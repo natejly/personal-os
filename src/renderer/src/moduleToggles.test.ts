@@ -9,5 +9,5 @@ test('rowHidden: shown by default, hidden by either list', () => {
   assert.equal(rowHidden(s({}), 'docs'), false)
   assert.equal(rowHidden(s({ sidebarHidden: ['docs'] }), 'docs'), true)
   assert.equal(rowHidden(s({ hiddenViews: ['mail'] }), 'mail'), true)
-  assert.equal(rowHidden(s({ sidebarHidden: ['docs'], hiddenViews: ['mail'] }), 'home'), false)
+  assert.equal(rowHidden(s({ sidebarHidden: ['docs'], hiddenViews: ['mail'] }), 'chat'), false)
 })

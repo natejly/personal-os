@@ -1,5 +1,5 @@
 /**
- * The Agent Inbox on Today. Two sections: "Needs you" (pending approvals and proposals, desks waiting on the user, and
+ * The Agent Inbox, shown under the greeting of a new chat. Two sections: "Needs you" (pending approvals and proposals, desks waiting on the user, and
  * a link into every other review queue: doc edits, skills, workflow runs, memory tidy-ups) and
  * "While you were away" (what the scheduled jobs did, late fires and failures included).
  *

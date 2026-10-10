@@ -3,58 +3,15 @@ import { dialog, openAdvanced, openSettings, save, seedJobRuns, seedUsage, sql }
 
 const benign = (e) => /ResizeObserver|favicon/i.test(e)
 const noErrors = (grain) => expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
-const goToday = async (page) => { await page.locator('.nav-item', { hasText: 'Today' }).first().click(); await expect(page.locator('main.home')).toBeVisible() }
-const card = (page, title) => page.locator('main.home section.widget', { has: page.locator('header', { hasText: title }) })
+// The Agent inbox sits under the greeting of a new chat; it opens by itself when something is unread or waiting.
+const openInbox = async (page) => {
+  await page.getByRole('button', { name: /New chat/ }).first().click()
+  const link = page.locator('.inbox-link')
+  if (await link.count()) await link.click()
+  await expect(page.locator('.agent-inbox')).toBeVisible()
+}
 
-test('Today renders with empty data', async ({ grain }) => {
-  const { page } = grain
-  await goToday(page)
-  await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible()
-  await expect(card(page, 'Projects')).toContainText('No projects yet')
-  await expect(card(page, 'Recently learned')).toContainText('Nothing yet')
-  await expect(card(page, 'Recent chats')).toContainText('No chats yet')
-  await expect(page.locator('main.home .agent-inbox')).toContainText('Nothing waiting, nothing ran')
-  await page.getByRole('button', { name: 'Refresh today’s data' }).click()
-  await page.getByRole('textbox', { name: 'Ask anything' }).fill('')
-  await expect(page.getByRole('button', { name: /Add as a todo instead/ })).toBeDisabled()
-  noErrors(grain)
-})
-
-test('Today shows seeded chats, memories, projects and todos', async ({ grain }) => {
-  const { page, api } = grain
-  const p = await api('/projects', { method: 'POST', body: { name: 'Alpha project' } })
-  await api('/projects', { method: 'POST', body: { name: 'Beta project' } })
-  for (let i = 0; i < 12; i++) await api('/conversations', { method: 'POST', body: { title: `Seed chat ${i}`, project_id: i % 2 ? p.id : null } })
-  for (let i = 0; i < 12; i++) await api('/memories', { method: 'POST', body: { content: `Seed memory number ${i}` } })
-  await api('/todos', { method: 'POST', body: { title: 'Seed todo one' } })
-  await grain.relaunch()
-  const pg = grain.page
-  await goToday(pg)
-  await expect(card(pg, 'Projects')).toContainText('Alpha project')
-  await expect(card(pg, 'Projects')).toContainText('Beta project')
-  await expect(card(pg, 'Recent chats')).toContainText('Seed chat')
-  await expect(card(pg, 'Recently learned')).toContainText('Seed memory number')
-  // Clicking a recent chat opens it.
-  await card(pg, 'Recent chats').locator('li').first().click()
-  await expect(pg.getByRole('textbox', { name: 'Message' })).toBeVisible()
-  noErrors(grain)
-})
-
-test('Today: the quick-ask box starts a chat and ⌘↵ adds a todo', async ({ grain }) => {
-  const { page, api } = grain
-  await goToday(page)
-  const box = page.getByRole('textbox', { name: 'Ask anything' })
-  await box.fill('buy oat milk')
-  await box.press('Meta+Enter')
-  await expect.poll(async () => JSON.stringify(await api('/todos'))).toContain('buy oat milk')
-  await goToday(page)
-  await box.fill('!!reply Quick answer')
-  await box.press('Enter')
-  await expect(page.locator('.msg.assistant').last()).toContainText('Quick answer', { timeout: 30_000 })
-  noErrors(grain)
-})
-
-test('Settings → Appearance turns each sidebar row on and off at once, and each Today card with Save', async ({ grain }) => {
+test('Settings → Appearance turns each sidebar row on and off at once', async ({ grain }) => {
   const { page, api } = grain
   const shown = async (name) => (await page.locator('.sidebar .nav-item', { hasText: new RegExp(`^${name}`) }).count()) > 0
   await openSettings(page, 'Appearance')
@@ -84,49 +41,21 @@ test('Settings → Appearance turns each sidebar row on and off at once, and eac
     await expect.poll(() => shown(n), { message: `${n} on` }).toBe(true)
   }
 
-  // Today cards that need no Google account.
-  const cards = dialog(page).locator('h4', { hasText: 'Today cards' }).locator('xpath=following-sibling::div[1]').locator('label.toggle-row')
-  const cardNames = await cards.locator('b').allInnerTexts()
-  expect(cardNames).toEqual(expect.arrayContaining(['Agent inbox', 'Projects', 'Recently learned', 'Recent chats', 'Daily recap']))
-  await dialog(page).getByRole('button', { name: 'Cancel' }).click()
-  await goToday(page)
-  for (const t of ['Projects', 'Recently learned', 'Recent chats']) await expect(card(page, t)).toBeVisible()
-  await expect(page.locator('main.home .agent-inbox')).toBeVisible()
-  for (const t of ['Projects', 'Recently learned', 'Recent chats']) {
-    await openSettings(page, 'Appearance')
-    await dialog(page).getByRole('checkbox', { name: t }).click({ force: true })
-    await save(page)
-    await expect(card(page, t)).toHaveCount(0)
-    expect((await api('/settings')).homeWidgets[Object.keys((await api('/settings')).homeWidgets).pop()]).toBe(false)
-  }
-  await openSettings(page, 'Appearance')
-  await dialog(page).getByRole('checkbox', { name: 'Agent inbox' }).click({ force: true })
-  await save(page)
-  await expect(page.locator('main.home .agent-inbox')).toHaveCount(0)
-  // The Today popover reflects and edits the same switches.
-  await page.getByRole('button', { name: 'Choose what shows on Today' }).click()
-  await page.locator('.home-customize').getByRole('checkbox', { name: 'Projects' }).click()
-  await expect(card(page, 'Projects')).toBeVisible()
-  await page.keyboard.press('Escape')
-  const s = await api('/settings')
-  expect(s.homeWidgets.projects).toBe(true)
-  await grain.relaunch()
-  await goToday(grain.page)
-  await expect(card(grain.page, 'Projects')).toBeVisible()
-  await expect(card(grain.page, 'Recent chats')).toHaveCount(0)
+  // One switch for the recap on new chats.
+  await expect(dialog(page).getByRole('checkbox', { name: 'Daily recap on new chats' })).toBeAttached()
   noErrors(grain)
 })
 
-test('hiding the view you are on sends you home', async ({ grain }) => {
+test('hiding the view you are on sends you to a new chat', async ({ grain }) => {
   const { page } = grain
   await page.locator('.sidebar .nav-item', { hasText: 'Library' }).first().click()
   await openSettings(page, 'Appearance')
   await dialog(page).getByRole('checkbox', { name: 'Library', exact: true }).click({ force: true })
-  await expect(page.locator('main.home')).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
   noErrors(grain)
 })
 
-test('Agent inbox: 200 seeded runs, mark read, mark all read, sidebar badge matches', async ({ grain }) => {
+test('Agent inbox: 200 seeded runs, mark read, mark all read, the new-chat inbox lists them', async ({ grain }) => {
   const { page, api } = grain
   seedJobRuns(grain, 200)
   await grain.relaunch()
@@ -135,22 +64,17 @@ test('Agent inbox: 200 seeded runs, mark read, mark all read, sidebar badge matc
   const listed = inbox.while_you_were_away.length
   expect(listed).toBeGreaterThan(0)
   expect(inbox.counts.unseen_runs).toBe(listed)
-  await goToday(pg)
-  const badge = pg.locator('.sidebar .nav-item', { hasText: 'Today' }).locator('.count.pending')
-  await expect(badge).toHaveText(String(listed))
+  await openInbox(pg)
   await expect(pg.locator('.agent-inbox .inbox-item')).toHaveCount(listed)
   // Mark one read.
   await pg.getByRole('button', { name: 'Mark Job 0 read' }).click()
-  await expect(badge).toHaveText(String(listed - 1))
   await expect.poll(async () => (await api('/inbox')).counts.unseen_runs).toBe(listed - 1)
   // Mark all read.
   await pg.getByRole('button', { name: 'Mark all read' }).click()
-  await expect(badge).toHaveCount(0)
   await expect.poll(async () => (await api('/inbox')).counts.unseen_runs).toBe(0)
   // Rapid double-click on a stale button must not break anything.
   await grain.relaunch()
-  await goToday(grain.page)
-  await expect(grain.page.locator('.sidebar .nav-item', { hasText: 'Today' }).locator('.count.pending')).toHaveCount(0)
+  await openInbox(grain.page)
   // Every row can expand its report.
   await grain.page.locator('.agent-inbox .inbox-item').first().getByRole('button', { name: /Show the report/ }).click()
   noErrors(grain)
@@ -164,15 +88,13 @@ test('Agent inbox: failed and interrupted runs are flagged, pending proposals co
   sql(grain, `INSERT INTO proposals(id,run_id,job_id,tool,args,args_digest,status,created_at) VALUES('p1','r-ok','jf','send_email','{"to":"a@b.c","subject":"Hi","body":"x"}','dg1','pending',${t});`)
   await grain.relaunch()
   const pg = grain.page
-  await goToday(pg)
+  await openInbox(pg)
   const box = pg.locator('.agent-inbox')
   await expect(box).toContainText('Broken job')
   await expect(box).toContainText('boom happened')
   await expect(box.locator('.chip.bad', { hasText: 'failed' })).toBeVisible()
   await expect(box.locator('.chip.bad', { hasText: 'interrupted' })).toBeVisible()
   await expect(box).toContainText('1 needs you')
-  const badge = pg.locator('.sidebar .nav-item', { hasText: 'Today' }).locator('.count.pending')
-  await expect(badge).toHaveText('4') // 1 proposal + 3 unread runs
   expect((await api('/inbox')).counts).toMatchObject({ needs_you: 1, unseen_runs: 3, failed: 2 })
   noErrors(grain)
 })

@@ -725,7 +725,7 @@ test('Stop sets stopping once, a second press joins the first, and a failure han
 })
 
 test('setView back to the chat clears what finished while it was away', () => {
-  useStore.setState({ view: 'home', focusedConversationId: 'c9', sessions: { c9: session({ unread: 2, streaming: null }) } as never })
+  useStore.setState({ view: 'docs', focusedConversationId: 'c9', sessions: { c9: session({ unread: 2, streaming: null }) } as never })
   useStore.getState().setView('chat')
   assert.equal(useStore.getState().sessions.c9.unread, 0)
 })
@@ -764,7 +764,7 @@ const backend = (state: Record<string, unknown>, tape: string): Backend => {
 
 const reset = (): void => {
   useStore.getState().closeSession('c1')
-  useStore.setState({ view: 'home', focusedConversationId: null, toasts: [], completionPopup: null } as never)
+  useStore.setState({ view: 'chat', focusedConversationId: null, toasts: [], completionPopup: null } as never)
 }
 
 test('a stream that closes without its done, from a run that died, settles the open reply as interrupted and notifies once', async () => {
@@ -1205,7 +1205,7 @@ test('opening a doc swaps the page agent thread to the chat bound to that doc', 
 })
 
 test('the side chat parks its model and effort until its thread exists, and a pin holds the thread', async (t) => {
-  useStore.setState({ sessions: {}, pageAgentChatSettings: {}, pageAgentModel: null, pageAgentPin: null, pageAgentId: 'a', view: 'home' } as never)
+  useStore.setState({ sessions: {}, pageAgentChatSettings: {}, pageAgentModel: null, pageAgentPin: null, pageAgentId: 'a', view: 'chat' } as never)
   const { calls } = stubFetch(t, () => json([]))
   await useStore.getState().setChatConfig({ model: 'm1', effort: 'high' }, PAGE_AGENT_DRAFT)
   assert.equal(calls.length, 0)
@@ -1221,14 +1221,14 @@ test('the side chat parks its model and effort until its thread exists, and a pi
 test('Memory lives in Settings: split by default, and every way in lands on its tab', () => {
   const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
   assert.equal(st().memoryMode, 'split')
-  const reset = (): void => { useStore.setState({ settingsOpen: false, settingsTab: 'model', memoryMode: 'list', memoryFocus: ['old'], view: 'home' }) }
+  const reset = (): void => { useStore.setState({ settingsOpen: false, settingsTab: 'model', memoryMode: 'list', memoryFocus: ['old'], view: 'chat' }) }
   reset()
   st().openMemory()
   assert.equal(st().settingsOpen, true)
   assert.equal(st().settingsTab, 'memory')
   assert.equal(st().memoryMode, 'split')
   assert.equal(st().memoryFocus, null)
-  assert.equal(st().view, 'home', 'no page to navigate to')
+  assert.equal(st().view, 'chat', 'no page to navigate to')
   reset()
   st().openMemory('graph')
   assert.equal(st().settingsTab, 'memory')

@@ -53,7 +53,7 @@ export default function ProjectView(): JSX.Element {
           <FolderX size={28} />
           <h2>Project not found</h2>
           <p>It may have been deleted, or moved to the trash.</p>
-          <button className="primary-btn" onClick={() => setView('home')}>Back to Today</button>
+          <button className="primary-btn" onClick={() => setView('chat')}>Back to chats</button>
         </div>
       </main>
     )

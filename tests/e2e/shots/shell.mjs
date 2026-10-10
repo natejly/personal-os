@@ -33,27 +33,23 @@ const run = (part, fn, opts) => (!only || only === part) ? session(fn, opts) : n
 
 await run('home', async (g) => {
   const { page, api } = g
-  await nav(page, 'Today').click()
+  await page.getByRole('button', { name: /New chat/ }).first().click()
   // chat with a reply
-  const box = page.getByRole('textbox', { name: 'Ask anything' })
+  const box = page.getByRole('textbox', { name: 'Message' })
   await box.fill('!!reply Here is a short answer about your week. Two meetings, one deadline on Friday.')
   await box.press('Enter')
   await page.locator('.msg.assistant').last().waitFor({ timeout: 30000 })
   await sleep(1500)
-  await nav(page, 'Today').click()
+  await page.getByRole('button', { name: /New chat/ }).first().click()
   await api('/projects', { method: 'POST', body: { name: 'Website relaunch' } })
   const todos = [['Send invoice to Acme', dayStr(0)], ['Renew passport', dayStr(-3)], ['Book dentist', dayStr(4)], ['Read the Q3 report', null]]
   for (const [title, due] of todos) await api('/todos', { method: 'POST', body: { title, due } })
   seedJobRuns(g, 3)
   await page.reload()
   await page.waitForSelector('.sidebar')
-  await nav(page, 'Today').click()
+  await page.getByRole('button', { name: /New chat/ }).first().click()
   await sleep(1500)
-  await shot(g, 'home-today-seeded')
-  await page.getByRole('button', { name: /Brief me/ }).click()
-  await page.locator('.msg.assistant').last().waitFor({ timeout: 30000 }).catch(() => {})
-  await sleep(2000)
-  await shot(g, 'home-brief-me')
+  await shot(g, 'new-chat-seeded')
 })
 
 await run('sidebar', async (g) => {
@@ -79,7 +75,7 @@ await run('sidebar', async (g) => {
 
 await run('overlays', async (g) => {
   const { page } = g
-  await nav(page, 'Today').click()
+  await page.getByRole('button', { name: /New chat/ }).first().click()
   // quick chat (⌘I)
   await page.getByRole('button', { name: 'Quick chat (⌘I)' }).click()
   await page.getByRole('complementary', { name: 'Page agent' }).waitFor()
@@ -109,7 +105,7 @@ await run('overlays', async (g) => {
 
 await run('small', async (g) => {
   const { page } = g
-  await nav(page, 'Today').click()
+  await page.getByRole('button', { name: /New chat/ }).first().click()
   await g.app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setMinimumSize(1, 1); w.setSize(820, 520) })
   await sleep(1200)
   await shot(g, 'small-window')
@@ -163,7 +159,7 @@ await run('canvas', async (g) => {
 })
 
 await run('failed', async (g) => {
-  await nav(g.page, 'Today').click()
+  await g.page.getByRole('button', { name: /New chat/ }).first().click()
   await killBackend(g)
   await sleep(500)
   await g.page.reload().catch(() => {})

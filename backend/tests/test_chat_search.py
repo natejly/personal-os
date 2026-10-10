@@ -127,3 +127,10 @@ def test_job_transcripts_excluded() -> None:
     cid = conv("hiddenterm content")
     app_mod.convos.update(cid, {"settings": {"job_id": "j1"}})
     check(search("hiddenterm") == [], "job chat excluded")
+
+
+def test_archived_chat_is_found_and_marked() -> None:
+    cid = conv("zebrafinch roost notes")
+    app_mod.convos.update(cid, {"archived": True})
+    hit = next(h for h in search("zebrafinch") if h["id"] == cid)
+    assert hit["archived"] is True

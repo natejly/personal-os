@@ -17,6 +17,7 @@ import RenderBoundary from './components/RenderBoundary'
 import { collectNotices } from './lib/deskNotify'
 import { notify } from './lib/notify'
 import SettingsModal from './components/SettingsModal'
+import InboxModal from './components/InboxModal'
 import CommandPalette from './components/CommandPalette'
 import HelpOverlay from './components/HelpOverlay'
 import ProjectModal from './components/ProjectModal'
@@ -213,6 +214,7 @@ export default function App(): JSX.Element {
   const accent = useStore((s) => s.settings.accent)
   const inCanvas = useStore((s) => s.view === 'canvas')
   const pageAgentOpen = useStore((s) => s.pageAgentOpen)
+  const inboxOpen = useStore((s) => s.inboxOpen)
   const wizardOpen = useOnboarding((s) => s.open)
 
   useEffect(() => {
@@ -291,6 +293,7 @@ export default function App(): JSX.Element {
       )}
       {pageAgentOpen && <PageAgentPanel />}
       {settingsOpen && <SettingsModal />}
+      {inboxOpen && <InboxModal />}
       {paletteOpen && <CommandPalette />}
       {helpOpen && <HelpOverlay />}
       {projectModal && <ProjectModal />}

@@ -212,7 +212,8 @@ export interface State {
   routineDraft: RoutineDraft | null
   scheduleAsRoutine: (conversationId: string, messageId: string) => void
   /** A new chat whose empty state also shows the Agent inbox (a job row, a job notification), even when nothing is waiting. */
-  inboxPeek: boolean
+  inboxOpen: boolean
+  closeInbox: () => void
   openInbox: () => void
   clearRoutineDraft: () => void
 
@@ -1765,8 +1766,9 @@ export const useStore = create<State>((set, get) => {
       set({ routineDraft: draft })
       get().openInbox()
     },
-    inboxPeek: false,
-    openInbox: () => { get().newChat(null); set({ inboxPeek: true }) },
+    inboxOpen: false,
+    openInbox: () => set({ inboxOpen: true, settingsOpen: false }),
+    closeInbox: () => set({ inboxOpen: false, routineDraft: null }),
     clearRoutineDraft: () => set({ routineDraft: null }),
     projects: [],
     view: 'chat',
@@ -2125,7 +2127,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftAutonomy: null, draftChatSettings: {}, view: 'chat', settingsOpen: false, inboxPeek: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftAutonomy: null, draftChatSettings: {}, view: 'chat', settingsOpen: false }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)

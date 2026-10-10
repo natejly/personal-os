@@ -1,4 +1,4 @@
-import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Component, memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite, splitSources } from '../lib/remarkCites'
@@ -18,7 +18,7 @@ import { parseChatMessage } from '../lib/chatLink'
 import { parseQuotedMessage } from '../lib/selectionActions'
 import { modelLabel } from '../lib/modelLabel'
 import { outcomeLabel } from '../lib/outcomeLabel'
-import { describeCall, staysVisible } from '../lib/toolDisplay'
+import { describeCall, staysVisible, traceLines } from '../lib/toolDisplay'
 import { quietEvents } from '../lib/orchestration'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
@@ -68,51 +68,20 @@ function SaveSkill({ conversationId, messageId }: { conversationId: string; mess
   )
 }
 
-/** One folded line of a reply: closed by default, streaming or not. Only the user's click opens it, and that state lives here, so stream updates keep it. */
-function Fold({ label, live, children }: { label: string; live: boolean; children: ReactNode }): JSX.Element {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className={`reasoning ${live ? 'live' : ''}`}>
-      <button className="reasoning-head" onClick={() => setOpen(!open)} aria-expanded={open}>
-        <ChevronRight size={12} className={open ? 'rot90' : ''} />
-        <span className={`reasoning-label ${live ? 'shimmer' : ''}`}>{label}</span>
-      </button>
-      {open && children}
-    </div>
-  )
-}
-
-/** The thinking summary, opened: it follows the newest line while the reply still thinks. */
-function ThinkingBody({ reasoning, streaming }: { reasoning: string; streaming: boolean }): JSX.Element {
-  const body = useRef<HTMLUListElement>(null)
-  useEffect(() => {
-    if (streaming && body.current) body.current.scrollTop = body.current.scrollHeight
-  }, [reasoning, streaming])
-  return <ul className="reasoning-body" ref={body}>{reasoning.split('\n').map((l, i) => <li key={i}>{l}</li>)}</ul>
-}
-
-/** A reply's thinking and its tool calls that do not need the user, each folded into one line. */
-function ReplyActivity({ reasoning, events, conversationId, streaming, answering, browserSession }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; streaming: boolean; answering: boolean; browserSession?: string }): JSX.Element {
-  const last = events[events.length - 1]
+/** A reply's trace: one plain gray line per step (the thinking summary, then each quiet tool call). Nothing opens; the live step shimmers. */
+function ReplyActivity({ reasoning, events, conversationId, streaming, answering }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; streaming: boolean; answering: boolean }): JSX.Element {
   const subs = useSubagents(conversationId)
   const live = streaming && !answering
-  const calling = live && events.some((t) => t.pending)
-  // The tools line names what the reply is doing now: the call in flight or its subagents.
-  const now = live ? nowText({ tool_events: events, content: '' }, subs) ?? (last ? describeCall(last.name, last.arguments).verb : null) : null
-  const tools = [`${events.length} tool call${events.length === 1 ? '' : 's'}`, now].filter(Boolean).join(' · ')
+  const lines = traceLines(reasoning, events)
+  // The live step is the call in flight (or its subagents) when there is one, else the newest summary line.
+  const now = live ? nowText({ tool_events: events, content: '' }, subs) : null
   return (
-    <>
-      {reasoning && (
-        <Fold label={live && !calling ? 'Thinking…' : 'Thought'} live={live && !calling}>
-          <ThinkingBody reasoning={reasoning} streaming={streaming} />
-        </Fold>
-      )}
-      {events.length > 0 && (
-        <Fold label={tools} live={live}>
-          <div className="activity-tools"><ToolEvents events={events} conversationId={conversationId} streaming={streaming} browserSession={browserSession} /></div>
-        </Fold>
-      )}
-    </>
+    <div className="trace" role="list">
+      {lines.map((l, i) => {
+        const isLive = live && i === lines.length - 1
+        return <div key={i} role="listitem" className={`trace-line ${l.error ? 'err' : ''} ${isLive ? 'shimmer' : ''}`}>{isLive && now && !l.error ? now : l.text}</div>
+      })}
+    </div>
   )
 }
 
@@ -339,7 +308,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
         ) : (
           <div className="msg-body">
             <BodyBoundary resetKey={message.id}>
-              {(message.reasoning || folded.length > 0) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!content} browserSession={browserSession} />}
+              {(message.reasoning || folded.length > 0) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!content} />}
               {trail && <ResearchTrail trail={trail} />}
               {!isUser && <SubagentThread messageId={message.id} conversationId={message.conversation_id} events={events ?? []} />}
               {shown.length > 0 && <ToolEvents events={shown} conversationId={message.conversation_id} streaming={streaming} browserSession={browserSession} />}

@@ -887,6 +887,8 @@ export interface ChatSearchHit {
   project_id: string | null
   updated_at: number
   hits: number
+  /** An archived chat still turns up in search; the sidebar marks it and offers Restore. */
+  archived?: boolean
   snippets: { message_id: string; role: string; created_at: number; text: string }[]
 }
 

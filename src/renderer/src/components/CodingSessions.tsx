@@ -33,8 +33,9 @@ export default function CodingSessions(): JSX.Element | null {
   const sessions = useStore((s) => s.codingSessions)
   const refresh = useStore((s) => s.refreshCodingSessions)
   useEffect(() => { void refresh() }, [refresh])
-  const rows = Object.values(sessions).filter((c) => codingLive(c.status)).sort((a, b) => b.created_at - a.created_at).slice(0, 10)
-  const live = rows.length
+  // Finished sessions drop off; a blocked one (its job record is lost, only Stop clears it) stays so Stop stays reachable.
+  const rows = Object.values(sessions).filter((c) => codingLive(c.status) || c.status === 'blocked').sort((a, b) => b.created_at - a.created_at).slice(0, 10)
+  const live = rows.filter((c) => codingLive(c.status)).length
   useEffect(() => {
     if (!live) return
     const t = setInterval(() => void refresh(), 5000)

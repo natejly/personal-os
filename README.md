@@ -230,8 +230,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   Turning autonomy off detaches the desk and the chat answers as a plain chat again; the workspace is kept.
   Another chat can also hand work to a desk (`desk_start`) along with the docs it needs; when the desk
   finishes, fails or waits for review, its report is posted back into that chat.
-  A desk that needs you also shows up in the Agent inbox under a new chat's greeting. See [docs/cowork-design.md](docs/cowork-design.md).
-- **Agent inbox.** Everything agents left for you, in one list under a new chat's greeting (it opens by
+  A desk that needs you also shows up in the Agent inbox behind the title-bar Inbox icon. See [docs/cowork-design.md](docs/cowork-design.md).
+- **Agent inbox.** Everything agents left for you, in one list behind the title-bar Inbox icon (it opens by
   itself while something is unread): approval cards from any chat, desks waiting on
   you, scheduled-job proposals and paused jobs, and a count with a link for every
   other review queue (proposed doc edits, skills and workflow runs

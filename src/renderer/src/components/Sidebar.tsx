@@ -184,8 +184,8 @@ export default function Sidebar(): JSX.Element {
   const [archived, setArchived] = useState<Conversation[]>([])
   const archiveBump = conversations.length
   useEffect(() => {
-    if (archivedOpen) void api.conversations.listArchived().then(setArchived).catch(() => undefined)
-  }, [archivedOpen, archiveBump])
+    if (archivedOpen || query.trim()) void api.conversations.listArchived().then(setArchived).catch(() => undefined)
+  }, [archivedOpen, archiveBump, query.trim() !== ''])
   const archiveChat = useStore((s) => s.archiveChat)
   const deleteChat = useStore((s) => s.deleteChat)
   // Search narrows the archived rows by title too, like the active list.
@@ -193,6 +193,8 @@ export default function Sidebar(): JSX.Element {
     const q = query.trim().toLowerCase()
     return q ? archived.filter((c) => c.title.toLowerCase().includes(q)) : archived
   }, [archived, query])
+  // While searching, the Archived section is shown (titles matching) so an archived chat is never unfindable.
+  const archivedShown = archivedOpen || query.trim() !== ''
   // ⌘⇧F: the store opens the sidebar; this brings the search field up. The tick seen at mount is
   // skipped, or a remount would reopen the search for a press handled before it.
   const searchTick = useStore((s) => s.sidebarSearchTick)
@@ -387,22 +389,24 @@ export default function Sidebar(): JSX.Element {
         {!filtering && inMessages.length > 0 && (
           <section>
             <h4>In messages</h4>
-            {inMessages.map((h) => (
+            {inMessages.filter((h) => !(h.archived && shownArchived.some((a) => a.id === h.id))).map((h) => (
               <div key={h.id} className={`convo-item ${h.id === focusedId && view === 'chat' ? 'active' : ''}`} aria-current={h.id === focusedId && view === 'chat' ? 'page' : undefined} {...rowButton(() => openConversation(h.id))}>
                 <span className="convo-title">
                   {h.project_id && projectById[h.project_id] && <span className="project-dot sm" style={{ background: projectById[h.project_id].color }} title={projectById[h.project_id].name} />}
                   {h.title}
+                  {h.archived && <span className="chip small" title="Archived">Archived</span>}
                   {h.hits > 1 && <span className="convo-hits">+{h.hits - 1}</span>}
                   <Snippet hit={h} />
                 </span>
+                {h.archived && <button className="icon-btn ghost" aria-label={`Unarchive chat: ${h.title}`} title="Unarchive" onClick={(e) => { e.stopPropagation(); void archiveChat(h.id, false).then(() => setHits((x) => x.map((y) => (y.id === h.id ? { ...y, archived: false } : y)))) }}><ArchiveRestore size={13} /></button>}
               </div>
             ))}
           </section>
         )}
         <section>
           <h4 className="archived-head"><button className="section-toggle" aria-expanded={archivedOpen} onClick={() => setArchivedOpen((o) => !o)}><ChevronRight size={11} className={archivedOpen ? 'rot90' : ''} /> Archived</button></h4>
-          {archivedOpen && shownArchived.length === 0 && <p className="empty-hint">{archived.length ? 'No archived chats match.' : 'Nothing archived.'}</p>}
-          {archivedOpen && shownArchived.map((c) => (
+          {archivedShown && shownArchived.length === 0 && <p className="empty-hint">{archived.length ? 'No archived chats match.' : 'Nothing archived.'}</p>}
+          {archivedShown && shownArchived.map((c) => (
             <div key={c.id} className="convo-item archived" {...rowButton(() => void selectChat(c.id))}>
               <span className="convo-title">{c.title}</span>
               <button className="icon-btn ghost" aria-label={`Unarchive chat: ${c.title}`} title="Unarchive" onClick={(e) => { e.stopPropagation(); void archiveChat(c.id, false) }}><ArchiveRestore size={13} /></button>

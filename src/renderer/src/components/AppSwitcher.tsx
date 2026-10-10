@@ -7,11 +7,7 @@ export default function AppSwitcher(): JSX.Element {
   const open = useStore((s) => s.pageAgentOpen)
   const toggle = useStore((s) => s.togglePageAgent)
   const unread = useStore((s) => inboxBadge(s.agentInbox))
-  const openInbox = (): void => {
-    useStore.getState().setView('home')
-    // The inbox renders with Today; scroll to it once the view has mounted.
-    setTimeout(() => document.getElementById('agent-inbox')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50)
-  }
+  const openInbox = useStore((s) => s.openInbox)
   return (
     <div className="app-switcher no-drag">
       <button className="icon-btn inbox-btn" title={unread ? `Agent inbox (${unread} new)` : 'Agent inbox'}

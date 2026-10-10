@@ -178,8 +178,7 @@ if (want('library')) await session(async (g) => {
     await page.keyboard.press('Escape'); await sleep(400)
   })
   await attempt('today-scheduled-task', async () => {
-    await page.getByRole('button', { name: /New chat/ }).first().click()
-    await page.locator('.inbox-link').click()
+    await page.getByRole('button', { name: /^Agent inbox/ }).click()
     const btn = page.getByRole('button', { name: /^Scheduled \(/ })
     await btn.waitFor({ timeout: 20000 })
     if ((await btn.getAttribute('aria-expanded')) !== 'true') await btn.click()
@@ -206,7 +205,7 @@ if (want('library')) await session(async (g) => {
 if (want('inbox')) await session(async (g) => {
   seedJobRuns(g, 3)
   await g.relaunch()
-  await g.page.getByRole('button', { name: /New chat/ }).first().click()
+  await g.page.getByRole('button', { name: /^Agent inbox/ }).click()
   await g.page.locator('.agent-inbox .inbox-item').first().waitFor({ timeout: 30000 })
   await shot(g, 'inbox-agent')
   await g.page.locator('.agent-inbox .inbox-item').first().getByRole('button', { name: /Show the report/ }).click().catch(() => {})

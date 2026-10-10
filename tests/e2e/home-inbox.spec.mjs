@@ -3,11 +3,9 @@ import { dialog, openAdvanced, openSettings, save, seedJobRuns, seedUsage, sql }
 
 const benign = (e) => /ResizeObserver|favicon/i.test(e)
 const noErrors = (grain) => expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
-// The Agent inbox sits under the greeting of a new chat; it opens by itself when something is unread or waiting.
+// The Agent inbox opens from the top-bar Inbox icon.
 const openInbox = async (page) => {
-  await page.getByRole('button', { name: /New chat/ }).first().click()
-  const link = page.locator('.inbox-link')
-  if (await link.count()) await link.click()
+  await page.getByRole('button', { name: /^Agent inbox/ }).click()
   await expect(page.locator('.agent-inbox')).toBeVisible()
 }
 

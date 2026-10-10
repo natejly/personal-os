@@ -879,6 +879,7 @@ def register(tb: Any) -> None:
     spec.force_ask = lambda args, ctx: bool(args.get("unsandboxed")) or (
         bool(ctx.get("tainted")) and reaches_out(cfg(ctx))
         and not permissions.get(cfg(ctx), "trustExternalContent"))
+    spec.force_card = lambda args, ctx: bool(args.get("unsandboxed"))  # a sandbox escape is a hard card: Auto's reviewer may not lift it
     R("shell_run", spec)
 
     async def shell_poll(ctx: dict[str, Any], job_id: str, wait_s: float = 0) -> Any:

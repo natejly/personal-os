@@ -111,7 +111,7 @@ export default function HealthView(): JSX.Element {
           <div className="empty-state">
             <HeartPulse size={28} />
             <h2>Every metric is hidden</h2>
-            <p>Hidden metrics keep their history. Choose the ones to show as tiles here and on Today.</p>
+            <p>Hidden metrics keep their history. Choose the ones to show as tiles here.</p>
             <button className="primary-btn" onClick={() => setManage(true)}>Choose metrics</button>
           </div>
         ) : (
@@ -296,7 +296,7 @@ function MetricManager({ onChanged, onClose }: { onChanged: () => Promise<void>;
     <section className="hl-manage" aria-label="Metrics">
       <header className="hl-manage-head">
         <h3>Metrics</h3>
-        <span className="muted small">Shown metrics appear as tiles and on Today. Hidden ones keep their history.</span>
+        <span className="muted small">Shown metrics appear as tiles. Hidden ones keep their history.</span>
         <button className="ghost-btn" onClick={onClose}>Done</button>
       </header>
       <div className="hl-manage-list">

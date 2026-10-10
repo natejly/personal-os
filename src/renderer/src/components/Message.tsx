@@ -75,6 +75,7 @@ function ReplyActivity({ reasoning, events, conversationId, streaming, answering
   const lines = traceLines(reasoning, events)
   // The live step is the call in flight (or its subagents) when there is one, else the newest summary line.
   const now = live ? nowText({ tool_events: events, content: '' }, subs) : null
+  if (!lines.length) return <></>
   return (
     <div className="trace" role="list">
       {lines.map((l, i) => {

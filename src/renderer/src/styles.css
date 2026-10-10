@@ -592,8 +592,7 @@ kbd {
 .msg-actions.streaming { visibility: hidden; }
 .msg.user .msg-actions { justify-content: flex-end; }
 /* Two user messages in a row are one group: the actions row stops reserving the turn gap and its buttons float over the bubble's corner on hover. */
-.msg.user:has(+ .msg.user) .msg-actions { position: relative; height: 0; min-height: 0; overflow: visible; }
-.msg.user:has(+ .msg.user) .msg-actions > * { position: absolute; bottom: 2px; right: 4px; }
+.msg.user:has(+ .msg.user) .msg-actions { height: 0; min-height: 0; overflow: visible; flex-wrap: nowrap; align-items: flex-end; padding-right: 4px; }
 .files-changed { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 6px; font-size: 12px; color: var(--text-muted); }
 .files-changed-note { margin-left: 6px; opacity: 0.8; }
 .msg-time { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }

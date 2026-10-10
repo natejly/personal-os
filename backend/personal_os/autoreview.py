@@ -49,8 +49,8 @@ def route(pmode: str, *, mode: str, danger: str, explicit_on: bool = False, expl
         return "off"
     if question or pmode == "manual":
         return "card" if mode == "ask" else "run"
-    if pmode == "allow_all":
-        return "card" if fenced else "run"
+    if pmode == "allow_all":  # no exceptions: fenced, forced and floor cases all run
+        return "run"
     if mode == "on":
         return "run" if danger == "safe" or explicit_on or covered else "review"
     if explicit_ask or fenced or hard_forced:

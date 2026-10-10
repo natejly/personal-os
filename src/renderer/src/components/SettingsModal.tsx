@@ -634,6 +634,9 @@ export default function SettingsModal(): JSX.Element {
               <AdvGroup id="data" title="Data" {...gp}>
                 <DataSettings />
                 <PresetFiles />
+                <label><span className="toggle-text"><b>Auto-archive after (days)</b><small>Chats and inbox messages with no activity for this long move to Archived. They stay searchable and can be restored. 0 turns it off.</small></span>
+                  <input type="number" min={0} max={3650} value={draft.autoArchiveDays ?? 0} onChange={(e) => patch({ autoArchiveDays: Math.min(3650, Math.max(0, Math.round(Number(e.target.value)) || 0)) })} />
+                </label>
                 <TrashPanel />
                 <h4>Diagnostics</h4>
                 <SupportSettings />

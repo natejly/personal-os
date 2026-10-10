@@ -32,6 +32,7 @@ from personal_os import llm as app_llm, logs  # noqa: E402
 _spec = importlib.util.spec_from_file_location("personal_os._llm_under_test", app_llm.__file__)
 llm = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
 _spec.loader.exec_module(llm)  # type: ignore[union-attr]
+from personal_os.cowork import Desks  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.repos import Conversations  # noqa: E402
 from personal_os.retention import sweep  # noqa: E402
@@ -369,6 +370,26 @@ class RetentionTests(unittest.TestCase):
         self.assertIsNone(self.one("SELECT trace FROM messages WHERE id=?", old_msg["id"]))
         self.assertEqual(self.one("SELECT trace FROM messages WHERE id=?", new_msg["id"]), "[2]")
         self.assertEqual(self.one("SELECT COUNT(*) FROM conversations"), 1)
+
+    def test_auto_archive(self) -> None:
+        convos = Conversations(self.db)
+        Desks(self.db)  # owns the desks table
+        stale, fresh, live, pinned = (convos.create(None, n, "m")["id"] for n in ("stale", "fresh", "live", "pinned"))
+        with self.db.tx() as c:
+            c.execute("UPDATE conversations SET updated_at=? WHERE id IN (?,?,?)", (self.now - 40 * 86400, stale, live, pinned))
+            c.execute("UPDATE conversations SET pinned_at=? WHERE id=?", (self.now, pinned))
+            for rid, cid, status, ts in (("r-live", live, "running", self.now - 40 * 86400), ("r-old", stale, "done", self.now - 40 * 86400),
+                                         ("r-new", fresh, "done", self.now - 86400)):
+                c.execute("INSERT INTO agent_runs(run_id, conversation_id, kind, status, started_at, updated_at) VALUES(?,?,'job',?,?,?)", (rid, cid, status, ts, ts))
+        archived = lambda t, k, v: self.one(f"SELECT archived_at IS NOT NULL FROM {t} WHERE {k}=?", v)  # noqa: E731
+        self.assertNotIn("chats_archived", sweep(self.db, {}, now=self.now))  # off by default
+        self.assertNotIn("chats_archived", sweep(self.db, {"autoArchiveDays": 0}, now=self.now))
+        self.assertEqual(archived("conversations", "id", stale), 0)
+        out = sweep(self.db, {"autoArchiveDays": 30}, now=self.now)
+        self.assertEqual((out["chats_archived"], out["runs_archived"]), (1, 1))
+        self.assertEqual([archived("conversations", "id", i) for i in (stale, fresh, live, pinned)], [1, 0, 0, 0])
+        self.assertEqual([archived("agent_runs", "run_id", i) for i in ("r-old", "r-new", "r-live")], [1, 0, 0])
+        self.assertEqual(self.one("SELECT COUNT(*) FROM conversations"), 4)  # archived, never deleted
 
     def test_thresholds_are_settings(self) -> None:
         with self.db.tx() as c:

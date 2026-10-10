@@ -417,6 +417,11 @@ kbd {
 /* Pushes whatever follows it to the far end of any flex row. */
 .spacer { flex: 1; }
 /* The quick-chat button: the last thing in every title bar, set off from the view's own controls. */
+.inbox-btn { position: relative; }
+.inbox-btn-count {
+  position: absolute; top: -3px; right: -4px; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box;
+  border-radius: 8px; background: var(--accent-solid); color: var(--on-accent); font-size: 10px; font-weight: 600; line-height: 15px; text-align: center;
+}
 .app-switcher {
   display: flex; align-items: center; gap: 2px;
   margin-left: 4px; padding-left: 8px;
@@ -1959,6 +1964,16 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 24px;
   background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer;
 }
+/* Mail-style run rows: sender, preview, time; unread is bold with a tinted row, open is selected; actions appear on hover. */
+.inbox-item.mail-row { padding: 4px 6px 4px 10px; }
+.inbox-item.mail-row.unread { background: color-mix(in srgb, var(--accent-solid) 7%, transparent); }
+.inbox-item.mail-row.unread .inbox-job, .inbox-item.mail-row.unread .inbox-line { font-weight: 600; color: var(--text); }
+.inbox-item.mail-row.seen .inbox-job { font-weight: 500; }
+.inbox-item.mail-row:hover { background: var(--bg-hover, color-mix(in srgb, var(--text) 5%, transparent)); }
+.inbox-item.mail-row.selected { border-color: var(--accent-solid); }
+.inbox-item.mail-row .inbox-job { flex: 0 0 140px; max-width: 140px; }
+.inbox-actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
+.inbox-item:hover .inbox-actions, .inbox-item:focus-within .inbox-actions, .inbox-item.selected .inbox-actions, .inbox-actions.show { opacity: 1; }
 .inbox-go { color: var(--text-muted); }
 .inbox-open:hover .inbox-line, .inbox-open:hover .inbox-go { color: var(--text); }
 .inbox-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--st-idle); }

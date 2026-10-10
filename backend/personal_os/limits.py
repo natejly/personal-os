@@ -98,7 +98,7 @@ CONSOLIDATE_EVERY = 25             # propose a memory tidy-up after this many ne
 TELEGRAM_LONG_RUN_MINUTES = 3      # when a run not started from Telegram counts as long
 
 # Accepted ranges for PUT /settings (finite numbers only). The keys in AUTOMATIC also accept 0, meaning "derive it".
-AUTOMATIC = ("contextWindow", "subagentMaxConcurrent", "deskMaxLive", "parallelReads")
+AUTOMATIC = ("autoArchiveDays", "contextWindow", "subagentMaxConcurrent", "deskMaxLive", "parallelReads")
 RANGES: dict[str, tuple[float, float]] = {
     "uiZoom": (80, 160),
     "subagentMaxConcurrent": (1, 20),
@@ -110,6 +110,7 @@ RANGES: dict[str, tuple[float, float]] = {
     "fileSnapshotBudgetMB": (1, 20_000),
     "llmRetries": (0, 10),
     "llmIdleSeconds": (10, 3_600),
+    "autoArchiveDays": (1, 3_650),  # 0 = off
     "retainUsageDays": (7, 3_650),
     "contextWindow": (1000, 4_000_000),
     "compactAt": (0.1, 0.95),

@@ -1,4 +1,5 @@
 import type {
+  ArchivedInboxRun,
   BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, Recap, Conversation, ConversationSettings, WorkerInfo, ContextUsed, ContextMeter, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message, MicrosoftStatus,
   ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
   Memory, MemoryProposal, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
@@ -232,6 +233,9 @@ export const api = {
   inboxRunSeen: (runId: string) => req(`/inbox/runs/${encodeURIComponent(runId)}/seen`, { method: 'POST' }),
   inboxSeenAll: (hours = 72) => req<{ ok: boolean; marked: number }>(`/inbox/seen_all?hours=${hours}`, { method: 'POST' }),
   /** Erase one "While you were away" message (the run row and its journal, not the chat). */
+  inboxArchived: () => req<ArchivedInboxRun[]>('/inbox/archived'),
+  inboxRunArchive: (runId: string) => req(`/inbox/runs/${encodeURIComponent(runId)}/archive`, { method: 'POST' }),
+  inboxRunRestore: (runId: string) => req(`/inbox/runs/${encodeURIComponent(runId)}/restore`, { method: 'POST' }),
   inboxRunDelete: (runId: string) => req<{ ok: boolean; deleted: number }>(`/inbox/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' }),
   /** Erase exactly the run messages GET /inbox lists for this window. A run still going is left alone. */
   inboxClear: (hours = 72) => req<{ ok: boolean; deleted: number; skipped: number }>(`/inbox?hours=${hours}`, { method: 'DELETE' }),

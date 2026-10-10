@@ -25,6 +25,9 @@ import { chatBrowserSession, deskBrowserSession, latestBrowserMessage } from '..
 import { DeskInline } from './DeskStrip'
 import DeskPanel from './DeskPanel'
 import Face from './Face'
+import DailyRecap from './DailyRecap'
+import AgentInbox from './AgentInbox'
+import { inboxBadge } from '../lib/inboxBadge'
 import TelegramIcon from './TelegramIcon'
 import { chatLabel, isTelegramChat } from '../lib/chatRows'
 
@@ -48,6 +51,9 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   // A chat with no row yet: its first message is shown (with the dots) in place of the greeting.
   const draftPending = useStore((s) => (!conversationId && s.focusedConversationId === null ? s.draftPendingSend : null))
   const contextOpen = useStore((s) => s.contextOpen)
+  const inboxPeek = useStore((s) => s.inboxPeek)
+  const inboxNew = useStore((s) => inboxBadge(s.agentInbox))
+  const routineDraft = useStore((s) => s.routineDraft)
   const draftProjectId = useStore((s) => s.draftProjectId)
   const project = useProject(convo?.project_id ?? draftProjectId)
   const toggleContext = useStore((s) => s.toggleContext)
@@ -165,6 +171,10 @@ export default function ChatView({ conversationId }: { conversationId?: string }
               <div className="empty-state">
                 <h1>{greeting()}</h1>
                 {project && <p>New chat in {project.name}</p>}
+                {!conversationId && !project && <DailyRecap />}
+                {!conversationId && (inboxPeek || inboxNew > 0 || !!routineDraft
+                  ? <AgentInbox />
+                  : <button className="link small inbox-link" onClick={() => useStore.setState({ inboxPeek: true })}>Agent inbox and scheduled tasks</button>)}
                 {showFirstPrompts && (
                   <div className="ob-first-prompts" role="group" aria-label="Things to try">
                     {firstPrompts(pimOn).map((t) => <button key={t} className="ghost-btn" onClick={() => { setFirstPrompts(false); void send(t, conversationId) }}>{t}</button>)}

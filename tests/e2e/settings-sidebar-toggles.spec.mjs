@@ -45,12 +45,3 @@ test('Settings → Memory opens split, with the graph and the list side by side'
   noErrors(grain)
 })
 
-test('Today → Recently learned → View all lands on the Memory tab', async ({ grain }) => {
-  const { page } = grain
-  await page.locator('.nav-item', { hasText: 'Today' }).first().click()
-  await page.locator('main.home section.widget', { has: page.locator('header', { hasText: 'Recently learned' }) }).getByRole('button', { name: 'View all' }).click()
-  await expect(dialog(page).getByRole('tab', { name: 'Memory' })).toHaveAttribute('aria-selected', 'true')
-  await expect(dialog(page).locator('.knowledge-body .graph-body')).toBeVisible()
-  await expect(dialog(page).locator('.knowledge-body .mem-pane')).toBeVisible()
-  noErrors(grain)
-})

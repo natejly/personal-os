@@ -7,7 +7,6 @@ import GrainLogo from './components/GrainLogo'
 import ChatView from './components/ChatView'
 import DocsView from './components/DocsView'
 import ProjectView from './components/ProjectView'
-import HomeView from './components/HomeView'
 import CalendarView from './components/CalendarView'
 import MailView from './components/MailView'
 import PendingSends from './components/PendingSends'
@@ -95,11 +94,11 @@ const writeSeen = (t: number): void => {
   }
 }
 
-/** A job notification's click: 'run:<conversation_id>' opens that run's transcript, anything else Today's inbox. */
+/** A job notification's click: 'run:<conversation_id>' opens that run's transcript, anything else the Agent inbox. */
 function openNotifyTarget(target: string | undefined): void {
   const s = useStore.getState()
   const cid = target?.startsWith('run:') ? target.slice(4) : ''
-  if (!cid) return s.setView('home')
+  if (!cid) return s.openInbox()
   s.setView('chat')
   void s.selectChat(cid)
 }
@@ -281,7 +280,6 @@ export default function App(): JSX.Element {
             </main>
           )}
         >
-          {view === 'home' && <HomeView />}
           {view === 'chat' && <ChatView />}
           {ModView && <ModView />}
           {view === 'calendar' && <CalendarView />}

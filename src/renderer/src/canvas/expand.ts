@@ -48,7 +48,7 @@ export function expandWindow(w: CanvasWindow): void {
       app.openFiles('uploads')
       break
     case 'recap':
-      app.setView('home')
+      app.newChat(null)
       break
     case 'project':
       if (w.ref_id) app.openProject(w.ref_id)

@@ -24,7 +24,7 @@ async function sendChat(page, text) {
   await box.press('Enter')
 }
 
-test.describe('tasks sync and the Today cards', () => {
+test.describe('tasks sync', () => {
   test('Sync now pulls Google Tasks into Todos, and a local todo is pushed to Google', async ({ grain }) => {
     const { page } = grain
     await openSettingsTab(page, 'Integrations')
@@ -55,44 +55,6 @@ test.describe('tasks sync and the Today cards', () => {
     await expect(p2.getByLabel('Sync Todos with Google Tasks')).not.toBeChecked()
   })
 
-  test('Today shows the Calendar, Mail inbox, Waiting mail and Drive cards; Google Tasks card only with sync off', async ({ grain }) => {
-    const { page } = grain
-    await page.getByRole('button', { name: 'Today', exact: true }).first().click()
-    const cal = widget(page, 'Calendar')
-    await expect(cal.locator('.events li').first()).toBeVisible()
-    await expect(cal).toContainText(/Standup|Lunch|Overlap|Review|Team sync|Holiday/)
-    const mail = widget(page, 'Mail inbox')
-    await expect(mail).toContainText('Subject') // unread rows
-    const drive = widget(page, 'Drive')
-    await expect(drive).toContainText('Drive doc 0')
-    await expect(page.locator('section.widget header', { hasText: 'Waiting mail' })).toBeVisible()
-    await expect(page.locator('section.widget header', { hasText: 'Google Tasks' })).toHaveCount(0) // synced tasks are todos
-    // Waiting mail: re-scan fills it
-    await page.getByRole('button', { name: 'Re-scan recent threads' }).click()
-    await expect(widget(page, 'Waiting mail')).not.toContainText('Nothing waiting')
-    // sync off (in Settings, so the store learns of it): the Google Tasks card takes over
-    await openSettingsTab(page, 'Integrations')
-    await syncToggleOff(page)
-    await page.keyboard.press('Escape')
-    await expect(widget(page, 'Google Tasks')).toContainText('Task 0')
-    expect(grain.consoleErrors).toEqual([])
-  })
-
-  test('Today at 820x520 stays usable', async ({ grain }) => {
-    await resize(grain, 820, 520)
-    await grain.page.getByRole('button', { name: 'Today', exact: true }).first().click()
-    await expect(widget(grain.page, 'Calendar').locator('.events li').first()).toBeVisible()
-    await expect(grain.page.locator('section.widget header', { hasText: 'Drive' })).toBeVisible()
-  })
-})
-
-const failingGmail = testFailing('gmail:200')
-failingGmail('a Google API failure on one Today card shows that card as failed, not the page', async ({ grain }) => {
-  const { page } = grain
-  await page.getByRole('button', { name: 'Today', exact: true }).first().click()
-  await expect(widget(page, 'Calendar').locator('.events li').first()).toBeVisible()
-  await expect(widget(page, 'Mail inbox')).toContainText(/error|failed|Google API/i)
-  await expect(page.locator('.toast.error')).toHaveCount(0)
 })
 
 test.describe('agent tool cards', () => {
@@ -165,9 +127,6 @@ testDisconnected.describe('Google not connected (default harness)', () => {
     await expect(page.getByRole('button', { name: 'New event' })).toHaveCount(0)
     await expect(page.locator('.cal-grid')).toBeVisible() // todos-only grid still renders
 
-    await page.getByRole('button', { name: 'Today', exact: true }).first().click()
-    await expect(page.locator('.home-connect')).toBeVisible()
-    await expect(page.locator('section.widget header', { hasText: 'Mail inbox' })).toHaveCount(0)
 
     await openApp(page, 'Lists')
     await expect(page.getByRole('button', { name: 'Sync with Google Tasks now' })).toHaveCount(0)

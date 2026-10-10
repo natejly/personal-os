@@ -632,9 +632,8 @@ def test_child_allow_all_lifts_asks() -> None:
         check(out["state"] == "completed", f"{rules}: the child carried on")
 
 
-def test_child_allow_all_floor_still_cards() -> None:
-    """Allow everything's floor holds for a child as for the front chat: a force-push from a worker raises a card and does
-    not run, while a routine command runs with no card and is logged under the child's run with its kind."""
+def test_child_allow_all_has_no_floor() -> None:
+    """Allow everything has no floor for a child either: a force-push from a worker runs with no card, logged under the child's run with its kind."""
     root = tempfile.mkdtemp()
     reset(permissionMode="allow_all", workspaceRoots=[root])
     spec = appmod.toolbox.specs["shell_run"]
@@ -656,7 +655,7 @@ def test_child_allow_all_floor_still_cards() -> None:
         async def go() -> Any:
             task = asyncio.create_task(appmod.toolbox.call("agent_spawn", {"task": "pushit", "role": "worker", "root": root}, ctx))
             for _ in range(200):
-                if task.done() or any(k.endswith(":p2") for k in appmod._approvals):
+                if task.done():
                     break
                 await asyncio.sleep(0.02)
             for k in [k for k in appmod._approvals if k.endswith(":p2")]:
@@ -668,12 +667,11 @@ def test_child_allow_all_floor_still_cards() -> None:
     finally:
         spec.fn = real
     cards = [d for e, d in fr.events if e == "tool_call" and d.get("needs_approval")]
-    check(hits == ["ls"], f"the routine command ran and the force-push did not: {hits}")
-    check(len(cards) == 1 and cards[0]["name"] == "shell_run", "exactly the force-push raised a card")
+    check(hits == ["ls", "git push --force origin main"] and not cards, f"both ran, no card: {hits} {cards}")
     with appmod.db.tx() as c:
         rows = [dict(r) for r in c.execute("SELECT agent, run_id, decision FROM approval_log WHERE call_id LIKE ? ORDER BY id",
                                            (f"%{out['agent_id']}:p%",)).fetchall()]
-    check([r["decision"] for r in rows] == ["auto", "deny"] and all(r["run_id"] == out["agent_id"] and r["agent"] == "subagent" for r in rows),
+    check([r["decision"] for r in rows] == ["auto", "auto"] and all(r["run_id"] == out["agent_id"] and r["agent"] == "subagent" for r in rows),
           f"both calls are in the approval history under the child's run: {rows}")
 
 

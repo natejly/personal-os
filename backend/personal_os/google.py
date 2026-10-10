@@ -1206,7 +1206,14 @@ class Google:
         media = MediaFileUpload(str(path), resumable=True) if path else MediaIoBaseUpload(io.BytesIO(data or b""), mimetype="text/markdown")
         files = self._svc("drive", "v3").files()
         if existing_id:
-            return files.update(fileId=existing_id, body={"name": name}, media_body=media, fields="id").execute()["id"]
+            from googleapiclient.errors import HttpError
+
+            try:
+                return files.update(fileId=existing_id, body={"name": name}, media_body=media, fields="id").execute()["id"]
+            except HttpError as e:
+                if e.resp.status != 404:
+                    raise
+                # The copy was deleted in Drive: upload a fresh one below.
         return files.create(body={"name": name, "parents": [folder_id]}, media_body=media, fields="id").execute()["id"]
 
     # ---------- Docs / Sheets ----------

@@ -168,7 +168,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     }
     if (name === 'quick') {
       // Flips this chat's quick answer mode; "/quick on" and "/quick off" set it. A draft parks it until the first send.
-      const cur = (activeId ? s.sessions[activeId]?.conversation.settings?.quick : s.draftChatSettings.quick) === true
+      const cur = (activeId === PAGE_AGENT_DRAFT ? s.pageAgentChatSettings.quick : activeId ? s.sessions[activeId]?.conversation.settings?.quick : s.draftChatSettings.quick) === true
       const next = args === 'on' ? true : args === 'off' ? false : !cur
       await s.setChatSettings({ quick: next }, activeId ?? undefined)
       dropDraft(k0)

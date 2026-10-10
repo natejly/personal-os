@@ -153,7 +153,7 @@ class Projects:
 # reasoning_effort, which on Kimi K3 means the model's own max. See llm.effort_param.
 DEFAULT_EFFORT = "high"
 DEFAULT_CONV_SETTINGS = {"effort": DEFAULT_EFFORT, "fast": False, "useMemory": True, "useGraph": True, "useDocuments": True,
-                         "useStyle": True, "draftMode": False, "autoLearn": True, "useTools": True, "tools": {},
+                         "useStyle": True, "draftMode": False, "quick": False, "autoLearn": True, "useTools": True, "tools": {},
                          "responseStyle": "default", "responseStyleText": ""}
 # Style banking needs no flag of its own: it is gated on the chat's autoLearn.
 

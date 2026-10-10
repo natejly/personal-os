@@ -3780,6 +3780,12 @@ CORE_TOOLS = frozenset({"calendar_events", "calendar_get", "gmail_search", "gmai
                         "delegate", "message_worker", "check_worker", "stop_worker", "resume_worker"})  # the front agent always has its hand-off tools
 
 
+# Quick answer mode hides these for the turn: everything that hands work to someone else or starts a long job.
+QUICK_HIDDEN = frozenset({"delegate", "message_worker", "check_worker", "stop_worker", "resume_worker", "agent_spawn", "agent_stop",
+                          "agent_wait", "schedule_task", "cancel_scheduled_task", "workflow_run", "workflow_resume", "opencode_run",
+                          "coding_session_start", "coding_session_send", "deep_research"})
+
+
 def is_core(spec: ToolSpec) -> bool:
     return spec.group in CORE_GROUPS or spec.name in CORE_TOOLS
 

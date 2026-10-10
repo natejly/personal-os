@@ -365,6 +365,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
               </button>
             )}
             {showContextChips && <TraceChip message={message} />}
+            {!isUser && !streaming && message.context_used?.quick && <span className="ctx-chip" title="Made in quick answer mode"><span><Zap size={11} />Quick</span></span>}
             {!isUser && !streaming && <TokenChip message={message} />}
             {!bare && <CopyButton text={content} />}
             {resendable && isUser && !message.kind && (

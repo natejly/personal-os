@@ -1,7 +1,7 @@
 import type { Attachment } from '@shared/types'
 
 /** Largest file one upload may be. Mirrors MAX_UPLOAD_MB in backend/personal_os/limits.py, which enforces it (413). */
-export const MAX_UPLOAD_MB = 50
+export const MAX_UPLOAD_MB = 100
 export const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
 /** The refusal for a file over the cap, worded like the server's 413; null when it may be sent. */

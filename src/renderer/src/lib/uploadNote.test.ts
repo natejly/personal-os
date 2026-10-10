@@ -20,11 +20,11 @@ test('only the readable files become attachments, and none when none are', () =>
   assert.deepEqual(uploadNote([]).files, [])
 })
 
-test('uploads are capped at 50 MB, worded like the server refusal', () => {
-  assert.equal(MAX_UPLOAD_MB, 50)
-  assert.equal(MAX_UPLOAD_BYTES, 50 * 1024 * 1024)
+test('uploads are capped at 100 MB, worded like the server refusal', () => {
+  assert.equal(MAX_UPLOAD_MB, 100)
+  assert.equal(MAX_UPLOAD_BYTES, 100 * 1024 * 1024)
   assert.equal(uploadTooBig(MAX_UPLOAD_BYTES), null)
   assert.equal(uploadTooBig(30 * 1024 * 1024), null)
-  assert.equal(uploadTooBig(MAX_UPLOAD_BYTES + 1), 'Files must be 50 MB or smaller')
+  assert.equal(uploadTooBig(MAX_UPLOAD_BYTES + 1), 'Files must be 100 MB or smaller')
   assert.equal(uploadTooBig(undefined), null)
 })

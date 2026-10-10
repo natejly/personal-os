@@ -958,8 +958,6 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 /* "Unsaved changes", and the question asked before a draft is thrown away, sit left of the buttons. */
 .settings-modal .footer-note { margin-right: auto; font-size: 13px; color: var(--text-muted); }
 .settings-modal .footer-note.ask { color: var(--text); font-weight: 500; }
-/* The knowledge graph and the memory list need room side by side: this tab widens the dialog. */
-.modal.settings-modal.wide-pane { width: min(1240px, calc(100vw - 60px)); height: min(860px, calc(100vh - 60px)); }
 /* Knowledge base: the Memory panel and the document library, filling the pane instead of scrolling it. */
 .settings-pane section.knowledge-section { display: flex; flex-direction: column; height: 100%; padding-bottom: 16px; }
 .knowledge-section > .muted { margin: 8px 0 12px; }

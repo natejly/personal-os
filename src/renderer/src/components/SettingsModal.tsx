@@ -337,7 +337,7 @@ export default function SettingsModal(): JSX.Element {
 
   return (
     <div className="modal-backdrop" {...backdrop}>
-      <div className={`modal settings-modal${tab === 'memory' ? ' wide-pane' : ''}`} {...modal} onKeyDown={onModalKey}>
+      <div className="modal settings-modal" {...modal} onKeyDown={onModalKey}>
         <header><h2 id={titleId}>Settings</h2><button className="icon-btn" aria-label="Close settings" title="Close" onClick={requestClose}><X size={16} /></button></header>
 
         <div className="settings-body">

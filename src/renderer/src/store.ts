@@ -562,6 +562,8 @@ export interface State {
   markInboxRunSeen: (runId: string | null) => Promise<void>
   /** Erase one "While you were away" message from the journal. The chat it ran in is untouched. */
   deleteInboxRun: (runId: string) => Promise<void>
+  /** Archive (or restore) one run message; the inbox re-reads afterwards. */
+  archiveInboxRun: (runId: string, on?: boolean) => Promise<void>
   /** Erase every "While you were away" message in the current window. Runs still going are left. */
   clearInbox: () => Promise<void>
   refreshJobs: () => Promise<void>
@@ -3481,6 +3483,15 @@ export const useStore = create<State>((set, get) => {
         await api.inboxRunDelete(runId)
       } catch (e) {
         get().toast(`Could not delete that run: ${(e as Error).message}`, 'error')
+      }
+      void get().refreshAgentInbox()
+    },
+    archiveInboxRun: async (runId, on = true) => {
+      if (on) set((st) => (st.agentInbox ? { agentInbox: withoutInboxRuns(st.agentInbox, [runId]) } : {}))
+      try {
+        await (on ? api.inboxRunArchive(runId) : api.inboxRunRestore(runId))
+      } catch (e) {
+        get().toast(`Could not ${on ? 'archive' : 'restore'} that message: ${(e as Error).message}`, 'error')
       }
       void get().refreshAgentInbox()
     },

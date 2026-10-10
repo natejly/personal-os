@@ -6025,6 +6025,39 @@ def inbox_delete_run(run_id: str) -> dict[str, Any]:
     return {"ok": True, "deleted": 1}
 
 
+@app.get("/inbox/archived")
+def inbox_archived(limit: int = 50) -> list[dict[str, Any]]:
+    """Archived run messages, newest first: out of "While you were away" but kept, and restorable."""
+    out = []
+    for r in run_store.of_kind("job", limit=_clamp(limit), archived=True):
+        fire = r["input"] if isinstance(r.get("input"), dict) else {}
+        text = workers_mod.strip_no_reply(run_store.transcript(r["run_id"], r["message_id"])[0]) if r["message_id"] else ""
+        out.append({"run_id": r["run_id"], "conversation_id": r["conversation_id"], "status": r["status"],
+                    "job": fire.get("job") or "Scheduled job", "fired_at": fire.get("fired_at") or r["started_at"],
+                    "error": r["error"], "summary": text[:INBOX_SUMMARY_CHARS]})
+    return out
+
+
+@app.post("/inbox/runs/{run_id}/archive")
+def inbox_archive_run(run_id: str) -> dict[str, bool]:
+    row = run_store.get(run_id)
+    if not row or row.get("kind") != "job":
+        raise HTTPException(404, "No such job run")
+    if row.get("status") in ("running", "awaiting_approval"):
+        raise HTTPException(409, "That run is still going")
+    run_store.set_archived(run_id, True)
+    return {"ok": True}
+
+
+@app.post("/inbox/runs/{run_id}/restore")
+def inbox_restore_run(run_id: str) -> dict[str, bool]:
+    row = run_store.get(run_id)
+    if not row or row.get("kind") != "job":
+        raise HTTPException(404, "No such job run")
+    run_store.set_archived(run_id, False)
+    return {"ok": True}
+
+
 @app.delete("/inbox")
 def inbox_clear(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> dict[str, Any]:
     """Erase exactly the run messages GET /inbox would list with the same window. A run still going is left

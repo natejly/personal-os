@@ -586,6 +586,9 @@ kbd {
 /* While the reply streams the row keeps its height but cannot be seen, focused or clicked. */
 .msg-actions.streaming { visibility: hidden; }
 .msg.user .msg-actions { justify-content: flex-end; }
+/* Two user messages in a row are one group: the actions row stops reserving the turn gap and its buttons float over the bubble's corner on hover. */
+.msg.user:has(+ .msg.user) .msg-actions { position: relative; height: 0; min-height: 0; overflow: visible; }
+.msg.user:has(+ .msg.user) .msg-actions > * { position: absolute; bottom: 2px; right: 4px; }
 .files-changed { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 6px; font-size: 12px; color: var(--text-muted); }
 .files-changed-note { margin-left: 6px; opacity: 0.8; }
 .msg-time { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -1458,21 +1461,10 @@ textarea.instructions:focus { border-color: var(--accent); }
 .graph-tools .sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
 
 /* ---------- Tool events in messages ---------- */
-.reasoning { font-size: 12px; margin: 0 0 12px; }
-.reasoning-head { width: 100%; display: flex; align-items: center; gap: 6px; padding: 2px 0; color: var(--text-muted); text-align: left; }
-.reasoning-head:hover { color: var(--text); }
-.reasoning-head svg.rot90 { transform: rotate(90deg); }
-.reasoning-head > svg:first-child { transition: transform 0.15s; flex-shrink: 0; }
-.reasoning-label { font-weight: 400; }
-.reasoning-body {
-  max-height: 220px; overflow-y: auto; margin: 2px 0 0; padding: 0 0 6px 18px; list-style: none;
-  font-size: 12px; line-height: 1.5;
-  color: var(--text-muted); word-break: break-word;
-}
-/* The thinking line and the tool-calls line sit together, one above the other. */
-.reasoning + .reasoning { margin-top: -10px; }
-.activity-tools { padding: 0 0 6px 12px; }
-.activity-tools .tool-events { margin: 0; }
+.trace { font-size: 12px; margin: 0 0 12px; color: var(--text-muted); }
+.trace-line { line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trace-line.err { color: var(--danger, var(--text-muted)); }
+
 .tool-events { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; }
 .tool-doc-diff { margin: 6px 8px 8px; }
 .tool-doc-diff .diff-card { margin-bottom: 0; }
@@ -2616,9 +2608,6 @@ select:focus-visible {
 /* The subagent panel: a transcript that grows, and a one-line box to talk to it. */
 .subagent-panel { width: 640px; display: flex; flex-direction: column; max-height: calc(100vh - 80px); }
 .subagent-panel header h2 { display: flex; align-items: center; gap: 8px; }
-.reasoning { display: flex; flex-wrap: wrap; align-items: center; }
-.reasoning .reasoning-head { flex: 1 1 0; width: auto; }
-.reasoning .reasoning-body, .reasoning .activity-tools { flex-basis: 100%; }
 .subagent-thread { margin: -4px 0 12px 16px; padding-left: 8px; border-left: 1px solid var(--border); font-size: 12px; }
 .subagent-head, .subagent-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 26px; padding: 0 6px; border-radius: 6px; color: var(--text-muted); text-align: left; }
 .subagent-head:hover, .subagent-row:hover { background: var(--hover); color: var(--text); }

@@ -71,9 +71,9 @@ def test_ask_rule_taint_and_always_ask_are_lifted() -> None:
     appmod.db.set_settings({"alwaysAsk": llm.DEFAULT_SETTINGS["alwaysAsk"]})
 
 
-def test_fs_ask_stays() -> None:
+def test_fs_ask_is_lifted() -> None:
     ev = run([[call(0, "t_fs")], []])
-    check(len(T.cards(ev)) == 1 and not CALLS, "outside-folder write asks")
+    check(not T.cards(ev) and CALLS, "allow-all runs the outside-folder write with no card")
 
 
 def test_allowed_calls_are_logged() -> None:
@@ -82,7 +82,7 @@ def test_allowed_calls_are_logged() -> None:
     check(rows and rows[0]["decision"] == "auto" and rows[0]["note"] == "allowed (allow-all mode)", "logged as allowed in allow-all mode")
 
 
-def test_bridge_only_fenced_call_not_approved() -> None:
+def test_bridge_fenced_call_is_approved_too() -> None:
     cid = T.setup(None, permissionMode="allow_all")
     appmod.convos.update(cid, {"settings": {"tools": {"t_probe": "on"}}})
     T.ROUNDS[:] = [[call(0, "t_probe")], []]
@@ -101,7 +101,7 @@ def test_bridge_only_fenced_call_not_approved() -> None:
 
     r = asyncio.run(go())
     check(r["plain"] and r["forced"] and r["ext"], "unfenced bridge calls are approved")
-    check(not r["fs"], "a fenced bridge call is not")
+    check(r["fs"], "a fenced bridge call is approved too")
 
 
 def test_job_bridge_card_refused_and_wait_off_the_clock() -> None:

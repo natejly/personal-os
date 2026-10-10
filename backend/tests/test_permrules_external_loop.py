@@ -124,8 +124,7 @@ def test_deny_survives_skip_permissions() -> None:
     check(not RAN and not cards(ev) and results(ev)[0]["error"], "a denied recipient is refused in allow-all mode")
     cid = setup({"deny": ["gmail_send(bad@x.com)"]}, mode="ask", permissionMode="allow_all")
     ev = drive(cid, [[sh(0, "ok@x.com")], []])
-    # Allow all lifts most external cards, but an email is never sent without the user's own card.
-    check(RAN == ["ok@x.com"] and len(cards(ev)) == 1, "another recipient still gets the email card in allow-all mode")
+    check(RAN == ["ok@x.com"] and not cards(ev), "another recipient is sent with no card in allow-all mode")
 
 
 def test_external_card_has_danger_and_no_whole_tool_grant() -> None:

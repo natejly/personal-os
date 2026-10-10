@@ -1072,18 +1072,15 @@ class Subagents:
             if not bad and pmode != "manual" and mode != "off":
                 # The parent's permission mode (autoreview.route), with the child's own task as the reviewer's intent.
                 explicit = (ch.ctx.get("explicit_modes") or {}).get(name)
-                floor = shell_mod.floor(self.toolbox, args, ch.ctx) if pmode == "allow_all" and name == "shell_run" else None
                 rt = autoreview.route(
                     pmode, mode=mode, danger=spec.danger, explicit_on=explicit == "on",
                     explicit_ask=(explicit == "ask" and not self.toolbox.ask_locked(spec)) or (
                         mode == "ask" and perm.kind in ("rule", "external_directory")),
                     covered=(pre_mode == "ask" and mode == "on") or bool(perm.rule and mode == "on"),
                     hard_forced=hard_forced, soft_forced=lockable and not hard_forced,
-                    # a sensitive-path read/write, a tainted write or a runaway repeat stays a card even in allow-all
-                    fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop") or bool(floor),
+                    # a sensitive-path read/write, a tainted write or a runaway repeat stays a card (not in allow-all)
+                    fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop"),
                     question=name in permrules.STILL_ASK)
-                if floor and rt == "card":
-                    mode, forced = "ask", True  # Allow everything's floor: a permanent delete, disk wipe or force-push
                 if rt == "run":
                     if mode == "ask":
                         mode, forced = "on", False

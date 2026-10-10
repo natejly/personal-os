@@ -677,6 +677,13 @@ async def _guarded_request(client: httpx.AsyncClient, method: str, url: str, *, 
             method, content = "GET", None
 
 
+def doc_edit_applies(ctx: dict[str, Any]) -> bool:
+    """doc_edit writes straight into the file: under Full agentic editing, and always under Allow everything (no diff to accept)."""
+    s = ctx.get("settings") or {}
+    return (ctx.get("permission_mode") or permissions.get(s, "permissionMode")) == "allow_all" or (
+        str(permissions.get(s, "docEditMode") or "review") == "apply")
+
+
 class Toolbox:
     web_cache: Any = None  # webread.WebCache, wired in app.py; fetch_url runs uncached without it
     subagents: Any = None  # subagents.Subagents, wired in app.py; the agent_* tools say so without it
@@ -939,7 +946,7 @@ class Toolbox:
         cancel_send = name == "gmail_outbox" and isinstance(args, dict) and args.get("action") == "cancel"
         # A doc_edit in review mode (the default) lands as a diff the user accepts or rejects: that is its card.
         # A card in front of it as well would ask twice for one edit, so taint only cards it under "apply".
-        reviewed = name == "doc_edit" and str(permissions.get(ctx.get("settings") or {}, "docEditMode") or "review") != "apply"
+        reviewed = name == "doc_edit" and not doc_edit_applies(ctx)
         if spec and mode == "on" and self.tainted_for(name, args or {}, ctx) and not reviewed and (
                 spec.danger == "network" or self.ask_locked(spec) or (name in PROMPT_WRITES and not self._own_words_save(name, args, ctx))
                 or self._networked_sandbox_call(spec, ctx) or cancel_send):
@@ -2267,7 +2274,7 @@ def _register_google(self: Toolbox) -> None:
             return _mail_shown(await run(lambda: g.gmail_send(to, subject, body, reply_to_message_id, **outbox_mod.extras(items, cc, bcc))))
         row = await run(self.outbox.queue, to, subject, body, reply_to_message_id, "assistant", ctx.get("conversation_id"), ids, cc, bcc)
         return outbox_mod.queued_result(row)
-    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it. Pass reply_to_message_id to answer an existing message in its thread. Files can be attached (25 MB in total), with optional cc and bcc. The user always reviews and edits the email on a card first, and only their Send click sends it, so an approved send may differ from what you wrote: the result says what was finally sent, or that it was discarded or saved as a draft. Leave as_draft unset: the user sets it on the card.",
+    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it. Pass reply_to_message_id to answer an existing message in its thread. Files can be attached (25 MB in total), with optional cc and bcc. Unless Allow everything is on, the user reviews and edits the email on a card first, and only their Send click sends it, so an approved send may differ from what you wrote: the result says what was finally sent, or that it was discarded or saved as a draft. Leave as_draft unset: the user sets it on the card.",
         _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "reply_to_message_id": {"type": "string"},
               "as_draft": {"type": "boolean", "default": False}, "attachments": _ATTACH_PARAM, "cc": _ADDR_PARAM, "bcc": _ADDR_PARAM}, ["to", "subject", "body"]), gmail_send, "google", "external",
         examples=[{"to": "mira@example.com", "subject": "Running late", "body": "I will be 10 minutes late."},
@@ -2730,8 +2737,7 @@ def _register_docs(self: Toolbox) -> None:
             return _missing(ctx, doc)
         # "apply" writes the change (Accept all). Anything else, including a missing setting, waits for review.
         # A scheduled run has nobody at the keyboard, so accept-all does not apply there either.
-        if (str(permissions.get(ctx.get("settings") or {}, "docEditMode") or "review") == "apply"
-                and not ctx.get("proposal_only")):
+        if doc_edit_applies(ctx) and not ctx.get("proposal_only"):
             applied = self.docs.accept(rev["id"])
             if not applied:
                 return _missing(ctx, doc)
@@ -2748,7 +2754,7 @@ def _register_docs(self: Toolbox) -> None:
                         "Tell them what you changed and that it is waiting. Do not paste the file back."})
     R("doc_edit", ToolSpec("doc_edit", (
         "Revise one of the user's editor files. The change is always shown to them as a diff. Under Diff review (the "
-        "default) it stays pending until they accept or reject it. Under Full agentic editing it is written "
+        "default) it stays pending until they accept or reject it. Under Full agentic editing, or when Allow everything is on, it is written "
         "immediately, and they can still undo it from the file's history. The result's status says which happened: "
         "'pending_review' or 'applied'. Do not claim the file was updated unless status is 'applied'.\n"
         "Pick one form. 'edits' — targeted find/replace, preferred: each 'find' must be copied exactly from doc_read "

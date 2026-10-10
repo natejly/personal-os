@@ -2078,11 +2078,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             spec = toolbox.specs.get(name)
             danger = spec.danger if spec else "external"
             fenced = bool(toolbox.fs_needs_ask(name, args, tool_ctx))
-            # Allow everything's floor: a shell command that deletes for good, wipes a disk or force-pushes still asks.
-            if pmode == "allow_all" and name == "shell_run" and shell_tool.floor(toolbox, args, tool_ctx):
-                fenced = forced = True
             blog = f"{am['id']}:bridgelog{bridge_n + 1}"
-            if pmode == "allow_all" and not fenced:
+            if pmode == "allow_all":
                 if danger != "safe":
                     _log_mode(name, args, blog, "auto", "allow-all", "allowed (allow-all mode)")
                 return True
@@ -3026,12 +3023,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     explicit = explicit_modes.get(c["name"]) if not mcp_is(c["name"]) else ("on" if raw_mode == "on" else None)
                     locked_spec = bool(spec and toolbox.ask_locked(spec))
                     hints = _mcp_event(c["name"]) or {}
-                    # A connector call forced by untrusted content stays a card in every mode, allow-all included, except the
-                    # coding-agent connectors under allow-all: they run like opencode_run and coding_session_start do there.
-                    mcp_tainted = bool(hints) and hard_forced and bool(tool_ctx["tainted"]) and not (
-                        pmode == "allow_all" and _coding_connector(c["name"]))
-                    # Allow everything's floor (permrules.destructive): a delete that skips the Trash, a disk wipe or a force-push.
-                    floor = shell_tool.floor(toolbox, args, tool_ctx) if pmode == "allow_all" and c["name"] == "shell_run" else None
+                    # A connector call forced by untrusted content stays a card (allow-all runs it: autoreview.route).
+                    mcp_tainted = bool(hints) and hard_forced and bool(tool_ctx["tainted"])
                     rt = autoreview.route(
                         # handing work to a worker needs no review of its own: each call the worker makes is reviewed in its turn
                         pmode, mode=mode, danger="safe" if c["name"] in workers_mod.FRONT_TOOLS else danger, explicit_on=explicit == "on",
@@ -3040,13 +3033,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         covered=desk_cleared or (pre_mode == "ask" and perm.mode == "on") or bool(perm.rule and perm.mode == "on"),
                         # a connector that calls its own tool destructive is reviewed strictly (a confident, untainted allow)
                         hard_forced=hard_forced, soft_forced=(lockable or bool(hints.get("destructive"))) and not hard_forced,
-                        # a sensitive-path read/write, a tainted write or a runaway repeat stays a card even in allow-all
-                        fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop") or mcp_tainted or bool(floor),
+                        # a sensitive-path read/write, a tainted write or a runaway repeat stays a card (not in allow-all)
+                        fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop") or mcp_tainted,
                         question=c["name"] in permrules.STILL_ASK or c["name"] == PLAN_TOOL)
-                    if floor and rt == "card":
-                        # One card, no rule or session grant behind it: the user reads what will be lost.
-                        mode, forced = "ask", True
-                        perm.mode, perm.forced, perm.kind, perm.display = "ask", True, floor[0], floor[1]
                     if rt == "run":
                         if mode == "ask":
                             mode, forced = "on", False

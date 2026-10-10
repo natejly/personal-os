@@ -270,7 +270,7 @@ export interface State {
   pageAgentOpen: boolean
   pageAgentId: string | null
   /** Skip permissions picked in the ⌘I panel before its thread exists. */
-  pageAgentChatSettings: Partial<Pick<ConversationSettings, 'skipPermissions' | 'effort' | 'fast'>>
+  pageAgentChatSettings: Partial<Pick<ConversationSettings, 'skipPermissions' | 'effort' | 'fast' | 'quick'>>
   /** Model picked in the ⌘I panel before its thread exists. */
   pageAgentModel: string | null
   /** While set, the panel keeps this view's thread whatever view or doc is on screen. */
@@ -942,8 +942,9 @@ export { adjacentChatId }
 export const PAGE_AGENT_DRAFT = '\u0000page-agent'
 
 /** The per-chat switches a row-less chat parks until `send` creates its row. */
-const parkable = (p: Partial<ConversationSettings>): Pick<ConversationSettings, 'skipPermissions'> => ({
-  ...(p.skipPermissions !== undefined ? { skipPermissions: p.skipPermissions } : {})
+const parkable = (p: Partial<ConversationSettings>): Pick<ConversationSettings, 'skipPermissions' | 'quick'> => ({
+  ...(p.skipPermissions !== undefined ? { skipPermissions: p.skipPermissions } : {}),
+  ...(p.quick !== undefined ? { quick: p.quick } : {})
 })
 
 export const useStore = create<State>((set, get) => {

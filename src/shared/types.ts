@@ -1289,6 +1289,22 @@ export interface GoogleTaskList {
 }
 
 /** Two-way todos <-> Google Tasks sync (`/integrations/google/tasks-sync`). */
+export interface DriveBackupRun {
+  /** Unix seconds. */
+  at: number
+  copied: number
+  skipped: number
+  failed: { name: string; error: string }[]
+  /** Why the run could not start or finish (not connected, Drive access not granted). */
+  error: string | null
+  ok: boolean
+}
+
+export interface DriveBackupStatus {
+  last: DriveBackupRun | null
+  tracked: number
+}
+
 export interface TasksSyncStatus {
   config: { enabled: boolean; tasklist: string; intervalMinutes: number }
   /** Unix seconds of the last successful pass. */

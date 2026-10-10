@@ -8,7 +8,6 @@ import { api } from '../lib/api'
 import { DEFAULT_ZOOM, stepZoom } from '../lib/zoom'
 import { downloadJson, pickJson } from '../lib/jsonFile'
 import { usePresets } from '../canvas/presets'
-import { HOME_MODULES } from '../modules'
 import { homeModuleOn } from '../moduleToggles'
 import { navEntries } from '../shell/nav'
 import { useModal } from '../lib/useModal'
@@ -302,7 +301,7 @@ export default function SettingsModal(): JSX.Element {
   const setRowShown = async (v: View, on: boolean): Promise<void> => {
     try {
       await saveEarly({ hiddenViews: [...hidden.filter((x) => x !== v), ...(on ? [] : [v])] })
-      if (!on && view === v) setView('home')
+      if (!on && view === v) setView('chat')
     } catch (e) { toast((e as Error).message, 'error') }
   }
   const sbHidden = draft.sidebarHidden ?? []
@@ -310,9 +309,6 @@ export default function SettingsModal(): JSX.Element {
   const setSectionShown = async (k: string, on: boolean): Promise<void> => {
     try { await saveEarly({ sidebarHidden: [...sbHidden.filter((x) => x !== k), ...(on ? [] : [k])] }) } catch (e) { toast((e as Error).message, 'error') }
   }
-  const homeOn = (k: string): boolean => homeModuleOn(draft, k)
-  const toggleHome = (k: string): void =>
-    patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), [k]: !homeOn(k) } })
 
   // Vertical tablist: arrows move and select, Home/End jump to the ends.
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>): void => {
@@ -337,7 +333,7 @@ export default function SettingsModal(): JSX.Element {
 
   return (
     <div className="modal-backdrop" {...backdrop}>
-      <div className={`modal settings-modal${tab === 'memory' ? ' wide-pane' : ''}`} {...modal} onKeyDown={onModalKey}>
+      <div className="modal settings-modal" {...modal} onKeyDown={onModalKey}>
         <header><h2 id={titleId}>Settings</h2><button className="icon-btn" aria-label="Close settings" title="Close" onClick={requestClose}><X size={16} /></button></header>
 
         <div className="settings-body">
@@ -383,7 +379,7 @@ export default function SettingsModal(): JSX.Element {
                   onChange={(e) => void saveEarly({ allowAllConnections: e.target.checked }).catch((err: Error) => toast(err.message, 'error'))} /><span className="switch" />
               </label>
               <RunSafetySettings draft={draft} patch={patch} />
-              <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits, and passwords, keys and sign-in files always ask first. Allow everything still asks before permanent deletes outside the Trash, disk wipes, force-pushes and sending email. Per-tool rules and the always-ask list are under Advanced.</p>
+              <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits. Allow everything never asks, not even before permanent deletes, disk wipes, force-pushes, credential access or sending email; Auto and Manual still do. Per-tool rules and the always-ask list are under Advanced.</p>
               {mode === 'auto' && (
                 <details className="modal-free">
                   <summary>Reviewer model: {draft.autoReviewModel ? draft.autoReviewModel : 'automatic'}</summary>
@@ -479,15 +475,7 @@ export default function SettingsModal(): JSX.Element {
                   <button type="button" onClick={() => void saveEarly({ uiZoom: DEFAULT_ZOOM })}>Reset</button>
                 </div>
               </div>
-              <h4>Today cards</h4>
-              <div className="setting-list">
-                {HOME_MODULES.map((m) => (
-                  <label key={m.key} className="toggle-row">
-                    <span className="toggle-text"><b>{m.label}</b></span>
-                    <input type="checkbox" checked={homeOn(m.key)} onChange={() => toggleHome(m.key)} /><span className="switch" />
-                  </label>
-                ))}
-              </div>
+              <Switch title="Daily recap on new chats" help="A short summary of your day under the greeting in a new chat." checked={homeModuleOn(draft, 'recap')} onChange={(on) => patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), recap: on } })} />
               <Switch title="Start chat windows as blobs" help="A chat added to a space starts as just its creature, no frame. Click it to open the chat." checked={!!draft.compactChats} onChange={(compactChats) => patch({ compactChats })} />
               <div className="setting-row">
                 <span className="toggle-text"><b>Default file font</b><small>How files read and edit unless a file has its own choice. Auto keeps the app's own size and line width.</small></span>
@@ -497,9 +485,9 @@ export default function SettingsModal(): JSX.Element {
             </section>}
             {tab === 'sidebar' && <section>
               <h3>Sidebar</h3>
-              <p className="muted small">New chat, your chats and Settings always show. Hiding Today, Files, Spaces, Projects or Jobs only removes the row: ⌘K and shortcuts still open them. Hiding Lists, Calendar, Mail, Health or Library turns that view off.</p>
+              <p className="muted small">New chat, your chats and Settings always show. Hiding Files, Spaces, Projects or Jobs only removes the row: ⌘K and shortcuts still open them. Hiding Lists, Calendar, Mail, Health or Library turns that view off.</p>
               <div className="setting-list">
-                {([['home', 'Today'], ['docs', 'Files']] as const).map(([k, label]) => (
+                {([['docs', 'Files']] as const).map(([k, label]) => (
                   <label key={k} className="toggle-row">
                     <span className="toggle-text"><b>{label}</b></span>
                     <input type="checkbox" aria-label={label} checked={!sbHidden.includes(k)} onChange={(ev) => void setSectionShown(k, ev.target.checked)} /><span className="switch" />
@@ -646,6 +634,9 @@ export default function SettingsModal(): JSX.Element {
               <AdvGroup id="data" title="Data" {...gp}>
                 <DataSettings />
                 <PresetFiles />
+                <label><span className="toggle-text"><b>Auto-archive after (days)</b><small>Chats and inbox messages with no activity for this long move to Archived. They stay searchable and can be restored. 0 turns it off.</small></span>
+                  <input type="number" min={0} max={3650} value={draft.autoArchiveDays ?? 0} onChange={(e) => patch({ autoArchiveDays: Math.min(3650, Math.max(0, Math.round(Number(e.target.value)) || 0)) })} />
+                </label>
                 <TrashPanel />
                 <h4>Diagnostics</h4>
                 <SupportSettings />

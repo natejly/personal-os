@@ -9,7 +9,8 @@ nothing else. The sandbox is the boundary, the approval card is the courtesy: no
 
 If the sandbox is unavailable (no sandbox-exec, another OS, or the profile fails to apply) the call is refused. The
 only way past that is `unsandboxed=true`, which Toolbox.gate turns into a forced approval no grant can buy off
-(Allow everything runs it without one; `floor` is what that mode still cards).
+(Allow everything runs it without one). `unsandboxed=true` is also the per-call exception for one action the sandbox
+blocks (binding a port, launching an app), and a blocked call names the rule that caused it (`wall_note`).
 
 Background commands return a job id; shell_poll reads new output (wait_s blocks until there is some, so an agent never
 sleeps in a shell to wait), shell_kill stops one. Jobs belong to the conversation and the run that started them (a
@@ -24,6 +25,7 @@ import codecs
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -166,15 +168,32 @@ def perm_where(tb: Any, ctx: dict[str, Any]) -> tuple[list[str], str]:
     return ([str(desk)] if desk else []), (os.path.join(base, last) if last else base)
 
 
-def floor(tb: Any, args: dict[str, Any], ctx: dict[str, Any]) -> tuple[str, str] | None:
-    """(card kind, reason) when Allow everything still cards this shell_run (permrules.allow_all_floor), judged from the folder it will run in.
-    Relative paths resolve against cwd, else where the last command ended, else the desk workspace, else home; a desk's
-    work/ folder counts as scratch beside the temp folders."""
-    from . import permrules
-    roots, start = perm_where(tb, ctx)
-    raw = os.path.expanduser(str(args.get("cwd") or "").strip())
-    cwd = os.path.join(roots[0] if roots else str(mac.home()), raw) if raw else start  # an explicit cwd starts from the desk, as run() does
-    return permrules.allow_all_floor("shell_run", args, cwd, [os.path.join(r, "work") for r in roots])
+# What the shell sandbox blocks, as (pattern in the command's own error output, the sandbox rule behind it). Stated up
+# front in the tool description and quoted back with the OS error when a call hits one, so a wall is never silent.
+SANDBOX_LIMITS = ("it cannot bind or listen on a network port (even 127.0.0.1) unless the user enabled open network, cannot "
+                  "send Apple events or launch/drive apps, cannot write Grain's data folder or app, cannot touch credential "
+                  "stores, and cannot write shell rc files, git hooks or launch agents")
+_DENIED = re.compile(r"Operation not permitted|Permission denied|Errno 1\b|EPERM|error -54|-10810|-1743|Read-only file system", re.I)
+_WALLS = (  # (words near the denial, sandbox rule, plain reason); the first that matches names the wall
+    (re.compile(r"bind|listen|socket|connect", re.I), "network*",
+     "the sandbox denies network access, binding or listening on a port included, unless open network is enabled"),
+    (re.compile(r"osascript|apple ?event|LSOpen|-10810|-1743", re.I), "appleevent-send / app launch",
+     "the sandbox denies Apple events and launching or driving apps"),
+    (re.compile(r"."), "file-write* / file-read*",
+     "the sandbox denies this path (Grain's data folder and app, credential stores, rc files, git hooks, launch agents)"),
+)
+
+
+def wall_note(output: str, network: bool = False) -> dict[str, str] | None:
+    """The sandbox rule behind a failed call, the OS error quoted: None unless the output holds a denial. With open
+    network the network rule is not what blocked it."""
+    line = next((ln.strip()[:300] for ln in output.splitlines() if _DENIED.search(ln)), None)
+    if line is None:
+        return None
+    for pat, rule, why in _WALLS:
+        if pat.search(output) and not (network and rule.startswith("network")):
+            return {"rule": rule, "error": line, "why": why, "retry": "unsandboxed=true asks the user for this one command"}
+    return None
 
 
 # ---- environment and output shaping ----
@@ -701,9 +720,6 @@ def register(tb: Any) -> None:
             return tool_error(_scrub(str(e)))
         network = bool(permissions.get(s, "shellNetwork"))
         usable = sandbox_available()
-        if unsandboxed and usable and not jobs.sandbox_failed:
-            return tool_error("The OS sandbox is available, so this runs sandboxed; unsandboxed is only for a machine where "
-                              "it cannot start.", alternative="run it again without unsandboxed")
         if not unsandboxed and not usable:
             return tool_error("The OS sandbox this shell runs in is not available here (it needs macOS sandbox-exec), so "
                               "nothing was run.", alternative="run_python for a calculation, or retry with "
@@ -806,6 +822,7 @@ def register(tb: Any) -> None:
             return tool_error(_scrub("The OS sandbox refused to start (" + text.strip()[:200] + "), so nothing was run."),
                               alternative="retry with unsandboxed=true, which asks the user for approval on every call")
         shown, cut = truncate(text)
+        wall = None if unsandboxed else wall_note(text, network)
         if job.end_cwd:
             try:
                 ended = resolve_cwd(job.end_cwd, default, dr)
@@ -820,6 +837,8 @@ def register(tb: Any) -> None:
                                "timed_out": job.status == "timed_out", "duration_s": round(time.time() - t0, 2), **base}
         if job.status == "timed_out":
             out["note"] = f"Killed after {timeout}s (the whole process group). Use background=true for long-running work."
+        if wall:
+            out["sandbox_blocked"] = wall
         net_report(out)
         if cut:
             out["note"] = (out.get("note", "") + " " + hint(ctx)).strip()
@@ -840,8 +859,10 @@ def register(tb: Any) -> None:
                     "(on_timeout=background, the default; poll it with shell_poll) or, with on_timeout=kill, the whole process "
                     "group is killed. For anything long-running pass background=true, then shell_poll and shell_kill with the job_id. "
                     "Outside a desk, background jobs are stopped when the reply ends and a timeout always kills. "
-                    "unsandboxed=true escapes the sandbox and asks the user (except under Allow everything). Under Allow everything "
-                    "a command that deletes outside a temp folder, wipes a disk or force-pushes still asks.",
+                    "Sandbox limits: " + SANDBOX_LIMITS + ". When a command needs one of those, plan around it or pass unsandboxed=true for "
+                    "that one command: it escapes the sandbox and asks the user first (Allow everything runs it without asking). "
+                    "A blocked command returns sandbox_blocked with the OS error and the rule that caused it; report that wall to "
+                    "the user instead of retrying blindly.",
                     _obj({"command": {"type": "string"}, "cwd": {"type": "string", "description": "Any folder on this Mac; relative to the default folder"},
                           "timeout_s": {"type": "integer", "default": 120}, "background": {"type": "boolean", "default": False},
                           "notify_on_complete": {"type": "boolean", "default": True},
@@ -858,6 +879,7 @@ def register(tb: Any) -> None:
     spec.force_ask = lambda args, ctx: bool(args.get("unsandboxed")) or (
         bool(ctx.get("tainted")) and reaches_out(cfg(ctx))
         and not permissions.get(cfg(ctx), "trustExternalContent"))
+    spec.force_card = lambda args, ctx: bool(args.get("unsandboxed"))  # a sandbox escape is a hard card: Auto's reviewer may not lift it
     R("shell_run", spec)
 
     async def shell_poll(ctx: dict[str, Any], job_id: str, wait_s: float = 0) -> Any:

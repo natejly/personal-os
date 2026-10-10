@@ -61,13 +61,12 @@ def test_job_auto_deny_is_refused_and_logged() -> None:
     check(rows, "an approval_log row records the reviewer's deny")
 
 
-def test_allow_all_doom_loop_still_asks() -> None:
+def test_allow_all_doom_loop_does_not_ask() -> None:
     cid = T.setup(None, mode=None, permissionMode="allow_all", alwaysAsk=[])
     appmod.convos.update(cid, {"settings": {"tools": {"gmail_draft": "on"}}})
     ev = T.drive(cid, [[sh(i, "same@x.com")] for i in range(permrules.DOOM_LIMIT)] + [[]], ["deny"])
-    cs = T.cards(ev)
-    check(len(cs) == 1 and cs[0]["forced"], "the repeated call raises one forced card")
-    check(len(T.RAN) == permrules.DOOM_LIMIT - 1, "only the calls before the loop ran")
+    check(not T.cards(ev), "allow-all raises no card for the repeated call")
+    check(len(T.RAN) == permrules.DOOM_LIMIT, "every call ran")
 
 
 if __name__ == "__main__":

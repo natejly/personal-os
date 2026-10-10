@@ -163,13 +163,11 @@ def test_manual_mode_allow_rule_lifts_the_card() -> None:
     assert cards(did) == []
 
 
-def test_allow_all_still_cards_a_credential_file_read(tmp_path: Path) -> None:
+def test_allow_all_reads_a_credential_file_without_a_card(tmp_path: Path) -> None:
     appmod.db.set_settings({"permissionMode": "allow_all"})
     secret = tmp_path / ".env"
     secret.write_text("TOKEN=abc\n")
     FRONT[:] = [{"calls": [call("r1", "read_local_file", {"path": str(secret)})]}, {"text": "ok"}]
     cid, did = start_desk()
-    row = wait(lambda: cards(did), "a card")[0]
-    assert row["tool"] == "read_local_file"
-    client.post(f"/approvals/{row['call_id']}", json={"decision": "deny"})
     settled(cid)
+    assert cards(did) == []

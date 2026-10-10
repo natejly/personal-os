@@ -1,4 +1,5 @@
-"""An agent never sends email by itself: gmail_send always stops at the user's email card, in every permission mode.
+"""An agent never sends email by itself: gmail_send always stops at the user's email card in Auto and Manual. Allow everything
+is the one mode that sends without it.
 
 Drives the real chat loop (app._chat_stream) with a scripted model, the real gmail_send tool, the real outbox and a
 fake Gmail. Only the user's Send click sends; Save as draft writes a draft; a discard sends nothing.
@@ -80,17 +81,27 @@ def last_tool_message() -> str:
     return next((m["content"] for m in reversed(T.SEEN[-1]) if m["role"] == "tool"), "")
 
 
-def test_allow_all_still_raises_the_email_card_and_a_discard_sends_nothing() -> None:
+def test_allow_all_sends_with_no_card() -> None:
     cid = setup("allow_all")
+    ev = drive(cid, [[send(0)], []], [])
+    check(not T.cards(ev), "allow-all raised no card for the email")
+    check(len(SERVER.messages) == 1 or [r for r in appmod.outbox.list() if r["to"] == GOOD["to"]], "the email went out or is queued")
+    SERVER.messages.clear()
+    for r in appmod.outbox.list():
+        appmod.outbox.cancel(r["id"])
+
+
+def test_manual_raises_the_email_card_and_a_discard_sends_nothing() -> None:
+    cid = setup("manual")
     ev = drive(cid, [[send(0)], []], ["deny"])
     cs = T.cards(ev)
-    check(len(cs) == 1 and cs[0]["forced"] is True, "allow-all raised one forced card for the email")
+    check(len(cs) == 1 and cs[0]["forced"] is True, "manual raised one forced card for the email")
     check(not SERVER.messages and not SERVER.drafts, "a discard sent nothing and saved no draft")
     check("discarded by the user on the email card" in last_tool_message(), "the model was told it was discarded")
 
 
 def test_an_allow_rule_or_grant_never_stands_in_for_the_click() -> None:
-    for mode in ("allow_all", "manual", "auto"):
+    for mode in ("manual", "auto"):
         cid = setup(mode, {"allow": ["gmail_send(mira@example.com)", "gmail_send(*)"], "ask": [], "deny": []})
         for decision in ("always_chat", "always_global"):
             ev = drive(cid, [[send(0)], []], [decision])
@@ -103,7 +114,7 @@ def test_an_allow_rule_or_grant_never_stands_in_for_the_click() -> None:
 
 
 def test_approving_edits_sends_exactly_the_edited_email() -> None:
-    cid = setup("allow_all")
+    cid = setup("manual")
     doc = appmod._store_upload(None, "notes.txt", "text/plain", b"attached text")
     edited = {**GOOD, "body": "Human wrote this", "cc": "ana@example.com", "attachments": [doc["id"]]}
     ev = drive(cid, [[send(0)], []], [("allow", edited, None)])
@@ -118,7 +129,7 @@ def test_approving_edits_sends_exactly_the_edited_email() -> None:
 
 
 def test_save_as_draft_writes_a_draft_and_never_sends() -> None:
-    cid = setup("allow_all")
+    cid = setup("manual")
     ev = drive(cid, [[send(0)], []], [("allow", {**GOOD, "as_draft": True}, None)])
     check(len(T.cards(ev)) == 1 and not SERVER.messages and len(SERVER.drafts) == 1, "a draft was saved, nothing was sent")
 
@@ -145,11 +156,11 @@ def test_the_pieces() -> None:
     check(tb.ask_locked(spec) and tb.forces_ask("gmail_send", {}, {}) and tb.forces_card("gmail_send", {}, {}), "locked, forced and hard-forced")
     check(tb.always_ask().issuperset({"gmail_send"}), "listed even when the alwaysAsk setting is empty")
     check(tb.effective({"gmail_send": "on"}, None, None)["gmail_send"] == "ask", "never 'on'")
-    for pmode in ("allow_all", "auto", "manual"):
+    for pmode in ("auto", "manual"):
         check(autoreview.route(pmode, mode="ask", danger="external", hard_forced=True, question="gmail_send" in permrules.STILL_ASK) == "card", f"{pmode}: card")
+    check(autoreview.route("allow_all", mode="ask", danger="external", hard_forced=True) == "run", "allow_all: no card")
     r = permrules.resolve("gmail_send", {"to": "mira@example.com"}, "ask", True, rules=permrules.load_rules({"allow": ["gmail_send(mira@example.com)"]}))
     check(r.mode == "ask", "a forced ask survives an allow rule")
-    check(permrules.lift_permission_ask("gmail_send", "ask", skip=True) == "ask", "skip-permissions does not lift it")
 
 
 if __name__ == "__main__":

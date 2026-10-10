@@ -230,34 +230,6 @@ test('Connect COROS (network): either a sign-in prompt or a readable "Not connec
   await expect(panel.getByRole('button', { name: /COROS/ })).toBeVisible()
 })
 
-test('Today shows a Health card that follows the Show on Today toggle and survives a relaunch', async ({ grain }) => {
-  const { page, api, dataDir } = grain
-  seedEntries(dataDir, [['sleep', 8.2, ymd(0)], ['steps', 9000, ymd(0)]])
-  await enableModules(api)
-  await reload(page)
-  await page.locator('.nav-item', { hasText: 'Today' }).first().click()
-  const card = page.locator('section.widget', { has: page.getByText('logged today') })
-  await expect(card).toBeVisible()
-  await expect(card).toContainText('2 of 9 logged today')
-  await expect(card.locator('.hl-card li', { hasText: 'Sleep' })).toContainText('8.2 h')
-  await expect(card.locator('.hl-card li', { hasText: 'Sleep' }).getByLabel('goal met')).toBeVisible()
-  await expect(card.locator('.hl-card li', { hasText: 'Steps' })).toContainText('9,000 steps')
-  // View all goes to the page
-  await card.getByRole('button', { name: 'View all' }).click()
-  await expect(page.getByRole('heading', { name: 'Health' }).first()).toBeVisible()
-  await page.locator('.nav-item', { hasText: 'Today' }).first().click()
-  // turn it off through Show on Today
-  await page.getByRole('button', { name: 'Choose what shows on Today' }).click()
-  await page.locator('.home-customize label', { hasText: 'Health' }).locator('input').click()
-  await expect(page.locator('section.widget', { has: page.getByText('logged today') })).toHaveCount(0)
-  await expect.poll(async () => (await api('/settings')).homeWidgets.health).toBe(false)
-  await grain.relaunch()
-  await grain.page.locator('.nav-item', { hasText: 'Today' }).first().click()
-  await expect(grain.page.locator('section.widget', { has: grain.page.getByText('Brief me').or(grain.page.getByText('Lists')) }).first()).toBeVisible()
-  await expect(grain.page.locator('section.widget', { has: grain.page.getByText('logged today') })).toHaveCount(0)
-  expect(realErrors(grain.consoleErrors)).toEqual([])
-})
-
 test('900 readings over 90 days at 820x520: tiles, sparklines and the trend render without sideways scroll', async ({ grain }) => {
   const { page, dataDir } = grain
   const rows = []

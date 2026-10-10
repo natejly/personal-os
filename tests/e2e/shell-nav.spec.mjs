@@ -4,22 +4,17 @@ import { menu, menuTable, withGrain, ALL_VIEWS_ON, setWindowSize, bodyOverflow }
 const sidebarItem = (page, name) => page.locator('.sidebar .nav-item', { hasText: new RegExp(`^\\s*${name}`) }).first()
 const heading = (page, re) => expect(page.locator('main h2, .page h2').filter({ hasText: re }).first()).toBeVisible()
 
-test('every sidebar nav item opens its view and is marked current; Today brings you back', async () => {
+test('every sidebar nav item opens its view and is marked current; the brand button brings you back to a chat', async () => {
   await withGrain({ settings: ALL_VIEWS_ON }, async ({ page, consoleErrors }) => {
     const rows = [['Files', /Files/], ['Library', /Library/]]
     for (const [name, h] of rows) {
       await sidebarItem(page, name).click()
       await heading(page, h)
       await expect(sidebarItem(page, name)).toHaveAttribute('aria-current', 'page')
-      await expect(sidebarItem(page, 'Today')).not.toHaveAttribute('aria-current', 'page')
     }
-    await sidebarItem(page, 'Today').click()
-    await heading(page, /Today/)
-    await expect(sidebarItem(page, 'Today')).toHaveAttribute('aria-current', 'page')
-    // brand button also goes Today
     await sidebarItem(page, 'Files').click()
     await page.locator('.sidebar .brand').click()
-    await heading(page, /Today/)
+    await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
     expect(consoleErrors).toEqual([])
   })
 })
@@ -27,13 +22,12 @@ test('every sidebar nav item opens its view and is marked current; Today brings 
 test('Lists, Calendar, Mail and Health are sidebar rows in order, each opens its view and is marked current', async () => {
   await withGrain({ settings: ALL_VIEWS_ON }, async ({ page, consoleErrors }) => {
     const labels = await page.locator('.sidebar .nav-item:not(.nav-more) > span:first-of-type').allInnerTexts()
-    const order = ['Today', 'Files', 'Lists', 'Calendar', 'Mail', 'Health', 'Library']
+    const order = ['Files', 'Lists', 'Calendar', 'Mail', 'Health', 'Library']
     expect(labels.filter((l) => order.includes(l))).toEqual(order)
     for (const [name, h] of [['Lists', /Lists/], ['Calendar', /Calendar/], ['Mail', /Mail/], ['Health', /Health/]]) {
       await sidebarItem(page, name).click()
       await heading(page, h)
       await expect(sidebarItem(page, name)).toHaveAttribute('aria-current', 'page')
-      await expect(sidebarItem(page, 'Today')).not.toHaveAttribute('aria-current', 'page')
     }
     // the title bar no longer carries the app icons: no Apps toolbar, no icon per view
     await expect(page.getByRole('toolbar', { name: 'Apps' })).toHaveCount(0)
@@ -174,7 +168,7 @@ test('command palette: opens, fuzzy filters, arrows + Enter run, every command e
   await expect(pal).toHaveCount(0)
   await heading(page, /Calendar/)
   // Go-to commands
-  for (const [q, h] of [['Today', /Today/], ['Files', /Files/], ['Lists', /Lists/], ['Mail', /Mail/], ['Library', /Library/]]) {
+  for (const [q, h] of [['Files', /Files/], ['Lists', /Lists/], ['Mail', /Mail/], ['Library', /Library/]]) {
     await menu(grain, 'Command Palette…')
     await pal.getByPlaceholder('Go to, create, open…').fill(q)
     await pal.getByRole('option').first().click()
@@ -232,8 +226,8 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   expect(acc['Toggle Context Panel']).toBe('Control+Command+I')
   expect(acc['Toggle Spaces']).toMatch(/Shift\+C$/)
   expect(acc['Command Palette…']).toMatch(/\+K$/)
-  const digits = ['Today', 'Chats', 'Lists', 'Calendar', 'Files', 'Mail', 'Memory…']
-  digits.forEach((l, i) => expect(acc[l]).toMatch(new RegExp(`\\+${i}$`)))
+  const digits = ['Chats', 'Lists', 'Calendar', 'Files', 'Mail', 'Memory…']
+  digits.forEach((l, i) => expect(acc[l]).toMatch(new RegExp(`\\+${i + 1}$`)))
   // no two items share an accelerator
   const seen = new Map()
   for (const t of table) {
@@ -258,7 +252,6 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   await page.waitForSelector('.sidebar')
   await menu(grain, 'Library')
   await expect(page.getByText('Library is turned off')).toBeVisible()
-  await menu(grain, 'Today'); await heading(page, /Today/)
   await menu(grain, 'Chats'); await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
   // Memory… opens Settings on the Memory tab, split: graph and list side by side
   await menu(grain, 'Memory…')
@@ -334,7 +327,7 @@ test('nothing overflows horizontally at 820x520 on any view', async () => {
       expect.soft(o.sw, `${label} body scrollWidth`).toBe(o.cw)
       expect.soft(o.dsw, `${label} html scrollWidth`).toBe(o.dcw)
     }
-    for (const n of ['Today', 'Files', 'Library']) {
+    for (const n of ['Files', 'Library']) {
       await sidebarItem(page, n).click()
       await check(n)
     }

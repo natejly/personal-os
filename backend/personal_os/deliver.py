@@ -99,7 +99,7 @@ def which(name: str) -> str | None:
 def _missing(binary: str, what: str) -> dict[str, Any]:
     from .tools import tool_error
     return tool_error(f"{what} needs `{binary}`, which is not installed on this Mac.",
-                      alternative=f"ask the user to run `{INSTALL[binary]}`, or produce the file with run_python instead")
+                      alternative=f"install it yourself with shell_run (`{INSTALL[binary]}`; the app asks the user to approve), then retry, or produce the file with run_python instead")
 
 
 # ---- paths ----

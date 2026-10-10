@@ -95,7 +95,6 @@ def test_trust_external_content_lifts_only_the_tainted_shell_card(box: Box) -> N
     # The destructive floor is not taint-driven, so the setting never touches it.
     from personal_os import permrules
     assert permrules.destructive("rm -rf build", cwd="/Users/someone/proj")
-    assert permrules.allow_all_floor("shell_run", {"command": "rm -rf build"}, cwd="/Users/someone/proj")
 
 
 def test_cwd_is_any_folder_except_the_protected_ones(tmp_path: Path, box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -651,10 +650,24 @@ def test_dead_or_recycled_pids_are_not_listed_as_orphans(tmp_path: Path) -> None
     assert shell.ShellJobs(state).jobs == {}
 
 
-def test_unsandboxed_is_refused_while_the_sandbox_works(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unsandboxed_is_a_per_call_exception_while_the_sandbox_works(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(shell, "sandbox_available", lambda: True)
     r = box.run("shell_run", command="echo hi", unsandboxed=True)
-    assert "sandbox is available" in r["error"]
+    assert r["exit_code"] == 0 and r["sandboxed"] is False  # the approval card is the gate (spec.force_ask), not a refusal
+
+
+def test_wall_note_names_the_rule_and_quotes_the_os_error() -> None:
+    bind = shell.wall_note("Traceback...\nPermissionError: [Errno 1] Operation not permitted: bind 127.0.0.1")
+    assert bind["rule"] == "network*" and "Operation not permitted" in bind["error"] and "unsandboxed" in bind["retry"]
+    assert shell.wall_note("open: error -54")["rule"].startswith("file")
+    assert shell.wall_note("osascript: Operation not permitted (-1743)")["rule"].startswith("appleevent")
+    assert shell.wall_note("PermissionError: [Errno 1] Operation not permitted: bind", network=True)["rule"].startswith("file")
+    assert shell.wall_note("all fine") is None
+    assert "cannot bind" in box_spec_description()
+
+
+def box_spec_description() -> str:
+    return shell.SANDBOX_LIMITS
 
 
 def test_no_sandbox_means_refused_until_the_forced_unsandboxed_path(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:

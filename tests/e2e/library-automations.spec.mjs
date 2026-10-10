@@ -2,7 +2,7 @@ import { test, expect } from './fixtures.mjs'
 import { resize, noOverflow } from './helpers/library.mjs'
 
 async function openScheduled(page) {
-  await page.getByRole('button', { name: /^Today/ }).first().click()
+  await page.getByRole('button', { name: /^Agent inbox/ }).click()
   const btn = page.getByRole('button', { name: /^Scheduled \(/ })
   await expect(btn).toBeVisible({ timeout: 20_000 })
   if ((await btn.getAttribute('aria-expanded')) !== 'true') await btn.click()

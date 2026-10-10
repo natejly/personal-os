@@ -6,6 +6,8 @@ All notable changes to Grain (formerly Personal OS). Dates are the days the work
 
 ### Added
 
+- **Daily recap in the new chat; the Today view is gone.** A new chat shows the recap as one small block under its greeting (clipped to a few lines, Show more opens it). The Today sidebar row, view, ⌘0 and its Settings switches are removed; Settings → Appearance has one switch for the recap. The Agent inbox now sits behind the title-bar Inbox icon (its count includes what needs you); job rows, job notifications and Schedule as routine open it there; a new chat keeps only the greeting and the recap.
+
 - **Files → Artifacts.** A third Files section lists every file the assistant made in any chat (plain chats' outboxes and autonomous sessions' workspaces: documents, data, images, code, browser downloads), grouped by chat with the newest first and a link back to the chat. It is an index of paths, not copies: saves are recorded as they happen, files a shell or script wrote are picked up by a rescan when the list is requested, and a migration indexes what was already on disk. Files open in the same viewer as uploads, with Open, Reveal in Finder and Save a copy. A chat in the trash keeps its artifacts listed (labelled, no link) until it is erased, which removes the files and their entries; an entry whose file is gone is left out.
 
 ### Changed

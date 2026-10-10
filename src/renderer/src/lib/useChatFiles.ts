@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { api, req } from './api'
 import { useStore } from '../store'
 import { uploadShowItem } from './showPanel'
+import { isMacPath } from './pathLinks'
 import { artifactShowItem, artifactsQuery, filesQuery, rowAction, uploadTarget, type ChatFile, type ChatFilesPage, type FilesScope } from './chatFiles'
 
 /** Network and store side of chat files; the grouping and click routing are pure, in chatFiles.ts. */
@@ -76,5 +77,28 @@ export async function revealChatFile(f: ChatFile): Promise<void> {
     if (!ok) toast('That is no longer there.', 'error')
   } catch (e) {
     toast((e as Error).message, 'error')
+  }
+}
+
+/**
+ * A path a reply named (see pathLinks.ts). A Mac path is checked first, so a missing or off-limits file says so
+ * in a toast instead of an empty panel; chat paths (outputs/, work/, uploads/) are looked up in the chat's files.
+ * The panel falls back to its Open / Show in Finder buttons for a kind it cannot render.
+ */
+export async function openPathLink(path: string, chat: string): Promise<void> {
+  const s = useStore.getState()
+  try {
+    if (isMacPath(path)) {
+      const st = await req<{ path: string; name: string }>(`/local/stat?path=${encodeURIComponent(path)}`)
+      return s.openShow(chat, { kind: 'file', title: st.name, path: st.path, name: st.name })
+    }
+    const { files } = await chatFilesApi.forChat(chat)
+    const base = path.slice(path.lastIndexOf('/') + 1)
+    const f = files.find((x) => x.kind === 'output' && x.rel === path) ?? (path.startsWith('uploads/') ? files.find((x) => x.kind === 'upload' && x.name === base) : undefined)
+    if (!f) return s.toast(`${path} is not among this chat's files.`, 'error')
+    if (f.missing) return s.toast(`${path} is no longer there.`, 'error')
+    await openChatFile(f, null)
+  } catch (e) {
+    s.toast(`${path}: ${(e as { status?: number }).status === 404 ? 'no such file.' : (e as Error).message}`, 'error')
   }
 }

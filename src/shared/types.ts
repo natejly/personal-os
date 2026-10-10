@@ -55,6 +55,8 @@ export interface ContextUsed {
   pinned?: { document_id: string; name: string }[]
   /** The always-on standing preferences (pinned rows plus preference and instruction rows) carried in the system prompt every turn. Absent on older messages. */
   profile?: { id: string; content: string; project_id: string | null; pinned: boolean }[]
+  /** The reply was made in quick answer mode (shown as a quiet tag). */
+  quick?: boolean
   /** Items dropped per section because it hit its share of the model's context window. */
   trimmed?: Record<string, number>
   /** Built-in tools held out of the request until tool_search loads them (toolDeferAbove). Absent on older messages. */
@@ -846,6 +848,8 @@ export interface ConversationSettings {
   useStyle: boolean
   /** Explicit draft turn: the voice block is only injected while this is on (never on a tainted chat). Defaults off. */
   draftMode?: boolean
+  /** Quick answer mode: short answers, and the backend hides delegation and background-job tools. */
+  quick?: boolean
   /** This chat's reply style; absent reads as default. `responseStyleText` is the user's own wording for 'custom'. */
   responseStyle?: string
   responseStyleText?: string
@@ -883,6 +887,8 @@ export interface ChatSearchHit {
   project_id: string | null
   updated_at: number
   hits: number
+  /** An archived chat still turns up in search; the sidebar marks it and offers Restore. */
+  archived?: boolean
   snippets: { message_id: string; role: string; created_at: number; text: string }[]
 }
 
@@ -1289,6 +1295,22 @@ export interface GoogleTaskList {
 }
 
 /** Two-way todos <-> Google Tasks sync (`/integrations/google/tasks-sync`). */
+export interface DriveBackupRun {
+  /** Unix seconds. */
+  at: number
+  copied: number
+  skipped: number
+  failed: { name: string; error: string }[]
+  /** Why the run could not start or finish (not connected, Drive access not granted). */
+  error: string | null
+  ok: boolean
+}
+
+export interface DriveBackupStatus {
+  last: DriveBackupRun | null
+  tracked: number
+}
+
 export interface TasksSyncStatus {
   config: { enabled: boolean; tasklist: string; intervalMinutes: number }
   /** Unix seconds of the last successful pass. */
@@ -1582,6 +1604,8 @@ export interface Settings {
   /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
   llmRetries?: number
   llmIdleSeconds?: number
+  /** Archive chats and inbox messages whose last activity is older than this many days (restorable). 0 or missing = off. */
+  autoArchiveDays?: number
   retainUsageDays?: number
   retainTraceDays?: number
   retainToolResultDays?: number
@@ -2673,6 +2697,17 @@ export interface JobNotifyEvent {
 }
 
 export type InboxQueueKey = 'doc_edits' | 'skills' | 'workflows' | 'memory'
+
+/** A run message moved out of the inbox by archiving (GET /inbox/archived). */
+export interface ArchivedInboxRun {
+  run_id: string
+  conversation_id: string | null
+  status: string
+  job: string
+  fired_at: number
+  error: string | null
+  summary: string
+}
 
 export interface AgentInbox {
   needs_you: {

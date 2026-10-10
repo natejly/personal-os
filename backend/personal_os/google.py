@@ -1177,6 +1177,45 @@ class Google:
         return {"id": file_id, "name": meta.get("name"), "mime_type": mime, "link": meta.get("webViewLink"),
                 "content": text[:max_chars], "truncated": len(text) > max_chars}
 
+    # ---------- Drive backup (drive.file: only what the app creates) ----------
+    def drive_backup_folder(self, name: str) -> str:
+        svc = self._svc("drive", "v3")
+        q = f"name = '{name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+        found = svc.files().list(q=q, pageSize=1, fields="files(id)").execute().get("files") or []
+        if found:
+            return found[0]["id"]
+        return svc.files().create(body={"name": name, "mimeType": "application/vnd.google-apps.folder"}, fields="id").execute()["id"]
+
+    def drive_backup_folder_alive(self, folder_id: str) -> bool:
+        """False when the folder was deleted (404) or trashed."""
+        from googleapiclient.errors import HttpError
+
+        try:
+            return not self._svc("drive", "v3").files().get(fileId=folder_id, fields="id,trashed").execute().get("trashed")
+        except HttpError as e:
+            if e.resp.status == 404:
+                return False
+            raise
+
+    def drive_backup_put(self, folder_id: str, name: str, path: Any, data: bytes | None, existing_id: str | None) -> str:
+        """Upload a local file (or bytes) into the folder; update in place when `existing_id` is given."""
+        import io
+
+        from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
+
+        media = MediaFileUpload(str(path), resumable=True) if path else MediaIoBaseUpload(io.BytesIO(data or b""), mimetype="text/markdown")
+        files = self._svc("drive", "v3").files()
+        if existing_id:
+            from googleapiclient.errors import HttpError
+
+            try:
+                return files.update(fileId=existing_id, body={"name": name}, media_body=media, fields="id").execute()["id"]
+            except HttpError as e:
+                if e.resp.status != 404:
+                    raise
+                # The copy was deleted in Drive: upload a fresh one below.
+        return files.create(body={"name": name, "parents": [folder_id]}, media_body=media, fields="id").execute()["id"]
+
     # ---------- Docs / Sheets ----------
     _MIME = {"doc": "application/vnd.google-apps.document", "sheet": "application/vnd.google-apps.spreadsheet"}
 

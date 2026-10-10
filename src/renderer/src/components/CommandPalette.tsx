@@ -8,7 +8,6 @@ import { SETTINGS_TABS } from './SettingsModal'
 type Entry = { key: string; label: string; hint: string; run: () => void }
 
 const VIEWS: { view: View; label: string }[] = [
-  { view: 'home', label: 'Today' },
   { view: 'chat', label: 'Chats' },
   { view: 'docs', label: 'Files' },
   ...OPTIONAL_VIEWS

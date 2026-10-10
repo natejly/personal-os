@@ -51,7 +51,7 @@ const withoutLegacyMode = (s: Settings): Settings => {
 }
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'library' | 'project' | 'canvas'
+export type View = 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'library' | 'project' | 'canvas'
 /** Which tab a project page shows. */
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
 export type LibraryTab = 'skills' | 'agents' | 'automations' | 'connectors'
@@ -211,6 +211,10 @@ export interface State {
   /** "Schedule as routine" on a reply: the Agent inbox opens its task editor with this, switched off until a test run. */
   routineDraft: RoutineDraft | null
   scheduleAsRoutine: (conversationId: string, messageId: string) => void
+  /** A new chat whose empty state also shows the Agent inbox (a job row, a job notification), even when nothing is waiting. */
+  inboxOpen: boolean
+  closeInbox: () => void
+  openInbox: () => void
   clearRoutineDraft: () => void
 
   projects: Project[]
@@ -266,7 +270,7 @@ export interface State {
   pageAgentOpen: boolean
   pageAgentId: string | null
   /** Skip permissions picked in the ⌘I panel before its thread exists. */
-  pageAgentChatSettings: Partial<Pick<ConversationSettings, 'skipPermissions' | 'effort' | 'fast'>>
+  pageAgentChatSettings: Partial<Pick<ConversationSettings, 'skipPermissions' | 'effort' | 'fast' | 'quick'>>
   /** Model picked in the ⌘I panel before its thread exists. */
   pageAgentModel: string | null
   /** While set, the panel keeps this view's thread whatever view or doc is on screen. */
@@ -559,6 +563,8 @@ export interface State {
   markInboxRunSeen: (runId: string | null) => Promise<void>
   /** Erase one "While you were away" message from the journal. The chat it ran in is untouched. */
   deleteInboxRun: (runId: string) => Promise<void>
+  /** Archive (or restore) one run message; the inbox re-reads afterwards. */
+  archiveInboxRun: (runId: string, on?: boolean) => Promise<void>
   /** Erase every "While you were away" message in the current window. Runs still going are left. */
   clearInbox: () => Promise<void>
   refreshJobs: () => Promise<void>
@@ -936,8 +942,9 @@ export { adjacentChatId }
 export const PAGE_AGENT_DRAFT = '\u0000page-agent'
 
 /** The per-chat switches a row-less chat parks until `send` creates its row. */
-const parkable = (p: Partial<ConversationSettings>): Pick<ConversationSettings, 'skipPermissions'> => ({
-  ...(p.skipPermissions !== undefined ? { skipPermissions: p.skipPermissions } : {})
+const parkable = (p: Partial<ConversationSettings>): Pick<ConversationSettings, 'skipPermissions' | 'quick'> => ({
+  ...(p.skipPermissions !== undefined ? { skipPermissions: p.skipPermissions } : {}),
+  ...(p.quick !== undefined ? { quick: p.quick } : {})
 })
 
 export const useStore = create<State>((set, get) => {
@@ -1758,12 +1765,15 @@ export const useStore = create<State>((set, get) => {
       const draft = routineDraftFrom(msgs, msgs.findIndex((m) => m.id === messageId))
       if (!draft) return get().toast('Nothing to schedule from this reply', 'info')
       set({ routineDraft: draft })
-      get().setView('home')
+      get().openInbox()
     },
+    inboxOpen: false,
+    openInbox: () => set({ inboxOpen: true, settingsOpen: false }),
+    closeInbox: () => set({ inboxOpen: false, routineDraft: null }),
     clearRoutineDraft: () => set({ routineDraft: null }),
     projects: [],
-    view: 'home',
-    lastClassicView: 'home',
+    view: 'chat',
+    lastClassicView: 'chat',
     memoryMode: 'split',
     projectViewId: null,
     draftProjectId: null,
@@ -1881,11 +1891,11 @@ export const useStore = create<State>((set, get) => {
       // Quiet while the backend restarts: the banner already says so, and every refresher would fail at once.
       installRejectionToasts((m, kind) => { if (get().backendState === 'ready') get().toast(m, kind) })
       // One-shot migration of the pre-spaces global mode: a user who left the app in canvas mode lands
-      // in the canvas once, and the setting is reset so later launches open on Today. Only the main
+      // in the canvas once, and the setting is reset so later launches open on a new chat. Only the main
       // window writes it back; a pop-out (`?surface=widget`) never renders App and must not touch settings.
       const { mode: legacyMode } = settings
       const legacyCanvas = legacyMode === 'canvas'
-      set({ settings: withoutLegacyMode(settings), view: legacyCanvas ? 'canvas' : 'home', projects, conversations, ready: true })
+      set({ settings: withoutLegacyMode(settings), view: legacyCanvas ? 'canvas' : 'chat', projects, conversations, ready: true })
       if (legacyCanvas && !isPopout()) void get().saveSettings({ mode: 'classic' }).catch(() => undefined)
       void get().loadModels()
       void get().loadScope('all')
@@ -1953,7 +1963,6 @@ export const useStore = create<State>((set, get) => {
         void get().refreshDocs()
         void get().refreshDocsPending()
       }
-      if (view === 'home') void get().refreshDashboard()
       if (view === 'todos') void get().refreshTodos()
     },
     leaveCanvas: () => {
@@ -1961,7 +1970,7 @@ export const useStore = create<State>((set, get) => {
       const v = s.lastClassicView
       // The target can have gone while in the canvas: its project deleted, or the view hidden in Settings.
       const gone = v === 'project' ? !s.projectViewId || !s.projects.some((p) => p.id === s.projectViewId) : viewHidden(s.settings, v)
-      s.setView(gone ? 'home' : v)
+      s.setView(gone ? 'chat' : v)
     },
     setMemoryMode: (memoryMode) => set({ memoryMode }),
     openMemory: (memoryMode) => {
@@ -3477,6 +3486,15 @@ export const useStore = create<State>((set, get) => {
         await api.inboxRunDelete(runId)
       } catch (e) {
         get().toast(`Could not delete that run: ${(e as Error).message}`, 'error')
+      }
+      void get().refreshAgentInbox()
+    },
+    archiveInboxRun: async (runId, on = true) => {
+      if (on) set((st) => (st.agentInbox ? { agentInbox: withoutInboxRuns(st.agentInbox, [runId]) } : {}))
+      try {
+        await (on ? api.inboxRunArchive(runId) : api.inboxRunRestore(runId))
+      } catch (e) {
+        get().toast(`Could not ${on ? 'archive' : 'restore'} that message: ${(e as Error).message}`, 'error')
       }
       void get().refreshAgentInbox()
     },

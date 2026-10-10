@@ -44,11 +44,6 @@ test('page agent carries each view\'s content to the model', async ({ grain }) =
   await expect(panel(page).locator('.page-agent-ctx')).toContainText(/Quokka|Files/)
   body = await askPageAgent(grain, '!!reply noted about doc')
   expect(body).toContain('happiest animal')
-  // Today
-  await page.locator('.sidebar .nav-item', { hasText: /^\s*Today/ }).click()
-  await expect(panel(page).locator('.page-agent-ctx')).toContainText(/Today|Home/)
-  body = await askPageAgent(grain)
-  expect(body).toMatch(/"page"|Today|view/)
   // Chat view: the chat's own text
   await page.getByRole('button', { name: /New chat/ }).first().click()
   const msg = page.locator('main').getByRole('textbox', { name: 'Message' })

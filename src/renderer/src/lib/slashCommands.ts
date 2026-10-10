@@ -12,6 +12,7 @@ import { overlap, rankByContext, type ComposerContext } from './composerRank'
  */
 export const BUILTIN: { name: string; args?: string; hint: string; client?: boolean }[] = [
   { name: 'clear', hint: 'Start over: earlier messages leave the context', client: true },
+  { name: 'quick', args: '[on|off]', hint: 'Quick answers: short replies, no background work', client: true },
   { name: 'skill', args: '<name> <message>', hint: 'Use one of your approved skills for this message' },
   { name: 'schedule', args: '<when>, <what>', hint: 'Have the assistant do this later, unattended' },
   { name: 'loop', args: '<every …> <what>', hint: 'Repeat something on an interval' },

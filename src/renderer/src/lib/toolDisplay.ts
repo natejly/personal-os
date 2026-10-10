@@ -366,3 +366,14 @@ export function recalledChats(preview: string | null | undefined): { id: string;
   for (const m of raw.matchAll(/conversation_id\\?"\s*:\s*\\?"([0-9a-f]{8,})/g)) if (!out.some((c) => c.id === m[1])) out.push({ id: m[1], title: 'Past chat' })
   return out
 }
+
+/** The steps of a reply as plain lines: its thinking summary (one per line), then one per tool call; a failed call says so. */
+export function traceLines(reasoning: string | null | undefined, events: { name: string; arguments: Record<string, unknown> | null; error?: string | null }[]): { text: string; error: boolean }[] {
+  const out = (reasoning ?? '').split('\n').map((t) => t.trim()).filter(Boolean).map((text) => ({ text, error: false }))
+  for (const t of events) {
+    const d = describeCall(t.name, t.arguments)
+    const text = [d.verb, d.subject].filter(Boolean).join(' ')
+    out.push({ text: t.error ? `${text} failed: ${clip(t.error, 100)}` : text, error: !!t.error })
+  }
+  return out
+}

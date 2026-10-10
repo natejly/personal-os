@@ -56,6 +56,7 @@ export default function WorkersPanel({ conversationId: focusId, all = false }: {
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
           <b>Workers</b>
           <span className="muted">· {live ? `${live} running` : workers.length}</span>
+          {!open && workers.filter(workerIsLive).map((w) => <WorkerFace key={w.id} w={w} />)}
         </button>
       </header>
       {open && (

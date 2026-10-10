@@ -45,11 +45,11 @@ def test_manual_is_the_per_tool_mode() -> None:
         assert r("manual", mode="ask", **kw) == "card" and r("manual", mode="on", **kw) == "run"
 
 
-def test_allow_all_only_stops_at_the_fence() -> None:
+def test_allow_all_never_stops() -> None:
     for danger, soft, hard, ea in itertools.product(DANGERS, (False, True), (False, True), (False, True)):
         kw = dict(danger=danger, soft_forced=soft, hard_forced=hard, explicit_ask=ea)
         assert r("allow_all", mode="ask", **kw) == "run" and r("allow_all", mode="on", **kw) == "run"
-        assert r("allow_all", mode="ask", fenced=True, **kw) == "card"
+        assert r("allow_all", mode="ask", fenced=True, **kw) == "run"
 
 
 def test_auto_on_runs_only_what_is_known_safe() -> None:

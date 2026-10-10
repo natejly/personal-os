@@ -166,11 +166,14 @@ CLAUDE_AGENTS = json.dumps({
 }, separators=(",", ":"))
 
 
-def floor_settings(worktree: str | None = None) -> str:
+def floor_settings(worktree: str | None = None, lifted: bool = False) -> str:
     """The `--settings` JSON every claude start and resume carries: the allow-all floor as permission rules plus the
     Bash PreToolUse hook (claude_hook) that judges what a command runs. `worktree` is a worktree Grain made for this
     session, where deleting files is the session's own work. Inline, so nothing on disk can be swapped under the
-    session; the CLI merges these lists with the user's own settings."""
+    session; the CLI merges these lists with the user's own settings. `lifted` (the session runs in bypassPermissions,
+    which is Allow everything): keep the denies on Grain's own data and disk wipes, drop every ask and the delete hook."""
+    if lifted:
+        return json.dumps({"permissions": {"deny": permrules.claude_code_floor()["permissions"]["deny"]}}, separators=(",", ":"))
     return json.dumps({**permrules.claude_code_floor(), "hooks": claude_hook.settings_hooks(worktree)}, separators=(",", ":"))
 
 
@@ -181,12 +184,13 @@ def claude_argv(exe: str, name: str, prompt: str, model: str | None = None, perm
     have quota for (pinning one here started every session on it and failed the moment that model's limit was reached).
     A permission flag likewise appears only when the caller asked for a mode."""
     return [exe, "--bg", "-n", name, *(["--model", model] if model else []), "--agents", CLAUDE_AGENTS,
-            "--settings", floor_settings(worktree), *(["--permission-mode", permission_mode] if permission_mode else []), _lead(prompt)]
+            "--settings", floor_settings(worktree, permission_mode == "bypassPermissions"), *(["--permission-mode", permission_mode] if permission_mode else []), _lead(prompt)]
 
 
-def resume_argv(exe: str, session_id: str, message: str, worktree: str | None = None) -> list[str]:
+def resume_argv(exe: str, session_id: str, message: str, worktree: str | None = None, permission_mode: str | None = None) -> list[str]:
     """A follow-up is a new CLI process: it needs the floor settings again (the mode is the session's own)."""
-    return [exe, "--bg", "--resume", session_id, "--settings", floor_settings(worktree), _lead(message)]
+    return [exe, "--bg", "--resume", session_id, "--settings",
+            floor_settings(worktree, permission_mode == "bypassPermissions"), _lead(message)]
 
 
 def own_worktree(row: dict[str, Any]) -> str | None:
@@ -567,7 +571,7 @@ class CodingSessions:
             exe = claude_binary()
             if not exe:
                 raise CodingError(CLAUDE_HINT)
-            ok, out = await self.run(resume_argv(exe, row["session_id"], message, own_worktree(row)), row["worktree"], START_TIMEOUT,
+            ok, out = await self.run(resume_argv(exe, row["session_id"], message, own_worktree(row), row["permission_mode"]), row["worktree"], START_TIMEOUT,
                                      await asyncio.to_thread(claude_env))
             if not ok:
                 raise CodingError(f"claude did not resume: {out.strip()[-300:]}")

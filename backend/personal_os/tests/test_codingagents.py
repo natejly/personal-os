@@ -195,11 +195,18 @@ class ClaudeDriver(CodingTestCase):
 
     def test_every_start_and_resume_carries_the_floor(self) -> None:
         """Allow everything's floor reaches Claude Code as deny/ask rules on every start and follow-up, whatever the mode."""
-        for argv in (ca.claude_argv("/bin/claude", "n", "do it"), ca.claude_argv("/bin/claude", "n", "x", None, "bypassPermissions"),
+        for argv in (ca.claude_argv("/bin/claude", "n", "do it"), ca.claude_argv("/bin/claude", "n", "x", None, "auto"),
                      ca.resume_argv("/bin/claude", SID, "go on")):
             rules = json.loads(argv[argv.index("--settings") + 1])["permissions"]
             self.assertEqual(rules, ca.permrules.claude_code_floor()["permissions"])
             self.assertIn("Bash(git push --force*)", rules["ask"])
+
+    def test_allow_all_sessions_carry_no_ask_rules_and_no_hook(self) -> None:
+        """bypassPermissions is Allow everything: only the denies (Grain's data, disk wipes) remain on start and resume."""
+        for argv in (ca.claude_argv("/bin/claude", "n", "x", None, "bypassPermissions"),
+                     ca.resume_argv("/bin/claude", SID, "go on", None, "bypassPermissions")):
+            s = json.loads(argv[argv.index("--settings") + 1])
+            self.assertEqual(s, {"permissions": {"deny": ca.permrules.claude_code_floor()["permissions"]["deny"]}})
 
     def test_claude_env_carries_no_app_secrets(self) -> None:
         """The claude CLI gets the scrubbed allowlist plus PATH and TMPDIR, never the app's keys and tokens."""

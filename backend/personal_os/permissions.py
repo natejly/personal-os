@@ -36,7 +36,7 @@ DEFAULTS: dict[str, Any] = {
     # External and schedules tools that always show a card (tools.Toolbox.ask_locked): no map switches one on, no
     # card grants one whole-tool, and untrusted content in the reply forces its card. Every other tool that acts
     # outside the app runs on a plain yes. Sending mail and deleting things that are hard to get back stay here.
-    # Auto and Manual honour this list; Allow everything lifts it except gmail_send (ALWAYS_CARD, permrules.STILL_ASK).
+    # Auto and Manual honour this list; Allow everything lifts all of it.
     "alwaysAsk": ["gmail_send", "calendar_delete", "trash_local_file", "move_local_file", "run_shortcut",
                   "python_install", "schedule_task"],
     # Argument-pattern rules over the per-tool modes: {allow: [], ask: [], deny: []} of "Tool(pattern)" strings
@@ -44,9 +44,7 @@ DEFAULTS: dict[str, Any] = {
     "permissionRules": {"allow": [], "ask": [], "deny": []},
     # How calls that would run or ask are decided (autoreview.route): "auto" has a reviewer model read every call that is
     # not known safe; "manual" is the per-tool modes, grants and rules alone; "allow_all" runs everything (unsandboxed
-    # shell included) except denied calls (hard-deny paths included), credential-store reads and writes, writes after
-    # untrusted content, the email card, and the shell floor (permrules.allow_all_floor: deletes that skip the Trash,
-    # disk wipes, force-pushes, and an unsandboxed command naming a credential store or Grain's own data or app).
+    # shell included) with no card at all; only denied calls (hard-deny paths included) are refused.
     "permissionMode": "auto",
     # Legacy, kept so stored values load and PUT keeps accepting them. skipPermissions and autoReview are no longer read
     # by any gate (migrate_mode folds an existing install into "auto"); unattendedApprovals is read only in manual mode.

@@ -178,19 +178,20 @@ def floor_settings(worktree: str | None = None, lifted: bool = False) -> str:
 
 
 def claude_argv(exe: str, name: str, prompt: str, model: str | None = None, permission_mode: str | None = None,
-                worktree: str | None = None) -> list[str]:
+                worktree: str | None = None, lifted: bool | None = None) -> list[str]:
     """The start command, with the two inline sub-agents and the floor settings. A model flag appears only when the caller
     named one: the session runs on the user's own account, so their own CLI default is the one model they are known to
     have quota for (pinning one here started every session on it and failed the moment that model's limit was reached).
     A permission flag likewise appears only when the caller asked for a mode."""
     return [exe, "--bg", "-n", name, *(["--model", model] if model else []), "--agents", CLAUDE_AGENTS,
-            "--settings", floor_settings(worktree, permission_mode == "bypassPermissions"), *(["--permission-mode", permission_mode] if permission_mode else []), _lead(prompt)]
+            "--settings", floor_settings(worktree, permission_mode == "bypassPermissions" if lifted is None else lifted), *(["--permission-mode", permission_mode] if permission_mode else []), _lead(prompt)]
 
 
-def resume_argv(exe: str, session_id: str, message: str, worktree: str | None = None, permission_mode: str | None = None) -> list[str]:
+def resume_argv(exe: str, session_id: str, message: str, worktree: str | None = None, permission_mode: str | None = None,
+                lifted: bool | None = None) -> list[str]:
     """A follow-up is a new CLI process: it needs the floor settings again (the mode is the session's own)."""
     return [exe, "--bg", "--resume", session_id, "--settings",
-            floor_settings(worktree, permission_mode == "bypassPermissions"), _lead(message)]
+            floor_settings(worktree, permission_mode == "bypassPermissions" if lifted is None else lifted), _lead(message)]
 
 
 def own_worktree(row: dict[str, Any]) -> str | None:
@@ -497,18 +498,27 @@ class CodingSessions:
         shell.taint(ctx, f"coding_session:start:{sid}")  # the agent's text comes back through status, logs and diff
         try:
             if agent == "claude":
-                await self._start_claude(row)
+                await self._start_claude(row, ctx)
             else:
                 await self._launch_opencode(row, ctx, prompt, False)
         except (CodingError, shell.ShellError) as e:
             return self._apply(row, status="failed", detail=shell._scrub(str(e))[:300])
         return self._apply(row, status="working", detail="started")
 
-    async def _start_claude(self, row: dict[str, Any]) -> None:
+    def _lifted(self, row: dict[str, Any], ctx: dict[str, Any] | None) -> bool:
+        """The floor's asks and delete hook are dropped only when Grain itself is in Allow everything: an explicit
+        bypassPermissions the user approved under Auto or Manual keeps every gate."""
+        from . import autoreview
+        ctx = ctx or {}
+        return row["permission_mode"] == "bypassPermissions" and (
+            ctx.get("permission_mode") or autoreview.mode_of(ctx.get("settings") or self.settings())) == "allow_all"
+
+    async def _start_claude(self, row: dict[str, Any], ctx: dict[str, Any] | None = None) -> None:
         exe = claude_binary()
         if not exe:
             raise CodingError(CLAUDE_HINT)
-        ok, out = await self.run(claude_argv(exe, row["name"], row["prompt"], row["model"], row["permission_mode"], own_worktree(row)),
+        ok, out = await self.run(claude_argv(exe, row["name"], row["prompt"], row["model"], row["permission_mode"], own_worktree(row),
+                                           self._lifted(row, ctx)),
                                  row["worktree"], START_TIMEOUT, await asyncio.to_thread(claude_env))
         if not ok:
             raise CodingError(f"claude did not start: {out.strip()[-300:]}")
@@ -571,7 +581,7 @@ class CodingSessions:
             exe = claude_binary()
             if not exe:
                 raise CodingError(CLAUDE_HINT)
-            ok, out = await self.run(resume_argv(exe, row["session_id"], message, own_worktree(row), row["permission_mode"]), row["worktree"], START_TIMEOUT,
+            ok, out = await self.run(resume_argv(exe, row["session_id"], message, own_worktree(row), row["permission_mode"], self._lifted(row, ctx)), row["worktree"], START_TIMEOUT,
                                      await asyncio.to_thread(claude_env))
             if not ok:
                 raise CodingError(f"claude did not resume: {out.strip()[-300:]}")

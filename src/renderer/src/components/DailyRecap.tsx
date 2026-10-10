@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { RefreshCw, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -15,7 +15,10 @@ export default function DailyRecap(): JSX.Element | null {
   const refreshRecap = useStore((s) => s.refreshRecap)
   const saveSettings = useStore((s) => s.saveSettings)
   const [open, setOpen] = useState(false)
-  if (!homeModuleOn(settings, 'recap') || !hasModelKey(settings) || (!recap?.content && !loading)) return null
+  const on = homeModuleOn(settings, 'recap') && hasModelKey(settings)
+  // The boot fetch only runs with the switch on; turning it on later (or a failed boot read) must still load it, once per mount.
+  useEffect(() => { if (on && !recap && !useStore.getState().recapLoading) void refreshRecap() }, [on]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!on || (!recap?.content && !loading)) return null
 
   const hide = (): void => {
     void saveSettings({ homeWidgets: { ...(settings.homeWidgets ?? {}), recap: false } })

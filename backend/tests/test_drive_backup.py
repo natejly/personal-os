@@ -26,8 +26,14 @@ class FakeDrive:
     def status(self):
         return self._status
 
+    folder_alive = True
+
+    def drive_backup_folder_alive(self, fid):
+        return self.folder_alive
+
     def drive_backup_folder(self, name):
-        return "folder1"
+        self.folders = getattr(self, "folders", 0) + 1
+        return f"folder{self.folders}"
 
     def drive_backup_put(self, folder, name, path, data, existing):
         if name in self.bad:
@@ -63,6 +69,15 @@ class DriveBackupTest(unittest.TestCase):
         self.assertEqual((r["copied"], [f["name"] for f in r["failed"]]), (1, ["a.txt"]))
         self.g.bad.clear()
         self.assertEqual(self.b.run()["copied"], 1)  # the failed one is retried, the good one skipped
+
+    def test_folder_deleted_recreated(self):
+        self.b.run()
+        self.g.folder_alive = False
+        self.g.puts.clear()
+        r = self.b.run()
+        self.assertEqual((r["copied"], r["skipped"], r["ok"]), (2, 0, True))
+        self.assertEqual([p[1] for p in self.g.puts], [None, None])  # fresh uploads, no stale Drive ids
+        self.assertEqual(self.b.state["folder_id"], "folder2")
 
     def test_not_connected(self):
         self.g._status = {"connected": False, "needs_reauth": False, "missing_scopes": []}

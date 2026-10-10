@@ -1527,7 +1527,8 @@ LOOP_STOP = ("{name} has been called with identical arguments {n} times in a row
 CUT_STOP = ("The model's output limit cut this call short, so it was not executed. "
             "Write the best final answer you can from what you already have, and say in one line what is still missing.")
 CUT_CALL = ("the arguments were cut off at the model's output limit and the call was not run; "
-            "send a smaller call or split the content")
+            "send a smaller call or split the content: for a big file, desk_write_file the first part, then add the rest "
+            "in several calls with mode='append'")
 REPEAT_LIMIT = limits.REPEAT_LIMIT
 TOOL_ERROR_LIMIT = limits.TOOL_ERROR_LIMIT
 

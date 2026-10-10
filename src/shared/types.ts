@@ -1582,6 +1582,8 @@ export interface Settings {
   /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
   llmRetries?: number
   llmIdleSeconds?: number
+  /** Archive chats and inbox messages whose last activity is older than this many days (restorable). 0 or missing = off. */
+  autoArchiveDays?: number
   retainUsageDays?: number
   retainTraceDays?: number
   retainToolResultDays?: number
@@ -2673,6 +2675,17 @@ export interface JobNotifyEvent {
 }
 
 export type InboxQueueKey = 'doc_edits' | 'skills' | 'workflows' | 'memory'
+
+/** A run message moved out of the inbox by archiving (GET /inbox/archived). */
+export interface ArchivedInboxRun {
+  run_id: string
+  conversation_id: string | null
+  status: string
+  job: string
+  fired_at: number
+  error: string | null
+  summary: string
+}
 
 export interface AgentInbox {
   needs_you: {

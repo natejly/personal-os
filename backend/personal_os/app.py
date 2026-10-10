@@ -3653,6 +3653,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
 async def _run_chat(run: Run, body: ChatIn) -> None:
     failure: str | None = None
+    # Every turn (wake report, chat-link delivery, resume, not just a typed message) un-hides an archived chat it writes into.
+    if (cur := convos.get(run.conversation_id, with_messages=False)) and cur.get("archived_at"):
+        convos.update(run.conversation_id, {"archived": False})
     try:
         async for event, data in _chat_stream(run.conversation_id, body, run.stop, run.steers, run=run):
             if event == "assistant_message":

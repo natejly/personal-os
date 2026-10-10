@@ -22,7 +22,7 @@ test('Spaces menu: toggle shows the plane and returns; New chat in a space opens
   await expect.poll(() => page.locator('.win').count()).toBe(before + 1)
   await menu(grain, 'New Space')
   await menu(grain, 'Toggle Spaces')
-  await expect(page.locator('.sidebar .nav-item.active')).toContainText('Today')
+  await expect(page.locator('.sidebar .nav-item.active')).toHaveCount(0) // back on a chat, which has no nav row
   expect(grain.consoleErrors).toEqual([])
 })
 

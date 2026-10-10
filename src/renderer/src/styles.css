@@ -1525,50 +1525,19 @@ textarea.instructions:focus { border-color: var(--accent); }
 
 /* ---------- Home / dashboard ---------- */
 .page-body.wide { max-width: 1180px; }
-/* ---------- shell modularity (Today customize popover) ---------- */
-.home-customize-wrap { position: relative; display: inline-flex; }
-.home-customize {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 31;
   min-width: 190px; padding: 10px 12px; border-radius: 10px;
   background: var(--bg-elev); border: 1px solid var(--border-strong);
   box-shadow: var(--shadow-float);
 }
-.home-customize h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); }
 .chip-check-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; cursor: pointer; color: var(--text); }
 .chip-check-row input { accent-color: var(--accent); }
 
-.home-hero { padding: 8px 0 18px; }
-.home-hero h1 { font-size: 28px; font-weight: 500; margin: 0 0 14px; letter-spacing: -0.01em; }
-.quick-ask { display: flex; align-items: center; gap: 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 14px; padding: 8px 8px 8px 14px; color: var(--text-muted); transition: box-shadow 0.15s, border-color 0.15s; }
-.quick-ask:focus-within { border-color: transparent; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent); }
-.quick-ask input { flex: 1; background: none; border: 0; outline: 0; font-size: 15px; color: var(--text); }
-.widgets { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
 .widget { border-radius: 12px; background: var(--bg-elev); padding: 14px 16px; min-height: 120px; }
 .widget > header { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; margin-bottom: 10px; color: var(--text); }
 .widget > header .link { margin-left: auto; }
-/* A canvas window's body is also called `.widget`, and it is `height: 100%` of its window. On Today
-   that resolved against the page for a card outside the grid, which then filled the viewport. */
-.home .widget { height: auto; }
-/* A card above the grid gets the gap the grid would have given it, and no floor: the 120px minimum
-   is there to keep a row of grid cards level. */
-.home .page-body > .widget { margin-bottom: 16px; min-height: 0; }
-/* Google is not connected: one strip says so once, in place of four cards each saying it. */
-.home-connect { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 10px 12px 10px 16px; border: 1px dashed var(--border-strong); border-radius: 12px; }
-.home-connect p { flex: 1; margin: 0; font-size: 13px; color: var(--text-muted); }
-.home-connect b { font-weight: 600; color: var(--text); }
 .widget-empty p { margin: 0 0 10px; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
-.events, .mails, .proj-list, .mem-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
-.events li, .proj-list li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; }
-.proj-list li, .events li[role='button'] { cursor: pointer; }
-.proj-list li:hover, .mails li:hover, .events li[role='button']:hover { background: var(--hover); }
-.ev-time { color: var(--text-muted); font-variant-numeric: tabular-nums; width: 68px; flex-shrink: 0; font-size: 12px; }
 .ev-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ev-sep { font-size: 11px; font-weight: 600; color: var(--text-faint); padding: 8px 8px 2px !important; }
-.mails li { display: grid; grid-template-columns: 120px 1fr; grid-template-rows: auto auto; column-gap: 10px; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
-.mail-from { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; grid-row: 1 / span 2; align-self: start; }
-.mail-subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mail-snippet { color: var(--text-faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mem-list li { padding: 5px 8px; border-radius: 8px; background: var(--hover); line-height: 1.4; }
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -2470,7 +2439,6 @@ select:focus-visible {
    !important: the input rule above is (0,4,1) through its :not()s and would outrank every entry here. */
 .composer textarea:focus-visible,
 .composer input:focus-visible,
-.quick-ask input:focus-visible,
 .search input:focus-visible,
 .kcol.new input:focus-visible,
 .cal-create input:focus-visible,
@@ -2789,3 +2757,8 @@ select:focus-visible {
 .reply-image img { display: block; max-width: 100%; max-height: 320px; min-width: 48px; min-height: 48px; font: 11px var(--font); color: var(--text-faint); line-height: 1.4; }
 .reply-image:hover { border-color: var(--accent); }
 .msg-body .msg-files { justify-content: flex-start; margin-top: 8px; }
+.recap-inline { max-width: 560px; width: 100%; margin: 14px auto 0; padding: 10px 14px; text-align: left; background: transparent; border: 1px solid var(--border); }
+.recap-inline > header { font-weight: 500; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.recap-inline .markdown { font-size: 12.5px; }
+.recap-inline .markdown.clamped { max-height: 5.4em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
+.inbox-link { margin-top: 10px; color: var(--text-faint); }

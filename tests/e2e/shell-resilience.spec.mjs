@@ -133,7 +133,6 @@ test('RootBoundary: a hand-edited settings row that crashes the shell shows reco
 
 // Idle for 20 s on each view: nothing may log an error (no polling storms, no unhandled rejections).
 const VIEWS = [
-  ['Today', async (p) => p.locator('.sidebar .nav-item', { hasText: /^\s*Today/ }).click()],
   ['Chat', async (p) => p.getByRole('button', { name: /New chat/ }).first().click()],
   ['Lists', async (p) => navItem(p, 'Lists').click()],
   ['Calendar', async (p) => navItem(p, 'Calendar').click()],

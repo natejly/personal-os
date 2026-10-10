@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, Files, Plus, Folder, FolderKanban, ChevronRight, Home, Bell, CalendarClock } from 'lucide-react'
+import { ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, Files, Plus, Folder, FolderKanban, ChevronRight, Bell, CalendarClock } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { chatAttentionOf, useStore, type View } from '../store'
@@ -17,7 +17,6 @@ import { AttentionDot } from './ChatPulse'
 import type { Attention, ChatSearchHit, Conversation, Job, WidgetKind } from '@shared/types'
 import { ATTENTION_RANK, jobAttention, wantsYou } from '../lib/attention'
 import { mergeChatSearch, snippetParts } from '../lib/chatSearch'
-import { inboxBadge } from '../lib/inboxBadge'
 import { rowButton } from '../lib/rowButton'
 import { projectGroupOpen, toggleProjectGroup } from '../lib/projectGroups'
 import { useChatFileCountsSync } from '../lib/useChatFiles'
@@ -75,7 +74,6 @@ type NavEntry = { view?: View; label: string; description?: string; icon: JSX.El
 
 // The fixed rows. Every other view (shell/nav.tsx) follows them; Settings → Sidebar can hide any of them.
 const TOP: NavEntry[] = [
-  { view: 'home', description: 'Your day at a glance: plan, mail, events and what the agent did', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
   { view: 'docs', description: 'Your documents, in folders, with the assistant editing alongside you', label: 'Files', icon: <Files size={15} /> }
 ]
 const NAV_MODULES = MODULES.filter((m) => m.nav && m.view)
@@ -92,8 +90,6 @@ export default function Sidebar(): JSX.Element {
   const memoryProposals = useStore((s) => s.memoryProposals)
   /** Chats working autonomously with something unseen that needs you: the one badge worth interrupting for. */
   const needsYou = useStore((s) => new Set(s.deskInbox.map((e) => e.desk_id)).size)
-  /** Everything agents left for the user (approvals, proposals, desks, review queues) plus unread job runs: the Agent inbox on Today. */
-  const inboxCount = useStore((s) => inboxBadge(s.agentInbox))
   const inCanvas = useStore((s) => s.view === 'canvas')
   // One selector per action. Sidebar is mounted in every view, the canvas included, so a bare
   // useStore() here is what made App's whole subtree commit once per streamed token.
@@ -102,6 +98,7 @@ export default function Sidebar(): JSX.Element {
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const setView = useStore((s) => s.setView)
+  const openInbox = useStore((s) => s.openInbox)
   const openProject = useStore((s) => s.openProject)
   const setProjectModal = useStore((s) => s.setProjectModal)
   // Inside a space a chat opens (or focuses) as a window there; from any other view it routes to the chat view.
@@ -214,7 +211,6 @@ export default function Sidebar(): JSX.Element {
   // fresh array with the same counts does not re-render.
   const moduleBadges = useStore(useShallow((s) => NAV_MODULES.map((m) => m.nav?.badge?.(s) ?? null)))
   const libCount = (v: View): number | null => {
-    if (v === 'home') return null
     const mi = NAV_MODULES.findIndex((m) => m.view?.id === v)
     if (mi >= 0) return moduleBadges[mi]
     if (v === 'library') return skillCandidates || null
@@ -230,9 +226,6 @@ export default function Sidebar(): JSX.Element {
       {n.view === 'docs' && docsPending > 0 && (
         <span className="count pending" title={`${docsPending} assistant edit${docsPending === 1 ? '' : 's'} awaiting review`}>{docsPending}</span>
       )}
-      {n.view === 'home' && inboxCount > 0 && (
-        <span className="count pending" title={`${inboxCount} new in the Agent inbox`}>{inboxCount}</span>
-      )}
       {n.view != null && libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}
     </button>
   )
@@ -241,7 +234,7 @@ export default function Sidebar(): JSX.Element {
     <aside className="sidebar">
       <ResizeHandle id="sidebar-w" defaultSize={260} min={190} max={480} grows="right" onCollapse={toggleSidebar} label="Sidebar width" className="at-right" />
       <div className="sidebar-top drag">
-        <button className="brand no-drag" onClick={() => setView('home')}><GrainLogo size={15} /><span>Grain</span></button>
+        <button className="brand no-drag" onClick={() => newChat(null)}><GrainLogo size={15} /><span>Grain</span></button>
         <button className="icon-btn no-drag" aria-label="Hide sidebar" title="Hide sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftClose size={16} /></button>
       </div>
 
@@ -375,7 +368,7 @@ export default function Sidebar(): JSX.Element {
             {wanting.length === 0 && <p className="empty-hint">Nothing needs you.</p>}
             {wanting.map((x) => ('conv' in x
               ? <ChatRow key={x.conv.id} conv={x.conv} active={x.conv.id === focusedId && view === 'chat'} lead={projectDot(x.conv)} />
-              : <JobRow key={`j${x.job.id}`} job={x.job} onOpen={() => setView('home')} />))}
+              : <JobRow key={`j${x.job.id}`} job={x.job} onOpen={openInbox} />))}
           </section>
         )}
         {!filtering && pinned.length > 0 && (
@@ -426,7 +419,7 @@ export default function Sidebar(): JSX.Element {
             <ChevronRight size={12} className={jobsOpen ? 'rot90' : ''} /><CalendarClock size={13} /> Jobs
           </button>
         </div>
-        {jobsOpen && <div className="convo-list">{shownJobs.map((j) => <JobRow key={j.id} job={j} onOpen={() => setView('home')} />)}</div>}
+        {jobsOpen && <div className="convo-list">{shownJobs.map((j) => <JobRow key={j.id} job={j} onOpen={openInbox} />)}</div>}
       </>)}
       </div>
 
@@ -439,7 +432,7 @@ export default function Sidebar(): JSX.Element {
   )
 }
 
-/** A scheduled job in the sidebar: its attention state and name. Jobs are managed on Today, so a click goes there. */
+/** A scheduled job in the sidebar: its attention state and name. Jobs are managed in the Agent inbox, so a click opens it. */
 function JobRow({ job, onOpen }: { job: Job; onOpen: () => void }): JSX.Element {
   return (
     <div className="convo-item" {...rowButton(onOpen)}>

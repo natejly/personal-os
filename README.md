@@ -10,22 +10,20 @@ instructions, files, memories and graph.
 
 ```
 ┌──────────────┬──────────────────────────────────────┬──────────────┐
-│ + New chat   │  Today · Monday, September 29        │  Context     │
-│ Today      2 │  ┌ Calendar ─────┐ ┌ Lists ────────┐ │  ☑ Memory    │
-│ Files        │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
-│              │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Files     │
-│ Library      │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
-│ SPACES     + │  ┌ Unread mail ──┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
-│ ▦ Space 1    │  │ Alice: Q4 …   │ │ ■ Grain       │ │   web search │
-│ PROJECTS   + │  └───────────────┘ └───────────────┘ │   run python │
-│ ■ Grain      │                                      │   gmail send │
-│ RECENTS      │  [Brief me]                          │  Last reply… │
-│ · …          │                                      │              │
-│              │                                      │              │
+│ + New chat   │            Good afternoon.           │  Context     │
+│ Files        │  ┌ Daily recap ───────────────────┐  │  ☑ Memory    │
+│              │  │ Two meetings, one deadline …   │  │  ☑ Graph     │
+│ Library      │  └────────────────────────────────┘  │  ☑ Files     │
+│ SPACES     + │                                      │  ☑ Auto-learn│
+│ ▦ Space 1    │  [ Message …                      ]  │  ☑ Tools  ▾  │
+│ PROJECTS   + │                                      │   web search │
+│ ■ Grain      │                                      │   run python │
+│ RECENTS      │                                      │   gmail send │
+│ · …          │                                      │  Last reply… │
 └──────────────┴──────────────────────────────────────┴──────────────┘
 ```
 
-Lists, Calendar, Mail and Health are sidebar rows under Today and Files.
+Lists, Calendar, Mail and Health are sidebar rows under Files. A new chat shows the daily recap under its greeting.
 Settings → Appearance → Sidebar turns any of them off (it takes effect at once). A **Quick chat** button at the top right of
 every view opens the ⌘I panel. Bars are 40 px and
 sidebar rows 26 px, so more fits on screen.
@@ -232,9 +230,9 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   Turning autonomy off detaches the desk and the chat answers as a plain chat again; the workspace is kept.
   Another chat can also hand work to a desk (`desk_start`) along with the docs it needs; when the desk
   finishes, fails or waits for review, its report is posted back into that chat.
-  A desk that needs you also shows up in the Agent inbox on Today. See [docs/cowork-design.md](docs/cowork-design.md).
-- **Agent inbox.** Everything agents left for you, in one list on Today, with the
-  total on the sidebar's Today row: approval cards from any chat, desks waiting on
+  A desk that needs you also shows up in the Agent inbox under a new chat's greeting. See [docs/cowork-design.md](docs/cowork-design.md).
+- **Agent inbox.** Everything agents left for you, in one list under a new chat's greeting (it opens by
+  itself while something is unread): approval cards from any chat, desks waiting on
   you, scheduled-job proposals and paused jobs, and a count with a link for every
   other review queue (proposed doc edits, skills and workflow runs
   to approve, memory tidy-ups). A plan or a desk's question
@@ -309,9 +307,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   cost. Settings shows spend, tokens, calls and frequency charts over 7/30/90
   days, broken down by model, kind and project. Prices come from your LiteLLM
   proxy and can be overridden per model.
-- **Today, lists, calendar.** A Today screen with a generated daily
-  recap, calendar, unread inbox, todos, projects and recently learned memories,
-  plus a one-click brief. Lists is a native todo view with a rail of lists and a
+- **Daily recap, lists, calendar.** A generated daily recap under the greeting of
+  every new chat. Lists is a native todo view with a rail of lists and a
   one-line add row, a week calendar (Google events
   plus due todos, double-click to add), and a board view of the same todos (columns by status or by list, drag and
   drop to move). Each older board is now a list, each card a todo with the column as its status.
@@ -319,7 +316,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 - **Scheduled tasks and the agent inbox.** Give the assistant work to do later:
   once at a time you pick ("tomorrow at 3pm, check whether they replied") or
   repeatedly on a cron expression ("every Friday at 17:00, write my weekly
-  review"). Schedule it from the Scheduled tab of the Agent inbox on Today, or just ask in a chat —
+  review"). Schedule it from the Scheduled tab of the Agent inbox, or just ask in a chat —
   the assistant has a `schedule_task` tool, which asks before it books anything.
   A scheduled run happens with nobody watching, so it is deliberately boxed in:
   it runs in a fresh chat, it can read and write inside
@@ -511,7 +508,7 @@ and its verdict is kept on the row.
 | ⌘N | New chat |
 | ⌘⇧N / ⌘⇧D | New note / today's note |
 | ⌘U | Upload file (Files → Uploads) |
-| ⌘0 … ⌘6 | Today / Chats / Lists / Calendar / Files / Mail / Settings → Memory |
+| ⌘1 … ⌘6 | Chats / Lists / Calendar / Files / Mail / Settings → Memory |
 | ⌘⇧M | Maths (while typing in a doc) |
 | ⌘⇧F | Search chats |
 | ⌘⇧[ / ⌘⇧] | Previous / next chat |

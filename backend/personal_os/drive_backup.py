@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ class DriveBackup:
     def __init__(self, db: Database, google: Google):
         self.db, self.google = db, google
         self.path = Path(db.data_dir) / "drive-backup.json"
+        self._lock = threading.Lock()
         self.state: dict[str, Any] = {"folder_id": None, "files": {}, "last": None}
         try:
             self.state.update(json.loads(self.path.read_text()))
@@ -58,20 +60,35 @@ class DriveBackup:
             st = p.stat()
             sig = p.parent.name if len(p.parent.name) == 64 else f"{st.st_size}:{st.st_mtime_ns}"
             out.append({"key": f"upload:{sig}:{r['name']}", "name": r["name"], "sig": sig, "file": p})
+        seen: dict[str, int] = {}
         for r in notes:
             data = (r["content"] or "").encode()
             title = (r["title"] or "Untitled").replace("/", "-")
-            out.append({"key": f"doc:{r['id']}", "name": f"{title}.md", "sig": hashlib.sha256(data + title.encode()).hexdigest(), "data": data})
+            seen[title] = seen.get(title, 0) + 1
+            # Two docs with one title would be indistinguishable in Drive; tag the later ones.
+            fname = f"{title}.md" if seen[title] == 1 else f"{title} ({str(r['id'])[:6]}).md"
+            out.append({"key": f"doc:{r['id']}", "name": fname, "sig": hashlib.sha256(data + title.encode()).hexdigest(), "data": data})
         return out
 
     def run(self) -> dict[str, Any]:
+        if not self._lock.acquire(blocking=False):
+            return {"at": time.time(), "copied": 0, "skipped": 0, "failed": [], "ok": False,
+                    "error": "A backup is already running; try again when it finishes.", "busy": True}
+        try:
+            return self._run()
+        finally:
+            self._lock.release()
+
+    def _run(self) -> dict[str, Any]:
         res: dict[str, Any] = {"at": time.time(), "copied": 0, "skipped": 0, "failed": [], "error": None}
         st = self.google.status()
         try:
             if not st["connected"]:
                 raise GoogleNotConnected("Google is not connected, so nothing was backed up. Sign in under Settings → Integrations.")
-            if st["needs_reauth"] or any(m.endswith("drive.file") for m in st["missing_scopes"]):
+            if any(m.endswith("drive.file") for m in st["missing_scopes"]):
                 raise GoogleNotConnected("Google Drive access was not granted. Reconnect Google in Settings → Integrations and allow it.")
+            if st["needs_reauth"]:
+                raise GoogleNotConnected(f"{st['reauth_reason']} Reconnect Google in Settings → Integrations.")
             files: dict[str, Any] = self.state["files"]
             folder = self.state.get("folder_id")
             if folder and not self.google.drive_backup_folder_alive(folder):

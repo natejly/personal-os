@@ -237,7 +237,7 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
   return (
     <div className="cowork-settings">
       <h4>Desks</h4>
-      <Toggle title="Start new chats working autonomously" help="A new chat hands its task to a desk that works on its own at Ask as it goes, until it is done or needs you. Switch it off per chat under the composer."
+      <Toggle title="Start new chats working autonomously" help="A new chat hands its task to a desk that works on its own at Ask as it goes, until it is done or needs you."
         checked={draft.autonomousByDefault !== false} onChange={(autonomousByDefault) => patch({ autonomousByDefault })} />
       <Toggle title="Resume desks after a restart" help="Carry on desks the app was running when it quit. A desk with an action whose outcome is unknown, or one waiting on your approval or plan, still waits for you."
         checked={draft.deskAutoResume === true} onChange={(deskAutoResume) => patch({ deskAutoResume })} />

@@ -1,4 +1,4 @@
-import { HeartPulse } from 'lucide-react'
+import { HeartPulse } from '../../icons'
 import type { ModuleDef } from '../../shell/types'
 import HealthView from './HealthView'
 

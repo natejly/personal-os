@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle } from '../../icons'
 import type { ToolEvent } from '@shared/types'
 import { parseResult, type Fields, type Parsed } from '../../lib/toolResult'
 import './toolcards.css'

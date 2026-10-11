@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { RefreshCw, X } from 'lucide-react'
+import { RefreshCw, X } from '../icons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useStore } from '../store'

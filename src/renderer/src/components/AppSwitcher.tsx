@@ -1,4 +1,4 @@
-import { Inbox, MessageSquare } from 'lucide-react'
+import { Inbox, MessageSquare } from '../icons'
 import { useStore } from '../store'
 import { inboxBadge } from '../lib/inboxBadge'
 

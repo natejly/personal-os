@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X } from 'lucide-react'
+import { X } from '../icons'
 import type { FullDesk } from '@shared/types'
 import ResizeHandle from './ResizeHandle'
 import DeskFiles from './DeskFiles'

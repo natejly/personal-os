@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Calendar, Plus, X } from 'lucide-react'
+import { Calendar, Plus, X } from '../icons'
 import type { Todo } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'

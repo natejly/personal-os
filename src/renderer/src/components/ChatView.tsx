@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { isClear } from '../lib/workers'
-import { Pencil, Sparkles, SlidersHorizontal, ArrowDown, PanelRight } from 'lucide-react'
+import { Pencil, Sparkles, SlidersHorizontal, ArrowDown, PanelRight } from '../icons'
 import { useStore, useProject, useChatFace, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
 import MessageView, { PendingUserMessage, Thinking } from './Message'
 import RegenRow from './RegenRow'

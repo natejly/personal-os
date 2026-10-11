@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronRight, Redo2, Undo2 } from 'lucide-react'
+import { ChevronRight, Redo2, Undo2 } from '../icons'
 import type { FullDesk, RunChanges, RunInfo } from '@shared/types'
 import { api } from '../lib/api'
 import { STATUS_WORD, fmtAgo, groupChangesByTurn, recentRunIds, undoNote } from '../lib/deskFiles'

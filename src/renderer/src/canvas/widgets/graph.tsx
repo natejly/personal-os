@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Network } from 'lucide-react'
+import { Network } from '../../icons'
 import { useStore, type Scope } from '../../store'
 import GraphView from '../../components/GraphView'
 import type { WidgetDef, WidgetProps } from '../registry'

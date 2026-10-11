@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Lock, X } from 'lucide-react'
+import { Lock, X } from '../icons'
 import type { Canvas, CanvasWindow, Rect } from '@shared/types'
 import { useProject } from '../store'
 import { useCanvas } from './store'

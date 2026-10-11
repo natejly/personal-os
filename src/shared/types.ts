@@ -570,7 +570,7 @@ export interface McpCatalogEntry {
   name: string
   description: string
   category: string
-  /** A lucide icon name in kebab-case. */
+  /** An icon name in kebab-case. */
   icon: string
   publisher: string
   /** Maintained by the vendor of the service. */

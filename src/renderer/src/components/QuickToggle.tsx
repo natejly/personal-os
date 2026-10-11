@@ -1,4 +1,4 @@
-import { Zap } from 'lucide-react'
+import { Zap } from '../icons'
 import { useStore } from '../store'
 
 /** Whether quick answer mode is on for a chat: its stored setting, or the draft's parked one before the first send. */

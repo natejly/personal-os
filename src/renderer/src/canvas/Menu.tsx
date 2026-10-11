@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight } from '../icons'
 import type { Point } from './snapping'
 
 /** Keep a menu this far inside the viewport. */

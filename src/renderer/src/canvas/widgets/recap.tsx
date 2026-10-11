@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { RefreshCw, Sparkles } from 'lucide-react'
+import { RefreshCw, Sparkles } from '../../icons'
 import { useStore } from '../../store'
 import type { WidgetDef, WidgetProps } from '../registry'
 import { SAFE_MD } from '../../components/Message'

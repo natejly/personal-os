@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X } from 'lucide-react'
+import { X } from '../icons'
 import type { PermissionEvaluation, PermissionRules as Rules } from '@shared/types'
 import { api } from '../lib/api'
 import { TESTERS, testBody, type TesterTool } from '../lib/permTester'

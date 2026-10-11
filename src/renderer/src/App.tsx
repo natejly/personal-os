@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { X } from 'lucide-react'
+import { X } from './icons'
 import { useStore } from './store'
 import { watchSelection } from './lib/pageContext'
 import Sidebar from './components/Sidebar'

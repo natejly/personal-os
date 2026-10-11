@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Gauge, RefreshCw } from 'lucide-react'
+import { AlertCircle, Gauge, RefreshCw } from '../../icons'
 import type { UsageReport } from '@shared/types'
 import { api } from '../../lib/api'
 import ChartBlock from '../../components/ChartBlock'

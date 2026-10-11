@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronRight, Pencil, ShieldAlert, Wrench } from 'lucide-react'
+import { ChevronRight, Pencil, ShieldAlert, Wrench } from '../icons'
 import type { PlanDecision, PlanEdit, PlanRecord, PlanRecordStep, ToolDanger } from '@shared/types'
 import { argRows, broken, edited as reallyEdited, editPayload, invalid } from '../lib/planDigest'
 import { useStore } from '../store'

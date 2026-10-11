@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Unplug, Check, AlertTriangle, RefreshCw, ExternalLink, Upload } from 'lucide-react'
+import { Unplug, Check, AlertTriangle, RefreshCw, ExternalLink, Upload } from '../icons'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import type { DriveBackupRun, GoogleTaskList } from '@shared/types'

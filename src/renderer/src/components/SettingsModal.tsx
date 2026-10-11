@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { X, Search, Download, Upload, Plug, Cpu, Bot, Palette, ShieldCheck, ShieldAlert, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, Gauge, Brain, PanelLeft, type LucideIcon } from 'lucide-react'
+import { X, Search, Download, Upload, Plug, Cpu, Bot, Palette, ShieldCheck, ShieldAlert, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, Gauge, Brain, PanelLeft, type Icon } from '../icons'
 import { useStore, type View } from '../store'
 import { modeOf } from '../lib/permissionMode'
 import { searchSettings, type SettingsTab } from '../lib/settingsTabs'
@@ -42,7 +42,7 @@ import ScopeSelect from './ScopeSelect'
 
 type Tab = SettingsTab
 
-const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
+const TABS: { id: Tab; label: string; icon: Icon }[] = [
   { id: 'model', label: 'Model', icon: Cpu },
   { id: 'usage', label: 'Usage', icon: Gauge },
   { id: 'permissions', label: 'Permissions', icon: ShieldCheck },

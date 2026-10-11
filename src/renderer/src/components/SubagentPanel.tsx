@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X } from 'lucide-react'
+import { X } from '../icons'
 import type { SubagentView } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore, useWorkerFace, useWorkers } from '../store'

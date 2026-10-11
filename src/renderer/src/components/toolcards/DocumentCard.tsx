@@ -1,4 +1,4 @@
-import { FilePlus, FileOutput } from 'lucide-react'
+import { FilePlus, FileOutput } from '../../icons'
 import { num, str } from '../../lib/toolResult'
 import { useStore } from '../../store'
 import CardShell from './CardShell'

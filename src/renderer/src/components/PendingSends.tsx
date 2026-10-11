@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Check, Send, Undo2, X } from 'lucide-react'
+import { AlertTriangle, Check, Send, Undo2, X } from '../icons'
 import { api, verificationMessage } from '../lib/api'
 import { useStore } from '../store'
 import { pimConnected } from '../lib/pim'

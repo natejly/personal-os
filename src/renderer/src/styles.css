@@ -578,6 +578,12 @@ kbd {
 .msg .avatar.face-avatar { background: none; width: 38px; height: 38px; margin-top: 0; }
 .avatar.face-avatar .face { width: 100%; height: 100%; }
 .face { flex: none; display: block; }
+/* A resting face holds still until hovered. The face library keeps its idle loops (shake, blink, gaze, bob)
+   running at zero amplitude, which forces a style recalculation every frame per face: a sidebar of chats
+   alone burned ~75% of a core. Paused animations cost nothing; live ("always") faces are untouched. */
+.face.mo-root:not(.mo-always):not(:hover),
+.face.mo-root:not(.mo-always):not(:hover) * { animation-play-state: paused; }
+.face.mo-root.mo-expr:not(.mo-always):not(:hover) .mo-eye { animation-play-state: running; }
 .bubble { min-width: 0; flex: 1; }
 /* An assistant reply: reasoning, tool rows and cards, then the text. The rhythm is set here so the
    cards share it without sitting inside .markdown, whose element rules would restyle their lists. */

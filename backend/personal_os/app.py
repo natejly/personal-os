@@ -1553,6 +1553,22 @@ JOB_HINT = ("## This is a scheduled background run\nNobody is watching it. Anyth
             "you need from the user). Give every claim its evidence: a URL, a time, or an id.")
 
 
+JOB_QUIET = ("[If this run found nothing new and nothing needs the user, make your whole final answer exactly "
+             f"{workers_mod.NO_REPLY} and nothing else, and no notification is sent.]")
+
+
+def _job_hint(run: Run | None) -> str:
+    """JOB_HINT for an unattended run, plus leave to stay quiet when no chat will judge the result (a task booked from a
+    chat hands its result back there instead). A manual run is answered, not suppressed."""
+    if not proposal_only(run):
+        return ""
+    inp = getattr(run, "input", None) or {}
+    job = jobs.get(inp.get("job_id") or "") or {}
+    if job.get("origin_conversation_id") or inp.get("manual") or inp.get("dry_run") or job.get("target") == "desk":
+        return JOB_HINT
+    return JOB_HINT + "\n\n" + JOB_QUIET
+
+
 def proposal_only(run: Run | None) -> bool:
     return run is not None and run.kind in PROPOSAL_ONLY_KINDS
 
@@ -2303,7 +2319,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             tools_hint = "\n\n".join(p for p in (tools_hint, _mcp_server_notes(set(mcp_modes))) if p)
         hints = (NO_EMOJI_HINT, RENDER_HINT, tools_hint,
                  FRONT_AGENT_HINT if front_hint else PROACTIVE_HINT if tool_schemas and not desk and not proposal_only(run) else "",
-                 _agents_hint(modes, front=front_hint), JOB_HINT if proposal_only(run) else "",
+                 _agents_hint(modes, front=front_hint), _job_hint(run),
                  job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
                  PERSONA_FOLDER_HINT.format(path=folder) if folder and not desk and tool_schemas else "",
@@ -4086,8 +4102,9 @@ async def _wake_conversation(conv_id: str) -> None:
     a reply run started here, so it works with no window open. While a reply is being written the wake waits (_run_changed
     retries when it ends); several reports waiting fold into one turn. Whether it was delivered is on each worker's row."""
     pending = [r for r in workers_mgr.pending_wakes(conv_id) if r["run_id"] not in _wake_inflight]
+    booked = _job_wakes.get(conv_id, [])
     row = convos.get(conv_id, with_messages=False)
-    verdict = workers_mod.wake_decision(bool(bus.answering(conv_id)), len(pending), row is not None)
+    verdict = workers_mod.wake_decision(bool(bus.answering(conv_id)), len(pending) + len(booked), row is not None)
     if verdict == "wait":
         _wake_waiting.add(conv_id)
         return
@@ -4095,20 +4112,23 @@ async def _wake_conversation(conv_id: str) -> None:
     if verdict == "skip":
         if row is None:  # the chat is gone: nobody to tell
             workers_mgr.mark_delivered(r["run_id"] for r in pending)
+            _job_wakes.pop(conv_id, None)
         return
-    text, wake = workers_mod.build_wake(_wake_reports(pending))
+    text, wake = workers_mod.build_wake(_wake_reports(pending) + booked)
     if desk_id := row["settings"].get("deskId"):
         # A desk-bound chat is woken through its desk, so the turn runs under the desk runtime, supervisor and settle.
         started = _launch_desk(desk_id, text, MESSAGE_FROM, wake=wake)
         if started is None:  # a run is still live on the conversation (its learn tail), or the desk is in no status that takes a message
             _wake_waiting.add(conv_id)
         elif isinstance(started, Run):
+            _job_wakes.pop(conv_id, None)
             _wake_inflight.update(wake["ids"])
             started.task.add_done_callback(lambda _t: _wake_inflight.difference_update(wake["ids"]))
         return
     body = ChatIn(content=text, wake=wake)
     _wake_inflight.update(wake["ids"])
     run = bus.start(conv_id, lambda r: _run_chat(r, body), input=body.model_dump())
+    _job_wakes.pop(conv_id, None)
     run.task.add_done_callback(lambda _t: _wake_inflight.difference_update(wake["ids"]))
 
 
@@ -4166,7 +4186,7 @@ def _push_wake_reply(text: str, attachments: list[dict[str, Any]] | None = None,
     """The reply written for a finished worker (and the files it sent), to the phone when telegramPushWorkerResults is on,
     and into the Telegram chat in Grain when it came from another chat (that chat is the phone's transcript)."""
     text = workers_mod.strip_no_reply(text)
-    if not settings().get("telegramPushWorkerResults") or not (text or attachments):
+    if not (settings().get("telegramPushWorkerResults") or telegram_bridge.is_texts_conversation(conv_id)) or not (text or attachments):
         return
     telegram_bridge.push(text, attachments or None)
     texts = telegram_bridge.texts_conversation_id()
@@ -5243,8 +5263,37 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     # Runs after _drive has ended the run, so the row the renderer then asks about is final. Ids only: the
     # app topic is a doorbell, and what to notify about is decided from rows by GET /inbox/notify.
     if run.task is not None:
-        run.task.add_done_callback(lambda _t, rid=run.run_id, jid=job["id"]: events.publish("job_finished", {"run_id": rid, "job_id": jid}))
+        run.task.add_done_callback(lambda _t, rid=run.run_id, jid=job["id"]: (_job_ended(rid, jid), events.publish("job_finished", {"run_id": rid, "job_id": jid})))
     return run.run_id
+
+
+_job_wakes: dict[str, list[dict[str, Any]]] = {}  # origin chat -> finished task reports waiting to be handed over (ponytail: lost on restart)
+
+
+def _job_ended(run_id: str, job_id: str) -> None:
+    """A finished run that answered NO_REPLY is flagged unchanged, so the inbox and notifications skip it. A run of a task
+    booked from a chat (schedule_task) hands its result to that chat as a hidden wake turn, where the assistant decides
+    whether there is anything to say."""
+    try:
+        row = run_store.get(run_id)
+        inp = (row or {}).get("input") or {}
+        if not row or row.get("status") != "done" or inp.get("dry_run"):
+            return
+        text = run_store.transcript(run_id, row["message_id"])[0] if row.get("message_id") else ""
+        if not text.strip() or workers_mod.is_silent(text):
+            if text.strip() and not inp.get("manual"):
+                run_store.mark_unchanged(run_id)
+            return
+        job = jobs.get(job_id) or {}
+        origin = job.get("origin_conversation_id")
+        if not origin or not convos.get(origin):
+            return
+        tainted = bool((convos.get(row["conversation_id"], with_messages=False) or {}).get("settings", {}).get("tainted"))
+        _job_wakes.setdefault(origin, []).append({"id": run_id, "label": "Scheduled task", "title": job.get("name") or "",
+                                                   "goal": job.get("prompt") or "", "status": "done", "text": text, "tainted": tainted})
+        _schedule_wake(origin)
+    except Exception:  # noqa: BLE001 - delivery must never break the scheduler
+        log.warning("could not hand job run %s to its chat", run_id, exc_info=True)
 
 
 def _job_desk(job_id: str, due_at: float) -> dict[str, Any] | None:

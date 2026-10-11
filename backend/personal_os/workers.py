@@ -208,7 +208,7 @@ def build_wake(reports: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
     {id, title, goal, status, text, tainted?, attachments?}; several fold into one message, oldest first."""
     blocks = []
     for r in reports:
-        lines = [f"Worker {r['id']}" + (f" ({_one_line(r.get('title'), 80)})" if r.get("title") else "") + f": {r['status']}."]
+        lines = [f"{r.get('label') or 'Worker'} {r['id']}" + (f" ({_one_line(r.get('title'), 80)})" if r.get("title") else "") + f": {r['status']}."]
         if r.get("goal"):
             lines.append("Goal: " + _one_line(r["goal"], 300))
         if r["status"] != "done":

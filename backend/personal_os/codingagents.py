@@ -1,6 +1,6 @@
-"""Coding sessions: hand a coding task to Claude Code or OpenCode on a repo (or a fresh git worktree of it) and follow it.
+"""Coding sessions: hand a coding task to Claude Code, OpenCode or pi on a repo (or a fresh git worktree of it) and follow it.
 
-Two drivers behind one row (`coding_sessions`, migration 11):
+Three drivers behind one row (`coding_sessions`, migration 11):
 
 - claude: `claude --bg` starts a background session that outlives this app. It runs OUTSIDE the OS sandbox with the
   user's own account and tools, and prompts for permission inside its own session: a prompt shows as state "blocked",
@@ -20,8 +20,11 @@ Two drivers behind one row (`coding_sessions`, migration 11):
   has no prompt to answer: the sandbox is its boundary. It runs until it exits or Stop ends it (no time limit: app shutdown
   kills every shell job group, and a session a crash orphaned is recorded as `orphaned`); a follow-up
   `--continue`s the same opencode state folder.
+- pi: `pi.launch` (`pi --mode json`) the same way as opencode, under the OS sandbox in the shell registry. pi has no
+  permission prompts at all, so the sandbox is its only boundary; a follow-up reopens the same pi session by id
+  (`--session`). pi exits 0 even when its model call failed, so a final error in its event stream marks the row failed.
 
-On a repo's main checkout either agent gets its own worktree unless the caller passes new_worktree=false, so neither
+On a repo's main checkout every agent gets its own worktree unless the caller passes new_worktree=false, so neither
 edits a checkout the user or another agent is working in by default.
 
 A session belongs to the run that started it (`run_id`: the calling subagent or worker, else the chat or desk reply).
@@ -48,12 +51,13 @@ import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from . import claude_hook, mac, opencode, permrules, shell
+from . import claude_hook, mac, opencode, permrules, pi, shell
+from .coding_route import AGENT_NAMES
 from .db import new_id
 from .limits import CODING_SESSION_MAX_CONCURRENT, LOGIN_SHELL_TIMEOUT_SECONDS
 from .ship import BRANCH_RE, PROTECTED
 
-AGENTS = ("claude", "opencode")
+AGENTS = ("claude", "opencode", "pi")
 PERMISSION_MODES = (None, "acceptEdits", "auto", "dontAsk", "bypassPermissions")
 LIVE = ("starting", "working", "needs_you")
 ATTENTION = {"starting": "working", "working": "working", "needs_you": "needs_you", "blocked": "blocked"}
@@ -272,7 +276,7 @@ def map_claude(state: dict[str, Any]) -> tuple[str, str] | None:
 
 
 def map_job(job: Any) -> tuple[str, str]:
-    """(status, detail) for an opencode job in the shell registry."""
+    """(status, detail) for an opencode or pi job in the shell registry."""
     st = job.status
     if st == "exited":
         return ("done", "") if job.exit_code == 0 else ("failed", f"exited with code {job.exit_code}")
@@ -309,11 +313,11 @@ class CodingSessions:
         jobs.on_change = self._job_changed
 
     def _job_changed(self) -> None:
-        """A shell job started or ended: a live OpenCode session publishes its new state now, not at the next poll."""
+        """A shell job started or ended: a live OpenCode or pi session publishes its new state now, not at the next poll."""
         if self._prev_on_change:
             self._prev_on_change()
         with self.db.tx() as c:
-            rows = [dict(r) for r in c.execute(f"SELECT * FROM coding_sessions WHERE agent = 'opencode' AND external_id IS NOT NULL "
+            rows = [dict(r) for r in c.execute(f"SELECT * FROM coding_sessions WHERE agent != 'claude' AND external_id IS NOT NULL "
                                                f"AND status IN ({','.join('?' * len(LIVE))})", LIVE)]
         for row in rows:
             self.refresh(row)
@@ -413,7 +417,12 @@ class CodingSessions:
         raw = job.buf
         if job.live() and not raw.endswith("\n"):
             raw = raw[:raw.rfind("\n") + 1]  # the last line is still being written
-        text, session = opencode.summarize(shell._scrub(raw))
+        if row["agent"] == "pi":
+            text, session, err = pi.summarize(shell._scrub(raw))
+            if err and status == "done":
+                status, detail = "failed", err
+        else:
+            text, session = opencode.summarize(shell._scrub(raw))
         lines = text.splitlines()
         step = next((ln for ln in reversed(lines) if ln.startswith("[")), lines[-1] if lines else "")
         return self._apply(row, status=status, detail=(detail or step)[:300] or None, log_tail=text[-LOG_TAIL:],
@@ -452,13 +461,13 @@ class CodingSessions:
         if permission_mode not in PERMISSION_MODES:
             raise CodingError("permission_mode must be acceptEdits, auto, dontAsk or bypassPermissions, or left out to follow Grain's permission mode.")
         if permission_mode and agent != "claude":
-            raise CodingError("permission_mode is for Claude Code only: OpenCode already runs with every permission allowed "
-                              "inside the OS sandbox.")
+            raise CodingError("permission_mode is for Claude Code only: OpenCode and pi already run with every permission "
+                              "allowed inside the OS sandbox.")
         model = (str(model).strip() or None) if model else None
         if model and not MODEL_RE.fullmatch(model):
             raise CodingError(f"'{model}' is not a model id this tool accepts.")
         repo = self.check_repo(repo_path, opencode._desk_root(self.tb, ctx))
-        if new_worktree is None:  # either agent stays off a main checkout unless asked
+        if new_worktree is None:  # every agent stays off a main checkout unless asked
             found = await asyncio.to_thread(opencode.repo_of, repo)
             new_worktree = bool(found and found[1])
         self._check_capacity()
@@ -476,6 +485,8 @@ class CodingSessions:
                 raise CodingError(CLAUDE_HINT)
             if agent == "opencode" and not opencode.binary():
                 raise CodingError(opencode.INSTALL_HINT)
+            if agent == "pi" and not pi.binary():
+                raise CodingError(pi.INSTALL_HINT)
             wt = worktree_path(repo, branch)
             if wt.exists():
                 raise CodingError(f"{wt} already exists. Pick another branch name.")
@@ -499,6 +510,8 @@ class CodingSessions:
         try:
             if agent == "claude":
                 await self._start_claude(row, ctx)
+            elif agent == "pi":
+                await self._launch_pi(row, ctx, prompt)
             else:
                 await self._launch_opencode(row, ctx, prompt, False)
         except (CodingError, shell.ShellError) as e:
@@ -563,6 +576,14 @@ class CodingSessions:
                                            pool="coding", max_background=self._max_concurrent())
         row["external_id"] = job.id
 
+    async def _launch_pi(self, row: dict[str, Any], ctx: dict[str, Any], prompt: str) -> None:
+        if self.tb is None:
+            raise CodingError("pi is not wired into this backend.")
+        job = await pi.launch(self.tb, ctx, prompt, cwd=row["worktree"], session=row.get("session_id"), model=row["model"],
+                              conversation_id=f"coding:{row['id']}", run_id=row.get("run_id"),
+                              max_background=self._max_concurrent())
+        row["external_id"] = job.id
+
     async def send(self, sid: str, message: str, ctx: dict[str, Any] | None = None) -> dict[str, Any]:
         ctx = ctx if ctx is not None else {}
         row = self._known(sid)
@@ -598,12 +619,17 @@ class CodingSessions:
         else:
             job = self.jobs.jobs.get(row.get("external_id") or "")
             if (job is not None and job.status in ("running", "orphaned")) or row["status"] in LIVE:
-                raise CodingError("OpenCode is still working on this session; wait for it to finish or stop it first.")
+                raise CodingError(f"{AGENT_NAMES[row['agent']]} is still working on this session; wait for it to finish or stop it first.")
             if row["status"] == "blocked":  # the job record was lost; the process may still run on the same state folder
-                raise CodingError("OpenCode may still be running on this session (its job record was lost); Stop it first, then send the follow-up.")
+                raise CodingError(f"{AGENT_NAMES[row['agent']]} may still be running on this session (its job record was lost); Stop it first, then send the follow-up.")
+            if row["agent"] == "pi" and not row.get("session_id"):
+                raise CodingError("pi's session id was not seen yet, so it cannot be reopened for a follow-up.")
             self._check_capacity()
             try:
-                await self._launch_opencode(row, ctx, message, True)
+                if row["agent"] == "pi":
+                    await self._launch_pi(row, ctx, message)
+                else:
+                    await self._launch_opencode(row, ctx, message, True)
             except shell.ShellError as e:
                 raise CodingError(shell._scrub(str(e))) from e
             detail = "follow-up sent"
@@ -693,10 +719,10 @@ def register(tb: Any, sessions: CodingSessions) -> None:
     tb.coding = sessions
 
     def available() -> bool:
-        return claude_binary() is not None or opencode.binary() is not None
+        return claude_binary() is not None or opencode.binary() is not None or pi.binary() is not None
 
     def installed() -> str:
-        have = [n for n, b in (("claude", claude_binary()), ("opencode", opencode.binary())) if b]
+        have = [n for n, b in (("claude", claude_binary()), ("opencode", opencode.binary()), ("pi", pi.binary())) if b]
         return ", ".join(have) or "none"
 
     def unattended(name: str) -> dict[str, Any]:
@@ -723,18 +749,18 @@ def register(tb: Any, sessions: CodingSessions) -> None:
                               alternative="fix the cause named above, or run the task another way")
         note = ("Started. It works in the background; coding_session_status(id) reads progress. "
                 + ("If it needs a permission answer its status becomes needs_you and the user runs `claude attach <external_id>`."
-                   if agent == "claude" else "OpenCode runs until it finishes or coding_session_stop; send a follow-up to continue."))
+                   if agent == "claude" else f"{AGENT_NAMES[agent]} runs until it finishes or coding_session_stop; send a follow-up to continue."))
         return {**summary(row), "note": note}
 
     spec = ToolSpec("coding_session_start",
-                    "Start a coding agent on a repo and let it work in the background: agent 'claude' (Claude Code) or 'opencode' "
-                    f"(installed here: {installed()}). repo_path must be a git repo anywhere on this Mac; new_worktree=true gives "
+                    "Start a coding agent on a repo and let it work in the background: agent 'claude' (Claude Code), 'opencode' "
+                    f"or 'pi' (installed here: {installed()}). repo_path must be a git repo anywhere on this Mac; new_worktree=true gives "
                     "the agent its own branch and git worktree under <repo>/.claude/worktrees so the repo's checkout stays "
-                    "untouched (on a repo's main checkout either agent gets one unless new_worktree=false). Give a complete, self-contained task: it does not see this conversation. Claude Code runs OUTSIDE "
+                    "untouched (on a repo's main checkout every agent gets one unless new_worktree=false). Give a complete, self-contained task: it does not see this conversation. Claude Code runs OUTSIDE "
                     "the OS sandbox with the user's own account and tools, and asks for permission inside its own session "
                     "(status needs_you; the user answers with `claude attach <id>`); in every mode it is refused Grain's own data folder and app "
-                    "and asks before credential stores, deletes, force-pushes and sending mail. OpenCode runs inside the OS sandbox (Grain's own data folder and app, credential stores and the "
-                    "files that run code later are off limits). permission_mode ('acceptEdits', 'auto', 'dontAsk' or 'bypassPermissions', "
+                    "and asks before credential stores, deletes, force-pushes and sending mail. OpenCode and pi run inside the OS sandbox (Grain's own data folder and app, credential stores and the "
+                    "files that run code later are off limits); pi has no permission prompts of its own, so the sandbox is all that limits it. permission_mode ('acceptEdits', 'auto', 'dontAsk' or 'bypassPermissions', "
                     "Claude Code only) overrides the mode this session runs in (default follows Grain's permission mode); only 'bypassPermissions' "
                     "(under Auto or Manual) asks the user first. Leave it out unless the user asked. Follow progress with coding_session_status and review with coding_session_diff.",
                     _obj({"agent": {"type": "string", "enum": list(AGENTS)}, "repo_path": {"type": "string"},

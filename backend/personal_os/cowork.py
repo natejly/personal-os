@@ -289,8 +289,6 @@ def desk_manual(offered: set[str], facts: dict[str, Any]) -> str:
     if has("run_python"):
         out.append("- `run_python` is for data work and building documents; its working folder is the workspace, so files it "
                    "writes under `outputs/` stay.")
-    if has("sandbox_exec"):
-        out.append("- `sandbox_*` is a Linux container" + ("; the workspace is mounted at `/workspace/desk`." if facts.get("sandbox_mount") else "."))
     if has("web_search", "fetch_url"):
         line = "- Web: `web_search`, then `fetch_url`."
         if has("browser_open"):
@@ -979,8 +977,6 @@ _VERBS = {
     "desk_write_file": "writing",
     "desk_trash_file": "trashing",
     "desk_deliver": "delivering",
-    "desk_import_sandbox": "importing",
-    "sandbox_export_file": "exporting",
     "desk_ask": "asking you",
     "desk_done": "wrapping up",
     "propose_plan": "writing a plan",
@@ -1006,7 +1002,7 @@ def _call_headline(data: dict[str, Any]) -> str:
     name = str(data.get("name") or "")
     args = data.get("arguments") if isinstance(data.get("arguments"), dict) else {}
     verb = _VERBS.get(name) or name.replace("_", " ") or "working"
-    obj = args.get("path") or args.get("sandbox_path") or ""
+    obj = args.get("path") or ""
     return f"{verb} {obj}".strip()[:120] if obj else verb
 
 

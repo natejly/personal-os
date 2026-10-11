@@ -70,7 +70,7 @@ def test_upgraded_fireworks_install_moves_to_deepseek_high() -> None:
     _chat(con, "d", "kimi-k3", {"effort": "max"})
     con.execute("PRAGMA user_version = 33")
     con.commit()
-    assert migrations.run(con)[:1] == [34]
+    assert migrations.run(con)[0] == 34  # later migrations land on top
     s = _settings(con)
     assert not {"defaultModel", "modelHigh", "extractionModel", "fastModel"} & set(s)
     assert s["embeddingModel"] == "accounts/fireworks/models/qwen3-embedding-8b"

@@ -463,8 +463,8 @@ export const api = {
     sendNow: (id: string) => req<PendingSend>(`/outbox/gmail/${encodeURIComponent(id)}/send-now`, { method: 'POST' })
   },
   assist: {
-    complete: (p: { kind: string; before: string; after?: string; context?: string }) =>
-      req<{ completion: string }>('/assist/complete', { method: 'POST', body: json(p) }),
+    complete: (p: { kind: string; before: string; after?: string; context?: string }, signal?: AbortSignal) =>
+      req<{ completion: string }>('/assist/complete', { method: 'POST', body: json(p), signal }),
     /** One mic clip (WAV, at most 2 minutes) through the configured transcription backend. A backend failure is `error`, not a throw. */
     transcribe: (audio: Blob, prompt = '') => {
       const fd = new FormData()

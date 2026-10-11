@@ -20,6 +20,7 @@ import { createTray } from './tray'
 import { chromeTheme, platform, setChromeTheme } from './platform'
 import { startUpdater } from './updater'
 import { registerSystemAccess } from './systemAccess'
+import { registerTerminals } from './terminals'
 import { background, goBackground, reveal } from './background'
 import { attachContextMenu } from './attachContextMenu'
 import { registerPreviewScheme, servePreviews } from './htmlPreview'
@@ -423,6 +424,7 @@ if (gotLock) app.whenReady().then(async () => {
     const hex = /^#[0-9a-f]{6}$/i
     if (typeof bg === 'string' && typeof symbol === 'string' && hex.test(bg) && hex.test(symbol)) setChromeTheme({ background: bg, symbol })
   })
+  registerTerminals(() => win)
   on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
   on('app:show', () => showMain())  // a chat notification was clicked: bring the main window forward

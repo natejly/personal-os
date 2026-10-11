@@ -5,6 +5,7 @@ import { useStore } from '../../store'
 import { api } from '../../lib/api'
 import { AGENT_LABEL, codingDot, codingStatusLabel, codingStoppable, codingTone } from '../../lib/codingSessions'
 import { str } from '../../lib/toolResult'
+import { useTermAvailable } from '../../lib/termRegistry'
 import CardShell from './CardShell'
 import { Badge, ErrorLine, Meta, MonoBlock, useParsed } from './blocks'
 import { registerToolCard, type ToolCardProps } from './registry'
@@ -34,15 +35,22 @@ export function useStop(id: string): { stop: () => Promise<void>; busy: boolean 
 /** A Claude Code session blocked on an answer: it can only be answered in its own session, so offer Terminal on a click. */
 export function NeedsYou({ c }: { c: CodingSession }): JSX.Element | null {
   const toast = useStore((s) => s.toast)
+  const openTerminal = useStore((s) => s.openTerminal)
+  const termOk = useTermAvailable()
   if (c.status !== 'needs_you' || c.agent !== 'claude' || !c.external_id) return null
   const open = (): void => {
     window.os.codingAttach(c.external_id as string).then((ok) => { if (!ok) toast('Could not open Terminal', 'error') }).catch(() => toast('Could not open Terminal', 'error'))
   }
+  // The in-app terminal when this build has one; the system Terminal stays as a quiet second way on macOS.
+  const external = !termOk || window.os.platform === 'darwin'
   return (
     <div className="tc-hint warn">
       <strong>This coding session is waiting for you</strong>
       <div>It needs an answer in its own session.</div>
-      <button type="button" className="ghost-btn sm" onClick={open}>Open in Terminal</button>
+      {termOk && <button type="button" className="ghost-btn sm" onClick={() => openTerminal(c.id, 'attach')}>Open terminal</button>}
+      {external && (termOk
+        ? <button type="button" className="link" onClick={open}>Open in external Terminal</button>
+        : <button type="button" className="ghost-btn sm" onClick={open}>Open in Terminal</button>)}
       {c.attach_hint && <div className="tc-muted small">Or run <span className="mono">{c.attach_hint}</span> yourself.</div>}
     </div>
   )
@@ -52,6 +60,8 @@ export function NeedsYou({ c }: { c: CodingSession }): JSX.Element | null {
 export function CodingSessionView({ session: c }: { session: CodingSession }): JSX.Element {
   const { stop, busy } = useStop(c.id)
   const [log, setLog] = useState(false)
+  const openTerminal = useStore((s) => s.openTerminal)
+  const termOk = useTermAvailable()
   return (
     <div className="coding-session">
       <div className="tc-statusrow">
@@ -61,6 +71,7 @@ export function CodingSessionView({ session: c }: { session: CodingSession }): J
         {codingStoppable(c.status) && (
           <button type="button" className="ghost-btn sm" disabled={busy} onClick={() => void stop()}>Stop</button>
         )}
+        {termOk && <button type="button" className="ghost-btn sm" onClick={() => openTerminal(c.id, null)}>Terminal</button>}
         {c.log_tail && (
           <button type="button" className="tc-more" aria-expanded={log} onClick={() => setLog((o) => !o)}>{log ? 'Hide log' : 'Log'}</button>
         )}

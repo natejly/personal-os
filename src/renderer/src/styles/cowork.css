@@ -299,3 +299,16 @@
 /* A desk chat's Files tab: the chat's own files over the workspace tree, a short scrolling block under a quiet divider. */
 .cf-above { flex: none; max-height: 40%; padding-bottom: 4px; }
 .desk-panel .cf-ws { margin: 0; padding: 6px 16px 2px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); border-top: 1px solid var(--border); }
+
+/* Terminal tab: session chips, the actions row and the xterm view */
+.term-pane { display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+.term-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: none; }
+.term-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-muted); font-size: 11.5px; }
+.term-chip:hover { background: var(--hover); }
+.term-chip.on { border-color: var(--accent); color: var(--text); background: var(--hover); }
+.term-chip-branch { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+.term-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.term-actions .spacer { flex: 1; }
+.term-view { flex: 1; min-height: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); padding: 6px 0 6px 8px; overflow: hidden; }
+.term-host { width: 100%; height: 100%; }
+.term-host .xterm-viewport { background-color: transparent !important; }

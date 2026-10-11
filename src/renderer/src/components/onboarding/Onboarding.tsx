@@ -148,7 +148,7 @@ export default function Onboarding(): JSX.Element {
 
         {state.step === 'welcome' && (
           <>
-            <p className="ob-lead">Grain is your personal AI workspace: chat, files, calendar, mail and tasks in one place, with an assistant that can work across all of it. Spaces lay out chats, files, the web and your apps side by side, and any window can pop out on top of other apps.</p>
+            <p className="ob-lead">Grain is your personal AI workspace: chat, files, calendar, mail and tasks in one place, with an assistant that can work across all of it. Canvases lay out chats, files, the web and your apps side by side, and any window can pop out on top of other apps.</p>
             <p className="ob-privacy"><Lock size={13} /> Your data is stored on this Mac. Your messages, the context Grain adds to them (memories, files, mail and calendar the assistant reads) and background learning go to the AI provider you choose. Web search and page reading use outside services.</p>
             <p className="muted">Setup takes about two minutes. You will need an API key from an AI provider (or a local model).</p>
           </>

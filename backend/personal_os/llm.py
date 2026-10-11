@@ -285,6 +285,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "telegramEnabled": False,
     "telegramNotifyLongRuns": False,  # also send approvals and finish notices for runs that were not started from Telegram
     "telegramLongRunMinutes": TELEGRAM_LONG_RUN_MINUTES,
+    "telegramBotName": "",  # the bot's display name; blank = "Grain · <this Mac's name>", set when this Mac claims the bot
     "telegramPushWorkerResults": False,  # also text the owner the reply Grain writes when a background worker finishes
     # Todo time-block planner (planner.py); PlannerModule.config() merges stored values over these.
     "planner": {"workStart": "09:00", "workEnd": "17:30", "workDays": [1, 2, 3, 4, 5], "bufferMin": 10, "minBlockMin": 15,

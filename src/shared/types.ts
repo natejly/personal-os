@@ -1559,6 +1559,8 @@ export interface Settings {
   workerMaxConcurrent?: number
   /** Send the assistant's reply to a finished worker to Telegram (default off). */
   telegramPushWorkerResults?: boolean
+  /** The Telegram bot's display name; blank = "Grain · <this Mac>". */
+  telegramBotName?: string
   /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
   llmRetries?: number
   llmIdleSeconds?: number
@@ -1845,7 +1847,9 @@ export interface TelegramStatus {
   bot_username: string | null
   paired: boolean
   owner_name: string | null
-  status: 'disabled' | 'no_token' | 'not_paired' | 'connected' | 'error' | 'bad_token' | 'conflict' | 'locked'
+  status: 'disabled' | 'no_token' | 'not_paired' | 'connected' | 'error' | 'bad_token' | 'conflict' | 'locked' | 'claimed_elsewhere'
+  claimed_by?: string | null
+  machine_name?: string | null
   last_error: string | null
   last_poll_at: number | null
   pairing: { code: string; link: string; expires_at: number } | null

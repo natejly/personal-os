@@ -22,6 +22,8 @@ import logging
 import random
 import re
 import secrets
+import socket
+import subprocess
 import tempfile
 import time
 from collections import deque
@@ -63,6 +65,19 @@ FETCH_FAILED = "Couldn't fetch that attachment from Telegram."
 _OTHER_MEDIA = ("voice", "audio", "video", "video_note", "animation", "sticker")
 ALLOWED_UPDATES = ["message", "callback_query"]
 APP_ONLY_TOOLS = frozenset({"propose_plan", "ask_user", "desk_ask"})  # a plan or a question is answered in the app
+
+NAME_MAX = 64  # Bot API: setMyName
+CLAIM_RE = re.compile(r"^Grain on (.+) · ([0-9a-f]{8})$")  # the short description a Grain leaves on the bot it polls
+
+
+def computer_name() -> str:
+    """This Mac's name as System Settings shows it; the hostname when scutil is not there."""
+    with contextlib.suppress(Exception):
+        out = subprocess.run(["scutil", "--get", "ComputerName"], capture_output=True, text=True, timeout=3).stdout.strip()
+        if out:
+            return out
+    return socket.gethostname().split(".")[0] or "this Mac"
+
 
 _URL_TOKEN = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
 _RAW_TOKEN = re.compile(r"\d{6,}:[A-Za-z0-9_-]{30,}")
@@ -216,6 +231,7 @@ class Deps:
     store_upload: Callable[[str, str, bytes], Any] | None = None  # (name, mime, data) -> {"id", ...}; sync or async
     download: Callable[[str, str], Awaitable[bytes]] | None = None  # (token, file_path) -> bytes; default: api.download
     mark_texts_conversation: Callable[[str, bool], None] = lambda cid, flag: None  # (conversation id, is the Texts chat): the app labels it
+    computer_name: Callable[[], str] | None = None  # set = one bot per Mac: name the bot and claim it; None leaves the bot alone
 
 
 @dataclass
@@ -282,7 +298,10 @@ class TelegramBridge:
     def __init__(self, deps: Deps, *, rate_limit: int = 20) -> None:
         self.deps = deps
         self.limiter = RateLimiter(rate_limit)
-        self.health = ""  # "" (fine so far) | "bad_token" | "conflict" | "locked" | "error"
+        self.health = ""  # "" (fine so far) | "bad_token" | "conflict" | "locked" | "claimed_elsewhere" | "error"
+        self.claimed_by: str | None = None  # the other Mac's name while health is "claimed_elsewhere"
+        self._claim_ok = False  # the bot's claim marker was checked and is ours (or could not be read)
+        self._name_retry_at = 0.0
         self.last_poll_at: float | None = None
         self.last_error: str | None = None
         self._task: asyncio.Task[None] | None = None
@@ -322,7 +341,7 @@ class TelegramBridge:
             return
         self._loop = asyncio.get_running_loop()
         self._stale_before = time.time() - STALE_SECONDS
-        self.health, self.last_error = "", None
+        self.health, self.last_error, self.claimed_by, self._claim_ok = "", None, None, False
         self._token_fp = self._fp(self.deps.get_token())
         if self.paired():  # a Texts chat from before the flag existed gets it now
             self._mark(self._peek_target(), True)
@@ -393,6 +412,9 @@ class TelegramBridge:
                     await self._sleep(RETRY_SECONDS)
                     continue
                 delay = 0.0
+                if self.deps.computer_name and not self._claim_ok and not await self._ensure_claim(token):
+                    await self._sleep(RETRY_SECONDS)  # claimed elsewhere: look again later, in case that Mac let go
+                    continue
                 try:
                     await self._poll(token)
                     self.health, self.last_error, backoff = "", None, 0.0
@@ -404,6 +426,7 @@ class TelegramBridge:
                         return
                     if e.code == 409:  # another getUpdates (a webhook, or a poller elsewhere) holds the bot
                         self.health, delay = "conflict", RETRY_SECONDS
+                        self._claim_ok = False  # recheck the marker: a takeover on another Mac makes this one stand down
                     elif e.code == 429:
                         self.health, delay = "error", min(max(e.retry_after or 1.0, 1.0), 300.0)
                     else:
@@ -418,6 +441,61 @@ class TelegramBridge:
                 await self._sleep(delay)  # 0 on a good poll: still a yield, so a misbehaving proxy cannot spin the loop
         finally:
             self._release()
+
+    # ---- one bot per Mac: a name and a claim marker on the bot itself
+    def _machine_id(self) -> str:
+        st = self._state()
+        if not st.get("machineId"):
+            st = self._save(machineId=secrets.token_hex(4))
+        return st["machineId"]
+
+    def _marker(self) -> str:
+        return f"Grain on {(self.deps.computer_name() or 'a Mac')[:60]} · {self._machine_id()}"
+
+    async def _ensure_claim(self, token: str, force: bool = False) -> bool:
+        """True when this Mac may poll: the marker is empty, ours, or `force`d. Any API failure leaves the bot alone and allows polling."""
+        try:
+            cur = await self.deps.api(token, "getMyShortDescription", {}, 15.0)
+            text = (cur.get("short_description") if isinstance(cur, dict) else "") or ""
+            m = CLAIM_RE.match(text.strip())
+            if m and m.group(2) != self._machine_id() and not force:
+                self.health, self.claimed_by = "claimed_elsewhere", m.group(1)
+                return False
+            if (not text.strip() or m) and text.strip() != self._marker():
+                await self.deps.api(token, "setMyShortDescription", {"short_description": self._marker()}, 15.0)
+            if not text.strip() or m:
+                await self._sync_name(token)
+        except TelegramError as e:
+            log.warning("telegram claim check failed: code=%s", e.code)
+        except Exception as e:  # noqa: BLE001 - a marker is a courtesy; polling goes on
+            log.warning("telegram claim check failed: %s", type(e).__name__)
+        self.claimed_by, self._claim_ok = None, True
+        if self.health == "claimed_elsewhere":
+            self.health = ""
+        return True
+
+    async def _sync_name(self, token: str) -> None:
+        """Rename the bot to the configured name (blank = "Grain · <this Mac>") when it differs. setMyName is rate limited: back off quietly."""
+        if time.time() < self._name_retry_at:
+            return
+        want = (str(self._settings().get("telegramBotName") or "").strip() or f"Grain · {self.deps.computer_name()}")[:NAME_MAX]
+        try:
+            cur = await self.deps.api(token, "getMyName", {}, 15.0)
+            if (cur.get("name") if isinstance(cur, dict) else None) != want:
+                await self.deps.api(token, "setMyName", {"name": want}, 15.0)
+        except TelegramError as e:
+            if e.code == 429:
+                self._name_retry_at = time.time() + min(max(e.retry_after or 60.0, 60.0), 86400.0)
+            log.warning("telegram rename failed: code=%s", e.code)
+
+    async def take_over(self) -> None:
+        """Rewrite the claim marker with this Mac and start polling."""
+        token = self.deps.get_token()
+        if not (token and self.deps.computer_name):
+            return
+        await self.stop()
+        await self._ensure_claim(token, force=True)
+        await self.start()
 
     # ---- state
     def _state(self) -> dict[str, Any]:
@@ -1110,7 +1188,9 @@ class TelegramBridge:
         return {"enabled": enabled, "has_token": has_token, "bot_username": st.get("botUsername"), "paired": paired,
                 "owner_name": st.get("ownerName") if paired else None, "status": code,
                 "last_error": self.last_error if enabled and has_token else None,
-                "last_poll_at": self.last_poll_at, "pairing": pairing}
+                "last_poll_at": self.last_poll_at, "pairing": pairing,
+                "claimed_by": self.claimed_by if code == "claimed_elsewhere" else None,
+                "machine_name": self.deps.computer_name() if self.deps.computer_name else None}
 
     async def send_test(self) -> dict[str, Any]:
         owner = self._state().get("ownerChatId")

@@ -75,7 +75,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    or right-click the plane to add a chat, lists, calendar, doc, memory, graph,
    uploads, recap, project, usage, face or crew window; drag a chat, a
    Files note or a sidebar row onto it. ⌘⌃O pops a window out of the Space into
-   its own OS window. Save a layout as a preset from the Spaces bar, and lock a
+   its own OS window. Lock a
    Space with ⌃⌘L so it cannot be rearranged. See [docs/spaces.md](docs/spaces.md).
 7. **Agents and crews.** Library → Agents lists roles. Describe one and the
    model drafts its label, hue, skills, boundaries and prompt; edit it, then
@@ -201,7 +201,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   windows sit side by side. Drag anything from the sidebar, or a Files note
   (it becomes its own editable `doc` window), or right-click to add. A window can
   pop out into its own OS window, pinned on top and see-through, and one
-  global shortcut gathers them all. Save a space as a preset, lock it so
+  global shortcut gathers them all. Lock a space so
   neither you nor the assistant can rearrange it, and let the assistant add
   windows with the `space_*` and `widget_*` tools. See
   [docs/spaces.md](docs/spaces.md).
@@ -751,7 +751,7 @@ scripts/litellm.sh  LiteLLM proxy alone
 litellm.yaml        Model routing (Fireworks by default)
 docs/research/      Feature research, the roadmap, per-track source reports
 docs/docs-editor.md The Files editor: revisions, diffs and the doc_* tools
-docs/spaces.md      Spaces: windows, pop-outs, presets, lock, agent tools
+docs/spaces.md      Spaces: windows, pop-outs, lock, agent tools
 docs/agents.md      Agents: scope, boundaries, routines, agent page, @mentions
 docs/health.md      Health: metrics and connected services
 docs/voice-input.md Voice input: backends, settings, permissions

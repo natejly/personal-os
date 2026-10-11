@@ -79,7 +79,6 @@ from .outbox import Outbox, extras as mail_extras, router as outbox_router
 from .setup import router as setup_router
 from .reliability import router as reliability_router, secret_values
 from .retention import RetentionWorker
-from .presets import CanvasPresets
 from . import limits, resume
 from . import permissions, permrules
 from . import egress
@@ -7430,7 +7429,6 @@ async def recap(force: bool = False) -> dict[str, Any]:
 # ---------------- canvas mode: spaces and windows ----------------
 canvases = Canvases(db)
 toolbox.canvases = canvases
-presets = CanvasPresets(db, canvases, docs)
 # 'popped' rows are NOT reset here: import runs before the main process can restore them (it clears the ones it declines).
 
 
@@ -8022,84 +8020,6 @@ def delete_doc_comment(cid: str) -> dict[str, bool]:
     if not docs.delete_comment(cid):
         raise HTTPException(404)
     return {"ok": True}
-
-
-# ---------------- space presets: named templates of a canvas ----------------
-class PresetIn(BaseModel):
-    canvas_id: str
-    name: str = ""
-
-
-class PresetPatch(BaseModel):
-    name: str | None = None
-
-
-class PresetInstantiateIn(BaseModel):
-    name: str | None = None
-
-
-@app.get("/canvas-presets")
-def list_canvas_presets() -> list[dict[str, Any]]:
-    return presets.list()
-
-
-@app.get("/canvas-presets/{pid}")
-def get_canvas_preset(pid: str) -> dict[str, Any]:
-    p = presets.get(pid)
-    if not p:
-        raise HTTPException(404, "No such preset")
-    return p
-
-
-@app.post("/canvas-presets")
-def create_canvas_preset(body: PresetIn) -> dict[str, Any]:
-    p = presets.create_from_canvas(body.canvas_id, body.name)
-    if not p:
-        raise HTTPException(404, "Unknown canvas")
-    return p
-
-
-@app.get("/canvas-presets/{pid}/export")
-def export_canvas_preset(pid: str) -> dict[str, Any]:
-    p = presets.export(pid)
-    if not p:
-        raise HTTPException(404, "No such preset")
-    return p
-
-
-@app.post("/canvas-presets/import")
-def import_canvas_preset(body: dict[str, Any]) -> dict[str, Any]:
-    try:
-        return presets.import_file(body.get("file") or {}, bool(body.get("instantiate", True)))
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-
-@app.put("/canvas-presets/{pid}")
-def update_canvas_preset(pid: str, body: PresetPatch) -> dict[str, Any]:
-    patch = body.model_dump(exclude_none=True)
-    if "name" in patch:
-        patch["name"] = patch["name"].strip()
-        if not patch["name"]:
-            raise HTTPException(400, "Preset name required")
-    p = presets.update(pid, patch)
-    if not p:
-        raise HTTPException(404, "No such preset")
-    return p
-
-
-@app.delete("/canvas-presets/{pid}")
-def delete_canvas_preset(pid: str) -> dict[str, bool]:
-    presets.delete(pid)
-    return {"ok": True}
-
-
-@app.post("/canvas-presets/{pid}/instantiate")
-def instantiate_canvas_preset(pid: str, body: PresetInstantiateIn) -> dict[str, Any]:
-    c = presets.instantiate(pid, body.name)
-    if not c:
-        raise HTTPException(404, "No such preset")
-    return c
 
 
 # ---------------- outbox: the delayed-send worker (outbox.py) ----------------

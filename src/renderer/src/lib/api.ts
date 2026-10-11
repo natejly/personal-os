@@ -4,7 +4,7 @@ import type {
   ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
   Memory, MemoryProposal, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
-  Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
+  Canvas, CanvasWindow, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
   DeskQueued, DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
   AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobSkipRecord, JobStats,
@@ -817,18 +817,6 @@ export const api = {
     patchComment: (cid: string, patch: { body?: string; resolved?: boolean }) => req<DocComment>(`/docs/comments/${cid}`, { method: 'PATCH', body: json(patch) }),
     deleteComment: (cid: string) => req(`/docs/comments/${cid}`, { method: 'DELETE' })
   },
-  /** Space presets (`/canvas-presets`): named templates of a canvas. */
-  presets: {
-    list: () => req<CanvasPreset[]>('/canvas-presets'),
-    /** The server snapshots the canvas; a blank name takes the canvas's name. */
-    create: (p: { canvas_id: string; name?: string }) => req<CanvasPreset>('/canvas-presets', { method: 'POST', body: json(p) }),
-    update: (id: string, patch: { name?: string }) => req<CanvasPreset>(`/canvas-presets/${id}`, { method: 'PUT', body: json(patch) }),
-    delete: (id: string) => req<{ ok: boolean }>(`/canvas-presets/${id}`, { method: 'DELETE' }),
-    /** Creates a NEW canvas; `skipped` counts windows whose referent no longer exists. */
-    instantiate: (id: string, opts: { name?: string } = {}) => req<InstantiatedCanvas>(`/canvas-presets/${id}/instantiate`, { method: 'POST', body: json(opts) }),
-    exportFile: (id: string) => req<Record<string, unknown>>(`/canvas-presets/${id}/export`),
-    importFile: (file: unknown) => req<{ preset: CanvasPreset }>('/canvas-presets/import', { method: 'POST', body: json({ file, instantiate: false }) })
-  }
 }
 
 const STREAM_RETRIES = 8

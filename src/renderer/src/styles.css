@@ -1466,6 +1466,7 @@ textarea.instructions:focus { border-color: var(--accent); }
 .trace { font-size: 12px; margin: 0 0 12px; color: var(--text-muted); }
 .trace-line { line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trace-line.err { color: var(--danger, var(--text-muted)); }
+.trace-effort { color: var(--text-faint); }
 
 .tool-events { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; }
 .tool-doc-diff { margin: 6px 8px 8px; }

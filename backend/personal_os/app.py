@@ -2542,7 +2542,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 buf.append("\n")
                 yield "delta", {"id": am["id"], "text": "\n"}
             llm.usage_context.set({**_ucx, "round": _round})
-            span = tracer.start("llm", model, {"round": _round, "final": True, "messages": len(messages), "tools": len(tool_schemas)})
+            span = tracer.start("llm", model, {"round": _round, "effort": str(conv["settings"].get("effort") or "default"), "final": True, "messages": len(messages), "tools": len(tool_schemas)})
             yield "span", {"message_id": am["id"], "span": span}
             start, fin = len(buf), {}
             llm.stream_deadline.set(time.monotonic() + FINAL_ROUND_SECONDS)
@@ -2685,7 +2685,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 messages.append({"role": "system", "content": _note})
             _reinject_plan()  # last message in the context, after the previous round's tool results
             llm.usage_context.set({**_ucx, "round": _round})
-            lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
+            lspan = tracer.start("llm", model, {"round": _round, "effort": str(conv["settings"].get("effort") or "default"), "messages": len(messages), "tools": len(tool_schemas)})
             round_span = lspan  # the tool calls below nest under it
             yield "span", {"message_id": am["id"], "span": lspan}
             first_token: int | None = None
@@ -2697,7 +2697,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tracer.end(lspan, {"finish_reason": "overflow"}, error="Context overflow; compacted and retrying")
                     yield "span", {"message_id": am["id"], "span": lspan}
                     yield "span", {"message_id": am["id"], "span": ev["span"]}
-                    lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
+                    lspan = tracer.start("llm", model, {"round": _round, "effort": str(conv["settings"].get("effort") or "default"), "messages": len(messages), "tools": len(tool_schemas)})
                     round_span = lspan
                     yield "span", {"message_id": am["id"], "span": lspan}
                 elif ev["type"] == "reasoning":

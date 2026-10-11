@@ -94,7 +94,11 @@ export async function openPathLink(path: string, chat: string): Promise<void> {
     }
     const { files } = await chatFilesApi.forChat(chat)
     const base = path.slice(path.lastIndexOf('/') + 1)
-    const f = files.find((x) => x.kind === 'output' && x.rel === path) ?? (path.startsWith('uploads/') ? files.find((x) => x.kind === 'upload' && x.name === base) : undefined)
+    // An editor doc has no path of its own: a reply names it by title (with or without the extension), and it opens in the editor.
+    const stem = base.replace(/\.[A-Za-z0-9]{1,8}$/, '')
+    const f = files.find((x) => x.kind === 'output' && x.rel === path)
+      ?? (path.startsWith('uploads/') ? files.find((x) => x.kind === 'upload' && x.name === base) : undefined)
+      ?? files.find((x) => x.kind === 'note' && (x.name === base || x.name === stem))
     if (!f) return s.toast(`${path} is not among this chat's files.`, 'error')
     if (f.missing) return s.toast(`${path} is no longer there.`, 'error')
     await openChatFile(f, null)

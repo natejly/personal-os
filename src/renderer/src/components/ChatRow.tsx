@@ -99,9 +99,9 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
           // Shift extends from the last clicked chat, ⌘ toggles one; a plain click opens the chat and drops the selection.
           if (e.shiftKey || e.metaKey) {
             const order = [...document.querySelectorAll<HTMLElement>('.convo-item[data-chat-id]')].map((el) => el.dataset.chatId!)
-            return useChatSelection.getState().pick(order, conv.id, e.shiftKey)
+            return useChatSelection.getState().pick(order, conv.id, e.shiftKey, document.querySelector<HTMLElement>('.convo-item.active[data-chat-id]')?.dataset.chatId)
           }
-          useChatSelection.getState().reset()
+          useChatSelection.getState().anchorAt(conv.id)
           void selectChat(conv.id)
         }}
         onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); void selectChat(conv.id) } }}

@@ -920,10 +920,10 @@ def register(tb: Any, sessions: CodingSessions) -> None:
         return claude_binary() is not None or opencode.binary() is not None or pi.binary() is not None
 
     def installed() -> str:
-        return ", ".join(sessions.installed_agents()) or "none"
+        return ", ".join(CodingSessions.installed_agents()) or "none"
 
     def harnesses() -> list[dict[str, Any]]:
-        have, default = sessions.installed_agents(), None
+        have, default = CodingSessions.installed_agents(), None
         try:
             default = sessions.default_agent()
         except Exception:

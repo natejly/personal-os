@@ -8,7 +8,7 @@ import { planSummary } from './plan'
  * progress card (only for a multi-step checklist or plan, see `progressCardShown`).
  */
 
-/** The workers card above the composer: only while one is live. Finished workers are listed in the side panel. */
+/** The workers card above the composer: only while one is live. Finished workers appear in it only on request ("Show finished"). */
 export const workersCardShown = (liveWorkers: number): boolean => liveWorkers > 0
 
 /** A plan in the transcript only while it waits for the user's approval (that is a question, not a status). Once approved

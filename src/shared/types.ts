@@ -1610,6 +1610,8 @@ export interface Settings {
   workspaceRoots?: string[]
   /** New chats start working autonomously (Ask as it goes) unless switched off per chat. Missing means on. */
   autonomousByDefault?: boolean
+  /** Renderer-only: hides the Checklist and Workers tabs in a chat's workspace panel (they stay above the composer while active). Missing means hidden. */
+  hideChatPanelTabs?: boolean
   /** Host shell. shellNetwork opens the network entirely; off, only the allowlist below is reachable. */
   shellNetwork?: boolean
   shellTimeoutSec?: number

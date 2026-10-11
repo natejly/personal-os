@@ -178,6 +178,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # A new chat's first message starts it as a task (a desk) that works through its steps; a plain question is answered
     # and the desk settles done. The composer's Autonomous switch starts from this value.
     "autonomousByDefault": True,
+    # Hide the Checklist and Workers tabs in a chat's workspace panel.
+    "hideChatPanelTabs": True,
     # Subagents (subagents.py): how many may run at once across the app and how deep they may nest. Hang
     # detection: a child with no model or tool activity for subagentStaleSeconds, or stuck inside one tool for
     # subagentToolSeconds, is stopped and returns what it had.

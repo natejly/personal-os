@@ -12,10 +12,10 @@ import WorkersPanel from './WorkersPanel'
 import { useStore, useWorkers } from '../store'
 import ContextDrawer from './ContextDrawer'
 import { workerIsLive } from '../lib/workers'
+import { initialDeskTab, panelTabsHidden, resolveDeskTab, tabShown, type DeskTab as Tab, type DeskTabFlags } from '../lib/deskTabs'
 import { useTermAvailable } from '../lib/termRegistry'
 import TerminalPane from './TerminalPane'
 
-type Tab = 'context' | 'files' | 'changes' | 'checklist' | 'workers' | 'review' | 'terminal'
 const TABS: { key: Tab; label: string }[] = [{ key: 'context', label: 'Context' }, { key: 'files', label: 'Files' }, { key: 'changes', label: 'Changes' }, { key: 'checklist', label: 'Checklist' }, { key: 'workers', label: 'Workers' }, { key: 'review', label: 'Review' }, { key: 'terminal', label: 'Terminal' }]
 
 /** An openTerminal request made just now; an old one must not pull a freshly opened panel onto Terminal. */
@@ -32,7 +32,8 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   const id = conversationId ?? '' // '' only on a draft chat, where just the Context tab shows
   const workers = useWorkers(conversationId)
   // Opened while workers are in flight, that is what you came to see; otherwise Files (the chat's artifacts).
-  const [picked, setTab] = useState<Tab>(freshTermRequest() ? 'terminal' : desk?.status === 'review' ? 'review' : workers.some(workerIsLive) ? 'workers' : 'files')
+  const hidden = panelTabsHidden(useStore((s) => s.settings))
+  const [picked, setTab] = useState<Tab>(() => initialDeskTab({ terminalRequest: freshTermRequest(), reviewing: desk?.status === 'review', liveWorker: workers.some(workerIsLive), hidden }))
   useEffect(() => { if (desk?.status === 'review') setTab('review') }, [desk?.id, desk?.status])
   const contextOpen = useStore((s) => s.contextOpen)
   const termOk = useTermAvailable()
@@ -42,9 +43,9 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   useEffect(() => { if (termRequest && freshTermRequest()) setTab('terminal') }, [termRequest])
   const hasChecklist = useStore((s) => (s.plans[conversationId ?? '']?.length ?? 0) > 0) || (!!desk?.plan && desk.plan.status !== 'pending')
   const hasWorkers = workers.length > 0
-  const shown = (k: Tab): boolean => k === 'context' || (!!conversationId && (k === 'files' || k === 'changes')) || (k === 'checklist' && hasChecklist) || (k === 'workers' && hasWorkers) || (k === 'review' && !!desk) || (k === 'terminal' && termOk && hasCoding)
-  const tabs = TABS.filter((t) => shown(t.key))
-  const tab: Tab = contextOpen ? 'context' : shown(picked) ? picked : conversationId ? 'files' : 'context'
+  const flags: DeskTabFlags = { hasConversation: !!conversationId, hasChecklist, hasWorkers, hasDesk: !!desk, hasTerminal: termOk && hasCoding }
+  const tabs = TABS.filter((t) => tabShown(t.key, flags, hidden))
+  const tab: Tab = resolveDeskTab(picked, contextOpen, flags, hidden)
   const pick = (k: Tab): void => { useStore.setState({ contextOpen: k === 'context' }); setTab(k) }
   return (
     <aside className="desk-panel" aria-label="Workspace">

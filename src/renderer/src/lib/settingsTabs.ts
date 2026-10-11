@@ -40,7 +40,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'integrations', sec: 'web-search', title: 'Web search', keys: 'firecrawl brave tavily exa searxng github token reader api key' },
   { tab: 'integrations', sec: 'texting', title: 'Texting', keys: 'telegram bot pairing messages phone' },
   { tab: 'agents', sec: 'desks', title: 'Desks', keys: 'cowork desk folder agents workers autonomous' },
-  { tab: 'agents', sec: 'workers', title: 'Background workers', keys: 'delegate delegation concurrent queue tool rounds' },
+  { tab: 'agents', sec: 'workers', title: 'Background workers', keys: 'delegate delegation concurrent queue tool rounds tabs panel checklist hide' },
   { tab: 'agents', sec: 'coding', title: 'Coding sessions', keys: 'opencode claude code repo git coding agent' },
   { tab: 'agents', sec: 'browser', title: 'Browser', keys: 'web pages visible session sites access' },
   { tab: 'agents', sec: 'checks', title: 'Checks and commands', keys: 'gates test lint build verify commands' },

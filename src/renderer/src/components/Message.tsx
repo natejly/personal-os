@@ -47,9 +47,14 @@ class BodyBoundary extends Component<{ resetKey: string; children: ReactNode }, 
   }
 }
 
-/** A reply's trace: one plain gray line per step (the thinking summary, then each quiet tool call). Nothing opens; the live step shimmers. */
-function ReplyActivity({ reasoning, events, conversationId, streaming, answering, trace }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; streaming: boolean; answering: boolean; trace?: Span[] | null }): JSX.Element {
+/**
+ * A reply's trace as one gray row: the newest step (thinking summary, then each quiet tool call) replaces the
+ * one before it, with the effort as a muted suffix. The live step shimmers. Click the row to list every step
+ * and, when spans were recorded, open the full trace in the context drawer.
+ */
+function ReplyActivity({ reasoning, events, conversationId, messageId, streaming, answering, trace }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; messageId: string; streaming: boolean; answering: boolean; trace?: Span[] | null }): JSX.Element {
   const subs = useSubagents(conversationId)
+  const [open, setOpen] = useState(false)
   // The effort this reply ran with; a reply from before it was recorded falls back to the chat's current setting.
   const effort = replyEffort(trace) ?? useStore.getState().sessions[conversationId]?.conversation.settings?.effort
   const effortLabel = effort && effort !== 'default' ? effort : null
@@ -58,13 +63,18 @@ function ReplyActivity({ reasoning, events, conversationId, streaming, answering
   // The live step is the call in flight (or its subagents) when there is one, else the newest summary line.
   const now = live ? nowText({ tool_events: events, content: '' }, subs) : null
   if (!lines.length) return <></>
+  const line = (l: (typeof lines)[number], i: number): JSX.Element => {
+    const isLive = live && i === lines.length - 1
+    return <span key={i} className={`trace-line ${l.error ? 'err' : ''} ${isLive ? 'shimmer' : ''}`}>{isLive && now && !l.error ? now : l.text}</span>
+  }
   return (
-    <div className="trace" role="list">
-      {lines.map((l, i) => {
-        const isLive = live && i === lines.length - 1
-        return <div key={i} role="listitem" className={`trace-line ${l.error ? 'err' : ''} ${isLive ? 'shimmer' : ''}`}>{isLive && now && !l.error ? now : l.text}</div>
-      })}
-      {effortLabel && <div className="trace-line trace-effort">{effortLabel} effort</div>}
+    <div className="trace">
+      <button type="button" className="trace-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <ChevronRight size={11} className={open ? 'rot90' : ''} />
+        {open ? <span className="trace-steps">{lines.map(line)}</span> : line(lines[lines.length - 1], lines.length - 1)}
+        {effortLabel && <span className="trace-effort"> · {effortLabel} effort</span>}
+      </button>
+      {open && !!trace?.length && <button type="button" className="ctx-chip" onClick={() => useStore.getState().openTrace(messageId)}>Open trace</button>}
     </div>
   )
 }
@@ -292,7 +302,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
         ) : (
           <div className="msg-body">
             <BodyBoundary resetKey={message.id}>
-              {(message.reasoning || folded.length > 0) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!content} trace={message.trace} />}
+              {(message.reasoning || folded.length > 0) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} messageId={message.id} streaming={streaming} answering={!!content} trace={message.trace} />}
               {trail && <ResearchTrail trail={trail} />}
               {!isUser && <SubagentThread messageId={message.id} conversationId={message.conversation_id} events={events ?? []} />}
               {shown.length > 0 && <ToolEvents events={shown} conversationId={message.conversation_id} streaming={streaming} browserSession={browserSession} />}

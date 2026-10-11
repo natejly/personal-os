@@ -84,6 +84,7 @@ from .retention import RetentionWorker
 from . import limits, resume
 from . import permissions, permrules
 from . import egress
+from . import sandbox
 from . import shell as shell_tool
 from . import ship as ship_mod
 from . import codingagents, coding_events
@@ -4025,6 +4026,13 @@ async def kill_shell_job(job_id: str) -> dict[str, Any]:
     job = _shell_job(job_id)
     await toolbox.shell.kill(job)
     return job.info()
+
+
+@app.get("/sandbox/limits")
+def sandbox_limits() -> dict[str, Any]:
+    """What the run_python sandbox blocks and how to ask for an exception, so a caller can plan around the walls before a
+    call. The same text rides on the run_python tool description; this route is for clients."""
+    return {"host": sandbox.declared_limits(), "shell_available": shell_tool.sandbox_available()}
 
 
 @app.post("/conversations/{id}/chat")

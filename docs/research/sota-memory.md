@@ -2,6 +2,8 @@
 
 ### Where we are
 
+*Note 2026-10-11: memory-1, memory-2 and memory-3 are now implemented (`memories.superseded_by`, `memory_index.py`, `consolidate.py`), so the description below is the pre-implementation state. See [hindsight-memory.md](hindsight-memory.md) for the current code compared with Hindsight.*
+
 **Memories.** `memories` table (db.py SCHEMA): `id, project_id (NULL = personal), content, kind fact|preference|goal|note, source user|auto, pinned, created_at, updated_at`, with an FTS5 mirror `memories_fts` (porter unicode61) maintained by hand in `repos.Memories.create/update/delete`. No provenance (which message produced a row), no confidence, no validity interval, and no embeddings anywhere in the backend (llm.py, docs.py and repos.py contain no embed calls). `Memories.create` dedups only on exact `lower(content)`.
 
 **Write path.** `learn.learn_from_exchange` runs after `done` via `LearnWorker` (serial queue, depth 32, publishes `learned` on the app topic). One extraction call sees the 60 most relevant memories from `Memories.for_context`, tagged `[M1]..[Mn]`, plus the exchange (user 4000 chars, assistant 3000), and returns `memories / updates / forget / entities / relations`. `updates` overwrite content in place (history lost). `forget` hard-deletes unless pinned. There is no NONE decision and no similarity retrieval of candidates, so contradictions with memory #61+ are never seen and become near-duplicates. The prompt already has a durability test, user-said-only, preference faithfulness and no-entity-for-the-user. Relative dates ("next month") are stored verbatim and rot.
@@ -30,7 +32,7 @@
 
 **A-MEM** ([paper](https://arxiv.org/html/2502.12110v2)). Each memory is a Zettelkasten note: content, timestamp, LLM keywords, tags, contextual description, embedding of all of them, links. On insert: cosine top-k neighbors, LLM decides links, and neighbors' context/keywords/tags may be rewritten ("memory evolution").
 
-**Hindsight** ([paper](https://arxiv.org/pdf/2512.12818)). Separates world facts, experiences, observations and opinions-with-confidence; retain/recall/reflect operations; recall runs semantic, BM25, graph and temporal strategies and fuses them. Reported to beat Zep and Mem0 on LongMemEval (numbers from the paper as cited in docs/research/roadmap.md).
+**Hindsight** ([paper](https://arxiv.org/pdf/2512.12818)). Separates world facts, experiences, observations and opinions-with-confidence; retain/recall/reflect operations; recall runs semantic, BM25, graph and temporal strategies and fuses them. The paper reports 83.6-91.4% on LongMemEval-S depending on backbone (the 94.6% figure is a later vendor leaderboard; Zep's 71.2 is a baseline the paper copied from Supermemory's technical report, GPT-4o judge). The current repo has dropped the opinion network and entity summaries for evidence-backed observations; see [hindsight-memory.md](hindsight-memory.md).
 
 **ChatGPT / Claude consumer memory** (as documented in docs/research/roadmap.md): background "dreaming" that rewrites time-sensitive memories, editable per-topic summaries.
 
@@ -46,7 +48,7 @@
 | 4 | Entity resolution (alias/embedding merge) | Graphiti, Mem0 graph | Med-High: graph fragments today | S-M (inside #3) |
 | 5 | Absolute dates at extraction time | Mem0 | Medium | S (inside #1) |
 | 6 | Memory notes with keywords/tags/links and neighbor evolution | A-MEM | Medium | M |
-| 7 | Typed stores with confidence (opinions vs facts) | Hindsight | Medium | M |
+| 7 | Typed stores with confidence (opinions vs facts); Hindsight has since dropped opinion confidence, see [hindsight-memory.md](hindsight-memory.md) | Hindsight | Medium | M |
 | 8 | Core blocks edited via tools (profile / project-state) | Letta, LangMem profiles | Medium | M |
 | 9 | Style: exemplar retrieval, per-register profiles, local stylometrics | none in OSS memory; practice from writing assistants | Medium | M |
 | 10 | Graph communities / global summaries | GraphRAG, Cognee | Low for personal-scale graph | L |

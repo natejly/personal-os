@@ -12,7 +12,7 @@ import { markRunsSeen, withoutInboxRuns } from './lib/inboxBadge'
 import { latestAgentChat } from './lib/mentions'
 import { acceptToast } from './lib/proposalToast'
 import { installRejectionToasts } from './lib/rejections'
-import { nowText } from './lib/runStatus'
+import { busyText, nowText } from './lib/runStatus'
 import { api, backgroundStream, chatStream, getBase, getToken, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { panelConversationFor, type PagePin } from './lib/pagePanel'
@@ -897,7 +897,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
     case 'thinking_summary':
       return mapMsg(ev.data.id, (m) => ({ ...m, reasoning: m.reasoning ? `${m.reasoning}\n${ev.data.text}` : ev.data.text, status: null }))
     case 'tool_call':
-      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, status: null, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, review: ev.data.review ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent, ...(ev.data.mcp ? { mcp: ev.data.mcp } : {}) }] }))
+      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, status: null, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, started_at: Date.now(), needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, review: ev.data.review ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent, ...(ev.data.mcp ? { mcp: ev.data.mcp } : {}) }] }))
     case 'tool_result':
       return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === ev.data.id ? { ...ev.data, pending: false } : t)) }))
     case 'tool_decision':
@@ -3836,6 +3836,9 @@ export const useNowText = (convId?: string): string | null =>
     const id = sess?.streaming?.answering ? sess.streaming.messageId : null
     return id ? nowText(sess!.conversation.messages?.find((m) => m.id === id), sess!.subagents) : null
   })
+/** Whether the streaming reply has a named busy line (see `busyText`); a boolean so only a change re-renders. False when not streaming. */
+export const useBusy = (message: Pick<Message, 'conversation_id' | 'status' | 'tool_events' | 'content'>, streaming: boolean): boolean =>
+  useStore((s) => streaming && busyText(message, { nowMs: 0, subs: pick(s, message.conversation_id)?.subagents, workers: s.workers[message.conversation_id] }) !== null)
 /** A Library agent's face colour; the primitive under every face that wears an agent. */
 export const useAgentHue = (agent?: string): number | undefined => useStore((s) => agentHue(s.agentDefs, agent))
 /**

@@ -17,6 +17,7 @@ import { AttentionDot } from './ChatPulse'
 import type { Attention, ChatSearchHit, Conversation, Job, WidgetKind } from '@shared/types'
 import { ATTENTION_RANK, jobAttention, wantsYou } from '../lib/attention'
 import { mergeChatSearch, snippetParts } from '../lib/chatSearch'
+import { useChatSelection } from '../lib/chatSelection'
 import { rowButton } from '../lib/rowButton'
 import { projectGroupOpen, toggleProjectGroup } from '../lib/projectGroups'
 import { useChatFileCountsSync } from '../lib/useChatFiles'
@@ -188,6 +189,36 @@ export default function Sidebar(): JSX.Element {
   }, [archivedOpen, archiveBump, query.trim() !== ''])
   const archiveChat = useStore((s) => s.archiveChat)
   const deleteChat = useStore((s) => s.deleteChat)
+  const picked = useChatSelection((s) => s.selected)
+  useEffect(() => {
+    if (picked.length < 2) return
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') useChatSelection.getState().reset() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [picked.length < 2])
+  /** Clear drops each chat's earlier context (the /clear marker); delete trashes them, each with its own Undo. */
+  const bulk = async (what: 'clear' | 'delete'): Promise<void> => {
+    const ids = picked
+    useChatSelection.getState().reset()
+    let failed = 0
+    const deleted: { type: 'conversation'; id: string }[] = []
+    for (const id of ids) {
+      try {
+        if (what === 'delete') { await deleteChat(id, true); deleted.push({ type: 'conversation', id }) }
+        else {
+          const row = await api.clearContext(id)
+          useStore.setState((st) => {
+            const se = st.sessions[id]
+            return se ? { sessions: { ...st.sessions, [id]: { ...se, conversation: { ...se.conversation, messages: [...(se.conversation.messages ?? []), row] } } } } : {}
+          })
+        }
+      } catch { failed++ }
+    }
+    const t = useStore.getState().toast
+    if (deleted.length) useStore.getState().offerUndo(`${deleted.length} chats`, deleted)
+    if (failed) t(`Could not ${what} ${failed} chat${failed === 1 ? '' : 's'}.`, 'error')
+    else if (what === 'clear') t(`Cleared ${ids.length} chats.`, 'info')
+  }
   // Search narrows the archived rows by title too, like the active list.
   const shownArchived = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -362,6 +393,12 @@ export default function Sidebar(): JSX.Element {
             }}
           />
         </label>
+      )}
+      {picked.length > 1 && (
+        <div className="select-bar" role="toolbar" aria-label="Selected chats">
+          <button className="ghost-btn" onClick={() => void bulk('clear')}>Clear {picked.length} chats</button>
+          <button className="ghost-btn danger" onClick={() => void bulk('delete')}>Delete {picked.length} chats</button>
+        </div>
       )}
       <div className="convo-list">
         {filtering && (

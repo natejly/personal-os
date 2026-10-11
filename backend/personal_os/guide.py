@@ -75,7 +75,7 @@ Type / in the composer:
 - Cmd+Shift+C opens Spaces: a desktop of live windows (chat, lists, calendar, doc, memory, graph, uploads, recap, project, usage, face, crew).
 - Add widget, or right-click the plane. Drag a chat, a Files note or a sidebar row onto it; a note becomes its own editable window.
 - Ctrl+Cmd+O pops a window out into its own OS window. Ctrl+1..9 jump between Spaces; Alt+Cmd+Left/Right moves between them; Alt+Cmd+Up is the overview; Ctrl+Cmd+N makes a Space; Ctrl+Cmd+T tidies up.
-- Lock a Space with Ctrl+Cmd+L so nothing can be rearranged. Save a layout as a preset from the Spaces bar.
+- Lock a Space with Ctrl+Cmd+L so nothing can be rearranged.
 
 ## Library
 - Skills: procedures the assistant may follow. Candidates wait under "Waiting for you" until you approve; only approved ones are used. Import by URL or pick from Popular skills. Revoke to stop using one.

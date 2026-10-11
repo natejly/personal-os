@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from . import codingagents, mac, macos, opencode, osplat, shell
+from . import codingagents, mac, macos, opencode, osplat, pi, shell
 
 AUTOMATION = {"finder": "com.apple.finder", "systemEvents": "com.apple.systemevents",
               "contacts": "com.apple.AddressBook", "calendar": "com.apple.iCal", "reminders": "com.apple.reminders"}
@@ -83,7 +83,8 @@ def router(settings: Callable[[], dict[str, Any]], shell_jobs: Callable[[], Any]
                          for n in names],
             "scope": _safe_scope(),
             "clis": {"claude": _cli_safe(codingagents.claude_binary, CLAUDE_INSTALL_HINT),
-                     "opencode": _cli_safe(opencode.binary, opencode.INSTALL_HINT)},
+                     "opencode": _cli_safe(opencode.binary, opencode.INSTALL_HINT),
+                     "pi": _cli_safe(pi.binary, pi.INSTALL_HINT)},
         }
 
     @r.get("/system/access")

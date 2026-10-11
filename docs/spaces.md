@@ -55,12 +55,6 @@ since a child's "now" line moves without an announcement.
 on top (⌃⌘P) and made see-through (⌃⌘[ / ⌃⌘]). **Gather Widgets** (⌥⌘G, and a global shortcut set in
 Settings → Behavior) brings every pop-out to the front and sends them back again.
 
-## Presets
-
-A preset is a named snapshot of a space: its windows, snapping, zoom, pan and wallpaper. Save one from
-the presets menu on the Spaces bar; picking a preset makes a new space from it. Presets live in
-`canvas_presets` (`backend/personal_os/presets.py`).
-
 ## Lock
 
 ⌃⌘L, or the padlock on the Spaces bar, freezes a space. Widgets stay usable, but nothing on a locked

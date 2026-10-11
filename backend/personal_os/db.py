@@ -21,7 +21,6 @@ SECRET_SETTINGS = ("apiKey", "firecrawlApiKey", "braveApiKey", "tavilyApiKey", "
 # These settings are dicts; only the listed fields are secret, the rest (email, expiry, scopes) stays in SQLite.
 TOKEN_SECRET_FIELDS = {
     "googleToken": ("token", "refresh_token", "client_secret"),
-    "microsoftToken": ("access_token", "refresh_token"),
 }
 
 SCHEMA = """
@@ -606,7 +605,9 @@ class Database:
                      # target='desk': a fire starts a desk (desk_autonomy plan|propose, desk_budget JSON) instead of a run.
                      "target": "TEXT NOT NULL DEFAULT 'run'", "desk_autonomy": "TEXT", "desk_budget": "TEXT",
                      # The agent definition this routine runs as (its prompt, skills, boundaries, tool overrides); NULL = plain.
-                     "agent_id": "TEXT"},
+                     "agent_id": "TEXT",
+                     # The chat that booked this (schedule_task): its result is handed back there as a wake turn.
+                     "origin_conversation_id": "TEXT"},
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
                              "expected_taint": "TEXT NOT NULL DEFAULT '[]'"},
             "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'",

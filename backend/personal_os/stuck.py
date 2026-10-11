@@ -22,6 +22,9 @@ ERROR_STORM = 4     # one tool erroring this many times running, with different 
 NOT_RUN = 4         # calls in a row that never executed (disabled, not loaded, refused), however the args vary
 WINDOW = 24
 
+# Calls whose whole point is to be repeated while something else works: an unchanged answer is not a loop.
+WAITING_TOOLS = frozenset({"coding_session_status", "coding_session_wait"})
+
 STUCK_NUDGE = ("You appear to be stuck: {detail}. Change approach: use a different tool or arguments, "
                "or answer with what you have and say what is missing.")
 STUCK_STOP = ("This reply keeps getting stuck ({detail}), so it is stopping tool use. "
@@ -90,6 +93,8 @@ class StuckDetector:
 
     def observe(self, tool: str, args: Any, result: Any) -> None:
         self.not_run = 0
+        if tool in WAITING_TOOLS:
+            return
         err = bool(result.get("error")) if isinstance(result, dict) else False
         self.obs.append(Obs(tool, args_digest(args), result_digest(result), err))
 

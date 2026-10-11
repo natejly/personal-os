@@ -51,7 +51,6 @@ BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "~/.opencode/bin", "~/.local/
 INSTALL_HINT = ("opencode is not installed on this Mac. The user can install it with `brew install opencode` "
                 "(or `npm i -g opencode-ai`), then try again.")
 MAX_PROMPT = 20_000
-DEFAULT_MODEL = "fireworks-ai/accounts/fireworks/models/deepseek-v4p1-flash"  # opencode provider/model spelling; a caller model wins
 GIT_TIMEOUT, REPORT_CAP = 60, 4_000
 # (conversation id, repo top folder) -> the worktree its last run used: continue_session goes back to it. In memory: after
 # a restart the caller passes the worktree as cwd (the result named it).
@@ -208,7 +207,7 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
                  model: str | None = None, background: bool = False, timeout: int | None = None,
                  conversation_id: str | None = None, run_id: str | None = None, notify: bool = True,
                  on_timeout: str | None = None, pool: str = "shell",
-                 max_background: int | None = None, no_timeout: bool = False) -> tuple[shell.Job, dict[str, Any]]:
+                 max_background: int | None = None, no_timeout: bool = False, session: str | None = None) -> tuple[shell.Job, dict[str, Any]]:
     """Start `opencode run` under the OS sandbox as a tracked job and return (job, {cwd, model, sandboxed}).
     Raises Refused (a ShellError) when it cannot start. The caller owns waiting for the job and reading its output.
     `conversation_id` defaults to the chat's; a caller that must outlive the chat's reply passes its own."""
@@ -219,7 +218,7 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
     if not shell.sandbox_available():
         raise Refused("The OS sandbox opencode runs in is not available here (it needs macOS sandbox-exec), so nothing "
                       "was run.", "fs_edit and shell_run for the change yourself")
-    use_model = str(model or "").strip() or DEFAULT_MODEL
+    use_model = str(model or "").strip()  # empty: opencode picks its own default
     dr = _desk_root(tb, ctx)
     where = shell.resolve_cwd(cwd, dr or mac.home(), dr)
     timeout = None if no_timeout else timeout or default_timeout(s, None, background)
@@ -234,7 +233,9 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
     argv = [exe, "run", "--standalone", "--format", "json"]  # standalone: no shared daemon outside the sandbox
     if use_model:  # otherwise opencode's own default model stands
         argv += ["-m", use_model]
-    if continue_session:
+    if session:  # this session, not "the last one in this folder"
+        argv += ["--session", session]
+    elif continue_session:
         argv.append("--continue")
     argv.append(prompt)
     writable = [tmp]

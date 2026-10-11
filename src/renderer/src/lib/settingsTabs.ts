@@ -35,7 +35,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'permissions', sec: 'always-ask', title: 'Always ask first', keys: 'confirm cards rules deny allow grants approvals revoke' },
   { tab: 'permissions', sec: 'file-edits', title: 'File edits', keys: 'diff review agentic editing apply' },
   { tab: 'permissions', sec: 'network', title: 'Network for commands', keys: 'shell hosts allow list sandbox internet domains' },
-  { tab: 'integrations', sec: 'accounts', title: 'Mail and Calendar account', keys: 'google microsoft gmail calendar sign in oauth client outbox undo send' },
+  { tab: 'integrations', sec: 'accounts', title: 'Mail and Calendar account', keys: 'google gmail calendar sign in oauth client outbox undo send' },
   { tab: 'integrations', sec: 'connectors', title: 'Connectors', keys: 'mcp library tools planner mail' },
   { tab: 'integrations', sec: 'web-search', title: 'Web search', keys: 'firecrawl brave tavily exa searxng github token reader api key' },
   { tab: 'integrations', sec: 'texting', title: 'Texting', keys: 'telegram bot pairing messages phone' },

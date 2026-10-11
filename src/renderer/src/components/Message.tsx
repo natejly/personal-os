@@ -2,7 +2,7 @@ import { Component, memo, useCallback, useEffect, useMemo, useState, type ReactN
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite, splitSources } from '../lib/remarkCites'
-import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Play, RotateCw, Pencil, GitBranch, Trash2, Zap } from '../icons'
+import { AlertCircle, User, FileText, Activity, ChevronRight, Play, RotateCw, Pencil, GitBranch, Trash2 } from '../icons'
 import type { Attachment, Message, RunChanges, Span, ToolEvent } from '@shared/types'
 import { useStore, useMessageSubagents, useSubagents } from '../store'
 import { api } from '../lib/api'
@@ -22,7 +22,6 @@ import { describeCall, staysVisible, traceLines } from '../lib/toolDisplay'
 import { quietEvents } from '../lib/orchestration'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
-import MemoryChips from './MemoryChips'
 import { nowText, waitText } from '../lib/runStatus'
 import { clockTime, fullTime } from '../lib/chatMeta'
 import Face from './Face'
@@ -225,18 +224,16 @@ function TraceChip({ message }: { message: Message }): JSX.Element | null {
   )
 }
 
-/** The per-reply cost chip: total tokens and generation speed, on every finished reply that has a trace.
+/** The model name plus, on a finished reply with a trace, its total tokens and generation speed, as one muted line.
  *  It reads no store state, so it stays out of MessageView's render path. */
-function TokenChip({ message }: { message: Message }): JSX.Element | null {
-  const m = replyMetrics(message.trace)
-  if (!m) return null
-  const speed = m.tokPerSec != null ? ` · ${m.tokPerSec.toFixed(1)} tok/s` : ''
-  const title = `${m.tokens.toLocaleString()} tokens used${m.tokPerSec != null ? ` at ${m.tokPerSec.toFixed(1)} tokens/second` : ''}`
-  return (
-    <span className="ctx-chip" title={title}>
-      <span><Zap size={11} />{compactCount(m.tokens)} tok{speed}</span>
-    </span>
-  )
+function ModelTag({ message, streaming }: { message: Message; streaming: boolean }): JSX.Element | null {
+  const m = message.role === 'assistant' && !streaming ? replyMetrics(message.trace) : null
+  if (!message.model && !m) return null
+  const speed = m?.tokPerSec != null ? ` · ${m.tokPerSec.toFixed(1)} tok/s` : ''
+  const usage = m ? `${compactCount(m.tokens)} tok${speed}` : ''
+  const label = message.model ? modelLabel(message.model) : ''
+  const tips = [message.model && message.model !== label ? message.model : '', m ? `${m.tokens.toLocaleString()} tokens used${m.tokPerSec != null ? ` at ${m.tokPerSec.toFixed(1)} tokens/second` : ''}` : ''].filter(Boolean)
+  return <span className="model-tag" title={tips.join('\n') || undefined}>{[label, usage].filter(Boolean).join(' · ')}</span>
 }
 
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
@@ -254,8 +251,6 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   const content = useMemo(() => (isUser ? message.content : stripNoReply(message.content)), [isUser, message.content])
   const chatFrom = useMemo(() => (message.kind === 'chat_in' || message.kind === 'chat_reply' ? parseChatMessage(message.content) : null), [message.kind, message.content])
   const ctx = message.context_used
-  // Memories have their own chip and sources their own list below the reply, so only graph nodes are counted here.
-  const ctxCount = ctx?.nodes.filter((n) => !n.kind).length ?? 0
   // Numbered sources this reply may cite as [n]; rows saved before numbering have no `n` and stay plain text.
   const chunks = ctx?.chunks
   // Chips and the sources footer number by first citation, so a reply citing [4] then [2] reads [1], [2].
@@ -328,19 +323,8 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
         {!editing && !plain && (
           <div className={streaming ? 'msg-actions streaming' : 'msg-actions'} aria-hidden={streaming || undefined}>
             {message.created_at > 0 && <time className="msg-time" dateTime={new Date(message.created_at * 1000).toISOString()} title={fullTime(message.created_at)}>{clockTime(message.created_at)}</time>}
-            {message.model && (
-              <span className="model-tag" title={message.model === modelLabel(message.model) ? undefined : message.model}>
-                {modelLabel(message.model)}
-              </span>
-            )}
-            {showContextChips && ctx && ctxCount > 0 && (
-              <button className="ctx-chip" title="Context used for this reply" onClick={() => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() }}>
-                <span><Share2 size={11} />{ctx.nodes.filter((n) => !n.kind).length}</span>
-              </button>
-            )}
-            {showContextChips && !isUser && <MemoryChips messageId={message.id} />}
+            <ModelTag message={message} streaming={streaming} />
             {showContextChips && <TraceChip message={message} />}
-            {!isUser && !streaming && <TokenChip message={message} />}
             {!bare && <CopyButton text={content} />}
             {resendable && isUser && !message.kind && (
               <button type="button" className="ctx-chip" title="Edit and resend: this message and everything after it is hidden" aria-label="Edit message" onClick={() => setEditing(true)}>

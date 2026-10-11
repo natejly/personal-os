@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fcntl
+import functools
 import hashlib
 import hmac
 import inspect
@@ -70,6 +71,7 @@ NAME_MAX = 64  # Bot API: setMyName
 CLAIM_RE = re.compile(r"^Grain on (.+) · ([0-9a-f]{8})$")  # the short description a Grain leaves on the bot it polls
 
 
+@functools.lru_cache(maxsize=1)  # the settings UI polls status(); the name rarely changes
 def computer_name() -> str:
     """This Mac's name as System Settings shows it; the hostname when scutil is not there."""
     with contextlib.suppress(Exception):

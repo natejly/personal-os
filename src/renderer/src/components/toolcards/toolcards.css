@@ -143,3 +143,13 @@
 
 /* Which connector a call came from, and what that server claims about the tool. */
 .tc-origin { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+
+.status-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); }
+.status-dot.done, .status-dot.verified { background: var(--ok); }
+.status-dot.failed, .status-dot.unverified { background: var(--danger); }
+.status-dot.denied { background: var(--text-muted); opacity: .6; }
+.status-dot.awaiting { background: none; box-shadow: inset 0 0 0 1.5px var(--accent); }
+.status-dot.running { background: var(--accent); animation: status-dot-pulse 1.4s ease-in-out infinite; }
+.group-failed { color: var(--danger); }
+@keyframes status-dot-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .status-dot.running { animation: none; } }

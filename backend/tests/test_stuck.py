@@ -46,6 +46,13 @@ def test_same_result() -> None:
     check(feed(StuckDetector(), [("a", {"q": 1}, {"v": i}) for i in range(8)]) is None, "same args, changing results never flags")
 
 
+def test_waiting_tools_are_never_stuck() -> None:
+    d = StuckDetector()
+    for _ in range(8):
+        d.observe("coding_session_status", {"id": "a"}, {"status": "working"})
+    check(d.check() is None and d.repeat_count("coding_session_status", {"id": "a"}) == 0, "polling a coding session is not a loop")
+
+
 def test_error_cycle_and_storm() -> None:
     check(feed(StuckDetector(), [("a", {"q": 1}, {"error": f"e{i}"}) for i in range(3)]).pattern == "error_cycle", "same call erroring x3")
     s = feed(StuckDetector(), [("a", {"q": i}, {"error": "bad"}) for i in range(4)])

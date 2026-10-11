@@ -33,8 +33,20 @@ MCP_DEFER_ABOVE = 12               # offer connector tools through search once m
 TOOL_DEFER_ABOVE = 40              # past this many built-in tools, send the core set plus tool_search (0 = send all)
 # Share of the context window each injected block may take. They match the old fixed token counts (1500, 800, 2000,
 # 3000, 1000, ~1500 for skills) at CONTEXT_WINDOW_FALLBACK to within 4%; the memory code reads them only through context_shares().
+# "map" is the workspace map (context_map.py): about 900 tokens at the fallback window, its stable half riding in the cached prefix.
 CONTEXT_SHARES = {"memories": .012, "graph": .006, "chunks": .016, "pinned": .023,
-                  "profile": .008, "skills": .012}
+                  "profile": .008, "skills": .012, "map": .007}
+# Workspace map (context_map.py). Item caps for the prompt copy; the context_map tool pages through everything.
+MAP_FILES = 12                     # notes and files listed in the prompt
+MAP_PROJECTS = 8                   # projects listed in the prompt
+MAP_UPLOADS = 5                    # newest uploads listed in the prompt
+MAP_TOPICS = 8                     # memory topic labels listed in the prompt
+MAP_TITLE_CHARS = 60               # a title is cut to this many characters
+MAP_SHRUNK_TOKENS = 500            # the map's cap once retrieved blocks fill MAP_SHRINK_AT of their shares
+MAP_SHRINK_AT = 0.7                # share of the memories + excerpts + graph shares at which the map shrinks
+MAP_HARD_CEILING_TOKENS = 1500     # whatever the window, the map never exceeds this
+MAP_PAGE = 25                      # lines per context_map call
+MAP_UPCOMING_EVENTS = 3            # calendar events in the volatile status block
 
 # ---- Reply loop (stuck detection, no caps) ----
 JOB_IDLE_SECONDS = 1800            # an unattended run with no model or tool activity this long is stopped (hang detection, not a length cap)

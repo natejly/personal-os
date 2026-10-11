@@ -26,6 +26,23 @@ const params = (): URLSearchParams => {
 // Before anything mounts, in every window: a file dropped off-target must never load in place of the app.
 installFileDropGuard(window)
 
+// CSS can tell platforms apart (title-bar padding: the Mac traffic lights on the left, native window
+// controls on the right elsewhere).
+document.documentElement.dataset.platform = window.os.platform
+
+// Native window controls and backgrounds follow the resolved theme. The surfaces set data-theme from
+// their settings, so watch the attribute rather than each of them, and the OS scheme for 'system'.
+const reportChromeTheme = (): void => {
+  const css = getComputedStyle(document.documentElement)
+  const bg = css.getPropertyValue('--bg').trim()
+  const symbol = css.getPropertyValue('--text').trim()
+  const hex = /^#[0-9a-f]{6}$/i
+  if (hex.test(bg) && hex.test(symbol)) window.os.setChromeTheme(bg, symbol)
+}
+new MutationObserver(reportChromeTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', reportChromeTheme)
+reportChromeTheme()
+
 // Every surface applies the saved zoom as its own page zoom factor once settings load and whenever they change.
 useStore.subscribe((s, prev) => {
   if (s.settings.uiZoom !== prev.settings.uiZoom && s.settings.uiZoom !== undefined) void window.os.setZoom(clampZoom(s.settings.uiZoom))

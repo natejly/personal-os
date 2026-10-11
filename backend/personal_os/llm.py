@@ -272,6 +272,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "memoryRerank": True,
     # Also retrieve from the user's own editor files (not just uploaded files) when a chat has useDocuments on.
     "useDocsInContext": True,
+    # Workspace map (context_map.py): a short list of what exists, one switch per section. mapWorkers adds the stable part to
+    # the prompt of background workers and subagents that can call context_map (off: their prompts stay small).
+    "mapMemory": True, "mapFiles": True, "mapUploads": True, "mapProjects": True, "mapSkills": True,
+    "mapSources": True, "mapToday": True, "mapWorkers": False,
     # Reply tracker (mailwatch.py); MailWatchModule.config() merges stored values over these defaults.
     "mailWatch": {"awaitingAfterDays": 3, "needsReplyAfterHours": 24, "useLLM": False,
                   "query": "newer_than:14d -category:promotions -category:social"},

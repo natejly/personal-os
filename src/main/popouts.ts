@@ -4,6 +4,7 @@
  */
 import { app, BrowserWindow, screen } from 'electron'
 import { handle } from './ipc'
+import { chromeTheme, platform } from './platform'
 import { join } from 'path'
 import { backendToken, backendUrl } from './backend'
 import { guardNavigation } from './navigation'
@@ -11,7 +12,6 @@ import type { BusMessage, GatherState, PopoutBounds, PopoutChange, PopoutInfo, P
 import { background, reveal, stealFocus } from './background'
 import { attachContextMenu } from './attachContextMenu'
 
-const isMac = process.platform === 'darwin'
 const MAX_POPOUTS = 6
 const MIN_W = 280
 const MIN_H = 200
@@ -162,13 +162,9 @@ export const openPopout = (windowId: string, req: PopoutOpenRequest = {}): boole
     minHeight,
     show: false,
     title: req.title || 'Grain',
-    frame: false,
     roundedCorners: true,
     hasShadow: true,
-    // vibrancy with a transparent backgroundColor, never transparent:true — on macOS the two fight
-    backgroundColor: '#00000000',
-    vibrancy: isMac ? 'under-window' : undefined,
-    visualEffectState: 'active',
+    ...platform.popoutChrome(chromeTheme()),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

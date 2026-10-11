@@ -28,7 +28,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from . import egress, mac, permissions
+from . import egress, mac, osplat, permissions
 from .kinds import is_internal
 from .embed import rrf
 from . import fsx
@@ -92,6 +92,21 @@ PROPOSAL_ONLY_DANGER = ("external", "schedules")
 # An external tool that is not locked runs on a plain yes: it is still read back (verify), still undoable where an
 # undo exists (extundo), still a proposal in an unattended run, and still a card on an ask-as-it-goes desk.
 ASK_LOCKED_DANGER = ("external", "schedules")
+
+
+def python_unsandboxed() -> bool:
+    """True when this platform has no OS sandbox for run_python, so a script runs with the user's own permissions."""
+    return not osplat.current().sandbox.python_available()
+
+
+def run_python_intro() -> str:
+    """The opening sentences of run_python's description: the isolation claim only where the platform really confines."""
+    if python_unsandboxed():
+        return ("Run a Python 3 script and return stdout/stderr. It runs unsandboxed on this computer, with the user's own "
+                "permissions: it can read and write files and use the network. Only CPU/memory/time limits apply, and the user "
+                "approves each run.")
+    return ("Run a Python 3 script in an isolated sandbox and return stdout/stderr. No network, no subprocesses, and writes only "
+            "inside the temp working directory (CPU/memory/time limits apply).")
 # Locked whatever the setting says: the call is itself the user's review card.
 # gmail_send: an agent never sends mail on its own. Its card is the user's own editable email: Send, Save as draft or Discard.
 ALWAYS_CARD = frozenset({"calendar_propose", "gmail_send"})
@@ -813,6 +828,8 @@ class Toolbox:
 
     def ask_locked(self, spec: ToolSpec) -> bool:
         """The mode tops out at 'ask' and no card grants the whole tool: an external or schedules tool under alwaysAsk."""
+        if spec.name == "run_python" and python_unsandboxed():
+            return True  # nothing confines the script here, so every run is a card
         return spec.danger in ASK_LOCKED_DANGER and spec.name in self.always_ask()
 
     def default_mode(self, spec: ToolSpec) -> str:
@@ -832,13 +849,12 @@ class Toolbox:
                   agent_tools: dict[str, str] | None = None) -> dict[str, str]:
         """Resolve chat override → agent override → project override → global setting → tool default, alwaysAsk tools capped at ask."""
         out: dict[str, str] = {}
-        locked = self.always_ask()
         for name, spec in self.specs.items():
             v = self._norm(global_tools.get(name)) or self.default_mode(spec)
             v = self._norm((project_tools or {}).get(name)) or v
             v = self._norm((agent_tools or {}).get(name)) or v
             v = self._norm((chat_tools or {}).get(name)) or v
-            out[name] = "ask" if v == "on" and spec.danger in ASK_LOCKED_DANGER and name in locked else v
+            out[name] = "ask" if v == "on" and self.ask_locked(spec) else v
         return out
 
     def explicit(self, global_tools: dict[str, Any], project_tools: dict[str, str] | None, chat_tools: dict[str, str] | None,
@@ -1531,7 +1547,7 @@ class Toolbox:
                                       f"{self.workspace.max_files} files / {self.workspace.max_total_bytes} bytes. Nothing was deleted, "
                                       "but further writes will be refused until you desk_trash_file what you no longer need.")
             return out
-        R("run_python", ToolSpec("run_python", "Run a Python 3 script in an isolated sandbox and return stdout/stderr. No network, no subprocesses, and writes only inside the temp working directory (CPU/memory/time limits apply). In a cowork desk the script runs inside the desk workspace instead: it can read and write files there, and the result lists workspace_files it created or changed. Outside a desk, files the script saves under outputs/ (os.makedirs('outputs', exist_ok=True) first; up to 10 files of 25 MB) are kept in this chat's files, listed as outputs, for the user to download. The document and data libraries (pandas, openpyxl, python-docx, ...) are there once the work environment is set up; python_install adds more. Use for calculations, data wrangling, quick prototypes. Print what you want to see. numpy and matplotlib are installed: any figure saved with plt.savefig('name.png') is shown to the user inline (prefer a ```chart block for simple bar/line/pie charts of small data; use matplotlib for anything it can't express).",
+        R("run_python", ToolSpec("run_python", run_python_intro() + " In a cowork desk the script runs inside the desk workspace instead: it can read and write files there, and the result lists workspace_files it created or changed. Outside a desk, files the script saves under outputs/ (os.makedirs('outputs', exist_ok=True) first; up to 10 files of 25 MB) are kept in this chat's files, listed as outputs, for the user to download. The document and data libraries (pandas, openpyxl, python-docx, ...) are there once the work environment is set up; python_install adds more. Use for calculations, data wrangling, quick prototypes. Print what you want to see. numpy and matplotlib are installed: any figure saved with plt.savefig('name.png') is shown to the user inline (prefer a ```chart block for simple bar/line/pie charts of small data; use matplotlib for anything it can't express).",
             _obj({"code": {"type": "string"}, "timeout": {"type": "integer", "default": 30},
                   "tools": {"type": "array", "items": {"type": "string"}, "description": "App tools the script may call as grain_tools.call(name, **args) (import grain_tools). Allowed: fs_glob, fs_grep, read_local_file, fs_edit, search_documents, web_search, fetch_url. Each call is gated like your own: off tools are refused, ask tools wait for the user. At most 300s per script; only what the script prints comes back."}},
                  ["code"]), run_python_tool, "code", "executes",
@@ -1809,6 +1825,34 @@ def _register_working(self: Toolbox) -> None:
             examples=[{"steps": [{"text": "Find the migration file", "status": "in_progress"}, {"text": "Add the column", "status": "pending"}, {"text": "Run the tests", "status": "pending"}]},
                       {"steps": [{"text": "Find the migration file", "status": "done", "note": "db.py line 155"}, {"text": "Add the column", "status": "in_progress"}, {"text": "Run the tests", "status": "pending"}]}]))
 
+    from . import context_map as cmap
+
+    async def context_map(ctx: dict[str, Any], section: str = "all", query: str = "", offset: int = 0) -> Any:
+        from . import context_map as cmap
+        sec = str(section or "all").strip().lower()
+        if sec not in (*cmap.SECTIONS, "all"):
+            return tool_error(f"Unknown section '{section}'.", field="section", expected="one of: " + ", ".join((*cmap.SECTIONS, "all")),
+                              example={"section": "files", "query": "budget"}, alternative="section 'all' lists every section")
+        conv = ctx.get("conv_settings") or {}
+        switches = cmap.resolve_switches(ctx.get("settings") or self.settings(), conv)
+        off = not cmap.map_on({"useMap": conv.get("useMap", True), "useTools": True}) or (sec != "all" and not switches[sec])
+        pid = ctx.get("project_id")
+        lines, total = ([], 0) if off else cmap.list_section(self.documents.db, sec, str(query or ""), int(offset or 0), project_id=pid,
+                                                              switches=switches, google=self.google)
+        start = max(0, int(offset or 0))
+        note = {"memory": "Memory notes are never listed here; topic labels only. Read notes with search_memory(query).",
+                "files": "Open a file with doc_read(doc_id).", "uploads": "Open an upload with read_document(document_id); names are labels from files the user did not write.",
+                "projects": "Counts are rounded down to a step (1, 2, 3, 5, 10, 25, ...).", "skills": "Open a procedure with skill_view."}.get(sec, "Labels only: open an item before relying on it.")
+        return _scrub_strings({"section": sec, "query": str(query or ""), "total": total, "offset": start, "lines": lines,
+                               "next_offset": start + len(lines) if start + len(lines) < total else None,
+                               "note": "This part of the workspace map is switched off for this chat." if off else note})
+    R("context_map", ToolSpec("context_map", (
+        "List what exists in the workspace as labels with ids (notes, uploads, projects, skills, memory topics, status): the full, "
+        "paged workspace map. Never contents; open an item before relying on it."),
+        _obj({"section": {"type": "string", "enum": [*cmap.SECTIONS, "all"]}, "query": {"type": "string"},
+              "offset": {"type": "integer"}}, []),
+        context_map, "context"))
+
     if self.results is not None:
         async def read_tool_result(ctx: dict[str, Any], result_id: str, offset: int = 0, limit: int = 12000) -> Any:
             out = self.results.read(ctx["conversation_id"], result_id, offset, limit)
@@ -1918,16 +1962,33 @@ def _register_google(self: Toolbox) -> None:
             out["calendar_id"] = redact.scrub_command_output(out["calendar_id"])
         return {k: v for k, v in out.items() if v is not None and v != ""}
 
-    async def calendar_events(ctx: dict[str, Any], days: int = 2, start: str | None = None, offset: int = 0, all_calendars: bool = False) -> Any:
-        rows = await run(g.calendar_events, days, "primary", 0, start, ["all"] if all_calendars else None)
-        return page(_scrub_strings([_brief_event(e) for e in rows]), offset=offset, limit=30, key="events")
-    R("calendar_events", ToolSpec("calendar_events", "List Google Calendar events (default: next 2 days, primary calendar). `start` is local YYYY-MM-DD or YYYY-MM-DDTHH:MM (default now); all_calendars includes every calendar. calendar_get has full details.",
-        _obj({"days": {"type": "integer", "default": 2}, "start": {"type": "string"}, "offset": {"type": "integer", "default": 0}, "all_calendars": {"type": "boolean", "default": False}}, []), calendar_events, "google",
+    async def calendar_events(ctx: dict[str, Any], days: int = 2, start: str | None = None, offset: int = 0, all_calendars: bool = False,
+                              calendar_id: str | None = None) -> Any:
+        if calendar_id:
+            ids = [calendar_id]
+        else:
+            ids = ["all"] if all_calendars else ["enabled"]
+        rows = await run(g.calendar_events, days, "primary", 0, start, ids)
+        names: dict[str, str] = {}
+        if len({e.get("calendar_id") for e in rows}) > 1 or calendar_id:
+            with contextlib.suppress(Exception):  # names are a label; the events are still right without them
+                names = {c["id"]: c["summary"] for c in await run(g.calendars)}
+        out = []
+        for e in rows:
+            b = _brief_event(e)
+            if names.get(e.get("calendar_id") or ""):
+                b["calendar"] = names[e["calendar_id"]]
+            out.append(b)
+        return page(_scrub_strings(out), offset=offset, limit=30, key="events")
+    R("calendar_events", ToolSpec("calendar_events", "List Google Calendar events (default: the next 2 days across every calendar the user has checked on in Google, such as work, classes and shared ones). `start` is a local YYYY-MM-DD or YYYY-MM-DDTHH:MM to look from (default now); `days` is the window length. Each event has `calendar` (its name) and `calendar_id`: pass that calendar_id, with the event id, to calendar_get, calendar_update, calendar_delete, calendar_respond or meeting_brief, since event ids belong to one calendar. calendar_id here narrows the list to one calendar; all_calendars also includes hidden and unchecked ones. calendar_get has an event's full details.",
+        _obj({"days": {"type": "integer", "default": 2}, "start": {"type": "string"}, "offset": {"type": "integer", "default": 0},
+              "calendar_id": {"type": "string", "description": "only this calendar (an id from a previous result)"},
+              "all_calendars": {"type": "boolean", "default": False, "description": "also hidden and unchecked calendars"}}, []), calendar_events, "google",
         examples=[{}, {"days": 7, "all_calendars": True}, {"days": 1, "start": "2026-10-02T09:00"}], taints=True))
 
     async def calendar_get(ctx: dict[str, Any], event_id: str, calendar_id: str = "primary") -> Any:
         return _scrub_strings(await run(g.calendar_get, event_id, calendar_id))
-    R("calendar_get", ToolSpec("calendar_get", "One event by id (from calendar_events): recurrence, reminders, guests and RSVPs, color, visibility.",
+    R("calendar_get", ToolSpec("calendar_get", "One event by id (from calendar_events; pass the calendar_id that row carried): recurrence, reminders, guests and RSVPs, color, visibility.",
         _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id"]), calendar_get, "google",
         examples=[{"event_id": "7abc123def"}], taints=True))
 
@@ -1946,7 +2007,7 @@ def _register_google(self: Toolbox) -> None:
             people.append({"email": mail, "name": name, "notes": list(seen.values())[:5]})
         return _scrub_strings({"event": {k: e.get(k) for k in ("summary", "start", "end", "location", "description")},
                                "people": people})
-    R("meeting_brief", ToolSpec("meeting_brief", "Pre-meeting brief for one calendar event: for each guest, what long-term memory holds about them. Read-only. Use before a meeting, or when asked who someone on the invite is.",
+    R("meeting_brief", ToolSpec("meeting_brief", "Pre-meeting brief for one calendar event (pass the calendar_id its calendar_events row carried): for each guest, what long-term memory holds about them. Read-only. Use before a meeting, or when asked who someone on the invite is.",
         _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id"]), meeting_brief, "google",
         examples=[{"event_id": "7abc123def"}], taints=True))
 
@@ -1975,7 +2036,7 @@ def _register_google(self: Toolbox) -> None:
                            "busy": busy, "create_meet": create_meet, "clear_meet": clear_meet})
         return _scrub_strings(await _undoable("calendar_update", ctx, {"event_id": event_id, "calendar_id": calendar_id, "send_updates": send_updates},
                                g.calendar_update, event_id, f, calendar_id, send_updates))
-    R("calendar_update", ToolSpec("calendar_update", "Edit ONE Google Calendar event by id; for moving several events or rescheduling around conflicts use calendar_propose. Only the fields you pass change. `attendees` replaces the whole guest list. For a recurring event, the instance id edits that occurrence and its recurring_event_id (from calendar_get) edits the series.",
+    R("calendar_update", ToolSpec("calendar_update", "Edit ONE Google Calendar event by id (pass the calendar_id its calendar_events row carried, or the edit looks on the primary calendar); for moving several events or rescheduling around conflicts use calendar_propose. Only the fields you pass change. `attendees` replaces the whole guest list. For a recurring event, the instance id edits that occurrence and its recurring_event_id (from calendar_get) edits the series.",
         _obj({"event_id": {"type": "string"}, "clear_meet": {"type": "boolean", "description": "remove the Meet link"}, **_EVENT_PROPS}, ["event_id"]), calendar_update, "google", "external",
         examples=[{"event_id": "7abc123def", "start": "2026-10-07T16:00", "end": "2026-10-07T17:00"},
                   {"event_id": "7abc123def", "summary": "Sprint review (moved)", "send_updates": "all"},
@@ -1984,14 +2045,14 @@ def _register_google(self: Toolbox) -> None:
     async def calendar_delete(ctx: dict[str, Any], event_id: str, calendar_id: str = "primary", send_updates: str = "none") -> Any:
         return _scrub_strings(await _undoable("calendar_delete", ctx, {"event_id": event_id, "calendar_id": calendar_id, "send_updates": send_updates},
                                g.calendar_delete, event_id, calendar_id, send_updates))
-    R("calendar_delete", ToolSpec("calendar_delete", "Delete a Google Calendar event by id. For a recurring event, the instance id removes that occurrence and its recurring_event_id removes the whole series. Only when the user asked to delete it.",
+    R("calendar_delete", ToolSpec("calendar_delete", "Delete a Google Calendar event by id (pass the calendar_id its calendar_events row carried). For a recurring event, the instance id removes that occurrence and its recurring_event_id removes the whole series. Only when the user asked to delete it.",
         _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}, "send_updates": {"type": "string", "enum": ["none", "all", "externalOnly"]}}, ["event_id"]), calendar_delete, "google", "external",
         examples=[{"event_id": "7abc123def"}, {"event_id": "7abc123def", "send_updates": "all"}]))
 
     async def calendar_respond(ctx: dict[str, Any], event_id: str, response: str, calendar_id: str = "primary") -> Any:
         return _scrub_strings(await _undoable("calendar_respond", ctx, {"event_id": event_id, "calendar_id": calendar_id, "send_updates": "all"},
                                g.calendar_respond, event_id, response, calendar_id, "all"))
-    R("calendar_respond", ToolSpec("calendar_respond", "RSVP to an event the user was invited to: accepted, declined or tentative.",
+    R("calendar_respond", ToolSpec("calendar_respond", "RSVP to an event the user was invited to (pass the calendar_id its calendar_events row carried): accepted, declined or tentative.",
         _obj({"event_id": {"type": "string"}, "response": {"type": "string", "enum": ["accepted", "declined", "tentative"]}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id", "response"]), calendar_respond, "google", "external",
         examples=[{"event_id": "7abc123def", "response": "accepted"}]))
 
@@ -2004,8 +2065,8 @@ def _register_google(self: Toolbox) -> None:
     async def calendar_free_busy(ctx: dict[str, Any], time_min: str, time_max: str, calendars: list[str] | None = None,
                                  attendees: list[str] | None = None) -> Any:
         return _scrub_strings(await run(g.calendar_free_busy, time_min, time_max, calendars, attendees))
-    R("calendar_free_busy", ToolSpec("calendar_free_busy", "Busy ranges between two ISO datetimes from Google's free/busy service, across all the user's visible calendars (or the `calendars` ids you name) plus any `attendees` emails. Use it to see when people are busy; to find a time, use calendar_find_time.",
-        _obj({"time_min": {"type": "string"}, "time_max": {"type": "string"}, "calendars": {"type": "array", "items": {"type": "string"}, "description": "calendar ids; default all visible"},
+    R("calendar_free_busy", ToolSpec("calendar_free_busy", "Busy ranges between two ISO datetimes from Google's free/busy service, across the calendars the user has checked on (or the `calendars` ids you name) plus any `attendees` emails. Use it to see when people are busy; to find a time, use calendar_find_time.",
+        _obj({"time_min": {"type": "string"}, "time_max": {"type": "string"}, "calendars": {"type": "array", "items": {"type": "string"}, "description": "calendar ids; default the calendars checked on"},
               "attendees": {"type": "array", "items": {"type": "string"}, "description": "other people's emails"}}, ["time_min", "time_max"]), calendar_free_busy, "google",
         examples=[{"time_min": "2026-10-05T09:00", "time_max": "2026-10-05T18:00"}, {"time_min": "2026-10-05T00:00", "time_max": "2026-10-09T23:59", "attendees": ["mira@example.com"]}]))
 
@@ -2032,7 +2093,7 @@ def _register_google(self: Toolbox) -> None:
         if w1 - w0 > dt.timedelta(days=60):
             w1 = w0 + dt.timedelta(days=60)
         days = max(1, -(-int((w1 - w0).total_seconds()) // 86400))
-        events = await run(g.calendar_events, days, "primary", 250, w0.isoformat(), ["all"])
+        events = await run(g.calendar_events, days, "primary", 250, w0.isoformat(), ["enabled"])
         busy = scheduling.busy_from_events(events, tz)
         unreachable: list[str] = []
         if attendees:
@@ -2056,7 +2117,7 @@ def _register_google(self: Toolbox) -> None:
         if note.strip():
             out["note"] = note.strip()
         return _scrub_strings(out)
-    R("calendar_find_time", ToolSpec("calendar_find_time", "Find free slots for a meeting: ranked candidates inside working hours (default 9-18 local, weekdays) that avoid the user's events on every visible calendar (declined and 'free' events do not block) and, when given, the attendees' busy time. ALWAYS use this before proposing a time. Then call calendar_propose with the chosen slot.",
+    R("calendar_find_time", ToolSpec("calendar_find_time", "Find free slots for a meeting: ranked candidates inside working hours (default 9-18 local, weekdays) that avoid the user's events on every calendar they have checked on (declined and 'free' events do not block) and, when given, the attendees' busy time. ALWAYS use this before proposing a time. Then call calendar_propose with the chosen slot.",
         _obj({"duration_minutes": {"type": "integer"}, "window_start": {"type": "string", "description": "ISO datetime or date to search from"},
               "window_end": {"type": "string", "description": "ISO datetime, or a date meaning through the end of that day"},
               "attendees": {"type": "array", "items": {"type": "string"}, "description": "emails whose busy time must also be free"},
@@ -2659,9 +2720,7 @@ def _mac_available(name: str) -> bool:
         return mac.page_bridge.connected
     if name in FILE_TOOLS:  # plain file system work: no Spotlight, no Shortcuts, no platform check
         return True
-    if not mac.is_mac():
-        return False
-    return mac.has_binary("mdfind" if name == "find_files" else "shortcuts")
+    return osplat.has("file_search" if name == "find_files" else "shortcuts")
 
 
 def _register_mac(self: Toolbox) -> None:
@@ -2792,7 +2851,7 @@ def _register_mac(self: Toolbox) -> None:
             return _path_error("trash_local_file", e, example={"path": "~/Downloads/duplicate.pdf"})
         except OSError as e:
             return tool_error(redact.scrub_command_output(f"trash_local_file: {_first_line(e)}"), field="path", alternative=ALTERNATIVE["trash_local_file"])
-    R("trash_local_file", ToolSpec("trash_local_file", "Move a file or folder on this Mac to the Trash. Nothing is erased: the user can put it back from the Finder. There is no tool that deletes outright, so say what you are about to trash before you do.",
+    R("trash_local_file", ToolSpec("trash_local_file", "Move a file or folder on this computer to the Trash. Nothing is erased: the user can restore it from the Trash. There is no tool that deletes outright, so say what you are about to trash before you do.",
         _obj({"path": {"type": "string", "description": "What to trash, usually from find_files"}}, ["path"]), trash_local_file, "files", "external",
         examples=[{"path": "~/Downloads/duplicate.pdf"}]))
 

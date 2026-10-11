@@ -9,13 +9,13 @@ import {
   type AccessState, type MainStatus
 } from '../shared/systemAccess'
 import { handle } from './ipc'
+import { platform } from './platform'
 
-const isMac = process.platform === 'darwin'
 type Grant = { state: AccessState; note?: string }
 
 /** Side-effect-free reads only; never prompts. */
 function status(): MainStatus {
-  if (!isMac) return { microphone: 'unknown', camera: 'unknown', screen: 'unknown', accessibility: 'unknown', notifications: 'unknown' }
+  if (!platform.systemPermissions) return { microphone: 'unknown', camera: 'unknown', screen: 'unknown', accessibility: 'unknown', notifications: 'unknown' }
   return {
     microphone: mediaState(systemPreferences.getMediaAccessStatus('microphone')),
     camera: mediaState(systemPreferences.getMediaAccessStatus('camera')),
@@ -37,7 +37,7 @@ function probe(script: string): Promise<AccessState> {
 }
 
 async function grant(id: string): Promise<Grant> {
-  if (!isMac) return { state: 'unknown', note: 'macOS only' }
+  if (!platform.systemPermissions) return { state: 'unknown', note: 'macOS only' }
   if (id === 'microphone' || id === 'camera') {
     const st = mediaState(systemPreferences.getMediaAccessStatus(id))
     if (st === 'unasked') return { state: (await systemPreferences.askForMediaAccess(id)) ? 'granted' : 'denied' }
@@ -68,7 +68,7 @@ async function grant(id: string): Promise<Grant> {
 
 /** Opens Terminal on `claude attach <id>`. Only ever called from a click; the id is checked before it reaches the file. */
 async function codingAttach(id: unknown): Promise<boolean> {
-  if (!isMac || !isAttachId(id)) return false
+  if (!platform.systemPermissions || !isAttachId(id)) return false
   const dir = await mkdtemp(join(tmpdir(), 'grain-attach-'))
   const file = join(dir, 'attach.command')
   await writeFile(file, attachScript(id), { mode: 0o700 })

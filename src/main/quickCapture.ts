@@ -6,6 +6,7 @@
 import { BrowserWindow } from 'electron'
 import { join } from 'path'
 import { guardNavigation } from './navigation'
+import { chromeTheme, platform } from './platform'
 import { background, reveal } from './background'
 
 let capture: BrowserWindow | null = null
@@ -19,12 +20,11 @@ export const toggleCapture = (): void => {
     width: 420,
     height: 140,
     show: false,
-    frame: false,
     resizable: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     fullscreenable: false,
-    backgroundColor: '#1c1c1e',
+    ...platform.floatingChrome(chromeTheme()),
     webPreferences: { preload: join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false, sandbox: true }
   })
   capture = w

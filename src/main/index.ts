@@ -17,15 +17,16 @@ import { registerQuickAsk, toggleAsk } from './quickAsk'
 import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
 import { registerShortcuts } from './shortcuts'
 import { createTray } from './tray'
+import { chromeTheme, platform, setChromeTheme } from './platform'
 import { startUpdater } from './updater'
 import { registerSystemAccess } from './systemAccess'
+import { registerTerminals } from './terminals'
 import { background, goBackground, reveal } from './background'
 import { attachContextMenu } from './attachContextMenu'
 import { registerPreviewScheme, servePreviews } from './htmlPreview'
 
 registerPreviewScheme() // before ready
 let win: BrowserWindow | null = null
-const isMac = process.platform === 'darwin'
 
 // The app was renamed from "Personal OS" to "Grain", which moves the userData directory Electron
 // derives from the app name. Existing installs keep their data: if the new location has none but a
@@ -54,11 +55,7 @@ function createWindow(): void {
     minHeight: 520,
     show: false,
     title: 'Grain',
-    titleBarStyle: isMac ? 'hiddenInset' : 'default',
-    trafficLightPosition: { x: 16, y: 14 },
-    vibrancy: isMac ? 'sidebar' : undefined,
-    visualEffectState: 'active',
-    backgroundColor: '#00000000',
+    ...platform.mainWindowChrome(chromeTheme()),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -67,6 +64,7 @@ function createWindow(): void {
     }
   })
 
+  platform.setupWindow(win)
   win.once('ready-to-show', () => { if (win) reveal(win) })
 
   // When the renderer dies there is no React error and no macOS crash report -- the window simply goes
@@ -181,7 +179,7 @@ const SPACES = SHORTCUTS.filter((s) => s.id.startsWith('space-')).map((s) => ite
 
 function buildMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
-    ...(isMac
+    ...(platform.macMenus
       ? [
           {
             label: app.name,
@@ -205,7 +203,7 @@ function buildMenu(): void {
         item('daily-note'),
         item('upload'),
         // ⌘W lives in the Window menu now: `role: 'close'` here could not be intercepted by the canvas.
-        ...(isMac
+        ...(platform.macMenus
           ? []
           : [
               { type: 'separator' as const },
@@ -225,7 +223,7 @@ function buildMenu(): void {
         item('find'),
         item('find-next'),
         item('find-prev'),
-        ...(isMac
+        ...(platform.macMenus
           ? [{ type: 'separator' }, { label: 'Speech', submenu: [{ role: 'startSpeaking' }, { role: 'stopSpeaking' }] }] as Electron.MenuItemConstructorOptions[]
           : [])
       ]
@@ -296,7 +294,7 @@ function buildMenu(): void {
         // through to closeSelf()/minimizeSelf() when no canvas window has focus.
         item('close-window'),
         item('minimize-window'),
-        ...(isMac ? [{ role: 'zoom' as const }, { type: 'separator' as const }, { role: 'front' as const }] : []),
+        ...(platform.macMenus ? [{ role: 'zoom' as const }, { type: 'separator' as const }, { role: 'front' as const }] : []),
         { type: 'separator' },
         item('popout'),
         item('unpopout'),
@@ -415,12 +413,18 @@ if (gotLock) app.whenReady().then(async () => {
   handle('data:relaunch', () => { app.relaunch(); app.quit() })
   // The composer's mic: macOS shows its prompt once, from here; after a denial only System Settings can change it.
   handle('media:mic-access', async () => {
-    if (!isMac) return 'granted'
+    if (!platform.systemPermissions) return 'granted'
     const st = systemPreferences.getMediaAccessStatus('microphone')
     if (st !== 'not-determined') return st
     return (await systemPreferences.askForMediaAccess('microphone')) ? 'granted' : 'denied'
   })
   registerSystemAccess()
+  // The renderer's resolved theme colours, so native window controls and window backgrounds follow it.
+  on('ui:chrome-theme', (_e, bg: unknown, symbol: unknown) => {
+    const hex = /^#[0-9a-f]{6}$/i
+    if (typeof bg === 'string' && typeof symbol === 'string' && hex.test(bg) && hex.test(symbol)) setChromeTheme({ background: bg, symbol })
+  })
+  registerTerminals(() => win)
   on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
   on('app:show', () => showMain())  // a chat notification was clicked: bring the main window forward
@@ -451,7 +455,7 @@ if (gotLock) app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
-  if (!isMac) app.quit()
+  if (platform.quitWhenAllWindowsClosed) app.quit()
 })
 app.on('before-quit', () => {
   stopPageBridge()

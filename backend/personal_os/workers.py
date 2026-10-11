@@ -26,14 +26,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
-import subprocess
-import sys
 from collections import deque
 from typing import Any, Callable, Iterable
 
-from . import limits, redact
+from . import limits, osplat, redact
+from .osplat.darwin import parse_vm_stat  # noqa: F401  (kept for callers and tests)
 from .subagents import GROUP, MAX_TASK_CHARS, Child, Subagents, _now_line, _one_line
 from .tools import ToolSpec, _obj, tool_error
 from .working import escape_tags
@@ -75,6 +73,20 @@ OBSERVABILITY_HINT = (
     "When you hand work to a subagent or background worker, say so and name what is running, so a reply is never bare tool calls."
 )
 
+# Shared by FRONT_AGENT_HINT and PROACTIVE_HINT (app.py): reconcile sources, then close with one offer.
+CHECK_HINT = (
+    "When a request touches time, people or commitments, check the calendar, inbox or todos first and say what you "
+    "found that bears on it (a clash, a reply waiting, a deadline). For a schedule, day or week question, read "
+    "calendar_events and also gmail_search that window for invitations, events, talks, deadlines and proposed meetings; "
+    "fold what you find into the answer in time order and mark anything not on the calendar. Flag a clash or an "
+    "unanswered invite. Lead with the synthesis (what is notable), then the detail."
+)
+CLOSE_HINT = (
+    "End with at most one specific next step you can do right now, or none; best is the offer a gap you found calls "
+    "for (\"X isn't on your calendar yet. Want me to add it?\"), never a generic one. A wrong suggestion costs more "
+    "than silence."
+)
+
 FRONT_AGENT_HINT = (
     "## How to work\n"
     "Answer what you can and do quick lookups yourself. Anything over a couple of steps goes to a background worker with delegate: write a "
@@ -86,11 +98,11 @@ FRONT_AGENT_HINT = (
     "or a report is stale or repeats what they already have, answer with exactly NO_REPLY and nothing else. "
     "Keep todo_write current for multi-step work. In an autonomous chat desk_done is optional: a "
     "reply that answers and hands the rest to workers is complete. Follow-ups on a worker's work go to resume_worker or "
-    "message_worker, not a new worker; do not poll workers, their report arrives as a hidden message. When a request touches time, people or commitments, check the calendar, inbox or "
-    "todos first and say what bears on it. Act where the app lets you; it stops you where an approval is needed, so do "
+    "message_worker, not a new worker; do not poll workers, their report arrives as a hidden message. "
+    + CHECK_HINT + " Act where the app lets you; it stops you where an approval is needed, so do "
     "not ask permission in advance. Prefer a draft or proposal over a silent change. If they describe a recurring want, "
-    "offer schedule_task once. If a decision is genuinely the user's, call ask_user once instead of guessing. End with at "
-    "most one specific next step you can do now, or none. "
+    "offer schedule_task once. If a decision is genuinely the user's, call ask_user once instead of guessing. "
+    + CLOSE_HINT + " "
     + ORCHESTRATION_HINT + " " + OBSERVABILITY_HINT
 )
 
@@ -244,28 +256,9 @@ def wake_decision(answering: bool, pending: int, conversation_exists: bool) -> s
 
 # ---- machine state -------------------------------------------------------------------------------
 
-def parse_vm_stat(text: str, total_bytes: int) -> float | None:
-    """(free + inactive + speculative pages) / total memory, from `vm_stat` output; None when it cannot be read."""
-    m = re.search(r"page size of (\d+) bytes", text or "")
-    if not m or total_bytes <= 0:
-        return None
-    page = int(m.group(1))
-    got = {k: int(v) for k, v in re.findall(r"Pages (free|inactive|speculative):\s+(\d+)", text)}
-    if len(got) < 3:
-        return None
-    return min(1.0, sum(got.values()) * page / total_bytes)
-
-
 def free_memory_fraction() -> float | None:
-    """Share of system memory that is free or readily reclaimable (macOS vm_stat). None = unknown, which never holds work."""
-    if sys.platform != "darwin":
-        return None
-    try:
-        total = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
-        out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=3).stdout
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return None
-    return parse_vm_stat(out, total)
+    """Share of system memory that is free or readily reclaimable (the platform's probe). None = unknown, which never holds work."""
+    return osplat.current().proc.memory_available_fraction()
 
 
 DEFAULT_REPORT = ("What changed (files, branch, ids); where (paths, links); the verification you ran and its result; "

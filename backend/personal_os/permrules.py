@@ -55,6 +55,19 @@ GIT_BRANCH_FLAGS = {"-a", "-r", "-v", "-vv", "--list", "--show-current", "--all"
 FIND_WRITERS = {"-exec", "-execdir", "-delete", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
 SENSITIVE = re.compile(r"(^|/)(\.ssh|\.aws|\.gnupg|\.netrc|\.env[^/]*|Keychains|id_(rsa|ed25519|ecdsa|dsa)[^/]*)(/|$)")
 
+
+
+def _platform_sensitive() -> re.Pattern[str] | None:
+    """The current platform's own credential folders (keyrings, browser profiles...) as a path regex like SENSITIVE; None
+    when it adds none beyond the macOS ones SENSITIVE already covers."""
+    from . import mac
+    from .osplat import base
+    extra = sorted(d for d in mac.keychain_dirs() if d not in base.KEYCHAIN_DIRS)
+    if not extra:
+        return None
+    return re.compile(r"(^|/)(" + "|".join(re.escape(d) for d in extra) + r")(/|$)")
+
+
 # Wrappers that run what follows. Allow rules see through the conservative set only; deny and ask rules also
 # see through the ones that could be hiding a destructive command.
 SAFE_ENV = re.compile(r"^(LANG|LC_[A-Z_]+|TZ|NO_COLOR)=")
@@ -893,15 +906,16 @@ def claude_code_floor() -> dict[str, Any]:
     through `sh -c`, `eval`, `sudo`, `xargs`, `find -exec` and chains, and lets temp folders and the session's own
     worktree through. The Bash rules below stay as a second check for the forms written plainly. Read/Edit rules cover
     Claude Code's file tools and the file commands it recognises in Bash only."""
-    from . import mac
+    from . import mac, osplat
     deny: list[str] = []
     ask: list[str] = []
     for root in dict.fromkeys(mac.protected_paths()):
         pat = "//" + str(root).lstrip("/") + "/**"  # `//` is an absolute path in Claude Code's rule syntax
         deny += [f"Edit({pat})"] + ([] if root.suffix.lower() == ".app" else [f"Read({pat})"])
-    paths = [f"~/{d}/**" for d in mac.CRED_HOME_DIRS] + [f"//{k.lstrip('/')}/**" for k in mac.SYSTEM_KEYCHAINS]
+    paths = [f"~/{d}/**" for d in mac.cred_home_dirs()] + [f"//{k.lstrip('/')}/**" for k in mac.system_keychains()]
     paths += [f"~/{f}" for f in mac.CRED_HOME_FILES]
-    paths += [f"~/Library/Application Support/{b}/**/{n}" for b in mac.BROWSER_DIRS for n in mac.BROWSER_FILE_NAMES]
+    support = osplat.current().paths.browser_support_dir()
+    paths += [f"~/{support}/{b}/**/{n}" for b in mac.browser_dirs() for n in mac.BROWSER_FILE_NAMES]
     paths += [".env", ".env.*"] + [f"id_{k}" for k in mac.KEY_TYPES]  # a bare name matches at any depth
     ask += [f"{t}({p})" for p in paths for t in ("Read", "Edit")]
     ask += [f"Bash(security {v}*)" for v in KEYCHAIN_VERBS]
@@ -1011,7 +1025,8 @@ def _readonly(tokens: list[str], redirects: list[tuple[str, str]]) -> bool:
         return False
     if any(op.startswith((">", "&>")) and t not in EXEMPT_PATHS for op, t in redirects):
         return False
-    if any(SENSITIVE.search(w) for w in tokens[1:]):
+    extra = _platform_sensitive()
+    if any(SENSITIVE.search(w) or (extra and extra.search(w)) for w in tokens[1:]):
         return False
     name = tokens[0]
     if name == "git":

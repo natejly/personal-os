@@ -141,6 +141,8 @@ def test_tools_hint_carries_orchestration_and_observability() -> None:
     # The agent-stance fragments carry the same wording, so the rule reads the same wherever it lands.
     for hint in (appmod.FRONT_AGENT_HINT, appmod.PROACTIVE_HINT):
         assert workers.ORCHESTRATION_HINT in hint and workers.OBSERVABILITY_HINT in hint
+        assert workers.CHECK_HINT in hint and workers.CLOSE_HINT in hint
+        assert "gmail_search" in hint and "calendar_events" in hint and "not on the calendar" in hint
 
 
 def test_agent_stance_hint_is_sent_only_with_tools() -> None:

@@ -21,8 +21,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="opencodetest-"))
 os.environ.setdefault("PERSONAL_OS_AUTH_TOKEN", "test-token")
 
-from personal_os import opencode, sandbox, shell  # noqa: E402
+from personal_os import opencode, osplat, sandbox, shell  # noqa: E402
 from personal_os.db import Database  # noqa: E402
+
+
+def fake_seatbelt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pretend the OS sandbox exists: these tests stop at the point where the confined argv would be started."""
+    monkeypatch.setattr(osplat, "_current", osplat._build("darwin"))
+    monkeypatch.setattr(shell, "sandbox_available", lambda: True)
 from personal_os.mcp_servers import RESERVED_TOOL_NAMES  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 from personal_os.working import ToolResults  # noqa: E402
@@ -95,7 +101,7 @@ def test_opencodes_own_config_and_state_are_left_alone(box: Box, monkeypatch: py
         raise shell.ShellError("stop here")
 
     monkeypatch.setattr(opencode, "binary", lambda: "/bin/echo")
-    monkeypatch.setattr(shell, "sandbox_available", lambda: True)
+    fake_seatbelt(monkeypatch)
     monkeypatch.setattr(box.tb.shell, "start", fake_start)
     box.run("opencode_run", prompt="x")
     env = got["env"]
@@ -115,7 +121,7 @@ def test_a_named_model_is_passed_through_unprefixed(box: Box, monkeypatch: pytes
         raise shell.ShellError("stop here")
 
     monkeypatch.setattr(opencode, "binary", lambda: "/bin/echo")
-    monkeypatch.setattr(shell, "sandbox_available", lambda: True)
+    fake_seatbelt(monkeypatch)
     monkeypatch.setattr(box.tb.shell, "start", fake_start)
     box.run("opencode_run", prompt="x", model="fireworks/ember-1")
     assert got["argv"][got["argv"].index("-m") + 1] == "fireworks/ember-1"
@@ -191,7 +197,7 @@ def test_launch_caches_packages_inside_the_per_launch_tmp_dir(box: Box, monkeypa
         return object()
 
     monkeypatch.setattr(opencode, "binary", lambda: "/bin/echo")
-    monkeypatch.setattr(shell, "sandbox_available", lambda: True)
+    fake_seatbelt(monkeypatch)
     monkeypatch.setattr(box.tb.shell, "start", fake_start)
     asyncio.run(opencode.launch(box.tb, box.ctx, "x", cwd=str(box.root), pool="coding", max_background=2))
     try:
@@ -210,7 +216,7 @@ def test_cwd_is_anywhere_but_the_protected_places(box: Box, tmp_path: Path, monk
         raise shell.ShellError("stop here")
 
     monkeypatch.setattr(opencode, "binary", lambda: "/bin/echo")
-    monkeypatch.setattr(shell, "sandbox_available", lambda: True)
+    fake_seatbelt(monkeypatch)
     monkeypatch.setattr(box.tb.shell, "start", fake_start)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()

@@ -12,6 +12,7 @@ import { KIND_LABEL, ago, formatBytes } from './dataFormat'
  */
 export default function DataSettings(): JSX.Element {
   const toast = useStore((s) => s.toast)
+  const settings = useStore((s) => s.settings)
   const [info, setInfo] = useState<DataOverview | null>(null)
   const [loadError, setLoadError] = useState(false)
   const [busy, setBusy] = useState<'backup' | 'export' | null>(null)
@@ -62,6 +63,9 @@ export default function DataSettings(): JSX.Element {
     <section>
       <h3>Data</h3>
       <p className="muted">Grain keeps a database plus folders of files (uploads, pasted images, desk outputs) on this Mac. Backups snapshot the database only, daily and before any update that changes its structure, keeping the newest of each. Export also takes the files.</p>
+      {settings.secretsKeychain === false && (
+        <p className="muted">Keys and sign-in tokens are stored unencrypted on this computer{settings.secretsReason ? ` (${settings.secretsReason})` : ''}.</p>
+      )}
 
       <div className="data-row">
         <span className="toggle-text">

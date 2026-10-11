@@ -288,7 +288,7 @@
   font: 600 12px var(--font);
   color: var(--text);
   background: var(--bg-input);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--control-border);
   border-radius: 6px;
   outline: 0;
 }

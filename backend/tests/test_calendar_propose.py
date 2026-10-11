@@ -33,7 +33,7 @@ class _FreeBusy:
 class _CalList:
     def list(self, **_: Any) -> _Call:
         return _Call(lambda: {"items": [{"id": "primary", "summary": "Me", "primary": True, "accessRole": "owner"},
-                                        {"id": "work@x.com", "summary": "Work", "accessRole": "owner"},
+                                        {"id": "work@x.com", "summary": "Work", "accessRole": "owner", "selected": True},
                                         {"id": "hidden@x.com", "summary": "Old", "accessRole": "reader", "hidden": True}]})
 
 
@@ -299,7 +299,7 @@ class FreeBusyTests(Base):
                           "stranger@x.com": {"busy": [], "errors": [{"reason": "notFound"}]}}
         out = self.call("calendar_free_busy", time_min="2026-10-07T00:00:00Z", time_max="2026-10-08T00:00:00Z", attendees=["mira@x.com", "stranger@x.com"])
         ids = [i["id"] for i in self.g.fb_queries[-1]["items"]]
-        self.assertEqual(ids, ["primary", "work@x.com", "mira@x.com", "stranger@x.com"])  # the hidden one is left out
+        self.assertEqual(ids, ["primary", "work@x.com", "mira@x.com", "stranger@x.com"])  # checked on, hidden ones left out
         self.assertEqual(out["calendars"]["mira@x.com"]["busy"][0]["start"], "2026-10-07T14:00:00Z")
         self.assertTrue(out["calendars"]["mira@x.com"]["attendee"])
         self.assertFalse(out["calendars"]["primary"]["attendee"])

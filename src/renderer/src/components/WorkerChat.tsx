@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Square } from 'lucide-react'
+import { ArrowUp, Square } from '../icons'
 import type { SubagentView } from '@shared/types'
 import { api } from '../lib/api'
 import { workerRows } from '../lib/workerTranscript'

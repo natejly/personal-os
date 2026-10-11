@@ -1,4 +1,4 @@
-import { CircleCheck, CircleHelp, PackageCheck, TriangleAlert } from 'lucide-react'
+import { CircleCheck, CircleHelp, PackageCheck, TriangleAlert } from '../../icons'
 import { gateProblems, num, str, strList } from '../../lib/toolResult'
 import CardShell from './CardShell'
 import { Badge, Chips, ErrorLine, Meta, unreadable, useParsed } from './blocks'

@@ -60,15 +60,14 @@ def _fenced(cmd: str) -> bool:
     roots, cwd = shell.perm_where(_TB(), CTX)
     args = {"command": cmd}
     perm = permrules.resolve("shell_run", args, "on", False, rules={}, roots=roots, cwd=cwd)
-    return perm.kind in ("external_directory", "doom_loop") or bool(shell.floor(_TB(), args, CTX))
+    return perm.kind in ("external_directory", "doom_loop")
 
 
 @pytest.mark.parametrize("cmd", BENIGN)
 def test_desk_commands_do_not_ask(cmd: str) -> None:
     v = permrules.evaluate("shell_run", {"command": cmd}, {}, roots=[WORK])
     assert v.action != "ask" and v.kind != "external_directory", (cmd, v.external)
-    assert permrules.allow_all_floor("shell_run", {"command": cmd}, WORK, [WORK]) is None
-    assert permrules.allow_all_floor("shell_run", {"command": cmd, "unsandboxed": True}, WORK, [WORK]) is None
+    assert permrules.destructive(cmd, WORK, [WORK]) is None and permrules.touches_protected(cmd, WORK, [WORK]) is None
 
 
 @pytest.mark.parametrize("cmd", BENIGN)
@@ -77,11 +76,12 @@ def test_desk_commands_run_under_allow_all(cmd: str) -> None:
 
 
 @pytest.mark.parametrize("cmd", GUARDED)
-def test_grain_data_other_desks_and_credentials_still_ask(cmd: str) -> None:
+def test_grain_data_other_desks_and_credentials_are_flagged_and_auto_cards_them(cmd: str) -> None:
     v = permrules.evaluate("shell_run", {"command": cmd}, {}, roots=[WORK])
     assert v.action == "ask" and v.kind == "external_directory", cmd
     assert permrules.touches_protected(cmd, WORK, [WORK]), cmd
-    assert autoreview.route("allow_all", mode="on", danger="external", fenced=_fenced(cmd)) == "card"
+    assert autoreview.route("auto", mode="ask", danger="external", fenced=_fenced(cmd)) == "card"
+    assert autoreview.route("allow_all", mode="ask", danger="external", fenced=_fenced(cmd)) == "run"  # Allow everything: no exceptions
 
 
 def test_no_desk_no_exemption() -> None:
@@ -89,8 +89,8 @@ def test_no_desk_no_exemption() -> None:
     assert v.kind == "external_directory"
 
 
-def test_delete_floor_kept() -> None:
-    assert permrules.allow_all_floor("shell_run", {"command": "rm ~/Desktop/x.md"}, WORK, [WORK])[0] == "destructive"
-    assert permrules.allow_all_floor("shell_run", {"command": f'cd "{REPO}" && rm -rf build'}, WORK, [WORK])[0] == "destructive"
-    assert permrules.allow_all_floor("shell_run", {"command": "git push --force"}, WORK, [WORK])[0] == "destructive"
-    assert _fenced("rm ~/Desktop/x.md")
+def test_delete_is_still_flagged_but_allow_all_never_cards_it() -> None:
+    assert permrules.destructive("rm ~/Desktop/x.md", WORK, [WORK])
+    assert permrules.destructive("git push --force", WORK, [WORK])
+    assert autoreview.route("allow_all", mode="ask", danger="executes", fenced=True) == "run"
+    assert autoreview.route("auto", mode="ask", danger="executes", fenced=True) == "card"

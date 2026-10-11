@@ -1,4 +1,4 @@
-"""The orchestrator is quiet: no "On it" line, no narrated delegation, and a turn that only handed work on leaves no reply row.
+"""The orchestrator is quiet about routine steps: no "On it" line, no narrated planning or rounds, and a turn that only handed work on leaves no reply row. A worker it hands work to is still named, so a reply is never bare tool calls.
 
 Harness and scripted model come from test_orchestration.py (fixtures re-exported below); Telegram cases use test_telegram.py's fake API.
 """
@@ -36,10 +36,13 @@ def messages(cid: str) -> list[dict]:
     return [m for m in client.get(f"/conversations/{cid}").json()["messages"] if m.get("kind") != "wake"]
 
 
-def test_no_prompt_tells_the_model_to_announce_what_it_started() -> None:
+def test_no_prompt_tells_the_model_to_narrate_routine_steps() -> None:
     for text in (W.FRONT_AGENT_HINT, W.FORCE_DELEGATE_NUDGE, json.dumps(W.forced_refusal("x"))):
         assert "what you started" not in text and "On it" not in text
-    assert "NO_REPLY" in W.FRONT_AGENT_HINT and "never announce" in W.FRONT_AGENT_HINT
+    # Still quiet about routine steps: NO_REPLY when there is nothing for the user, and no narrating rounds or tools.
+    assert "NO_REPLY" in W.FRONT_AGENT_HINT and "do not narrate planning, rounds or tools" in W.FRONT_AGENT_HINT
+    # But it does name a worker it hands work to, so a reply is never bare tool calls with no visible output.
+    assert "name what is running" in W.FRONT_AGENT_HINT
     assert not hasattr(W, "ACK_LINE") and not hasattr(W, "ACK_NUDGE")
 
 

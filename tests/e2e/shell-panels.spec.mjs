@@ -44,11 +44,6 @@ test('page agent carries each view\'s content to the model', async ({ grain }) =
   await expect(panel(page).locator('.page-agent-ctx')).toContainText(/Quokka|Files/)
   body = await askPageAgent(grain, '!!reply noted about doc')
   expect(body).toContain('happiest animal')
-  // Today
-  await page.locator('.sidebar .nav-item', { hasText: /^\s*Today/ }).click()
-  await expect(panel(page).locator('.page-agent-ctx')).toContainText(/Today|Home/)
-  body = await askPageAgent(grain)
-  expect(body).toMatch(/"page"|Today|view/)
   // Chat view: the chat's own text
   await page.getByRole('button', { name: /New chat/ }).first().click()
   const msg = page.locator('main').getByRole('textbox', { name: 'Message' })
@@ -199,7 +194,7 @@ test('theme: Settings switches light/dark/system; system follows prefers-color-s
   const theme = () => page.evaluate(() => document.documentElement.dataset.theme)
   await menu(grain, 'Settings…')
   const dlg = page.getByRole('dialog')
-  await dlg.getByRole('tab', { name: /Appearance/ }).click()
+  await dlg.getByRole('tab', { name: /General/ }).click()
   const group = dlg.getByRole('radio', { name: /^Light$/ })
   await expect(group).toBeVisible()
   await dlg.getByRole('radio', { name: /^Dark$/ }).click()
@@ -221,7 +216,7 @@ test('theme: Settings switches light/dark/system; system follows prefers-color-s
   expect((await grain.api('/settings')).theme).toBe('system')
   // discarding restores
   await menu(grain, 'Settings…')
-  await dlg.getByRole('tab', { name: /Appearance/ }).click()
+  await dlg.getByRole('tab', { name: /General/ }).click()
   await dlg.getByRole('radio', { name: /^Dark$/ }).click()
   await expect.poll(theme).toBe('dark')
   await page.keyboard.press('Escape')

@@ -5,11 +5,11 @@ import { create } from 'zustand'
 import { useMemo } from 'react'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
 import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
-  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskEvent, DeskFile, FullDesk, PromotionResult, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job, MicrosoftStatus } from '@shared/types'
+  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskEvent, DeskFile, FullDesk, PromotionResult, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import type { DraftAutonomy } from './lib/autonomyDefault'
-import { markRunsSeen } from './lib/inboxBadge'
+import { markRunsSeen, withoutInboxRuns } from './lib/inboxBadge'
 import { latestAgentChat } from './lib/mentions'
 import { acceptToast } from './lib/proposalToast'
 import { installRejectionToasts } from './lib/rejections'
@@ -22,6 +22,7 @@ import { chatNotice, finishNotice, type FinishInfo, finishStatus, foldRunState, 
 import { adjacentChatId, sidebarOrder } from './lib/chatRows'
 import { createDeltaBuffer } from './lib/deltaBuffer'
 import { CHAT_NOTICE_BODY, notify } from './lib/notify'
+import { COMPLETION_SNOOZE_MS, shouldShowCompletion, type CompletionPopup } from './lib/completionNotice'
 import { homeModuleOn, viewHidden } from './moduleToggles'
 import { chainTo, folderKey, groupShutKey, renameKeys } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
@@ -50,7 +51,7 @@ const withoutLegacyMode = (s: Settings): Settings => {
 }
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'library' | 'project' | 'canvas'
+export type View = 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'library' | 'project' | 'canvas'
 /** Which tab a project page shows. */
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
 export type LibraryTab = 'skills' | 'agents' | 'automations' | 'connectors'
@@ -124,7 +125,7 @@ const PROMOTED_TO: Record<string, string> = {
   doc: 'Files', doc_append: 'Files (as an edit to review)', document: 'uploaded files', download: 'your Mac'
 }
 
-interface Toast { id: number; text: string; kind: 'info' | 'error' | 'learned'; action?: { label: string; run: () => void } }
+interface Toast { id: number; text: string; kind: 'info' | 'error' | 'learned'; action?: { label: string; run: () => void }; onClick?: () => void }
 
 /** Live sessions kept in memory at once. Beyond this the least recently touched are dropped. */
 const MAX_SESSIONS = 12
@@ -184,7 +185,6 @@ export interface State {
   modelsError: string | null
   tools: ToolInfo[]
   google: GoogleStatus | null
-  microsoft: MicrosoftStatus | null
   tasksSync: TasksSyncStatus | null
   /** Mail-watch chip to open expanded on the next Mail visit (Today's "View all"); MailWatchPanel clears it. */
   mailWatchKind: 'to_reply' | 'awaiting_reply' | null
@@ -210,6 +210,10 @@ export interface State {
   /** "Schedule as routine" on a reply: the Agent inbox opens its task editor with this, switched off until a test run. */
   routineDraft: RoutineDraft | null
   scheduleAsRoutine: (conversationId: string, messageId: string) => void
+  /** A new chat whose empty state also shows the Agent inbox (a job row, a job notification), even when nothing is waiting. */
+  inboxOpen: boolean
+  closeInbox: () => void
+  openInbox: () => void
   clearRoutineDraft: () => void
 
   projects: Project[]
@@ -287,6 +291,8 @@ export interface State {
   /** A draft handed to the Mail compose window (an assistant's email card moved there); MailView takes it and clears it. */
   mailComposePrefill: MailComposePrefill | null
   toasts: Toast[]
+  /** The in-app completion popup: a reply that finished while the user was elsewhere, with Open/Snooze/Dismiss. */
+  completionPopup: CompletionPopup | null
   /** The ⌘K command palette. */
   paletteOpen: boolean
   /** The help overlay (⌘/ or ?): shortcuts, or the "Using Grain" guide. */
@@ -393,10 +399,16 @@ export interface State {
   setProjectModal: (m: State['projectModal']) => void
   openUploadPreview: (id: string | null) => void
   openMailCompose: (prefill: MailComposePrefill) => void
-  toast: (text: string, kind?: Toast['kind'], action?: Toast['action']) => void
+  toast: (text: string, kind?: Toast['kind'], action?: Toast['action'], onClick?: () => void) => void
   dismissToast: (id: number) => void
   /** Pointer or focus is on the toast stack: stop every toast's clock until it leaves. */
   holdToasts: (on: boolean) => void
+  /** Show the completion popup for a finished reply (replacing any earlier one). */
+  showCompletion: (p: CompletionPopup) => void
+  /** Close the completion popup and drop any snooze it was on. */
+  dismissCompletion: () => void
+  /** Hide the completion popup now and bring the same one back after COMPLETION_SNOOZE_MS. */
+  snoozeCompletion: () => void
   /** After a soft delete: a toast with Undo (~8s) that restores it from the trash. */
   offerUndo: (what: string, items: { type: TrashKind; id: string }[], note?: string) => void
   restoreTrashed: (items: { type: TrashKind; id: string }[]) => Promise<void>
@@ -425,7 +437,8 @@ export interface State {
   closeSession: (conversationId: string) => void
   /** Called on focus: clears unread and maps done/error back to idle, but never needs-approval. */
   clearSessionStatus: (conversationId: string) => void
-  deleteChat: (id: string) => Promise<void>
+  /** `quiet` skips the per-chat Undo toast, for a caller that offers one Undo for the batch. */
+  deleteChat: (id: string, quiet?: boolean) => Promise<void>
   pinChat: (id: string, on: boolean) => Promise<void>
   archiveChat: (id: string, on: boolean) => Promise<void>
   moveChat: (id: string, projectId: string | null) => Promise<void>
@@ -548,6 +561,12 @@ export interface State {
   refreshAgentInbox: () => Promise<void>
   /** Mark one "While you were away" run read, or every run in the window when `runId` is null. Optimistic. */
   markInboxRunSeen: (runId: string | null) => Promise<void>
+  /** Erase one "While you were away" message from the journal. The chat it ran in is untouched. */
+  deleteInboxRun: (runId: string) => Promise<void>
+  /** Archive (or restore) one run message; the inbox re-reads afterwards. */
+  archiveInboxRun: (runId: string, on?: boolean) => Promise<void>
+  /** Erase every "While you were away" message in the current window. Runs still going are left. */
+  clearInbox: () => Promise<void>
   refreshJobs: () => Promise<void>
   /** Schedule a task: a one-off (kind 'once' + run_at) or a repeating job (cron). True if it was created. */
   createJob: (input: Parameters<typeof api.jobs.create>[0]) => Promise<boolean>
@@ -564,9 +583,6 @@ export interface State {
   refreshGoogle: () => Promise<void>
   connectGoogle: () => Promise<void>
   disconnectGoogle: () => Promise<void>
-  refreshMicrosoft: () => Promise<void>
-  connectMicrosoft: () => Promise<void>
-  disconnectMicrosoft: () => Promise<void>
   refreshTasksSync: () => Promise<void>
   setTasksSync: (patch: { enabled?: boolean; tasklist?: string; intervalMinutes?: number }) => Promise<void>
   runTasksSync: () => Promise<void>
@@ -649,6 +665,8 @@ export function learnedText(d: { memories: unknown[]; nodes: unknown[]; edges: u
 /** Each live toast's remaining time; `at` is when its running timer started (unset while held). */
 const toastClocks = new Map<number, { left: number; at?: number; timer?: ReturnType<typeof setTimeout> }>()
 let toastsHeld = false
+/** The completion popup's snooze timer. Its own, so dismissing a toast never clears a snoozed popup. */
+let completionTimer: ReturnType<typeof setTimeout> | null = null
 let flushChain: Promise<void> = Promise.resolve()
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
@@ -1337,10 +1355,13 @@ export const useStore = create<State>((set, get) => {
     runNoticed.add(key)  // the `/events` feed sees the same run end too: one notice per run, whichever path got there first
     if (kind === 'approval') void get().refreshAgentInbox()  // the Today badge counts every open card, this one too
     if (get().settings.chatNotify === false) return true
-    if (visible && typeof document !== 'undefined' && document.hasFocus()) return true
+    const focused = typeof document !== 'undefined' && document.hasFocus()
+    if (visible && focused) return true
     // A desk's chat: its status notifier already says finished / failed / needs you, so one run is not two banners.
     if (get().desks.some((d) => d.conversation_id === convId) && (kind === 'approval' || get().settings.deskNotify !== false)) return true
     const title = get().sessions[convId]?.conversation.title || get().conversations.find((c) => c.id === convId)?.title || 'Chat'
+    // In-app twin of the OS notice: a reply that finished off-screen gets a popup with Open/Snooze/Dismiss.
+    if (shouldShowCompletion(kind, visible, focused)) get().showCompletion({ convId, runId, title })
     const onClick = (): void => {
       try { window.os.showMain() } catch { /* no bridge: window.focus() in notify() is the fallback */ }
       void get().selectChat(convId)
@@ -1702,12 +1723,11 @@ export const useStore = create<State>((set, get) => {
     ready: false,
     backendError: null,
     backendState: 'ready',
-    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', fastModel: '', autoRoute: false, systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true, microsoftClientId: '', microsoftTenant: '', pimProvider: 'google' },
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', fastModel: '', autoRoute: false, systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true },
     models: [],
     modelsError: null,
     tools: [],
     google: null,
-    microsoft: null,
     tasksSync: null,
     mailWatchKind: null,
     dashboard: null,
@@ -1740,12 +1760,15 @@ export const useStore = create<State>((set, get) => {
       const draft = routineDraftFrom(msgs, msgs.findIndex((m) => m.id === messageId))
       if (!draft) return get().toast('Nothing to schedule from this reply', 'info')
       set({ routineDraft: draft })
-      get().setView('home')
+      get().openInbox()
     },
+    inboxOpen: false,
+    openInbox: () => set({ inboxOpen: true, settingsOpen: false }),
+    closeInbox: () => set({ inboxOpen: false, routineDraft: null }),
     clearRoutineDraft: () => set({ routineDraft: null }),
     projects: [],
-    view: 'home',
-    lastClassicView: 'home',
+    view: 'chat',
+    lastClassicView: 'chat',
     memoryMode: 'split',
     projectViewId: null,
     draftProjectId: null,
@@ -1800,6 +1823,7 @@ export const useStore = create<State>((set, get) => {
     uploadPreview: null,
     mailComposePrefill: null,
     toasts: [],
+    completionPopup: null,
     paletteOpen: false,
     helpOpen: false,
     helpSection: 'shortcuts',
@@ -1862,11 +1886,11 @@ export const useStore = create<State>((set, get) => {
       // Quiet while the backend restarts: the banner already says so, and every refresher would fail at once.
       installRejectionToasts((m, kind) => { if (get().backendState === 'ready') get().toast(m, kind) })
       // One-shot migration of the pre-spaces global mode: a user who left the app in canvas mode lands
-      // in the canvas once, and the setting is reset so later launches open on Today. Only the main
+      // in the canvas once, and the setting is reset so later launches open on a new chat. Only the main
       // window writes it back; a pop-out (`?surface=widget`) never renders App and must not touch settings.
       const { mode: legacyMode } = settings
       const legacyCanvas = legacyMode === 'canvas'
-      set({ settings: withoutLegacyMode(settings), view: legacyCanvas ? 'canvas' : 'home', projects, conversations, ready: true })
+      set({ settings: withoutLegacyMode(settings), view: legacyCanvas ? 'canvas' : 'chat', projects, conversations, ready: true })
       if (legacyCanvas && !isPopout()) void get().saveSettings({ mode: 'classic' }).catch(() => undefined)
       void get().loadModels()
       void get().loadScope('all')
@@ -1905,19 +1929,11 @@ export const useStore = create<State>((set, get) => {
       }
     },
     saveSettings: async (patch) => {
-      const prevPim = get().settings.pimProvider
       set({ settings: withoutLegacyMode(await api.settings.set(patch)) })
       // Which tools are capped at ask follows this list, and the tool rows read it from the tools listing.
       if ('alwaysAsk' in patch) void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
       if ('baseUrl' in patch || 'apiKey' in patch || 'provider' in patch) void get().loadModels()
       if ('googleClientId' in patch || 'googleClientSecret' in patch) void get().refreshGoogle()
-      if ('microsoftClientId' in patch || 'microsoftTenant' in patch) void get().refreshMicrosoft()
-      // Mail and Calendar now read from the other account: drop what the first one cached.
-      if (get().settings.pimProvider !== prevPim) {
-        clearViews()
-        void get().refreshDashboard()
-        void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
-      }
     },
     setView: (view) => {
       const cur = get().view
@@ -1934,7 +1950,6 @@ export const useStore = create<State>((set, get) => {
         void get().refreshDocs()
         void get().refreshDocsPending()
       }
-      if (view === 'home') void get().refreshDashboard()
       if (view === 'todos') void get().refreshTodos()
     },
     leaveCanvas: () => {
@@ -1942,7 +1957,7 @@ export const useStore = create<State>((set, get) => {
       const v = s.lastClassicView
       // The target can have gone while in the canvas: its project deleted, or the view hidden in Settings.
       const gone = v === 'project' ? !s.projectViewId || !s.projects.some((p) => p.id === s.projectViewId) : viewHidden(s.settings, v)
-      s.setView(gone ? 'home' : v)
+      s.setView(gone ? 'chat' : v)
     },
     setMemoryMode: (memoryMode) => set({ memoryMode }),
     openMemory: (memoryMode) => {
@@ -1996,9 +2011,9 @@ export const useStore = create<State>((set, get) => {
     setProjectModal: (projectModal) => set({ projectModal }),
     openUploadPreview: (uploadPreview) => set({ uploadPreview }),
     openMailCompose: (mailComposePrefill) => { set({ mailComposePrefill }); get().setView('mail') },
-    toast: (text, kind = 'info', action) => {
+    toast: (text, kind = 'info', action, onClick) => {
       const id = ++toastSeq
-      set((s) => ({ toasts: [...s.toasts, { id, text, kind, action }] }))
+      set((s) => ({ toasts: [...s.toasts, { id, text, kind, action, onClick }] }))
       toastClocks.set(id, { left: action ? UNDO_MS : kind === 'error' ? 6000 : 3500 })
       if (!toastsHeld) get().holdToasts(false)
     },
@@ -2022,6 +2037,21 @@ export const useStore = create<State>((set, get) => {
           c.timer = setTimeout(() => get().dismissToast(id), Math.max(c.left, 0))
         }
       }
+    },
+    showCompletion: (p) => {
+      if (completionTimer) { clearTimeout(completionTimer); completionTimer = null }
+      set({ completionPopup: p })
+    },
+    dismissCompletion: () => {
+      if (completionTimer) { clearTimeout(completionTimer); completionTimer = null }
+      set({ completionPopup: null })
+    },
+    snoozeCompletion: () => {
+      const p = get().completionPopup
+      if (!p) return
+      set({ completionPopup: null })
+      if (completionTimer) clearTimeout(completionTimer)
+      completionTimer = setTimeout(() => { completionTimer = null; set({ completionPopup: p }) }, COMPLETION_SNOOZE_MS)
     },
     offerUndo: (what, items, note) => {
       get().toast(`Deleted ${what}${note ? `. ${note}` : ''}`, 'info', { label: 'Undo', run: () => void get().restoreTrashed(items) })
@@ -2108,6 +2138,8 @@ export const useStore = create<State>((set, get) => {
     selectChat: async (id) => {
       set({ view: 'chat', settingsOpen: false, traceMessageId: null })
       if (!id) return set({ focusedConversationId: null })
+      // Opening the chat the completion popup named settles it: there is nothing left to open.
+      if (get().completionPopup?.convId === id) get().dismissCompletion()
       set({ focusedConversationId: id })
       get().clearSessionStatus(id)
       // A session mid-run holds content the backend has not persisted yet, so never refetch over it.
@@ -2175,13 +2207,13 @@ export const useStore = create<State>((set, get) => {
         return { ...s, unread: 0, touchedAt: Date.now(), status: settled ? 'idle' : s.status, finishedAt: settled ? null : s.finishedAt }
       })
     },
-    deleteChat: async (id) => {
+    deleteChat: async (id, quiet) => {
       const title = get().conversations.find((c) => c.id === id)?.title
       const res = await api.conversations.delete(id)
       get().closeSession(id)
       set((s) => ({ conversations: s.conversations.filter((c) => c.id !== id) }))
       void get().refreshProjects()
-      get().offerUndo(title ? `chat “${title}”` : 'chat', [{ type: 'conversation', id }], res?.stopped ? 'Reply stopped.' : undefined)
+      if (!quiet) get().offerUndo(title ? `chat “${title}”` : 'chat', [{ type: 'conversation', id }], res?.stopped ? 'Reply stopped.' : undefined)
     },
     pinChat: async (id, on) => {
       await guard(on ? 'Could not pin chat' : 'Could not unpin chat', async () => {
@@ -3271,7 +3303,7 @@ export const useStore = create<State>((set, get) => {
       // A drafted skill waits in Library → Skills; the toast's one action takes the user there to decide.
       const skillDrafted = !!(l.skill_candidates?.length || l.skill_revisions?.length)
       const review = skillDrafted ? { label: 'Review', run: () => { get().setLibraryTab('skills'); get().setView('library') } } : undefined
-      get().toast(text, 'learned', review ?? undo)
+      get().toast(text, 'learned', review ?? undo, added.length ? () => get().showMemories(added) : undefined)
       if (skillDrafted) void get().refreshSkills()
       refreshAll()
     },
@@ -3433,6 +3465,34 @@ export const useStore = create<State>((set, get) => {
       } catch {
         void get().refreshAgentInbox()
       }
+    },
+    deleteInboxRun: async (runId) => {
+      // Optimistic: the row leaves at once, and the re-read puts the truth back if the server refused.
+      set((st) => (st.agentInbox ? { agentInbox: withoutInboxRuns(st.agentInbox, [runId]) } : {}))
+      try {
+        await api.inboxRunDelete(runId)
+      } catch (e) {
+        get().toast(`Could not delete that run: ${(e as Error).message}`, 'error')
+      }
+      void get().refreshAgentInbox()
+    },
+    archiveInboxRun: async (runId, on = true) => {
+      if (on) set((st) => (st.agentInbox ? { agentInbox: withoutInboxRuns(st.agentInbox, [runId]) } : {}))
+      try {
+        await (on ? api.inboxRunArchive(runId) : api.inboxRunRestore(runId))
+      } catch (e) {
+        get().toast(`Could not ${on ? 'archive' : 'restore'} that message: ${(e as Error).message}`, 'error')
+      }
+      void get().refreshAgentInbox()
+    },
+    clearInbox: async () => {
+      try {
+        const res = await api.inboxClear()
+        if (res.skipped) get().toast(`Cleared ${res.deleted} run${res.deleted === 1 ? '' : 's'}; ${res.skipped} still running`, 'info')
+      } catch (e) {
+        get().toast(`Could not clear the inbox: ${(e as Error).message}`, 'error')
+      }
+      void get().refreshAgentInbox()
     },
     refreshJobs: async () => {
       const seen = jobsEdits
@@ -3618,42 +3678,6 @@ export const useStore = create<State>((set, get) => {
       void get().refreshDashboard()
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
       void get().refreshAgentDefs().catch(() => undefined)
-    },
-    refreshMicrosoft: async () => {
-      try {
-        set({ microsoft: await api.microsoft.status() })
-      } catch { /* ignore */ }
-    },
-    connectMicrosoft: async () => {
-      try {
-        const before = get().microsoft?.connected_at ?? null
-        const { url } = await api.microsoft.start()
-        window.open(url, '_blank')
-        // poll until the callback lands
-        const started = Date.now()
-        const timer = setInterval(async () => {
-          const st = await api.microsoft.status().catch(() => null)
-          const fresh = !!st?.connected && st.connected_at !== before
-          if (fresh || Date.now() - started > 180_000) {
-            clearInterval(timer)
-            if (fresh && st) {
-              clearViews()
-              set({ microsoft: st })
-              get().toast(`Connected ${st.email ?? 'Microsoft account'}`)
-              void get().refreshDashboard()
-              void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
-            }
-          }
-        }, 1500)
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    disconnectMicrosoft: async () => {
-      set({ microsoft: await api.microsoft.disconnect() })
-      clearViews()
-      void get().refreshDashboard()
-      void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
     },
 
     // Latest request wins: a slower, older fetch (another scope, or the mount's) must not overwrite the one the view asked for last.

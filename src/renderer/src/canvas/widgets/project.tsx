@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BookOpen, FileText, FolderKanban, MessageSquare } from 'lucide-react'
+import { BookOpen, FileText, FolderKanban, MessageSquare } from '../../icons'
 import { useProject, useStore } from '../../store'
 import ChatPulse from '../../components/ChatPulse'
 import { useCanvas } from '../store'

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Lock, X } from 'lucide-react'
+import { Lock, X } from '../icons'
 import type { Canvas, CanvasWindow, Rect } from '@shared/types'
 import { useProject } from '../store'
 import { useCanvas } from './store'
@@ -94,7 +94,7 @@ export default function Overview(): JSX.Element {
     <div className="overview" onClick={() => useCanvas.getState().toggleOverview()}>
       <div className="overview-head">
         <b>Overview</b>
-        <span>Click a space to open it · drag a window onto another space · Esc to close</span>
+        <span>Click a canvas to open it · drag a window onto another canvas · Esc to close</span>
         <button className="icon-btn" aria-label="Close overview" title="Close (Esc)"><X size={15} /></button>
       </div>
       {order.map((id) => canvases[id] && <Thumb key={id} canvas={canvases[id]} />)}

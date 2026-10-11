@@ -1,6 +1,6 @@
 # Grain reference
 
-Generated from `GET /tools` on a fresh backend (152 tools). `default` is the mode before any Settings, project or chat override; `locked` marks a tool in the `alwaysAsk` setting (external/schedules danger only), whose mode tops out at `ask`. A tool also needs its backing service (Google connected, sandbox runtime, desktop bridge) to be offered at all.
+Generated from `GET /tools` on a fresh backend (142 tools). `default` is the mode before any Settings, project or chat override; `locked` marks a tool in the `alwaysAsk` setting (external/schedules danger only), whose mode tops out at `ask`. A tool also needs its backing service (Google connected, desktop bridge) to be offered at all.
 
 Danger tiers (`backend/personal_os/tools.py`): `safe` read-only in-app, `writes` in-app write, `network` reads the internet, `executes` sandboxed code, `external` writes to systems outside the app, `plan` the call is itself an approval card, `schedules` books future unattended work. Default mode is `on` for every tier except `plan` (`ask`); a few tools override it (shown below).
 
@@ -63,7 +63,6 @@ Always forced to ask in a reply that has read untrusted content (tainted): netwo
 | `desk_deliver` | writes | on | Nominate a file under outputs/ as a deliverable. |
 | `desk_ask` | plan | ask | Ask the user one question and stop. |
 | `desk_done` | safe | on | Declare this desk finished and say what you did. |
-| `desk_import_sandbox` | writes | on | Copy a text file out of this chat's sandbox into the desk's workspace, overwriting the destination. |
 | `desk_fetch_file` | network | on | Download a file from a public http(s) URL into this desk's workspace (default work/downloads/<name>), at mo... |
 
 ### docs
@@ -177,20 +176,6 @@ Always forced to ask in a reply that has read untrusted content (tainted): netwo
 | tool | danger | default | what it does |
 |---|---|---|---|
 | `todo_write` | writes | on | Write this conversation's plan: the step list you are working from. |
-
-### sandbox
-
-| tool | danger | default | what it does |
-|---|---|---|---|
-| `sandbox_exec` | executes | on | Run a shell command in this chat's persistent Linux sandbox (a VM-isolated container; the host machine is u... |
-| `sandbox_write_file` | executes | on | Write (or append to) a text file in the sandbox. |
-| `sandbox_read_file` | executes | on | Read a file from the sandbox. |
-| `sandbox_list_files` | executes | on | List files in the sandbox (default /workspace, up to 3 levels deep). |
-| `sandbox_put_document` | executes | on | Copy an uploaded file's extracted text into the sandbox as a file, so you can edit, transform or analyse it... |
-| `sandbox_export_file` | writes | on | Copy any file (binary included, up to 10 MB) from the sandbox's /workspace to the user so they can open it:... |
-| `sandbox_reset` | executes | on | Destroy this chat's sandbox and its checkpoints and start the next call from a fresh container. |
-| `sandbox_checkpoint` | executes | on | Save the sandbox's files and installed packages under a name so you can roll back to them with sandbox_rest... |
-| `sandbox_restore` | executes | on | Replace the sandbox with a checkpoint made by sandbox_checkpoint. |
 
 ### schedule
 

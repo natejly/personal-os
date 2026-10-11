@@ -16,6 +16,7 @@ data/
 graphify-out/
 __pycache__/
 build/backend-bundle
+backend/oauth_client.json
 build/.cache
 tests/e2e/results.json
 tests/e2e/node_modules

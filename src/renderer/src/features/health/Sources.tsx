@@ -4,7 +4,7 @@
  * Approval is per tool shape: if the server later changes a tool, sync skips it and this panel says so.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, ChevronRight, ExternalLink, Link2, RefreshCw, Trash2 } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, ChevronRight, ExternalLink, Link2, RefreshCw, Trash2 } from '../../icons'
 import type { HealthProvider, HealthSource, HealthSourcePlan, HealthSyncResult } from '@shared/types'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'

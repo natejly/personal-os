@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CircleHelp, Copy, Download, FolderOpen, RefreshCw } from 'lucide-react'
+import { CircleHelp, Copy, Download, FolderOpen, RefreshCw } from '../icons'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 

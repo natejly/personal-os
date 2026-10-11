@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight, FileText, Folder, FolderOpen, FolderPlus, MoreHorizontal, Pin, Plus, Search, Sparkles, Star,
   Trash2, User
-} from 'lucide-react'
+} from '../icons'
 import type { Doc } from '@shared/types'
 import { useStore } from '../store'
 import type { DocHit } from '../lib/api'

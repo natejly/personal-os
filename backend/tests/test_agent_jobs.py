@@ -14,6 +14,7 @@ import os
 import sys
 import tempfile
 import time
+import types
 from pathlib import Path
 from typing import Any
 
@@ -1106,3 +1107,74 @@ def test_a_desk_job_cannot_carry_a_tool_allowlist() -> None:
     j("PATCH", f"/jobs/{narrowed['id']}", {"allowed_tools": ["current_time"]}, expect=400)
     j("DELETE", f"/jobs/{narrowed['id']}")
 
+
+
+# ---------------- a task's result goes back to the chat that booked it ----------------
+def _origin_chat() -> str:
+    return appmod.convos.create(None, "asked here", "")["id"]
+
+
+def _tick_and_settle(at: float) -> list[dict[str, Any]]:
+    """tick(), then let the wake turn the finished run may have started in its origin chat run to its end."""
+    s = Scheduler(jobs, appmod._launch_job, clock=lambda: at)  # noqa: SLF001
+
+    async def go() -> list[dict[str, Any]]:
+        fired = await s.tick()
+        for f in fired:
+            run = next((r for r in appmod.bus._runs.values() if r.run_id == f["run_id"]), None)  # noqa: SLF001
+            if run is not None and run.task is not None:
+                with contextlib.suppress(Exception):
+                    await run.task
+        for _ in range(40):  # the done-callback schedules the wake; give it a few turns of the loop
+            await asyncio.sleep(0.02)
+        for r in list(appmod.bus._runs.values()):  # noqa: SLF001
+            if r.task is not None and not r.task.done():
+                with contextlib.suppress(Exception):
+                    await r.task
+        return fired
+
+    return asyncio.run(go())
+
+
+def test_schedule_task_records_the_chat_it_was_booked_from() -> None:
+    cid = _origin_chat()
+    ctx = {"project_id": None, "conversation_id": cid, "settings": appmod.settings(),
+           "tainted": False, "taint_sources": [], "allowed_urls": set(), "proposal_only": False}
+    out = asyncio.run(appmod.toolbox.call("schedule_task", {"name": "Chase", "prompt": "Did Acme reply?", "in_minutes": 30}, ctx))
+    assert jobs.get(out["id"])["origin_conversation_id"] == cid
+    assert tool("schedule_task", {"name": "Bare", "prompt": "x", "in_minutes": 30}) and \
+        jobs.get(tool("schedule_task", {"name": "Bare2", "prompt": "x", "in_minutes": 30})["id"])["origin_conversation_id"] is None
+
+
+def test_a_finished_task_wakes_the_chat_that_booked_it() -> None:
+    cid = _origin_chat()
+    job = jobs.create("Chase Acme", "0 * * * *", "Did Acme reply?", timezone="UTC", enabled=True, at=T0, origin_conversation_id=cid)
+    ROUNDS.extend([["Acme replied: invoice approved."], ["Good news: Acme approved the invoice."]])
+    _tick_and_settle(T0 + HOUR + 10)
+    msgs = appmod.convos.get(cid)["messages"]
+    assert [m.get("kind") for m in msgs if m["role"] == "user"] == ["wake"]
+    wake = next(m for m in msgs if m.get("kind") == "wake")
+    assert "Scheduled task" in wake["content"] and "Acme replied: invoice approved." in wake["content"]
+    assert msgs[-1]["role"] == "assistant" and msgs[-1]["content"] == "Good news: Acme approved the invoice."
+    assert not appmod._job_wakes.get(cid)  # noqa: SLF001
+    jobs.delete(job["id"])
+
+
+def test_a_task_that_answers_no_reply_wakes_nobody_and_stays_out_of_the_inbox() -> None:
+    cid = _origin_chat()
+    jobs.create("Quiet booked", "0 * * * *", "Did Acme reply?", timezone="UTC", enabled=True, at=T0, origin_conversation_id=cid)
+    ROUNDS.append(["NO_REPLY"])
+    _tick_and_settle(T0 + HOUR + 10)
+    assert not [m for m in appmod.convos.get(cid)["messages"] if m.get("kind") == "wake"]
+
+    # No origin chat: the run is told it may stay quiet, and a NO_REPLY answer is flagged unchanged so nothing announces it.
+    quiet = jobs.create("Brief", "0 * * * *", "Morning brief", timezone="UTC", enabled=True, at=T0)
+    ROUNDS.append(["NO_REPLY"])
+    fired = _tick_and_settle(T0 + HOUR + 10)
+    row = appmod.run_store.get(next(f["run_id"] for f in fired if f["job_id"] == quiet["id"]))
+    assert row["input"].get("unchanged") is True
+    fake = lambda jid, **k: types.SimpleNamespace(kind="job", input={"job_id": jid, **k})  # noqa: E731
+    assert "NO_REPLY" in appmod._job_hint(fake(quiet["id"]))  # noqa: SLF001
+    assert "NO_REPLY" not in appmod._job_hint(fake(quiet["id"], manual=True))  # noqa: SLF001
+    booked = jobs.create("Booked", "0 * * * *", "x", timezone="UTC", at=T0, origin_conversation_id=cid)
+    assert "NO_REPLY" not in appmod._job_hint(fake(booked["id"]))  # noqa: SLF001

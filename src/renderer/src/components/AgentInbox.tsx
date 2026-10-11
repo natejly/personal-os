@@ -1,5 +1,5 @@
 /**
- * The Agent Inbox on Today. Two sections: "Needs you" (pending approvals and proposals, desks waiting on the user, and
+ * The Agent Inbox, shown under the greeting of a new chat. Two sections: "Needs you" (pending approvals and proposals, desks waiting on the user, and
  * a link into every other review queue: doc edits, skills, workflow runs, memory tidy-ups) and
  * "While you were away" (what the scheduled jobs did, late fires and failures included).
  *
@@ -10,10 +10,10 @@
 import { splitReport } from '../lib/report'
 import { type RoutineDraft } from '../lib/routine'
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Rocket, Timer, Trash2, Users, Wrench, X } from 'lucide-react'
+import { AlertTriangle, Archive, ArchiveRestore, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Rocket, Timer, Trash2, Users, Wrench, X } from '../icons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { AgentInbox as AgentInboxData, AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobSkipRecord, JobStats } from '@shared/types'
+import type { AgentInbox as AgentInboxData, ArchivedInboxRun, AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobSkipRecord, JobStats } from '@shared/types'
 import { useStore, useChatTainted, useChatFaceById } from '../store'
 import { api } from '../lib/api'
 import { DAYS, DEFAULT_SCHEDULE, type Preset, type Schedule, cronPreset, diffJob, presetCron, toLocalInput } from '../lib/jobSchedule'
@@ -219,6 +219,8 @@ function ReportBody({ text }: { text: string }): JSX.Element {
 function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const markInboxRunSeen = useStore((s) => s.markInboxRunSeen)
+  const deleteInboxRun = useStore((s) => s.deleteInboxRun)
+  const archiveInboxRun = useStore((s) => s.archiveInboxRun)
   const chatFace = useChatFaceById(r.conversation_id)
   // An unread problem opens itself; Mark all read collapses it. A row the user opened stays open — that click
   // marks it read too, and a click must not undo itself.
@@ -239,7 +241,7 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   const line = r.error ? oneLine(r.error) : r.summary ? oneLine(r.summary) : `It wrote nothing. ${r.tool_calls} tool call${r.tool_calls === 1 ? '' : 's'}.`
 
   return (
-    <li className={`inbox-item ${r.seen ? 'seen' : ''}`}>
+    <li className={`inbox-item mail-row ${r.seen ? 'seen' : 'unread'} ${open ? 'selected' : ''}`}>
       <div className="inbox-row">
         <RowOpen open={open} what="the report" onOpen={show}>
           <Face {...(r.conversation_id ? chatFace : { name: r.job })} status={r.status} size={18} />
@@ -257,6 +259,14 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
         {r.pending_proposals > 0 && <span className="chip needs">{r.pending_proposals} waiting on you</span>}
         <span className="muted small inbox-when" title={r.attempt > 1 ? 'Re-launched after the earlier run ended in an error' : undefined}>
           {fmtWhen(r.fired_at)}{r.test ? ' · test' : r.manual ? ' · by hand' : ''}{r.attempt > 1 ? ` · retry ${r.attempt}` : ''}
+        </span>
+        {/* Per-message actions show on hover, focus or when the message is open. Delete: the row leaves now and the chat it
+            ran in is kept. Archive: out of the inbox, kept, restorable from Archived. A run still going is refused by the server. */}
+        <span className="inbox-actions">
+          <button className="icon-btn sm" title="Archive this message" aria-label={`Archive the ${r.job} run message`}
+            onClick={() => void archiveInboxRun(r.run_id)}><Archive size={13} /></button>
+          <button className="icon-btn sm" title="Delete this message" aria-label={`Delete the ${r.job} run message`}
+            onClick={() => void deleteInboxRun(r.run_id)}><X size={13} /></button>
         </span>
       </div>
       {open && (
@@ -792,8 +802,15 @@ export function NewTask({ onDone, job, draft, agentId }: { onDone: () => void; j
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, goToDesk, selectChat, setLibraryTab, markDeskSeen, markInboxRunSeen, rejectJobProposals } = useStore()
+  const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, goToDesk, selectChat, setLibraryTab, markDeskSeen, markInboxRunSeen, rejectJobProposals, clearInbox, archiveInboxRun } = useStore()
   const draft = useStore((s) => s.routineDraft)
+  const [showArchived, setShowArchived] = useState(false)
+  const [archivedRuns, setArchivedRuns] = useState<ArchivedInboxRun[]>([])
+  const [archivedQ, setArchivedQ] = useState('')
+  const awayCount = box?.while_you_were_away.length
+  useEffect(() => {
+    if (showArchived) void api.inboxArchived().then(setArchivedRuns).catch(() => undefined)
+  }, [showArchived, awayCount])
   const [showJobs, setShowJobs] = useState(!!draft)
   const [adding, setAdding] = useState(!!draft)
   useEffect(() => { if (draft) { setShowJobs(true); setAdding(true) } }, [draft])
@@ -840,13 +857,16 @@ export default function AgentInbox(): JSX.Element | null {
   }
 
   return (
-    <section className="agent-inbox">
+    <section className="agent-inbox" id="agent-inbox">
       <header>
         <Inbox size={14} /> Agent inbox
         {box.counts.needs_you > 0 && <span className="chip needs">{box.counts.needs_you} need{box.counts.needs_you === 1 ? 's' : ''} you</span>}
         <span className="spacer" />
         {box.scheduler.next_due_at && <span className="muted small"><Timer size={11} /> next job {fmtWhen(box.scheduler.next_due_at)}</span>}
         {box.scheduler.wake_unavailable && <span className="muted small" title="This Mac is not woken for a job: jobs run while the Mac is awake and Grain is open, and a slot missed while asleep runs as soon as it wakes">needs Grain open</span>}
+        <button className={`ghost-btn sm ${showArchived ? 'on' : ''}`} aria-expanded={showArchived} onClick={() => setShowArchived((v) => !v)}>
+          <Archive size={12} /> Archived
+        </button>
         <button className={`ghost-btn sm ${showJobs ? 'on' : ''}`} aria-expanded={showJobs} onClick={toggleJobs}>
           Scheduled ({jobs.length})
         </button>
@@ -931,14 +951,42 @@ export default function AgentInbox(): JSX.Element | null {
         </div>
       )}
 
+      {showArchived && (
+        <div className="inbox-group">
+          <h5>Archived <span className="muted small">{archivedRuns.length} message{archivedRuns.length === 1 ? '' : 's'}</span></h5>
+          {archivedRuns.length > 0 && <input type="search" className="inbox-archive-search" placeholder="Search archived messages" aria-label="Search archived messages" value={archivedQ} onChange={(e) => setArchivedQ(e.target.value)} />}
+          {archivedRuns.length === 0 ? <p className="muted">Nothing archived.</p> : (
+            <ul className="inbox-list">
+              {archivedRuns.filter((r) => `${r.job} ${r.error ?? ''} ${r.summary ?? ''}`.toLowerCase().includes(archivedQ.trim().toLowerCase())).map((r) => (
+                <li className="inbox-item mail-row seen" key={r.run_id}>
+                  <div className="inbox-row">
+                    <span className="inbox-job">{r.job}</span>
+                    <span className="inbox-line" title={r.error || r.summary}>{r.error ? oneLine(r.error) : r.summary ? oneLine(r.summary) : 'It wrote nothing.'}</span>
+                    <span className="muted small inbox-when">{fmtWhen(r.fired_at)}</span>
+                    <span className="inbox-actions show">
+                      <button className="ghost-btn sm" title="Put this message back in the inbox" onClick={() => {
+                        setArchivedRuns((l) => l.filter((x) => x.run_id !== r.run_id))
+                        void archiveInboxRun(r.run_id, false)
+                      }}><ArchiveRestore size={13} /> Restore</button>
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       {away.length > 0 && (
         <div className="inbox-group">
           <h5>While you were away <span className="muted small">
             {box.counts.late > 0 ? `${box.counts.late} late · ` : ''}{box.counts.failed > 0 ? `${box.counts.failed} failed · ` : ''}
             {away.length} run{away.length === 1 ? '' : 's'}</span>
-            {(box.counts.unseen_runs ?? 0) > 0 && (
-              <><span className="spacer" /><button className="link small" onClick={() => void markInboxRunSeen(null)}>Mark all read</button></>
-            )}</h5>
+            <span className="spacer" />
+            {(box.counts.unseen_runs ?? 0) > 0 && <button className="link small" onClick={() => void markInboxRunSeen(null)}>Mark all read</button>}
+            <button className="link small" onClick={() => {
+              if (confirm(`Clear the Agent inbox? This deletes these ${away.length} run message${away.length === 1 ? '' : 's'}; the chats they ran in are kept.`)) void clearInbox()
+            }}>Clear</button></h5>
           <ul className="inbox-list">{away.map((r) => <RunCard key={r.run_id} r={r} />)}</ul>
         </div>
       )}

@@ -1,4 +1,4 @@
-import { Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, CheckSquare, Mail, Laptop, FolderOpen, ListChecks, Layers, GraduationCap, PenLine, HeartPulse, Telescope } from 'lucide-react'
+import { Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, CheckSquare, Mail, Laptop, FolderOpen, ListChecks, Layers, GraduationCap, PenLine, HeartPulse, Telescope } from '../icons'
 import { useState } from 'react'
 import { useStore } from '../store'
 import { askLocked, type ToolInfo, type ToolMode, type ToolOverride } from '@shared/types'

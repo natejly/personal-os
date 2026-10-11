@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Library, Plug, Sparkles, Terminal, Users, Workflow, Zap } from 'lucide-react'
+import { Library, Plug, Sparkles, Terminal, Users, Workflow, Zap } from '../icons'
 import { useStore, type LibraryTab } from '../store'
 import SkillsPanel from './SkillsPanel'
 import McpSettings from './McpSettings'

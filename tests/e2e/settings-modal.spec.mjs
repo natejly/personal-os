@@ -29,8 +29,7 @@ test('every settings tab opens and renders cleanly', async ({ grain }) => {
 
 test('Voice input settings act at once and persist through /voice/config', async ({ grain }) => {
   const { page, api } = grain
-  await openSettings(page, 'Advanced')
-  await dialog(page).locator('summary', { hasText: 'Voice and shortcuts' }).click()
+  await openAdvanced(page, 'Voice and shortcuts')
   await dialog(page).getByLabel('Transcription').first().selectOption('local')
   await field(page, 'Tidy dictation with the model').setChecked(true, { force: true })
   await expect.poll(async () => api('/voice/config')).toMatchObject({ sttBackend: 'local', dictationCleanup: true })
@@ -199,7 +198,7 @@ test('model list comes from the provider and leaves the embedding model out of c
 test('theme and accent apply to the document and persist', async ({ grain }) => {
   const { page, api } = grain
   const html = page.locator('html')
-  await openSettings(page, 'Appearance')
+  await openSettings(page, 'General')
   await dialog(page).getByRole('radio', { name: 'Dark' }).click()
   await expect(html).toHaveAttribute('data-theme', 'dark')
   await dialog(page).getByRole('radio', { name: 'Light' }).click()
@@ -219,7 +218,7 @@ test('theme and accent apply to the document and persist', async ({ grain }) => 
   await closeDirty(page)
   await expect(html).toHaveAttribute('data-theme', saved.theme)
   // Saving keeps it, across relaunch.
-  await openSettings(page, 'Appearance')
+  await openSettings(page, 'General')
   await dialog(page).getByRole('radio', { name: 'Dark' }).click()
   await swatches.nth(2).click()
   const accent = await html.getAttribute('data-accent')
@@ -277,7 +276,7 @@ test('a 200 KB system prompt saves and reloads; junk in view toggles cannot bric
   }
   const p2 = await grain.relaunch()
   await expect(p2.locator('.sidebar').first()).toBeVisible()
-  await openSettings(p2, 'Appearance')
+  await openSettings(p2, 'General')
   await expect(dialog(p2).getByRole('checkbox', { name: 'Library', exact: true })).toBeVisible()
   await closeSettings(p2)
   noErrors(grain)

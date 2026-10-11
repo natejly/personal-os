@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { CalendarDays, ChevronDown, Plus } from 'lucide-react'
+import { CalendarDays, ChevronDown, Plus } from '../../icons'
 import { TEMPLATES, expandTemplate, userTemplates } from './templates'
 import { api } from '../../lib/api'
 import { useStore } from '../../store'

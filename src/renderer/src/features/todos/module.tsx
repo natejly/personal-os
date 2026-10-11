@@ -1,8 +1,7 @@
-import { ListChecks } from 'lucide-react'
+import { ListChecks } from '../../icons'
 import type { ModuleDef } from '../../shell/types'
 import TodosView from '../../components/TodosView'
 import { def as todosWidget } from '../../canvas/widgets/todos'
-import TodosCard from './TodosCard'
 
 export const todosModule: ModuleDef = {
   key: 'todos',
@@ -12,5 +11,4 @@ export const todosModule: ModuleDef = {
   view: { id: 'todos', Component: TodosView, optional: true },
   nav: { order: 12, badge: (s) => s.dashboard?.todo_stats?.open || null },
   widget: todosWidget,
-  home: { key: 'todos', label: 'Lists', Card: TodosCard },
 }

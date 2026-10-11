@@ -1,9 +1,9 @@
-import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Component, memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite, splitSources } from '../lib/remarkCites'
-import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2 } from 'lucide-react'
-import type { Attachment, Message, RunChanges, ToolEvent } from '@shared/types'
+import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Play, RotateCw, Pencil, GitBranch, Trash2, Zap } from '../icons'
+import type { Attachment, Message, RunChanges, Span, ToolEvent } from '@shared/types'
 import { useStore, useMessageSubagents, useSubagents } from '../store'
 import { api } from '../lib/api'
 import { fetchBlobUrl } from '../features/notes/api'
@@ -12,11 +12,13 @@ import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 import { ShowCtx } from './ShowButton'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
+import { replyMetrics } from '../lib/replyMetrics'
+import { compactCount } from '../lib/usageFormat'
 import { parseChatMessage } from '../lib/chatLink'
 import { parseQuotedMessage } from '../lib/selectionActions'
 import { modelLabel } from '../lib/modelLabel'
 import { outcomeLabel } from '../lib/outcomeLabel'
-import { describeCall, staysVisible } from '../lib/toolDisplay'
+import { describeCall, staysVisible, traceLines } from '../lib/toolDisplay'
 import { quietEvents } from '../lib/orchestration'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
@@ -45,72 +47,25 @@ class BodyBoundary extends Component<{ resetKey: string; children: ReactNode }, 
   }
 }
 
-/** A reply that called tools can be turned into a candidate skill. The id sent is this message, not the whole chat. */
-function SaveSkill({ conversationId, messageId }: { conversationId: string; messageId: string }): JSX.Element {
-  const [busy, setBusy] = useState(false)
-  return (
-    <button
-      type="button"
-      className="ctx-chip"
-      disabled={busy}
-      title="Save as skill: turn this run into a skill for you to review. It is not used until you approve it."
-      aria-label={busy ? 'Saving skill…' : 'Save as skill'}
-      aria-busy={busy || undefined}
-      onClick={() => {
-        setBusy(true)
-        void useStore.getState().induceSkill(conversationId, messageId).finally(() => setBusy(false))
-      }}
-    >
-      <GraduationCap size={11} />
-    </button>
-  )
-}
-
-/** One folded line of a reply: closed by default, streaming or not. Only the user's click opens it, and that state lives here, so stream updates keep it. */
-function Fold({ label, live, children }: { label: string; live: boolean; children: ReactNode }): JSX.Element {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className={`reasoning ${live ? 'live' : ''}`}>
-      <button className="reasoning-head" onClick={() => setOpen(!open)} aria-expanded={open}>
-        <ChevronRight size={12} className={open ? 'rot90' : ''} />
-        <span className={`reasoning-label ${live ? 'shimmer' : ''}`}>{label}</span>
-      </button>
-      {open && children}
-    </div>
-  )
-}
-
-/** The thinking summary, opened: it follows the newest line while the reply still thinks. */
-function ThinkingBody({ reasoning, streaming }: { reasoning: string; streaming: boolean }): JSX.Element {
-  const body = useRef<HTMLUListElement>(null)
-  useEffect(() => {
-    if (streaming && body.current) body.current.scrollTop = body.current.scrollHeight
-  }, [reasoning, streaming])
-  return <ul className="reasoning-body" ref={body}>{reasoning.split('\n').map((l, i) => <li key={i}>{l}</li>)}</ul>
-}
-
-/** A reply's thinking and its tool calls that do not need the user, each folded into one line. */
-function ReplyActivity({ reasoning, events, conversationId, streaming, answering, browserSession }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; streaming: boolean; answering: boolean; browserSession?: string }): JSX.Element {
-  const last = events[events.length - 1]
+/**
+ * A reply's trace as one short gray line: the newest step (thinking summary, then each quiet tool call)
+ * replaces the one before it, and the live step shimmers.
+ */
+function ReplyActivity({ reasoning, events, conversationId, streaming, answering, trace }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; streaming: boolean; answering: boolean; trace?: Span[] | null }): JSX.Element {
   const subs = useSubagents(conversationId)
   const live = streaming && !answering
-  const calling = live && events.some((t) => t.pending)
-  // The tools line names what the reply is doing now: the call in flight or its subagents.
-  const now = live ? nowText({ tool_events: events, content: '' }, subs) ?? (last ? describeCall(last.name, last.arguments).verb : null) : null
-  const tools = [`${events.length} tool call${events.length === 1 ? '' : 's'}`, now].filter(Boolean).join(' · ')
+  const lines = traceLines(reasoning, events)
+  // The live step is the call in flight (or its subagents) when there is one, else the newest summary line.
+  const now = live ? nowText({ tool_events: events, content: '' }, subs) : null
+  if (!lines.length) return <></>
+  const line = (l: (typeof lines)[number], i: number): JSX.Element => {
+    const isLive = live && i === lines.length - 1
+    return <span key={i} className={`trace-line ${l.error ? 'err' : ''} ${isLive ? 'shimmer' : ''}`}>{isLive && now && !l.error ? now : l.text}</span>
+  }
   return (
-    <>
-      {reasoning && (
-        <Fold label={live && !calling ? 'Thinking…' : 'Thought'} live={live && !calling}>
-          <ThinkingBody reasoning={reasoning} streaming={streaming} />
-        </Fold>
-      )}
-      {events.length > 0 && (
-        <Fold label={tools} live={live}>
-          <div className="activity-tools"><ToolEvents events={events} conversationId={conversationId} streaming={streaming} browserSession={browserSession} /></div>
-        </Fold>
-      )}
-    </>
+    <div className="trace" aria-live="polite">
+      {line(lines[lines.length - 1], lines.length - 1)}
+    </div>
   )
 }
 
@@ -204,7 +159,7 @@ function ErrorAction({ conversationId, kind }: { conversationId: string; kind: s
 }
 
 // Tools that can change a granted folder; a reply without one never asks the backend for a change list.
-const FILE_CHANGING = /^(write_local_file|move_local_file|trash_local_file|shell_run|opencode_run|fs_edit|fs_copy|fs_mkdir|desk_write_file|desk_trash_file|desk_import_sandbox)$/
+const FILE_CHANGING = /^(write_local_file|move_local_file|trash_local_file|shell_run|opencode_run|fs_edit|fs_copy|fs_mkdir|desk_write_file|desk_trash_file)$/
 
 /** "Files changed (n) · Undo" under a reply that changed files in a granted folder. Undo and Redo are the user's clicks. */
 function FilesChanged({ messageId }: { messageId: string }): JSX.Element | null {
@@ -270,6 +225,20 @@ function TraceChip({ message }: { message: Message }): JSX.Element | null {
   )
 }
 
+/** The per-reply cost chip: total tokens and generation speed, on every finished reply that has a trace.
+ *  It reads no store state, so it stays out of MessageView's render path. */
+function TokenChip({ message }: { message: Message }): JSX.Element | null {
+  const m = replyMetrics(message.trace)
+  if (!m) return null
+  const speed = m.tokPerSec != null ? ` · ${m.tokPerSec.toFixed(1)} tok/s` : ''
+  const title = `${m.tokens.toLocaleString()} tokens used${m.tokPerSec != null ? ` at ${m.tokPerSec.toFixed(1)} tokens/second` : ''}`
+  return (
+    <span className="ctx-chip" title={title}>
+      <span><Zap size={11} />{compactCount(m.tokens)} tok{speed}</span>
+    </span>
+  )
+}
+
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
 // streamed token would re-render every message in every mounted transcript.
 /** `showContextChips`: only ChatView mounts the context drawer, so only it shows chips that open it.
@@ -323,7 +292,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
         ) : (
           <div className="msg-body">
             <BodyBoundary resetKey={message.id}>
-              {(message.reasoning || folded.length > 0) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!content} browserSession={browserSession} />}
+              {(message.reasoning || folded.length > 0) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!content} trace={message.trace} />}
               {trail && <ResearchTrail trail={trail} />}
               {!isUser && <SubagentThread messageId={message.id} conversationId={message.conversation_id} events={events ?? []} />}
               {shown.length > 0 && <ToolEvents events={shown} conversationId={message.conversation_id} streaming={streaming} browserSession={browserSession} />}
@@ -369,17 +338,9 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
                 <span><Share2 size={11} />{ctx.nodes.filter((n) => !n.kind).length}</span>
               </button>
             )}
-            {showContextChips && !isUser && <MemoryChips messageId={message.id} ctx={ctx ?? null} />}
-            {!isUser && events.length > 0 && (
-              <SaveSkill conversationId={message.conversation_id} messageId={message.id} />
-            )}
-            {!isUser && !streaming && content.trim() && (
-              <button type="button" className="ctx-chip" title="Schedule as routine: repeat this on a schedule. It starts switched off, and you can test-run it first."
-                aria-label="Schedule as routine" onClick={() => useStore.getState().scheduleAsRoutine(message.conversation_id, message.id)}>
-                <CalendarClock size={11} />
-              </button>
-            )}
+            {showContextChips && !isUser && <MemoryChips messageId={message.id} />}
             {showContextChips && <TraceChip message={message} />}
+            {!isUser && !streaming && <TokenChip message={message} />}
             {!bare && <CopyButton text={content} />}
             {resendable && isUser && !message.kind && (
               <button type="button" className="ctx-chip" title="Edit and resend: this message and everything after it is hidden" aria-label="Edit message" onClick={() => setEditing(true)}>

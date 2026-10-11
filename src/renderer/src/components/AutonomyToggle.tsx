@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bot } from 'lucide-react'
+import { Bot } from '../icons'
 import type { DeskAutonomy } from '@shared/types'
 import { useStore } from '../store'
 import { AUTONOMY } from '../lib/deskStatus'

@@ -18,4 +18,4 @@ export const codingTone = (s: Status): 'ok' | 'warn' | 'bad' | 'run' | undefined
 
 export const codingStatusLabel = (s: Status): string => (s === 'needs_you' ? 'needs you' : s)
 
-export const AGENT_LABEL: Record<CodingSession['agent'], string> = { claude: 'Claude Code', opencode: 'OpenCode' }
+export const AGENT_LABEL: Record<CodingSession['agent'], string> = { claude: 'Claude Code', opencode: 'OpenCode', pi: 'pi' }

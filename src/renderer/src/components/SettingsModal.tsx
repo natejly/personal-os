@@ -430,6 +430,7 @@ export default function SettingsModal(): JSX.Element {
                 </label>}
                 <Switch title="Name new chats" help="Write a short title after the first reply. A title you typed is never replaced." checked={draft.autoTitle !== false} onChange={(autoTitle) => patch({ autoTitle })} />
                 <Switch title="Suggest next questions" help="Show a few follow-up chips under replies." checked={draft.followUps !== false} onChange={(followUps) => patch({ followUps })} />
+                <Switch title="Notice things in mail" help="Every so often, read recent mail for events that are not on your calendar and offer to add them. Nothing is added until you click." checked={draft.noticer !== false} onChange={(noticer) => patch({ noticer })} />
                 <Switch title="Selection toolbar" help="Explain, summarize, verify or ask about selected text." checked={draft.selectionToolbar !== false} onChange={(selectionToolbar) => patch({ selectionToolbar })} />
                 <Switch title="Summarize old messages automatically" help="When a chat gets long. Off: only when you ask (type /compact)." checked={draft.autoCompact !== false} onChange={(autoCompact) => patch({ autoCompact })} />
               </Sec>

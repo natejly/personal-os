@@ -28,6 +28,7 @@ import logging
 import os
 import re
 import secrets
+import sys
 import threading
 import time
 from pathlib import Path
@@ -36,6 +37,10 @@ from typing import Any, Callable
 from . import mail_attachments, verify
 from .cache import TTLCache, bypassing, cached, dont_cache, invalidates
 from .google_store import ReadStore
+
+# Packaged builds ship the OAuth client in Resources/backend/oauth_client.json (written by
+# scripts/bundle-backend.sh); sys.prefix is Resources/backend/python there.
+BAKED_CLIENT = Path(sys.prefix).parent / "oauth_client.json"
 
 # Google lists the scopes it actually granted in the token response, and that set rarely
 # matches the request byte for byte (openid aliases, scopes granted to this client earlier).
@@ -157,7 +162,8 @@ class Google:
         """Resolve the OAuth client: (client_id, client_secret, source).
 
         A client pasted in Settings wins over the one in the environment, so a user can
-        swap in their own without touching .env. Source is "settings", "env" or None.
+        swap in their own without touching .env. The client baked into a packaged build is the
+        last resort. Source is "settings", "env", "bundled" or None.
         """
         s = self.get_settings()
         if s.get("googleClientId") and s.get("googleClientSecret"):
@@ -165,6 +171,12 @@ class Google:
         cid, sec = os.environ.get("GOOGLE_CLIENT_ID", "").strip(), os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
         if cid and sec:
             return cid, sec, "env"
+        try:
+            baked = json.loads(BAKED_CLIENT.read_text())
+            if baked.get("client_id") and baked.get("client_secret"):
+                return baked["client_id"], baked["client_secret"], "bundled"
+        except (OSError, ValueError, AttributeError):
+            pass
         return None, None, None
 
     def status(self) -> dict[str, Any]:

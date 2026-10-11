@@ -428,7 +428,8 @@ export default function Sidebar(): JSX.Element {
         )}
         {!filtering && groups.length === 0 && pinned.length === 0 && inMessages.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No personal chats yet.'}</p>}
         {!filtering && groups.map((g) => {
-          const folded = foldedDates.has(g.label)
+          // A search always shows its hits, folded or not.
+          const folded = foldedDates.has(g.label) && !query.trim()
           return (
           <section key={g.label}>
             <h4><button className="section-toggle" aria-expanded={!folded} onClick={() => toggleDateGroup(g.label)}><ChevronRight size={11} className={folded ? '' : 'rot90'} /> {g.label}</button></h4>

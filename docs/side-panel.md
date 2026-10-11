@@ -2,7 +2,7 @@
 
 A panel beside the chat for content the assistant wants you to look at while it talks about it:
 a full-page HTML mock-up, an SVG, a diagram, a chart, markdown, or a file on this Mac. It is per
-chat (a chat window in a Space gets its own), resizable from its left edge, and closes with the ×
+chat (a chat window in a canvas gets its own), resizable from its left edge, and closes with the ×
 or by dragging it shut.
 
 ## How it opens

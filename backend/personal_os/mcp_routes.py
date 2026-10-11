@@ -127,6 +127,8 @@ def router(store: McpServers, client: McpClient, server_view: Callable[[dict[str
         servers = store.servers()
         entries = [{**e, "installed": [s["id"] for s in servers if s.get("catalog_id") == e["id"]],
                     "detected": await asyncio.to_thread(mcp_catalog.detect, e)} for e in mcp_catalog.load()["entries"]]
+        # Entries that duplicate a built-in tool stay out of the catalog, unless already installed.
+        entries = [e for e in entries if not e.get("hidden") or e["installed"]]
         return {"entries": entries, "categories": mcp_catalog.CATEGORIES, "runtimes": await asyncio.to_thread(mcp_path.runtimes)}
 
     @r.post("/mcp/catalog/{entry_id}/install")

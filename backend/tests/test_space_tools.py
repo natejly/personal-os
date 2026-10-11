@@ -36,7 +36,7 @@ def test_a_token_in_a_space_name_is_stripped() -> None:
     assert made is not None
     cv.add_window(made["id"], "todos", title=f"List {pat}")
     listed = call("space_list")
-    row = next(s for s in listed["spaces"] if s["canvas_id"] == made["id"])
+    row = next(s for s in listed["canvases"] if s["canvas_id"] == made["id"])
     assert pat not in row["name"] and "[github-pat]" in row["name"]
     assert pat not in row["windows"][0]["title"] and "[github-pat]" in row["windows"][0]["title"]
     stored = cv.get(made["id"])
@@ -45,7 +45,7 @@ def test_a_token_in_a_space_name_is_stripped() -> None:
 
 
 def test_add_arrange_and_guards() -> None:
-    sid = call("space_list")["spaces"][0]["canvas_id"]
+    sid = call("space_list")["canvases"][0]["canvas_id"]
     assert "space_add_widget" in _offered({})
     assert "space_add_widget" not in _offered({"space_add_widget": "off"})
     assert call("space_add_widget", canvas_id=sid, kind="bogus")["error"]

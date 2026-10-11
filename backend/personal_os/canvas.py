@@ -15,11 +15,11 @@ WIDGET_KINDS = (
 WINDOW_STATES = ("normal", "minimized", "maximized", "popped")
 SNAP_MODES = ("off", "grid", "guides", "both")
 
-DEFAULT_NAME = "Space 1"
+DEFAULT_NAME = "Canvas 1"
 # Blank names (a new space, a cleared rename) land here. The first space is numbered; later ones are not.
-FALLBACK_NAME = "Space"
+FALLBACK_NAME = "Canvas"
 # Exact old defaults, rewritten once so an existing install matches the new wording.
-_RENAMED_DEFAULTS = (("Desk 1", DEFAULT_NAME), ("Desk", FALLBACK_NAME))
+_RENAMED_DEFAULTS = (("Desk 1", DEFAULT_NAME), ("Desk", FALLBACK_NAME), ("Space 1", DEFAULT_NAME), ("Space", FALLBACK_NAME))
 WINDOW_JSON = ("restore_bounds", "popout_bounds", "config")
 
 # These tables are owned here, not by db.py: Database._migrate runs inside Database.__init__,

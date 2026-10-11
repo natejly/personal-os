@@ -1479,7 +1479,7 @@ textarea.instructions:focus { border-color: var(--accent); }
 /* ---------- Tool events in messages ---------- */
 .trace { font-size: 12px; margin: 0 0 12px; color: var(--text-muted); }
 .trace-line { line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.trace-line.err { color: var(--danger, var(--text-muted)); }
+.trace-line.err { color: var(--danger); }
 .trace-effort { color: var(--text-faint); }
 
 .tool-events { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; }
@@ -2504,7 +2504,7 @@ select:focus-visible {
 /* Scoped to .plan-panel throughout: the plan approval card uses the same .plan-head / .plan-steps /
    .plan-step names for a different layout, and unscoped rules here used to restyle it. */
 .plan-panel { font-size: 12.5px; }
-/* In the chat's side panel (Checklist tab): a count and Clear, then the steps. Nothing above the composer. */
+/* In the chat's side panel (Checklist tab): a count and Clear, a progress bar, then the steps. */
 .plan-panel > header { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
 .plan-panel .plan-count { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .plan-panel .plan-steps { list-style: none; margin: 6px 0 0; padding: 0; }
@@ -2523,6 +2523,22 @@ select:focus-visible {
 /* Workers sit above the checklist pill, in the status block over the composer. */
 .worker-panel { padding-top: 4px; }
 .chat-main > .worker-panel { margin: 0 auto; width: min(calc(100% - 48px), var(--chat-col)); box-sizing: border-box; }
+/* Multi-step progress above the composer (ProgressCard): one row, the step list unfolds beneath. Same column as the workers card. */
+.chat-main > .progress-card { margin: 0 auto; width: min(calc(100% - 48px), var(--chat-col)); box-sizing: border-box; padding-top: 4px; }
+.progress-card .progress-row { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
+.progress-card .progress-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-card .progress-text b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+.progress-card .progress-row .progress-bar { flex: 1 0 48px; max-width: 220px; margin-left: auto; }
+.progress-card .progress-plan .desk-mark { display: inline-flex; padding-top: 1px; color: var(--text-faint); }
+.progress-card .progress-plan .plan-step.consumed .desk-mark { color: var(--accent); }
+.progress-card .progress-plan .plan-step.done .desk-mark { color: var(--ok); }
+.progress-card .progress-plan .plan-step.failed .desk-mark { color: var(--danger); }
+/* A thin done/total track, in the checklist headers too. */
+.progress-bar { height: 4px; border-radius: 2px; background: var(--border-strong); overflow: hidden; }
+.progress-bar > span { display: block; height: 100%; border-radius: 2px; background: var(--accent-solid); transition: width 0.3s ease; }
+.progress-bar.complete > span { background: var(--ok); }
+.plan-panel > .progress-bar, .desk-plan > .progress-bar { margin: 6px 0 2px; }
+@media (prefers-reduced-motion: reduce) { .progress-bar > span { transition: none; } }
 .worker-panel .worker-row { display: flex; flex-direction: column; gap: 2px; padding: 3px 0; }
 .worker-line { display: flex; align-items: center; gap: 8px; }
 .worker-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0; text-align: left; cursor: pointer; color: var(--text); font: inherit; }

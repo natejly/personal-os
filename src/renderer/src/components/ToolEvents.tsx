@@ -12,7 +12,7 @@ import ApprovalRules from './ApprovalRules'
 import { describeCall, docEditStatus, errorLine, fmtMs, groupSummary, partitionEvents, QUESTION_TOOLS, recalledChats } from '../lib/toolDisplay'
 import { AskQuestion } from './DeskApprovalCard'
 import { GenericApproval, GenericBody } from './toolcards/GenericCard'
-import { OutputFiles } from './toolcards/parts'
+import { OutputFiles, StatusDot } from './toolcards/parts'
 // Importing the index registers every dedicated card (TaskCard, FileCard, and whatever other workstreams add).
 import { TOOL_CARDS } from './toolcards'
 import { quietEvents } from '../lib/orchestration'
@@ -318,6 +318,7 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
       <div className={`tool-event ${t.pending ? 'pending' : ''} ${t.pending && t.needs_approval ? 'awaiting' : ''} ${t.error ? 'error' : ''}`}>
         <button className="tool-head" title={tools.find((x) => x.name === t.name)?.description || t.name} aria-expanded={!!open[t.id]} onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
           <ChevronRight size={12} className={open[t.id] ? 'rot90' : ''} />
+          <StatusDot event={t} />
           <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
           <span className={`tool-name human ${t.pending && !t.needs_approval ? 'shimmer' : ''}`}>{d.verb}</span>
           {t.agent && <span className="tag" title="Raised by a subagent">via {t.agent}</span>}
@@ -402,12 +403,14 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
         if (it.kind === 'single') return renderEvent(it.event)
         // Open while the reply streams, folded once it is done or loaded from history; a manual toggle wins.
         const isOpen = groupOpen[it.key] ?? !!streaming
+        const failed = it.events.filter((e) => e.error).length
         return (
           <div key={`g-${it.key}`} className="tool-event tool-group">
             <button className="tool-head" aria-expanded={isOpen} onClick={() => setGroupOpen((g) => ({ ...g, [it.key]: !isOpen }))}>
               <ChevronRight size={12} className={isOpen ? 'rot90' : ''} />
+              <span className={`status-dot ${failed ? 'failed' : 'done'}`} role="img" aria-label={failed ? 'Some calls failed' : 'Succeeded'} />
               <span className="tool-icon"><ListChecks size={13} /></span>
-              <span className="tool-summary">{groupSummary(it.events)}</span>
+              <span className="tool-summary">{groupSummary(it.events)}{failed > 0 && <span className="group-failed"> · {failed} failed</span>}</span>
             </button>
             {isOpen && <div className="tool-group-rows">{it.events.map(renderEvent)}</div>}
           </div>

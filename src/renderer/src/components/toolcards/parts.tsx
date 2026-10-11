@@ -156,6 +156,16 @@ export function StatusChip({ event }: { event: ToolEvent }): JSX.Element {
   return <span className={`tc-status ${s}`} role="status">{STATUS[s].icon}<span className={s === 'running' ? 'shimmer' : undefined}>{label}</span></span>
 }
 
+const DOT_LABEL: Record<CardStatus, string> = {
+  running: 'Running', awaiting: 'Needs approval', denied: 'Denied', failed: 'Failed', unverified: 'Unverified', verified: 'Succeeded', done: 'Succeeded'
+}
+
+/** A small outcome dot: green once the call succeeded, red when it failed, a pulsing accent while it runs. */
+export function StatusDot({ event }: { event: ToolEvent }): JSX.Element {
+  const s = cardStatus(event)
+  return <span className={`status-dot ${s}`} role="img" aria-label={DOT_LABEL[s]} title={DOT_LABEL[s]} />
+}
+
 const fmtSize = (n: number): string =>
   n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`
 

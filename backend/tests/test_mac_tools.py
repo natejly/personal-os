@@ -24,6 +24,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for d in ("Desktop", "Documents", "Downloads", "Library/Keychains", ".ssh"):
         (h / d).mkdir(parents=True)
     monkeypatch.setenv("HOME", str(h))
+    monkeypatch.setattr(osplat, "_current", osplat._build("darwin"))  # these tests describe the macOS Trash in ~/.Trash
     return h
 
 

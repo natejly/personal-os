@@ -1,6 +1,8 @@
 """macOS. Keychain for secrets, Seatbelt (sandbox-exec) for confinement, `open`, Spotlight, Shortcuts and screen capture."""
 from __future__ import annotations
 
+import base64
+import logging
 import os
 import re
 import shutil
@@ -10,6 +12,8 @@ from typing import Any
 
 from . import seatbelt
 from .base import CommonPaths, Platform, PosixProc, home, run_opener, which
+
+log = logging.getLogger("personal_os.secrets")
 
 
 class DarwinPaths(CommonPaths):
@@ -21,11 +25,57 @@ class DarwinPaths(CommonPaths):
 
 
 class DarwinSecrets:
+    """The login Keychain through the `security` CLI in interactive mode, fed on stdin so a secret never appears in argv.
+    The value is base64-wrapped and passed hex-encoded (-X), which keeps newlines and non-ASCII safe through `-w`."""
+    NOT_FOUND = 44   # `security` exit status for "item could not be found"
+
     def keychain_available(self) -> bool:
-        return True   # the Keychain code in secrets.py falls back to the file when `security` fails
+        return True   # SecretStore falls back to the file when `security` fails
+
+    def keychain_reason(self) -> str | None:
+        return None
 
     def store_name(self) -> str:
         return "keychain"
+
+    def _security(self, command: str) -> subprocess.CompletedProcess[str] | None:
+        try:
+            return subprocess.run(["security", "-i"], input=command + "\n", capture_output=True, text=True, timeout=15)
+        except (OSError, subprocess.SubprocessError) as e:
+            log.warning("Keychain unavailable (%s); using the secrets file", e)
+            return None
+
+    @staticmethod
+    def _quote(s: str) -> str:
+        return "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+    def get(self, service: str, name: str) -> str | None:
+        r = self._security(f"find-generic-password -s {self._quote(service)} -a {self._quote(name)} -w")
+        if r is None:
+            return None
+        if r.returncode != 0 or not r.stdout.strip():
+            if r.returncode not in (0, self.NOT_FOUND):
+                log.warning("Keychain read of %s failed (%s)", name, r.returncode)
+            return None
+        try:
+            return base64.b64decode(r.stdout.strip()).decode()
+        except ValueError:
+            return None
+
+    def set(self, service: str, name: str, value: str) -> bool:
+        hexed = base64.b64encode(value.encode()).hex()
+        r = self._security(f"add-generic-password -U -s {self._quote(service)} -a {self._quote(name)} -X {hexed}")
+        if r is None:
+            return False
+        if r.returncode != 0:
+            log.warning("Keychain write of %s failed (%s); using the secrets file", name, r.returncode)
+            return False
+        return True
+
+    def delete(self, service: str, name: str) -> None:
+        r = self._security(f"delete-generic-password -s {self._quote(service)} -a {self._quote(name)}")
+        if r is not None and r.returncode not in (0, self.NOT_FOUND):
+            log.warning("Keychain delete of %s failed (%s)", name, r.returncode)
 
 
 class DarwinSandbox:
@@ -85,6 +135,14 @@ class DarwinDesktop:
         for r in roots:
             argv += ["-onlyin", r]
         return argv + (["-name", query] if name_only else [query])
+
+    def trash(self, path: str) -> str:
+        from . import trash
+        return trash.darwin_trash(path)
+
+    def trash_note(self) -> str:
+        from . import trash
+        return trash.MAC_NOTE
 
     def can(self, feature: str) -> bool:
         if feature == "file_search":

@@ -87,7 +87,34 @@ function ContextMeterView({ conversationId, refreshKey }: { conversationId: stri
   )
 }
 
-function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
+/** The exact messages and tool schemas each model round of a reply received (captured by the backend). */
+function ExactRequest({ messageId }: { messageId: string }): JSX.Element {
+  const [rounds, setRounds] = useState<Awaited<ReturnType<typeof api.messageRequests>> | null | undefined>(undefined)
+  const [open, setOpen] = useState<number | null>(null)
+  useEffect(() => { setRounds(undefined); setOpen(null) }, [messageId])
+  const load = (): void => { void api.messageRequests(messageId).then(setRounds).catch(() => setRounds(null)) }
+  if (rounds === undefined) return <div className="ctx-meta"><button className="link" onClick={load}>Exact request</button></div>
+  if (!rounds) return <div className="ctx-meta muted">No request was captured for this reply.</div>
+  return (
+    <section>
+      <h5>Exact request ({rounds.length} {rounds.length === 1 ? 'round' : 'rounds'})</h5>
+      {rounds.map((r) => {
+        const json = JSON.stringify({ model: r.model, tool_choice: r.tool_choice, messages: r.messages, tools: r.tools }, null, 2)
+        return (
+          <div key={r.round + r.tokens} className="ctx-meta">
+            #{r.round} {r.model} · {r.messages.length} messages · {r.tools.length} tools · ~{r.tokens} tokens{' '}
+            <button className="link" onClick={() => setOpen(open === r.round ? null : r.round)}>{open === r.round ? 'hide' : 'view'}</button>{' '}
+            <button className="link" onClick={() => void navigator.clipboard.writeText(json)}>copy</button>{' '}
+            <a className="link" href={`data:application/json;charset=utf-8,${encodeURIComponent(json)}`} download={`request-${messageId}-${r.round}.json`}>download</a>
+            {open === r.round && <pre className="ctx-prompt">{json}</pre>}
+          </div>
+        )
+      })}
+    </section>
+  )
+}
+
+function ContextUsedView({ ctx, messageId }: { ctx: ContextUsed; messageId?: string }): JSX.Element {
   const openMemory = useStore((s) => s.openMemory)
   const openFiles = useStore((s) => s.openFiles)
   const memories = useStore((s) => s.memories)
@@ -105,6 +132,7 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
         {devTools && <button className="link" onClick={() => setShowPrompt((v) => !v)}>{showPrompt ? 'hide' : 'view full system prompt'}</button>}
       </div>
       {devTools && showPrompt && <pre className="ctx-prompt">{ctx.system_prompt}</pre>}
+      {messageId && <ExactRequest messageId={messageId} />}
       {!has && <p className="muted">Nothing from memory, graph, or files was relevant.</p>}
       {ctx.page && (
         <section>
@@ -203,7 +231,7 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
   }))
   const lastCtx = useMemo(() => {
     const ms = convo?.messages ?? []
-    for (let i = ms.length - 1; i >= 0; i--) if (ms[i].context_used) return ms[i].context_used
+    for (let i = ms.length - 1; i >= 0; i--) if (ms[i].context_used) return { ctx: ms[i].context_used!, id: ms[i].id }
     return null
   }, [convo?.messages])
   const traceMsg = useMemo(() => {
@@ -287,7 +315,7 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
       </div>
 
       {tab === 'last' ? (
-        lastCtx ? <ContextUsedView ctx={lastCtx} /> : <p className="muted ctx-empty">Send a message to see its context.</p>
+        lastCtx ? <ContextUsedView ctx={lastCtx.ctx} messageId={lastCtx.id} /> : <p className="muted ctx-empty">Send a message to see its context.</p>
       ) : tab === 'trace' ? (
         traceMsg ? (
           <TraceView spans={traceMsg.trace ?? []} live={streamingMessageId === traceMsg.id} model={traceMsg.model} messageId={traceMsg.id} />

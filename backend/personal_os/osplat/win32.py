@@ -9,7 +9,31 @@ from pathlib import Path
 from .base import CommonPaths, FileSecrets, NoSandbox, Platform, home
 
 
+# Credential stores and browser profiles on Windows, relative to home (AppData is where %APPDATA% / %LOCALAPPDATA% live).
+WIN_CRED_DIRS = (
+    "AppData/Roaming/Microsoft/Credentials", "AppData/Roaming/Microsoft/Protect", "AppData/Roaming/Microsoft/Vault",
+    "AppData/Local/Microsoft/Credentials", "AppData/Local/Microsoft/Vault",
+    "AppData/Local/Google/Chrome/User Data", "AppData/Local/Microsoft/Edge/User Data",
+    "AppData/Local/BraveSoftware", "AppData/Local/Vivaldi", "AppData/Roaming/Opera Software",
+    "AppData/Roaming/Mozilla/Firefox/Profiles", "AppData/Local/Mozilla/Firefox/Profiles",
+    "AppData/Roaming/Grain", "AppData/Roaming/personal-os", "AppData/Local/Grain", ".gnupg",
+)
+
+
 class WindowsPaths(CommonPaths):
+    def keychain_dirs(self) -> tuple[str, ...]:
+        return WIN_CRED_DIRS
+
+    def system_keychains(self) -> tuple[str, ...]:
+        return ()
+
+    def browser_dirs(self) -> tuple[str, ...]:
+        return ()
+
+    def sensitive_labels(self) -> tuple[str, ...]:
+        return ("~/.ssh", "Windows Credential Manager and DPAPI keys", "Browser cookies and saved passwords",
+                "~/.aws, ~/.gnupg, ~/.netrc, gh tokens", ".env files")
+
     def data_dir(self) -> Path:
         return Path(os.environ.get("APPDATA") or home() / "AppData" / "Roaming") / "personal-os" / "data"
 
@@ -59,6 +83,14 @@ class WindowsDesktop:
 
     def file_search_argv(self, query: str, roots: list[str], name_only: bool) -> list[str] | None:
         return None
+
+    def trash(self, path: str) -> str:
+        from . import trash
+        return trash.win32_trash(path)
+
+    def trash_note(self) -> str:
+        from . import trash
+        return trash.WINDOWS_NOTE
 
     def can(self, feature: str) -> bool:
         return feature in ("open_path", "reveal_path", "open_url")

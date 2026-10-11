@@ -14,6 +14,7 @@ function PythonCard(props: ToolCardProps): JSX.Element {
   const code0 = num(d?.exit_code)
   return (
     <CardShell {...props} icon={<FileCode2 size={14} />} title="Run Python" hideResult={!unreadable(p, event)}>
+      {props.pending && window.os.platform !== 'darwin' && <div className="tc-hint warn">Runs unsandboxed on this computer, with access to your files and the network.</div>}
       <MonoBlock text={code} label="Script" collapseAt={6} empty="(no code)" />
       {d && !event.error && (
         <div className="tc-statusrow">

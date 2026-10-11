@@ -23,6 +23,9 @@ KEYCHAIN_DIRS = ("Library/Keychains", "Library/Cookies", "Library/Containers/com
 SYSTEM_KEYCHAINS = ("/Library/Keychains",)
 # Where the browsers keep a profile, relative to the home folder.
 BROWSER_SUPPORT_DIR = "Library/Application Support"
+# Browser profile folders under that parent (macOS names; another platform lists its own, or puts whole profile folders
+# in keychain_dirs and returns ()).
+BROWSER_DIRS = ("Google/Chrome", "Arc", "BraveSoftware", "Microsoft Edge", "Chromium", "Vivaldi", "Firefox")
 APP_BUNDLE = "/Applications/Grain.app"
 
 
@@ -36,12 +39,18 @@ class Paths(Protocol):
     def keychain_dirs(self) -> tuple[str, ...]: ...      # relative to home: keychains and cookie jars
     def system_keychains(self) -> tuple[str, ...]: ...   # absolute
     def browser_support_dir(self) -> str: ...            # relative to home: parent of the browser profile folders
+    def browser_dirs(self) -> tuple[str, ...]: ...       # relative to browser_support_dir: profile folders judged by file name
+    def sensitive_labels(self) -> tuple[str, ...]: ...   # what the System access panel lists as asking first
 
 
 @runtime_checkable
 class Secrets(Protocol):
     def keychain_available(self) -> bool: ...
     def store_name(self) -> str: ...         # "keychain" or "file"
+    def keychain_reason(self) -> str | None: ...   # why the OS store is unusable; None when it is usable
+    def get(self, service: str, name: str) -> str | None: ...
+    def set(self, service: str, name: str, value: str) -> bool: ...   # False = refused, the caller keeps it in the file
+    def delete(self, service: str, name: str) -> None: ...
 
 
 @runtime_checkable
@@ -61,6 +70,8 @@ class Desktop(Protocol):
     def open_path(self, path: str, reveal: bool = False) -> None: ...   # open with the default app, or show in the file manager
     def open_url(self, url: str) -> None: ...
     def file_search_argv(self, query: str, roots: list[str], name_only: bool) -> list[str] | None: ...
+    def trash(self, path: str) -> str: ...    # move to the Trash; returns where it ended up. Raises osplat.Unsupported (an OSError) with a user-facing message
+    def trash_note(self) -> str: ...          # what to tell the user about getting it back
     def can(self, feature: str) -> bool: ...  # screenshot, file_search, shortcuts, frontmost_app, screen_recording, ...
 
 
@@ -170,6 +181,18 @@ class FileSecrets:
     def store_name(self) -> str:
         return "file"
 
+    def keychain_reason(self) -> str | None:
+        return "this platform has no secret store"
+
+    def get(self, service: str, name: str) -> str | None:
+        return None
+
+    def set(self, service: str, name: str, value: str) -> bool:
+        return False
+
+    def delete(self, service: str, name: str) -> None:
+        return None
+
 
 def home() -> Path:
     return Path(os.path.expanduser("~"))
@@ -195,6 +218,12 @@ class CommonPaths:
 
     def browser_support_dir(self) -> str:
         return BROWSER_SUPPORT_DIR
+
+    def browser_dirs(self) -> tuple[str, ...]:
+        return BROWSER_DIRS
+
+    def sensitive_labels(self) -> tuple[str, ...]:
+        return ("~/.ssh", "Keychains", "Browser cookies and saved passwords", "~/.aws, ~/.gnupg, ~/.netrc, gh tokens", ".env files")
 
 
 def run_opener(argv: list[str]) -> None:

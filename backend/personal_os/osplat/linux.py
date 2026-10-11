@@ -3,11 +3,39 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 from .base import CommonPaths, FileSecrets, NoSandbox, Platform, PosixProc, home, run_opener, which
 
 
+# Credential stores and browser profiles on Linux, relative to home. Whole folders: opening any file in one needs approval.
+LINUX_CRED_DIRS = (
+    ".local/share/keyrings", ".local/share/gnome-keyring", ".config/keyring", ".gnupg", ".password-store", ".pki",
+    ".mozilla", "snap/firefox", ".var/app/org.mozilla.firefox", "snap/chromium", ".var/app/com.google.Chrome",
+    ".var/app/org.chromium.Chromium", ".var/app/com.brave.Browser", ".var/app/com.microsoft.Edge",
+    ".config/google-chrome", ".config/google-chrome-beta", ".config/chromium", ".config/BraveSoftware",
+    ".config/microsoft-edge", ".config/vivaldi", ".config/opera", ".config/chrome-for-testing",
+    ".config/Grain", ".config/grain", ".local/share/Grain", ".local/share/personal-os",
+)
+
+
 class LinuxPaths(CommonPaths):
+    def keychain_dirs(self) -> tuple[str, ...]:
+        return LINUX_CRED_DIRS
+
+    def system_keychains(self) -> tuple[str, ...]:
+        return ()
+
+    def browser_support_dir(self) -> str:
+        return ".config"
+
+    def browser_dirs(self) -> tuple[str, ...]:
+        return ()   # the profile folders are in keychain_dirs whole
+
+    def sensitive_labels(self) -> tuple[str, ...]:
+        return ("~/.ssh", "Keyrings and ~/.password-store", "Browser cookies and saved passwords",
+                "~/.aws, ~/.gnupg, ~/.netrc, gh tokens", ".env files")
+
     def data_dir(self) -> Path:
         return Path(os.environ.get("XDG_DATA_HOME") or home() / ".local" / "share") / "personal-os" / "data"
 
@@ -50,11 +78,24 @@ class LinuxDesktop:
     def file_search_argv(self, query: str, roots: list[str], name_only: bool) -> list[str] | None:
         return None
 
+    def trash(self, path: str) -> str:
+        from . import trash
+        return trash.linux_trash(path)
+
+    def trash_note(self) -> str:
+        from . import trash
+        return trash.LINUX_NOTE
+
     def can(self, feature: str) -> bool:
         if feature in ("open_path", "reveal_path", "open_url"):
             return which("xdg-open")
         return False
 
 
+def _linux_secrets() -> Any:
+    from .linux_secrets import LinuxSecrets
+    return LinuxSecrets()
+
+
 def build() -> Platform:
-    return Platform("linux", LinuxPaths(), FileSecrets(), NoSandbox(), LinuxDesktop(), LinuxProc())
+    return Platform("linux", LinuxPaths(), _linux_secrets(), NoSandbox(), LinuxDesktop(), LinuxProc())

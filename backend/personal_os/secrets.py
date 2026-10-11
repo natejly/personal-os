@@ -1,11 +1,9 @@
-"""Secret storage: the macOS login Keychain, with a 0600 JSON file in the data dir as the fallback.
+"""Secret storage: the platform's store (macOS Keychain, Linux Secret Service), with a 0600 JSON file in the data dir as the fallback.
 
 Every secret is one named string. Reads and writes go through an in-process cache so the settings
 layer (read on nearly every request) never shells out more than once per name.
 
-Keychain access uses the `security` CLI in interactive mode (`security -i`) and feeds the command on
-stdin, so the secret never appears in argv (visible to `ps`). The value is base64-wrapped and passed
-hex-encoded (-X), which keeps newlines and non-ASCII safe through `find-generic-password -w`.
+The store itself lives behind osplat.current().secrets (get/set/delete, keychain_available, keychain_reason).
 
 A Keychain failure (locked, no GUI session, denied, no `security` binary) never raises: the secret goes to
 the file instead and the failure is logged. Reads check the file first (it only holds what the Keychain refused, so it is newer), then the Keychain.
@@ -14,11 +12,9 @@ GRAIN_SECRETS_BACKEND=file forces the file backend (tests, headless installs).
 """
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import os
-import subprocess
 import threading
 from pathlib import Path
 
@@ -28,7 +24,6 @@ log = logging.getLogger("personal_os.secrets")
 
 SERVICE = os.environ.get("GRAIN_KEYCHAIN_SERVICE", "Grain")
 FILE_NAME = ".secrets.json"
-_NOT_FOUND = 44  # `security` exit status for "item could not be found"
 
 
 def _teach_logs(value: str | None) -> None:
@@ -52,9 +47,18 @@ class SecretStore:
     def __init__(self, data_dir: str | Path, backend: str | None = None):
         self.path = Path(data_dir) / FILE_NAME
         want = (backend or os.environ.get("GRAIN_SECRETS_BACKEND") or "").strip().lower()
-        self.use_keychain = want != "file" and osplat.current().secrets.keychain_available()
+        self.forced_file = want == "file"
+        self._use_keychain: bool | None = None   # tests pin it; otherwise ask the platform each time (it caches and re-probes)
         self._cache: dict[str, str | None] = {}
         self._lock = threading.RLock()
+
+    @property
+    def use_keychain(self) -> bool:
+        return self.status()[0]
+
+    @use_keychain.setter
+    def use_keychain(self, value: bool) -> None:
+        self._use_keychain = value
 
     # ---- public ----
     def get(self, name: str) -> str | None:
@@ -91,45 +95,25 @@ class SecretStore:
                 self._file_drop(name)
             self._cache[name] = None
 
-    # ---- keychain ----
-    def _security(self, command: str) -> subprocess.CompletedProcess[str] | None:
-        try:
-            return subprocess.run(["security", "-i"], input=command + "\n", capture_output=True, text=True, timeout=15)
-        except (OSError, subprocess.SubprocessError) as e:
-            log.warning("Keychain unavailable (%s); using the secrets file", e)
-            return None
-
-    @staticmethod
-    def _quote(s: str) -> str:
-        return "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'"
-
+    # ---- keychain (the platform's store) ----
     def _kc_get(self, name: str) -> str | None:
-        r = self._security(f"find-generic-password -s {self._quote(SERVICE)} -a {self._quote(name)} -w")
-        if r is None:
-            return None
-        if r.returncode != 0 or not r.stdout.strip():
-            if r.returncode not in (0, _NOT_FOUND):
-                log.warning("Keychain read of %s failed (%s)", name, r.returncode)
-            return None
-        try:
-            return base64.b64decode(r.stdout.strip()).decode()
-        except ValueError:
-            return None
+        return osplat.current().secrets.get(SERVICE, name)
 
     def _kc_set(self, name: str, value: str) -> bool:
-        hexed = base64.b64encode(value.encode()).hex()
-        r = self._security(f"add-generic-password -U -s {self._quote(SERVICE)} -a {self._quote(name)} -X {hexed}")
-        if r is None:
-            return False
-        if r.returncode != 0:
-            log.warning("Keychain write of %s failed (%s); using the secrets file", name, r.returncode)
-            return False
-        return True
+        return osplat.current().secrets.set(SERVICE, name, value)
 
     def _kc_delete(self, name: str) -> None:
-        r = self._security(f"delete-generic-password -s {self._quote(SERVICE)} -a {self._quote(name)}")
-        if r is not None and r.returncode not in (0, _NOT_FOUND):
-            log.warning("Keychain delete of %s failed (%s)", name, r.returncode)
+        osplat.current().secrets.delete(SERVICE, name)
+
+    def status(self) -> tuple[bool, str | None]:
+        """(is the OS store in use, why not). Shown to the user: keys in the file are unencrypted."""
+        if self.forced_file:
+            return False, "forced file backend"
+        if self._use_keychain is not None:
+            return self._use_keychain, None if self._use_keychain else "keychain disabled"
+        s = osplat.current().secrets
+        ok = s.keychain_available()
+        return ok, None if ok else s.keychain_reason()
 
     # ---- file ----
     def _file_read(self) -> dict[str, str]:

@@ -94,11 +94,8 @@ CITE_RULE = "When a sentence relies on an excerpt, end it with that excerpt's nu
 # the same wording for the Settings box. Kept short: they are behaviour, not context.
 DIRECTNESS_RULES = (
     "## Working style\n"
-    "- Be direct: answer what was asked, with no preamble and without restating the question. When what is already in "
-    "front of you answers the question, answer it in plain text — do not make tool calls or retrieve context that would "
-    "not change the answer.\n"
-    "- When you hand work to a subagent or background worker, say so in your reply and name what is running, so a reply "
-    "never comes back as bare tool calls with no visible output."
+    "- Be direct: answer what was asked, with no preamble and without restating the question. When what is in front of "
+    "you already answers, answer in plain text without tool calls."
 )
 
 def cite_ref(h: dict[str, Any], n: int) -> dict[str, Any]:

@@ -18,6 +18,8 @@ export interface DiffLine {
   newNo: number | null
   /** Set on a del/add pair that is a rewording, so the row can highlight just the words that moved. */
   parts?: WordPart[]
+  /** True on a del/add pair that is a rewording; `parts` is then computed on first read. */
+  reworded?: boolean
 }
 
 export interface Hunk {
@@ -206,8 +208,6 @@ function similarity(a: string, b: string): number {
 }
 
 const REWORD_THRESHOLD = 0.4
-/** Word-diff cells spent on one document; past it, reworded lines show as plain delete/add rows so a huge rewrite never stalls the editor. */
-const WORD_CELLS = 3_000_000
 
 /**
  * Line diff with intra-line refinement. A run of deletions immediately followed by additions is
@@ -218,7 +218,6 @@ export function diffLines(before: string, after: string): DiffLine[] {
   // insertion rather than as replacing a phantom blank line. ('a\n' really does end in a blank line.)
   const split = (s: string): string[] => (s === '' ? [] : s.split('\n'))
   const lines = lcsDiff(split(before), split(after))
-  let spent = 0
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].op !== 'del') continue
     let dEnd = i
@@ -229,12 +228,14 @@ export function diffLines(before: string, after: string): DiffLine[] {
     for (let k = 0; i + k < dEnd && dEnd + k < aEnd; k++) {
       const del = lines[i + k]
       const add = lines[dEnd + k]
-      const cells = (del.text.length * add.text.length) / 9 // about three characters per token
-      if (spent + cells <= WORD_CELLS && similarity(del.text, add.text) >= REWORD_THRESHOLD) {
-        spent += cells
-        const { before: bp, after: ap } = wordDiff(del.text, add.text)
-        del.parts = bp
-        add.parts = ap
+      if (similarity(del.text, add.text) >= REWORD_THRESHOLD) {
+        // The word-level diff is the expensive part, so it runs the first time a row reads `parts` (DiffView only
+        // reads the rows it draws), once per pair.
+        let both: ReturnType<typeof wordDiff> | undefined
+        const get = (): ReturnType<typeof wordDiff> => (both ??= wordDiff(del.text, add.text))
+        del.reworded = add.reworded = true
+        Object.defineProperty(del, 'parts', { get: () => get().before, enumerable: true, configurable: true })
+        Object.defineProperty(add, 'parts', { get: () => get().after, enumerable: true, configurable: true })
       }
     }
     i = aEnd - 1
@@ -249,7 +250,7 @@ export function diffStat(lines: DiffLine[]): DiffStat {
   for (const l of lines) {
     if (l.op === 'add') added++
     else if (l.op === 'del') removed++
-    if (l.parts) changed++
+    if (l.reworded) changed++
   }
   return { added, removed, changed: Math.floor(changed / 2) }
 }

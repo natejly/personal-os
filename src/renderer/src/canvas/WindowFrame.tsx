@@ -158,7 +158,7 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
           stays as the status glyph's home. */}
       <div
         className="win-move"
-        title={locked ? 'Space locked · right-click for window options' : 'Drag to move · right-click for window options'}
+        title={locked ? 'Canvas locked · right-click for window options' : 'Drag to move · right-click for window options'}
         onPointerDown={locked ? undefined : onDragPointerDown}
       >
         <span className="win-grip">{status}</span>

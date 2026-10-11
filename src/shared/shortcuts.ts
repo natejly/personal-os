@@ -96,7 +96,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'close-window', label: 'Close Window', keys: 'CmdOrCtrl+W', group: 'Windows', action: 'close-window', scope: 'window' },
   { id: 'minimize-window', label: 'Minimize', keys: 'CmdOrCtrl+M', group: 'Windows', action: 'minimize-window', scope: 'window' },
   { id: 'popout', label: 'Pop Out', keys: 'Control+Command+O', group: 'Windows', action: 'canvas:popout', scope: 'window' },
-  { id: 'unpopout', label: 'Return to Space', keys: 'Control+Command+Shift+O', group: 'Windows', action: 'canvas:unpopout', scope: 'window' },
+  { id: 'unpopout', label: 'Return to Canvas', keys: 'Control+Command+Shift+O', group: 'Windows', action: 'canvas:unpopout', scope: 'window' },
   { id: 'pin', label: 'Pin on Top', keys: 'Control+Command+P', group: 'Windows', action: 'canvas:pin', scope: 'window' },
   { id: 'opacity-down', label: 'More Transparent', keys: 'Control+Command+[', group: 'Windows', action: 'canvas:opacity:down', scope: 'window' },
   { id: 'opacity-up', label: 'Less Transparent', keys: 'Control+Command+]', group: 'Windows', action: 'canvas:opacity:up', scope: 'window' },

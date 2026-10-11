@@ -203,8 +203,8 @@ export default function Canvas(): JSX.Element {
     view: 'canvas',
     label: canvas ? `Canvas “${canvas.name}”` : 'Canvases',
     detail: windows.length
-      ? `The space has these widgets open:\n${lines(windows, (w) => `${w.kind}${w.title ? ` “${w.title}”` : ''}${w.ref_id ? ` (\`${w.ref_id}\`)` : ''}`)}`
-      : 'The space is empty.',
+      ? `The canvas has these widgets open:\n${lines(windows, (w) => `${w.kind}${w.title ? ` “${w.title}”` : ''}${w.ref_id ? ` (\`${w.ref_id}\`)` : ''}`)}`
+      : 'The canvas is empty.',
     refs: windows.filter((w) => w.ref_id).slice(0, 40).map((w) => ({ kind: w.kind, id: w.ref_id as string, name: w.title })),
     hints: ['What is on this space?', 'What should I look at first?']
   }), [canvas?.id, canvas?.name, windows])
@@ -513,8 +513,8 @@ export default function Canvas(): JSX.Element {
         </div>
         {marquee && <div className="canvas-marquee" style={screenRect(marquee, view)} />}
         {loaded && !shown.length && intro && !locked && canvas && (
-          <div className="canvas-empty canvas-intro" role="note" aria-label="About spaces">
-            <strong>This is a space</strong>
+          <div className="canvas-empty canvas-intro" role="note" aria-label="About canvases">
+            <strong>This is a canvas</strong>
             <span>Lay out chats, notes, docs and your apps side by side, then pop any window out on top of other apps. Drag anything here from the sidebar.</span>
             <div className="canvas-intro-actions">
               <button className="primary-btn" onClick={() => void useCanvas.getState().newChatWindow()}><MessageSquarePlus size={14} /> New chat</button>
@@ -525,7 +525,7 @@ export default function Canvas(): JSX.Element {
         )}
         {loaded && !shown.length && !(intro && !locked && canvas) && (
           <div className="canvas-empty">
-            <strong>Empty space</strong>
+            <strong>Empty canvas</strong>
             <span>{locked ? 'This space is locked. Unlock it (⌃⌘L) to add widgets.' : 'Drag anything from the sidebar, or right-click to add a widget.'}</span>
           </div>
         )}

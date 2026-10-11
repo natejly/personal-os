@@ -141,7 +141,7 @@ export function AddWidgetButton(): JSX.Element {
     <>
       <button
         className="icon-btn ghost sm"
-        title={locked ? 'Space locked (⌃⌘L to unlock)' : 'Add widget'}
+        title={locked ? 'Canvas locked (⌃⌘L to unlock)' : 'Add widget'}
         disabled={!activeId || locked}
         aria-haspopup="menu"
         aria-expanded={!!at}

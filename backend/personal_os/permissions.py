@@ -94,7 +94,7 @@ DEFAULTS: dict[str, Any] = {
     "trustExternalContent": False,
     # Coding goes to a coding agent (coding_route.py): Grain's own file writers and file-changing shell commands are refused
     # inside a git work tree under every permission mode, and the agents are told to use coding_session_start. codingAgent is
-    # the agent they are told to start: "opencode", "claude", or "any" (the agent picks). A code default: nothing to migrate.
+    # the agent they are told to start: "opencode", "claude", "pi", or "any" (the agent picks). A code default: nothing to migrate.
     "codingRoute": True,
     "codingAgent": "any",
 }
@@ -110,7 +110,7 @@ CHOICES: dict[str, tuple[str, ...]] = {
     "sandboxRuntime": SANDBOX_RUNTIMES,
     "sandboxNetwork": ("off", "proxy", "open"),
     "docEditMode": ("review", "apply"),
-    "codingAgent": ("any", "opencode", "claude"),
+    "codingAgent": ("any", "opencode", "claude", "pi"),
 }
 CHOICE_ERRORS = {
     "permissionMode": "permissionMode must be 'auto', 'manual' or 'allow_all'",
@@ -119,7 +119,7 @@ CHOICE_ERRORS = {
     "sandboxRuntime": f"sandboxRuntime must be one of {', '.join(SANDBOX_RUNTIMES)}",
     "sandboxNetwork": "sandboxNetwork must be 'off', 'proxy' or 'open'",
     "docEditMode": "docEditMode must be 'review' or 'apply'",
-    "codingAgent": "codingAgent must be 'any', 'opencode' or 'claude'",
+    "codingAgent": "codingAgent must be 'any', 'opencode', 'claude' or 'pi'",
 }
 
 

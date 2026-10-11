@@ -22,13 +22,14 @@ import { chatNotice, finishNotice, type FinishInfo, finishStatus, foldRunState, 
 import { adjacentChatId, sidebarOrder } from './lib/chatRows'
 import { createDeltaBuffer } from './lib/deltaBuffer'
 import { CHAT_NOTICE_BODY, notify } from './lib/notify'
+import { codingNoticeText, codingTransition, mergeCodingEvents, type CodingTransition } from './lib/codingSessions'
 import { COMPLETION_SNOOZE_MS, shouldShowCompletion, type CompletionPopup } from './lib/completionNotice'
 import { homeModuleOn, viewHidden } from './moduleToggles'
 import { chainTo, folderKey, groupShutKey, renameKeys } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
 import type { ShowItem, UploadResult } from '@shared/types'
-import type { Attention, CodingSession, WorkerInfo, RunInfo, ShipChecklist } from '@shared/types'
+import type { Attention, CodingSession, CodingSessionEvent, WorkerInfo, RunInfo, ShipChecklist } from '@shared/types'
 import { attention, chatAttention, wantsYou } from './lib/attention'
 import * as panes from './lib/panelPanes'
 import type { PanelState, Pane } from './lib/panelPanes'
@@ -127,6 +128,9 @@ const PROMOTED_TO: Record<string, string> = {
 
 interface Toast { id: number; text: string; kind: 'info' | 'error' | 'learned'; action?: { label: string; run: () => void }; onClick?: () => void }
 
+/** Sessions whose timeline has been backfilled over REST at least once. */
+const codingEventsLoaded = new Set<string>()
+
 /** Live sessions kept in memory at once. Beyond this the least recently touched are dropped. */
 const MAX_SESSIONS = 12
 const HOLD_MS = 6000
@@ -206,6 +210,10 @@ export interface State {
   workers: Record<string, WorkerInfo[]>
   loadWorkers: (conversationId: string) => Promise<void>
   upsertCodingSession: (c: CodingSession) => void
+  /** Timeline events by session id (ascending seq, deduped): backfilled over REST when a session is opened, then appended from `coding_session_event`. */
+  codingEvents: Record<string, CodingSessionEvent[]>
+  addCodingEvents: (id: string, events: CodingSessionEvent[]) => void
+  loadCodingEvents: (id: string) => Promise<void>
   refreshCodingSessions: () => Promise<void>
   /** The last "open a terminal on this coding session" request; `n` makes a repeat of the same one a new request. DeskPanel shows its Terminal tab and TerminalPane starts `mode`. */
   terminalRequest: { sessionId: string; mode: 'attach' | 'shell' | null; n: number; at: number } | null
@@ -1271,7 +1279,12 @@ export const useStore = create<State>((set, get) => {
           } else if (ev.event === 'ship_checklist') {
             get().upsertShip(ev.data)
           } else if (ev.event === 'coding_session') {
+            const prev = get().codingSessions[ev.data.id]
             get().upsertCodingSession(ev.data)
+            const kind = codingTransition(prev, ev.data)
+            if (kind) announceCoding(kind, ev.data)
+          } else if (ev.event === 'coding_session_event') {
+            get().addCodingEvents(ev.data.session_id, [ev.data])
           } else if (ev.event === 'shell_jobs') {
             window.dispatchEvent(new Event('grain-shell-jobs'))
           } else if (ev.event === 'workers') {
@@ -1371,6 +1384,20 @@ export const useStore = create<State>((set, get) => {
     }
     notify(title.length > 60 ? title.slice(0, 57) + '…' : title, CHAT_NOTICE_BODY[kind], { tag: key, onClick })
     return true
+  }
+
+  /**
+   * A coding session finished, failed or is waiting on the user: a toast in the app, plus an OS notice when the
+   * window is not in front. Callers pass only real transitions (codingTransition), never a first sighting.
+   */
+  const announceCoding = (kind: CodingTransition, c: CodingSession): void => {
+    const text = codingNoticeText(kind, c)
+    get().toast(text, kind === 'failed' ? 'error' : 'info')
+    if (get().settings.chatNotify === false || (typeof document !== 'undefined' && document.hasFocus())) return
+    notify('Coding agent', text, {
+      tag: `coding:${c.id}:${kind}`,
+      onClick: () => { try { window.os.showMain() } catch { /* no bridge: window.focus() in notify() is the fallback */ } }
+    })
   }
 
   /**
@@ -1751,6 +1778,21 @@ export const useStore = create<State>((set, get) => {
       } catch { /* the panel stays as it was; the event stream or the next poll refills it */ }
     },
     upsertCodingSession: (c) => set((st) => ({ codingSessions: { ...st.codingSessions, [c.id]: c } })),
+    codingEvents: {},
+    addCodingEvents: (id, events) => set((st) => {
+      const cur = st.codingEvents[id] ?? []
+      const next = mergeCodingEvents(cur, events)
+      return next === cur ? st : { codingEvents: { ...st.codingEvents, [id]: next } }
+    }),
+    loadCodingEvents: async (id) => {
+      try {
+        // Events that arrived over SSE before the first load are only the tail: the first fetch starts from 0.
+        const have = codingEventsLoaded.has(id) ? get().codingEvents[id] : undefined
+        const { events } = await api.coding.events(id, have?.length ? have[have.length - 1].seq : 0)
+        codingEventsLoaded.add(id)
+        get().addCodingEvents(id, events)
+      } catch { /* the timeline stays as it was; the event stream fills it */ }
+    },
     refreshCodingSessions: async () => {
       try {
         const { sessions } = await api.coding.list()

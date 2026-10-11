@@ -146,7 +146,8 @@ def target() -> str:
 def test_status_shape_and_precedence_without_a_token() -> None:
     s = j("GET", "/telegram/status")
     assert s == {"enabled": False, "has_token": False, "bot_username": None, "paired": False, "owner_name": None,
-                 "status": "no_token", "last_error": None, "last_poll_at": None, "pairing": None}
+                 "status": "no_token", "last_error": None, "last_poll_at": None, "pairing": None,
+                 "claimed_by": None, "machine_name": s["machine_name"]}
 
 
 def test_token_is_validated_stored_privately_and_starts_the_poller() -> None:
@@ -359,3 +360,9 @@ def test_the_real_http_caller_is_what_the_app_ships_with() -> None:
     api = tg.HttpApi()
     api._client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: httpx.Response(200, json={"ok": True, "result": [1]})))
     assert asyncio.run(api(TOKEN, "getUpdates", {})) == [1]
+
+
+def test_takeover_needs_a_token_and_reports_status() -> None:
+    appmod.db.secrets.delete("telegramBotToken")
+    j("POST", "/telegram/takeover", expect=400)
+    assert "claimed_by" in j("GET", "/telegram/status") and "machine_name" in j("GET", "/telegram/status")

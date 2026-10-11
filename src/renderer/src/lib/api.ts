@@ -198,6 +198,7 @@ export const api = {
   telegramSaveToken: (token: string) => req<TelegramStatus>('/telegram/token', { method: 'PUT', body: json({ token }) }),
   telegramRemoveToken: () => req<TelegramStatus>('/telegram/token', { method: 'DELETE' }),
   telegramNewCode: () => req<TelegramStatus>('/telegram/pairing', { method: 'POST' }),
+  telegramTakeOver: () => req<TelegramStatus>('/telegram/takeover', { method: 'POST' }),
   telegramUnpair: () => req<TelegramStatus>('/telegram/unpair', { method: 'POST' }),
   telegramTest: () => req<{ ok: boolean; error?: string }>('/telegram/test', { method: 'POST' }),
   telegramSetEnabled: (enabled: boolean) => req<TelegramStatus>('/telegram/enabled', { method: 'POST', body: json({ enabled }) }),

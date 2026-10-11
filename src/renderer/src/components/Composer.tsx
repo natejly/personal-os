@@ -26,8 +26,11 @@ import { appendToDraft, clearRedirect, composerKey, dropDraft, getDraft, moveDra
 import { promptList, recallKey, step, type Recall } from '../lib/promptHistory'
 import { enqueue, enterAction, removeQueued, requeueFront, sendNext, updateQueue, type QueuedItem } from '../lib/followQueue'
 import QueueTray from './QueueTray'
+import { followupsFor } from '../lib/followups'
+import { conversationContext } from '../lib/composerSuggest'
 
 const NO_MESSAGES: never[] = []
+const NO_SUGGESTIONS: string[] = []
 
 interface ComposerProps {
   conversationId?: string
@@ -183,23 +186,36 @@ export default function Composer({ conversationId, footer, compact = false, onSe
 
   /** Up/Down through this chat's earlier prompts (lib/promptHistory.ts); null when not recalling. */
   const recall = useRef<Recall | null>(null)
-  useEffect(() => { recall.current = null }, [key])
+  // The ref drives the keys; the flag lets the suggestion ghost step aside while a recalled prompt is showing.
+  const [recalling, setRecalling] = useState(false)
+  const setRecall = (r: Recall | null): void => { recall.current = r; setRecalling(r !== null) }
+  useEffect(() => { setRecall(null) }, [key])
 
   /** Handles the key when it is a recall step; returns whether it did. */
   const onRecallKey = (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
     if (e.nativeEvent.isComposing) return false
     const ta = e.currentTarget
     const act = recallKey(e.key, { value: text, selStart: ta.selectionStart, selEnd: ta.selectionEnd, streaming, modified: e.shiftKey || e.altKey || e.metaKey || e.ctrlKey }, recall.current)
-    if (act === 'exit') { recall.current = null; e.preventDefault(); return true }
+    if (act === 'exit') { setRecall(null); e.preventDefault(); return true }
     if (!act) return false
     const s = useStore.getState()
     const next = step(promptList(s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.messages ?? []), recall.current, text, act)
     if (!next) return false
     e.preventDefault()
-    recall.current = next.recall
+    setRecall(next.recall)
     setText(next.text)
     return true
   }
+
+  // Next-prompt ghosts for an empty box (the newest reply's follow-ups) and the conversation tail that steers typed completions.
+  // Both select to strings so the box does not re-render on every streamed token.
+  const followUps = useStore((s) => s.settings.followUps !== false)
+  const suggestKey = useStore((s) => {
+    if (onSend || !activeId || streaming) return ''
+    return followupsFor(s.sessions[activeId]?.conversation.messages ?? NO_MESSAGES, { live: false, enabled: followUps }).join('\u0000')
+  })
+  const suggestions = useMemo(() => (suggestKey && !slash && !recalling ? suggestKey.split('\u0000') : NO_SUGGESTIONS), [suggestKey, slash, recalling])
+  const chatContext = useStore((s) => (activeId ? conversationContext(s.sessions[activeId]?.conversation.messages ?? NO_MESSAGES, { live: streaming }) : ''))
 
   /** Stop, then hand the keyboard back: the button that was pressed is about to be replaced or disabled. */
   const halt = (): void => {
@@ -308,7 +324,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     if (entry?.taint && useStore.getState().uploadTaintTarget === null) {
       useStore.setState({ uploadTaintTarget: onSend ? 'page' : 'draft', uploadTaintSource: entry.taint })
     }
-    recall.current = null
+    setRecall(null)
     clearRedirect(k0)
     dropDraft(k0)
     // "@name message": the message goes to that agent's chat, unless this chat already speaks as it.
@@ -442,10 +458,12 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           maxHeight={240}
           minChars={8}
           value={text}
-          onChange={(v) => { recall.current = null; setText(v) }}
+          onChange={(v) => { setRecall(null); setText(v) }}
           onPaste={onPaste}
           placeholder={streaming ? (queueId ? 'Queue a follow-up… ⌘↵ to steer now' : 'Steer the reply…') : placeholder}
           noGhost={!!slash}
+          suggestions={suggestions}
+          context={chatContext}
           ariaLabel="Message"
           onKeyDown={(e) => {
             const act = slash && !e.shiftKey && !e.nativeEvent.isComposing ?slashMenuKey(e.key, slashActive, slash.length) : null
@@ -456,6 +474,8 @@ export default function Composer({ conversationId, footer, compact = false, onSe
               else setSlashClosedAt(text)
             }
             else if (onRecallKey(e)) return
+            // Tab with nothing to accept stays in the box rather than moving focus away (Shift+Tab still leaves).
+            else if (e.key === 'Tab' && !e.shiftKey && !e.nativeEvent.isComposing) e.preventDefault()
             else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(e.metaKey || e.ctrlKey) }
             // Escape closes the decline prompt first, then ends the reply; while an input method is composing it belongs to the method.
             else if (e.key === 'Escape' && confirm && !e.nativeEvent.isComposing) { e.preventDefault(); setConfirm(null) }

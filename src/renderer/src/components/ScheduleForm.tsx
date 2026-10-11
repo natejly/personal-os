@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CalendarClock, X } from 'lucide-react'
+import { CalendarClock, X } from '../icons'
 import { api } from '../lib/api'
 import { describeCron } from '../lib/cron'
 import { LOOP_PRESETS, ONCE_PRESETS, customTiming, jobTiming } from '../lib/scheduleWhen'

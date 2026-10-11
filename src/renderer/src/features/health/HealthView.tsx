@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Activity, Droplet, Footprints, Gauge, HeartPulse, Link2, Moon, Pill, Plus, Scale, Settings2, Smile, Trash2, Zap } from 'lucide-react'
+import { Activity, Droplet, Footprints, Gauge, HeartPulse, Link2, Moon, Pill, Plus, Scale, Settings2, Smile, Trash2, Zap } from '../../icons'
 import type { HealthEntry, HealthMetric, HealthSummary } from '@shared/types'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'

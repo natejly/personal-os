@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# macOS system access (macos.py, teach, voice input). Without these the frontmost-app probe falls back to
+# macOS system access (macos.py, voice input). Without these the frontmost-app probe falls back to
 # `lsappinfo` (app name only) and permission checks report "unknown".
 mac = [
   "pyobjc-framework-Cocoa>=10.3; sys_platform == 'darwin'",

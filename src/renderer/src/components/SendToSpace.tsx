@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { AppWindow, Check, LayoutGrid, Plus } from 'lucide-react'
+import { AppWindow, Check, LayoutGrid, Plus } from '../icons'
 import type { CanvasWindow, WidgetKind } from '@shared/types'
 import { api } from '../lib/api'
 import { useProject, useStore } from '../store'
 import { useCanvas } from '../canvas/store'
-import { Popover } from '../canvas/PresetsMenu'
+import { Popover } from '../canvas/Popover'
 import '../styles/spaces.css'
 
 export interface SendItem { kind: WidgetKind; refId?: string | null; config?: Record<string, unknown> }

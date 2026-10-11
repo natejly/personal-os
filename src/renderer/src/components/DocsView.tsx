@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FileText, Files, PanelRight, X, Columns2, Eye, Pencil, BookOpen, MessageSquarePlus, Type,
   Sparkles, FolderTree, SlidersHorizontal
-} from 'lucide-react'
+} from '../icons'
 import { flushDocOnUnload, restoreDocTabs, useStore, type FilesSection } from '../store'
 import { api, type DocHit } from '../lib/api'
 import type { Doc, DocTypography } from '@shared/types'

@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import { PanelRight } from 'lucide-react'
+import { PanelRight } from '../icons'
 import type { ShowItem } from '@shared/types'
 import { useStore } from '../store'
 import { fromFence } from '../lib/showPanel'

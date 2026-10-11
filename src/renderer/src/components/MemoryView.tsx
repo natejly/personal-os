@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Pin, PinOff, Trash2, Wand2, User, History, Undo2, Sparkles, Download, Upload } from 'lucide-react'
+import { Plus, Pin, PinOff, Trash2, Wand2, User, History, Undo2, Sparkles, Download, Upload } from '../icons'
 import { useStore, type Scope } from '../store'
 import type { Memory, MemoryProposal, MemorySource } from '@shared/types'
 import ProjectChip from './ProjectChip'

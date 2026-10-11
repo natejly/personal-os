@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { PenLine, Wand2, Trash2, Plus, RefreshCw, FileText, MessageSquare, ClipboardPaste, Pencil } from 'lucide-react'
+import { PenLine, Wand2, Trash2, Plus, RefreshCw, FileText, MessageSquare, ClipboardPaste, Pencil } from '../icons'
 import { useStore, type Scope } from '../store'
 import type { StyleSample } from '@shared/types'
 

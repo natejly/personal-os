@@ -1,4 +1,4 @@
-import { Eye } from 'lucide-react'
+import { Eye } from '../../icons'
 import { num, str } from '../../lib/toolResult'
 import CardShell from './CardShell'
 import { Badge, ErrorLine, Meta, MonoBlock, unreadable, useParsed } from './blocks'

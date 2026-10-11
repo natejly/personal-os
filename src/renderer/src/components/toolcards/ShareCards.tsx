@@ -1,4 +1,4 @@
-import { Camera, Send } from 'lucide-react'
+import { Camera, Send } from '../../icons'
 import { attachedNames, num, str } from '../../lib/toolResult'
 import CardShell from './CardShell'
 import { Badge, ErrorLine, Meta, unreadable, useParsed } from './blocks'

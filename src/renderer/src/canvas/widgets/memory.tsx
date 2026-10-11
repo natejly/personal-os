@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Brain, Pin, PinOff, Trash2 } from 'lucide-react'
+import { Brain, Pin, PinOff, Trash2 } from '../../icons'
 import type { Memory } from '@shared/types'
 import { useStore, type Scope } from '../../store'
 import { dragProps } from '../dnd'

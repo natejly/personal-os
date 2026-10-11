@@ -82,7 +82,7 @@ export interface BackendAccess {
   browsers: { name: string; state: AccessState }[]
   /** Short display strings from the backend: what Grain never touches, and what always asks first. */
   scope?: { protected: string[]; sensitive: string[] }
-  clis: { claude: Cli; opencode: Cli }
+  clis: { claude: Cli; opencode: Cli; pi: Cli }
 }
 export interface ShellCheck { ok: boolean; output: string; cwd: string | null; error: string | null }
 
@@ -94,7 +94,7 @@ export function buildRows(main: MainStatus, backend: BackendAccess | null, probe
   return [
     row('microphone', 'Microphone', 'Voice input.', main.microphone, 'native', PANE_URLS.microphone),
     row('camera', 'Camera', 'Photos and video you choose to capture.', main.camera, 'native', PANE_URLS.camera),
-    row('screen', 'Screen Recording', 'Teaching a task by showing it, and looking at your screen.', main.screen, 'pane', PANE_URLS.screen),
+    row('screen', 'Screen Recording', 'Looking at your screen when you ask.', main.screen, 'pane', PANE_URLS.screen),
     row('accessibility', 'Accessibility', 'Reading the frontmost window and Mac actions.', main.accessibility, 'native', PANE_URLS.accessibility),
     row('fullDisk', 'Full Disk Access', 'Lets Grain\'s agent, and the coding agents it starts, read protected folders like Mail, Messages and app data, plus Desktop, Documents and Downloads. The rest of the Mac needs no grant.', backend?.fullDisk, 'pane', PANE_URLS.fullDisk),
     row('automation:finder', 'Automation: Finder', 'Mac actions you ask for.', a?.finder, 'native', PANE_URLS.automation),

@@ -1,4 +1,4 @@
-import { Minus, Plus } from 'lucide-react'
+import { Minus, Plus } from '../../icons'
 import type { DocTypography } from '@shared/types'
 import { FONTS, MEASURE, SIZE } from './typography'
 

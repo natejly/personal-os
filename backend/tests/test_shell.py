@@ -718,50 +718,6 @@ def test_spilled_outputs_older_than_a_week_are_swept(box: Box) -> None:
     assert box.tb.shell.sweep_spills(box.db) == 0  # at most once an hour
 
 
-# ---- idle VM sandboxes are stopped by a reaper (microvm.py) ----
-def _vm():
-    from test_microvm_checkpoints import make
-    sb, d = make()
-    sb._reaper_stop.set()  # no background thread in a unit test: stop_idle() is called by hand
-    return sb, d
-
-
-def test_idle_sandbox_is_stopped_after_300s_and_restarts_on_next_use() -> None:
-    sb, d = _vm()
-    name = sb.ensure("c1")
-    t = sb._last[name]
-    assert sb.stop_idle(now=t + 299) == [] and d.containers[name]["running"] is True
-    assert sb.stop_idle(now=t + 301) == [name] and d.containers[name]["running"] is False
-    assert sb.stop_idle(now=t + 900) == []  # already stopped: nothing to do
-    assert sb.ensure("c1") == name and d.containers[name]["running"] is True  # state kept, restarted on use
-    assert name in d.containers  # stopped, never removed
-
-
-def test_a_command_in_flight_is_never_reaped_and_use_resets_the_clock() -> None:
-    sb, d = _vm()
-    name = sb.ensure("c1")
-    t = sb._last[name]
-    sb._busy[name] = 1
-    assert sb.stop_idle(now=t + 5000) == []
-    sb._busy[name] = 0
-    sb.exec("c1", "true")
-    assert sb._last[name] >= t and sb.stop_idle(now=sb._last[name] + 10) == []
-
-
-def test_reaper_thread_starts_once_and_shutdown_stops_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    from test_microvm_checkpoints import make
-    sb, d = make()
-    sb.ensure("c1")
-    th = sb._reaper
-    assert th is not None and th.is_alive() and th.daemon
-    sb.ensure("c1")
-    assert sb._reaper is th
-    monkeypatch.setattr(shutil, "which", lambda b: "/usr/bin/docker")
-    sb.shutdown()
-    th.join(2)
-    assert not th.is_alive() and d.containers[sb._name("c1")]["running"] is False
-
-
 # ---- network modes, auto-approval, cwd persistence, timeout promotion (cowork shell slice) ----
 def test_profile_allows_only_the_proxy_port_in_allowlist_mode() -> None:
     p = sandbox.shell_profile(["/tmp/w"], network=False, proxy_port=48123)

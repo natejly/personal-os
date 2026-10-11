@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { RotateCcw, Square } from 'lucide-react'
+import { RotateCcw, Square } from '../icons'
 import type { WorkerInfo } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore, useConversation, useWorkerFace, useWorkers } from '../store'

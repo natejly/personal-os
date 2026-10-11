@@ -1,4 +1,4 @@
-import { CircleHelp, ShieldQuestion } from 'lucide-react'
+import { CircleHelp, ShieldQuestion } from '../icons'
 import type { Desk, DeskStatus, FullDesk, ToolEvent } from '@shared/types'
 import { useStore } from '../store'
 import { inlinePlanShown } from '../lib/statusChrome'

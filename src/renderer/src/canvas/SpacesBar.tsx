@@ -1,8 +1,7 @@
-import { AlignJustify, LayoutGrid, Lock, LockOpen } from 'lucide-react'
 import type { SnapMode } from '@shared/types'
+import { AlignJustify, LayoutGrid, Lock, LockOpen } from '../icons'
 import { useStore } from '../store'
 import { AddWidgetButton } from './AddWidgetMenu'
-import { PresetsButton } from './PresetsMenu'
 import AppSwitcher from '../components/AppSwitcher'
 import { useCanvas, useSpaceLocked } from './store'
 import { GRID_SIZES } from './snapping'
@@ -41,7 +40,6 @@ export default function SpacesBar(): JSX.Element {
       {/* Clears the window's traffic lights once the sidebar is gone, and drags the app window. */}
       {!sidebarOpen && <span className="spaces-inset drag" />}
       <div className="space-tab active" title="Canvas 1"><span>Canvas 1</span></div>
-      <PresetsButton canvasId={activeId} />
       <span className="spacer" />
       {/* Deliberately apart from the new-space + beside the tabs: this one adds to the space. */}
       <AddWidgetButton />

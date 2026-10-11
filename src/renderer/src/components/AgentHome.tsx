@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, MessageSquare, Plus } from 'lucide-react'
+import { ArrowLeft, MessageSquare, Plus } from '../icons'
 import type { AgentDef, AgentHomeData } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'

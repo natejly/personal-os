@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { X } from 'lucide-react'
+import { X } from '../icons'
 import { useStore } from '../store'
 import { useModal } from '../lib/useModal'
 import AgentInbox from './AgentInbox'

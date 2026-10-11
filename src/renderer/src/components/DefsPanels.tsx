@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Check, Pencil, Plus, Trash2 } from '../icons'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { COMMAND_SKELETON } from '../lib/defText'

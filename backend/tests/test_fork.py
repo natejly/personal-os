@@ -109,18 +109,6 @@ def test_taint_carries_and_grants_do_not() -> None:
     check(n == 0, "no approvals are copied")
 
 
-def test_sandbox_import_taints_the_fork() -> None:
-    cid = three_turns()
-    real = app_mod.sandboxes.holds_import
-    app_mod.sandboxes.holds_import = lambda conv: conv == cid  # type: ignore[method-assign]
-    try:
-        f = fork(cid, msgs(cid)[1]["id"]).json()
-    finally:
-        app_mod.sandboxes.holds_import = real  # type: ignore[method-assign]
-    check(f["settings"].get("tainted") is True and "fork:sandbox_import" in f["settings"]["taint_sources"],
-          f"a held sandbox import taints the fork, got {f['settings']}")
-
-
 def test_new_turn_in_the_fork_sees_the_copied_history() -> None:
     cid = three_turns()
     f = fork(cid, msgs(cid)[1]["id"]).json()

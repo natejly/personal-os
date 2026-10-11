@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { MessageSquarePlus, Pencil, Files, FolderX, Brain, MessageSquare, BookOpen, Trash2, Info } from 'lucide-react'
+import { MessageSquarePlus, Pencil, Files, FolderX, Brain, MessageSquare, BookOpen, Trash2, Info } from '../icons'
 import { useStore, useProject } from '../store'
 import { dragProps } from '../canvas/dnd'
 import { rowButton } from '../lib/rowButton'

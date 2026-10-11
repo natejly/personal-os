@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, ChevronRight, FileCheck2, TriangleAlert, X } from 'lucide-react'
+import { Check, ChevronRight, FileCheck2, TriangleAlert, X } from '../icons'
 import type { DeskOutput, FullDesk, PromotionKind, PromotionResult } from '@shared/types'
 import { api, saveDownload } from '../lib/api'
 import { defaultDest } from '../lib/deskFiles'

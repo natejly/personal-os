@@ -32,7 +32,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from . import auth_breaker, blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, thinking_summary, titles
-from . import chatlink, coding_route, fsx, opencode_usage
+from . import chatlink, coding_route, fsx, opencode_usage, request_log
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .drive_backup import DriveBackup
@@ -2493,6 +2493,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             tracer.end(span, {"cleared": cleared, "summarized": summarized, "tokens_saved": saved})
             return {"span": span}
 
+        def _capture(tool_choice: str) -> None:
+            """Snapshot exactly what goes to llm.stream_chat this round (messages are mutated afterwards, so copy now)."""
+            if cfg.get("captureRequests", True):
+                with contextlib.suppress(Exception):
+                    request_log.record(db.data_dir, am["id"], _round, model, messages, tool_schemas, tool_choice)
+
         async def _stream_round() -> AsyncIterator[dict[str, Any]]:
             """The round's model stream. A provider overflow before anything streamed is recovered once per reply:
             the stream is re-issued over the compacted context and a synthetic `overflow_recovered` event says so.
@@ -2500,6 +2506,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             nonlocal overflow_retried
             while True:
                 streamed = False
+                _capture("auto")
                 stream = llm.stream_chat(cfg, model, messages, tool_schemas or None,
                                          effort=str(conv["settings"].get("effort") or "default"),
                                          fast=bool(conv["settings"].get("fast")),
@@ -2548,6 +2555,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             llm.stream_deadline.set(time.monotonic() + FINAL_ROUND_SECONDS)
             # tools are still declared, with tool_choice "none": the history holds tool_calls, and some OpenAI-compatible
             # backends reject that when no tool list is sent. "none" is the portable way to say "answer, do not call".
+            _capture("none")
             async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
                                             effort=str(conv["settings"].get("effort") or "default"), tool_choice="none",
                                             fast=bool(conv["settings"].get("fast")),
@@ -6154,6 +6162,15 @@ async def put_prices(body: PricesIn) -> dict[str, Any]:
     cfg = settings()
     await pricing.refresh(cfg, force=True)
     return {"repriced": usage.reprice(pricing, cfg), "prices": pricing.table(cfg)}
+
+
+@app.get("/messages/{mid}/requests")
+def message_requests(mid: str) -> list[dict[str, Any]]:
+    """The exact request of each model round of a reply (messages, tool schemas, model), if captured."""
+    rounds = request_log.read(db.data_dir, mid)
+    if rounds is None:
+        raise HTTPException(404, "no captured request for this reply")
+    return rounds
 
 
 @app.post("/messages/{mid}/stop")

@@ -77,7 +77,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "desk_list_files", "desk_read_file", "desk_write_file", "desk_trash_file",
     "desk_deliver", "desk_ask", "desk_done", "desk_import_sandbox",
     "shell_run", "shell_poll", "shell_kill", "opencode_run", "ship_checklist", "ship_status",
-    "coding_session_start", "coding_session_list", "coding_session_status", "coding_session_send", "coding_session_stop",
+    "coding_session_start", "coding_session_list", "coding_session_status", "coding_session_wait", "coding_session_send", "coding_session_stop",
     "coding_session_diff",
     "screenshot", "send_files",
     "browser_open", "browser_snapshot", "browser_click", "browser_type", "browser_select", "browser_press",

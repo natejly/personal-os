@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Code2, Eye } from 'lucide-react'
+import { Code2, Eye } from '../icons'
 import { clampPreviewHeight, PREVIEW_HEIGHT_MESSAGE, previewUrl } from '../../../shared/htmlPreview'
 import { buildPreviewDoc, PREVIEW_SANDBOX } from '../lib/htmlFence'
 import { CopyButton } from './MarkdownPreview'

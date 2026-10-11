@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ListTodo } from 'lucide-react'
+import { ListTodo } from '../../icons'
 import { changedKeys, formatValue, wasEdited } from '../../lib/toolDisplay'
 import CardShell from './CardShell'
 import { registerToolCard, type ToolCardProps } from './registry'

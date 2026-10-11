@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { GitBranch, Code2, Copy, Check, AlertCircle } from 'lucide-react'
+import { GitBranch, Code2, Copy, Check, AlertCircle } from '../icons'
 import { useStore } from '../store'
 import OpenInPanel from './ShowButton'
 

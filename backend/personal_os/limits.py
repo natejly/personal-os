@@ -77,7 +77,7 @@ JOB_EXPIRE_DAYS = 0                # a recurring job pauses this many days after
 GMAIL_SEND_HOLD_SECONDS = 90       # undo window on outgoing mail (clamped to 60-120 on read)
 
 # ---- Storage ----
-MAX_UPLOAD_MB = 50                   # largest file POST /documents accepts (Files, the composer, drag-drop); mirrored in src/renderer/src/lib/uploadNote.ts
+MAX_UPLOAD_MB = 100                  # largest file POST /documents accepts (Files, the composer, drag-drop); mirrored in src/renderer/src/lib/uploadNote.ts
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 MAX_UNZIPPED_BYTES = MAX_UPLOAD_BYTES * 5 // 2  # a docx/xlsx's declared uncompressed size, summed; refused past this (zip bomb guard)
 FILE_SNAPSHOT_MAX_BYTES = 5_000_000  # largest file pre-image kept
@@ -87,7 +87,6 @@ RETAIN_USAGE_DAYS = 365              # bookkeeping age: usage rows
 RETAIN_TRACE_DAYS = 60               # bookkeeping age: traces
 RETAIN_TOOL_RESULT_DAYS = 30         # bookkeeping age: stored tool results
 RETAIN_APPROVAL_DAYS = 90            # bookkeeping age: decided approvals
-SANDBOX_KEEP_DAYS = 14               # a stopped sandbox is deleted after this many idle days
 FETCH_CACHE_SECONDS = 3600           # fetch_url reuses a page fetched this recently (0 = never)
 
 # ---- Retrieval / misc ----
@@ -98,7 +97,7 @@ CONSOLIDATE_EVERY = 25             # propose a memory tidy-up after this many ne
 TELEGRAM_LONG_RUN_MINUTES = 3      # when a run not started from Telegram counts as long
 
 # Accepted ranges for PUT /settings (finite numbers only). The keys in AUTOMATIC also accept 0, meaning "derive it".
-AUTOMATIC = ("contextWindow", "subagentMaxConcurrent", "deskMaxLive", "parallelReads")
+AUTOMATIC = ("autoArchiveDays", "contextWindow", "subagentMaxConcurrent", "deskMaxLive", "parallelReads")
 RANGES: dict[str, tuple[float, float]] = {
     "uiZoom": (80, 160),
     "subagentMaxConcurrent": (1, 20),
@@ -110,6 +109,7 @@ RANGES: dict[str, tuple[float, float]] = {
     "fileSnapshotBudgetMB": (1, 20_000),
     "llmRetries": (0, 10),
     "llmIdleSeconds": (10, 3_600),
+    "autoArchiveDays": (1, 3_650),  # 0 = off
     "retainUsageDays": (7, 3_650),
     "contextWindow": (1000, 4_000_000),
     "compactAt": (0.1, 0.95),
@@ -126,7 +126,6 @@ RANGES: dict[str, tuple[float, float]] = {
     "parallelReads": (1, 8),
     "browserMaxTabs": (1, 12),
     "browserIdleSeconds": (30, 86_400),
-    "sandboxKeepDays": (0, 3_650),
     "retrievalMinSimilarity": (0, 1),
     "retrievalPerDocCap": (1, 10),
     "retrievalCandidates": (5, 50),

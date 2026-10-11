@@ -99,7 +99,7 @@ def which(name: str) -> str | None:
 def _missing(binary: str, what: str) -> dict[str, Any]:
     from .tools import tool_error
     return tool_error(f"{what} needs `{binary}`, which is not installed on this Mac.",
-                      alternative=f"ask the user to run `{INSTALL[binary]}`, or produce the file with run_python instead")
+                      alternative=f"install it yourself with shell_run (`{INSTALL[binary]}`; the app asks the user to approve), then retry, or produce the file with run_python instead")
 
 
 # ---- paths ----
@@ -409,7 +409,7 @@ def register(tb: Any) -> None:
             return err
         assert src is not None
         if not src.is_file():
-            return tool_error(f"{path} is not a file here.", field="path", alternative="list the folder first (desk_list_files in a desk, sandbox_list_files or the earlier tool results in a chat)")
+            return tool_error(f"{path} is not a file here.", field="path", alternative="list the folder first (desk_list_files in a desk, or the earlier tool results in a chat)")
         why = fsx.sensitive_reason(path, src)
         if why:
             return tool_error(f"{path} cannot be read: {why}.", field="path")
@@ -449,7 +449,7 @@ def register(tb: Any) -> None:
             return err
         assert src is not None
         if not src.is_file():
-            return tool_error(f"{path} is not a file here.", field="path", alternative="list the folder first (desk_list_files in a desk, sandbox_list_files or the earlier tool results in a chat)")
+            return tool_error(f"{path} is not a file here.", field="path", alternative="list the folder first (desk_list_files in a desk, or the earlier tool results in a chat)")
         why = fsx.sensitive_reason(path, src)
         if why:
             return tool_error(f"{path} cannot be read: {why}.", field="path")

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ExternalLink, Plus, Trash2, Video, X } from 'lucide-react'
+import { Check, ExternalLink, Plus, Trash2, Video, X } from '../icons'
 import type { CalendarColors, CalendarEvent, EventPayload, GoogleCalendar } from '@shared/types'
 import { api } from '../lib/api'
 import { eventPrep } from '../lib/emailAsk'

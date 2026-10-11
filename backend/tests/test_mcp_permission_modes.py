@@ -82,10 +82,11 @@ def reply(pmode: str, calls: list[str]) -> list[dict[str, Any]]:
     return out
 
 
-def test_allow_all_runs_until_a_connector_result_taints_the_reply() -> None:
+def test_allow_all_runs_connectors_even_after_a_result_taints_the_reply() -> None:
     ev = reply("allow_all", ["read", "send"])
-    assert [e["needs_approval"] for e in ev] == [False, True]  # read ran, its result tainted the reply, send asks
-    assert CALLED == [SLUGS["read"]]
+    assert [e["needs_approval"] for e in ev] == [False, False]  # no card, tainted or not
+    assert CALLED == [SLUGS["read"], SLUGS["send"]]
+    assert [e["needs_approval"] for e in reply("auto", ["read", "send"])] == [False, True]
 
 
 def test_allow_all_runs_coding_connectors_in_a_tainted_reply() -> None:

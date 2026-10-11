@@ -123,3 +123,37 @@ test('a large rewrite still terminates and accounts for every line', () => {
   assert.equal(stat.removed, 400)
   assert.ok(stat.changed > 0, 'similar paragraphs should be paired as rewordings')
 })
+
+test('a whole-file rewrite of a long doc is diffed fast and stays correct', () => {
+  const a = Array.from({ length: 6000 }, (_, i) => `alpha ${i}`).join('\n')
+  const b = Array.from({ length: 6000 }, (_, i) => `omega ${i + 100000}`).join('\n')
+  const t = Date.now()
+  const lines = diffLines(a, b)
+  assert.ok(Date.now() - t < 2000)
+  assert.deepEqual(diffStat(lines), { added: 6000, removed: 6000, changed: 0 })
+})
+
+test('anchors keep a big edit in a long doc small', () => {
+  const base = Array.from({ length: 5000 }, (_, i) => `row ${i}`)
+  const edited = [...base.slice(0, 1000), ...Array.from({ length: 2000 }, (_, i) => `zzz ${i}`), ...base.slice(3000)]
+  const lines = diffLines(base.join('\n'), edited.join('\n'))
+  assert.deepEqual(diffStat(lines), { added: 2000, removed: 2000, changed: 0 })
+  assert.equal(lines.filter((l) => l.op === 'same').length, 3000)
+})
+
+test('thousands of reworded long paragraphs do not stall the refinement', () => {
+  const para = (i: number, w: string): string => Array.from({ length: 300 }, (_, k) => `word${k % 50}${k === 7 ? w : ''}`).join(' ') + ` p${i}`
+  const a = Array.from({ length: 1500 }, (_, i) => para(i, 'x')).join('\n')
+  const b = Array.from({ length: 1500 }, (_, i) => para(i, 'y')).join('\n')
+  const t = Date.now()
+  const lines = diffLines(a, b)
+  const stat = diffStat(lines)
+  assert.ok(Date.now() - t < 2000, `took ${Date.now() - t} ms`)
+  assert.equal(stat.added, 1500)
+  assert.equal(stat.changed, 1500)
+  // Word highlights are computed per row on first read: the rows a view draws first are cheap, and every row still gets them.
+  const t2 = Date.now()
+  const drawn = lines.slice(0, 600).filter((l) => l.parts?.some((p) => p.changed))
+  assert.equal(drawn.length, 600)
+  assert.ok(Date.now() - t2 < 2000, `first rows took ${Date.now() - t2} ms`)
+})

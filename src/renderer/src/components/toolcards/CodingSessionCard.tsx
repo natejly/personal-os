@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bot } from 'lucide-react'
+import { Bot } from '../../icons'
 import type { CodingSession, CodingSessionDiff } from '@shared/types'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'
@@ -133,7 +133,7 @@ function CodingSessionCard(props: ToolCardProps): JSX.Element {
     if (fetchIt) api.coding.get(id).then(upsert).catch(() => undefined)
   }, [fetchIt, id, upsert])
 
-  const agent = str(a.agent) === 'opencode' ? 'opencode' : 'claude'
+  const agent = str(a.agent) === 'opencode' || str(a.agent) === 'pi' ? str(a.agent) as 'opencode' | 'pi' : 'claude'
   const repo = str(a.repo_path)
   const branch = str(a.branch)
   const mode = str(a.permission_mode)
@@ -155,6 +155,7 @@ function CodingSessionCard(props: ToolCardProps): JSX.Element {
             <div className="tc-muted small">Runs outside Grain&apos;s sandbox with your own account; Claude Code asks for permission in its own session.</div>
           )}
           {agent === 'opencode' && <div className="tc-muted small">Runs inside the OS sandbox.</div>}
+          {agent === 'pi' && <div className="tc-muted small">Runs inside the OS sandbox. pi never asks before it edits files or runs commands.</div>}
         </>
       )}
       {pending && tool === 'coding_session_send' && (

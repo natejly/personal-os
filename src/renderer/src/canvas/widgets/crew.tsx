@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ExternalLink, Play, RotateCw, Square, Users } from 'lucide-react'
+import { Check, ExternalLink, Play, RotateCw, Square, Users } from '../../icons'
 import type { CrewAgent, CrewView, WorkflowPlanStep, WorkflowStepRow } from '@shared/types'
 import { api } from '../../lib/api'
 import { useChatFaceById, useStore, useWorkerFace } from '../../store'

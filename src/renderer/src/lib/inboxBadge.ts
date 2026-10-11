@@ -10,3 +10,17 @@ export function markRunsSeen(box: AgentInbox, runIds: string[] | null): AgentInb
   const away = box.while_you_were_away.map((r) => (hit(r.run_id) ? { ...r, seen: true } : r))
   return { ...box, while_you_were_away: away, counts: { ...box.counts, unseen_runs: away.filter((r) => !r.seen).length } }
 }
+
+/** The inbox with `runIds` removed, for an optimistic delete before the round trip. The run counts are
+ *  recomputed from what is left; needs_you is not touched (a run message is not a pending decision). */
+export function withoutInboxRuns(box: AgentInbox, runIds: string[]): AgentInbox {
+  const away = box.while_you_were_away.filter((r) => !runIds.includes(r.run_id))
+  return {
+    ...box, while_you_were_away: away,
+    counts: {
+      ...box.counts, runs: away.length, unseen_runs: away.filter((r) => !r.seen).length,
+      late: away.filter((r) => r.late).length,
+      failed: away.filter((r) => r.status === 'error' || r.status === 'interrupted').length
+    }
+  }
+}

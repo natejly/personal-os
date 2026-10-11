@@ -41,8 +41,8 @@ from typing import Any, Callable
 from . import approval_log, autoreview, coding_route, compaction, fsx, limits, llm, mac, permissions, permrules, redact
 from .db import new_id, now
 from .toolcalls import parse_arguments
-from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
-from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, DISCARDED, ToolSpec, _obj, call_key, denied, summarize_result, tool_error
+from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
+from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, DISCARDED, ToolSpec, _obj, allows_slug, call_key, denied, summarize_result, tool_error
 from .working import escape_tags, fence_untrusted
 
 log = logging.getLogger(__name__)
@@ -69,17 +69,16 @@ CHILD_BLOCK = frozenset({
 CHILD_DANGER_BLOCK = ("plan", "schedules")
 FILE_WRITERS = ("write_local_file", "move_local_file", "fs_edit", "fs_copy", "fs_mkdir")
 SHELL_TOOLS = ("shell_run", "shell_poll", "shell_kill", "opencode_run", "coding_session_start", "coding_session_list",
-               "coding_session_status", "coding_session_send", "coding_session_stop", "coding_session_diff")
+               "coding_session_status", "coding_session_wait", "coding_session_send", "coding_session_stop", "coding_session_diff")
 # Run kinds that have nobody at the keyboard; with unattendedApprovals = "deny" a call that would ask is refused.
 UNATTENDED_KINDS = ("job", "scheduled")
-STATEFUL_GROUPS = ("browser", "shell", "sandbox")  # tools that hold session state never run side by side
+STATEFUL_GROUPS = ("browser", "shell")  # tools that hold session state never run side by side
 # What an interrupted child's run row says, by exit reason: an empty error left the user guessing why a worker stopped.
 # exit reasons that stop the coding sessions a child started (codingagents.stop_owned), and how the row says it. A
 # completed child or one that errored leaves them running: a session started to work in the background keeps going.
 SESSION_STOPS = {
     "stopped": "was stopped",
     "stale": "was stopped by the hang watchdog",
-    "stuck": "was stopped by the stuck breaker",
     "interrupted": "was stopped with the reply or agent that started it",
     "shutdown": "was halted at app shutdown",
 }
@@ -98,7 +97,7 @@ def parallel_safe(spec: Any, name: str, mode: str) -> bool:
                 and not name.startswith("agent_") and spec.group not in STATEFUL_GROUPS)
 
 
-WRITER_TOOLS = frozenset({*FILE_WRITERS, *SHELL_TOOLS, "run_python", "desk_write_file", "desk_trash_file", "desk_import_sandbox"})
+WRITER_TOOLS = frozenset({*FILE_WRITERS, *SHELL_TOOLS, "run_python", "desk_write_file", "desk_trash_file"})
 PATH_ARGS = ("path", "dest", "destination", "src", "source", "cwd", "repo_path", "to")
 
 READ_TOOLS = (
@@ -570,6 +569,7 @@ class Subagents:
         self.children: dict[str, Child] = {}
         self.locks = RootLocks()
         self.snaps: Any = None  # folder snapshots (snapshots.py), set by app.py
+        self.connectors: Any = None  # MCP connector hooks (call, hints, review_text, mode, denied), set by app.py
         self.peak = 0
         self._watchdog: asyncio.Task[None] | None = None
         self._watch_loop: Any = None
@@ -630,8 +630,11 @@ class Subagents:
             return BUILTIN_ROLES[name]
         return self.defs.role(name) if self.defs else None
 
-    def child_modes(self, parent_modes: dict[str, str], role: RoleDef, narrow: list[str] | None, depth: int) -> dict[str, str]:
-        """The parent's modes (or the role's narrower list), minus what no child gets. Only ever removes or keeps a mode."""
+    def child_modes(self, parent_modes: dict[str, str], role: RoleDef, narrow: list[str] | None, depth: int,
+                    mcp_modes: dict[str, str] | None = None) -> dict[str, str]:
+        """The parent's modes (or the role's narrower list), minus what no child gets. Only ever removes or keeps a mode.
+        `mcp_modes` are the parent's connector tools: a child gets those the role's list (and `narrow`) names, all of them
+        when the role has no list. They are not in toolbox.specs; Subagents._exec_mcp decides each call."""
         want = set(role.tools) if role.tools else set(parent_modes)  # no tool list: the parent's whole set
         if narrow:
             want &= set(narrow)
@@ -650,6 +653,10 @@ class Subagents:
         if "agent_spawn" not in out:
             out.pop("agent_wait", None)
             out.pop("agent_stop", None)
+        if self.connectors is not None:
+            for slug, mode in (mcp_modes or {}).items():
+                if mode in ("on", "ask") and (not role.tools or allows_slug(role.tools, slug)) and (not narrow or allows_slug(narrow, slug)):
+                    out[slug] = mode
         return out
 
     def writable_roots(self, ctx: dict[str, Any], sub: str | None) -> tuple[tuple[Path, ...], bool] | str:
@@ -722,7 +729,7 @@ class Subagents:
         narrow = a.get("tools")
         if narrow is not None and not (isinstance(narrow, list) and all(isinstance(t, str) for t in narrow)):
             return tool_error("tools must be a list of tool names.", field="tools")
-        modes = self.child_modes(ctx.get("modes") or {}, role, narrow, depth + 1)
+        modes = self.child_modes(ctx.get("modes") or {}, role, narrow, depth + 1, ctx.get("mcp_modes"))
         roots: tuple[Path, ...] = ()
         confine = False
         if set(modes) & WRITER_TOOLS:
@@ -733,7 +740,7 @@ class Subagents:
         cfg = ctx.get("settings") or self.settings()
         model = str(a.get("model") or role.model or ctx.get("model") or cfg.get("defaultModel") or "")
         cid = "sa_" + new_id()
-        cctx = {**ctx, "depth": depth + 1, "agent_run_id": cid, "modes": modes, "tainted": bool(ctx.get("tainted")),
+        cctx = {**ctx, "depth": depth + 1, "agent_run_id": cid, "modes": modes, "mcp_modes": {n: m for n, m in modes.items() if n in (ctx.get("mcp_schemas") or {})}, "tainted": bool(ctx.get("tainted")),
                 # a worker owns what it starts: its shell and opencode jobs are keyed to its run and die with it, not the reply's
                 **({"run_id": cid} if kind == "worker" else {}),
                 "taint_sources": list(ctx.get("taint_sources") or []), "allowed_urls": set(ctx.get("allowed_urls") or ()),
@@ -907,7 +914,7 @@ class Subagents:
 
     async def _loop(self, ch: Child) -> None:
         cfg = ch.ctx.get("settings") or self.settings()
-        schemas = self.toolbox.schemas(ch.modes)
+        schemas = self.toolbox.schemas(ch.modes) + [s for n, s in (ch.ctx.get("mcp_schemas") or {}).items() if ch.modes.get(n) in ("on", "ask")]
         rnd = 0
         while True:
             rnd += 1
@@ -938,6 +945,8 @@ class Subagents:
                 ch.messages.append({"role": "assistant", "content": text})
                 ch.state, ch.exit_reason = ("error", "error") if end.get("finish_reason") == "error" else ("completed", "completed")
                 return
+            if end.get("finish_reason") == "length":
+                calls[-1]["_cut"] = True  # the output limit cut the last call's arguments
             ch.messages.append({"role": "assistant", "content": text or None,
                                 **({"reasoning_content": end["reasoning"]} if end.get("reasoning") else {}),
                                 "tool_calls": [{"id": c["id"], "type": "function",
@@ -1025,7 +1034,7 @@ class Subagents:
         ch.calls += 1
         self._check(ch)
         sig = call_key(name, args)
-        ch.repeats = ch.repeats + 1 if sig == ch.last_sig else 1
+        ch.repeats = ch.repeats + 1 if sig == ch.last_sig and name not in WAITING_TOOLS else 1
         ch.last_sig = sig
         if ch.repeats >= limits.REPEAT_LIMIT and not ch.stuck_stop:
             ch.stuck_stop = f"{name} has been called with identical arguments {limits.REPEAT_LIMIT} times in a row, so tool use is stopping."
@@ -1039,10 +1048,17 @@ class Subagents:
         self._set_now(ch, _now_line(name, args))
         self._emit(ch, "tool_call", {"id": uid, "name": name, "arguments": _short(args)})
         decision, result, ran = "allow", None, False
-        if spec is None or raw_mode == "off":
+        mcp = self.connectors is not None and spec is None and name in (ch.ctx.get("mcp_schemas") or {})
+        if mcp and raw_mode != "off" and "_raw" not in args:
+            decision, result, ran = await self._exec_mcp(ch, uid, name, args, raw_mode)
+        elif spec is None or raw_mode == "off":
             result = denied(name, "not available to this subagent")
         elif "_raw" in args:
-            result = tool_error(f"{name}: the arguments were not valid JSON.", alternative=ALTERNATIVE.get(name))
+            cut = bool(c.get("_cut"))
+            result = tool_error(
+                f"{name}: the arguments were cut off at the model's output limit and the call was not run." if cut
+                else f"{name}: the arguments were not valid JSON.",
+                alternative="send a smaller call or split the content (for a big file, write the first part, then add the rest in several calls with mode='append')" if cut else ALTERNATIVE.get(name))
         else:
             pmode = ch.ctx.get("permission_mode") or autoreview.mode_of(ch.ctx.get("settings") or self.settings())
             tainted = self.toolbox.tainted_for(name, args, ch.ctx)
@@ -1072,18 +1088,15 @@ class Subagents:
             if not bad and pmode != "manual" and mode != "off":
                 # The parent's permission mode (autoreview.route), with the child's own task as the reviewer's intent.
                 explicit = (ch.ctx.get("explicit_modes") or {}).get(name)
-                floor = shell_mod.floor(self.toolbox, args, ch.ctx) if pmode == "allow_all" and name == "shell_run" else None
                 rt = autoreview.route(
                     pmode, mode=mode, danger=spec.danger, explicit_on=explicit == "on",
                     explicit_ask=(explicit == "ask" and not self.toolbox.ask_locked(spec)) or (
                         mode == "ask" and perm.kind in ("rule", "external_directory")),
                     covered=(pre_mode == "ask" and mode == "on") or bool(perm.rule and mode == "on"),
                     hard_forced=hard_forced, soft_forced=lockable and not hard_forced,
-                    # a sensitive-path read/write, a tainted write or a runaway repeat stays a card even in allow-all
-                    fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop") or bool(floor),
+                    # a sensitive-path read/write, a tainted write or a runaway repeat stays a card (not in allow-all)
+                    fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop"),
                     question=name in permrules.STILL_ASK)
-                if floor and rt == "card":
-                    mode, forced = "ask", True  # Allow everything's floor: a permanent delete, disk wipe or force-push
                 if rt == "run":
                     if mode == "ask":
                         mode, forced = "on", False
@@ -1139,7 +1152,7 @@ class Subagents:
             result.pop("images", None)
             if hint := ch.denials.note():
                 result["permission_note"] = hint
-        ch.denials.record(not ran and spec is not None and raw_mode != "off" and "_raw" not in args)
+        ch.denials.record(not ran and (spec is not None or mcp) and raw_mode != "off" and "_raw" not in args)
         nudge = ""
         if ran:
             ch.detector.observe(name, args, result)
@@ -1164,6 +1177,69 @@ class Subagents:
         blob = redact.scrub_command_output(json.dumps(result, default=str, ensure_ascii=False))
         blob = blob if len(blob) <= 8000 else blob[:8000] + "...[truncated]"
         return (fence_untrusted(blob, fence, name) if fence else blob) + nudge
+
+    async def _exec_mcp(self, ch: Child, uid: str, name: str, args: dict[str, Any], raw_mode: str) -> tuple[str, Any, bool]:
+        """One connector call: the checks the chat loop applies to a connector tool (autoreview.connector_*, a deny rule, the
+        grant read live so a revoked or re-shaped tool is not run on a stale snapshot), then the same call path.
+        -> (decision, result, ran)."""
+        con = self.connectors
+        live = con.mode(name, ch.ctx)
+        if live == "off" or (live == "ask" and raw_mode == "on"):
+            raw_mode = live  # a grant revoked or decayed since this child started: the stricter mode wins
+        if raw_mode == "off":
+            return "deny", denied(name, "not available to this subagent"), False
+        if why := con.denied(name):
+            return "deny", denied(name, why), False
+        pmode = ch.ctx.get("permission_mode") or autoreview.mode_of(ch.ctx.get("settings") or self.settings())
+        tainted = bool(ch.ctx.get("tainted"))
+        mode = autoreview.connector_gate(raw_mode, tainted)
+        hard_forced = mode != raw_mode
+        hints = con.hints(name)
+        decision = "allow"
+        if pmode != "manual":
+            rt = autoreview.connector_route(pmode, mode=mode, raw_mode=raw_mode, hints=hints, hard_forced=hard_forced, tainted=tainted)
+            if rt == "run":
+                mode = "on"
+                if pmode == "allow_all":
+                    self._log_mode(ch, uid, name, args, "auto", "allow-all", "allowed (allow-all mode)")
+            elif rt in ("review", "review_strict"):
+                recent, _first = autoreview.digest(ch.messages)
+                rv = await autoreview.review(
+                    ch.ctx.get("settings") or self.settings(), ch.model, name=name, description=con.review_text(name), args=args,
+                    danger="external", user_text=str(ch.ctx.get("user_text") or ch.task), task=ch.task, recent=recent,
+                    mode=raw_mode, tainted=tainted, cancel=ch.cancel, conv_id=ch.conversation_id, cache=ch.ctx.get("review_cache"))
+                out = autoreview.apply(rt, rv["verdict"], rv["confidence"], tainted)
+                if out == "run":
+                    mode = "on"
+                    self._log_mode(ch, uid, name, args, "auto", "auto-review", "mode: auto", rv)
+                elif out == "deny":
+                    self._log_mode(ch, uid, name, args, "deny", "auto-review", "mode: auto", rv)
+                    return "deny", denied(name, f"refused by the safety reviewer: {rv['reason']}. Do not retry the same call; change approach or ask the user."), False
+                else:
+                    mode = "ask"
+                    self._log_mode(ch, uid, name, args, "review-ask", "auto-review", "mode: auto", rv)
+        if mode == "ask":
+            if unattended := self._unattended(ch, pmode):
+                if self.store is not None:
+                    self.store.open_approval(uid, ch.id, name, args, conversation_id=ch.conversation_id, message_id=ch.message_id,
+                                             forced=hard_forced, desk_id=ch.desk_id, danger="external")
+                    self.store.decide(uid, "deny", by="unattended", note=unattended)
+                return "deny", denied(name, unattended), False
+            decision, edited = await self._ask(ch, uid, name, args, hard_forced, "external")
+            if decision == "deny":
+                return decision, denied(name, "declined by the user"), False
+            if edited:
+                args.clear()
+                args.update(edited)
+        ch.touch(in_tool=True)
+        try:
+            result = await con.call(name, args)
+        finally:
+            ch.touch(in_tool=False)
+        # Whatever a connector said, result or error, is third-party text: the child's run is tainted from here on.
+        ch.ctx["tainted"] = True
+        ch.ctx.setdefault("taint_sources", []).append(name)
+        return decision, result, True
 
     async def _call(self, ch: Child, name: str, args: dict[str, Any], uid: str, spec: ToolSpec) -> Any:
         async def go() -> Any:

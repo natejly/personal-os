@@ -97,16 +97,16 @@ def test_upload_cap_is_50_mb_and_one_constant() -> None:
     from personal_os import limits
     from personal_os.app import AUTH_TOKEN, app
 
-    assert limits.MAX_UPLOAD_MB == 50 and limits.MAX_UPLOAD_BYTES == 50 * 1024 * 1024
+    assert limits.MAX_UPLOAD_MB == 100 and limits.MAX_UPLOAD_BYTES == 100 * 1024 * 1024
     assert ex.MAX_UPLOAD_BYTES is limits.MAX_UPLOAD_BYTES and appmod.MAX_UPLOAD_BYTES == limits.MAX_UPLOAD_BYTES
     assert ex.MAX_UNZIPPED_BYTES == limits.MAX_UNZIPPED_BYTES > limits.MAX_UPLOAD_BYTES
     assert appmod._too_big(limits.MAX_UPLOAD_BYTES) is None
-    assert appmod._too_big(limits.MAX_UPLOAD_BYTES + 1) == "Files must be 50 MB or smaller"
+    assert appmod._too_big(limits.MAX_UPLOAD_BYTES + 1) == "Files must be 100 MB or smaller"
     client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
     ok = client.post("/documents", files={"file": ("big.bin", b"\0" * (30 * 1024 * 1024), "application/octet-stream")})
     assert ok.status_code == 200, ok.text
     big = client.post("/documents", files={"file": ("huge.bin", b"\0" * (limits.MAX_UPLOAD_BYTES + 1), "application/octet-stream")})
-    assert big.status_code == 413 and "50 MB" in big.json()["detail"]
+    assert big.status_code == 413 and "100 MB" in big.json()["detail"]
 
 
 if __name__ == "__main__":

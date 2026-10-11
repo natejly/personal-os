@@ -49,13 +49,28 @@ def route(pmode: str, *, mode: str, danger: str, explicit_on: bool = False, expl
         return "off"
     if question or pmode == "manual":
         return "card" if mode == "ask" else "run"
-    if pmode == "allow_all":
-        return "card" if fenced else "run"
+    if pmode == "allow_all":  # no exceptions: fenced, forced and floor cases all run
+        return "run"
     if mode == "on":
         return "run" if danger == "safe" or explicit_on or covered else "review"
     if explicit_ask or fenced or hard_forced:
         return "card"
     return "review_strict" if soft_forced else "review"
+
+
+def connector_gate(mode: str, tainted: bool) -> str:
+    """A connector tool is external by construction: untrusted content in the run turns a plain 'on' into an ask."""
+    return "ask" if mode == "on" and tainted else mode
+
+
+def connector_route(pmode: str, *, mode: str, raw_mode: str, hints: dict[str, Any], hard_forced: bool, tainted: bool,
+                    covered: bool = False, question: bool = False) -> str:
+    """`route` for a connector tool, the one rule chat and child runs share. Only a stored 'on' grant is an explicit choice;
+    a connector that calls its own tool destructive is reviewed strictly; a call forced by untrusted content stays a card
+    (allow-all runs it, as in `route`)."""
+    return route(pmode, mode=mode, danger="external", explicit_on=raw_mode == "on", covered=covered, hard_forced=hard_forced,
+                 soft_forced=bool(hints.get("destructive")) and not hard_forced, fenced=bool(hints) and hard_forced and tainted,
+                 question=question)
 
 
 def apply(rt: str, verdict: str, confidence: str, tainted: bool) -> str:

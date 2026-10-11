@@ -1,4 +1,4 @@
-import { Terminal } from 'lucide-react'
+import { Terminal } from '../../icons'
 import { fmtSeconds, networkLine, num, shellState, str } from '../../lib/toolResult'
 import CardShell from './CardShell'
 import { Badge, ErrorLine, Meta, MonoBlock, unreadable, useParsed } from './blocks'

@@ -4,7 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, Brush
 } from 'recharts'
 import { parseJsonLoose } from '../lib/chartRepair'
-import { AlertCircle, BarChart3, Check, Code2, Copy, Table2 } from 'lucide-react'
+import { AlertCircle, BarChart3, Check, Code2, Copy, Table2 } from '../icons'
 import { applyTransforms, isIsoDateColumn, fmtIsoDate, BRUSH_ABOVE, MAX_ROWS } from '../lib/chartTransforms'
 import OpenInPanel from './ShowButton'
 

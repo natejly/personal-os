@@ -87,6 +87,16 @@ def test_registered_ask_by_default_and_never_unsandboxed_unasked(box: Box) -> No
     assert (llm.DEFAULT_SETTINGS["shellTimeoutSec"], llm.DEFAULT_SETTINGS["shellMaxBackground"]) == (120, 4)
 
 
+def test_trust_external_content_lifts_only_the_tainted_shell_card(box: Box) -> None:
+    trusted = {"tainted": True, "settings": {**box.settings, "shellNetwork": True, "trustExternalContent": True}}
+    assert not box.tb.forces_ask("shell_run", {"command": "ls"}, trusted)
+    assert box.tb.gate("shell_run", "on", trusted, {"command": "ls"}) == "on", "the taint-forced card is gone"
+    assert box.tb.forces_ask("shell_run", {"command": "ls", "unsandboxed": True}, trusted), "unsandboxed still asks"
+    # The destructive floor is not taint-driven, so the setting never touches it.
+    from personal_os import permrules
+    assert permrules.destructive("rm -rf build", cwd="/Users/someone/proj")
+
+
 def test_cwd_is_any_folder_except_the_protected_ones(tmp_path: Path, box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
     other = tmp_path / "elsewhere"
     other.mkdir()
@@ -640,10 +650,24 @@ def test_dead_or_recycled_pids_are_not_listed_as_orphans(tmp_path: Path) -> None
     assert shell.ShellJobs(state).jobs == {}
 
 
-def test_unsandboxed_is_refused_while_the_sandbox_works(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unsandboxed_is_a_per_call_exception_while_the_sandbox_works(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(shell, "sandbox_available", lambda: True)
     r = box.run("shell_run", command="echo hi", unsandboxed=True)
-    assert "sandbox is available" in r["error"]
+    assert r["exit_code"] == 0 and r["sandboxed"] is False  # the approval card is the gate (spec.force_ask), not a refusal
+
+
+def test_wall_note_names_the_rule_and_quotes_the_os_error() -> None:
+    bind = shell.wall_note("Traceback...\nPermissionError: [Errno 1] Operation not permitted: bind 127.0.0.1")
+    assert bind["rule"] == "network*" and "Operation not permitted" in bind["error"] and "unsandboxed" in bind["retry"]
+    assert shell.wall_note("open: error -54")["rule"].startswith("file")
+    assert shell.wall_note("osascript: Operation not permitted (-1743)")["rule"].startswith("appleevent")
+    assert shell.wall_note("PermissionError: [Errno 1] Operation not permitted: bind", network=True)["rule"].startswith("file")
+    assert shell.wall_note("all fine") is None
+    assert "cannot bind" in box_spec_description()
+
+
+def box_spec_description() -> str:
+    return shell.SANDBOX_LIMITS
 
 
 def test_no_sandbox_means_refused_until_the_forced_unsandboxed_path(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -692,50 +716,6 @@ def test_spilled_outputs_older_than_a_week_are_swept(box: Box) -> None:
     assert box.tb.shell.sweep_spills(box.db) == 1
     assert box.tb.results.get(old["id"]) is None and box.tb.results.get(new["id"]) and box.tb.results.get(other["id"])
     assert box.tb.shell.sweep_spills(box.db) == 0  # at most once an hour
-
-
-# ---- idle VM sandboxes are stopped by a reaper (microvm.py) ----
-def _vm():
-    from test_microvm_checkpoints import make
-    sb, d = make()
-    sb._reaper_stop.set()  # no background thread in a unit test: stop_idle() is called by hand
-    return sb, d
-
-
-def test_idle_sandbox_is_stopped_after_300s_and_restarts_on_next_use() -> None:
-    sb, d = _vm()
-    name = sb.ensure("c1")
-    t = sb._last[name]
-    assert sb.stop_idle(now=t + 299) == [] and d.containers[name]["running"] is True
-    assert sb.stop_idle(now=t + 301) == [name] and d.containers[name]["running"] is False
-    assert sb.stop_idle(now=t + 900) == []  # already stopped: nothing to do
-    assert sb.ensure("c1") == name and d.containers[name]["running"] is True  # state kept, restarted on use
-    assert name in d.containers  # stopped, never removed
-
-
-def test_a_command_in_flight_is_never_reaped_and_use_resets_the_clock() -> None:
-    sb, d = _vm()
-    name = sb.ensure("c1")
-    t = sb._last[name]
-    sb._busy[name] = 1
-    assert sb.stop_idle(now=t + 5000) == []
-    sb._busy[name] = 0
-    sb.exec("c1", "true")
-    assert sb._last[name] >= t and sb.stop_idle(now=sb._last[name] + 10) == []
-
-
-def test_reaper_thread_starts_once_and_shutdown_stops_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    from test_microvm_checkpoints import make
-    sb, d = make()
-    sb.ensure("c1")
-    th = sb._reaper
-    assert th is not None and th.is_alive() and th.daemon
-    sb.ensure("c1")
-    assert sb._reaper is th
-    monkeypatch.setattr(shutil, "which", lambda b: "/usr/bin/docker")
-    sb.shutdown()
-    th.join(2)
-    assert not th.is_alive() and d.containers[sb._name("c1")]["running"] is False
 
 
 # ---- network modes, auto-approval, cwd persistence, timeout promotion (cowork shell slice) ----

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CheckSquare, Plus } from 'lucide-react'
+import { CheckSquare, Plus } from '../../icons'
 import type { DragKind, DragPayload, Todo } from '@shared/types'
 import TodoItem from '../../components/TodoItem'
 import SmartTextarea from '../../components/SmartTextarea'

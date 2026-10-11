@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronLeft, ChevronRight, Calendar as CalIcon, Plus, RefreshCw } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Calendar as CalIcon, Plus, RefreshCw } from '../icons'
 import { useStore } from '../store'
 import { PIM_SETTINGS_TAB, pimLabel, pimStatus } from '../lib/pim'
 import { api } from '../lib/api'
@@ -24,7 +24,7 @@ function CalToggle({ c, on, onToggle }: { c: GoogleCalendar; on: boolean; onTogg
     <button type="button" className={on ? 'cal-cal on' : 'cal-cal'} aria-pressed={on}
       title={on ? `Hide ${c.summary}` : `Show ${c.summary}`} onClick={onToggle}>
       <span className="cal-cal-box" style={{ borderColor: color, background: on ? color : 'transparent' }}>
-        {on && <Check size={11} strokeWidth={3} />}
+        {on && <Check size={11} weight="bold" />}
       </span>
       <span className="cal-cal-name">{c.summary}</span>
     </button>
@@ -57,7 +57,7 @@ function CalendarRail({ calendars, ready, shown, toggle }: {
 }
 
 export default function CalendarView(): JSX.Element {
-  // The active calendar account (Google or Microsoft).
+  // The active calendar account.
   const google = useStore(pimStatus)
   const label = useStore(pimLabel)
   const todos = useStore((s) => s.todos)

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { MessageSquarePlus, Pencil, Files, FolderX, Brain, MessageSquare, BookOpen, Trash2, Info } from 'lucide-react'
+import { MessageSquarePlus, Pencil, Files, FolderX, Brain, MessageSquare, BookOpen, Trash2, Info } from '../icons'
 import { useStore, useProject } from '../store'
 import { dragProps } from '../canvas/dnd'
 import { rowButton } from '../lib/rowButton'
@@ -53,7 +53,7 @@ export default function ProjectView(): JSX.Element {
           <FolderX size={28} />
           <h2>Project not found</h2>
           <p>It may have been deleted, or moved to the trash.</p>
-          <button className="primary-btn" onClick={() => setView('home')}>Back to Today</button>
+          <button className="primary-btn" onClick={() => setView('chat')}>Back to chats</button>
         </div>
       </main>
     )

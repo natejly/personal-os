@@ -2,7 +2,6 @@
 
 Item 1: what a sandbox blocks is stated up front, in the tool descriptions the assistant reads and at GET /sandbox/limits.
 Item 3: a blocked call comes back as the operating system's own error, quoted, never an empty result or generic text.
-Item 4: a mode the environment will refuse to run is not silently downgraded; the refusal names the rule.
 
 No Database (its file is named personal-os.db, which a host sandbox denies) and no real Seatbelt: the profile's
 refusals are exercised through sandbox.profile_failed / sandbox.blocked_note, and run_python runs with the profile
@@ -19,39 +18,29 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from personal_os import microvm, sandbox  # noqa: E402
+from personal_os import sandbox  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 
 
 def _tb() -> Toolbox:
     # Descriptions are built at registration; nothing here opens the database or the container runtime.
-    return Toolbox(None, None, None, lambda: {}, sandboxes=microvm.Sandboxes(lambda: {}))
+    return Toolbox(None, None, None, lambda: {})
 
 
 def test_declared_limits_name_every_wall() -> None:
     limits = sandbox.declared_limits()
-    assert set(limits) == {"run_python", "shell_run"}
+    assert set(limits) == {"run_python"}
     py = " ".join(limits["run_python"]["blocks"]).lower()
     for wall in ("network", "bind", "subprocess", "launch", "writes outside", "credential"):
         assert wall in py, wall
-    sh = " ".join(limits["shell_run"]["blocks"]).lower()
-    for wall in ("credential", "network", "git hooks"):
-        assert wall in sh, wall
     assert "unsandboxed" in limits["run_python"]["escalation"]
-    assert "unsandboxed" in limits["shell_run"]["escalation"]
-    # The Linux sandbox declares its own; limits_text turns any entry into one sentence for a description.
-    text = sandbox.limits_text(microvm.DECLARED_LIMITS)
-    assert text.startswith(" Declared limits:") and "host machine" in text and "network" in text
+    text = sandbox.limits_text(limits["run_python"])
+    assert text.startswith(" Declared limits:") and "network" in text
 
 
-def test_tool_descriptions_carry_the_declared_limits() -> None:
+def test_run_python_description_carries_the_declared_limits() -> None:
     tb = _tb()
-    for name, limits in (("run_python", sandbox.declared_limits()["run_python"]),
-                         ("shell_run", sandbox.declared_limits()["shell_run"]),
-                         ("sandbox_exec", microvm.DECLARED_LIMITS)):
-        assert sandbox.limits_text(limits) in tb.specs[name].description, name
-    # item 4: the escape hatch says when it is offered instead of promising something it cannot deliver
-    assert "unsandboxed=true is only for a machine where the OS sandbox cannot start" in tb.specs["shell_run"].description
+    assert sandbox.limits_text(sandbox.declared_limits()["run_python"]) in tb.specs["run_python"].description
 
 
 def test_profile_failed_only_for_a_sandbox_that_never_started() -> None:
@@ -100,18 +89,3 @@ def test_run_python_tool_keeps_the_os_error_and_adds_a_note(monkeypatch: pytest.
     out = asyncio.run(tb.specs["run_python"].fn({"conversation_id": None, "settings": {}}, code="print(1)"))
     assert out["stderr"] == blocked["stderr"]  # the OS error is untouched
     assert "unsandboxed" in out["note"]        # the wall and the way out are named alongside it
-
-
-def test_shell_refuses_without_a_sandbox_and_never_downgrades(monkeypatch: pytest.MonkeyPatch) -> None:
-    tb = _tb()
-    monkeypatch.setattr("personal_os.shell.sandbox_available", lambda: False)
-    out = asyncio.run(tb.specs["shell_run"].fn({"conversation_id": None, "settings": {}}, command="echo hi"))
-    assert "not available" in out["error"] and "unsandboxed" in out["try_instead"]
-
-
-def test_unsandboxed_is_refused_while_the_sandbox_works(monkeypatch: pytest.MonkeyPatch) -> None:
-    tb = _tb()
-    monkeypatch.setattr("personal_os.shell.sandbox_available", lambda: True)
-    out = asyncio.run(tb.specs["shell_run"].fn({"conversation_id": None, "settings": {}}, command="echo hi",
-                                               unsandboxed=True))
-    assert "sandbox is available" in out["error"]

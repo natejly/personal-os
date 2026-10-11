@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { AlertCircle, CheckCircle2, CircleDashed, FileDown, FolderOpen, Loader2, ShieldAlert, ShieldCheck, XCircle } from 'lucide-react'
+import { AlertCircle, CheckCircle2, CircleDashed, FileDown, FolderOpen, Loader2, ShieldAlert, ShieldCheck, XCircle } from '../../icons'
 import type { ToolEvent } from '@shared/types'
 import { api } from '../../lib/api'
 import { outputFiles } from '../../lib/toolResult'

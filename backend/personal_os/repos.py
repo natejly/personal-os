@@ -209,7 +209,7 @@ class Conversations:
                 "AND COALESCE(json_extract(c.settings,'$.deskId'),'')='' AND COALESCE(json_extract(c.settings,'$.job_id'),'')='' "
                 + scope)
         cols = ("m.id, m.conversation_id, m.role, m.created_at, c.title, c.project_id, c.updated_at, "
-                "COALESCE(json_extract(c.settings,'$.tainted'),0) AS tainted")
+                "COALESCE(json_extract(c.settings,'$.tainted'),0) AS tainted, c.archived_at IS NOT NULL AS archived")
         rows: list[Any] = []
         fts_ok = q.isascii() and any(len(t) >= 2 for t in tokens)
         with self.db.tx() as c:
@@ -251,7 +251,7 @@ class Conversations:
                 if len(out) >= limit:
                     continue
                 item = out[r["conversation_id"]] = {"id": r["conversation_id"], "title": r["title"], "project_id": r["project_id"],
-                                                    "updated_at": r["updated_at"], "tainted": bool(r["tainted"]), "hits": 0, "snippets": []}
+                                                    "updated_at": r["updated_at"], "tainted": bool(r["tainted"]), "archived": bool(r["archived"]), "hits": 0, "snippets": []}
             item["hits"] += 1
             if len(item["snippets"]) < per_conv:
                 item["snippets"].append({"message_id": r["id"], "role": r["role"], "created_at": r["created_at"], "text": snip})

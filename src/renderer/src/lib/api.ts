@@ -15,7 +15,7 @@ import type {
   PendingSend, SendHoldConfig, Verification, Verified,
   PermissionGrantResult, VoiceConfig,
   RunChanges, RunUndoResult,
-  BackupInfo, DataOverview, SandboxStatus, ShellJobInfo, ShellJobTail, TelegramStatus,
+  BackupInfo, DataOverview, ShellJobInfo, ShellJobTail, TelegramStatus,
   TeachDraft, TeachRecording
 } from '@shared/types'
 import type { CodingSession, CodingSessionDiff, ShipChecklist } from '@shared/types'
@@ -195,7 +195,6 @@ export const api = {
   shellJobs: () => req<{ jobs: ShellJobInfo[] }>('/shell/jobs'),
   shellJobTail: (id: string, limit = 4000) => req<ShellJobTail>(`/shell/jobs/${encodeURIComponent(id)}/tail?limit=${limit}`),
   killShellJob: (id: string) => req<ShellJobInfo>(`/shell/jobs/${encodeURIComponent(id)}/kill`, { method: 'POST' }),
-  sandboxes: () => req<SandboxStatus>('/sandboxes'),
   telegramStatus: () => req<TelegramStatus>('/telegram/status'),
   telegramSaveToken: (token: string) => req<TelegramStatus>('/telegram/token', { method: 'PUT', body: json({ token }) }),
   telegramRemoveToken: () => req<TelegramStatus>('/telegram/token', { method: 'DELETE' }),
@@ -203,7 +202,6 @@ export const api = {
   telegramUnpair: () => req<TelegramStatus>('/telegram/unpair', { method: 'POST' }),
   telegramTest: () => req<{ ok: boolean; error?: string }>('/telegram/test', { method: 'POST' }),
   telegramSetEnabled: (enabled: boolean) => req<TelegramStatus>('/telegram/enabled', { method: 'POST', body: json({ enabled }) }),
-  resetSandbox: (key: string) => req<{ reset: boolean; note: string }>(`/sandboxes/${encodeURIComponent(key)}/reset`, { method: 'POST' }),
   dashboard: () => req<TodayDashboard>('/dashboard'),
   recap: (force = false) => req<Recap>(`/recap?force=${force}`, undefined, NO_TIMEOUT),
   // `steps` / `note` are for a propose_plan card: the steps the user is authorising (with any edited arguments,

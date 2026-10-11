@@ -21,10 +21,9 @@ import ProviderSettings from './ProviderSettings'
 import PermissionRules from './PermissionRules'
 import GrantsPanel from './GrantsPanel'
 import { PermissionsPanel } from './PermissionsPanel'
-import CoworkSettings, { BrowserAccess, CoworkAdvanced, DeskGates, ShellNetwork } from './CoworkSettings'
+import CoworkSettings, { BrowserAccess, DeskGates, ShellNetwork } from './CoworkSettings'
 import RunSafetySettings, { SnapshotToggle } from './RunSafetySettings'
 import { PermissionModeCards } from './PermissionMode'
-import SandboxSettings from './SandboxSettings'
 import TelegramSettings from './TelegramSettings'
 import GoogleSettings from './GoogleSettings'
 import VoiceInputSettings from './VoiceInputSettings'
@@ -487,7 +486,6 @@ export default function SettingsModal(): JSX.Element {
                 <SnapshotToggle draft={draft} patch={patch} />
                 <h4>Network for commands</h4>
                 <ShellNetwork draft={draft} patch={patch} />
-                <SandboxSettings draft={draft} patch={patch} />
               </Sec>
             </section>}
 
@@ -527,7 +525,6 @@ export default function SettingsModal(): JSX.Element {
               <p className="muted">How the assistant works on its own: desks, background workers, coding sessions, the browser and the checks it runs.</p>
               <Sec id="desks">
                 <CoworkSettings draft={draft} patch={patch} />
-                <CoworkAdvanced draft={draft} patch={patch} />
               </Sec>
               <Sec id="workers">
                 <h4>Background workers</h4>

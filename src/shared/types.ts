@@ -1610,15 +1610,6 @@ export interface Settings {
   workspaceRoots?: string[]
   /** New chats start working autonomously (Ask as it goes) unless switched off per chat. Missing means on. */
   autonomousByDefault?: boolean
-  /** Mount the active desk's workspace at /workspace/desk in its sandbox container. Missing means on. */
-  sandboxMountDesk?: boolean
-  /** Linux sandbox containers: the image a fresh one starts from, the CLI. */
-  sandboxImage?: string
-  sandboxRuntime?: 'docker' | 'podman' | 'nerdctl'
-  /** A stopped sandbox nobody came back to is removed after this many days (0 = never). */
-  sandboxKeepDays?: number
-  /** The Linux sandbox's network: none, an allowlisting proxy (registries plus shellAllowedDomains), or open. A legacy stored true reads as open. */
-  sandboxNetwork?: 'off' | 'proxy' | 'open' | boolean
   /** Host shell. shellNetwork opens the network entirely; off, only the allowlist below is reachable. */
   shellNetwork?: boolean
   shellTimeoutSec?: number
@@ -1880,11 +1871,6 @@ export interface ShellJobInfo {
 }
 export interface ShellJobTail extends ShellJobInfo { output: string; note?: string }
 
-/** One sandbox container (GET /sandboxes). conversation_id is null for one made before containers were labelled. */
-export interface SandboxInfo {
-  name: string; conversation_id: string | null; title: string | null; status: string; created: string
-  last_used: number | null; networked: boolean | null; holds_import: boolean; checkpoints: string[]
-}
 export interface TelegramStatus {
   enabled: boolean
   has_token: boolean
@@ -1896,8 +1882,6 @@ export interface TelegramStatus {
   last_poll_at: number | null
   pairing: { code: string; link: string; expires_at: number } | null
 }
-
-export interface SandboxStatus { available: boolean; runtime: string; reason: string; items: SandboxInfo[] }
 
 export interface BackupInfo {
   name: string; kind: 'daily' | 'manual' | 'premigrate' | 'prerestore'; created_at: number; size: number

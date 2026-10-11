@@ -69,7 +69,6 @@ from .cowork import (AUTO_RESUME_FROM, internal_kind, AUTONOMY, CHAT_HANDOFF, CO
                      OUTPUT_KINDS, checklist_items, mail_parts, origin_report, parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
 from .envs import WorkEnv
-from .microvm import SandboxError, Sandboxes
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
                     normalize_plan, parse_plan_edits, plan_voided_by_taint, taint_expected)
 from .chat_files import ChatFiles, router as chat_files_router
@@ -462,9 +461,6 @@ desks.on_change = _desk_changed
 # The supervisor task per live desk: it owns the CHAIN, not the turn in flight. Cancelling one ends
 # the chain and leaves the running turn to settle cooperatively.
 _desk_tasks: dict[str, asyncio.Task[None]] = {}
-sandboxes = Sandboxes(settings, import_dir=db.data_dir / "sandbox-imports")
-# A desk's container sees the desk's workspace at /workspace/desk (microvm.DESK_MOUNT); other chats mount nothing.
-sandboxes.desk_workspace = lambda conv_id: (str(workspace.ensure(d["id"])) if (d := desks.by_conversation(conv_id)) else None)
 # Every Gmail send is held here first so it can be undone (outbox.py); its own routes are included below.
 outbox = Outbox(db, google, settings, documents=documents)
 app.include_router(outbox_router(outbox))
@@ -513,7 +509,7 @@ guide.ensure(skills)  # the built-in "Using Grain" skill: created approved, text
 # Auto-learn may only ever *propose* a skill (a friction fix, or a revised copy of one that failed); the lint it
 # runs is the approval gate's, so a draft that claims authority never even becomes a candidate.
 learner.skills, learner.known_tools = skills, lambda: _known_tools()
-toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, sandboxes=sandboxes, docs=docs,
+toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, docs=docs,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, desks=desks, workspace=workspace, filesnap=filesnap,
                   conversations=convos, extundo=extundo)
@@ -877,8 +873,6 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
     set_settings_via_provider(clean)
     if {"apiKey", "baseUrl", "provider"} & clean.keys():
         auth_breaker.reset()  # a new key or endpoint gets a fresh start, whatever the old one's record
-    if "sandboxRuntime" in perm:
-        sandboxes._avail = None  # the status line answers for the new runtime now, not after the cache expires
     if "telegramEnabled" in clean and _loop is not None and not _loop.is_closed():
         asyncio.run_coroutine_threadsafe(telegram_bridge.reconcile(), _loop)  # a sync route runs in the threadpool
     if "workerMaxConcurrent" in clean and _loop is not None and not _loop.is_closed():
@@ -1314,10 +1308,6 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
         settings_patch["tools"] = toolbox.cap_modes(settings_patch["tools"])  # external and schedules tools top out at ask
     settings_patch.pop("deskId", None)  # bound and unbound by the cowork routes only, never by a settings PATCH
     settings_patch.pop("workingFolder", None)  # retired: the file tools reach the whole Mac, so a chat needs no folder bound to it
-    # Clearing the banner has to drop library text that was copied into the sandbox, or the next
-    # command can print it back as if the chat were trusted again.
-    if settings_patch.get("tainted") is False and sandboxes.holds_import(id):
-        sandboxes.reset(id)
     new_title = (patch.get("title") or "").strip()
     if new_title:
         cur = convos.get(id, with_messages=False)
@@ -1351,10 +1341,6 @@ def fork_conversation(id: str, body: ForkIn) -> dict[str, Any]:
         raise HTTPException(404, "No such message in this chat") from None
     except ValueError:
         raise HTTPException(409, "That message was replaced; branch from the current one") from None
-    if sandboxes.holds_import(id):
-        srcs = sorted({*(out["settings"].get("taint_sources") or []), "fork:sandbox_import"})
-        convos.update(out["id"], {"settings": {"tainted": True, "taint_sources": srcs}})
-        out = convos.get(out["id"]) or out
     return out
 
 
@@ -1988,9 +1974,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             "citations": used["chunks"],
             # Taint is sticky for the whole conversation: the injected instructions live on in the replayed history, so
             # waiting one turn must not re-arm a standing 'always' grant. Only the user clears it (Context -> this chat).
-            "tainted": bool(conv["settings"].get("tainted")) or bool(ctx_taints) or sandboxes.holds_import(conv_id),
-            "taint_sources": list(conv["settings"].get("taint_sources") or []) + [f"context:{k}" for k in ctx_taints]
-                + (["sandbox_import"] if sandboxes.holds_import(conv_id) else []),
+            "tainted": bool(conv["settings"].get("tainted")) or bool(ctx_taints),
+            "taint_sources": list(conv["settings"].get("taint_sources") or []) + [f"context:{k}" for k in ctx_taints],
             # a chat tainted with no recorded source: no tool's own-subject exemption may read its taint as explained
             "taint_unsourced": bool(conv["settings"].get("tainted")) and not conv["settings"].get("taint_sources"),
             "allowed_urls": set() if internal else _urls(user_text), "settings": cfg, "conv_settings": conv["settings"],
@@ -2259,7 +2244,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             net = ("open" if permissions.get(cfg, "shellNetwork") or permissions.get(cfg, "allowAllConnections") else
                    "allowlist" if permissions.get(cfg, "shellRegistryAccess") or permissions.get(cfg, "shellAllowedDomains") else "off")
             text = desk_manual({s["function"]["name"] for s in tool_schemas},
-                               {"shell_network": net, "sandbox_mount": bool(cfg.get("sandboxMountDesk", True))})
+                               {"shell_network": net})
             return "\n\n" + text if text else ""
 
         def _desk_inputs_block() -> str:
@@ -3957,7 +3942,7 @@ toolbox.shell.on_note = _shell_wake
 toolbox.shell.on_change = lambda: events.publish("shell_jobs", {"live": toolbox.shell.running_background()})
 
 
-# ---------------- running views: shell jobs and sandboxes ----------------
+# ---------------- running views: shell jobs ----------------
 def _shell_job(job_id: str) -> Any:
     job = toolbox.shell.jobs.get(job_id)
     if not job:
@@ -3981,34 +3966,6 @@ async def kill_shell_job(job_id: str) -> dict[str, Any]:
     job = _shell_job(job_id)
     await toolbox.shell.kill(job)
     return job.info()
-
-
-@app.get("/sandboxes")
-def list_sandboxes() -> dict[str, Any]:
-    st = sandboxes.status()
-    items: list[dict[str, Any]] = []
-    if st["available"]:
-        try:
-            items = sandboxes.list()
-        except SandboxError as e:
-            st = {**st, "reason": str(e)}
-        for it in items:
-            c = convos.get(it["conversation_id"], with_messages=False) if it["conversation_id"] else None
-            it["title"] = c["title"] if c else None
-    return {**st, "items": items}
-
-
-@app.post("/sandboxes/{key}/reset")
-def reset_sandbox(key: str) -> dict[str, Any]:
-    """Remove a sandbox and its checkpoints. `key` is a conversation id, or the container name of one made before
-    containers carried their conversation."""
-    if not sandboxes.available():
-        raise HTTPException(409, "The sandbox runtime is not available")
-    if key.startswith("pos-sbx-"):
-        if not re.fullmatch(r"pos-sbx-[0-9a-f]{12}", key):
-            raise HTTPException(400, "Not a sandbox name")
-        return sandboxes.reset_name(key)
-    return sandboxes.reset(key)
 
 
 @app.post("/conversations/{id}/chat")
@@ -6934,7 +6891,6 @@ async def _shutdown() -> None:
     await followup_jobs.stop()
     await learner.stop()  # after the runs, so nothing is still queueing work at it
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)
-    await asyncio.to_thread(sandboxes.shutdown)  # after the runs: a live sandbox_exec would just see its container vanish
 
 
 # ---------------- Google integration ----------------

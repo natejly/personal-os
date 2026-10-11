@@ -77,21 +77,20 @@ def test_single_nudge() -> None:
 
 
 FULL = {"desk_list_files", "desk_read_file", "desk_write_file", "fs_edit", "fs_glob", "fs_grep", "shell_run", "run_python",
-        "sandbox_exec", "web_search", "fetch_url", "browser_open", "desk_fetch_file", "view_image", "render_preview",
+        "web_search", "fetch_url", "browser_open", "desk_fetch_file", "view_image", "render_preview",
         "convert_document", "doc_guide", "agent_spawn", "todo_write", "desk_deliver", "desk_done", "desk_ask"}
 
 
 def test_manual() -> None:
-    full = desk_manual(FULL, {"shell_network": "allowlist", "sandbox_mount": True})
+    full = desk_manual(FULL, {"shell_network": "allowlist"})
     check(len(full) < 2400, f"manual is {len(full)} chars")
-    for needle in ("outputs/", "`doc_guide`", "/workspace/desk", "package registries", "background=true",
+    for needle in ("outputs/", "`doc_guide`", "package registries", "background=true",
                    "`desk_fetch_file`", "`browser_open`", "`view_image`", "`desk_done`"):
         check(needle in full, f"full manual mentions {needle}")
     check(full.index("`desk_list_files`") < full.index("`shell_run`") < full.index("`run_python`") < full.index("`web_search`")
           < full.index("`view_image`") < full.index("`agent_spawn`") < full.index("Finish"), "lines keep the briefed order")
     check("network is open" in desk_manual({"shell_run"}, {"shell_network": "open"}), "open network sentence")
     check("no network" in desk_manual({"shell_run"}, {"shell_network": "off"}), "off network sentence")
-    check("/workspace/desk" not in desk_manual(FULL, {"sandbox_mount": False}), "no mount, no mount line")
     small = desk_manual({"desk_read_file", "run_python"}, {})
     check("`run_python`" in small and "`shell_run`" not in small and "`browser_open`" not in small and "`doc_guide`" not in small,
           "only offered tools appear")

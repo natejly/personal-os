@@ -80,7 +80,7 @@ export default function MicButton({ scope, onText }: { scope: RefObject<HTMLElem
       }
     } catch (e) {
       const fixable = e instanceof ApiError && e.status === 409
-      toast((e as Error).message, 'error', fixable ? { label: 'Open settings', run: () => useStore.getState().openSettings('advanced', 'voice') } : undefined)
+      toast((e as Error).message, 'error', fixable ? { label: 'Open settings', run: () => useStore.getState().openSettings('appearance') } : undefined)
     } finally {
       setPhase('idle')
     }

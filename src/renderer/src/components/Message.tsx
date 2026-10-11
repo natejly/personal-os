@@ -2,7 +2,7 @@ import { Component, memo, useCallback, useEffect, useMemo, useState, type ReactN
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite, splitSources } from '../lib/remarkCites'
-import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2, Zap } from '../icons'
+import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Play, RotateCw, Pencil, GitBranch, Trash2, Zap } from '../icons'
 import type { Attachment, Message, RunChanges, Span, ToolEvent } from '@shared/types'
 import { useStore, useMessageSubagents, useSubagents } from '../store'
 import { api } from '../lib/api'
@@ -45,27 +45,6 @@ class BodyBoundary extends Component<{ resetKey: string; children: ReactNode }, 
   render(): ReactNode {
     return this.state.failed ? <div className="msg-error"><AlertCircle size={14} /><span>Could not render this message.</span></div> : this.props.children
   }
-}
-
-/** A reply that called tools can be turned into a candidate skill. The id sent is this message, not the whole chat. */
-function SaveSkill({ conversationId, messageId }: { conversationId: string; messageId: string }): JSX.Element {
-  const [busy, setBusy] = useState(false)
-  return (
-    <button
-      type="button"
-      className="ctx-chip"
-      disabled={busy}
-      title="Save as skill: turn this run into a skill for you to review. It is not used until you approve it."
-      aria-label={busy ? 'Saving skill…' : 'Save as skill'}
-      aria-busy={busy || undefined}
-      onClick={() => {
-        setBusy(true)
-        void useStore.getState().induceSkill(conversationId, messageId).finally(() => setBusy(false))
-      }}
-    >
-      <GraduationCap size={11} />
-    </button>
-  )
 }
 
 /** A reply's trace: one plain gray line per step (the thinking summary, then each quiet tool call). Nothing opens; the live step shimmers. */
@@ -359,16 +338,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
                 <span><Share2 size={11} />{ctx.nodes.filter((n) => !n.kind).length}</span>
               </button>
             )}
-            {showContextChips && !isUser && <MemoryChips messageId={message.id} ctx={ctx ?? null} />}
-            {!isUser && events.length > 0 && (
-              <SaveSkill conversationId={message.conversation_id} messageId={message.id} />
-            )}
-            {!isUser && !streaming && content.trim() && (
-              <button type="button" className="ctx-chip" title="Schedule as routine: repeat this on a schedule. It starts switched off, and you can test-run it first."
-                aria-label="Schedule as routine" onClick={() => useStore.getState().scheduleAsRoutine(message.conversation_id, message.id)}>
-                <CalendarClock size={11} />
-              </button>
-            )}
+            {showContextChips && !isUser && <MemoryChips messageId={message.id} />}
             {showContextChips && <TraceChip message={message} />}
             {!isUser && !streaming && <TokenChip message={message} />}
             {!bare && <CopyButton text={content} />}

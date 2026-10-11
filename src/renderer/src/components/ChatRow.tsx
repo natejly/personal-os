@@ -10,6 +10,7 @@ import type { Conversation } from '@shared/types'
 import { STATUS_LABEL } from '../lib/deskStatus'
 import { useChatFileCount } from '../lib/useChatFiles'
 import { formatCount } from '../lib/chatFiles'
+import { useChatSelection } from '../lib/chatSelection'
 import { chatLabel, isTelegramChat } from '../lib/chatRows'
 import TelegramIcon from './TelegramIcon'
 import './chatFiles.css'
@@ -37,6 +38,7 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
   const telegram = isTelegramChat(conv)
   const label = chatLabel(conv)
   const fileCount = useChatFileCount(conv.id)
+  const picked = useChatSelection((s) => s.selected.length > 1 && s.selected.includes(conv.id))
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
   const [renaming, setRenaming] = useState(false)
   /** Enter commits and the unmount's blur commits again: the first one settles, Escape settles it empty. */
@@ -87,12 +89,21 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
   return (
     <>
       <div
-        className={`convo-item${sub ? ' sub' : ''} ${active ? 'active' : ''}`}
+        data-chat-id={conv.id}
+        className={`convo-item${sub ? ' sub' : ''} ${active ? 'active' : ''}${picked ? ' picked' : ''}`}
         aria-current={active ? 'page' : undefined}
         title={telegram ? 'Telegram — messages from your phone show here too' : undefined}
         role="button"
         tabIndex={0}
-        onClick={() => void selectChat(conv.id)}
+        onClick={(e) => {
+          // Shift extends from the last clicked chat, ⌘ toggles one; a plain click opens the chat and drops the selection.
+          if (e.shiftKey || e.metaKey) {
+            const order = [...document.querySelectorAll<HTMLElement>('.convo-item[data-chat-id]')].map((el) => el.dataset.chatId!)
+            return useChatSelection.getState().pick(order, conv.id, e.shiftKey, document.querySelector<HTMLElement>('.convo-item.active[data-chat-id]')?.dataset.chatId)
+          }
+          useChatSelection.getState().anchorAt(conv.id)
+          void selectChat(conv.id)
+        }}
         onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); void selectChat(conv.id) } }}
         onContextMenu={(e) => { e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }) }}
         {...dragProps({ kind: 'conversation', id: conv.id, label, projectId: conv.project_id })}

@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import egress, permissions
-from .sandbox import IMAGE_EXT, MAX_IMAGE_BYTES, capped_run
+from .sandbox import IMAGE_EXT, MAX_IMAGE_BYTES, capped_run, limits_text
 
 WORKSPACE = "/workspace"
 DESK_MOUNT = "/workspace/desk"  # where an active desk's own workspace appears inside its container
@@ -64,6 +64,18 @@ PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROX
 PROXY_ALIAS = "egress"          # the sidecar's name on the internal network
 PROXY_PORT = 3128
 PROXY_LOG = "/tmp/egress.json"  # in the sidecar's own filesystem: survives stop/start, goes with the container
+
+
+# The walls, declared up front for the assistant (sandbox_exec's description and GET /sandbox/limits read this).
+DECLARED_LIMITS: dict[str, Any] = {
+    "blocks": [
+        "the host machine: a VM-isolated container with no bind mounts, so the host filesystem and processes are unreachable",
+        "network unless sandboxNetwork is on: off by default, or package registries and the user's allowed domains through a proxy only",
+        "writes outside /workspace (and, in a desk, the mounted workspace)",
+    ],
+    "enforced_by": "a Linux container (colima/docker) with capabilities dropped, no-new-privileges and memory/cpu/pids caps",
+    "escalation": "turn network on for new sandboxes under Settings → Tools → Linux sandbox, or allow a host; run_python never has network",
+}
 
 
 def net_mode(v: Any) -> str:

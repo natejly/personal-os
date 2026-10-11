@@ -73,6 +73,9 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const openDesk = useStore((s) => s.openDesk)
   const markDeskSeen = useStore((s) => s.markDeskSeen)
   const [deskPanel, setDeskPanel] = useState(false)
+  // openTerminal (a coding session row or card) asks for the side panel's Terminal tab.
+  const termRequest = useStore((s) => s.terminalRequest?.n)
+  useEffect(() => { if (termRequest && !conversationId) setDeskPanel(true) }, [termRequest, conversationId])
   useEffect(() => { if (deskId && !conversationId) void openDesk(deskId) }, [deskId, conversationId, openDesk])
   // Looking at the chat is the acknowledgement. Keyed on desk+count so a failed POST /seen is not retried every render.
   const deskUnseen = desk?.unseen ?? 0

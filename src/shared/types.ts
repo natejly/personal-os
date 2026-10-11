@@ -1986,6 +1986,14 @@ export interface GrainApi {
   micAccess: () => Promise<'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown'>
   /** Opens Terminal on `claude attach <id>` for a coding session waiting on the user; false when the id is invalid or it failed. */
   codingAttach: (externalId: string) => Promise<boolean>
+  /** In-app terminal for a coding session (main window only). The backend resolves the session; no command crosses this bridge. */
+  termAvailable: () => Promise<boolean>
+  termOpen: (sessionId: string, mode: 'attach' | 'shell', cols: number, rows: number) => Promise<{ termId: string; replay: string; fresh: boolean } | { error: string }>
+  termWrite: (termId: string, data: string) => Promise<boolean>
+  termResize: (termId: string, cols: number, rows: number) => Promise<boolean>
+  termClose: (termId: string) => Promise<boolean>
+  onTermData: (cb: (termId: string, data: string) => void) => () => void
+  onTermExit: (cb: (termId: string, code: number | null) => void) => () => void
   /** System access wizard: side-effect-free status reads, one grant per row, and an allowlisted Settings pane opener. */
   sysAccess: {
     status: () => Promise<import('./systemAccess').MainStatus>

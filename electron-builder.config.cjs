@@ -18,6 +18,8 @@ module.exports = {
   appId: 'com.natejly.grain',
   productName: 'Grain',
   files: ['out/main/**/*', 'out/preload/**/*', 'out/renderer/**/*', 'package.json'],
+  // node-pty's native addon and spawn-helper must live outside the asar to load and execute.
+  asarUnpack: ['node_modules/node-pty/**'],
   // The python-build-standalone + backend bundle made by scripts/bundle-backend.sh.
   extraResources: [{ from: 'build/backend-bundle', to: 'backend' }],
   afterSign: 'scripts/adhoc-sign.cjs',

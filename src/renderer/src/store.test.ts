@@ -951,7 +951,7 @@ test('a draft parks chat settings instead of writing the global ones, and send a
 
 test('the first send of a chat armed autonomous makes its desk and sends through it, not as a plain run', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
-  useStore.setState({ sessions: {}, focusedConversationId: null, draftPendingSend: null, draftChatSettings: {}, draftAutonomy: null, toasts: [], desks: [] })
+  useStore.setState({ sessions: {}, focusedConversationId: null, draftPendingSend: null, draftChatSettings: {}, toasts: [], desks: [] })
   const { calls } = stubFetch(t, (m, p) => m === 'POST' && p.endsWith('/conversations') ? json(row({ id: 'c9' }))
     : m === 'POST' && p.endsWith('/cowork/desks') ? json({ desk: { id: 'd1', conversation_id: 'c9' }, conversation_id: 'c9' })
     : m === 'POST' && p.endsWith('/cowork/desks/d1/message') ? json({ ok: true, steered: false })
@@ -966,7 +966,7 @@ test('the first send of a chat armed autonomous makes its desk and sends through
 
 test('when the desk cannot be made, the first send falls back to a plain chat and says why', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
-  useStore.setState({ sessions: {}, focusedConversationId: null, draftPendingSend: null, draftChatSettings: {}, draftAutonomy: null, toasts: [], desks: [] })
+  useStore.setState({ sessions: {}, focusedConversationId: null, draftPendingSend: null, draftChatSettings: {}, toasts: [], desks: [] })
   const { calls } = stubFetch(t, (m, p) => m === 'POST' && p.endsWith('/conversations') ? json(row({ id: 'c9' }))
     : m === 'POST' && p.endsWith('/cowork/desks') ? json({ detail: 'no desks today' }, 500)
     : m === 'GET' ? json([]) : json({ detail: 'down' }, 500))

@@ -43,12 +43,9 @@ export async function openPanel(page, tab) {
   if (!(await panel(page).count())) await page.getByRole('button', { name: 'Documents in this chat' }).click()
   if (tab) await panel(page).locator('.desk-tabs').getByRole('button', { name: new RegExp('^' + tab) }).click()
 }
-/** Turn autonomy on from the composer, as a user does: pick the level, Start working. */
-export async function turnOn(page, level = 'Autonomous') {
-  await page.getByRole('button', { name: /^Mode/ }).click()
-  const menu = page.getByRole('dialog', { name: 'Mode' })
-  await menu.getByLabel(new RegExp(level)).check()
-  await menu.getByRole('button', { name: 'Start working' }).click()
+/** Turn autonomy on for an existing chat over the API (the composer has no per-chat switch): `level` is plan, ask or propose. */
+export async function turnOn(grain, chatId, level = 'propose') {
+  await grain.api('/cowork/desks', { method: 'POST', body: { conversation_id: chatId, autonomy: level, start: true } })
 }
 /** The desk bound to a chat, read off its settings. */
 export const deskOf = async (grain, chatId) => (await grain.api(`/conversations/${chatId}`)).settings.deskId

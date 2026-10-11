@@ -85,8 +85,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    it, or let a reply hand work to a background worker with `delegate` (naming a Library agent runs the worker as it).
    Subagents appear as indented rows under the reply that started them, with
    live status; click one to open and message it. A crew window shows the
-   delegating agent as a big face with its subagents around it. Longer jobs: open **Mode**
-   under the composer and pick Plan first, Ask as it goes or Autonomous, and watch the strip above the composer; its side panel holds the
+   delegating agent as a big face with its subagents around it. Longer jobs: with **Start new chats working autonomously** on (Settings → Advanced → Desks), a new chat hands its task to a desk, and you watch the strip above the composer; its side panel holds the
    workspace files, changes and review. Library
    → Automations holds workflows, which you approve once. `/schedule` or the
    `schedule_task` tool books a run for later; its results arrive in the Agent
@@ -208,10 +207,10 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 - **Health.** Daily metrics (water, steps, sleep, weight, mood, or your own)
   with goals, a Today card, and `health_*` tools for the assistant. COROS and
   Garmin sync through MCP. See [docs/health.md](docs/health.md).
-- **Mode** (a control in any chat's composer). A chat hands its task to a desk that keeps
+- **Working autonomously** (Settings → Advanced → Desks, "Start new chats working autonomously", on by default). A new chat hands its task to a desk that keeps
   working in the same conversation, in its own folder, and has one plan you approve before it acts. Several run at
   once. Each turn is an ordinary reply that runs until the work is done, the desk asks you something,
-  or stuck detection stops a loop; a turn that simply trails off gets one nudge to finish or ask. Three modes: Plan first (nothing consequential runs until you
+  or stuck detection stops a loop; a turn that simply trails off gets one nudge to finish or ask. A new chat starts as Ask as it goes; the other levels are set on a desk through the API or an agent job. Plan first (nothing consequential runs until you
   approve a plan, and those tools are withheld rather than offered and refused),
   Ask as it goes (no plan up front; risky actions follow the permission mode), and Autonomous (it may plan an external
   action and never perform one). A strip above the composer shows the state, turns used and

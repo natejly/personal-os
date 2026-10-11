@@ -177,18 +177,6 @@ if (want('ask')) await session('ask', async (g) => {
 }, { settings: { toolDeferAbove: 0 } })
 
 // ---- 4-10. everything else ----
-// ---- mode menu (composer Mode button: the three styles and their one-line descriptions) ----
-if (want('mode')) await session('mode', async (g) => {
-  const { page } = g
-  g_page_reset = async () => { await escape(g).catch(() => {}); await escape(g).catch(() => {}) }
-  await attempt('chat-mode-menu', async () => {
-    await newChat(page); await sleep(500)
-    await page.getByRole('button', { name: /^Mode/ }).click(); await sleep(500)
-    await snap(g, 'chat-mode-menu', page, 'menu text: ' + (await page.getByRole('dialog', { name: 'Mode' }).innerText()).replace(/\s+/g, ' '))
-    await escape(g)
-  })
-})
-
 if (want('main')) await session('main', async (g) => {
   const { page } = g
   g_page_reset = async () => { await escape(g).catch(() => {}); await escape(g).catch(() => {}) }

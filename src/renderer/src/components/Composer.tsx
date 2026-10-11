@@ -9,7 +9,6 @@ import { composerContext, EMPTY_CONTEXT, overlap, rankByContext, rankChats, type
 import ScheduleForm from './ScheduleForm'
 import { mentionChats, mentionItems, routeMention } from '../lib/mentions'
 import { ArrowUp, Square, Paperclip, Loader2, Sparkles, Download, FileText, X } from '../icons'
-import AutonomyToggle from './AutonomyToggle'
 import { PermissionModePill } from './PermissionMode'
 import { uploadNote } from '../lib/uploadNote'
 import { hasModelKey } from '../lib/modelLabel'
@@ -72,7 +71,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   // Only the main new-chat composer starts a chat autonomous (lib/autonomyDefault.ts): not the chat widget, page agent or a pop-out.
   const newChat = !onSend && !compact && !activeId
   const newChatAutonomy = (st: ReturnType<typeof useStore.getState>): DeskAutonomy | null =>
-    startAutonomy({ autonomousByDefault: st.settings.autonomousByDefault, draft: st.draftAutonomy, mainComposer: newChat, agent: st.draftChatSettings.agent })
+    startAutonomy({ autonomousByDefault: st.settings.autonomousByDefault, mainComposer: newChat, agent: st.draftChatSettings.agent })
   /** A steer that would decline an open card, waiting on the user's yes. `item` when it came from the tray. */
   const [confirm, setConfirm] = useState<{ item?: QueuedItem } | null>(null)
   useEffect(() => { if (!cardPending) setConfirm(null) }, [cardPending])
@@ -482,10 +481,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
       <div className="composer-footer">
         {footer}
         {conversationId !== '\u0000page-agent' && (
-          <>
-            <PermissionModePill />
-            <AutonomyToggle conversationId={conversationId} draft={newChat} />
-          </>
+          <PermissionModePill />
         )}
       </div>
     </div>

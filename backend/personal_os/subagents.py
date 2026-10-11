@@ -938,6 +938,8 @@ class Subagents:
                 ch.messages.append({"role": "assistant", "content": text})
                 ch.state, ch.exit_reason = ("error", "error") if end.get("finish_reason") == "error" else ("completed", "completed")
                 return
+            if end.get("finish_reason") == "length":
+                calls[-1]["_cut"] = True  # the output limit cut the last call's arguments
             ch.messages.append({"role": "assistant", "content": text or None,
                                 **({"reasoning_content": end["reasoning"]} if end.get("reasoning") else {}),
                                 "tool_calls": [{"id": c["id"], "type": "function",
@@ -1042,7 +1044,11 @@ class Subagents:
         if spec is None or raw_mode == "off":
             result = denied(name, "not available to this subagent")
         elif "_raw" in args:
-            result = tool_error(f"{name}: the arguments were not valid JSON.", alternative=ALTERNATIVE.get(name))
+            cut = bool(c.get("_cut"))
+            result = tool_error(
+                f"{name}: the arguments were cut off at the model's output limit and the call was not run." if cut
+                else f"{name}: the arguments were not valid JSON.",
+                alternative="send a smaller call or split the content (for a big file, write the first part, then add the rest in several calls with mode='append')" if cut else ALTERNATIVE.get(name))
         else:
             pmode = ch.ctx.get("permission_mode") or autoreview.mode_of(ch.ctx.get("settings") or self.settings())
             tainted = self.toolbox.tainted_for(name, args, ch.ctx)

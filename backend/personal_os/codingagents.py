@@ -41,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import logging
 import os
 import re
 import secrets
@@ -57,9 +58,12 @@ from .db import new_id
 from .limits import CODING_SESSION_MAX_CONCURRENT, LOGIN_SHELL_TIMEOUT_SECONDS
 from .ship import BRANCH_RE, PROTECTED
 
+log = logging.getLogger(__name__)
+
 AGENTS = ("claude", "opencode", "pi")
 PERMISSION_MODES = (None, "acceptEdits", "auto", "dontAsk", "bypassPermissions")
 LIVE = ("starting", "working", "needs_you")
+SETTLED = ("done", "failed", "stopped", "needs_you", "blocked")  # a session in one of these has something to report
 ATTENTION = {"starting": "working", "working": "working", "needs_you": "needs_you", "blocked": "blocked"}
 LOG_TAIL = 4000
 READ_CAP = 256 * 1024
@@ -307,6 +311,9 @@ class CodingSessions:
         self.claude_home = claude_home or Path.home() / ".claude" / "jobs"
         self.resumed: dict[str, float] = {}   # id -> when a follow-up started: a stale "done" in state.json is ignored for a moment
         self.seen: dict[str, tuple[int, str]] = {}   # id -> (output size, job status) at the last opencode refresh
+        self.on_finish: Callable[[dict[str, Any]], None] | None = None  # a session settled: wake the chat or run that owns it
+        self.waiting: dict[str, int] = {}   # id -> coding_session_wait calls blocked on it (they report it themselves, no wake)
+        self.stopping: set[str] = set()     # ids Grain is stopping itself: that stop is not news
         self.closing = False  # set at app shutdown, after the halted workers' sessions are stopped (see stop_owned)
         self._recover()
         self._prev_on_change = getattr(jobs, "on_change", None)
@@ -385,9 +392,55 @@ class CodingSessions:
     # ---- progress ----
     def refresh(self, row: dict[str, Any]) -> dict[str, Any]:
         """Re-read the driver's state and save when it changed. Reads files and the in-memory job registry only."""
+        prev = row["status"]
         if row["agent"] == "claude":
-            return self._refresh_claude(row) if row.get("external_id") and row["status"] != "failed" else row
-        return self._refresh_opencode(row) if row["status"] in LIVE else row
+            row = self._refresh_claude(row) if row.get("external_id") and row["status"] != "failed" else row
+        else:
+            row = self._refresh_opencode(row) if row["status"] in LIVE else row
+        if prev in ("starting", "working") and row["status"] in SETTLED and self.on_finish:
+            if not (self.waiting.get(row["id"]) or row["id"] in self.stopping):
+                try:
+                    self.on_finish(row)
+                except Exception:  # noqa: BLE001 - a wake-up that fails must not break the refresh
+                    log.warning("coding session wake failed", exc_info=True)
+        return row
+
+    async def watch(self, every: float = 5.0) -> None:
+        """Claude Code sessions have no process of ours to hear from: re-read the live ones so a finish is noticed (and woken
+        for) without anyone calling status."""
+        while True:
+            await asyncio.sleep(every)
+            try:
+                with self.db.tx() as c:
+                    rows = [dict(r) for r in c.execute("SELECT * FROM coding_sessions WHERE agent = 'claude' AND status IN ('starting','working')")]
+                for row in rows:
+                    await asyncio.to_thread(self.refresh, row)
+            except Exception:  # noqa: BLE001 - the watcher outlives any one bad row
+                log.warning("coding session watcher failed", exc_info=True)
+
+    async def wait(self, ids: list[str], mode: str = "all", timeout_s: float = 120) -> dict[str, Any]:
+        """Block (asynchronously) until the sessions have settled (all of them, or any one) or the timeout passes."""
+        ids = [str(i) for i in ids][:20]
+        for i in ids:
+            self._known(i)
+        if not ids:
+            raise CodingError("ids is empty.")
+        try:
+            deadline = time.monotonic() + max(1.0, min(float(timeout_s or 120), 600.0))
+        except (TypeError, ValueError):
+            deadline = time.monotonic() + 120
+        for i in ids:
+            self.waiting[i] = self.waiting.get(i, 0) + 1
+        try:
+            while True:
+                rows = [self.refresh(self._known(i)) for i in ids]
+                settled = [r for r in rows if r["status"] not in ("starting", "working")]
+                if (settled if mode == "any" else len(settled) == len(rows)) or time.monotonic() >= deadline:
+                    return {"sessions": rows, "settled": [r["id"] for r in settled], "timed_out": not (settled if mode == "any" else len(settled) == len(rows))}
+                await asyncio.sleep(min(2.0, max(0.05, deadline - time.monotonic())))
+        finally:
+            for i in ids:
+                self.waiting[i] -= 1
 
     def _refresh_claude(self, row: dict[str, Any]) -> dict[str, Any]:
         state, lines = read_claude(self.claude_home, row["external_id"])
@@ -493,18 +546,21 @@ class CodingSessions:
             ok, out = await self.run([*GIT, "worktree", "add", "-b", branch, str(wt)], str(repo), GIT_TIMEOUT)
             if not ok:
                 raise CodingError(f"git could not create the worktree: {out.strip()[-300:]}")
+        ok, head = await self.run([*GIT, "rev-parse", "HEAD"], str(wt), GIT_TIMEOUT)
+        base = head.strip() if ok and re.fullmatch(r"[0-9a-f]{40}", head.strip()) else None  # what diff and the commit list compare to
         t = time.time()
         row = {"id": sid, "agent": agent, "external_id": None, "session_id": None, "repo_path": str(repo), "worktree": str(wt),
                "branch": branch, "conversation_id": ctx.get("conversation_id"), "desk_id": ctx.get("desk_id"),
                # the owner: the subagent or worker that called (agent_run_id), else the chat or desk reply (stop_owned)
                "run_id": ctx.get("agent_run_id") or ctx.get("run_id"), "name": name, "prompt": prompt, "model": model, "permission_mode": permission_mode,
-               "status": "starting", "detail": None, "log_tail": "", "created_at": t, "updated_at": t, "ended_at": None}
+               "status": "starting", "detail": None, "log_tail": "", "created_at": t, "updated_at": t, "ended_at": None,
+               "base_sha": base}
         with self.db.tx() as c:
             c.execute("INSERT INTO coding_sessions(id, agent, external_id, session_id, repo_path, worktree, branch, conversation_id, "
                       "desk_id, run_id, name, prompt, model, permission_mode, status, detail, log_tail, created_at, updated_at, "
-                      "ended_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      "ended_at, base_sha) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (sid, agent, None, None, row["repo_path"], row["worktree"], branch, row["conversation_id"], row["desk_id"],
-                       row["run_id"], name, prompt, model, permission_mode, "starting", None, "", t, t, None))
+                       row["run_id"], name, prompt, model, permission_mode, "starting", None, "", t, t, None, base))
         self.publish("coding_session", summary(row, None))
         shell.taint(ctx, f"coding_session:start:{sid}")  # the agent's text comes back through status, logs and diff
         try:
@@ -570,7 +626,8 @@ class CodingSessions:
             raise CodingError("OpenCode is not wired into this backend.")
         ctx = {**ctx, "taint_sources": []}  # opencode's own "network" label stays off the caller's ctx; the session's label covers it
         job, _base = await opencode.launch(self.tb, ctx, prompt, cwd=row["worktree"],
-                                           continue_session=continue_session, model=row["model"], background=True,
+                                           continue_session=continue_session, session=row.get("session_id") if continue_session else None,
+                                           model=row["model"], background=True,
                                            no_timeout=True, conversation_id=f"coding:{row['id']}",
                                            run_id=row.get("run_id"), notify=False, on_timeout="kill",
                                            pool="coding", max_background=self._max_concurrent())
@@ -639,6 +696,13 @@ class CodingSessions:
         row = self._known(sid)
         if row["status"] not in (*LIVE, "blocked"):
             return row
+        self.stopping.add(row["id"])
+        try:
+            return await self._stop(row, reason)
+        finally:
+            self.stopping.discard(row["id"])
+
+    async def _stop(self, row: dict[str, Any], reason: str) -> dict[str, Any]:
         if row["agent"] == "claude":
             exe = claude_binary()
             if not (exe and ID_RE.fullmatch(row.get("external_id") or "")):
@@ -700,14 +764,27 @@ class CodingSessions:
                 out, cut = out[:cap], True
             return ok, out
 
+        base = row.get("base_sha") or "HEAD"  # sessions from before the base was recorded: working tree vs HEAD
         _, status = await git("status", "--short")
-        _, stat = await git("diff", "HEAD", "--stat", "--no-ext-diff", "--no-textconv")
-        ok, log = await git("log", "--oneline", "--stat", "-n", "20", "origin/main..HEAD")
-        if not ok:
-            _, log = await git("log", "--oneline", "--stat", "-n", "5")
-        out: dict[str, Any] = {"worktree": wt, "branch": row.get("branch"), "status": status, "diff_stat": stat, "log": log}
+        _, stat = await git("diff", base, "--stat", "--no-ext-diff", "--no-textconv")
+        _, new = await git("ls-files", "--others", "--exclude-standard")  # new files the diff against a commit cannot show
+        new_files = new.splitlines()[:200]
+        if row.get("base_sha"):
+            _, log = await git("log", "--oneline", "--stat", "-n", "20", f"{base}..HEAD")
+        else:
+            ok, log = await git("log", "--oneline", "--stat", "-n", "20", "origin/main..HEAD")
+            if not ok:
+                _, log = await git("log", "--oneline", "--stat", "-n", "5")
+        out: dict[str, Any] = {"worktree": wt, "branch": row.get("branch"), "base": row.get("base_sha"), "status": status,
+                               "diff_stat": stat, "new_files": new_files, "log": log}
         if full:
-            _, out["diff"] = await git("diff", "HEAD", "--no-ext-diff", "--no-textconv", cap=DIFF_CAP)
+            _, out["diff"] = await git("diff", base, "--no-ext-diff", "--no-textconv", cap=DIFF_CAP)
+            for f in new_files:  # git diff --no-index exits 1 when the files differ, so the output is read whatever the code
+                if len(out["diff"]) >= DIFF_CAP:
+                    break
+                _, patch = await git("diff", "--no-index", "--no-ext-diff", "--no-textconv", "--", "/dev/null", f, cap=DIFF_CAP)
+                out["diff"] += patch
+            out["diff"] = out["diff"][:DIFF_CAP]
         out["truncated"] = cut
         return out
 
@@ -803,6 +880,14 @@ def register(tb: Any, sessions: CodingSessions) -> None:
         out["log_tail"] = "\n".join(out["log_tail"].splitlines()[-n:])[-LOG_TAIL:]
         return out
 
+    async def coding_session_wait(ctx: dict[str, Any], ids: list[str], mode: str = "all", timeout_s: int = 120) -> Any:
+        try:
+            out = await sessions.wait(list(ids or []), "any" if mode == "any" else "all", timeout_s)
+        except CodingError as e:
+            return tool_error(shell._scrub(str(e)), field="ids")
+        shell.taint(ctx, "coding_session:wait:" + ",".join(r["id"] for r in out["sessions"]))  # logs and details are agent-written
+        return {**out, "sessions": [summary(r, 1500) for r in out["sessions"]]}
+
     async def coding_session_send(ctx: dict[str, Any], id: str, message: str) -> Any:
         if ctx.get("proposal_only"):
             return unattended("coding_session_send")
@@ -835,17 +920,22 @@ def register(tb: Any, sessions: CodingSessions) -> None:
          "for the user to answer a permission prompt in its own window.", _obj({}, []), coding_session_list, "safe"),
         ("coding_session_status", "Read one coding session's status, current step and the end of its log. Refreshes it first.",
          _obj({**sid, "lines": {"type": "integer", "default": 30}}, ["id"]), coding_session_status, "safe"),
+        ("coding_session_wait", "Wait (without polling) until the named coding sessions have finished, stopped, failed or need the user: "
+         "mode 'all' (default) or 'any' of them; returns their summaries, or timed_out=true after timeout_s (default 120, max 600): "
+         "call it again to keep waiting. Prefer this to repeated coding_session_status calls.",
+         _obj({"ids": {"type": "array", "items": {"type": "string"}}, "mode": {"type": "string", "enum": ["all", "any"], "default": "all"},
+               "timeout_s": {"type": "integer", "default": 120}}, ["ids"]), coding_session_wait, "safe"),
         ("coding_session_send", "Send a follow-up message to a coding session that has finished or been stopped. A session "
          "that is still working or waiting for the user cannot take one: wait, or stop it first. A finished Claude Code session "
          "may continue as a copy with a new external_id. Asks the user in Manual mode, and whenever the run read other untrusted content.",
          _obj({**sid, "message": {"type": "string"}}, ["id", "message"]), coding_session_send, "external"),
         ("coding_session_stop", "Stop a running coding session. It keeps its files and can be continued with "
          "coding_session_send. Never removes a session.", _obj(sid, ["id"]), coding_session_stop, "executes"),
-        ("coding_session_diff", "What a coding session changed in its worktree: git status, diff stat and the commits "
-         "ahead of origin/main; full=true adds the whole working-tree patch (cut at 60 KB).",
+        ("coding_session_diff", "What a coding session changed in its worktree: git status, diff stat and new files and the commits "
+         "since the session started; full=true adds the whole working-tree patch (cut at 60 KB).",
          _obj({**sid, "full": {"type": "boolean", "default": False}}, ["id"]), coding_session_diff, "safe"),
     ):
-        s = ToolSpec(name, desc, params, fn, "shell", danger, examples=[{"id": "a1b2c3d4e5f60718"}] if name != "coding_session_list" else [])
+        s = ToolSpec(name, desc, params, fn, "shell", danger, examples=[{"id": "a1b2c3d4e5f60718"}] if name not in ("coding_session_list", "coding_session_wait") else [])
         s.available_fn = available
         if name == "coding_session_send":
             s.default = "ask"

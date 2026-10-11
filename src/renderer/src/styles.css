@@ -630,7 +630,7 @@ kbd {
 .ctx-usage { color: var(--text-faint); font-size: 11px; margin-bottom: 8px; }
 .ctx-compact-focus { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .ctx-compact-focus input { flex: 1; min-width: 0; font-size: 12px; }
-.model-tag { font-size: 11px; color: var(--text-faint); font-family: var(--mono); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-tag { font-size: 11px; color: var(--text-faint); font-family: var(--mono); max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg-error {
   display: flex; align-items: center; gap: 6px;
   color: var(--danger); font-size: 13px; margin-top: 8px;

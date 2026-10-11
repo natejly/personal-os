@@ -260,10 +260,10 @@ class TodosModule(Module):
             return out
         R("todo_list", ToolSpec("todo_list", "List the user's todos (open by default) in this chat's scope: the project's todos plus personal ones.",
             _obj({"include_done": {"type": "boolean", "default": False}, "all_projects": {"type": "boolean", "default": False}, "offset": {"type": "integer", "default": 0},
-             "sort": {"type": "string", "enum": ["due", "urgency"], "default": "due", "description": "urgency orders by a weighted score (due, priority, age); each row carries its urgency number."},
-             "tag": {"type": "string", "description": "Only todos carrying this tag."},
-             "list_name": {"type": "string", "description": "Only todos on this list (a named group, shown as one board)."},
-             "status": {"type": "string", "description": "Only todos in this board column, e.g. Backlog, To do, In progress, Done."}}, []), todo_list, "todos",
+             "sort": {"type": "string", "enum": ["due", "urgency"], "default": "due", "description": "urgency = weighted score (due, priority, age)"},
+             "tag": {"type": "string", "description": "Only this tag"},
+             "list_name": {"type": "string", "description": "Only this list"},
+             "status": {"type": "string", "description": "Only this board column"}}, []), todo_list, "todos",
             examples=[{}, {"include_done": True}, {"all_projects": True, "offset": 50}, {"sort": "urgency"}]))
 
         async def todo_add(ctx: dict[str, Any], title: str, due: str | None = None, notes: str = "", priority: int = 2, personal: bool = False,
@@ -276,14 +276,14 @@ class TodosModule(Module):
             except ValueError as e:
                 return tool_error(redact.scrub_command_output(str(e)), field="repeat_unit or parent_id", expected="day, week, month or year; parent_id from todo_list", example={"title": "Water plants", "due": "2026-10-05", "repeat_every": 1, "repeat_unit": "week"})
             return {"id": t["id"], "title": redact.scrub_command_output(str(t["title"] or "")), "due": t["due"]}
-        R("todo_add", ToolSpec("todo_add", "Add a todo for the user. Dates as YYYY-MM-DD. Priority 1 (high) to 3 (low). Not for your own working checklist — that is todo_write.",
+        R("todo_add", ToolSpec("todo_add", "Add a todo for the user. Dates YYYY-MM-DD; priority 1 (high) to 3 (low). Not your own checklist (todo_write).",
             _obj({"title": {"type": "string"}, "due": {"type": "string"}, "notes": {"type": "string"}, "priority": {"type": "integer", "default": 2}, "personal": {"type": "boolean", "default": False},
-             "repeat_every": {"type": "integer", "description": "Repeat every N units (default 1)."}, "repeat_unit": {"type": "string", "enum": ["day", "week", "month", "year"]},
+             "repeat_every": {"type": "integer", "description": "default 1"}, "repeat_unit": {"type": "string", "enum": ["day", "week", "month", "year"]},
              "repeat_mode": {"type": "string", "enum": ["from_due", "from_completion"], "default": "from_due"},
-             "estimate_min": {"type": "integer", "description": "Expected minutes of work; the planner uses it to time-block."},
-             "tags": {"type": "array", "items": {"type": "string"}}, "parent_id": {"type": "string", "description": "Make this a subtask of the todo with this id."},
-             "list_name": {"type": "string", "description": "Put it on this list (the Lists page shows one rail entry per list; unlisted todos are the default \"Todos\" list). A new name makes the list, e.g. \"Groceries\"."},
-             "status": {"type": "string", "description": "Board column: Backlog, To do, In progress or Done (default To do)."}}, ["title"]), todo_add, "todos", "writes",
+             "estimate_min": {"type": "integer", "description": "Expected minutes of work, used to time-block"},
+             "tags": {"type": "array", "items": {"type": "string"}}, "parent_id": {"type": "string", "description": "Parent todo id"},
+             "list_name": {"type": "string", "description": "Named list; a new name creates it"},
+             "status": {"type": "string", "description": "Board column: Backlog, To do (default), In progress, Done"}}, ["title"]), todo_add, "todos", "writes",
             examples=[{"title": "Renew passport", "due": "2026-10-14", "priority": 1},
                       {"title": "Buy milk", "personal": True},
                       {"title": "Water the plants", "due": "2026-10-05", "repeat_every": 1, "repeat_unit": "week"},
@@ -308,11 +308,11 @@ class TodosModule(Module):
             _obj({"id": {"type": "string"}, "done": {"type": "boolean"}, "title": {"type": "string"}, "due": {"type": "string"}, "priority": {"type": "integer"}, "notes": {"type": "string"},
              "repeat_every": {"type": "integer"}, "repeat_unit": {"type": "string", "enum": ["day", "week", "month", "year"]},
              "repeat_mode": {"type": "string", "enum": ["from_due", "from_completion"], "default": "from_due"},
-             "estimate_min": {"type": "integer"}, "tags": {"type": "array", "items": {"type": "string"}, "description": "Replaces the todo's tags."},
-             "parent_id": {"type": "string", "description": "Nest under this todo (subtask)."},
-             "depends_on": {"type": "array", "items": {"type": "string"}, "description": "Ids of todos that must finish first; replaces the set, [] clears it."},
-             "list_name": {"type": "string", "description": "Move it to this named list; \"\" takes it off its list."},
-             "status": {"type": "string", "description": "Move it to this board column (Backlog, To do, In progress, Done). Done completes it; any other reopens it."}}, ["id"]), todo_update, "todos", "writes",
+             "estimate_min": {"type": "integer"}, "tags": {"type": "array", "items": {"type": "string"}, "description": "Replaces the tags"},
+             "parent_id": {"type": "string", "description": "Parent todo id"},
+             "depends_on": {"type": "array", "items": {"type": "string"}, "description": "Ids that must finish first; replaces the set, [] clears"},
+             "list_name": {"type": "string", "description": "Named list; \"\" removes it from its list"},
+             "status": {"type": "string", "description": "Board column (Backlog, To do, In progress, Done). Done completes; any other reopens"}}, ["id"]), todo_update, "todos", "writes",
             examples=[{"id": "td_8c41a2", "done": True}, {"id": "td_8c41a2", "due": "2026-11-01", "priority": 1}, {"id": "td_8c41a2", "title": "Renew passport (expedited)"},
                       {"id": "td_8c41a2", "repeat_every": 2, "repeat_unit": "week"}, {"id": "td_8c41a2", "status": "In progress"}]))
 
@@ -324,7 +324,7 @@ class TodosModule(Module):
             store.trash(id)
             return {"deleted": redact.scrub_command_output(str(t["title"] or "")),
                     "note": "moved to the trash; the user can restore it for 30 days"}
-        R("todo_delete", ToolSpec("todo_delete", "Delete a todo by id (it goes to the trash, restorable for 30 days). Prefer todo_update(done=true) to complete; delete only when the user asks to remove it.",
+        R("todo_delete", ToolSpec("todo_delete", "Trash a todo by id (restorable 30 days). To complete use todo_update(done=true); delete only when asked to remove it.",
             _obj({"id": {"type": "string"}}, ["id"]), todo_delete, "todos", "writes", examples=[{"id": "td_8c41a2"}]))
 
     # ---- loops ----

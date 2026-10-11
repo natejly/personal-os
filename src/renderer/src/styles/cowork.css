@@ -269,15 +269,7 @@
 .cowork-error { margin: 0; color: var(--danger); font-size: 12px; }
 .cowork-env-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
-/* ---------- A chat working autonomously (DeskPanel, AutonomyToggle) ---------- */
-.autonomy.on { color: var(--accent); }
-.autonomy-ctl { position: relative; display: inline-flex; }
-.autonomy-menu {
-  position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 30; width: min(320px, calc(100vw - 32px));
-  display: flex; flex-direction: column; gap: 10px; padding: 10px;
-  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow, 0 8px 24px rgb(0 0 0 / 0.18));
-}
-.autonomy-menu .desk-autonomy { grid-template-columns: 1fr; }
+/* ---------- A chat working autonomously (DeskPanel) ---------- */
 .desk-inline { display: flex; flex-direction: column; gap: 8px; }
 .desk-inline:empty { display: none; }
 .desk-panel {

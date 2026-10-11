@@ -8,7 +8,6 @@ import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit,
   AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskEvent, DeskFile, FullDesk, PromotionResult, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
-import type { DraftAutonomy } from './lib/autonomyDefault'
 import { markRunsSeen, withoutInboxRuns } from './lib/inboxBadge'
 import { latestAgentChat } from './lib/mentions'
 import { acceptToast } from './lib/proposalToast'
@@ -248,7 +247,6 @@ export interface State {
   /** Every other per-chat setting picked on a draft (skip permissions, context toggles). `send` applies it. */
   draftChatSettings: Partial<ConversationSettings>
   /** Autonomy picked on a draft. Null follows `settings.autonomousByDefault`; `send` starts the new chat's desk with it. */
-  draftAutonomy: DraftAutonomy
   /** The first message of a chat that has no row yet, shown until the row exists. */
   draftPendingSend: PendingSend | null
   /** A file was attached before this draft had a row. `send` marks the new chat untrusted. */
@@ -473,7 +471,6 @@ export interface State {
   /** `attachments`: uploaded files going with this turn; the row keeps them and the model reads their text. */
   /** `autonomy`: only the main new-chat composer passes it (lib/autonomyDefault.ts); a chat that exists already ignores it. */
   send: (text: string, conversationId?: string, attachments?: Attachment[], autonomy?: DeskAutonomy | null) => Promise<boolean>
-  setDraftAutonomy: (a: DraftAutonomy) => void
   /** Send from the ⌘I panel: same contract as `send`, plus the page snapshot and its own thread. */
   sendToPageAgent: (text: string, attachments?: Attachment[]) => Promise<boolean>
   regenerate: (conversationId?: string) => Promise<void>
@@ -537,8 +534,6 @@ export interface State {
   /** Open the chat a desk works in (every desk is a conversation). */
   goToDesk: (id: string) => Promise<void>
   /** Turn autonomy on for a chat: a desk binds to it and starts. Turning it off stops it and unbinds the chat. */
-  workAutonomously: (convId: string, autonomy: DeskAutonomy) => Promise<void>
-  stopWorkingAutonomously: (convId: string) => Promise<void>
 
   refreshSkills: () => Promise<void>
   refreshAgentDefs: () => Promise<void>
@@ -1823,7 +1818,6 @@ export const useStore = create<State>((set, get) => {
     draftModel: null,
     draftFast: false,
     draftChatSettings: {},
-    draftAutonomy: null,
     draftPendingSend: null,
     uploadTaintTarget: null,
     uploadTaintSource: 'upload',
@@ -2162,7 +2156,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftAutonomy: null, draftChatSettings: {}, view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftChatSettings: {}, view: 'chat', settingsOpen: false }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -2379,7 +2373,6 @@ export const useStore = create<State>((set, get) => {
       return get().send(emailAsk(id, subject))
     },
 
-    setDraftAutonomy: (draftAutonomy) => set({ draftAutonomy }),
     send: async (text, conversationId, attachments, autonomy) => {
       const ids = attachments?.length ? attachments.map((a) => a.id) : undefined
       if (!text.trim() && !ids) return false
@@ -2500,7 +2493,7 @@ export const useStore = create<State>((set, get) => {
       const { messages: _m, ...row } = c
       set((s) => ({
         draftPendingSend: null,
-        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftAutonomy: null, draftChatSettings: {},
+        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftChatSettings: {},
         uploadTaintTarget: fromUpload ? null : uploadTaintTarget,
         uploadTaintSource: fromUpload ? 'upload' : uploadTaintSource,
         conversations: [row as Conversation, ...s.conversations.filter((x) => x.id !== c.id)]
@@ -3221,33 +3214,6 @@ export const useStore = create<State>((set, get) => {
     goToDesk: async (id) => {
       const convId = deskConv(id) ?? (await api.cowork.desks.get(id).catch(() => null))?.conversation_id
       if (convId) await get().selectChat(convId)
-    },
-    workAutonomously: async (convId, autonomy) => {
-      set({ deskBusy: true })
-      try {
-        const { desk, run_id, seq, position } = await api.cowork.desks.create({ conversation_id: convId, autonomy, start: true })
-        if (position) get().toast(queuedNote(position))
-        bindDesk(convId, desk.id)
-        await get().refreshDesks()
-        await get().openDesk(desk.id)
-        if (run_id) void watchRun(convId, { run_id, seq: seq ?? 0 }, { messageId: null, approvals: 0, attached: true })
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      } finally {
-        set({ deskBusy: false })
-      }
-    },
-    stopWorkingAutonomously: async (convId) => {
-      const id = get().sessions[convId]?.conversation.settings.deskId
-      if (!id) return
-      try {
-        putDesk(await api.cowork.desks.stop(id, true))
-      } catch (e) {
-        return get().toast((e as Error).message, 'error')
-      }
-      bindDesk(convId, '')
-      void get().markDeskSeen(id)
-      if (get().activeDeskId === id) set({ activeDeskId: null, activeDesk: null, deskFiles: [] })
     },
     markDeskSeen: async (deskId) => {
       // Optimistic for the same reason as the single-event version: the badge must not wait on a

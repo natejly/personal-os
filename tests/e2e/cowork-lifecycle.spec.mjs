@@ -75,7 +75,7 @@ test('stop a working chat from the composer, then message it to pick it back up'
   expect(realErrors(grain)).toEqual([])
 })
 
-test('turning autonomy off stops the desk and the chat answers as a plain chat; on again picks the same desk up', async ({ grain }) => {
+test('detaching a desk over the API stops the desk and the chat answers as a plain chat; starting it again picks the same desk up', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE], delay: 120_000 })
@@ -83,8 +83,7 @@ test('turning autonomy off stops the desk and the chat answers as a plain chat; 
   const { desk, chat } = await deskChat(grain, { brief: 'switch me off', title: 'Switchable' })
   await openChat(page, 'Switchable')
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).toMatch(/working|planning/)
-  await page.getByRole('button', { name: /^Mode/ }).click()
-  await page.getByRole('dialog', { name: 'Mode' }).getByRole('button', { name: 'Turn off' }).click()
+  await grain.api(`/cowork/desks/${desk.id}/stop?detach=true`, { method: 'POST' }) // the composer has no per-chat switch
   await waitStatus(grain, desk.id, 'stopped', 60_000)
   await expect(strip(page)).toHaveCount(0)
   expect(await deskOf(grain, chat.id)).toBe('')
@@ -94,7 +93,7 @@ test('turning autonomy off stops the desk and the chat answers as a plain chat; 
   await expect(page.locator('.msg.assistant').last()).toContainText('plain-chat-reply', { timeout: 60_000 })
   expect(await deskStatus(grain, desk.id)).toBe('stopped') // the message did not wake the desk
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'ok' })
-  await turnOn(page, 'Autonomous')
+  await turnOn(grain, chat.id, 'propose')
   await expect.poll(() => deskOf(grain, chat.id)).toBe(desk.id)
   await waitStatus(grain, desk.id, 'review', 90_000)
   expect(realErrors(grain)).toEqual([])
@@ -118,29 +117,26 @@ test('pause over the API, resume from the strip', async ({ grain }) => {
   expect(realErrors(grain)).toEqual([])
 })
 
-test('the Mode menu: arms a draft, sets autonomy on a chat, and autonomy changes later', async ({ grain }) => {
+test('a chat armed over the API becomes a desk, and its autonomy changes later', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   const { page } = grain
   await newChat(page)
-  await expect(page.getByRole('button', { name: /^Mode/ })).toBeEnabled() // a draft can be armed before its first message
+  await expect(page.getByRole('button', { name: /^Mode(?!l)/ })).toHaveCount(0) // no per-chat autonomy picker
   llm.push({ text: 'Noted.' })
   await say(page, 'Summarise the thing')
   await expect(page.locator('.msg.assistant').last()).toContainText('Noted.', { timeout: 60_000 })
   const [chat] = await grain.api('/conversations?include_desks=true')
   llm.push({ calls: [{ name: 'desk_ask', args: { question: 'Hold on?' } }] })
-  await turnOn(page, 'Ask as it goes')
+  await turnOn(grain, chat.id, 'ask')
   await expect.poll(() => deskOf(grain, chat.id)).toBeTruthy()
   const id = await deskOf(grain, chat.id)
   const d = await grain.api(`/cowork/desks/${id}`)
   expect(d).toMatchObject({ autonomy: 'ask', conversation_id: chat.id })
   expect(d.brief).toBe('Summarise the thing') // the chat's own ask is the brief
   // change autonomy while it works: takes effect on its next turn
-  await expect(page.getByRole('button', { name: /^Mode/ })).toHaveText(/Mode: Ask as it goes/)
-  await page.getByRole('button', { name: /^Mode/ }).click()
-  await page.getByRole('dialog', { name: 'Mode' }).getByLabel(/Autonomous/).click() // saved, then shown
+  await grain.api(`/cowork/desks/${id}`, { method: 'PATCH', body: { autonomy: 'propose' } })
   await expect.poll(async () => (await grain.api(`/cowork/desks/${id}`)).autonomy).toBe('propose')
-  await expect(page.getByRole('button', { name: /^Mode/ })).toHaveText(/Mode: Autonomous/)
   // plan mode steps aside while the chat works autonomously
   await expect(page.locator('.composer-footer .plan-mode')).toHaveCount(0)
   expect(realErrors(grain)).toEqual([])

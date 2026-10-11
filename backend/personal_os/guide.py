@@ -85,13 +85,12 @@ Type / in the composer:
 
 ## Autonomy: working on its own
 - A chat can do several steps by itself. It stops for you at approval cards, plans and questions.
-- Plan first (Mode button): the assistant writes a plan first, you approve it once, and its steps run without a card each. Changing the plan needs approval again.
 - Approvals: an inline Approve/Deny card. A card nobody answers waits; answering later resumes the run.
 - Needs you: anything waiting on you shows in the Agent inbox on Today, with a count on the sidebar Today row.
 - Scheduled and background runs can only propose anything that leaves the app (mail, calendar, Docs). Proposals land in the Agent inbox; accepting sends them once.
-- Work autonomously (Mode button in any chat): the chat keeps working on its task in its own folder until it is done or needs you. Pick Plan first (you approve a plan once), Ask as it goes (no plan up front; risky actions follow the permission mode) or Work and propose (it only proposes anything external).
+- Work autonomously (Settings -> Advanced -> Desks, "Start new chats working autonomously"; on by default): a new chat keeps working on its task in its own folder until it is done or needs you, asking as it goes (no plan up front; risky actions follow the permission mode). With the setting off, new chats are plain chats. There is no per-chat switch.
 - A strip above the composer shows the state, turns used and what needs you, with Start, Pause, Resume and Stop; it opens a side panel with Files, Changes and Review. Questions, parked cards and the plan appear at the end of the transcript. Output reaches the app only when you accept it in Review. Files you attach land in its inputs folder.
-- Autonomous chats list with other chats, with a status dot; the Chats header counts what needs you. Turn the control off to stop; the chat answers normally again. Caps live in Settings -> Autonomy.
+- Autonomous chats list with other chats, with a status dot; the Chats header counts what needs you. Stop it with the composer's Stop button. Caps live in Settings -> Autonomy.
 
 ## Subagents and crews
 - A reply can delegate to subagents. They show as indented rows under that reply with live status; click one to open and message it.

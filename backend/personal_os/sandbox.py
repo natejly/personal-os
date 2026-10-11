@@ -195,63 +195,6 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
 
 # ---- declared limits: the walls, stated before the work ----
 # The profiles above are the enforcement; these strings are what the assistant is told up front, so it plans around
-# the wall instead of discovering it mid-task. The tool descriptions and GET /sandbox/limits both read them, so the
-# text cannot drift from the profile without this file changing too.
-_DENIAL = re.compile(r"sandbox-exec:|operation not permitted|\[Errno 1\]|(?:errno|error) -54", re.IGNORECASE)
-
-
-def declared_limits() -> dict[str, dict[str, Any]]:
-    """What each host sandbox blocks, and how to ask for an exception, keyed by tool."""
-    return {
-        "run_python": {
-            "blocks": [
-                "network access of any kind, including binding or listening on a local port",
-                "subprocesses and launching other apps (osascript, open, a child process)",
-                "writes outside the run's own temp working directory (a desk workspace is also writable)",
-                "reads outside an allowlist (the interpreter, its packages, the work dir, system libraries); credential "
-                "stores (~/.ssh, ~/.aws, keychains, browser profiles, .env files) are denied",
-            ],
-            "enforced_by": "macOS Seatbelt (sandbox-exec), with per-run rlimits and a wall-clock timeout",
-            "escalation": "a task that needs one of these uses shell_run with unsandboxed=true, which asks the user for "
-                          "that one command, or sandbox_exec when a container runtime is available",
-        },
-        "shell_run": {
-            "blocks": [
-                "writing Grain's own data folder and app, the credential stores (~/.ssh, keychains, browser cookies, "
-                ".env files) and the files that run code later (shell rc files, git hooks, launch agents)",
-                "network unless the user enabled it: off by default, or package registries and the user's allowed "
-                "domains through a proxy only",
-            ],
-            "enforced_by": "macOS Seatbelt (sandbox-exec); if it cannot start the command is refused, never run unconfined",
-            "escalation": "unsandboxed=true runs the one command outside the profile and asks the user; while the sandbox "
-                          "works it is refused. A blocked host is opened under Settings → shell allowed domains",
-        },
-    }
-
-
-def limits_text(limits: dict[str, Any]) -> str:
-    """One `Declared limits: ...` sentence for a tool description, from declared_limits() or the Linux sandbox's entry."""
-    blocks = "; ".join(limits.get("blocks") or [])
-    return f" Declared limits: {blocks}." if blocks else ""
-
-
-def profile_failed(exit_code: int | None, stderr: str) -> bool:
-    """True when sandbox-exec itself refused to start, so the run never happened (not a failure of the code it wraps)."""
-    return exit_code in (65, 71) and str(stderr or "").lstrip().startswith("sandbox-exec:")
-
-
-def blocked_note(stderr: str, stdout: str = "") -> str | None:
-    """When the OS blocked an operation, a sentence naming the wall and the way to ask for an exception. The OS error
-    itself stays verbatim in stderr/stdout; this only explains it, so a blocked call is never a silent or generic failure."""
-    if not _DENIAL.search(f"{stderr or ''}\n{stdout or ''}"):
-        return None
-    return ("The OS sandbox blocked an operation: the error above is the operating system's own refusal, not a bug in "
-            "the code. Do not retry it unchanged. Report what was impossible, and if the task genuinely needs it, "
-            "shell_run with unsandboxed=true asks the user for that one command.")
-
-
-# ---- declared limits: the walls, stated before the work ----
-# The profiles above are the enforcement; these strings are what the assistant is told up front, so it plans around
 # the wall instead of discovering it mid-task. The run_python description and GET /sandbox/limits both read them, so the
 # text cannot drift from the profile without this file changing too.
 _DENIAL = re.compile(r"sandbox-exec:|operation not permitted|\[Errno 1\]|(?:errno|error) -54", re.IGNORECASE)

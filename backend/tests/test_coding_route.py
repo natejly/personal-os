@@ -185,7 +185,8 @@ def test_setting_off_allows_direct_edits_again(home: Path, tmp_path: Path) -> No
 
 
 def test_refusal_and_hint_name_the_preferred_agent(home: Path, tmp_path: Path) -> None:
-    for choice, needle in (("opencode", "agent='opencode'"), ("claude", "agent='claude'"), ("any", "agent='opencode' (OpenCode) or agent='claude'")):
+    for choice, needle in (("opencode", "agent='opencode'"), ("claude", "agent='claude'"), ("pi", "agent='pi'"),
+                           ("any", "agent='opencode' (OpenCode), agent='claude' (Claude Code) or agent='pi'")):
         tb, cfg = make(tmp_path, codingAgent=choice)
         msg = coding_route.check(tb, "fs_edit", {"path": str(home / "repo/src/a.py")}, {"settings": cfg})
         assert msg and needle in msg and f"repo_path='{home / 'repo'}'" in msg

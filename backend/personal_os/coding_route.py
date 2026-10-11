@@ -1,4 +1,4 @@
-"""Coding goes to OpenCode or Claude Code: Grain's own agents plan, brief, delegate and verify; they do not hand-edit repos.
+"""Coding goes to OpenCode, Claude Code or pi: Grain's own agents plan, brief, delegate and verify; they do not hand-edit repos.
 
 While the `codingRoute` permission setting is on (the default), a call from any Grain agent (chat, desk, worker, subagent,
 workflow step, a run_python tool bridge) that would change files inside a git work tree is refused, under every
@@ -44,7 +44,7 @@ from . import permissions, permrules
 
 log = logging.getLogger(__name__)
 
-AGENT_NAMES = {"opencode": "OpenCode", "claude": "Claude Code"}
+AGENT_NAMES = {"opencode": "OpenCode", "claude": "Claude Code", "pi": "pi"}
 
 # Commands whose operands are all changed; and the ones whose last operand is the one written.
 ALL_OPERANDS = {"rm", "rmdir", "mv", "touch", "mkdir", "chmod", "chown", "tee", "truncate", "unlink", "shred", "patch"}
@@ -88,7 +88,7 @@ def enabled(cfg: dict[str, Any] | None) -> bool:
 
 
 def agent_choice(cfg: dict[str, Any] | None) -> str:
-    """'opencode' | 'claude' | 'any'."""
+    """'opencode' | 'claude' | 'pi' | 'any'."""
     v = permissions.get(cfg or {}, "codingAgent")
     return v if v in AGENT_NAMES else "any"
 
@@ -96,7 +96,7 @@ def agent_choice(cfg: dict[str, Any] | None) -> str:
 def _agent_phrase(cfg: dict[str, Any] | None) -> str:
     a = agent_choice(cfg)
     return (f"agent='{a}' ({AGENT_NAMES[a]}, the user's preferred coding agent)" if a != "any"
-            else "agent='opencode' (OpenCode) or agent='claude' (Claude Code), whichever suits the task")
+            else "agent='opencode' (OpenCode), agent='claude' (Claude Code) or agent='pi' (pi), whichever suits the task")
 
 
 def hint(cfg: dict[str, Any] | None) -> str:

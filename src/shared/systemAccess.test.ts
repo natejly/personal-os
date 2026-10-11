@@ -11,7 +11,7 @@ const backend: BackendAccess = {
   automation: { finder: 'unasked', systemEvents: 'unknown', contacts: 'unknown', calendar: 'unknown', reminders: 'unknown' },
   browsers: [{ name: 'Safari', state: 'denied' }],
   scope: { protected: [], sensitive: [] },
-  clis: { claude: { path: null, version: null, hint: '' }, opencode: { path: null, version: null, hint: '' } }
+  clis: { claude: { path: null, version: null, hint: '' }, opencode: { path: null, version: null, hint: '' }, pi: { path: null, version: null, hint: '' } }
 }
 
 test('only known pane URLs open', () => {

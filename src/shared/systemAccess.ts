@@ -82,7 +82,7 @@ export interface BackendAccess {
   browsers: { name: string; state: AccessState }[]
   /** Short display strings from the backend: what Grain never touches, and what always asks first. */
   scope?: { protected: string[]; sensitive: string[] }
-  clis: { claude: Cli; opencode: Cli }
+  clis: { claude: Cli; opencode: Cli; pi: Cli }
 }
 export interface ShellCheck { ok: boolean; output: string; cwd: string | null; error: string | null }
 

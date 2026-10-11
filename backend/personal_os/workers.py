@@ -66,38 +66,31 @@ WORKER_PROMPT = (
 # The orchestration stance and the observability rule. TOOLS_HINT (app.py) and the two agent-stance fragments
 # (FRONT_AGENT_HINT here, PROACTIVE_HINT in app.py) carry the same wording, so a chat reads one rule wherever it lands.
 ORCHESTRATION_HINT = (
-    "Own each request end to end: delegate to agents, skills and workers, run the work, verify it and close it out "
-    "yourself, so the user never has to do anything outside this chat. Never answer with a list of steps for the user "
-    "to perform in the UI; the one exception is a decision only they can make. Where the app would hand them a manual "
-    "follow-up — a pending approval card, an instruction to act in a view — say plainly what you did and what you "
-    "could not do. This is default behaviour only: it never weakens an approval gate, a permission prompt or any hard block."
+    "Own each request end to end: delegate to agents, skills and workers, run and verify the work yourself, so the user "
+    "never has to act outside this chat. Never answer with steps for the user to perform in the UI, except a decision "
+    "only they can make. Where the app leaves them a manual follow-up (a pending approval card), say what you did and "
+    "what you could not. This never weakens an approval gate, permission prompt or hard block."
 )
 OBSERVABILITY_HINT = (
-    "When you hand work to a subagent or background worker, say so in the reply and name what is running, so a reply "
-    "never comes back as bare tool calls with no visible output."
+    "When you hand work to a subagent or background worker, say so and name what is running, so a reply is never bare tool calls."
 )
 
 FRONT_AGENT_HINT = (
     "## How to work\n"
-    "You are the user's assistant and you own each request end to end. Answer what you can yourself, and do quick "
-    "lookups yourself. Anything that needs more than a couple of steps goes to a background worker with delegate: write "
-    "a self-contained brief (goal, context, constraints, done criteria, report format), because the worker cannot see "
-    "this conversation: name the exact locations (absolute paths, the repo and branch, doc or event ids, links) and how "
-    "the result will be checked. A worker's report is a claim: before telling the user code or files changed, check the "
-    "evidence it gives (the diff, the test output, the file) yourself when you can. The app shows the user what is "
-    "running, so do not narrate planning, rounds or tools; name a worker in one line when you hand it work. If a turn "
-    "has nothing for the user beyond handing work on, answer with exactly "
-    "NO_REPLY and nothing else. Keep todo_write "
-    "current for multi-step work (it is re-sent to you every round). "
-    "In an autonomous chat, desk_done is optional: a reply that answers and hands the rest to workers is complete. Follow-ups on work a worker already did go to resume_worker or message_worker, not a "
-    "new worker. Do not poll workers: when one finishes its report arrives by itself as a hidden message from the "
-    "system. Tell the user the result in plain words; do not narrate a worker's internals. If a report is stale or "
-    "repeats what the user already has, answer with exactly NO_REPLY and nothing else. "
-    "When a request touches time, people or commitments, check the calendar, inbox or todos first and say what you "
-    "found that bears on it. Act where the app lets you; it stops you where an approval is needed, so do not ask "
-    "permission in advance. Prefer a draft or proposal over a silent change to anything the user owns. If they describe "
-    "a recurring want, offer schedule_task once. If a decision is genuinely the user's, call ask_user once instead of guessing. "
-    "End with at most one specific next step you can do right now, or none. "
+    "Answer what you can and do quick lookups yourself. Anything over a couple of steps goes to a background worker with delegate: write a "
+    "self-contained brief (goal, context, constraints, done criteria, report format) naming exact locations (absolute "
+    "paths, repo and branch, doc or event ids, links) and how the result will be checked, because the worker cannot see "
+    "this conversation. A worker's report is a claim: check its evidence (diff, test output, file) yourself before telling "
+    "the user code or files changed. The app shows the user what is running, so do not narrate planning, rounds or "
+    "tools. If a turn has nothing for the user beyond handing work on, "
+    "or a report is stale or repeats what they already have, answer with exactly NO_REPLY and nothing else. "
+    "Keep todo_write current for multi-step work. In an autonomous chat desk_done is optional: a "
+    "reply that answers and hands the rest to workers is complete. Follow-ups on a worker's work go to resume_worker or "
+    "message_worker, not a new worker; do not poll workers, their report arrives as a hidden message. When a request touches time, people or commitments, check the calendar, inbox or "
+    "todos first and say what bears on it. Act where the app lets you; it stops you where an approval is needed, so do "
+    "not ask permission in advance. Prefer a draft or proposal over a silent change. If they describe a recurring want, "
+    "offer schedule_task once. If a decision is genuinely the user's, call ask_user once instead of guessing. End with at "
+    "most one specific next step you can do now, or none. "
     + ORCHESTRATION_HINT + " " + OBSERVABILITY_HINT
 )
 
@@ -675,23 +668,19 @@ def register(tb: Any) -> None:
 
     R("delegate", ToolSpec(
         "delegate",
-        "Hand work to a background worker that runs on its own while you keep talking to the user. Use it for anything that needs more than a "
-        "couple of steps. The worker has your built-in tools and your connected connector tools (minus asking the user, planning, scheduling and "
-        "delegating) and the same ask/allow rules, but it cannot see this conversation: the brief must carry everything it needs, with concrete locations (absolute paths, "
-        "the repo and branch, doc or event ids) and acceptance criteria. Code changes in a repo happen on a new branch in a separate "
-        "git worktree, never in the user's checkout. Returns a worker_id at once. When the worker ends, its report comes back to you on "
-        "its own; verify what it claims (diff, test output, files) before passing it on. To continue finished work, use resume_worker "
-        "rather than a new worker.",
-        _obj({"goal": {"type": "string", "description": "What to achieve, in a sentence or two"},
-              "context": {"type": "string", "description": "Everything the worker needs to know: absolute paths, the repo and branch, doc "
-                          "or event ids, links, names, what the user said"},
-              "constraints": {"type": "string", "description": "What it must not do or must ask about; limits that matter"},
-              "done_criteria": {"type": "string", "description": "How the worker knows it is finished and how to check it (a test, a command, a file)"},
-              "report_format": {"type": "string", "description": "What its final report should contain and how it is laid out. Default: "
-                                "what changed, where, the verification run and its result, open issues"},
-              "title": {"type": "string", "description": "Two to five words naming the job"},
-              "allow_subworkers": {"type": "boolean", "default": False, "description": "Let it fan parts of its work out to subagents"},
-              "agent": {"type": "string", "description": "The name of one of the user's Library agents to run the worker as (its instructions, tools and skills). Leave empty for a general worker."}},
+        "Hand work to a background worker while you keep talking to the user; use it for anything over a couple of steps. "
+        "The worker has your built-in tools and your connected connector tools (minus asking, planning, scheduling, delegating) and the same ask/allow rules, but cannot see this "
+        "conversation, so the brief must carry everything, with concrete locations and acceptance criteria. Repo code changes go on a new "
+        "branch in a separate git worktree, never the user's checkout. The report arrives on its own; verify its claims (diff, tests, "
+        "files) before passing them on. To continue finished work use resume_worker.",
+        _obj({"goal": {"type": "string", "description": "What to achieve"},
+              "context": {"type": "string", "description": "Everything it needs: absolute paths, repo, branch, ids, what the user said"},
+              "constraints": {"type": "string", "description": "What it must not do or must ask about"},
+              "done_criteria": {"type": "string", "description": "How to know it is finished and check it"},
+              "report_format": {"type": "string", "description": "Default: what changed, where, verification and result, open issues"},
+              "title": {"type": "string", "description": "Two to five words"},
+              "allow_subworkers": {"type": "boolean", "default": False, "description": "Let it use subagents"},
+              "agent": {"type": "string", "description": "Name of a Library agent to run as; empty for a general worker"}},
              ["goal"]),
         delegate, GROUP, "executes",
         examples=[{"goal": "Find the three cheapest direct flights from SFO to JFK next Friday and compare them",
@@ -707,7 +696,7 @@ def register(tb: Any) -> None:
         return w.message(ctx.get("conversation_id"), worker_id, text)
 
     R("message_worker", ToolSpec(
-        "message_worker", "Send a note to a running worker; it reads it before its next step. Use it to add a detail or change direction.",
+        "message_worker", "Note to a running worker, read before its next step: add a detail or change direction.",
         _obj({"worker_id": {"type": "string"}, "text": {"type": "string"}}, ["worker_id", "text"]), message_worker, GROUP, "safe",
         examples=[{"worker_id": "sa_abc", "text": "The user also wants the cheapest option flagged."}]))
 
@@ -735,8 +724,7 @@ def register(tb: Any) -> None:
         return {"workers": out, "note": "Reports arrive by themselves; checking is only for answering the user's question about progress."}
 
     R("check_worker", ToolSpec(
-        "check_worker", "Status of one worker (or all of this conversation's workers when no id is given): state, what it is doing now, and its "
-        "last few actions. Only for answering the user about progress; do not poll, reports arrive on their own.",
+        "check_worker", "Status of one worker (all of this conversation's if no id): state, current activity, last actions. Only to answer the user about progress; do not poll.",
         _obj({"worker_id": {"type": "string"}}, []), check_worker, GROUP, "safe", examples=[{}, {"worker_id": "sa_abc"}]))
 
     async def stop_worker(ctx: dict[str, Any], worker_id: str = "") -> Any:
@@ -744,7 +732,7 @@ def register(tb: Any) -> None:
         return await w.stop(ctx.get("conversation_id"), worker_id, by="tool") if w else tool_error("Workers are not available.")
 
     R("stop_worker", ToolSpec(
-        "stop_worker", "Stop a worker, and anything it started. Its partial work stays and it can be resumed. You will not get a report for it.",
+        "stop_worker", "Stop a worker and anything it started; partial work stays and it can be resumed. No report follows.",
         _obj({"worker_id": {"type": "string"}}, ["worker_id"]), stop_worker, GROUP, "safe", examples=[{"worker_id": "sa_abc"}]))
 
     async def resume_worker(ctx: dict[str, Any], worker_id: str = "", text: str = "") -> Any:
@@ -757,7 +745,6 @@ def register(tb: Any) -> None:
         return out
 
     R("resume_worker", ToolSpec(
-        "resume_worker", "Continue a finished, stopped or interrupted worker with everything it already did, as a new worker. Prefer this over "
-        "delegate for follow-ups on the same work. text is what it should do next.",
+        "resume_worker", "Continue a finished, stopped or interrupted worker, with all it already did, as a new worker. Prefer over delegate for follow-ups; text is what to do next.",
         _obj({"worker_id": {"type": "string"}, "text": {"type": "string", "description": "What to do next"}}, ["worker_id"]),
         resume_worker, GROUP, "executes", examples=[{"worker_id": "sa_abc", "text": "Also include the return flights."}]))

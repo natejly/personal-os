@@ -497,7 +497,6 @@ export default function SettingsModal(): JSX.Element {
               <Sec id="workers">
                 <h4>Background workers</h4>
                 <Switch title="Delegate long work" help="Once a reply has used its tool rounds, the assistant hands the rest to a background worker and answers you at once. Nothing is cut off." checked={draft.delegationForce !== false} onChange={(delegationForce) => patch({ delegationForce })} />
-                <Switch title="Hide the Checklist and Workers tabs" help="Hide the Checklist and Workers tabs in a chat's side panel. They stay available above the composer while something is running." checked={draft.hideChatPanelTabs !== false} onChange={(hideChatPanelTabs) => patch({ hideChatPanelTabs })} />
                 {draft.delegationForce !== false && (
                   <label className="setting-row"><span className="toggle-text"><b>Delegate after this many tool rounds</b><small>1 to 20. Quick lookups under this stay in the chat.</small></span>
                     <input type="number" min={1} max={20} value={draft.delegationAfterRounds ?? 2} onChange={(e) => patch({ delegationAfterRounds: Math.min(20, Math.max(1, Math.round(Number(e.target.value)) || 2)) })} />

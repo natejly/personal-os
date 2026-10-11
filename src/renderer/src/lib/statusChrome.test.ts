@@ -52,13 +52,3 @@ test('the progress card needs two steps, and a finished plan shows only while th
   assert.equal(progressCardShown(p(3, 3), false), false)
   assert.equal(progressCardShown(p(3, 3), true), true)
 })
-
-// The setting hides only the panel's tabs; the compact cards above the composer stay.
-test('the hide-tabs setting leaves the compact workers and progress cards alone', () => {
-  const chat = src('components/ChatView.tsx')
-  assert.match(chat, /<WorkersPanel conversationId=\{conversationId\} \/>/)
-  assert.match(chat, /<ProgressCard\b/)
-  const desk = src('components/DeskPanel.tsx')
-  assert.equal(desk.match(/<WorkersPanel\b[^>]*\ball\b/g)?.length, 1)
-  assert.match(desk, /\{tab === 'workers' && [^\n]*<WorkersPanel conversationId=\{id\} all \/>/)
-})

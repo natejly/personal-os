@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Message, WorkerInfo } from '@shared/types'
-import { isInternal, liveWorkerCount, sortWorkers, upsertWorker, withoutInternal, workerActions, workerWord } from './workers'
+import { ENDED_SHOWN, isInternal, listedWorkers, liveWorkerCount, sortWorkers, upsertWorker, withoutInternal, workerActions, workerWord } from './workers'
 
 const w = (id: string, status: WorkerInfo['status'], extra: Partial<WorkerInfo> = {}): WorkerInfo => ({
   id, conversation_id: 'c', title: id, goal: '', status, now: '', queue_position: null, started_at: Number(id.replace(/\D/g, '')) || 0,
@@ -53,4 +53,18 @@ test('live worker count', () => {
   const ws = (['queued', 'running', 'awaiting_approval', 'done', 'error', 'stopped', 'interrupted'] as const).map((s, i) => w(`w${i}`, s))
   assert.equal(liveWorkerCount(ws), 3)
   assert.equal(liveWorkerCount([]), 0)
+})
+
+test('finished workers are hidden by default, live ones always listed', () => {
+  const ws = [w('w1', 'done'), w('w2', 'running'), w('w3', 'error'), w('w4', 'queued')]
+  assert.deepEqual(listedWorkers(ws, false).map((x) => x.id), ['w2', 'w4'])
+  assert.deepEqual(listedWorkers(ws, true).map((x) => x.id), ['w2', 'w4', 'w3', 'w1'])
+})
+
+test('finished workers are capped at the newest few when shown', () => {
+  const ended = Array.from({ length: ENDED_SHOWN + 3 }, (_, i) => w(`w${i + 10}`, 'stopped'))
+  const ids = listedWorkers([w('w1', 'running'), ...ended], true).map((x) => x.id)
+  assert.equal(ids.length, 1 + ENDED_SHOWN)
+  assert.equal(ids[0], 'w1')
+  assert.equal(ids[1], `w${ENDED_SHOWN + 12}`)
 })

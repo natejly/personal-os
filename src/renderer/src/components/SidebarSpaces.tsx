@@ -6,7 +6,6 @@ import type { DragKind } from '@shared/types'
 import { useCanvas } from '../canvas/store'
 import { useDropTarget } from '../canvas/dnd'
 import { openPayload } from '../canvas/drops'
-import { PresetsButton, SavePresetForm } from '../canvas/PresetsMenu'
 import { focusFirstItem, menuKeyDown, useReturnFocus } from '../canvas/Menu'
 import { rowButton } from '../lib/rowButton'
 import Face, { SPACE_HUE } from './Face'
@@ -17,14 +16,12 @@ const ALL: DragKind[] = ['conversation', 'todo', 'document', 'memory', 'project'
 /** Keep a fixed popover this far inside the viewport. */
 const MENU_GAP = 8
 
-/** `keep`: the item swaps the menu's body instead of closing it. */
-interface MenuItem { label: string; danger?: boolean; keep?: boolean; run: () => void }
+interface MenuItem { label: string; danger?: boolean; run: () => void }
 
 /** A space row's actions, in a body portal so the sidebar's scroll container cannot clip it. */
 function SpaceMenu({ at, canvasId, onClose, onRename }: { at: { x: number; y: number }; canvasId: string; onClose: () => void; onRename: () => void }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState(at)
-  const [saving, setSaving] = useState(false)
   useReturnFocus()
   useEffect(() => focusFirstItem(ref.current), [])
 
@@ -36,7 +33,7 @@ function SpaceMenu({ at, canvasId, onClose, onRename }: { at: { x: number; y: nu
       x: Math.max(MENU_GAP, Math.min(at.x, window.innerWidth - r.width - MENU_GAP)),
       y: Math.max(MENU_GAP, Math.min(at.y, window.innerHeight - r.height - MENU_GAP))
     })
-  }, [at, saving])
+  }, [at])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -56,7 +53,6 @@ function SpaceMenu({ at, canvasId, onClose, onRename }: { at: { x: number; y: nu
   const items: MenuItem[] = [
     { label: 'Rename', run: onRename },
     { label: locked ? 'Unlock space' : 'Lock space', run: () => void useCanvas.getState().setLocked(canvasId, !locked) },
-    { label: 'Save as preset…', keep: true, run: () => setSaving(true) },
     // Left in place while locked: `deleteSpace` refuses, and the toast says why.
     {
       label: 'Delete space',
@@ -81,8 +77,8 @@ function SpaceMenu({ at, canvasId, onClose, onRename }: { at: { x: number; y: nu
         }}
       />
       <div ref={ref} className="project-menu space-menu" style={{ position: 'fixed', left: pos.x, top: pos.y }} role="menu" onKeyDown={(e) => menuKeyDown(e, onClose)}>
-        {saving ? <SavePresetForm canvasId={canvasId} onDone={onClose} /> : items.map((it) => (
-          <button key={it.label} className={`project-item${it.danger ? ' danger' : ''}`} role="menuitem" onClick={it.keep ? it.run : run(it.run)}>
+        {items.map((it) => (
+          <button key={it.label} className={`project-item${it.danger ? ' danger' : ''}`} role="menuitem" onClick={run(it.run)}>
             {it.label}
           </button>
         ))}
@@ -194,7 +190,6 @@ export default function SidebarSpaces(): JSX.Element {
           <ChevronRight size={12} className={open ? 'rot90' : ''} /><LayoutGrid size={13} /> Spaces
         </button>
         <span className="section-actions">
-          <PresetsButton canvasId={null} />
           <button className="icon-btn ghost sm" aria-label="New space" title="New space (⌃⌘N)" onClick={() => void useCanvas.getState().newSpace()}><Plus size={14} /></button>
         </span>
       </div>

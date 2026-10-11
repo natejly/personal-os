@@ -8,7 +8,6 @@ import { useOnboarding } from './onboarding/onboardingStore'
 import { api } from '../lib/api'
 import { DEFAULT_ZOOM, stepZoom } from '../lib/zoom'
 import { downloadJson, pickJson } from '../lib/jsonFile'
-import { usePresets } from '../canvas/presets'
 import { homeModuleOn } from '../moduleToggles'
 import { navEntries } from '../shell/nav'
 import { useModal } from '../lib/useModal'
@@ -116,38 +115,6 @@ function IndexStatusLine(): JSX.Element | null {
       <span className="toggle-text"><b>Search index</b><small>{done} of {total} passages embedded ({st.mode}{st.model ? `, ${st.model}` : ', no embedding model'}).</small></span>
       <button className="ghost-btn" type="button" disabled={busy} onClick={() => void rebuild()}><RefreshCw size={14} /> {busy ? 'Rebuilding…' : 'Rebuild search index'}</button>
     </div>
-  )
-}
-
-/** Space presets as files: export one to a JSON file, or import one (it is added to the presets list, not opened). */
-function PresetFiles(): JSX.Element {
-  const presets = usePresets((s) => s.presets)
-  const toast = useStore((s) => s.toast)
-  useEffect(() => { void usePresets.getState().load() }, [])
-  const exportOne = async (p: { id: string; name: string }): Promise<void> => {
-    try { downloadJson(`${p.name.replace(/[^\w-]+/g, '-') || 'preset'}.grain-preset.json`, await api.presets.exportFile(p.id)) } catch (e) { toast((e as Error).message, 'error') }
-  }
-  const importOne = async (): Promise<void> => {
-    try {
-      const file = await pickJson()
-      if (!file) return
-      const r = await api.presets.importFile(file)
-      toast(`Imported preset "${r.preset.name}"`)
-      await usePresets.getState().load()
-    } catch (e) { toast((e as Error).message, 'error') }
-  }
-  return (
-    <section>
-      <h3>Space presets</h3>
-      <p className="muted small">Save a space as a preset from the sidebar, then share it as a file. Notes travel with it; chats never do.</p>
-      {presets.map((p) => (
-        <div className="setting-row" key={p.id}>
-          <span className="toggle-text"><b>{p.name}</b><small>{p.windows.length} window{p.windows.length === 1 ? '' : 's'}</small></span>
-          <button className="ghost-btn sm" type="button" onClick={() => void exportOne(p)}><Download size={13} /> Export</button>
-        </div>
-      ))}
-      <div className="button-row"><button className="ghost-btn" type="button" onClick={() => void importOne()}><Upload size={14} /> Import preset…</button></div>
-    </section>
   )
 }
 
@@ -689,7 +656,6 @@ export default function SettingsModal(): JSX.Element {
 
               <Sec id="data"><AdvGroup id="data" title="Data" {...gp}>
                   <DataSettings />
-                  <PresetFiles />
                   <label><span className="toggle-text"><b>Auto-archive after (days)</b><small>Chats and inbox messages with no activity for this long move to Archived. They stay searchable and can be restored. 0 turns it off.</small></span>
                     <input type="number" min={0} max={3650} value={draft.autoArchiveDays ?? 0} onChange={(e) => patch({ autoArchiveDays: Math.min(3650, Math.max(0, Math.round(Number(e.target.value)) || 0)) })} />
                   </label>

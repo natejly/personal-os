@@ -2348,34 +2348,6 @@ export interface DocRevision {
   /** GET /docs/revisions/{id} only: a unified diff, for copying out. */
   patch?: string
 }
-/** One window captured in a space preset: content + geometry, no live state (state/popout are not kept). */
-export interface PresetWindow {
-  kind: WidgetKind
-  ref_id: string | null
-  project_id: string | null
-  title: string
-  x: number; y: number; w: number; h: number
-  z: number
-  pinned: number /** 0 | 1 */
-  /** window alpha while popped, 0.2..1 */
-  opacity: number
-  config: Record<string, unknown>
-}
-/** A named, user-saved template of a space. Instantiating it creates a new Canvas. */
-export interface CanvasPreset {
-  id: string
-  name: string
-  project_id: string | null
-  snap_mode: SnapMode
-  grid_size: number
-  zoom: number; pan_x: number; pan_y: number
-  wallpaper: string
-  windows: PresetWindow[]
-  created_at: number
-  updated_at: number
-}
-/** POST /canvas-presets/{id}/instantiate: the new canvas plus how many preset windows were dropped (dangling refs). */
-export type InstantiatedCanvas = Canvas & { skipped: number }
 
 export type DragKind =
   | 'conversation' | 'todo' | 'document' | 'memory' | 'project' | 'file' | 'nav'

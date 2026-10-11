@@ -28,7 +28,10 @@ export function sortWorkers(ws: WorkerInfo[]): WorkerInfo[] {
 export const upsertWorker = (ws: WorkerInfo[], w: WorkerInfo): WorkerInfo[] => (ws.some((x) => x.id === w.id) ? ws.map((x) => (x.id === w.id ? w : x)) : [w, ...ws])
 
 /** Any non-null kind marks a control message for the model (wake, nudge, continue, ...); it is not the user's words and never shows. Messages from another chat ('chat_in', 'chat_reply') and the `/clear` marker are the exception: they render. */
-export const isInternal = (m: Pick<Message, 'kind'>): boolean => m.kind != null && m.kind !== 'chat_in' && m.kind !== 'chat_reply' && m.kind !== 'clear'
+export const isInternal = (m: Pick<Message, 'kind'>): boolean => m.kind != null && m.kind !== 'chat_in' && m.kind !== 'chat_reply' && m.kind !== 'clear' && m.kind !== 'branch_summary'
+
+/** The note a fork carries about the branch it left; it shows collapsed. */
+export const isBranchNote = (m: Pick<Message, 'kind'>): boolean => m.kind === 'branch_summary'
 
 /** The `/clear` marker row: the model's context starts after it; the transcript shows a divider. */
 export const isClear = (m: Pick<Message, 'kind'>): boolean => m.kind === 'clear'

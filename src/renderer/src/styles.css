@@ -2794,3 +2794,6 @@ select:focus-visible {
 /* A file path inside a reply sentence: the attachment chip, sized to the line. */
 .file-chip.inline { margin: 0 1px; padding: 0 7px; font-size: inherit; line-height: inherit; vertical-align: baseline; }
 .file-chip.inline svg { color: var(--text-muted); flex: none; }
+.branch-note { margin: 6px 0; font-size: 11px; color: var(--text-faint); }
+.branch-note summary { cursor: pointer; }
+.branch-note div { margin-top: 4px; white-space: pre-wrap; }

@@ -582,17 +582,18 @@ export default function SettingsModal(): JSX.Element {
                 <h3>Memory</h3>
                 <div className="knowledge-controls modal-free"><ScopeSelect value={libraryScope} onChange={(sc) => void setLibraryScope(sc)} /></div>
               </div>
-              <Sec id="learning"><details className="modal-free">
-                <summary>Learning</summary>
-                <Switch title="Learn from chats" help="Save useful facts after replies." checked={draft.autoLearn} onChange={(autoLearn) => patch({ autoLearn })} />
-                <Switch title="Learn how I write" help="Keep a profile of your writing so drafts sound like you." checked={draft.learnStyle !== false} onChange={(learnStyle) => patch({ learnStyle })} />
-              </details></Sec>
-              <Sec id="search"><AdvGroup id="search" title="Memory search and index" {...gp}>
+              <div className="knowledge-top">
+                <Sec id="learning"><AdvGroup id="learning" title="Learning" {...gp}>
+                  <Switch title="Learn from chats" help="Save useful facts after replies." checked={draft.autoLearn} onChange={(autoLearn) => patch({ autoLearn })} />
+                  <Switch title="Learn how I write" help="Keep a profile of your writing so drafts sound like you." checked={draft.learnStyle !== false} onChange={(learnStyle) => patch({ learnStyle })} />
+                </AdvGroup></Sec>
+                <Sec id="search"><AdvGroup id="search" title="Memory search and index" {...gp}>
                   <IndexStatusLine />
                   <Switch title="Smarter memory search" help="Combine keywords, meaning, recency and links. Off means keywords only." checked={draft.hybridRetrieval !== false} onChange={(hybridRetrieval) => patch({ hybridRetrieval })} />
                   <AdvancedRetrieval draft={draft} patch={patch} />
                   <Switch title="Describe each file passage when indexing" help="One extra model call per passage. Off by default." checked={draft.contextualChunks === true} onChange={(contextualChunks) => patch({ contextualChunks })} />
               </AdvGroup></Sec>
+              </div>
               <div className="knowledge-body modal-free"><MemoryPanel /></div>
             </section>}
 

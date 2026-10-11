@@ -1,4 +1,4 @@
-import { Box } from 'lucide-react'
+import { Box } from '../../icons'
 import { networkLine, num, sandboxEntries, sandboxLine, shellState, str } from '../../lib/toolResult'
 import { describeCall } from '../../lib/toolDisplay'
 import CardShell from './CardShell'

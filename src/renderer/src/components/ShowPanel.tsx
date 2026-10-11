@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X, Download, RefreshCw, FolderOpen, ExternalLink, Columns2, PanelTop } from 'lucide-react'
+import { X, Download, RefreshCw, FolderOpen, ExternalLink, Columns2, PanelTop } from '../icons'
 import type { ShowItem } from '@shared/types'
 import { isOpenable } from '@shared/openable'
 import { useStore } from '../store'

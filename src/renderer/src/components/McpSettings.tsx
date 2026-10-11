@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, ExternalLink, LogOut, Plug, Plus, RefreshCw, ScrollText, ShieldAlert, Trash2, X
-} from 'lucide-react'
+} from '../icons'
 import { api } from '../lib/api'
 import { ApiError } from '../lib/apiError'
 import { useStore } from '../store'

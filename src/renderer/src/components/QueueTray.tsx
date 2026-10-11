@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Pencil, Send, X } from 'lucide-react'
+import { Pencil, Send, X } from '../icons'
 import { useDraft } from '../lib/drafts'
 import { parseQueue, queueKey, removeQueued, updateQueue, type QueuedItem } from '../lib/followQueue'
 

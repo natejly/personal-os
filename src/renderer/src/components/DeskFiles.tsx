@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, Columns2, FileImage, FilePlus, FileText, Folder, PackageCheck, RefreshCw } from 'lucide-react'
+import { ChevronRight, Columns2, FileImage, FilePlus, FileText, Folder, PackageCheck, RefreshCw } from '../icons'
 import { DESK_LIVE, type DeskDiff, type DeskFile, type DeskRichPreview, type FullDesk } from '@shared/types'
 import { api } from '../lib/api'
 import { wordDiff, type Op, type WordPart } from '../lib/diff'

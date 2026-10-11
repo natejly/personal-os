@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ExternalLink, FilePen, Pencil, BookOpen } from 'lucide-react'
+import { ExternalLink, FilePen, Pencil, BookOpen } from '../../icons'
 import type { FullDoc } from '@shared/types'
 import { api } from '../../lib/api'
 import { useStore } from '../../store'

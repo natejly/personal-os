@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, forceX, forceY, type Simulation, type SimulationNodeDatum, type SimulationLinkDatum } from 'd3-force'
-import { Plus, Trash2, Globe, X, Link2, Maximize2, History } from 'lucide-react'
+import { Plus, Trash2, Globe, X, Link2, Maximize2, History } from '../icons'
 import { useStore, type Scope } from '../store'
 import { api } from '../lib/api'
 import type { GraphBackfillStatus, GraphData, GraphEdge, GraphNode } from '@shared/types'

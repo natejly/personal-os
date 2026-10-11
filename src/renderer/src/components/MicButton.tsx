@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
-import { Loader2, Mic, Square } from 'lucide-react'
+import { Loader2, Mic, Square } from '../icons'
 import { api } from '../lib/api'
 import { ApiError } from '../lib/apiError'
 import { startWavRecording, type WavRecording } from '../lib/wavRecorder'

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AppWindow, Check, LayoutGrid, Plus } from 'lucide-react'
+import { AppWindow, Check, LayoutGrid, Plus } from '../icons'
 import type { CanvasWindow, WidgetKind } from '@shared/types'
 import { api } from '../lib/api'
 import { useProject, useStore } from '../store'

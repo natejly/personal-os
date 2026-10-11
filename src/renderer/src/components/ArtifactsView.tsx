@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Download, ExternalLink, FileDown, FolderOpen, MessageSquare, Trash2 } from 'lucide-react'
+import { Download, ExternalLink, FileDown, FolderOpen, MessageSquare, Trash2 } from '../icons'
 import { useStore } from '../store'
 import { saveDownload } from '../lib/api'
 import { itemRawPath } from '../lib/showPanel'

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, ChevronDown, ChevronRight, Download, Eye, Globe, Plus, Sparkles, Trash2, Undo2, Upload, Video, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Download, Eye, Globe, Plus, Sparkles, Trash2, Undo2, Upload, Video, X } from '../icons'
 import { useStore } from '../store'
 import type { Skill, SkillFinding, SkillPreview } from '@shared/types'
 import { PRESET_KIND_LABEL, SKILL_PRESETS, type SkillPreset } from '@shared/skillPresets'

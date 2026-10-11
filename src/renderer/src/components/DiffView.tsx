@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Columns2, AlignLeft, Copy, RotateCcw, Sparkles, User, AlertTriangle } from 'lucide-react'
+import { Check, Columns2, AlignLeft, Copy, RotateCcw, Sparkles, User, AlertTriangle } from '../icons'
 import type { DocRevision } from '@shared/types'
 import { diffLines, diffStat, hunks, toUnified, type DiffLine, type Hunk, type WordPart } from '../lib/diff'
 

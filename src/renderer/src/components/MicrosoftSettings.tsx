@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Unplug, Check, AlertTriangle, RefreshCw, ExternalLink } from 'lucide-react'
+import { Unplug, Check, AlertTriangle, RefreshCw, ExternalLink } from '../icons'
 import { useStore } from '../store'
 
 const PORTAL = 'https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade/quickStartType~/null/sourceType/Microsoft_AAD_IAM'

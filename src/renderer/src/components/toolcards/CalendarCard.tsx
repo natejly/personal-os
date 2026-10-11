@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, ArrowRight, CalendarClock, CalendarDays, CalendarPlus, CalendarSearch, CalendarX, Check, ExternalLink, Loader2, ShieldAlert, ShieldCheck, Trash2, TriangleAlert, Video, X } from 'lucide-react'
+import { AlertCircle, ArrowRight, CalendarClock, CalendarDays, CalendarPlus, CalendarSearch, CalendarX, Check, ExternalLink, Loader2, ShieldAlert, ShieldCheck, Trash2, TriangleAlert, Video, X } from '../../icons'
 import type { CalendarEvent, ToolEvent } from '@shared/types'
 import { api } from '../../lib/api'
 import {

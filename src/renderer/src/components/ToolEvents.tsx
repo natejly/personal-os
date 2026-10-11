@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { ChevronRight, MessageSquare, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, PenLine, ShieldAlert, ShieldCheck,
   FolderOpen, FileText, FilePen, Trash2, PackageCheck, CircleHelp, CircleCheck,
-  Youtube, Github, Rss, Undo2, Bot, Eye, FileOutput, PanelRight, BookOpen, Download, MousePointerClick, Keyboard, ListFilter, ArrowDownUp, MonitorCog, Package, Search, Copy, FolderPlus, OctagonX, Hourglass, ShieldQuestion, CalendarDays, CalendarClock, CalendarSearch, CalendarPlus, CalendarX } from 'lucide-react'
+  Youtube, Github, Rss, Undo2, Bot, Eye, FileOutput, PanelRight, BookOpen, Download, MousePointerClick, Keyboard, ListFilter, ArrowDownUp, MonitorCog, Package, Search, Copy, FolderPlus, OctagonX, Hourglass, ShieldQuestion, CalendarDays, CalendarClock, CalendarSearch, CalendarPlus, CalendarX } from '../icons'
 import type { DocRevision, RunTapeEvent, ToolEvent, Verification } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'

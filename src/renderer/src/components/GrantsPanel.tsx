@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { X } from 'lucide-react'
+import { X } from '../icons'
 import type { McpGrant, PermissionGrants, PermissionRules, Settings, ToolOverride } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'

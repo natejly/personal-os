@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { X, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, Activity, ShieldAlert, MonitorDot, PenLine } from 'lucide-react'
+import { X, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, Activity, ShieldAlert, MonitorDot, PenLine } from '../icons'
 import { ToolOverrides } from './ToolPermissions'
 import TraceView from './TraceView'
 import ShellJobs from './ShellJobs'

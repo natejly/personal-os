@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, Check, Circle, Plus, Sparkles, Square, Trash2, Upload, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, Circle, Plus, Sparkles, Square, Trash2, Upload, X } from '../icons'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import type { TeachDraft, TeachRecording } from '@shared/types'

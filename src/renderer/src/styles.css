@@ -2573,12 +2573,12 @@ select:focus-visible {
 .progress-card .progress-plan .plan-step.consumed .desk-mark { color: var(--accent); }
 .progress-card .progress-plan .plan-step.done .desk-mark { color: var(--ok); }
 .progress-card .progress-plan .plan-step.failed .desk-mark { color: var(--danger); }
-/* The unfolded step list is a vertical timeline: a bar runs from a finished (green) or current (accent) step's circle down to the next.
-   Finished circles are filled and hide the bar; the current one is an outline, so the bar shows through. */
+/* The unfolded step list is a vertical timeline: a bar joins finished (green) steps and ends just below the current (accent) step.
+   Pending steps have no bar. Finished circles are filled and hide the bar; the current one is an outline, so the bar shows through. */
 .progress-card .plan-steps .plan-step { position: relative; }
 .progress-card .plan-steps .plan-step::after { content: ''; position: absolute; left: 6px; width: 1.5px; border-radius: 1px; top: 10px; bottom: -4px; display: none; }
 .progress-card .plan-steps .plan-step.done::after { display: block; background: var(--ok); }
-.progress-card .plan-steps .plan-step.in_progress::after, .progress-card .plan-steps .plan-step.consumed::after { display: block; background: var(--accent); }
+.progress-card .plan-steps .plan-step.in_progress::after, .progress-card .plan-steps .plan-step.consumed::after { display: block; bottom: 0; background: var(--accent); }
 .progress-card .plan-steps .plan-step:last-child::after { display: none; }
 .progress-card .plan-steps .plan-check, .progress-card .plan-steps .desk-mark { position: relative; z-index: 1; }
 /* A thin done/total track. */

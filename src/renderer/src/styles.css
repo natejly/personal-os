@@ -1739,6 +1739,8 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 
 /* ---------- Execution trace ---------- */
 .trace { padding: 10px 14px; }
+/* The reply's step lines share the class but are plain text, not the Developer-tools panel. */
+.msg-body > .trace { padding: 0; }
 .trace-summary { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--text-faint); margin-bottom: 4px; }
 .trace-summary b { color: var(--text); font-weight: 600; }
 .trace-summary .err { color: var(--danger); display: inline-flex; align-items: center; gap: 3px; }

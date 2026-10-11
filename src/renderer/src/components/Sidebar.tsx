@@ -24,17 +24,18 @@ import SidebarChatFiles from './SidebarChatFiles'
 
 /** Project groups the user folded shut. Stored as exceptions, so a new project starts open. */
 const COLLAPSED_KEY = 'grain.sidebar.collapsedProjects'
-const readCollapsed = (): Set<string> => {
+const DATE_GROUPS_KEY = 'grain.sidebar.collapsedDateGroups'
+const readCollapsed = (key = COLLAPSED_KEY): Set<string> => {
   try {
-    const v: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]')
+    const v: unknown = JSON.parse(localStorage.getItem(key) ?? '[]')
     return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
   } catch {
     return new Set()
   }
 }
-const writeCollapsed = (ids: Set<string>): void => {
+const writeCollapsed = (ids: Set<string>, key = COLLAPSED_KEY): void => {
   try {
-    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...ids]))
+    localStorage.setItem(key, JSON.stringify([...ids]))
   } catch {
     // Per-viewer convenience only; without it the groups are open again next launch.
   }
@@ -150,7 +151,16 @@ export default function Sidebar(): JSX.Element {
   }, [needsOnly, conversations, chatStates, shownJobs])
   // A search reaches every chat: typing a query lifts the filter until the box is cleared.
   const filtering = needsOnly && !query.trim()
-  const [collapsed, setCollapsed] = useState(readCollapsed)
+  const [collapsed, setCollapsed] = useState(() => readCollapsed())
+  const [foldedDates, setFoldedDates] = useState(() => readCollapsed(DATE_GROUPS_KEY))
+  const toggleDateGroup = (label: string): void => {
+    setFoldedDates((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(label)) next.add(label)
+      writeCollapsed(next, DATE_GROUPS_KEY)
+      return next
+    })
+  }
   useEffect(() => {
     if (searching) searchRef.current?.focus()
   }, [searching])
@@ -380,12 +390,15 @@ export default function Sidebar(): JSX.Element {
           </section>
         )}
         {!filtering && groups.length === 0 && pinned.length === 0 && inMessages.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No personal chats yet.'}</p>}
-        {!filtering && groups.map((g) => (
+        {!filtering && groups.map((g) => {
+          const folded = foldedDates.has(g.label)
+          return (
           <section key={g.label}>
-            <h4>{g.label}</h4>
-            {g.items.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} trail={<Snippet hit={hitById.get(c.id)} />} />)}
+            <h4><button className="section-toggle" aria-expanded={!folded} onClick={() => toggleDateGroup(g.label)}><ChevronRight size={11} className={folded ? '' : 'rot90'} /> {g.label}</button></h4>
+            {!folded && g.items.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} trail={<Snippet hit={hitById.get(c.id)} />} />)}
           </section>
-        ))}
+          )
+        })}
         {!filtering && inMessages.length > 0 && (
           <section>
             <h4>In messages</h4>

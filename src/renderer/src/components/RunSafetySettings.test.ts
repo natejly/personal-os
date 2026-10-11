@@ -49,11 +49,3 @@ test('the Advanced sections the run-safety block sits beside are exported from o
   assert.ok(html.includes('Check before finishing'))
   assert.match(html, /Check before finishing[\s\S]*?<input type="checkbox"\/>/, 'deskDoneGate off renders unchecked')
 })
-
-test('the shell network block offers one sandbox control: none of its own', async () => {
-  const { ShellNetwork } = await import('./CoworkSettings')
-  const html = renderToStaticMarkup(createElement(ShellNetwork, { draft: { sandboxNetwork: 'proxy' } as Settings, patch: () => {} }))
-  assert.ok(html.includes('Network for commands'))
-  assert.ok(!html.includes('Network for the Linux sandbox'), 'sandboxNetwork is set in SandboxSettings only')
-  assert.ok(html.includes('Allowed hosts'), 'the host list shows while the sandbox uses the proxy')
-})

@@ -6,7 +6,7 @@ policy. Each shell run carries a random token as proxy credentials (`http://grai
 is how a connection is tied to the run (and so to that run's allowed hosts) and how a run's `contacted` / `blocked`
 lists are kept. A request without a live token is refused; a token is revoked when its run ends.
 
-The Linux sandbox (microvm.py) runs this same file as a sidecar container: `sidecar()` binds every interface of a
+It also runs as a standalone sidecar: `sidecar()` binds every interface of a
 container that sits on both the internet bridge and the sandbox's internal-only network, with one long-lived token,
 and writes its contacted / blocked report to a file the host reads back. Binding beyond loopback changes nothing
 about the checks below: no token, no tunnel, and IP literals and private addresses stay refused.

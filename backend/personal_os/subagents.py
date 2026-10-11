@@ -72,7 +72,7 @@ SHELL_TOOLS = ("shell_run", "shell_poll", "shell_kill", "opencode_run", "coding_
                "coding_session_status", "coding_session_send", "coding_session_stop", "coding_session_diff")
 # Run kinds that have nobody at the keyboard; with unattendedApprovals = "deny" a call that would ask is refused.
 UNATTENDED_KINDS = ("job", "scheduled")
-STATEFUL_GROUPS = ("browser", "shell", "sandbox")  # tools that hold session state never run side by side
+STATEFUL_GROUPS = ("browser", "shell")  # tools that hold session state never run side by side
 # What an interrupted child's run row says, by exit reason: an empty error left the user guessing why a worker stopped.
 # exit reasons that stop the coding sessions a child started (codingagents.stop_owned), and how the row says it. A
 # completed child or one that errored leaves them running: a session started to work in the background keeps going.
@@ -98,7 +98,7 @@ def parallel_safe(spec: Any, name: str, mode: str) -> bool:
                 and not name.startswith("agent_") and spec.group not in STATEFUL_GROUPS)
 
 
-WRITER_TOOLS = frozenset({*FILE_WRITERS, *SHELL_TOOLS, "run_python", "desk_write_file", "desk_trash_file", "desk_import_sandbox"})
+WRITER_TOOLS = frozenset({*FILE_WRITERS, *SHELL_TOOLS, "run_python", "desk_write_file", "desk_trash_file"})
 PATH_ARGS = ("path", "dest", "destination", "src", "source", "cwd", "repo_path", "to")
 
 READ_TOOLS = (

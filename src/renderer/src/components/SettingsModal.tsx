@@ -134,7 +134,7 @@ function PresetFiles(): JSX.Element {
   }
   return (
     <section>
-      <h3>Space presets</h3>
+      <h3>Canvas presets</h3>
       <p className="muted small">Save a space as a preset from the sidebar, then share it as a file. Notes travel with it; chats never do.</p>
       {presets.map((p) => (
         <div className="setting-row" key={p.id}>
@@ -485,7 +485,7 @@ export default function SettingsModal(): JSX.Element {
             </section>}
             {tab === 'sidebar' && <section>
               <h3>Sidebar</h3>
-              <p className="muted small">New chat, your chats and Settings always show. Hiding Files, Spaces, Projects or Jobs only removes the row: ⌘K and shortcuts still open them. Hiding Lists, Calendar, Mail, Health or Library turns that view off.</p>
+              <p className="muted small">New chat, your chats and Settings always show. Hiding Files, Canvases, Projects or Jobs only removes the row: ⌘K and shortcuts still open them. Hiding Lists, Calendar, Mail, Health or Library turns that view off.</p>
               <div className="setting-list">
                 {([['docs', 'Files']] as const).map(([k, label]) => (
                   <label key={k} className="toggle-row">
@@ -499,7 +499,7 @@ export default function SettingsModal(): JSX.Element {
                     <input type="checkbox" aria-label={e.label} checked={!hidden.includes(e.view)} onChange={(ev) => void setRowShown(e.view, ev.target.checked)} /><span className="switch" />
                   </label>
                 ))}
-                {([['spaces', 'Spaces'], ['projects', 'Projects'], ['jobs', 'Jobs']] as const).map(([k, label]) => (
+                {([['spaces', 'Canvases'], ['projects', 'Projects'], ['jobs', 'Jobs']] as const).map(([k, label]) => (
                   <label key={k} className="toggle-row">
                     <span className="toggle-text"><b>{label}</b></span>
                     <input type="checkbox" aria-label={label} checked={!sbHidden.includes(k)} onChange={(ev) => void setSectionShown(k, ev.target.checked)} /><span className="switch" />

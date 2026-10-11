@@ -15,8 +15,7 @@ import type {
   PendingSend, SendHoldConfig, Verification, Verified,
   PermissionGrantResult, VoiceConfig,
   RunChanges, RunUndoResult,
-  BackupInfo, DataOverview, ShellJobInfo, ShellJobTail, TelegramStatus,
-  TeachDraft, TeachRecording
+  BackupInfo, DataOverview, ShellJobInfo, ShellJobTail, TelegramStatus
 } from '@shared/types'
 import type { CodingSession, CodingSessionDiff, ShipChecklist } from '@shared/types'
 import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
@@ -588,28 +587,6 @@ export const api = {
     importMd: (src: { text?: string; url?: string }) =>
       req<{ skill: Skill; findings: SkillFinding[]; warnings: string[] }>('/skills/import', { method: 'POST', body: json(src) }, NO_TIMEOUT),
     exportMd: (id: string) => req<{ filename: string; text: string }>(`/skills/${id}/export`)
-  },
-  /** Teach a task: a screen recording (or an imported video) becomes a candidate skill. */
-  teach: {
-    list: () => req<TeachRecording[]>('/teach'),
-    get: (id: string) => req<TeachRecording>(`/teach/${id}`),
-    /** `needs_permission` when macOS has not granted Screen Recording; nothing is recorded then. */
-    start: () => req<TeachRecording | { needs_permission: true; state: string }>('/teach/start', { method: 'POST' }),
-    stop: () => req<TeachRecording>('/teach/stop', { method: 'POST' }, CONTROL_TIMEOUT_MS),
-    importVideo: (file: File) => {
-      const fd = new FormData()
-      fd.append('file', file)
-      return req<TeachRecording>('/teach/import', { method: 'POST', body: fd }, NO_TIMEOUT)
-    },
-    extract: (id: string) => req<TeachRecording>(`/teach/${id}/extract`, { method: 'POST' }, NO_TIMEOUT),
-    setSteps: (id: string, d: TeachDraft) => req<TeachRecording>(`/teach/${id}/steps`, { method: 'PUT', body: json(d) }),
-    save: (id: string) => req<{ skill: Skill; findings: SkillFinding[]; recording: TeachRecording }>(`/teach/${id}/save`, { method: 'POST' }),
-    schedule: (id: string, s: { kind: 'cron' | 'once'; cron?: string; run_at?: number | null; test?: boolean }) =>
-      req<{ job: Job; recording: TeachRecording; test?: { ok: boolean; run_id: string | null; conversation_id: string | null } }>(
-        `/teach/${id}/schedule`, { method: 'POST', body: json(s) }, NO_TIMEOUT),
-    delete: (id: string) => req<{ ok: boolean }>(`/teach/${id}`, { method: 'DELETE' }),
-    /** One frame as an object URL (an <img> cannot send the token header). Revoke it when done. */
-    frame: async (id: string, n: number): Promise<string> => URL.createObjectURL(await (await fetchRaw(`/teach/${id}/frames/${n}`)).blob())
   },
   /** Starts the reply as a background task and returns at once; watch it with `chatStream(convId, seq)`. Throws a 409 carrying a `RunConflict` when that conversation already has a live run. */
   chat: (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string; attachments?: string[] }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }, CONTROL_TIMEOUT_MS),

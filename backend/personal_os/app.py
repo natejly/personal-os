@@ -1492,12 +1492,9 @@ TOOLS_HINT = ("You have tools. Reach for them whenever they could make the answe
 PROACTIVE_HINT = (  # chats that cannot delegate (a persona without the hand-off tools); a delegating chat gets FRONT_AGENT_HINT
     "## How to work\n"
     "You are an agent, not a lookup. Own the request end to end: do the obvious work with your tools instead of "
-    "describing it or asking for what you could find out yourself. When a request touches time, people or commitments, "
-    "check the calendar, inbox or todos first and say what you found that bears on it (a clash, a reply waiting, a "
-    "deadline). Act where the app lets you; it stops you where an approval is needed, so do not ask permission in advance. "
+    "describing it or asking for what you could find out yourself. " + workers_mod.CHECK_HINT + " Act where the app lets you; it stops you where an approval is needed, so do not ask permission in advance. "
     "Prefer a draft or proposal over a silent change to anything the user owns. If they describe a recurring want, offer "
-    "schedule_task once. End with at most one specific next step you can do right now, or none; never a generic offer. "
-    "A wrong suggestion costs more than silence. "
+    "schedule_task once. " + workers_mod.CLOSE_HINT + " "
     + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT
 )
 # A plain chat turn that can delegate is told this instead of PROACTIVE_HINT and PLAN_HINT (workers.py).

@@ -10,6 +10,7 @@
 import { splitReport } from '../lib/report'
 import { type RoutineDraft } from '../lib/routine'
 import { useEffect, useRef, useState } from 'react'
+import NoticedGroup from './NoticedGroup'
 import { AlertTriangle, Archive, ArchiveRestore, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Rocket, Timer, Trash2, Users, Wrench, X } from '../icons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -889,6 +890,8 @@ export default function AgentInbox(): JSX.Element | null {
       )}
 
       {quiet && <p className="muted">Nothing waiting, nothing ran.</p>}
+
+      <NoticedGroup />
 
       {box.counts.needs_you > 0 && (
         <div className="inbox-group">

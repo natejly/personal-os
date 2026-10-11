@@ -1515,6 +1515,8 @@ export interface Settings {
   autoTitle: boolean
   /** Suggest up to 3 next questions as chips under the latest reply (uses the extraction model). */
   followUps: boolean
+  /** Scan recent mail in the background for events that are not on the calendar (uses the extraction model). */
+  noticer?: boolean
   /** Bank long messages and saved docs as writing samples, and keep the voice profile current. */
   learnStyle: boolean
   /** Default type for Files; a doc with its own `typography` ignores it. */
@@ -2807,6 +2809,25 @@ export interface MailWatchThread {
   age_days: number
   dismissed: number
   followup_todo_id: string | null
+}
+/** One thing Grain noticed on its own: an event in mail that is not on the calendar. */
+export interface NoticedItem {
+  id: string
+  kind: 'calendar_gap'
+  thread_id: string
+  subject: string
+  title: string
+  /** Local wall-clock `YYYY-MM-DDTHH:MM`, or `YYYY-MM-DD` for an all-day event. */
+  start: string
+  end: string | null
+  location: string | null
+  confidence: number | null
+  status: 'pending' | 'accepted' | 'dismissed' | 'resolved'
+  mail_url: string
+}
+export interface NoticedList {
+  enabled: boolean
+  items: NoticedItem[]
 }
 export interface MailWatchList {
   threads: MailWatchThread[]

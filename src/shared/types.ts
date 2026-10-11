@@ -1576,7 +1576,7 @@ export interface Settings {
   /** Coding goes to a coding agent: Grain's own agents may not edit files or run file-changing commands inside a git repo,
    *  and are told to use coding_session_start. Missing means on. */
   codingRoute?: boolean
-  /** The coding agent they are told to start. Missing means 'any' (the agent picks). */
+  /** The default coding agent for a new session. 'any' (or missing) lets Grain pick the first installed one. */
   codingAgent?: 'any' | 'opencode' | 'claude' | 'pi'
   /** Background workers. Past `delegationAfterRounds` tool rounds in one reply the assistant hands remaining work to a worker (default on, 2, 1-20). */
   delegationForce?: boolean
@@ -1835,6 +1835,8 @@ export type BackgroundEvent =
   | { event: 'ship_checklist'; data: ShipChecklist }
   /** A coding session moved (codingagents.py): the whole summary row. */
   | { event: 'coding_session'; data: CodingSession }
+  /** One new line of a coding session's timeline (user message, assistant text, tool call, error, status change). */
+  | { event: 'coding_session_event'; data: CodingSessionEvent }
 
 /** GET /coding-sessions: one background Claude Code, OpenCode or pi session started through the coding_session_* tools. */
 export interface CodingSession {
@@ -1845,6 +1847,12 @@ export interface CodingSession {
   /** `claude attach <id>`, set while a Claude Code session waits on a permission prompt. */
   attach_hint?: string | null
   created_at: number; updated_at: number; ended_at: number | null
+}
+/** GET /coding-sessions/{id}/events: one entry of a session's timeline, ordered by `seq` within the session. */
+export interface CodingSessionEvent {
+  id: number; session_id: string; seq: number; ts: string
+  kind: 'user' | 'text' | 'tool' | 'tool_result' | 'error' | 'status'
+  text: string; tool: string | null; data: Record<string, unknown> | null
 }
 /** GET /coding-sessions/{id}/diff: what the session changed in its worktree. `diff` only with ?full=1. */
 export interface CodingSessionDiff { worktree: string; branch: string | null; status: string; diff_stat: string; log: string; diff?: string; truncated: boolean }

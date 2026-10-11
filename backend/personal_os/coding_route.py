@@ -95,8 +95,9 @@ def agent_choice(cfg: dict[str, Any] | None) -> str:
 
 def _agent_phrase(cfg: dict[str, Any] | None) -> str:
     a = agent_choice(cfg)
-    return (f"agent='{a}' ({AGENT_NAMES[a]}, the user's preferred coding agent)" if a != "any"
-            else "agent='opencode' (OpenCode), agent='claude' (Claude Code) or agent='pi' (pi), whichever suits the task")
+    who = f"the user's default is {AGENT_NAMES[a]}" if a != "any" else "with no preference set it uses the first installed of Claude Code, OpenCode and pi"
+    return (f"no `agent` argument (omit it to use the user's default harness: {who}; pass agent='claude', 'opencode' or 'pi' "
+            "only when the user asks for a specific one)")
 
 
 def hint(cfg: dict[str, Any] | None) -> str:

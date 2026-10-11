@@ -12,7 +12,7 @@ import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 import { ShowCtx } from './ShowButton'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
-import { replyEffort, replyMetrics } from '../lib/replyMetrics'
+import { replyMetrics } from '../lib/replyMetrics'
 import { compactCount } from '../lib/usageFormat'
 import { parseChatMessage } from '../lib/chatLink'
 import { parseQuotedMessage } from '../lib/selectionActions'
@@ -48,16 +48,11 @@ class BodyBoundary extends Component<{ resetKey: string; children: ReactNode }, 
 }
 
 /**
- * A reply's trace as one gray row: the newest step (thinking summary, then each quiet tool call) replaces the
- * one before it, with the effort as a muted suffix. The live step shimmers. Click the row to list every step
- * and, when spans were recorded, open the full trace in the context drawer.
+ * A reply's trace as one short gray line: the newest step (thinking summary, then each quiet tool call)
+ * replaces the one before it, and the live step shimmers.
  */
-function ReplyActivity({ reasoning, events, conversationId, messageId, streaming, answering, trace }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; messageId: string; streaming: boolean; answering: boolean; trace?: Span[] | null }): JSX.Element {
+function ReplyActivity({ reasoning, events, conversationId, streaming, answering, trace }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; streaming: boolean; answering: boolean; trace?: Span[] | null }): JSX.Element {
   const subs = useSubagents(conversationId)
-  const [open, setOpen] = useState(false)
-  // The effort this reply ran with; a reply from before it was recorded falls back to the chat's current setting.
-  const effort = replyEffort(trace) ?? useStore.getState().sessions[conversationId]?.conversation.settings?.effort
-  const effortLabel = effort && effort !== 'default' ? effort : null
   const live = streaming && !answering
   const lines = traceLines(reasoning, events)
   // The live step is the call in flight (or its subagents) when there is one, else the newest summary line.
@@ -68,13 +63,8 @@ function ReplyActivity({ reasoning, events, conversationId, messageId, streaming
     return <span key={i} className={`trace-line ${l.error ? 'err' : ''} ${isLive ? 'shimmer' : ''}`}>{isLive && now && !l.error ? now : l.text}</span>
   }
   return (
-    <div className="trace">
-      <button type="button" className="trace-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <ChevronRight size={11} className={open ? 'rot90' : ''} />
-        {open ? <span className="trace-steps">{lines.map(line)}</span> : line(lines[lines.length - 1], lines.length - 1)}
-        {effortLabel && <span className="trace-effort"> · {effortLabel} effort</span>}
-      </button>
-      {open && !!trace?.length && <button type="button" className="ctx-chip" onClick={() => useStore.getState().openTrace(messageId)}>Open trace</button>}
+    <div className="trace" aria-live="polite">
+      {line(lines[lines.length - 1], lines.length - 1)}
     </div>
   )
 }
@@ -302,7 +292,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
         ) : (
           <div className="msg-body">
             <BodyBoundary resetKey={message.id}>
-              {(message.reasoning || folded.length > 0) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} messageId={message.id} streaming={streaming} answering={!!content} trace={message.trace} />}
+              {(message.reasoning || folded.length > 0) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!content} trace={message.trace} />}
               {trail && <ResearchTrail trail={trail} />}
               {!isUser && <SubagentThread messageId={message.id} conversationId={message.conversation_id} events={events ?? []} />}
               {shown.length > 0 && <ToolEvents events={shown} conversationId={message.conversation_id} streaming={streaming} browserSession={browserSession} />}

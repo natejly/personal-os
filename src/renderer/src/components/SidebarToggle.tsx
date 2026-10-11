@@ -1,4 +1,4 @@
-import { PanelLeftOpen } from 'lucide-react'
+import { SlidersHorizontal } from 'lucide-react'
 import { useStore } from '../store'
 
 /**
@@ -11,7 +11,7 @@ export default function SidebarToggle(): JSX.Element | null {
   if (sidebarOpen) return null
   return (
     <button className="icon-btn no-drag" title="Show sidebar (⌘B)" aria-label="Show sidebar (⌘B)" onClick={toggleSidebar}>
-      <PanelLeftOpen size={16} />
+      <SlidersHorizontal size={16} />
     </button>
   )
 }

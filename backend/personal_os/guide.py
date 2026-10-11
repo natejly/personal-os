@@ -12,7 +12,7 @@ from typing import Any
 NAME = "grain-guide"
 DESCRIPTION = (
     "Using Grain: how to do things in this app. Use for 'how do I', 'where is', 'what does X do in Grain', "
-    "settings, shortcuts, slash commands, approvals, Spaces, Lists, Files, Library, backups. "
+    "settings, shortcuts, slash commands, approvals, Canvases, Lists, Files, Library, backups. "
     "Built in; refreshed at every start, so edits here do not last."
 )
 # One sentence in the stable prompt prefix (context.py), only while the skill is approved.
@@ -27,10 +27,10 @@ Answer from this guide. If something is not here, say so instead of guessing; po
 ## Mental model
 - Grain is a desktop assistant with your stuff in it: chats, Files (notes and uploads), Lists (todos), Calendar and Mail (Google), memory, and tools it can use.
 - Everything is local except model calls and Google. Tools run on their own by default; a few always stop and ask first.
-- Projects group chats with their own instructions, files and memories. Spaces are a desktop of live windows.
+- Projects group chats with their own instructions, files and memories. Canvases are a desktop of live windows.
 
 ## Views and the title bar
-- Sidebar: New chat, Today, Files, then Spaces, Projects and Recents. Library is a sidebar row too.
+- Sidebar: New chat, Today, Files, then Canvases, Projects and Recents. Library is a sidebar row too.
 - Title bar, top right of every view: Lists, Calendar, Mail and Health. Hover any of them to see what it is for.
 - Settings -> Modules moves each view to the sidebar, the title bar, or hides it (nav placement). If a view seems missing, look there.
 - Today: the day's recap, calendar, unread mail, todos, and the Agent inbox (everything an agent left for you: approvals, desks waiting, scheduled-run proposals, review queues).
@@ -41,7 +41,7 @@ Answer from this guide. If something is not here, say so instead of guessing; po
 - Files: the assistant's file and shell tools work anywhere on this Mac. Grain's own data folder and app are off limits, credential stores (~/.ssh, keychains, browser cookies and passwords, .env files) ask first, and macOS-protected folders (Desktop, Documents, Downloads, Mail, Messages) need Full Disk Access in System Settings.
 - Per-chat context toggles (memory, graph, files, auto-learn, tools) are in the Context panel (Ctrl+Cmd+I). It also shows exactly what was injected into the last reply.
 - Regenerate, stop, edit and resend are on each message. Cmd+F finds in the chat, Cmd+Shift+F searches all chats.
-- A face by each chat blinks while it works. Compact chats in Settings folds chat windows in Spaces to the face and one line.
+- A face by each chat blinks while it works. Compact chats in Settings folds chat windows in Canvases to the face and one line.
 
 ## Slash commands
 Type / in the composer:
@@ -71,11 +71,11 @@ Type / in the composer:
 - Memory (Settings -> Memory, Cmd+6): Memories (facts and preferences; edit, pin, forget, see past versions, export or import), the Knowledge graph, and Voice (how you write; used only when the assistant drafts as you).
 - Auto-learn saves memories and graph links after replies. When it sees you repeating yourself it suggests a skill, which waits for your approval.
 
-## Spaces
-- Cmd+Shift+C opens Spaces: a desktop of live windows (chat, lists, calendar, doc, memory, graph, uploads, recap, project, usage, face, crew).
+## Canvases
+- Cmd+Shift+C opens Canvases: a desktop of live windows (chat, lists, calendar, doc, memory, graph, uploads, recap, project, usage, face, crew).
 - Add widget, or right-click the plane. Drag a chat, a Files note or a sidebar row onto it; a note becomes its own editable window.
-- Ctrl+Cmd+O pops a window out into its own OS window. Ctrl+1..9 jump between Spaces; Alt+Cmd+Left/Right moves between them; Alt+Cmd+Up is the overview; Ctrl+Cmd+N makes a Space; Ctrl+Cmd+T tidies up.
-- Lock a Space with Ctrl+Cmd+L so nothing can be rearranged.
+- Ctrl+Cmd+O pops a window out into its own OS window. Ctrl+1..9 jump between Canvases; Alt+Cmd+Left/Right moves between them; Alt+Cmd+Up is the overview; Ctrl+Cmd+N makes a canvas; Ctrl+Cmd+T tidies up.
+- Lock a canvas with Ctrl+Cmd+L so nothing can be rearranged.
 
 ## Library
 - Skills: procedures the assistant may follow. Candidates wait under "Waiting for you" until you approve; only approved ones are used. Import by URL or pick from Popular skills. Revoke to stop using one.
@@ -94,7 +94,7 @@ Type / in the composer:
 
 ## Subagents and crews
 - A reply can delegate to subagents. They show as indented rows under that reply with live status; click one to open and message it.
-- A crew window (in Spaces) shows the delegating agent as a big face with its subagents around it.
+- A crew window (in Canvases) shows the delegating agent as a big face with its subagents around it.
 - Subagents get the chat's tools minus asking, planning and scheduling.
 
 ## Settings people touch (Cmd+,)
@@ -112,8 +112,8 @@ Cmd+/ (or ? outside a text field) shows them all, searchable; Help -> Keyboard S
 - Go to: Cmd+0 Today, 1 Chats, 2 Lists, 3 Calendar, 4 Files, 5 Mail, 6 Memory.
 - Chat: Cmd+Shift+[ and ] previous and next chat, Cmd+Shift+F search chats, Cmd+F find (Cmd+G / Shift+Cmd+G next and previous). Enter sends (queues while a reply runs), Cmd+Enter steers the running reply, Shift+Enter new line, Esc stops the reply. The mic button dictates into the message; the dictation chord (hold to talk, tap to latch) and the transcription backend are in Settings -> Behavior -> Voice input.
 - Files (note editor): Cmd+S save, Cmd+Shift+B bold, Cmd+Shift+I italic, Cmd+K link, Ctrl+Cmd+M maths, Cmd+Shift+E code, Tab indent.
-- Spaces: Cmd+Shift+C toggle Spaces, Ctrl+Cmd+N new Space, Alt+Cmd+Left/Right previous and next, Alt+Cmd+Up overview, Ctrl+1..9 jump, Ctrl+Cmd+T tidy up, Ctrl+Cmd+L lock. Esc deselects, Delete closes the selected windows, Cmd+scroll zooms, Cmd+drag moves a window from anywhere in it.
-- Windows: Cmd+W close, Cmd+M minimize, Ctrl+Cmd+O pop out, Ctrl+Cmd+Shift+O return to Space, Ctrl+Cmd+P pin on top, Ctrl+Cmd+[ and ] transparency, Alt+Cmd+G gather widgets, Alt+Cmd+F bring pop-outs to front.
+- Canvases: Cmd+Shift+C toggle Canvases, Ctrl+Cmd+N new canvas, Alt+Cmd+Left/Right previous and next, Alt+Cmd+Up overview, Ctrl+1..9 jump, Ctrl+Cmd+T tidy up, Ctrl+Cmd+L lock. Esc deselects, Delete closes the selected windows, Cmd+scroll zooms, Cmd+drag moves a window from anywhere in it.
+- Windows: Cmd+W close, Cmd+M minimize, Ctrl+Cmd+O pop out, Ctrl+Cmd+Shift+O return to canvas, Ctrl+Cmd+P pin on top, Ctrl+Cmd+[ and ] transparency, Alt+Cmd+G gather widgets, Alt+Cmd+F bring pop-outs to front.
 - Anywhere on your Mac (change them in Settings -> Behavior -> Shortcuts -> Advanced): Ctrl+Alt+Cmd+Space gather widgets, Cmd+Shift+Space quick capture, Alt+Space quick ask.
 
 ## When something fails

@@ -7,7 +7,6 @@ import TodoItem from './TodoItem'
 import ScopeSelect from './ScopeSelect'
 import SmartTextarea from './SmartTextarea'
 import { localDay } from './CalendarWeek'
-import SendToSpace from './SendToSpace'
 import { lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 import PlannerPanel from './PlannerPanel'
@@ -178,7 +177,6 @@ export default function TodosView(): JSX.Element {
               <RefreshCw size={14} className={tasksSync.syncing ? 'spin' : ''} />
             </button>
           )}
-          <SendToSpace items={[{ kind: 'todos' }]} />
           {!board && (
             <label className={`chip-check ${showDone ? 'on' : ''}`}>
               <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Show done

@@ -53,5 +53,5 @@ off a real run. An agent or fan-out step also records the subagent runs it spawn
 is what lets a run be drawn as a tree. Every run or step write is announced on the app event stream as
 `workflow_run` (payloads stripped), and `GET /crew/{id}` returns the tree for a run, a saved workflow
 (its latest run) or a desk: the root, its steps, and every subagent under it with the parent it hangs
-off, its task, and while it runs the tool call in flight. Spaces draws that as the crew window (see
+off, its task, and while it runs the tool call in flight. Canvas draws that as the crew window (see
 `docs/spaces.md`).

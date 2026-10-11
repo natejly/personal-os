@@ -60,32 +60,6 @@ test('drop a chat on a sidebar space row adds it to that space without switching
   expect(grain.consoleErrors).toEqual([])
 })
 
-test('Send to space from a chat view: existing space, then new space, then "already in"', async ({ grain }) => {
-  const { page, api } = grain
-  const s = (await spaces(grain))[0]
-  const c = await mkChat(grain, 'Sendable')
-  await page.reload()
-  await page.waitForSelector('.sidebar')
-  await chatRow(page, 'Sendable').click()
-  const send = page.getByRole('button', { name: 'Send to space' }).or(page.locator('button[title="Send to space"]')).first()
-  await send.click()
-  await page.locator('.send-row', { hasText: s.name }).click()
-  await expect.poll(async () => (await windowsOf(grain, s.id)).filter((w) => w.ref_id === c.id).length).toBe(1)
-  await expect(page.getByText(`Sent to "${s.name}"`)).toBeVisible()
-  // second send focuses instead of duplicating
-  await send.click()
-  await page.locator('.send-row', { hasText: s.name }).click()
-  await expect(page.getByText(`Already in "${s.name}"`)).toBeVisible()
-  expect((await windowsOf(grain, s.id)).filter((w) => w.ref_id === c.id)).toHaveLength(1)
-  // new space
-  await send.click()
-  await page.locator('.send-row.new').click()
-  await expect.poll(async () => (await spaces(grain)).length).toBe(2)
-  const made = (await spaces(grain)).find((x) => x.id !== s.id)
-  await expect.poll(async () => (await windowsOf(grain, made.id)).length).toBe(1)
-  expect(grain.consoleErrors).toEqual([])
-})
-
 test('a chat window sends a message, streams a reply, and the face view toggles and persists', async ({ grain }) => {
   const { page, api } = grain
   const s = (await spaces(grain))[0]

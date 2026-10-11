@@ -38,7 +38,7 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   const pick = (k: Tab): void => { useStore.setState({ contextOpen: k === 'context' }); setTab(k) }
   return (
     <aside className="desk-panel" aria-label="Workspace">
-      <ResizeHandle id="desk-panel-w" defaultSize={460} min={320} max={900} grows="left" onCollapse={onClose} label="Workspace panel width" className="at-left" />
+      <ResizeHandle id="desk-panel-w" defaultSize={460} min={320} max={900} keep={360} overlayAt={1100} grows="left" onCollapse={onClose} label="Workspace panel width" className="at-left" />
       <div className="desk-tabs tabs">
         {tabs.map((t) => (
           <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => pick(t.key)}>

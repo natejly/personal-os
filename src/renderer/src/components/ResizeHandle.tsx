@@ -37,11 +37,15 @@ type Props = {
   grows: 'right' | 'left'
   /** Dragging this far under `min` and letting go collapses the pane instead of clamping it. */
   onCollapse?: () => void
+  /** Leave this many px of the pane's parent free for its sibling, while the pane sits beside it (window wider than `overlayAt`). */
+  keep?: number
+  /** At or below this window width the pane floats over its sibling, so `keep` does not apply. */
+  overlayAt?: number
   label: string
   className?: string
 }
 
-export default function ResizeHandle({ id, defaultSize, min, max, unit = 'px', grows, onCollapse, label, className }: Props): JSX.Element {
+export default function ResizeHandle({ id, defaultSize, min, max, unit = 'px', grows, onCollapse, keep, overlayAt = 0, label, className }: Props): JSX.Element {
   const size = useRef(defaultSize)
 
   // Before paint, so a remembered width never flashes the default first.
@@ -50,8 +54,12 @@ export default function ResizeHandle({ id, defaultSize, min, max, unit = 'px', g
     apply(id, size.current, unit)
   }, [id, defaultSize, min, max, unit])
 
+  const elRef = useRef<HTMLDivElement>(null)
   const set = (v: number): void => {
-    size.current = Math.min(max, Math.max(min, v))
+    let hi = max
+    const room = elRef.current?.parentElement?.parentElement?.clientWidth
+    if (keep && room && window.innerWidth > overlayAt) hi = Math.max(min, Math.min(max, room - keep))
+    size.current = Math.min(hi, Math.max(min, v))
     apply(id, size.current, unit)
   }
 
@@ -107,6 +115,7 @@ export default function ResizeHandle({ id, defaultSize, min, max, unit = 'px', g
 
   return (
     <div
+      ref={elRef}
       className={`resize-handle no-drag ${className ?? ''}`}
       role="separator"
       aria-orientation="vertical"

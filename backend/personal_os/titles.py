@@ -35,9 +35,18 @@ def _clamp(text: str, limit: int) -> str:
     return (cut[:sp] if sp >= limit // 3 else cut).rstrip()
 
 
+def strip_markdown(text: str) -> str:
+    """Inline markdown reduced to its words: emphasis markers, backticks, leading block markers, link targets."""
+    s = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text or "")
+    s = re.sub(r"(?m)^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)+", "", s)
+    s = s.replace("`", "")
+    s = re.sub(r"(\*\*|__|\*|(?<!\w)_|_(?!\w))", "", s)
+    return s
+
+
 def placeholder(text: str, limit: int = PLACEHOLDER_LIMIT) -> str:
     """The first message cut at a word boundary. One long unbroken token falls back to a hard cut."""
-    t = " ".join((text or "").split())
+    t = " ".join(strip_markdown(text).split())
     if not t:
         return "New chat"
     if len(t) <= limit:

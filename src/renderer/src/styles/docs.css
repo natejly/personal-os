@@ -80,7 +80,7 @@
 }
 .doc-folder-rename {
   flex: 1; min-width: 0; font: inherit; font-size: 12.5px;
-  background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 6px;
+  background: var(--bg-input); border: 1px solid var(--control-border); border-radius: 6px;
   padding: 2px 6px; color: var(--text); outline: 0;
 }
 .doc-folder-row .icon-btn.xs { opacity: 0; flex: none; }
@@ -127,7 +127,7 @@
 .doc-pending {
   display: inline-flex; align-items: center; gap: 2px;
   padding: 0 4px; border-radius: 6px;
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
   color: var(--accent); font-size: 9.5px; font-weight: 600;
 }
 
@@ -227,7 +227,7 @@
 .doc-comment-body { margin: 2px 0 0; font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .doc-comment-compose textarea {
   width: 100%; margin-top: 4px; padding: 5px 7px; resize: vertical; min-height: 44px;
-  border: 1px solid var(--border-strong); border-radius: 7px; background: var(--bg-input); color: var(--text);
+  border: 1px solid var(--control-border); border-radius: 7px; background: var(--bg-input); color: var(--text);
   font: inherit; font-size: 12.5px; outline: 0;
 }
 .doc-comment-compose textarea:focus { border-color: var(--accent); }

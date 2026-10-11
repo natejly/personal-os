@@ -9489,6 +9489,7 @@ telegram_bridge = telegram.TelegramBridge(telegram.Deps(
     attachment_path=_telegram_attachment_path,
     store_upload=_telegram_store_upload,
     mark_texts_conversation=_telegram_mark_conversation,
+    computer_name=telegram.computer_name,
 ))
 
 
@@ -9545,6 +9546,14 @@ def telegram_pairing() -> dict[str, Any]:
     if not db.secrets.get(telegram.SECRET_NAME):
         raise HTTPException(400, "Add a bot token first")
     telegram_bridge.issue_pairing()
+    return telegram_bridge.status()
+
+
+@app.post("/telegram/takeover")
+async def telegram_takeover() -> dict[str, Any]:
+    if not db.secrets.get(telegram.SECRET_NAME):
+        raise HTTPException(400, "Add a bot token first")
+    await telegram_bridge.take_over()
     return telegram_bridge.status()
 
 

@@ -12,7 +12,8 @@ function statusView(st: TelegramStatus | null): { tone: Tone; text: string } {
     case 'not_paired': return { tone: 'needs-you', text: 'Not paired. Send the code below to your bot.' }
     case 'error': return { tone: 'failed', text: st.last_error ? `Polling error: ${st.last_error}` : 'Polling error' }
     case 'bad_token': return { tone: 'failed', text: 'Telegram rejected the token. Paste a new one.' }
-    case 'conflict': return { tone: 'failed', text: 'Another program is reading this bot\'s updates, or a webhook is set on it.' }
+    case 'conflict': return { tone: 'failed', text: 'Something else is reading this bot\'s updates: a webhook, another program, or a Grain on another Mac that does not know about this one. Give each Mac its own bot.' }
+    case 'claimed_elsewhere': return { tone: 'needs-you', text: st.claimed_by ? `This bot is used by Grain on ${st.claimed_by}.` : 'This bot is used by Grain on another Mac.' }
     case 'locked': return { tone: 'working', text: 'Another Grain is polling this bot' }
     case 'no_token': return { tone: '', text: 'No bot token yet' }
     default: return { tone: '', text: 'Off' }
@@ -35,6 +36,7 @@ export default function TelegramSettings({ draft, patch }: { draft: Settings; pa
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [guide, setGuide] = useState(false)
 
   const load = (): void => { api.telegramStatus().then((s) => { setSt(s); setStErr(null) }).catch((e: Error) => setStErr(e.message)) }
   const unpaired = !!st?.has_token && !st.paired
@@ -51,6 +53,7 @@ export default function TelegramSettings({ draft, patch }: { draft: Settings; pa
   }
   const saveToken = async (): Promise<void> => { if (await run(() => api.telegramSaveToken(token.trim()))) setToken('') }
   const removeToken = (): void => { if (window.confirm('Remove the bot token and unpair this chat?')) void run(api.telegramRemoveToken) }
+  const takeOver = (): void => { if (window.confirm(`Take this bot over from Grain on ${st?.claimed_by ?? 'the other Mac'}? That Mac stops receiving its messages.`)) void run(api.telegramTakeOver) }
   const test = async (): Promise<void> => {
     setBusy(true)
     setMsg(null)
@@ -71,11 +74,20 @@ export default function TelegramSettings({ draft, patch }: { draft: Settings; pa
     <div className="workspace-roots">
       <h4>Telegram</h4>
       <p className="muted small">Text Grain from your phone through a private bot that only you can use. Works while your Mac is awake and Grain is running.</p>
-      <ol className="muted small">
-        <li>In Telegram, open @BotFather and send /newbot.</li>
-        <li>Pick a name, then a username that ends in "bot".</li>
-        <li>Copy the token BotFather sends and paste it here.</li>
-      </ol>
+      <p className="muted small">Each Mac needs its own bot: two Macs reading one bot take its messages from each other.</p>
+      {st?.status === 'claimed_elsewhere' && (
+        <div className="workspace-roots-add">
+          <button type="button" className="ghost-btn" onClick={() => setGuide((g) => !g)}>Set up a bot for this Mac</button>
+          <button type="button" className="ghost-btn" disabled={busy} onClick={takeOver}>Take over this bot</button>
+        </div>
+      )}
+      {(guide || st?.status !== 'claimed_elsewhere') && (
+        <ol className="muted small">
+          <li>In Telegram, open <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a> and send /newbot.</li>
+          <li>Name it <code>Grain · {st?.machine_name ?? 'this Mac'}</code>, then pick a username that ends in "bot", for example <code>grain_{(st?.machine_name ?? 'mac').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'mac'}_bot</code>.</li>
+          <li>Copy the token BotFather sends and paste it here. Grain checks it with Telegram before saving.</li>
+        </ol>
+      )}
       <div className="workspace-roots-add">
         <input type="password" value={token} autoComplete="off" spellCheck={false} aria-label="Bot token" placeholder={hasToken ? 'Saved. Paste a new token to replace' : '123456789:ABC…'}
           onChange={(e) => setToken(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && token.trim()) { e.preventDefault(); void saveToken() } }} />

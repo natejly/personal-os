@@ -65,7 +65,7 @@ from .mcp_client import MCP_DANGER, McpClient, McpError
 from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthStore
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers, review_text as mcp_review_text
 from .cowork import (AUTO_RESUME_FROM, internal_kind, AUTONOMY, CHAT_HANDOFF, CONTINUE_MESSAGES, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, inputs_line, read_notes,
-                     STATUSES as DESK_STATUSES, TERMINAL as DESK_TERMINAL, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
+                     STATUSES as DESK_STATUSES, TERMINAL as DESK_TERMINAL, DeskRuntime, Desks,
                      OUTPUT_KINDS, checklist_items, mail_parts, origin_report, parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
 from .envs import WorkEnv

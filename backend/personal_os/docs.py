@@ -852,27 +852,6 @@ class Docs:
                 (rid, doc_id, cur["content"], after, cur["title"], title_after, summary or "Assistant edit", tool, now()))
         return self.revision(rid)
 
-    def propose_append(self, doc_id: str, section: str, summary: str = "",
-                       tool: str | None = None) -> dict[str, Any] | None:
-        """Propose adding `section` to the end of a doc, resolved against the doc at accept time.
-
-        `propose` freezes `after` as the whole new body, so anything typed between the proposal and
-        the click is overwritten. A section that is only ever added does not need the whole body:
-        the revision stores the section, and both the pending view and `accept` build the result
-        from the doc as it stands. None when the doc is missing or in the trash.
-        """
-        cur = self.get(doc_id)
-        if cur is None or not (section or "").strip():
-            return None
-        rid = new_id()
-        with self.db.tx() as c:
-            c.execute(
-                "INSERT INTO doc_revisions(id,doc_id,before,after,title_before,title_after,summary,author,tool,status,created_at,append)"
-                " VALUES(?,?,?,?,?,?,?,'assistant',?,'pending',?,?)",
-                (rid, doc_id, cur["content"], self.append_after(cur["content"], section), cur["title"], None,
-                 summary or "Assistant edit", tool, now(), section))
-        return self.revision(rid)
-
     def accept(self, rev_id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
             r = c.execute("SELECT * FROM doc_revisions WHERE id=? AND status='pending'", (rev_id,)).fetchone()

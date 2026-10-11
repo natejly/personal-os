@@ -79,7 +79,9 @@ def test_default_offers_core_plus_search() -> None:
     assert all(n == "tool_search" or tools.is_core(appmod.toolbox.specs[n]) for n in names), names
     # core set grew by doc_delete, show, agent_spawn text and deep_research on 2026-10-05; fetch_url/web_search Firecrawl
     # wording on 2026-10-06; the worker tools (delegate, message/check/stop/resume_worker) and send_files on 2026-10-06/07
-    assert SIZES[0] < 36_000, SIZES[0]
+    # 2026-10-11: terse descriptions, and examples sent only for doubly nested shapes (flat ones ride in the bad-arguments
+    # error); 22.8k measured. scripts/tool_schema_size.py prints the per-tool breakdown.
+    assert SIZES[0] < 23_500, SIZES[0]
 
 
 def test_search_loads_and_persists_per_conversation() -> None:

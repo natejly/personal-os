@@ -654,23 +654,19 @@ def register(tb: Any) -> None:
 
     R("delegate", ToolSpec(
         "delegate",
-        "Hand work to a background worker that runs on its own while you keep talking to the user. Use it for anything that needs more than a "
-        "couple of steps. The worker has your tools (minus asking the user, planning, scheduling and delegating) and the same ask/allow "
-        "rules, but it cannot see this conversation: the brief must carry everything it needs, with concrete locations (absolute paths, "
-        "the repo and branch, doc or event ids) and acceptance criteria. Code changes in a repo happen on a new branch in a separate "
-        "git worktree, never in the user's checkout. Returns a worker_id at once. When the worker ends, its report comes back to you on "
-        "its own; verify what it claims (diff, test output, files) before passing it on. To continue finished work, use resume_worker "
-        "rather than a new worker.",
-        _obj({"goal": {"type": "string", "description": "What to achieve, in a sentence or two"},
-              "context": {"type": "string", "description": "Everything the worker needs to know: absolute paths, the repo and branch, doc "
-                          "or event ids, links, names, what the user said"},
-              "constraints": {"type": "string", "description": "What it must not do or must ask about; limits that matter"},
-              "done_criteria": {"type": "string", "description": "How the worker knows it is finished and how to check it (a test, a command, a file)"},
-              "report_format": {"type": "string", "description": "What its final report should contain and how it is laid out. Default: "
-                                "what changed, where, the verification run and its result, open issues"},
-              "title": {"type": "string", "description": "Two to five words naming the job"},
-              "allow_subworkers": {"type": "boolean", "default": False, "description": "Let it fan parts of its work out to subagents"},
-              "agent": {"type": "string", "description": "The name of one of the user's Library agents to run the worker as (its instructions, tools and skills). Leave empty for a general worker."}},
+        "Hand work to a background worker while you keep talking to the user; use it for anything over a couple of steps. "
+        "The worker has your tools (minus asking, planning, scheduling, delegating) and the same ask/allow rules, but cannot see this "
+        "conversation, so the brief must carry everything, with concrete locations and acceptance criteria. Repo code changes go on a new "
+        "branch in a separate git worktree, never the user's checkout. The report arrives on its own; verify its claims (diff, tests, "
+        "files) before passing them on. To continue finished work use resume_worker.",
+        _obj({"goal": {"type": "string", "description": "What to achieve"},
+              "context": {"type": "string", "description": "Everything it needs: absolute paths, repo, branch, ids, what the user said"},
+              "constraints": {"type": "string", "description": "What it must not do or must ask about"},
+              "done_criteria": {"type": "string", "description": "How to know it is finished and check it"},
+              "report_format": {"type": "string", "description": "Default: what changed, where, verification and result, open issues"},
+              "title": {"type": "string", "description": "Two to five words"},
+              "allow_subworkers": {"type": "boolean", "default": False, "description": "Let it use subagents"},
+              "agent": {"type": "string", "description": "Name of a Library agent to run as; empty for a general worker"}},
              ["goal"]),
         delegate, GROUP, "executes",
         examples=[{"goal": "Find the three cheapest direct flights from SFO to JFK next Friday and compare them",
@@ -686,7 +682,7 @@ def register(tb: Any) -> None:
         return w.message(ctx.get("conversation_id"), worker_id, text)
 
     R("message_worker", ToolSpec(
-        "message_worker", "Send a note to a running worker; it reads it before its next step. Use it to add a detail or change direction.",
+        "message_worker", "Note to a running worker, read before its next step: add a detail or change direction.",
         _obj({"worker_id": {"type": "string"}, "text": {"type": "string"}}, ["worker_id", "text"]), message_worker, GROUP, "safe",
         examples=[{"worker_id": "sa_abc", "text": "The user also wants the cheapest option flagged."}]))
 
@@ -714,8 +710,7 @@ def register(tb: Any) -> None:
         return {"workers": out, "note": "Reports arrive by themselves; checking is only for answering the user's question about progress."}
 
     R("check_worker", ToolSpec(
-        "check_worker", "Status of one worker (or all of this conversation's workers when no id is given): state, what it is doing now, and its "
-        "last few actions. Only for answering the user about progress; do not poll, reports arrive on their own.",
+        "check_worker", "Status of one worker (all of this conversation's if no id): state, current activity, last actions. Only to answer the user about progress; do not poll.",
         _obj({"worker_id": {"type": "string"}}, []), check_worker, GROUP, "safe", examples=[{}, {"worker_id": "sa_abc"}]))
 
     async def stop_worker(ctx: dict[str, Any], worker_id: str = "") -> Any:
@@ -723,7 +718,7 @@ def register(tb: Any) -> None:
         return await w.stop(ctx.get("conversation_id"), worker_id, by="tool") if w else tool_error("Workers are not available.")
 
     R("stop_worker", ToolSpec(
-        "stop_worker", "Stop a worker, and anything it started. Its partial work stays and it can be resumed. You will not get a report for it.",
+        "stop_worker", "Stop a worker and anything it started; partial work stays and it can be resumed. No report follows.",
         _obj({"worker_id": {"type": "string"}}, ["worker_id"]), stop_worker, GROUP, "safe", examples=[{"worker_id": "sa_abc"}]))
 
     async def resume_worker(ctx: dict[str, Any], worker_id: str = "", text: str = "") -> Any:
@@ -736,7 +731,6 @@ def register(tb: Any) -> None:
         return out
 
     R("resume_worker", ToolSpec(
-        "resume_worker", "Continue a finished, stopped or interrupted worker with everything it already did, as a new worker. Prefer this over "
-        "delegate for follow-ups on the same work. text is what it should do next.",
+        "resume_worker", "Continue a finished, stopped or interrupted worker, with all it already did, as a new worker. Prefer over delegate for follow-ups; text is what to do next.",
         _obj({"worker_id": {"type": "string"}, "text": {"type": "string", "description": "What to do next"}}, ["worker_id"]),
         resume_worker, GROUP, "executes", examples=[{"worker_id": "sa_abc", "text": "Also include the return flights."}]))

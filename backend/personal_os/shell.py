@@ -233,14 +233,14 @@ def sandbox_available() -> bool:
 
 def no_sandbox_reason() -> str:
     """Why the confined shell is unavailable, named for this platform."""
-    if osplat.name() == "darwin":
+    if osplat.current().sandbox.name == "seatbelt":
         return "it needs macOS sandbox-exec"
     return "this computer has no OS sandbox for the shell yet"
 
 
 def unsandboxed_description() -> str:
     """shell_run's description on a platform with no shell sandbox: every command runs unconfined and only after approval."""
-    return ("Run a shell command on this computer. There is no OS sandbox for the shell here: a command runs unsandboxed, with "
+    return ("Run a shell command (cd persists, environment variables do not) on this computer. There is no OS sandbox for the shell here: a command runs unsandboxed, with "
             "the user's own permissions (it can read and write their files and use the network), and only after the user approves "
             "that one command. Pass unsandboxed=true on every call; without it nothing runs. Output is stdout and stderr together, "
             "cut to the last 2000 lines / 50 KB; the rest is behind result_id. Default timeout 120s (max 600s); then the command "

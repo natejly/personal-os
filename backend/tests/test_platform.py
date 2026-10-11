@@ -59,7 +59,9 @@ def test_capability_map_has_the_same_keys_everywhere(name: str) -> None:
 def test_secrets_contract(name: str) -> None:
     s = osplat._build(name).secrets
     assert s.store_name() == ("keychain" if s.keychain_available() else "file")
-    assert s.keychain_available() is (name == "darwin")
+    if name != "linux":   # the Linux store depends on a Secret Service being reachable (tests/test_secrets_linux.py)
+        assert s.keychain_available() is (name == "darwin")
+    assert (s.keychain_reason() is None) == s.keychain_available()
 
 
 @pytest.mark.parametrize("name", NAMES)

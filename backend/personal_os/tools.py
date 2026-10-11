@@ -92,6 +92,21 @@ PROPOSAL_ONLY_DANGER = ("external", "schedules")
 # An external tool that is not locked runs on a plain yes: it is still read back (verify), still undoable where an
 # undo exists (extundo), still a proposal in an unattended run, and still a card on an ask-as-it-goes desk.
 ASK_LOCKED_DANGER = ("external", "schedules")
+
+
+def python_unsandboxed() -> bool:
+    """True when this platform has no OS sandbox for run_python, so a script runs with the user's own permissions."""
+    return not osplat.current().sandbox.python_available()
+
+
+def run_python_intro() -> str:
+    """The opening sentences of run_python's description: the isolation claim only where the platform really confines."""
+    if python_unsandboxed():
+        return ("Run a Python 3 script and return stdout/stderr. It runs unsandboxed on this computer, with the user's own "
+                "permissions: it can read and write files and use the network. Only CPU/memory/time limits apply, and the user "
+                "approves each run.")
+    return ("Run a Python 3 script in an isolated sandbox and return stdout/stderr. No network, no subprocesses, and writes only "
+            "inside the temp working directory (CPU/memory/time limits apply).")
 # Locked whatever the setting says: the call is itself the user's review card.
 # gmail_send: an agent never sends mail on its own. Its card is the user's own editable email: Send, Save as draft or Discard.
 ALWAYS_CARD = frozenset({"calendar_propose", "gmail_send"})
@@ -813,6 +828,8 @@ class Toolbox:
 
     def ask_locked(self, spec: ToolSpec) -> bool:
         """The mode tops out at 'ask' and no card grants the whole tool: an external or schedules tool under alwaysAsk."""
+        if spec.name == "run_python" and python_unsandboxed():
+            return True  # nothing confines the script here, so every run is a card
         return spec.danger in ASK_LOCKED_DANGER and spec.name in self.always_ask()
 
     def default_mode(self, spec: ToolSpec) -> str:
@@ -832,13 +849,12 @@ class Toolbox:
                   agent_tools: dict[str, str] | None = None) -> dict[str, str]:
         """Resolve chat override → agent override → project override → global setting → tool default, alwaysAsk tools capped at ask."""
         out: dict[str, str] = {}
-        locked = self.always_ask()
         for name, spec in self.specs.items():
             v = self._norm(global_tools.get(name)) or self.default_mode(spec)
             v = self._norm((project_tools or {}).get(name)) or v
             v = self._norm((agent_tools or {}).get(name)) or v
             v = self._norm((chat_tools or {}).get(name)) or v
-            out[name] = "ask" if v == "on" and spec.danger in ASK_LOCKED_DANGER and name in locked else v
+            out[name] = "ask" if v == "on" and self.ask_locked(spec) else v
         return out
 
     def explicit(self, global_tools: dict[str, Any], project_tools: dict[str, str] | None, chat_tools: dict[str, str] | None,
@@ -1531,7 +1547,7 @@ class Toolbox:
                                       f"{self.workspace.max_files} files / {self.workspace.max_total_bytes} bytes. Nothing was deleted, "
                                       "but further writes will be refused until you desk_trash_file what you no longer need.")
             return out
-        R("run_python", ToolSpec("run_python", "Run a Python 3 script in an isolated sandbox and return stdout/stderr. No network, no subprocesses, and writes only inside the temp working directory (CPU/memory/time limits apply). In a cowork desk the script runs inside the desk workspace instead: it can read and write files there, and the result lists workspace_files it created or changed. Outside a desk, files the script saves under outputs/ (os.makedirs('outputs', exist_ok=True) first; up to 10 files of 25 MB) are kept in this chat's files, listed as outputs, for the user to download. The document and data libraries (pandas, openpyxl, python-docx, ...) are there once the work environment is set up; python_install adds more. Use for calculations, data wrangling, quick prototypes. Print what you want to see. numpy and matplotlib are installed: any figure saved with plt.savefig('name.png') is shown to the user inline (prefer a ```chart block for simple bar/line/pie charts of small data; use matplotlib for anything it can't express).",
+        R("run_python", ToolSpec("run_python", run_python_intro() + " In a cowork desk the script runs inside the desk workspace instead: it can read and write files there, and the result lists workspace_files it created or changed. Outside a desk, files the script saves under outputs/ (os.makedirs('outputs', exist_ok=True) first; up to 10 files of 25 MB) are kept in this chat's files, listed as outputs, for the user to download. The document and data libraries (pandas, openpyxl, python-docx, ...) are there once the work environment is set up; python_install adds more. Use for calculations, data wrangling, quick prototypes. Print what you want to see. numpy and matplotlib are installed: any figure saved with plt.savefig('name.png') is shown to the user inline (prefer a ```chart block for simple bar/line/pie charts of small data; use matplotlib for anything it can't express).",
             _obj({"code": {"type": "string"}, "timeout": {"type": "integer", "default": 30},
                   "tools": {"type": "array", "items": {"type": "string"}, "description": "App tools the script may call as grain_tools.call(name, **args) (import grain_tools). Allowed: fs_glob, fs_grep, read_local_file, fs_edit, search_documents, web_search, fetch_url. Each call is gated like your own: off tools are refused, ask tools wait for the user. At most 300s per script; only what the script prints comes back."}},
                  ["code"]), run_python_tool, "code", "executes",
@@ -1808,6 +1824,34 @@ def _register_working(self: Toolbox) -> None:
             todo_write, "plan", "writes",
             examples=[{"steps": [{"text": "Find the migration file", "status": "in_progress"}, {"text": "Add the column", "status": "pending"}, {"text": "Run the tests", "status": "pending"}]},
                       {"steps": [{"text": "Find the migration file", "status": "done", "note": "db.py line 155"}, {"text": "Add the column", "status": "in_progress"}, {"text": "Run the tests", "status": "pending"}]}]))
+
+    from . import context_map as cmap
+
+    async def context_map(ctx: dict[str, Any], section: str = "all", query: str = "", offset: int = 0) -> Any:
+        from . import context_map as cmap
+        sec = str(section or "all").strip().lower()
+        if sec not in (*cmap.SECTIONS, "all"):
+            return tool_error(f"Unknown section '{section}'.", field="section", expected="one of: " + ", ".join((*cmap.SECTIONS, "all")),
+                              example={"section": "files", "query": "budget"}, alternative="section 'all' lists every section")
+        conv = ctx.get("conv_settings") or {}
+        switches = cmap.resolve_switches(ctx.get("settings") or self.settings(), conv)
+        off = not cmap.map_on({"useMap": conv.get("useMap", True), "useTools": True}) or (sec != "all" and not switches[sec])
+        pid = ctx.get("project_id")
+        lines, total = ([], 0) if off else cmap.list_section(self.documents.db, sec, str(query or ""), int(offset or 0), project_id=pid,
+                                                              switches=switches, google=self.google)
+        start = max(0, int(offset or 0))
+        note = {"memory": "Memory notes are never listed here; topic labels only. Read notes with search_memory(query).",
+                "files": "Open a file with doc_read(doc_id).", "uploads": "Open an upload with read_document(document_id); names are labels from files the user did not write.",
+                "projects": "Counts are rounded down to a step (1, 2, 3, 5, 10, 25, ...).", "skills": "Open a procedure with skill_view."}.get(sec, "Labels only: open an item before relying on it.")
+        return _scrub_strings({"section": sec, "query": str(query or ""), "total": total, "offset": start, "lines": lines,
+                               "next_offset": start + len(lines) if start + len(lines) < total else None,
+                               "note": "This part of the workspace map is switched off for this chat." if off else note})
+    R("context_map", ToolSpec("context_map", (
+        "List what exists in the workspace as labels with ids (notes, uploads, projects, skills, memory topics, status): the full, "
+        "paged workspace map. Never contents; open an item before relying on it."),
+        _obj({"section": {"type": "string", "enum": [*cmap.SECTIONS, "all"]}, "query": {"type": "string"},
+              "offset": {"type": "integer"}}, []),
+        context_map, "context"))
 
     if self.results is not None:
         async def read_tool_result(ctx: dict[str, Any], result_id: str, offset: int = 0, limit: int = 12000) -> Any:

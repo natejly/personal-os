@@ -246,7 +246,7 @@ def test_claude_floor_paths_come_from_the_sandbox_lists() -> None:
         pat = "//" + str(root).lstrip("/") + "/**"
         assert f"Edit({pat})" in rules["deny"], root
         assert (f"Read({pat})" in rules["deny"]) is (root.suffix.lower() != ".app"), root
-    for d in mac.CRED_HOME_DIRS:
+    for d in mac.cred_home_dirs():
         assert {f"Read(~/{d}/**)", f"Edit(~/{d}/**)"} <= set(rules["ask"]), d
     for f in mac.CRED_HOME_FILES:
         assert f"Read(~/{f})" in rules["ask"], f

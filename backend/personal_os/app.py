@@ -35,6 +35,7 @@ from . import approval_edits, approval_log, assist, autoreview, backups, llm, ma
 from . import branch_summary, compaction, followups, otel_export, router, thinking_summary, titles
 from . import chatlink, coding_route, fsx, opencode_usage, request_log
 from .fsx import sensitive_reason
+from . import context_map
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .drive_backup import DriveBackup
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
@@ -1476,9 +1477,12 @@ TELEGRAM_HINT = ("You are talking over Telegram on the user's phone. Reply first
 # Always on, every path (chats, desks, subagents, scheduled jobs, drafts, Telegram): static, so it sits in the cached prefix.
 NO_EMOJI_HINT = "No emoji in replies, documents or messages unless asked."
 
+# Static, so it sits in the cached prefix: the map itself is built by context_map.py.
+MAP_HINT = "The workspace map lists what exists; open an item with its tool before relying on it."
+
 TOOLS_HINT = ("Use tools when they would make the answer more accurate, current or grounded in the user's data. "
               "Be direct: when what is already in front of you answers the question, skip them. "
-              + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT + " " + FENCE_RULE)
+              + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT + " " + MAP_HINT + " " + FENCE_RULE)
 # The agent stance for an ordinary chat (desks and scheduled runs carry their own). Text only: the leash is the
 # alwaysAsk list and the approval cards, so the model is told to act and let the app stop it where a card is due.
 PROACTIVE_HINT = (  # chats that cannot delegate (a persona without the hand-off tools); a delegating chat gets FRONT_AGENT_HINT
@@ -1506,6 +1510,21 @@ def _today_hint() -> str:
     week = ", ".join(f"{d:%a} {d:%Y-%m-%d}" for d in (now + timedelta(days=i) for i in range(1, 8)))
     return (f"## Today\nToday is {now:%A %Y-%m-%d}, time zone {now:%Z} (UTC{now:%z}). Next 7 days: {week}. "
             "Use this for dates; do not compute weekdays in code. Calendar times are local: YYYY-MM-DDTHH:MM, no offset.")
+
+
+def _map_status_block(used: dict[str, Any], conv_settings: dict[str, Any], cfg: dict[str, Any], project_id: str | None,
+                      nonce: str, tool_schemas: list[dict[str, Any]]) -> str:
+    """The workspace map's live half (sources, todos, next events, what waits, workers) for this turn's volatile message, and its
+    size in used["map"]["volatile"]. Empty when the chat has the map or tools off, or context_map is not offered."""
+    if not context_map.map_on(conv_settings) or not any(s["function"]["name"] == "context_map" for s in tool_schemas):
+        return ""
+    text, info = context_map.build_volatile(db, project_id=project_id, switches=context_map.resolve_switches(cfg, conv_settings),
+                                            google=google, mcp_store=mcp_store, nonce=nonce)
+    if not text:
+        return ""
+    base = used.get("map") or {"tokens": 0, "shrunk": False, "hash": "", "sections": {}, "volatile": None, "text": ""}
+    used["map"] = {**base, "volatile": info}
+    return text
 
 
 EMPTY_NUDGE = ("Your last turn ended without any text and without a tool call. Answer the user now in plain text, "
@@ -2315,7 +2334,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                  TELEGRAM_HINT if tool_schemas and telegram_bridge.is_texts_conversation(conv_id) else "",
                  coding_route.hint(cfg) if tool_schemas else "")
         inputs_block = _desk_inputs_block() if desk else ""
-        used["volatile_blocks"] = [*used["volatile_blocks"], *([inputs_block] if inputs_block else []), _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
+        map_block = _map_status_block(used, conv["settings"], cfg, conv["project_id"], fence_nonce, tool_schemas)
+        used["volatile_blocks"] = [*used["volatile_blocks"], *([inputs_block] if inputs_block else []), *([map_block] if map_block else []), _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
         if cfg.get("cacheLayout", True):
             # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
             stable = "\n\n".join(p for p in (used["stable_system"], *hints) if p)
@@ -2324,7 +2344,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             cspan["meta"]["stable_hash"] = used["stable_hash"]
         else:
             stable = None
-            system = "\n\n".join(p for p in (system, *hints, inputs_block, _today_hint()) if p)
+            system = "\n\n".join(p for p in (system, *hints, inputs_block, map_block, _today_hint()) if p)
         used["system_prompt"] = system
         used["tokens_estimate"] = estimate_tokens(system)
         run_notes: list[dict[str, Any]] = []  # system notes that follow the history, whichever history it is

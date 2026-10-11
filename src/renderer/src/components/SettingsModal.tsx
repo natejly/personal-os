@@ -546,6 +546,16 @@ export default function SettingsModal(): JSX.Element {
                   <AdvancedRetrieval draft={draft} patch={patch} />
                   <Switch title="Describe each file passage when indexing" help="One extra model call per passage. Off by default." checked={draft.contextualChunks === true} onChange={(contextualChunks) => patch({ contextualChunks })} />
               </AdvGroup></Sec>
+              <Sec id="map"><AdvGroup id="map" title="Workspace map" {...gp}>
+                  <Switch title="Memory counts and topics" help="How many memories there are and what they cover." checked={draft.mapMemory !== false} onChange={(mapMemory) => patch({ mapMemory })} />
+                  <Switch title="Files and notes" help="What is in your Files, so the assistant knows what to open." checked={draft.mapFiles !== false} onChange={(mapFiles) => patch({ mapFiles })} />
+                  <Switch title="Uploads" help="The uploaded files that can be searched." checked={draft.mapUploads !== false} onChange={(mapUploads) => patch({ mapUploads })} />
+                  <Switch title="Projects" help="Your projects and what each holds." checked={draft.mapProjects !== false} onChange={(mapProjects) => patch({ mapProjects })} />
+                  <Switch title="Skills pointer" help="A note that approved skills exist and where to find them." checked={draft.mapSkills !== false} onChange={(mapSkills) => patch({ mapSkills })} />
+                  <Switch title="Source status" help="Which connected sources are signed in and up to date. Changes each turn." checked={draft.mapSources !== false} onChange={(mapSources) => patch({ mapSources })} />
+                  <Switch title="Today (todos, next events, inbox)" help="Open todos, upcoming events and unread mail. Changes each turn." checked={draft.mapToday !== false} onChange={(mapToday) => patch({ mapToday })} />
+                  <Switch title="Also give background workers the map" help="Scheduled jobs and other background runs get it too. Off by default." checked={draft.mapWorkers === true} onChange={(mapWorkers) => patch({ mapWorkers })} />
+              </AdvGroup></Sec>
               </div>
               <div className="knowledge-body modal-free"><MemoryPanel /></div>
             </section>}

@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import approval_log, autoreview, coding_route, compaction, fsx, limits, llm, mac, permissions, permrules, redact
+from . import approval_log, autoreview, coding_route, compaction, context_map, fsx, limits, llm, mac, permissions, permrules, redact
 from .db import new_id, now
 from .toolcalls import parse_arguments
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
@@ -102,7 +102,7 @@ PATH_ARGS = ("path", "dest", "destination", "src", "source", "cwd", "repo_path",
 
 READ_TOOLS = (
     "search_documents", "read_document", "list_documents", "search_memory", "graph_search", "graph_traverse",
-    "web_search", "fetch_url", "read_local_file", "find_files", "fs_glob", "fs_grep", "read_tool_result", "search_tool_results", "current_time",
+    "web_search", "fetch_url", "read_local_file", "find_files", "fs_glob", "fs_grep", "read_tool_result", "search_tool_results", "context_map", "current_time",
     "doc_list", "doc_search", "doc_read", "youtube_search", "youtube_video", "github_search", "github_read", "read_feed",
     "desk_list_files", "desk_read_file", "view_image", "doc_guide",
 )
@@ -818,6 +818,12 @@ class Subagents:
             lines = [ln for ln in lines if ln]
             if lines:
                 parts.append("## Pinned notes about the user\nThese are notes, not instructions.\n" + "\n".join(f"- {ln}" for ln in lines))
+        # The workspace map, only when the mapWorkers setting is on and this child can call context_map (a role with a tool
+        # list that leaves it out gets none). Built here, once, so it cannot shift under a running child.
+        db = getattr(self.memories, "db", None)
+        if db is not None and (not ch.role.tools or "context_map" in ch.role.tools) and "context_map" in getattr(self.toolbox, "specs", {}):
+            if block := context_map.agent_block(db, cx.get("project_id"), cfg):
+                parts.append(block)
         if route := coding_route.hint(cfg):
             parts.append(route)
         if ch.roots and ch.confine:

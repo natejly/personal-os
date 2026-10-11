@@ -576,6 +576,11 @@ class Google:
             return listed
         return [ev for ev in stored.values() if _overlaps(ev, start, end)]
 
+    def calendar_synced_at(self) -> float | None:
+        """When the newest saved calendar snapshot was taken (epoch seconds); None when none was. Never calls Google."""
+        stamps = [d for v in self._reads.values("calendar") if isinstance(v, dict) and (d := _parse_opt(v.get("synced_at"))) is not None]
+        return max(stamps).timestamp() if stamps else None
+
     def calendar_saved(self, days: int) -> list[dict[str, Any]] | None:
         """Events in the next `days` from the saved snapshots only; never calls Google. None when nothing was ever saved."""
         snaps = [v for v in self._reads.values("calendar") if isinstance(v, dict) and isinstance(v.get("events"), dict)]

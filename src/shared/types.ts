@@ -59,8 +59,22 @@ export interface ContextUsed {
   trimmed?: Record<string, number>
   /** Built-in tools held out of the request until tool_search loads them (toolDeferAbove). Absent on older messages. */
   tools_deferred?: number
+  /** The workspace map block of the prompt. Null or absent when it is off. */
+  map?: WorkspaceMapUsed | null
   system_prompt: string
   tokens_estimate: number
+}
+
+export interface WorkspaceMapUsed {
+  tokens: number
+  /** Sections were cut to fit the map's token budget. */
+  shrunk: boolean
+  hash: string
+  /** Tokens per section of the stable part. */
+  sections: Record<string, number>
+  /** The part that changes every turn (sources, todos, next events, inbox, workers). */
+  volatile: { tokens: number; sections: Record<string, number> } | null
+  text: string
 }
 
 export type PlanStatus = 'pending' | 'in_progress' | 'done'
@@ -831,6 +845,8 @@ export interface ConversationSettings {
   useTools: boolean
   /** Inject the skills the user approved. Defaults on; only approved ones are ever eligible. */
   useSkills?: boolean
+  /** Put the workspace map (what exists in memory, files, projects, plus today's state) in the prompt. Defaults on. */
+  useMap?: boolean
   tools: Record<string, ToolOverride>
   /** Sticky: a reply read untrusted content, so external tools keep asking and fetch_url stays restricted. */
   tainted?: boolean
@@ -1469,6 +1485,16 @@ export interface Settings {
   retrievalCandidates?: number
   /** Also retrieve from the user's own Docs, not just uploaded files. */
   useDocsInContext?: boolean
+  /** Workspace map sections; each defaults on, except mapWorkers. */
+  mapMemory?: boolean
+  mapFiles?: boolean
+  mapUploads?: boolean
+  mapProjects?: boolean
+  mapSkills?: boolean
+  mapSources?: boolean
+  mapToday?: boolean
+  /** Also give background workers the map. Defaults off. */
+  mapWorkers?: boolean
   /** Write a short model title after the first reply (uses the extraction model). */
   autoTitle: boolean
   /** Suggest up to 3 next questions as chips under the latest reply (uses the extraction model). */

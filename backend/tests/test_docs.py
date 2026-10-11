@@ -213,8 +213,8 @@ job2 = call("doc_edit", {"doc": made2["doc_id"], "edits": [{"find": "beta", "rep
             {"settings": {"permissionMode": "allow_all"}, "proposal_only": True})
 check(job2["status"] == "applied", "a scheduled run under Allow everything applies directly")
 _edit_desc = toolbox.specs["doc_edit"].description
-check("Diff review" in _edit_desc and "Full agentic editing" in _edit_desc and "pending_review" in _edit_desc,
-      "the tool description names both file-edit modes and the pending status")
+check("pending_review" in _edit_desc and "applied" in _edit_desc,
+      "the tool description names both result statuses")
 
 # ---- GET /docs/search: snippets, scope, odd characters ----
 sd = j("POST", "/docs", {"title": "Searchable", "content": "the quokkafrobnitz lives here"})

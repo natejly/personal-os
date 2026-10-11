@@ -31,6 +31,7 @@ from typing import Any
 import httpx
 
 from . import osplat
+from .osplat import base as osplat_base
 from .extract_text import extract_text
 
 DEFAULT_ROOTS = ("~/Desktop", "~/Documents")
@@ -158,17 +159,38 @@ SENSITIVE_PREFIXES = ("/dev/", "/proc/")
 KEY_TYPES = ("rsa", "dsa", "ecdsa", "ed25519")
 KEY_FILE_RE = re.compile(rf"^id_({'|'.join(KEY_TYPES)})(?!.*\.pub$)")
 # Keychains and cookie jars: whole folders under the home folder (or /Library) the user has to approve.
-KEYCHAIN_DIRS = osplat.current().paths.keychain_dirs()
-SYSTEM_KEYCHAINS = osplat.current().paths.system_keychains()
+# The module constants are the macOS lists (the shell sandbox profile is macOS only); everything else calls the
+# functions below, which ask the current platform.
+KEYCHAIN_DIRS = osplat_base.KEYCHAIN_DIRS
+SYSTEM_KEYCHAINS = osplat_base.SYSTEM_KEYCHAINS
 # Where the browsers keep a profile, relative to ~/Library/Application Support, and the files in it that hold sessions
 # and saved passwords.
-BROWSER_DIRS = ("Google/Chrome", "Arc", "BraveSoftware", "Microsoft Edge", "Chromium", "Vivaldi", "Firefox")
+BROWSER_DIRS = osplat_base.BROWSER_DIRS
 BROWSER_FILE_NAMES = ("Cookies", "Cookies-journal", "Login Data", "Login Data-journal", "Login Data For Account", "Web Data",
                       "Web Data-journal", "cookies.sqlite", "cookies.sqlite-wal", "key4.db", "logins.json")
 BROWSER_FILES = frozenset(n.lower() for n in BROWSER_FILE_NAMES)
 SENSITIVE_HOME_FILES = (".config/gh/hosts.yml", ".cargo/credentials.toml")
 # What the shell sandbox denies for read and write: the same stores as `sensitive_reason`, as paths a profile can name.
 CRED_HOME_DIRS = tuple(sorted(SENSITIVE_DIRS - {"gcloud"})) + (".config/gcloud",) + KEYCHAIN_DIRS
+
+
+def keychain_dirs() -> tuple[str, ...]:
+    return tuple(osplat.current().paths.keychain_dirs())
+
+
+def system_keychains() -> tuple[str, ...]:
+    return tuple(osplat.current().paths.system_keychains())
+
+
+def browser_dirs() -> tuple[str, ...]:
+    return tuple(osplat.current().paths.browser_dirs())
+
+
+def cred_home_dirs() -> tuple[str, ...]:
+    """CRED_HOME_DIRS for the current platform."""
+    return tuple(sorted(SENSITIVE_DIRS - {"gcloud"})) + (".config/gcloud",) + keychain_dirs()
+
+
 CRED_HOME_FILES = tuple(sorted(n for n in SENSITIVE_NAMES if n.startswith("."))) + SENSITIVE_HOME_FILES
 # What the System access panel shows.
 PROTECTED_LABELS = ("Grain's data folder", APP_BUNDLE)
@@ -213,15 +235,15 @@ def sensitive_reason(*paths: str | Path) -> str | None:
         if any(x.lower() in SENSITIVE_DIRS for x in parts[:-1]) or low in SENSITIVE_DIRS:
             return "credential folders hold secrets"
         p = Path(os.path.normpath(s))
-        if any(_under(p, Path(k)) for k in SYSTEM_KEYCHAINS):
+        if any(_under(p, Path(k)) for k in system_keychains()):
             return "keychains hold secrets"
         for h in _homes():
-            if any(_under(p, h / k) for k in KEYCHAIN_DIRS):
+            if any(_under(p, h / k) for k in keychain_dirs()):
                 return "keychains and cookie jars hold secrets"
             if any(_under(p, h / f) for f in SENSITIVE_HOME_FILES):
                 return "access tokens hold secrets"
             support = h / osplat.current().paths.browser_support_dir()
-            if low in BROWSER_FILES and any(_under(p, support / d) for d in BROWSER_DIRS):
+            if low in BROWSER_FILES and any(_under(p, support / d) for d in browser_dirs()):
                 return "browser cookies and saved passwords hold secrets"
     return None
 
@@ -240,7 +262,7 @@ def scope_summary() -> dict[str, list[str]]:
     h = str(home())
     shown = str(data).replace(h, "~", 1) if data is not None else None
     return {"protected": [f"{PROTECTED_LABELS[0]} ({shown})" if shown else PROTECTED_LABELS[0], *PROTECTED_LABELS[1:]],
-            "sensitive": list(SENSITIVE_LABELS)}
+            "sensitive": list(osplat.current().paths.sensitive_labels())}
 
 
 def allowed_path(raw: str) -> Path:
@@ -487,49 +509,8 @@ def move_local(path: str, to: str) -> dict[str, Any]:
     return {"from": str(src), "path": str(dst), "kind": "folder" if dst.is_dir() else "file"}
 
 
-def _open_trash() -> tuple[int, Path]:
-    """A directory fd for ~/.Trash.
-
-    `shutil.move` follows a directory symlink, so a `~/.Trash` that points elsewhere
-    would drop the file there while the returned path still said `~/.Trash/...`. Open the directory
-    itself (`O_NOFOLLOW`) and rename into that fd.
-    """
-    trash = osplat.current().paths.trash_dir()
-    if trash.is_symlink():
-        raise LocalPathError("the Trash is a symlink and is off limits")
-    if not trash.exists():
-        trash.mkdir()
-    elif not trash.is_dir():
-        raise LocalPathError("the Trash is off limits")
-    if trash.is_symlink():
-        raise LocalPathError("the Trash is a symlink and is off limits")
-    flags = os.O_RDONLY | os.O_DIRECTORY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    try:
-        fd = os.open(trash, flags)
-    except OSError as e:
-        # Without Full Disk Access macOS refuses the open; the error says what to do rather than reading as a policy.
-        raise LocalPathError("the Trash could not be opened: grant Grain Full Disk Access in System Settings > Privacy & Security, "
-                             "or move the file somewhere else instead") from e
-    return fd, trash
-
-
-def _free_trash_name(fd: int, src: Path) -> str:
-    """The Finder's naming: `notes.txt`, then `notes 2.txt`, without following a symlink in the Trash."""
-    name = src.name
-    n = 2
-    while True:
-        try:
-            os.lstat(name, dir_fd=fd)
-        except FileNotFoundError:
-            return name
-        name = f"{src.stem} {n}{src.suffix}"
-        n += 1
-
-
 def trash_local(path: str) -> dict[str, Any]:
-    """Move a file or folder to ~/.Trash, so the user can get it back from the Finder. Nothing is erased here."""
+    """Move a file or folder to the platform's Trash, so the user can get it back. Nothing is erased here."""
     _refuse_leaf_symlink(path, "trash")
     p = allowed_path(path)
     if not p.exists():
@@ -538,21 +519,12 @@ def trash_local(path: str) -> dict[str, Any]:
         raise LocalPathError("the home folder itself cannot be trashed")
     if why := _holds_protected(p):
         raise LocalPathError(why)
-    fd, trash = _open_trash()
+    desk = osplat.current().desktop
     try:
-        name = _free_trash_name(fd, p)
-        try:
-            os.rename(os.fspath(p), name, dst_dir_fd=fd)
-        except OSError as e:
-            if e.errno != errno.EXDEV:
-                raise LocalPathError(f"could not move {p.name} to the Trash") from e
-            dest = trash / name
-            if trash.is_symlink() or dest.is_symlink():
-                raise LocalPathError("the Trash is a symlink and is off limits") from e
-            shutil.move(os.fspath(p), os.fspath(dest))
-    finally:
-        os.close(fd)
-    return {"path": str(p), "trashed_to": str(trash / name), "note": "in the Trash; the user can put it back from the Finder"}
+        dest = desk.trash(str(p))
+    except osplat.Unsupported as e:
+        raise LocalPathError(str(e)) from e
+    return {"path": str(p), "trashed_to": dest, "note": desk.trash_note()}
 
 
 # ---- Shortcuts ----

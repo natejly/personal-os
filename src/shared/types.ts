@@ -1574,6 +1574,10 @@ export interface Settings {
   snapshotsEnabled?: boolean
   /** Reported by GET /settings, never stored: folder snapshots need a version-control binary on this Mac. */
   snapshotsAvailable?: boolean
+  /** Reported by GET /settings, never stored: false means API keys and sign-in tokens sit unencrypted in the data folder. */
+  secretsKeychain?: boolean
+  /** Why the system secret store is not in use (shown with the unencrypted-keys notice). */
+  secretsReason?: string | null
   /** Grain works anywhere on the Mac, so this no longer limits anything. The backend still accepts and stores it. */
   workspaceRoots?: string[]
   /** New chats start working autonomously (Ask as it goes) unless switched off per chat. Missing means on. */

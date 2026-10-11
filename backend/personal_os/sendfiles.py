@@ -180,12 +180,10 @@ def register(tb: Any) -> None:
 
     spec = ToolSpec(
         "send_files",
-        "Show the user a screenshot, chart or file: pass document ids (from screenshot, browser_manage(screenshot), generate_image or an upload) or paths on this Mac, and an "
-        "optional short text. Up to 20 files, 50 MB each. In the app the files appear on your reply. In a Telegram chat they are also delivered "
-        "to the user's phone at once as a progress update: send one at meaningful milestones, not every step, and attach a screenshot when it "
-        "shows more than words. Files always ride on the final reply in the app.",
+        "Show the user a screenshot, chart or file: document ids (from screenshot, browser_manage(screenshot), generate_image or an upload) or paths on this Mac, plus optional short text. Up to 20 files, 50 MB each. "
+        "Files appear on your reply in the app. In a Telegram chat they are also sent to the phone at once as a progress update: send at milestones, not every step, and attach a screenshot when it shows more than words.",
         _obj({"files": {"type": "array", "items": {"type": "string"}, "description": "Document ids, or paths on this Mac"},
-              "text": {"type": "string", "description": "A short message sent with them (optional)"}}, ["files"]),
+              "text": {"type": "string", "description": "Short message sent with them"}}, ["files"]),
         send_files, "utility", "safe",
         examples=[{"files": ["<document id>"], "text": "The settings page, as it is now."}])
     tb.specs["send_files"] = spec

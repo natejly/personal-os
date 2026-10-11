@@ -622,6 +622,8 @@ export const api = {
   messageOtlp: (messageId: string) => req<unknown>(`/messages/${messageId}/otlp`),
   testTraceExport: () => req<{ sent: boolean; reason?: string; status: number | null; error: string | null }>('/traces/export-test', { method: 'POST' }),
   conversationUsage: (conversationId: string) => req<ConversationUsage>(`/conversations/${conversationId}/usage`),
+  messageRequests: (messageId: string) =>
+    req<{ round: number; model: string; tool_choice: string; tokens: number; messages: unknown[]; tools: unknown[] }[]>(`/messages/${messageId}/requests`),
   contextMeter: (conversationId: string) => req<ContextMeter>(`/conversations/${conversationId}/context-meter`),
   compactConversation: (conversationId: string, focus?: string) =>
     req<{ compacted: boolean }>(`/conversations/${conversationId}/compact`, { method: 'POST', body: json({ focus: focus ?? null }) }, NO_TIMEOUT),

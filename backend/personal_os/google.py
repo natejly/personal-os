@@ -74,6 +74,9 @@ SCOPES = [
 # anything the user stares at is seconds, and anything near-static is hours.
 # Our own writes invalidate their namespace outright, so these only bound how
 # stale a *third-party* change can be.
+# Most calendars one read fans out to (one API call each). Past this the rest are dropped, in list order.
+MAX_CALENDARS = 40
+
 TTL = {
     "calendar_list": 10 * 60,   # calendars are added/removed rarely
     "calendar_colors": 24 * 3600,  # Google's fixed palette
@@ -412,6 +415,23 @@ class Google:
         """Calendars checked on in Google: not hidden, and selected or primary."""
         return [c["id"] for c in self.calendars() if c.get("id") and not c.get("hidden") and (c.get("selected") or c.get("primary"))]
 
+    def calendar_resolve_ids(self, ids: list[str]) -> list[str]:
+        """Expand the two calendar-set names a read may pass.
+
+        ["enabled"] is the user's schedule: the calendars checked on in Google, or just the primary
+        one when the list call fails. ["all"] is every calendar, hidden and unchecked ones included.
+        Any other list is returned as given.
+        """
+        if ids == ["enabled"]:
+            try:
+                return self.enabled_calendar_ids()[:MAX_CALENDARS] or ["primary"]
+            except Exception as e:  # noqa: BLE001  # the list is a nicety; the primary calendar still answers
+                log.warning("calendar list unavailable, reading primary only: %s", e)
+                return ["primary"]
+        if ids == ["all"]:
+            return [c["id"] for c in self.calendars()][:MAX_CALENDARS]
+        return ids
+
     def calendar_ensure(self, summary: str) -> dict[str, Any]:
         """Find, or create, a secondary calendar of this name that we can write to.
 
@@ -445,8 +465,7 @@ class Google:
             now = now.astimezone()  # a naive start is the user's wall clock, same as calendar_create reads it
         end = now + dt.timedelta(days=max(1, min(int(days), 60)))
         ids = calendar_ids or [calendar_id]
-        if ids == ["all"]:
-            ids = [c["id"] for c in self.calendars() if not c["hidden"]][:15]
+        ids = self.calendar_resolve_ids(ids)
         svc = self._svc("calendar", "v3")
         out: list[dict[str, Any]] = []
         failures: list[Exception] = []
@@ -473,7 +492,7 @@ class Google:
                            attendees: list[str] | None = None) -> dict[str, Any]:
         """Busy ranges from the Google freebusy API.
 
-        `calendars` defaults to every calendar the user has not hidden; `attendees` are other
+        `calendars` defaults to the calendars the user has checked on (primary when the list fails); `attendees` are other
         people's emails (Google answers for those it can see, and reports the rest as errors,
         which come back under `unreachable` rather than as silence).
         """
@@ -483,8 +502,7 @@ class Google:
         if b.tzinfo is None:
             b = b.astimezone()
         ids = [c for c in (calendars or []) if c]
-        if not ids or ids == ["all"]:
-            ids = [c["id"] for c in self.calendars() if not c["hidden"]][:20] or ["primary"]
+        ids = self.calendar_resolve_ids(ids or ["enabled"])
         people = [p for p in (attendees or []) if p and p not in ids]
         items = [{"id": i} for i in [*ids, *people]]
         res = self._svc("calendar", "v3").freebusy().query(
@@ -557,6 +575,11 @@ class Google:
         if listed is not None and window_start == start and window_end == end:
             return listed
         return [ev for ev in stored.values() if _overlaps(ev, start, end)]
+
+    def calendar_synced_at(self) -> float | None:
+        """When the newest saved calendar snapshot was taken (epoch seconds); None when none was. Never calls Google."""
+        stamps = [d for v in self._reads.values("calendar") if isinstance(v, dict) and (d := _parse_opt(v.get("synced_at"))) is not None]
+        return max(stamps).timestamp() if stamps else None
 
     def calendar_saved(self, days: int) -> list[dict[str, Any]] | None:
         """Events in the next `days` from the saved snapshots only; never calls Google. None when nothing was ever saved."""

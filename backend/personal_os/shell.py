@@ -30,13 +30,12 @@ import shlex
 import shutil
 import signal
 import subprocess
-import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
-from . import egress, mac, permissions, redact, sandbox
+from . import egress, mac, osplat, permissions, redact, sandbox
 from .db import new_id
 
 log = logging.getLogger(__name__)
@@ -229,15 +228,29 @@ def truncate(text: str) -> tuple[str, bool]:
 
 
 def sandbox_available() -> bool:
-    return sys.platform == "darwin" and bool(shutil.which("sandbox-exec"))
+    return osplat.current().sandbox.shell_available()
+
+
+def no_sandbox_reason() -> str:
+    """Why the confined shell is unavailable, named for this platform."""
+    if osplat.current().sandbox.name == "seatbelt":
+        return "it needs macOS sandbox-exec"
+    return "this computer has no OS sandbox for the shell yet"
+
+
+def unsandboxed_description() -> str:
+    """shell_run's description on a platform with no shell sandbox: every command runs unconfined and only after approval."""
+    return ("Run a shell command (cd persists, environment variables do not) on this computer. There is no OS sandbox for the shell here: a command runs unsandboxed, with "
+            "the user's own permissions (it can read and write their files and use the network), and only after the user approves "
+            "that one command. Pass unsandboxed=true on every call; without it nothing runs. Output is stdout and stderr together, "
+            "cut to the last 2000 lines / 50 KB; the rest is behind result_id. Default timeout 120s (max 600s); then the command "
+            "keeps running as a background job (on_timeout=background, the default; poll it with shell_poll) or, with "
+            "on_timeout=kill, the whole process group is killed. For anything long-running pass background=true, then shell_poll "
+            "and shell_kill with the job_id. Outside a desk, background jobs are stopped when the reply ends and a timeout always kills.")
 
 
 def _pgid_of(pid: int) -> int | None:
-    try:
-        r = subprocess.run(["ps", "-o", "pgid=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
-        return int(r.stdout.strip()) if r.stdout.strip() else None
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return None
+    return osplat.current().proc.group_of(pid)
 
 
 async def _exited(proc: asyncio.subprocess.Process) -> None:
@@ -248,12 +261,7 @@ async def _exited(proc: asyncio.subprocess.Process) -> None:
 
 
 def _signal_group(pgid: int | None, sig: int) -> None:
-    if not pgid or pgid <= 1:
-        return
-    try:
-        os.killpg(pgid, sig)
-    except (ProcessLookupError, PermissionError):
-        pass
+    osplat.current().proc.signal_group(pgid, sig)
 
 
 # ---- jobs ----
@@ -428,12 +436,12 @@ class ShellJobs:
         try:
             job.proc = await asyncio.create_subprocess_exec(
                 *argv, cwd=cwd, env=env, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT, start_new_session=True, limit=1 << 20)
+                stderr=asyncio.subprocess.STDOUT, limit=1 << 20, **osplat.current().proc.new_group_kwargs())
         except OSError as e:
             self._cleanup(job)
             raise ShellError(f"could not start the shell: {e}") from e
         job.pid = job.proc.pid
-        job.pgid = job.pid  # start_new_session makes the child its own group leader
+        job.pgid = job.pid  # the child was started as its own group leader
         self.jobs[job.id] = job
         self._persist()
         self._changed()
@@ -727,7 +735,7 @@ def register(tb: Any) -> None:
         is_allow_all = (ctx.get("permission_mode") or permissions.get(s, "permissionMode")) == "allow_all"
         usable = sandbox_available()
         if not unsandboxed and not usable:
-            return tool_error("The OS sandbox this shell runs in is not available here (it needs macOS sandbox-exec), so "
+            return tool_error(f"The OS sandbox this shell runs in is not available here ({no_sandbox_reason()}), so "
                               "nothing was run.", alternative="run_python for a calculation, or retry with "
                               f"unsandboxed=true, which {_escape(is_allow_all)}")
         default_t = BACKGROUND_TIMEOUT if background else int(s.get("shellTimeoutSec") or DEFAULT_TIMEOUT)
@@ -762,7 +770,7 @@ def register(tb: Any) -> None:
             writable = [tmp]  # the profile lets a command write anywhere but the protected places; this is the run's own scratch dir
             if dr:
                 writable.append(str(dr))  # a desk workspace sits inside the protected data folder and is let back in
-            argv = ["sandbox-exec", "-p", sandbox.shell_profile(writable, network=network, proxy_port=port if proxied else None), *argv]
+            argv = osplat.current().sandbox.wrap(argv, sandbox.shell_profile(writable, network=network, proxy_port=port if proxied else None))
         if unsandboxed:  # the approval log has the call; this line is for the backend log (no card under Allow everything)
             log.warning("shell_run unsandboxed in %s (conversation %s): %s", _scrub(str(where)), ctx.get("conversation_id"),
                         _scrub(command)[:500])
@@ -823,7 +831,7 @@ def register(tb: Any) -> None:
             net_report(res)
             _note_shell_copies(ctx, since_ns)
             return res
-        if not unsandboxed and job.exit_code in (65, 71) and text.lstrip().startswith("sandbox-exec:"):
+        if not unsandboxed and osplat.current().sandbox.failed_to_start(job.exit_code, text):
             jobs.sandbox_failed = True
             return tool_error(_scrub("The OS sandbox refused to start (" + text.strip()[:200] + "), so nothing was run."),
                               alternative=f"retry with unsandboxed=true, which {_escape(is_allow_all)}")
@@ -879,6 +887,8 @@ def register(tb: Any) -> None:
                               {"command": "npm test", "cwd": "app", "timeout_s": 300},
                               {"command": "python3 -m http.server 8000", "background": True}])
     spec.default = "ask"
+    if not sandbox_available():
+        spec.description = unsandboxed_description()
     # Unsandboxed asks (Allow everything lifts it, autoreview.route); so does a reply that read untrusted content while a command could reach out, and no
     # standing grant, session grant or allow rule buys that card off (it is forced). trustExternalContent lifts only the
     # taint half: an unsandboxed command still asks.
@@ -947,9 +957,9 @@ async def run_fixed(jobs: ShellJobs, argv: list[str], cwd: str, settings: dict[s
     if sandboxed:
         if not sandbox_available():
             shutil.rmtree(tmp, ignore_errors=True)
-            raise ShellError("The OS sandbox is not available here (it needs macOS sandbox-exec), so nothing was run.")
+            raise ShellError(f"The OS sandbox is not available here ({no_sandbox_reason()}), so nothing was run.")
         net = bool(permissions.get(settings, "shellNetwork"))
-        argv = ["sandbox-exec", "-p", sandbox.shell_profile([cwd, tmp], network=net), *argv]
+        argv = osplat.current().sandbox.wrap(argv, sandbox.shell_profile([cwd, tmp], network=net))
     else:
         env.update(GIT_TERMINAL_PROMPT="0", GH_PROMPT_DISABLED="1")
         if os.environ.get("SSH_AUTH_SOCK"):

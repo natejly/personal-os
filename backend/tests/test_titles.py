@@ -155,6 +155,18 @@ def test_placeholder_and_clean() -> None:
     check(titles.clean("<think>only</think>") == "", "nothing usable is empty")
 
 
+def test_placeholder_strips_inline_markdown() -> None:
+    check(titles.placeholder("hello **bold** there") == "hello bold there", "bold markers")
+    check(titles.placeholder("a __b__ and *c* and `d`") == "a b and c and d", "underscores, stars, backticks")
+    check(titles.placeholder("## Heading here") == "Heading here", "heading marker")
+    check(titles.placeholder("> quoted text") == "quoted text", "quote marker")
+    check(titles.placeholder("- item one") == "item one", "bullet marker")
+    check(titles.placeholder("1. first step") == "first step", "numbered marker")
+    check(titles.placeholder("see [the docs](https://x.test/a_b) now") == "see the docs now", "link keeps its text")
+    check(titles.placeholder("rename my_var_name please") == "rename my_var_name please", "snake_case kept")
+    check(titles.placeholder("**") == "New chat", "only markers is New chat")
+
+
 def test_a_token_in_a_message_is_stripped_before_the_title() -> None:
     pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
     seen: list[str] = []
@@ -260,7 +272,7 @@ def test_regenerate() -> None:
     j("POST", "/conversations/nope/title", expect=404)
 
 
-TESTS = [test_placeholder_and_clean, test_a_token_in_a_message_is_stripped_before_the_title,
+TESTS = [test_placeholder_and_clean, test_placeholder_strips_inline_markdown, test_a_token_in_a_message_is_stripped_before_the_title,
          test_happy_path, test_detached, test_rename_race, test_failure_and_off, test_regenerate]
 
 if __name__ == "__main__":

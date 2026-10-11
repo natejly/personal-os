@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os import codingagents, macos, opencode, shell, system_access  # noqa: E402
+from personal_os import codingagents, macos, opencode, osplat, shell, system_access  # noqa: E402
 
 
 class _Base(unittest.TestCase):
@@ -27,7 +27,8 @@ class _Base(unittest.TestCase):
         app = FastAPI()
         app.include_router(system_access.router(lambda: self.cfg, lambda: object()))
         self.c = TestClient(app)
-        for target, val in [(macos, {"IS_MAC": True, "automation_status": lambda b: "granted", "full_disk_access": lambda: True,
+        for target, val in [(osplat, {"has": lambda cap: True}),
+                            (macos, {"IS_MAC": True, "automation_status": lambda b: "granted", "full_disk_access": lambda: True,
                                      "installed_browsers": lambda: ["Safari"]}),
                             (codingagents, {"claude_binary": lambda: "/bin/claude"}),
                             (opencode, {"binary": lambda: None})]:
@@ -67,7 +68,7 @@ class AccessTests(_Base):
             self.assertEqual(self.c.get("/system/access").json()["fullDisk"], "denied")
 
     def test_fda_unknown_off_mac(self) -> None:
-        with mock.patch.object(macos, "IS_MAC", False):
+        with mock.patch.object(osplat, "has", lambda cap: False):
             self.assertEqual(self.c.get("/system/access").json()["fullDisk"], "unknown")
 
     def test_cli_missing_has_hint(self) -> None:

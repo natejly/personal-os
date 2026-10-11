@@ -20,6 +20,7 @@ const api: GrainApi = {
   platform: process.platform,
   onMenu: (cb) => listen<string>('menu', cb),
   setZoom: (percent: number) => ipcRenderer.invoke('ui:zoom', percent),
+  setChromeTheme: (background, symbol) => ipcRenderer.send('ui:chrome-theme', background, symbol),
   popout: {
     open: (windowId: string, req?: PopoutOpenRequest) => ipcRenderer.invoke('popout:open', windowId, req ?? {}),
     close: (windowId: string) => ipcRenderer.invoke('popout:close', windowId),
@@ -72,6 +73,21 @@ const api: GrainApi = {
   showMain: () => ipcRenderer.send('app:show'),
   micAccess: () => ipcRenderer.invoke('media:mic-access'),
   codingAttach: (id) => ipcRenderer.invoke('coding:attach', id),
+  termAvailable: () => ipcRenderer.invoke('term:available'),
+  termOpen: (sessionId, mode, cols, rows) => ipcRenderer.invoke('term:open', sessionId, mode, cols, rows),
+  termWrite: (termId, data) => ipcRenderer.invoke('term:write', termId, data),
+  termResize: (termId, cols, rows) => ipcRenderer.invoke('term:resize', termId, cols, rows),
+  termClose: (termId) => ipcRenderer.invoke('term:close', termId),
+  onTermData: (cb) => {
+    const h = (_e: Electron.IpcRendererEvent, termId: string, data: string): void => cb(termId, data)
+    ipcRenderer.on('term:data', h)
+    return () => ipcRenderer.removeListener('term:data', h)
+  },
+  onTermExit: (cb) => {
+    const h = (_e: Electron.IpcRendererEvent, termId: string, code: number | null): void => cb(termId, code)
+    ipcRenderer.on('term:exit', h)
+    return () => ipcRenderer.removeListener('term:exit', h)
+  },
   sysAccess: {
     status: () => ipcRenderer.invoke('sysaccess:status'),
     grant: (id) => ipcRenderer.invoke('sysaccess:grant', id),

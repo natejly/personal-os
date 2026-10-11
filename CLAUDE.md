@@ -1,5 +1,9 @@
 # Grain
 
+## How to work
+
+Never do the work yourself. Orchestrate: break the task into self-contained briefs and hand each to a Sonnet subagent (`model: sonnet`), running independent ones in parallel. Your own job is planning, writing briefs, checking the agents' results (diffs, test output) and reporting back.
+
 ## Naming other products
 
 Never mention other apps, products, companies or open-source projects that a feature is based on or compares to. Describe the mechanism itself instead ("deny rules win over allow rules", not "like <product>'s permission rules").

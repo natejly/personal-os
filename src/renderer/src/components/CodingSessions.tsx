@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import { AGENT_LABEL, codingDot, codingLive, codingStatusLabel, codingStoppable } from '../lib/codingSessions'
 import { useStore } from '../store'
+import { useTermAvailable } from '../lib/termRegistry'
 import { NeedsYou, useStop } from './toolcards/CodingSessionCard'
 import type { CodingSession } from '@shared/types'
 
 function Row({ c }: { c: CodingSession }): JSX.Element {
   const [open, setOpen] = useState(false)
   const { stop, busy } = useStop(c.id)
+  const openTerminal = useStore((s) => s.openTerminal)
+  const termOk = useTermAvailable()
   return (
     <li>
       <div className="ctx-meta">
@@ -14,6 +17,7 @@ function Row({ c }: { c: CodingSession }): JSX.Element {
           <span className={`inbox-dot ${codingDot(c.status)}`} role="img" aria-label={codingStatusLabel(c.status)} title={codingStatusLabel(c.status)} /> {c.name}
         </button>
         {codingStoppable(c.status) && <button className="link" disabled={busy} onClick={() => void stop()}>Stop</button>}
+        {termOk && <button className="link" onClick={() => openTerminal(c.id, null)}>Terminal</button>}
       </div>
       <small className="muted">{AGENT_LABEL[c.agent]} · {codingStatusLabel(c.status)}{c.detail ? ` · ${c.detail}` : ''}</small>
       {c.status === 'needs_you' && !(c.agent === 'claude' && c.external_id) && c.attach_hint && <small className="muted"> · run <code>{c.attach_hint}</code></small>}

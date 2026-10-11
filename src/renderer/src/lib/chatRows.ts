@@ -5,8 +5,20 @@ const DAY = 86_400_000
 /** The conversation the Telegram bridge writes into (flagged by the backend). */
 export const isTelegramChat = (c: Pick<Conversation, 'settings'>): boolean => c.settings?.telegram === true
 
-/** What the sidebar and header call a chat: "Telegram" for the bridge's conversation, else its title. */
-export const chatLabel = (c: Pick<Conversation, 'title' | 'settings'>): string => (isTelegramChat(c) ? 'Telegram' : c.title)
+/** A title as plain words: emphasis markers, backticks, leading block markers and link targets removed (the backend's `titles.strip_markdown`). */
+export function plainTitle(title: string): string {
+  const t = (title ?? '')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)+/gm, '')
+    .replace(/`/g, '')
+    .replace(/\*\*|__|\*|(?<!\w)_|_(?!\w)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return t || (title ?? '')
+}
+
+/** What the sidebar and header call a chat: "Telegram" for the bridge's conversation, else its title as plain words. */
+export const chatLabel = (c: Pick<Conversation, 'title' | 'settings'>): string => (isTelegramChat(c) ? 'Telegram' : plainTitle(c.title))
 
 export function groupLabel(ts: number, now = Date.now()): string {
   const start = new Date(now)

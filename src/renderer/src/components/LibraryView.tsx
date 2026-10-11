@@ -32,6 +32,18 @@ export default function LibraryView(): JSX.Element {
   // fell over while the view was closed.
   useEffect(() => { void refreshLibrary().catch(() => undefined) }, [refreshLibrary])
 
+  // Arrow keys move between tabs and select as they go; only the selected tab is in the tab order.
+  const onTabKey = (e: React.KeyboardEvent): void => {
+    const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
+    const end = e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : -1
+    if (!d && end < 0) return
+    e.preventDefault()
+    const i = TABS.findIndex((t) => t.key === tab)
+    const next = TABS[end >= 0 ? end : (i + d + TABS.length) % TABS.length].key
+    setLibraryTab(next)
+    document.getElementById(`library-tab-${next}`)?.focus()
+  }
+
   return (
     <main className="page library-page">
       <header className="page-header drag">
@@ -40,15 +52,16 @@ export default function LibraryView(): JSX.Element {
         <AppSwitcher />
       </header>
       {/* The shelves are sections of this page, so they are tabs under the header, not a switch in it. */}
-      <div className="library-tabs tabs" role="tablist">
+      <div className="library-tabs" role="tablist" aria-label="Library" onKeyDown={onTabKey}>
         {TABS.map((t) => (
-          <button key={t.key} role="tab" aria-selected={tab === t.key} className={tab === t.key ? 'active' : ''} title={t.blurb} onClick={() => setLibraryTab(t.key)}>
+          <button key={t.key} id={`library-tab-${t.key}`} role="tab" aria-selected={tab === t.key} aria-controls="library-panel" tabIndex={tab === t.key ? 0 : -1}
+            className={tab === t.key ? 'active' : ''} title={t.blurb} onClick={() => setLibraryTab(t.key)}>
             {t.icon} {t.label}
             {t.key === 'skills' && candidates > 0 && <span className="count" title={`${candidates} waiting for you`}>{candidates}</span>}
           </button>
         ))}
       </div>
-      <div className="page-body">
+      <div className="page-body" id="library-panel" role="tabpanel" aria-labelledby={`library-tab-${tab}`}>
         {tab === 'skills' && <SkillsPanel />}
         {tab === 'agents' && <AgentsPanel />}
         {tab === 'automations' && (

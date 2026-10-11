@@ -340,11 +340,12 @@ export default function SettingsModal(): JSX.Element {
 
         <div className="settings-body">
           <div className="settings-rail">
-            <label className="settings-search">
+            {/* modal-free keeps the generic `.modal label` / `.modal input` form rules off the search field. */}
+            <div className="settings-search modal-free">
               <Search size={14} aria-hidden />
               <input type="search" value={q} aria-label="Search settings" placeholder="Search settings" spellCheck={false}
                 onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && hits[0]) goTo(hits[0]) }} />
-            </label>
+            </div>
             {q.trim() ? (
               <div className="settings-hits" role="list" aria-label="Search results">
                 {hits.length ? hits.map((h) => (
@@ -545,6 +546,16 @@ export default function SettingsModal(): JSX.Element {
                   <Switch title="Smarter memory search" help="Combine keywords, meaning, recency and links. Off means keywords only." checked={draft.hybridRetrieval !== false} onChange={(hybridRetrieval) => patch({ hybridRetrieval })} />
                   <AdvancedRetrieval draft={draft} patch={patch} />
                   <Switch title="Describe each file passage when indexing" help="One extra model call per passage. Off by default." checked={draft.contextualChunks === true} onChange={(contextualChunks) => patch({ contextualChunks })} />
+              </AdvGroup></Sec>
+              <Sec id="map"><AdvGroup id="map" title="Workspace map" {...gp}>
+                  <Switch title="Memory counts and topics" help="How many memories there are and what they cover." checked={draft.mapMemory !== false} onChange={(mapMemory) => patch({ mapMemory })} />
+                  <Switch title="Files and notes" help="What is in your Files, so the assistant knows what to open." checked={draft.mapFiles !== false} onChange={(mapFiles) => patch({ mapFiles })} />
+                  <Switch title="Uploads" help="The uploaded files that can be searched." checked={draft.mapUploads !== false} onChange={(mapUploads) => patch({ mapUploads })} />
+                  <Switch title="Projects" help="Your projects and what each holds." checked={draft.mapProjects !== false} onChange={(mapProjects) => patch({ mapProjects })} />
+                  <Switch title="Skills pointer" help="A note that approved skills exist and where to find them." checked={draft.mapSkills !== false} onChange={(mapSkills) => patch({ mapSkills })} />
+                  <Switch title="Source status" help="Which connected sources are signed in and up to date. Changes each turn." checked={draft.mapSources !== false} onChange={(mapSources) => patch({ mapSources })} />
+                  <Switch title="Today (todos, next events, inbox)" help="Open todos, upcoming events and unread mail. Changes each turn." checked={draft.mapToday !== false} onChange={(mapToday) => patch({ mapToday })} />
+                  <Switch title="Also give background workers the map" help="Scheduled jobs and other background runs get it too. Off by default." checked={draft.mapWorkers === true} onChange={(mapWorkers) => patch({ mapWorkers })} />
               </AdvGroup></Sec>
               </div>
               <div className="knowledge-body modal-free"><MemoryPanel /></div>

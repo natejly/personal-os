@@ -3,6 +3,7 @@ import { useStore, type View } from '../store'
 import { OPTIONAL_VIEWS } from '../modules'
 import { viewHidden } from '../moduleToggles'
 import { useModal } from '../lib/useModal'
+import { plainTitle } from '../lib/chatRows'
 import { SETTINGS_TABS } from './SettingsModal'
 
 type Entry = { key: string; label: string; hint: string; run: () => void }
@@ -33,7 +34,7 @@ export default function CommandPalette(): JSX.Element {
     { key: 'new-file', label: 'New file', hint: 'Create', run: () => void s.createDoc({}) },
     { key: 'help', label: 'Help and keyboard shortcuts', hint: 'Help', run: () => s.openHelp('shortcuts') },
     { key: 'help:guide', label: 'Using Grain', hint: 'Help', run: () => s.openHelp('guide') },
-    ...recent(conversations).map((c) => ({ key: `chat:${c.id}`, label: c.title || 'Untitled chat', hint: 'Chat', run: () => void s.selectChat(c.id) })),
+    ...recent(conversations).map((c) => ({ key: `chat:${c.id}`, label: plainTitle(c.title) || 'Untitled chat', hint: 'Chat', run: () => void s.selectChat(c.id) })),
     ...recent(docs).map((d) => ({ key: `doc:${d.id}`, label: d.title || 'Untitled', hint: 'File', run: () => void s.openDoc(d.id) })),
     ...SETTINGS_TABS.map((t) => ({ key: `settings:${t.id}`, label: t.label, hint: 'Settings', run: () => s.openSettings(t.id) })),
     // Advanced groups people look for by name.

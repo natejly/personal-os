@@ -10,6 +10,7 @@ import { randomBytes } from 'crypto'
 import { existsSync, readFileSync } from 'fs'
 import { createServer } from 'net'
 import { join } from 'path'
+import { platform } from './platform'
 import type { BackendInfo, BackendRestart, BackendState } from '../shared/types'
 import { logBackendOutput, logDir, logMain, registerSecret } from './logging'
 import { RestartPolicy } from './restartPolicy'
@@ -146,7 +147,7 @@ function pythonBin(dir: string): string {
   if (existsSync(venv)) return venv
   const venvWin = join(dir, '.venv', 'Scripts', 'python.exe')
   if (existsSync(venvWin)) return venvWin
-  return process.platform === 'win32' ? 'python' : 'python3'
+  return platform.pythonCommand
 }
 
 async function waitHealthy(base: string, timeoutMs: number): Promise<void> {

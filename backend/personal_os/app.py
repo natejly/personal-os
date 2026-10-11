@@ -31,10 +31,11 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import AfterValidator, BaseModel, Field
 
 from . import auth_breaker, blobs, system_access, telegram
-from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
+from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
 from . import branch_summary, compaction, followups, otel_export, router, thinking_summary, titles
 from . import chatlink, coding_route, fsx, opencode_usage, request_log
 from .fsx import sensitive_reason
+from . import context_map
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .drive_backup import DriveBackup
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
@@ -795,6 +796,7 @@ def public_settings() -> dict[str, Any]:
     out["providerKeysSet"] = provider_keys.saved_for(db.secrets)  # which providers have a saved key, never the keys
     out["providerAuthBlocked"] = auth_breaker.blocked(settings()) or ""  # computed, never stored: the active key was rejected
     out["firecrawlEnvKey"] = bool(os.environ.get("FIRECRAWL_API_KEY", "").strip())  # computed, never stored: the key came from the environment
+    out["secretsKeychain"], out["secretsReason"] = db.secrets.status()  # computed, never stored: false = keys sit unencrypted in the data folder
     out["snapshotsAvailable"] = snapshots_available()  # computed, never stored: folder snapshots need a version-control binary
     return out
 
@@ -931,6 +933,14 @@ def list_tools() -> dict[str, Any]:
     cfg = settings()
     modes = toolbox.effective(permissions.get(cfg, "tools") or {}, None, None)
     return {"tools": toolbox.list(), "modes": modes}
+
+
+@app.get("/capabilities")
+def get_capabilities() -> dict[str, Any]:
+    """What this operating system can do (the platform layer, osplat): the platform name and a map of capability -> bool."""
+    caps = osplat.capabilities()
+    caps["secrets_keychain"], reason = db.secrets.status()   # honors GRAIN_SECRETS_BACKEND=file
+    return {"platform": osplat.name(), "capabilities": caps, "secrets_reason": reason}
 
 
 class PageBridgeIn(BaseModel):
@@ -1467,18 +1477,20 @@ TELEGRAM_HINT = ("You are talking over Telegram on the user's phone. Reply first
 # Always on, every path (chats, desks, subagents, scheduled jobs, drafts, Telegram): static, so it sits in the cached prefix.
 NO_EMOJI_HINT = "No emoji in replies, documents or messages unless asked."
 
+# Static, so it sits in the cached prefix: the map itself is built by context_map.py.
+MAP_HINT = "The workspace map lists what exists; open an item with its tool before relying on it."
+
 TOOLS_HINT = ("Use tools when they would make the answer more accurate, current or grounded in the user's data. "
               "Be direct: when what is already in front of you answers the question, skip them. "
-              + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT + " " + FENCE_RULE)
+              + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT + " " + MAP_HINT + " " + FENCE_RULE)
 # The agent stance for an ordinary chat (desks and scheduled runs carry their own). Text only: the leash is the
 # alwaysAsk list and the approval cards, so the model is told to act and let the app stop it where a card is due.
 PROACTIVE_HINT = (  # chats that cannot delegate (a persona without the hand-off tools); a delegating chat gets FRONT_AGENT_HINT
     "## How to work\n"
-    "When a request touches time, people or commitments, "
-    "check the calendar, inbox or todos first and say what bears on it. Act where the app lets you; it stops you where "
-    "an approval is needed, so do not ask permission in advance. Prefer a draft or proposal over a silent change. "
-    "If they describe a recurring want, offer schedule_task once. End with at most one specific next step you can do "
-    "now, or none. "
+    "Own the request end to end: do the obvious work with your tools instead of describing it or asking for what you "
+    "could find out yourself. " + workers_mod.CHECK_HINT + " Act where the app lets you; it stops you where an approval is "
+    "needed, so do not ask permission in advance. Prefer a draft or proposal over a silent change. If they describe a "
+    "recurring want, offer schedule_task once. " + workers_mod.CLOSE_HINT + " "
     + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT
 )
 # A plain chat turn that can delegate is told this instead of PROACTIVE_HINT and PLAN_HINT (workers.py).
@@ -1498,6 +1510,21 @@ def _today_hint() -> str:
     week = ", ".join(f"{d:%a} {d:%Y-%m-%d}" for d in (now + timedelta(days=i) for i in range(1, 8)))
     return (f"## Today\nToday is {now:%A %Y-%m-%d}, time zone {now:%Z} (UTC{now:%z}). Next 7 days: {week}. "
             "Use this for dates; do not compute weekdays in code. Calendar times are local: YYYY-MM-DDTHH:MM, no offset.")
+
+
+def _map_status_block(used: dict[str, Any], conv_settings: dict[str, Any], cfg: dict[str, Any], project_id: str | None,
+                      nonce: str, tool_schemas: list[dict[str, Any]]) -> str:
+    """The workspace map's live half (sources, todos, next events, what waits, workers) for this turn's volatile message, and its
+    size in used["map"]["volatile"]. Empty when the chat has the map or tools off, or context_map is not offered."""
+    if not context_map.map_on(conv_settings) or not any(s["function"]["name"] == "context_map" for s in tool_schemas):
+        return ""
+    text, info = context_map.build_volatile(db, project_id=project_id, switches=context_map.resolve_switches(cfg, conv_settings),
+                                            google=google, mcp_store=mcp_store, nonce=nonce)
+    if not text:
+        return ""
+    base = used.get("map") or {"tokens": 0, "shrunk": False, "hash": "", "sections": {}, "volatile": None, "text": ""}
+    used["map"] = {**base, "volatile": info}
+    return text
 
 
 EMPTY_NUDGE = ("Your last turn ended without any text and without a tool call. Answer the user now in plain text, "
@@ -2307,7 +2334,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                  TELEGRAM_HINT if tool_schemas and telegram_bridge.is_texts_conversation(conv_id) else "",
                  coding_route.hint(cfg) if tool_schemas else "")
         inputs_block = _desk_inputs_block() if desk else ""
-        used["volatile_blocks"] = [*used["volatile_blocks"], *([inputs_block] if inputs_block else []), _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
+        map_block = _map_status_block(used, conv["settings"], cfg, conv["project_id"], fence_nonce, tool_schemas)
+        used["volatile_blocks"] = [*used["volatile_blocks"], *([inputs_block] if inputs_block else []), *([map_block] if map_block else []), _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
         if cfg.get("cacheLayout", True):
             # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
             stable = "\n\n".join(p for p in (used["stable_system"], *hints) if p)
@@ -2316,7 +2344,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             cspan["meta"]["stable_hash"] = used["stable_hash"]
         else:
             stable = None
-            system = "\n\n".join(p for p in (system, *hints, inputs_block, _today_hint()) if p)
+            system = "\n\n".join(p for p in (system, *hints, inputs_block, map_block, _today_hint()) if p)
         used["system_prompt"] = system
         used["tokens_estimate"] = estimate_tokens(system)
         run_notes: list[dict[str, Any]] = []  # system notes that follow the history, whichever history it is
@@ -5216,6 +5244,9 @@ def _job_prompt(job: dict[str, Any], fire: dict[str, Any]) -> str:
     """The run's user turn: the job's own prompt, the late notice in front of it when the fire is late, and the
     folder's changed names after it when a directory change fired it."""
     prompt = _mail_block(fire) + _calendar_block(fire) + redact.scrub_command_output(str(job.get("prompt") or ""))
+    if job.get("id") and (prior := job_history.prior_proposals_block(
+            proposals.undecided_or_refused(job["id"], time.time() - job_history.PRIOR_DAYS * 86400))):
+        prompt += "\n\n" + prior
     if fire.get("trigger") in ("dir", "clock+dir"):
         prompt += "\n\n" + _changed_block(job, fire)
     if not fire.get("late"):
@@ -5363,8 +5394,9 @@ def _mail_threads(query: str) -> list[dict[str, Any]]:
 
 
 def _calendar_events(calendar_id: str | None) -> list[dict[str, Any]]:
-    """A calendar job's look: the next two days from the read cache (the 24 h look-ahead is cut by the scheduler)."""
-    return google.calendar_events(2, calendar_ids=[calendar_id or "primary"], max_results=0)
+    """A calendar job's look: the next two days from the read cache (the 24 h look-ahead is cut by the scheduler).
+    Without a named calendar, every calendar the user has checked on."""
+    return google.calendar_events(2, calendar_ids=[calendar_id] if calendar_id else ["enabled"], max_results=0)
 
 
 scheduler = Scheduler(jobs, _launch_job, policy=job_policy, wake=PowerWake(), mail=_mail_threads, calendar=_calendar_events)
@@ -6942,21 +6974,21 @@ _RUNS_CODE = {".app", ".command", ".sh", ".bash", ".zsh", ".csh", ".ksh", ".fish
               ".exe", ".msi", ".bat", ".cmd", ".ps1"}
 
 
-def _mac_open(*args: str) -> None:
-    subprocess.run(["open", *args], check=True, timeout=10, capture_output=True)
+def _desktop_open(path: str, reveal: bool = False) -> None:
+    osplat.current().desktop.open_path(path, reveal=reveal)
 
 
-def _run_open(*args: str) -> dict[str, bool]:
+def _run_open(path: str, reveal: bool = False) -> dict[str, bool]:
     try:
-        _mac_open(*args)
+        _desktop_open(path, reveal)
     except (OSError, subprocess.SubprocessError) as e:
-        raise HTTPException(400, "macOS could not open this file.") from e
+        raise HTTPException(400, "This computer could not open the file.") from e
     return {"ok": True}
 
 
 @app.post("/documents/{id}/reveal")
 def document_reveal(id: str) -> dict[str, bool]:
-    return _run_open("-R", str(_original(id)[1]))
+    return _run_open(str(_original(id)[1]), reveal=True)
 
 
 @app.post("/documents/{id}/open")
@@ -6977,7 +7009,7 @@ def _artifact_or_404(id: str) -> tuple[dict[str, Any], Path]:
 @app.post("/chat-files/{id}/reveal")
 def artifact_reveal(id: str) -> dict[str, bool]:
     """Files → Artifacts: show a chat's output in Finder (the raw route is in chat_files.py)."""
-    return _run_open("-R", str(_artifact_or_404(id)[1]))
+    return _run_open(str(_artifact_or_404(id)[1]), reveal=True)
 
 
 @app.post("/chat-files/{id}/open")
@@ -7396,7 +7428,7 @@ async def stt_transcribe(audio: UploadFile = File(...), prompt: str = Form("")) 
     backend = stt.resolve_backend(cfg, db.data_dir)
     if backend == "off":
         raise HTTPException(409, f"Transcription is off. {stt.OFF_FIX}")
-    if backend == "speech" and not (macos.IS_MAC and stt.speech_ready()):
+    if backend == "speech" and not (osplat.has("speech_recognition") and stt.speech_ready()):
         row = next((r for r in stt.capabilities(cfg, db.data_dir) if r["id"] == "stt"), {})
         raise HTTPException(409, row.get("fix") or "On-device Speech Recognition is not available.")
     data = bytearray()

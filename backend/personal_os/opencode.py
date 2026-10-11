@@ -44,7 +44,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import mac, sandbox, shell
+from . import mac, osplat, sandbox, shell
 
 # Where the binary usually lands: Homebrew, the official installer (~/.opencode/bin), npm -g, ~/.local/bin.
 BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "~/.opencode/bin", "~/.local/bin", "~/.bun/bin")
@@ -246,7 +246,7 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
     shell.taint(ctx, "opencode_run:network")  # a model with network access wrote whatever comes back
     shown_cmd = f"opencode run {prompt[:160]!r}"
     try:
-        job = await tb.shell.start(["sandbox-exec", "-p", profile, *argv], command=shown_cmd, cwd=str(where), env=env, tmp=tmp,
+        job = await tb.shell.start(osplat.current().sandbox.wrap(argv, profile), command=shown_cmd, cwd=str(where), env=env, tmp=tmp,
                                    conversation_id=conversation_id if conversation_id is not None else ctx.get("conversation_id"),
                                    run_id=run_id if run_id is not None else ctx.get("run_id"),
                                    background=bool(background), timeout=timeout, notify=notify,
@@ -325,7 +325,7 @@ def register(tb: Any) -> None:
             return {"output": shown, "truncated": cut, "still_running": True, "job_id": job.id, "session_id": session,
                     "duration_s": round(time.time() - t0, 2), **info,
                     "note": f"Still running after {timeout}s, so it carries on in the background (job_id {job.id}). {poll}"}
-        if job.exit_code in (65, 71) and raw.lstrip().startswith("sandbox-exec:"):
+        if osplat.current().sandbox.failed_to_start(job.exit_code, raw):
             return tool_error(shell._scrub("The OS sandbox refused to start (" + raw.strip()[:200] + "), so nothing was run."))
         text, session = summarize(raw)
         shown, cut = shell.truncate(text)

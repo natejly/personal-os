@@ -17,7 +17,7 @@ import type {
   RunChanges, RunUndoResult,
   BackupInfo, DataOverview, ShellJobInfo, ShellJobTail, TelegramStatus
 } from '@shared/types'
-import type { CodingSession, CodingSessionDiff, ShipChecklist } from '@shared/types'
+import type { CodingSession, CodingSessionDiff, CodingSessionEvent, ShipChecklist } from '@shared/types'
 import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
 import { ApiError } from './apiError'
 import type { ChatRunChanges } from './deskFiles'
@@ -282,6 +282,7 @@ export const api = {
     get: (id: string) => req<CodingSession>(`/coding-sessions/${id}`),
     logs: (id: string, limit = 4000) => req<{ id: string; output: string; status: string }>(`/coding-sessions/${id}/logs?limit=${limit}`),
     diff: (id: string, full = false) => req<CodingSessionDiff>(`/coding-sessions/${id}/diff${full ? '?full=1' : ''}`),
+    events: (id: string, after = 0, limit = 2000) => req<{ events: CodingSessionEvent[] }>(`/coding-sessions/${id}/events?after=${after}&limit=${limit}`),
     stop: (id: string) => req<CodingSession>(`/coding-sessions/${id}/stop`, { method: 'POST' }),
     send: (id: string, message: string) => req<CodingSession>(`/coding-sessions/${id}/send`, { method: 'POST', body: json({ message }) })
   },

@@ -2785,3 +2785,31 @@ select:focus-visible {
 /* A file path inside a reply sentence: the attachment chip, sized to the line. */
 .file-chip.inline { margin: 0 1px; padding: 0 7px; font-size: inherit; line-height: inherit; vertical-align: baseline; }
 .file-chip.inline svg { color: var(--text-muted); flex: none; }
+
+/* Coding agents panel and the inline activity preview in the coding_session card. */
+.cs-row { padding: 6px 0; border-top: 1px solid var(--border); }
+.cs-row:first-child { border-top: 0; }
+.cs-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cs-head .link { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; text-align: left; }
+.cs-head .link .cs-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-head .inbox-dot { flex-shrink: 0; }
+.cs-head .inbox-dot.working { animation: pulse-dot 1.2s ease-in-out infinite; }
+.cs-sub { display: block; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-latest { font-size: 11px; color: var(--text-muted); font-family: var(--mono, ui-monospace, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-actions { display: flex; gap: 8px; margin: 4px 0; }
+.cs-timeline { display: flex; flex-direction: column; gap: 3px; max-height: 260px; overflow: auto; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-size: 11px; }
+.cs-timeline.compact { max-height: none; overflow: hidden; }
+.cs-preview { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
+.cs-ev { white-space: pre-wrap; word-break: break-word; color: var(--text); }
+.cs-ev-tool { display: flex; gap: 6px; white-space: nowrap; font-family: var(--mono, ui-monospace, monospace); color: var(--text-muted); }
+.cs-ev-name { color: var(--text); font-weight: 600; flex-shrink: 0; }
+.cs-ev-sum { overflow: hidden; text-overflow: ellipsis; }
+.cs-ev-result { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cs-ev-error { color: var(--danger); }
+.cs-ev-user { border-left: 2px solid var(--accent); padding-left: 6px; }
+.cs-ev-who { font-weight: 600; margin-right: 6px; }
+.cs-ev-status { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+.cs-ev-status::before, .cs-ev-status::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.cs-followup { display: flex; gap: 6px; margin-top: 6px; }
+.cs-followup input { flex: 1; min-width: 0; }
+.cs-recent-toggle { display: flex; align-items: center; gap: 4px; margin-top: 8px; }

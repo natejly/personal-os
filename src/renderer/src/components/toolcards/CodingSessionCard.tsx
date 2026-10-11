@@ -3,10 +3,11 @@ import { Bot } from '../../icons'
 import type { CodingSession, CodingSessionDiff } from '@shared/types'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'
-import { AGENT_LABEL, codingDot, codingStatusLabel, codingStoppable, codingTone } from '../../lib/codingSessions'
+import { AGENT_LABEL, codingDot, codingLive, codingStatusLabel, codingStoppable, codingTone } from '../../lib/codingSessions'
 import { str } from '../../lib/toolResult'
 import CardShell from './CardShell'
 import { Badge, ErrorLine, Meta, MonoBlock, useParsed } from './blocks'
+import { CodingActivityPreview } from '../CodingTimeline'
 import { registerToolCard, type ToolCardProps } from './registry'
 
 const TITLE: Record<string, string> = {
@@ -66,6 +67,7 @@ export function CodingSessionView({ session: c }: { session: CodingSession }): J
         )}
       </div>
       {c.detail && <div className="tc-muted small">{c.detail}</div>}
+      {codingLive(c.status) && <CodingActivityPreview id={c.id} />}
       <NeedsYou c={c} />
       <Meta items={[['Folder', <span className="mono" title={c.worktree}>{c.worktree}</span>], ['Branch', c.branch ? <span className="mono">{c.branch}</span> : null]]} />
       {log && <MonoBlock text={c.log_tail} tail />}
@@ -74,7 +76,7 @@ export function CodingSessionView({ session: c }: { session: CodingSession }): J
 }
 
 /** The changes a session left in its worktree: file stats and commits, the full patch on demand. */
-function CodingDiffView({ id }: { id: string }): JSX.Element {
+export function CodingDiffView({ id }: { id: string }): JSX.Element {
   const [d, setD] = useState<CodingSessionDiff | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [patch, setPatch] = useState<string | null>(null)

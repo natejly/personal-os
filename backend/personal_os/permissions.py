@@ -86,7 +86,8 @@ DEFAULTS: dict[str, Any] = {
     "trustExternalContent": False,
     # Coding goes to a coding agent (coding_route.py): Grain's own file writers and file-changing shell commands are refused
     # inside a git work tree under every permission mode, and the agents are told to use coding_session_start. codingAgent is
-    # the agent they are told to start: "opencode", "claude", "pi", or "any" (the agent picks). A code default: nothing to migrate.
+    # the default harness for coding_session_start when `agent` is omitted: "opencode", "claude", "pi", or "any" (the first
+    # installed of claude, opencode, pi). A code default: nothing to migrate.
     "codingRoute": True,
     "codingAgent": "any",
 }

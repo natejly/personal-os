@@ -208,6 +208,21 @@ def _coding_session_base(c: sqlite3.Connection) -> None:
         c.execute("ALTER TABLE coding_sessions ADD COLUMN base_sha TEXT")
 
 
+def _coding_session_events(c: sqlite3.Connection) -> None:
+    """coding_session_events (coding_events.py): the structured live feed of a coding session. seq counts up from 1 per
+    session; kind: user | text | tool | tool_result | error | status; data is optional JSON."""
+    c.execute("""CREATE TABLE IF NOT EXISTS coding_session_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      ts TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      text TEXT NOT NULL DEFAULT '',
+      tool TEXT,
+      data TEXT)""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_coding_session_events ON coding_session_events(session_id, seq)")
+
+
 def _sticky_notes_into_docs(c: sqlite3.Connection) -> None:
     """Sticky notes become docs. Each note row turns into a doc with the SAME id (so a space window keeps its
     ref_id), titled from its first line (docs.title_from_body), body, project and timestamps kept, filed at the
@@ -615,6 +630,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (34, "deepseek_default", _deepseek_default),
     (35, "coding_session_base", _coding_session_base),
     (36, "drop_unused_tables_and_settings", _drop_unused_tables_and_settings),
+    (37, "coding_session_events", _coding_session_events),
 ]
 
 

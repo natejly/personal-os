@@ -184,12 +184,12 @@ def test_setting_off_allows_direct_edits_again(home: Path, tmp_path: Path) -> No
     assert coding_route.hint({"codingRoute": False}) == ""
 
 
-def test_refusal_and_hint_name_the_preferred_agent(home: Path, tmp_path: Path) -> None:
-    for choice, needle in (("opencode", "agent='opencode'"), ("claude", "agent='claude'"), ("pi", "agent='pi'"),
-                           ("any", "agent='opencode' (OpenCode), agent='claude' (Claude Code) or agent='pi'")):
+def test_refusal_and_hint_describe_the_default_harness(home: Path, tmp_path: Path) -> None:
+    for choice, needle in (("opencode", "the user's default is OpenCode"), ("claude", "the user's default is Claude Code"),
+                           ("pi", "the user's default is pi"), ("any", "first installed of Claude Code, OpenCode and pi")):
         tb, cfg = make(tmp_path, codingAgent=choice)
         msg = coding_route.check(tb, "fs_edit", {"path": str(home / "repo/src/a.py")}, {"settings": cfg})
-        assert msg and needle in msg and f"repo_path='{home / 'repo'}'" in msg
+        assert msg and needle in msg and f"repo_path='{home / 'repo'}'" in msg and "omit it" in msg
         assert needle in coding_route.hint(cfg)
     assert "coding_session_start" in coding_route.hint({})  # on by default
 

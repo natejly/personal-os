@@ -508,11 +508,11 @@ export default function SettingsModal(): JSX.Element {
               <Sec id="coding">
                 <h4>Coding sessions</h4>
                 <Switch title="Route coding to OpenCode / Claude Code" help="Grain's own agents plan, hand code changes to a coding session and check the result. They can't edit files or run file-changing commands inside a git repository themselves." checked={draft.codingRoute !== false} onChange={(codingRoute) => patch({ codingRoute })} />
-                <label className="setting-row"><span className="toggle-text"><b>Preferred coding agent</b><small>Which one the agents start for a coding task.</small></span>
+                <label className="setting-row"><span className="toggle-text"><b>Default coding agent</b><small>The one Grain starts for a coding task unless you ask for another. Let Grain choose uses the first one installed.</small></span>
                   <select value={draft.codingAgent ?? 'any'} onChange={(e) => patch({ codingAgent: e.target.value as Settings['codingAgent'] })}>
-                    <option value="any">Let the agent choose</option>
-                    <option value="opencode">OpenCode</option>
+                    <option value="any">Let Grain choose</option>
                     <option value="claude">Claude Code</option>
+                    <option value="opencode">OpenCode</option>
                     <option value="pi">pi</option>
                   </select>
                 </label>

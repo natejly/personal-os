@@ -52,7 +52,7 @@ import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from . import claude_hook, mac, opencode, permrules, pi, shell
+from . import claude_hook, coding_events, mac, opencode, permrules, pi, shell
 from .coding_route import AGENT_NAMES
 from .db import new_id
 from .limits import CODING_SESSION_MAX_CONCURRENT, LOGIN_SHELL_TIMEOUT_SECONDS
@@ -234,6 +234,27 @@ def _tail(path: Path, cap: int = READ_CAP) -> tuple[str, bool]:
     return data.decode("utf-8", "replace"), size > cap
 
 
+def read_timeline(home: Path, job_id: str, cap: int = 8_000_000) -> list[str]:
+    """The complete lines of a claude job's timeline.jsonl (the last line only when it is valid JSON, since the CLI may
+    still be writing it). Same folder rules as read_claude."""
+    if not ID_RE.fullmatch(job_id or ""):
+        return []
+    d = home / job_id
+    try:
+        if d.resolve().parent != home.resolve():
+            return []
+        text, cut = _tail(d / "timeline.jsonl", cap)
+    except OSError:
+        return []
+    lines = text.splitlines()[1 if cut else 0:]
+    if lines and not text.endswith("\n"):
+        try:
+            json.loads(lines[-1])
+        except ValueError:
+            lines.pop()
+    return lines
+
+
 def read_claude(home: Path, job_id: str, lines: int = 30) -> tuple[dict[str, Any] | None, list[str]]:
     """(state.json as a dict, the last `lines` timeline texts) for a claude job, or (None, []) when unreadable. Only the
     one folder named by an 8-hex id inside `home` is read, and symlinks that leave it are not followed."""
@@ -310,6 +331,8 @@ class CodingSessions:
         self.tb = tb                    # the Toolbox: opencode.launch needs its model settings, data dir and workspace
         self.claude_home = claude_home or Path.home() / ".claude" / "jobs"
         self.resumed: dict[str, float] = {}   # id -> when a follow-up started: a stale "done" in state.json is ignored for a moment
+        self.cursors: dict[str, tuple[str, int]] = {}  # id -> (job id, absolute output offset) already turned into events (opencode, pi)
+        self.timelines: dict[tuple[str, str], tuple[int, tuple[str, str] | None]] = {}  # (id, claude job id) -> (lines read, last event)
         self.seen: dict[str, tuple[int, str]] = {}   # id -> (output size, job status) at the last opencode refresh
         self.on_finish: Callable[[dict[str, Any]], None] | None = None  # a session settled: wake the chat or run that owns it
         self.waiting: dict[str, int] = {}   # id -> coding_session_wait calls blocked on it (they report it themselves, no wake)
@@ -368,12 +391,25 @@ class CodingSessions:
                                                 row.get("log_tail") or "", row["updated_at"], row.get("ended_at"), row["id"]))
         self.publish("coding_session", summary(row, None))
 
+    def event(self, sid: str, kind: str, text: str, tool: str | None = None, data: dict[str, Any] | None = None) -> None:
+        """Add an event to a session's live feed and publish it. Never raises: the feed must not break a session."""
+        try:
+            coding_events.append(self.db, sid, kind, text, tool, data, self.publish)
+        except Exception:  # noqa: BLE001
+            log.warning("coding session event failed", exc_info=True)
+
+    def _events(self, sid: str, evs: list[coding_events.Ev]) -> None:
+        for kind, text, tool, data in evs:
+            self.event(sid, kind, text, tool, data)
+
     def _apply(self, row: dict[str, Any], **kw: Any) -> dict[str, Any]:
         """Set fields and save, but only when something changed (a poll that sees nothing new publishes nothing)."""
         changed = {k: v for k, v in kw.items() if row.get(k) != v}
         if changed:
+            old = row.get("status")
             row.update(changed)
             if "status" in changed:
+                self.event(row["id"], "status", f"{old} → {row['status']}")
                 row["ended_at"] = None if row["status"] in LIVE else (row.get("ended_at") or time.time())
             self._save(row)
         return row
@@ -405,11 +441,12 @@ class CodingSessions:
                     log.warning("coding session wake failed", exc_info=True)
         return row
 
-    async def watch(self, every: float = 5.0) -> None:
+    async def watch(self, every: float = 5.0, fast: float = 2.0) -> None:
         """Claude Code sessions have no process of ours to hear from: re-read the live ones so a finish is noticed (and woken
         for) without anyone calling status."""
+        rows: list[dict[str, Any]] = []
         while True:
-            await asyncio.sleep(every)
+            await asyncio.sleep(fast if rows else every)  # a working session is polled faster so its feed reads live
             try:
                 with self.db.tx() as c:
                     rows = [dict(r) for r in c.execute("SELECT * FROM coding_sessions WHERE agent = 'claude' AND status IN ('starting','working')")]
@@ -454,10 +491,50 @@ class CodingSessions:
             return row  # a follow-up was just sent and state.json has not caught up
         sid = state.get("sessionId")
         log = shell._scrub("\n".join(lines))[-LOG_TAIL:]
+        self._claude_events(row)
         if status == row["status"] == "stopped":
             detail = row.get("detail") or detail  # the recorded stop reason, not the CLI's own word for it
         return self._apply(row, status=status, detail=detail or row.get("detail"), log_tail=log or row.get("log_tail") or "",
                            session_id=sid if isinstance(sid, str) and UUID_RE.fullmatch(sid) else row.get("session_id"))
+
+    def _claude_events(self, row: dict[str, Any]) -> None:
+        """Turn the timeline lines not yet seen into events. The cursor is a line count per claude job id; after a
+        restart it is found again from the newest event of that job (coding_events.last_from), so nothing repeats."""
+        key = (row["id"], row["external_id"])
+        try:
+            raw = read_timeline(self.claude_home, row["external_id"])
+            if key not in self.timelines:
+                last = coding_events.last_from(self.db, row["id"], row["external_id"])
+                if last:
+                    self.timelines[key] = (int((last["data"] or {}).get("line") or 0),
+                                           (("tool" if last["kind"] == "tool" else "text"), last["text"]))
+                else:
+                    self.timelines[key] = (0, None)
+            done, prev = self.timelines[key]
+            evs, prev = coding_events.parse_claude([shell._scrub(ln) for ln in raw[done:]], done + 1, row["external_id"], prev)
+            self.timelines[key] = (len(raw), prev)
+            self._events(row["id"], evs)
+        except Exception:  # noqa: BLE001
+            log.warning("claude timeline events failed", exc_info=True)
+
+    def _job_events(self, row: dict[str, Any], job: Any) -> None:
+        """Turn the job output not yet seen into events. The cursor is an absolute offset into the job's output; only
+        complete lines are taken while the job runs."""
+        try:
+            jid, pos = self.cursors.get(row["id"], (None, 0))
+            if jid != row.get("external_id"):
+                pos = 0
+            base = getattr(job, "base", 0)
+            start = max(pos - base, 0)
+            raw = job.buf[start:]
+            if job.live() and not raw.endswith("\n"):
+                raw = raw[:raw.rfind("\n") + 1]
+            self.cursors[row["id"]] = (row.get("external_id") or "", base + start + len(raw))
+            if raw:
+                parse = coding_events.parse_pi if row["agent"] == "pi" else coding_events.parse_opencode
+                self._events(row["id"], parse(shell._scrub(raw))[0])
+        except Exception:  # noqa: BLE001
+            log.warning("coding job events failed", exc_info=True)
 
     def _refresh_opencode(self, row: dict[str, Any]) -> dict[str, Any]:
         job = self.jobs.jobs.get(row.get("external_id") or "")
@@ -467,6 +544,7 @@ class CodingSessions:
             return row  # nothing new since the last look: skip re-parsing the buffer
         self.seen[row["id"]] = (job.total, job.status)
         status, detail = map_job(job)
+        self._job_events(row, job)
         raw = job.buf
         if job.live() and not raw.endswith("\n"):
             raw = raw[:raw.rfind("\n") + 1]  # the last line is still being written
@@ -503,12 +581,44 @@ class CodingSessions:
             raise CodingError(f"The {what} is over {opencode.MAX_PROMPT} characters; point the agent at a file instead.")
         return text
 
-    async def start(self, agent: str, repo_path: str, prompt: str, *, new_worktree: bool | None = None, branch: str | None = None,
+    @staticmethod
+    def installed_agents() -> list[str]:
+        """The harnesses whose binary is present on this Mac, in preference order."""
+        return [n for n, b in (("claude", claude_binary), ("opencode", opencode.binary), ("pi", pi.binary)) if b()]
+
+    def default_agent(self) -> str | None:
+        """The user's default harness: the `codingAgent` setting when it names one, else the first installed (claude, opencode, pi)."""
+        from . import coding_route
+        choice = coding_route.agent_choice(self.settings())
+        if choice != "any":
+            return choice
+        have = self.installed_agents()
+        return have[0] if have else None
+
+    def resolve_agent(self, agent: str | None) -> str:
+        """An explicit agent must be installed; with none given the default is used. Raises CodingError otherwise."""
+        have = self.installed_agents()
+        listed = ", ".join(have) or "none"
+        agent = (str(agent).strip() or None) if agent else None
+        if agent is None:
+            agent = self.default_agent()
+            if agent is None:
+                raise CodingError("No coding agent is installed on this Mac (looked for claude, opencode and pi).")
+            if agent not in have:
+                raise CodingError(f"The default coding agent '{agent}' (Settings) is not installed. Installed here: {listed}. "
+                                  "Pass agent explicitly or change the default.")
+            return agent
+        if agent not in AGENTS:
+            raise CodingError(f"agent must be one of {', '.join(AGENTS)}.")
+        if agent not in have:
+            raise CodingError(f"'{agent}' is not installed on this Mac. Installed here: {listed}.")
+        return agent
+
+    async def start(self, agent: str | None, repo_path: str, prompt: str, *, new_worktree: bool | None = None, branch: str | None = None,
                     model: str | None = None, permission_mode: str | None = None, name: str | None = None,
                     ctx: dict[str, Any] | None = None) -> dict[str, Any]:
         ctx = ctx if ctx is not None else {}
-        if agent not in AGENTS:
-            raise CodingError(f"agent must be one of {', '.join(AGENTS)}.")
+        agent = self.resolve_agent(agent)
         prompt = self._text(prompt, "prompt")
         permission_mode = permission_mode or None
         if permission_mode not in PERMISSION_MODES:
@@ -562,6 +672,7 @@ class CodingSessions:
                       (sid, agent, None, None, row["repo_path"], row["worktree"], branch, row["conversation_id"], row["desk_id"],
                        row["run_id"], name, prompt, model, permission_mode, "starting", None, "", t, t, None, base))
         self.publish("coding_session", summary(row, None))
+        self.event(sid, "user", prompt)
         shell.taint(ctx, f"coding_session:start:{sid}")  # the agent's text comes back through status, logs and diff
         try:
             if agent == "claude":
@@ -690,6 +801,7 @@ class CodingSessions:
             except shell.ShellError as e:
                 raise CodingError(shell._scrub(str(e))) from e
             detail = "follow-up sent"
+        self.event(row["id"], "user", message)
         return self._apply(row, status="working", detail=detail, log_tail="", ended_at=None)
 
     async def stop(self, sid: str, reason: str = "stopped by the user") -> dict[str, Any]:
@@ -789,6 +901,15 @@ class CodingSessions:
         return out
 
 
+def recent_events(db: Any, sid: str, n: int) -> list[Any]:
+    """The last n structured events of a session, or [] while coding_events (or its `recent`) is not there."""
+    try:
+        from . import coding_events
+        return list(coding_events.recent(db, sid, n))
+    except (ImportError, AttributeError, TypeError):
+        return []
+
+
 def register(tb: Any, sessions: CodingSessions) -> None:
     """The coding_session_* tools (group `shell`). Starting and following up are external: they run an agent that edits
     a repo on this Mac, so an unattended run only proposes them and a chat asks first."""
@@ -799,8 +920,15 @@ def register(tb: Any, sessions: CodingSessions) -> None:
         return claude_binary() is not None or opencode.binary() is not None or pi.binary() is not None
 
     def installed() -> str:
-        have = [n for n, b in (("claude", claude_binary()), ("opencode", opencode.binary()), ("pi", pi.binary())) if b]
-        return ", ".join(have) or "none"
+        return ", ".join(sessions.installed_agents()) or "none"
+
+    def harnesses() -> list[dict[str, Any]]:
+        have, default = sessions.installed_agents(), None
+        try:
+            default = sessions.default_agent()
+        except Exception:
+            pass
+        return [{"id": n, "name": AGENT_NAMES[n], "installed": n in have, "default": n == default} for n in AGENTS]
 
     def unattended(name: str) -> dict[str, Any]:
         return tool_error(f"{name} starts or steers a coding agent on this Mac and this is an unattended background run, "
@@ -810,9 +938,9 @@ def register(tb: Any, sessions: CodingSessions) -> None:
         row = sessions.get(str(sid or ""))
         return (sessions.refresh(row), None) if row else (None, tool_error(f"No coding session '{sid}'.", field="id"))
 
-    async def coding_session_start(ctx: dict[str, Any], agent: str, repo_path: str, prompt: str, new_worktree: bool | None = None,
-                                   branch: str | None = None, model: str | None = None, permission_mode: str | None = None,
-                                   name: str | None = None) -> Any:
+    async def coding_session_start(ctx: dict[str, Any], repo_path: str, prompt: str, agent: str | None = None,
+                                   new_worktree: bool | None = None, branch: str | None = None, model: str | None = None,
+                                   permission_mode: str | None = None, name: str | None = None) -> Any:
         if ctx.get("proposal_only"):
             return unattended("coding_session_start")
         try:
@@ -821,6 +949,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
                                        permission_mode=permission_mode, name=name, ctx=ctx)
         except (CodingError, shell.ShellError) as e:
             return tool_error(shell._scrub(str(e)))
+        agent = row["agent"]
         if row["status"] == "failed":
             return tool_error(row.get("detail") or "The session did not start.",
                               alternative="fix the cause named above, or run the task another way")
@@ -830,8 +959,10 @@ def register(tb: Any, sessions: CodingSessions) -> None:
         return {**summary(row), "note": note}
 
     spec = ToolSpec("coding_session_start",
-                    "Start a coding agent on a repo and let it work in the background: agent 'claude' (Claude Code), 'opencode' "
-                    f"or 'pi' (installed here: {installed()}). repo_path must be a git repo anywhere on this Mac; new_worktree=true gives "
+                    "Start a coding agent on a repo and let it work in the background. Leave `agent` out to use the user's default "
+                    "harness (the Coding agent setting; if it is 'any', the first installed of claude, opencode, pi); pass it only when the "
+                    f"user asked for a specific one: 'claude' (Claude Code), 'opencode' or 'pi' (installed here: {installed()}). "
+                    "Returns at once with a session id; use coding_session_wait to block until it settles. repo_path must be a git repo anywhere on this Mac; new_worktree=true gives "
                     "the agent its own branch and git worktree under <repo>/.claude/worktrees so the repo's checkout stays "
                     "untouched (on a repo's main checkout every agent gets one unless new_worktree=false). Give a complete, self-contained task: it does not see this conversation. Claude Code runs OUTSIDE "
                     "the OS sandbox with the user's own account and tools, and asks for permission inside its own session "
@@ -839,17 +970,18 @@ def register(tb: Any, sessions: CodingSessions) -> None:
                     "and asks before credential stores, deletes, force-pushes and sending mail. OpenCode and pi run inside the OS sandbox (Grain's own data folder and app, credential stores and the "
                     "files that run code later are off limits); pi has no permission prompts of its own, so the sandbox is all that limits it. permission_mode ('acceptEdits', 'auto', 'dontAsk' or 'bypassPermissions', "
                     "Claude Code only) overrides the mode this session runs in (default follows Grain's permission mode); only 'bypassPermissions' "
-                    "(under Auto or Manual) asks the user first. Leave it out unless the user asked. Follow progress with coding_session_status and review with coding_session_diff.",
-                    _obj({"agent": {"type": "string", "enum": list(AGENTS)}, "repo_path": {"type": "string"},
+                    "(under Auto or Manual) asks the user first. Leave it out unless the user asked. Follow progress with coding_session_wait (blocks) or coding_session_status (one look) and review with coding_session_diff.",
+                    _obj({"agent": {"type": "string", "enum": list(AGENTS), "description": "Optional: omit to use the user's default harness"},
+                          "repo_path": {"type": "string", "description": "Absolute path of a git repo on this Mac"},
                           "prompt": {"type": "string", "description": "The task, with the files or folders it concerns"},
                           "new_worktree": {"type": "boolean", "description": "Default: true on a repo's main checkout, else false"},
                           "branch": {"type": "string", "description": "Branch for the new worktree (default grain/<task>-<hex>); never main/master"},
                           "model": {"type": "string"},
                           "permission_mode": {"type": "string", "enum": ["acceptEdits", "auto", "dontAsk", "bypassPermissions"]},
                           "name": {"type": "string", "description": "A short label for the session"}},
-                         ["agent", "repo_path", "prompt"]),
+                         ["repo_path", "prompt"]),
                     coding_session_start, "shell", "external",
-                    examples=[{"agent": "claude", "repo_path": "/Users/me/code/app", "prompt": "Add a --dry-run flag to cli.py and cover it in tests",
+                    examples=[{"repo_path": "/Users/me/code/app", "prompt": "Add a --dry-run flag to cli.py and cover it in tests",
                                "new_worktree": True}])
     spec.default = "ask"
     def _bypass(args: dict[str, Any], ctx: dict[str, Any]) -> bool:  # an explicit bypass that Allow all did not itself choose
@@ -865,9 +997,9 @@ def register(tb: Any, sessions: CodingSessions) -> None:
     async def coding_session_list(ctx: dict[str, Any]) -> Any:
         rows = [summary(sessions.refresh(r), 0) for r in sessions.list(20)]
         shell.taint(ctx, "coding_session:list:" + ",".join(r["id"] for r in rows))  # each row's detail was written by a coding agent
-        return {"sessions": rows}
+        return {"harnesses": harnesses(), "sessions": rows}
 
-    async def coding_session_status(ctx: dict[str, Any], id: str, lines: int = 30) -> Any:
+    async def coding_session_status(ctx: dict[str, Any], id: str, lines: int = 30, events: int = 0) -> Any:
         row, err = view(id)
         if err:
             return err
@@ -878,6 +1010,12 @@ def register(tb: Any, sessions: CodingSessions) -> None:
             n = 30
         out = summary(row, None)  # type: ignore[arg-type]
         out["log_tail"] = "\n".join(out["log_tail"].splitlines()[-n:])[-LOG_TAIL:]
+        try:
+            want = max(0, min(int(events or 0), 100))
+        except (TypeError, ValueError):
+            want = 0
+        if want:
+            out["events"] = recent_events(sessions.db, row["id"], want)
         return out
 
     async def coding_session_wait(ctx: dict[str, Any], ids: list[str], mode: str = "all", timeout_s: int = 120) -> Any:
@@ -916,16 +1054,20 @@ def register(tb: Any, sessions: CodingSessions) -> None:
 
     sid = {"id": {"type": "string"}}
     for name, desc, params, fn, danger in (
-        ("coding_session_list", "List coding sessions (newest first) with their status. needs_you means the session is waiting "
-         "for the user to answer a permission prompt in its own window.", _obj({}, []), coding_session_list, "safe"),
-        ("coding_session_status", "Read one coding session's status, current step and the end of its log. Refreshes it first.",
-         _obj({**sid, "lines": {"type": "integer", "default": 30}}, ["id"]), coding_session_status, "safe"),
+        ("coding_session_list", "List coding sessions (newest first) with their status, plus `harnesses`: each supported coding agent with "
+         "installed and default flags. needs_you means the session is waiting for the user to answer a permission prompt in its own window.", _obj({}, []), coding_session_list, "safe"),
+        ("coding_session_status", "One non-blocking look at a coding session: status, current step and the end of its log (refreshed first). "
+         "Use it to inspect; to wait for a session to settle use coding_session_wait. events=N adds the last N structured "
+         "events (tool calls, messages) when recorded.",
+         _obj({**sid, "lines": {"type": "integer", "default": 30, "description": "Log lines to return (1-200)"},
+               "events": {"type": "integer", "default": 0, "description": "Also return the last N structured events (0 = none, max 100)"}}, ["id"]), coding_session_status, "safe"),
         ("coding_session_wait", "Wait (without polling) until the named coding sessions have finished, stopped, failed or need the user: "
          "mode 'all' (default) or 'any' of them; returns their summaries, or timed_out=true after timeout_s (default 120, max 600): "
          "call it again to keep waiting. Prefer this to repeated coding_session_status calls.",
          _obj({"ids": {"type": "array", "items": {"type": "string"}}, "mode": {"type": "string", "enum": ["all", "any"], "default": "all"},
                "timeout_s": {"type": "integer", "default": 120}}, ["ids"]), coding_session_wait, "safe"),
-        ("coding_session_send", "Send a follow-up message to a coding session that has finished or been stopped. A session "
+        ("coding_session_send", "Send a follow-up message to a coding session that has finished, failed or been stopped (to fix, extend or answer something; "
+         "it keeps its worktree and context; do not start a new session for it). A session "
          "that is still working or waiting for the user cannot take one: wait, or stop it first. A finished Claude Code session "
          "may continue as a copy with a new external_id. Asks the user in Manual mode, and whenever the run read other untrusted content.",
          _obj({**sid, "message": {"type": "string"}}, ["id", "message"]), coding_session_send, "external"),

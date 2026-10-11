@@ -466,16 +466,11 @@ kbd {
 .model-menu-effort .chat-control {
   max-width: none;
   appearance: none;
-  padding: 0 16px 0 2px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7' fill='none' stroke='%238f8d86' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l4 4 4-4'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 2px center;
-  background-size: 8px 6px;
+  padding: 0 2px;
 }
 .model-menu-trigger { min-width: 0; flex: 0 1 auto; max-width: 100%; padding-right: 6px; }
 .model-menu-name { min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-menu-suffix { color: var(--text-faint); flex-shrink: 0; }
-.model-menu-chevron { flex-shrink: 0; opacity: 0.7; }
 .model-menu-pop, .model-menu-params {
   position: fixed; z-index: 80; width: 280px;
   max-height: calc(100vh - 16px);
@@ -1484,13 +1479,6 @@ textarea.instructions:focus { border-color: var(--accent); }
 .trace { font-size: 12px; margin: 0 0 12px; color: var(--text-muted); }
 .trace-line { line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trace-line.err { color: var(--danger, var(--text-muted)); }
-.trace-effort { color: var(--text-faint); white-space: pre; }
-.trace-toggle { display: flex; align-items: flex-start; gap: 4px; width: 100%; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
-.trace-toggle svg { flex: none; margin-top: 4px; transition: transform .12s; }
-.trace-toggle svg.rot90 { transform: rotate(90deg); }
-.trace-toggle > .trace-line { min-width: 0; }
-.trace-steps { display: flex; flex-direction: column; min-width: 0; }
-.trace > .ctx-chip { margin: 4px 0 0 15px; }
 
 .tool-events { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; }
 .tool-doc-diff { margin: 6px 8px 8px; }

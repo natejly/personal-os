@@ -5,6 +5,7 @@ import { argRows } from '../lib/planDigest'
 import { useStore } from '../store'
 import ActionPlanCard from './ActionPlanCard'
 import InlineNote from './InlineNote'
+import ProgressBar from './ProgressBar'
 
 /**
  * The Plan tab. While the plan is pending this is the approval card itself; once decided it becomes
@@ -12,7 +13,8 @@ import InlineNote from './InlineNote'
  * what the user reads here is literally what the agent is being held to.
  */
 
-const MARK: Record<PlanStepStatus, JSX.Element> = {
+/** Status marks for a plan step; the progress card reuses them. */
+export const MARK: Record<PlanStepStatus, JSX.Element> = {
   proposed: <Circle size={13} />,
   approved: <Circle size={13} />,
   consumed: <CircleDot size={13} />,
@@ -59,6 +61,7 @@ export default function DeskPlan({ desk }: { desk: FullDesk }): JSX.Element {
         <span className="spacer" />
         <button className="ghost-btn sm" aria-expanded={amending} onClick={() => setAmending((v) => !v)}>Amend plan</button>
       </header>
+      <ProgressBar done={done} total={live.length} label="Plan progress" />
       {amending && (
         <InlineNote placeholder="What should change about the plan? The agent re-plans." submitLabel="Ask to re-plan"
           onSubmit={amend} onCancel={() => setAmending(false)} />

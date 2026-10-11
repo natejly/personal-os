@@ -13,7 +13,7 @@ export const useChatDesk = (deskId?: string): Desk | FullDesk | null =>
 
 /**
  * What the desk is waiting on you for, at the foot of the transcript: a question (answered from the composer), the cards a
- * parked turn let go of, and a plan waiting for approval. Nothing about its own progress: that has no card (lib/statusChrome).
+ * parked turn let go of, and a plan waiting for approval. Its progress is not here: multi-step work gets the progress card above the composer (lib/statusChrome).
  */
 export function DeskInline({ desk, events }: { desk: FullDesk; events: ToolEvent[] }): JSX.Element | null {
   // A card whose call is still pending in the transcript is answered there; these are the ones a parked turn let go of.

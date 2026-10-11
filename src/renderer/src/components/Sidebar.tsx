@@ -25,8 +25,7 @@ import SidebarChatFiles from './SidebarChatFiles'
 
 /** Project groups the user folded shut. Stored as exceptions, so a new project starts open. */
 const COLLAPSED_KEY = 'grain.sidebar.collapsedProjects'
-/** Date-group labels folded shut. */
-const FOLDED_DATES_KEY = 'grain.sidebar.foldedDates'
+const DATE_GROUPS_KEY = 'grain.sidebar.collapsedDateGroups'
 const readCollapsed = (key = COLLAPSED_KEY): Set<string> => {
   try {
     const v: unknown = JSON.parse(localStorage.getItem(key) ?? '[]')
@@ -154,12 +153,12 @@ export default function Sidebar(): JSX.Element {
   // A search reaches every chat: typing a query lifts the filter until the box is cleared.
   const filtering = needsOnly && !query.trim()
   const [collapsed, setCollapsed] = useState(() => readCollapsed())
-  const [foldedDates, setFoldedDates] = useState(() => readCollapsed(FOLDED_DATES_KEY))
-  const toggleDate = (label: string): void => {
+  const [foldedDates, setFoldedDates] = useState(() => readCollapsed(DATE_GROUPS_KEY))
+  const toggleDateGroup = (label: string): void => {
     setFoldedDates((prev) => {
       const next = new Set(prev)
       if (!next.delete(label)) next.add(label)
-      writeCollapsed(next, FOLDED_DATES_KEY)
+      writeCollapsed(next, DATE_GROUPS_KEY)
       return next
     })
   }
@@ -430,11 +429,11 @@ export default function Sidebar(): JSX.Element {
         {!filtering && groups.length === 0 && pinned.length === 0 && inMessages.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No personal chats yet.'}</p>}
         {!filtering && groups.map((g) => {
           // A search always shows its hits, folded or not.
-          const open = !foldedDates.has(g.label) || !!query.trim()
+          const folded = foldedDates.has(g.label) && !query.trim()
           return (
           <section key={g.label}>
-            <h4><button className="section-toggle" aria-expanded={open} onClick={() => toggleDate(g.label)}><ChevronRight size={11} className={open ? 'rot90' : ''} /> {g.label}</button></h4>
-            {open && g.items.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} trail={<Snippet hit={hitById.get(c.id)} />} />)}
+            <h4><button className="section-toggle" aria-expanded={!folded} onClick={() => toggleDateGroup(g.label)}><ChevronRight size={11} className={folded ? '' : 'rot90'} /> {g.label}</button></h4>
+            {!folded && g.items.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} trail={<Snippet hit={hitById.get(c.id)} />} />)}
           </section>
           )
         })}

@@ -6,6 +6,10 @@
   /* Title bars: the sidebar top, chat and page headers all share one height. */
   --bar-h: 40px;
   --page-agent-w: 380px;
+  /* Room the native window controls take at the top right (none on macOS, where they sit on the left). */
+  --overlay-w: 0px;
+  /* Room the macOS traffic lights take at the top left. */
+  --lights-w: 84px;
   /* The reading column: messages, the composer and the plan panel all share it. */
   --chat-col: 760px;
   /* One status vocabulary for runs, desks, jobs and inbox rows. */
@@ -210,6 +214,12 @@ kbd {
   margin-left: auto;
 }
 
+/* Windows and Linux: no traffic lights, but native min/max/close overlay the top right. */
+:root:not([data-platform='darwin']) { --lights-w: 16px; --overlay-w: 140px; }
+:root:not([data-platform='darwin']) .sidebar-top { padding-left: 16px; }
+:root:not([data-platform='darwin']) .chat-header,
+:root:not([data-platform='darwin']) .page-header { padding-right: calc(16px + var(--overlay-w)); }
+
 .drag { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }
 
@@ -278,7 +288,7 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 12px 0 84px;
+  padding: 0 12px 0 var(--lights-w);
 }
 .brand {
   display: flex;
@@ -396,8 +406,11 @@ kbd {
   border-bottom: 1px solid var(--border);
 }
 /* With the sidebar hidden the window's traffic lights sit over the left end of every title bar. */
-.sidebar-collapsed .chat-header, .sidebar-collapsed .page-header { padding-left: 84px; }
+.sidebar-collapsed .chat-header, .sidebar-collapsed .page-header { padding-left: var(--lights-w); }
 .chat-title { flex: 1; min-width: 0; display: flex; }
+/* The strip beside the title still drags the window; only the title itself is clickable. */
+.chat-title.no-drag { -webkit-app-region: drag; }
+.chat-title > * { -webkit-app-region: no-drag; }
 .title-btn {
   display: flex; align-items: center; gap: 6px;
   font-weight: 500;
@@ -2787,5 +2800,7 @@ select:focus-visible {
 .recap-inline .markdown.clamped { max-height: 5.4em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
 .inbox-modal { width: min(760px, 94vw); max-height: 86vh; overflow-y: auto; padding: 0; position: relative; }
 .inbox-modal > .agent-inbox { margin: 0; background: none; }
-.inbox-modal-close { position: absolute; top: 8px; right: 8px; z-index: 1; }
+/* Above the modal's sticky header (z-index 2), which the inbox header inherits; the header leaves room at its right end. */
+.inbox-modal-close { position: absolute; top: 8px; right: 8px; z-index: 3; }
+.inbox-modal .agent-inbox > header { padding-right: 48px; }
 .inbox-archive-search { width: 100%; margin: 4px 0 6px; }

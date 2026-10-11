@@ -6,6 +6,7 @@
 import { BrowserWindow, clipboard } from 'electron'
 import { join } from 'path'
 import { guardNavigation } from './navigation'
+import { chromeTheme, platform } from './platform'
 import { handle } from './ipc'
 
 const WIDTH = 560
@@ -23,12 +24,11 @@ export const toggleAsk = (): void => {
     width: WIDTH,
     height: MIN_H,
     show: false,
-    frame: false,
     resizable: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     fullscreenable: false,
-    backgroundColor: '#1c1c1e',
+    ...platform.floatingChrome(chromeTheme()),
     webPreferences: { preload: join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false, sandbox: true }
   })
   ask = w

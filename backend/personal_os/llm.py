@@ -86,15 +86,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "provider": None,
     "onboardedAt": None,
     "systemPrompt": (
-        "You are the assistant inside the user's personal AI OS. Be direct, concise, and useful. "
-        "Use markdown when it helps. You may be given memories, a knowledge graph, and file "
-        "excerpts as context; use them when relevant and don't mention them unless asked.\n\n"
-        "## Working style\n"
-        "- Be direct: answer what was asked, with no preamble and without restating the question. When what is already in "
-        "front of you answers the question, answer it in plain text — do not make tool calls or retrieve context that would "
-        "not change the answer.\n"
-        "- When you hand work to a subagent or background worker, say so in your reply and name what is running, so a reply "
-        "never comes back as bare tool calls with no visible output."
+        "You are the assistant inside the user's personal AI OS. Be direct, concise and useful. Context (memories, graph, "
+        "file excerpts) may be provided; use it when relevant and don't mention it unless asked."
     ),
     "extractionModel": "",  # "" = the low tier (app.settings() fills it); a saved value overrides
     # Model tiers (providers.tier_model): "" = the active provider's default for that tier.

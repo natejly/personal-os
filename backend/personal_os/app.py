@@ -1458,20 +1458,19 @@ def _resolve_attachments(conv: dict[str, Any], ids: list[str] | None) -> list[di
 
 
 RENDER_HINT = """## Rendering
-Besides normal markdown, the UI renders three fenced code blocks inline:
-- ```chart — a small JSON spec for a data chart: {"type": "bar" | "line" | "area" | "pie" | "scatter", "title": "...", "x": "<key used for the x axis / category>", "series": ["<numeric key>", ...], "data": [{"<x key>": ..., "<numeric key>": ..., ...}, ...], "stacked": false, "xLabel": "...", "yLabel": "...", "unit": "", "transforms": [{"op": "sort", "by": "<key>", "dir": "desc"}, {"op": "limit", "n": 10}]}. `data` is an array of objects (one per x value); keep it under 200 rows. `transforms` is optional (ops: sort, limit, filter {field, cmp, value}, group {by, agg: {<key>: "sum|mean|count|min|max"}}) for trimming or aggregating raw rows; ISO dates (2026-03-01) as x values get a date axis. Use a chart whenever numbers would be clearer that way (comparisons, trends, breakdowns).
-- ```interactive — a chart the user steers with sliders and other controls; it recomputes instantly as they drag, with no new request to you: {"title": "Compound growth", "type": "line", "controls": [{"id": "rate", "label": "Annual return", "type": "slider", "min": 0, "max": 15, "step": 0.25, "value": 7, "unit": "%"}, {"id": "start", "label": "Starting amount", "type": "number", "value": 5000, "unit": "$"}], "x": {"id": "year", "label": "Year", "from": 0, "to": 30, "steps": 120}, "series": [{"key": "balance", "label": "Balance", "expr": "start * pow(1 + rate/100, year)"}], "readouts": [{"label": "Final balance", "expr": "balance_last", "unit": "$"}], "unit": "$", "yLabel": "Balance"}
-  - `controls` (max 12): `type` is slider (the default), number, select (needs "options": [...]), or toggle. Every `id` must be a plain name, because the formulas reference it by that name.
-  - `x` is either a swept range — `from`/`to`/`steps` (max 400), each a number or a formula over the controls — or `{"id": "...", "values": [...]}` for fixed categories. To drive real rows instead, pass `"data": [{...}, ...]` and set `"x"` to the column name; formulas then also see that row's columns.
-  - `series[].expr` (max 8) is a formula over the control ids, the x variable (also available as `x`), `index` and `n`.
-  - `readouts` (optional, max 6) are scalars shown under the chart. Besides the controls they can use `<series key>_last`, `_first`, `_min`, `_max`, `_sum`, `_mean`.
-  - Formulas may use `+ - * / % ^`, comparisons, `&& || !`, `cond ? a : b`, `pi`, `e`, and only these functions: abs sqrt cbrt exp log ln log2 log10 sin cos tan asin acos atan sinh cosh tanh sign floor ceil trunc round(x[,digits]) sqr pow atan2 mod logb lerp clamp step min max hypot if(cond,a,b). There is nothing else — no assignment, no indexing, no other names.
-  Reach for it when the interesting part of an answer is an assumption worth playing with (a rate, a price, a threshold, a growth curve); use ```chart for numbers that are already fixed.
-- ```mermaid — diagrams (flowchart, sequenceDiagram, gantt, mindmap, timeline, ...).
-- ```html — a self-contained HTML document or fragment (inline CSS/JS, no network, no external files). It is shown as a sandboxed live preview with a Code/Preview toggle; inline scripts do not run there. Use it for a mock-up or a formatted layout. ```svg renders as an image.
-Maths renders when written inline as `$...$` and as a display block with `$$` on its own lines; do not use `\\(` `\\)` or `\\[` `\\]`.
-Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual.
-The `show` tool opens the same kinds of content (plus markdown and files on this Mac: PDFs, images, text) in a side panel beside the chat, with more room than an inline block. Use it when the user should look at something while you talk about it, e.g. a PDF they asked about or a full-page mock-up."""
+Besides markdown, the UI renders these fenced blocks inline:
+- ```chart: {"type": "bar" | "line" | "area" | "pie" | "scatter", "title": "...", "x": "<x/category key>", "series": ["<numeric key>", ...], "data": [{"<x key>": ..., "<numeric key>": ...}, ...], "stacked": false, "xLabel": "...", "yLabel": "...", "unit": "", "transforms": [{"op": "sort", "by": "<key>", "dir": "desc"}, {"op": "limit", "n": 10}]}. `data` is one object per x value, under 200 rows. `transforms` is optional (sort, limit, filter {field, cmp, value}, group {by, agg: {<key>: "sum|mean|count|min|max"}}).
+- ```interactive: a chart the user steers with controls; it recomputes as they drag, with no new request: {"title": "Compound growth", "type": "line", "controls": [{"id": "rate", "label": "Annual return", "type": "slider", "min": 0, "max": 15, "step": 0.25, "value": 7, "unit": "%"}], "x": {"id": "year", "label": "Year", "from": 0, "to": 30, "steps": 120}, "series": [{"key": "balance", "label": "Balance", "expr": "5000 * pow(1 + rate/100, year)"}], "readouts": [{"label": "Final", "expr": "balance_last", "unit": "$"}], "yLabel": "Balance"}
+  - `controls` (max 12): `type` slider (default), number, select (needs "options": [...]) or toggle; `id` is a plain name.
+  - `x`: a swept range `from`/`to`/`steps` (max 400; numbers or formulas), or `{"id": "...", "values": [...]}` for categories; or pass `"data": [{...}]` and set `"x"` to a column name (formulas then see its columns).
+  - `series[].expr` (max 8): a formula over the control ids, the x variable (also `x`), `index`, `n`.
+  - `readouts` (optional, max 6): scalars; may use `<series key>_last|_first|_min|_max|_sum|_mean`.
+  - Formulas: `+ - * / % ^`, comparisons, `&& || !`, `cond ? a : b`, `pi`, `e`, and only these functions: abs sqrt cbrt exp log ln log2 log10 sin cos tan asin acos atan sinh cosh tanh sign floor ceil trunc round(x[,digits]) sqr pow atan2 mod logb lerp clamp step min max hypot if(cond,a,b). No assignment, indexing or other names.
+  Use it for assumptions worth playing with, ```chart for fixed numbers.
+- ```mermaid: diagrams.
+- ```html: a self-contained document or fragment (inline CSS, no network or external files), shown as a sandboxed preview with a Code/Preview toggle; inline scripts do not run. ```svg renders as an image.
+Maths: inline `$...$`, display `$$` on its own lines; not `\\(` `\\)` or `\\[` `\\]`.
+The `show` tool opens these (plus markdown and Mac files) in a side panel beside the chat."""
 
 # The Texts conversation is answered on the user's phone (telegram.py).
 TELEGRAM_HINT = ("You are talking over Telegram on the user's phone. Reply first in one or two lines, then work. At meaningful milestones send a "
@@ -1479,37 +1478,30 @@ TELEGRAM_HINT = ("You are talking over Telegram on the user's phone. Reply first
                  "reach the phone; the final reply may carry them too.")
 
 # Always on, every path (chats, desks, subagents, scheduled jobs, drafts, Telegram): static, so it sits in the cached prefix.
-NO_EMOJI_HINT = "Don't use emoji in replies, documents, or messages unless the user explicitly asks for them."
+NO_EMOJI_HINT = "No emoji in replies, documents or messages unless asked."
 
-TOOLS_HINT = ("You have tools. Reach for them whenever they could make the answer more accurate, more current or grounded in "
-              "the user's own data; answer directly only when nothing you could look up would change it. "
-              "Be direct: when what is already in front of you answers the question, answer it in plain text — do not make "
-              "tool calls or retrieve context that would not change the answer. "
-              "After using tools, write the final answer for the user. "
+TOOLS_HINT = ("Use tools when they would make the answer more accurate, current or grounded in the user's data. "
+              "Be direct: when what is already in front of you answers the question, skip them. "
               + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT + " " + FENCE_RULE)
 # The agent stance for an ordinary chat (desks and scheduled runs carry their own). Text only: the leash is the
 # alwaysAsk list and the approval cards, so the model is told to act and let the app stop it where a card is due.
 PROACTIVE_HINT = (  # chats that cannot delegate (a persona without the hand-off tools); a delegating chat gets FRONT_AGENT_HINT
     "## How to work\n"
-    "You are an agent, not a lookup. Own the request end to end: do the obvious work with your tools instead of "
-    "describing it or asking for what you could find out yourself. When a request touches time, people or commitments, "
-    "check the calendar, inbox or todos first and say what you found that bears on it (a clash, a reply waiting, a "
-    "deadline). Act where the app lets you; it stops you where an approval is needed, so do not ask permission in advance. "
-    "Prefer a draft or proposal over a silent change to anything the user owns. If they describe a recurring want, offer "
-    "schedule_task once. End with at most one specific next step you can do right now, or none; never a generic offer. "
-    "A wrong suggestion costs more than silence. "
+    "When a request touches time, people or commitments, "
+    "check the calendar, inbox or todos first and say what bears on it. Act where the app lets you; it stops you where "
+    "an approval is needed, so do not ask permission in advance. Prefer a draft or proposal over a silent change. "
+    "If they describe a recurring want, offer schedule_task once. End with at most one specific next step you can do "
+    "now, or none. "
     + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT
 )
 # A plain chat turn that can delegate is told this instead of PROACTIVE_HINT and PLAN_HINT (workers.py).
 FRONT_AGENT_HINT = workers_mod.FRONT_AGENT_HINT
 # Only added when todo_write is actually available in this chat (see _chat_stream).
-PLAN_HINT = ("When a request needs more than a couple of tool calls, open with todo_write to lay out the steps, then update it "
-             "as each one lands. Your current plan is re-sent to you at the end of every round, so it — not your memory of "
-             "earlier rounds — is what keeps a long task on track. If a decision is genuinely the user's, call ask_user once "
-             "instead of guessing.")
+PLAN_HINT = ("For more than a couple of tool calls, open with todo_write and update it as steps land."
+             " If a decision is genuinely the user's, call ask_user once instead of guessing.")
 # Only added when save_memory or search_memory is available in this chat. Static text: it sits in the cached prefix.
-MEMORY_HINT = ("Save corrections, standing instructions and durable facts the user states with save_memory (kind instruction for always/never rules, until for facts that stop holding on a date).\n"
-               "Call search_memory before answering a question about the user's past or preferences that is not already in context.")
+MEMORY_HINT = ("Save corrections, standing instructions and durable facts with save_memory (kind instruction for always/never rules; until for facts that expire).\n"
+               "Call search_memory before answering about the user's past or preferences not already in context.")
 
 
 def _today_hint() -> str:

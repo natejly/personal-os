@@ -11,6 +11,7 @@ import ChatControls from './ChatControls'
 import ContextDrawer from './ContextDrawer'
 import ResizeHandle from './ResizeHandle'
 import WorkersPanel from './WorkersPanel'
+import ProgressCard from './ProgressCard'
 import ShowPanel from './ShowPanel'
 import ChatFilesButton from './ChatFilesPanel'
 import { fenced, usePageContext } from '../lib/pageContext'
@@ -197,6 +198,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
             </button>
           )}
           <WorkersPanel conversationId={conversationId} />
+          <ProgressCard conversationId={conversationId} desk={desk} />
           <Composer conversationId={conversationId} footer={<ChatControls conversationId={conversationId} />} />
         </div>
         {showing && <ShowPanel conversationId={showKey} />}

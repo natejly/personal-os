@@ -19,8 +19,8 @@ const TABS: { key: Tab; label: string }[] = [{ key: 'context', label: 'Context' 
 /**
  * The side panel of a chat, beside the transcript: Files and Changes for every chat; Checklist once the agent keeps one,
  * Workers once it has started any, and Review once it has a desk (a chat working autonomously), which comes forward when
- * the desk asks for it. The checklist and finished workers live here, not above the composer: the main agent's own
- * progress has no status card (lib/statusChrome). Without a desk, Files is the chat's own list. Context (the store's
+ * the desk asks for it. The full checklist and finished workers live here; a multi-step
+ * checklist or plan also shows a compact progress card above the composer (ProgressCard). Without a desk, Files is the chat's own list. Context (the store's
  * `contextOpen`) is always there and wins while requested; a draft chat with no id has only that tab.
  */
 export default function DeskPanel({ desk, conversationId, onClose }: { desk?: FullDesk | null; conversationId?: string; onClose: () => void }): JSX.Element {

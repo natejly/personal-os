@@ -74,7 +74,7 @@ export default function SendToSpace({ items, disabled, title }: { items: SendIte
     <>
       <button
         className={`icon-btn no-drag send-btn${sent ? ' on' : ''}`}
-        title={title ?? 'Send to space'}
+        title={title ?? 'Send to canvas'}
         disabled={disabled || !items.length}
         onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect()
@@ -86,11 +86,11 @@ export default function SendToSpace({ items, disabled, title }: { items: SendIte
       </button>
       {at && (
         <Popover at={at} onClose={close}>
-          <h4>Send to space</h4>
+          <h4>Send to canvas</h4>
           {order.map((id) => <SendRow key={id} canvasId={id} onPick={(cid) => void send(cid)} />)}
           <button className="send-row new" onClick={() => void sendToNew()}>
             <Plus size={12} className="send-row-icon" />
-            <span className="project-name">New space</span>
+            <span className="project-name">New canvas</span>
           </button>
         </Popover>
       )}

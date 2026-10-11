@@ -18,6 +18,8 @@ export interface DiffLine {
   newNo: number | null
   /** Set on a del/add pair that is a rewording, so the row can highlight just the words that moved. */
   parts?: WordPart[]
+  /** True on a del/add pair that is a rewording; `parts` is then computed on first read. */
+  reworded?: boolean
 }
 
 export interface Hunk {
@@ -227,9 +229,13 @@ export function diffLines(before: string, after: string): DiffLine[] {
       const del = lines[i + k]
       const add = lines[dEnd + k]
       if (similarity(del.text, add.text) >= REWORD_THRESHOLD) {
-        const { before: bp, after: ap } = wordDiff(del.text, add.text)
-        del.parts = bp
-        add.parts = ap
+        // The word-level diff is the expensive part, so it runs the first time a row reads `parts` (DiffView only
+        // reads the rows it draws), once per pair.
+        let both: ReturnType<typeof wordDiff> | undefined
+        const get = (): ReturnType<typeof wordDiff> => (both ??= wordDiff(del.text, add.text))
+        del.reworded = add.reworded = true
+        Object.defineProperty(del, 'parts', { get: () => get().before, enumerable: true, configurable: true })
+        Object.defineProperty(add, 'parts', { get: () => get().after, enumerable: true, configurable: true })
       }
     }
     i = aEnd - 1
@@ -244,7 +250,7 @@ export function diffStat(lines: DiffLine[]): DiffStat {
   for (const l of lines) {
     if (l.op === 'add') added++
     else if (l.op === 'del') removed++
-    if (l.parts) changed++
+    if (l.reworded) changed++
   }
   return { added, removed, changed: Math.floor(changed / 2) }
 }

@@ -3,7 +3,7 @@ import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite, splitSources } from '../lib/remarkCites'
 import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2, Zap } from 'lucide-react'
-import type { Attachment, Message, RunChanges, ToolEvent } from '@shared/types'
+import type { Attachment, Message, RunChanges, Span, ToolEvent } from '@shared/types'
 import { useStore, useMessageSubagents, useSubagents } from '../store'
 import { api } from '../lib/api'
 import { fetchBlobUrl } from '../features/notes/api'
@@ -12,7 +12,7 @@ import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 import { ShowCtx } from './ShowButton'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
-import { replyMetrics } from '../lib/replyMetrics'
+import { replyEffort, replyMetrics } from '../lib/replyMetrics'
 import { compactCount } from '../lib/usageFormat'
 import { parseChatMessage } from '../lib/chatLink'
 import { parseQuotedMessage } from '../lib/selectionActions'
@@ -69,8 +69,11 @@ function SaveSkill({ conversationId, messageId }: { conversationId: string; mess
 }
 
 /** A reply's trace: one plain gray line per step (the thinking summary, then each quiet tool call). Nothing opens; the live step shimmers. */
-function ReplyActivity({ reasoning, events, conversationId, streaming, answering }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; streaming: boolean; answering: boolean }): JSX.Element {
+function ReplyActivity({ reasoning, events, conversationId, streaming, answering, trace }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; streaming: boolean; answering: boolean; trace?: Span[] | null }): JSX.Element {
   const subs = useSubagents(conversationId)
+  // The effort this reply ran with; a reply from before it was recorded falls back to the chat's current setting.
+  const effort = replyEffort(trace) ?? useStore.getState().sessions[conversationId]?.conversation.settings?.effort
+  const effortLabel = effort && effort !== 'default' ? effort : null
   const live = streaming && !answering
   const lines = traceLines(reasoning, events)
   // The live step is the call in flight (or its subagents) when there is one, else the newest summary line.
@@ -82,6 +85,7 @@ function ReplyActivity({ reasoning, events, conversationId, streaming, answering
         const isLive = live && i === lines.length - 1
         return <div key={i} role="listitem" className={`trace-line ${l.error ? 'err' : ''} ${isLive ? 'shimmer' : ''}`}>{isLive && now && !l.error ? now : l.text}</div>
       })}
+      {effortLabel && <div className="trace-line trace-effort">{effortLabel} effort</div>}
     </div>
   )
 }
@@ -309,7 +313,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
         ) : (
           <div className="msg-body">
             <BodyBoundary resetKey={message.id}>
-              {(message.reasoning || folded.length > 0) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!content} />}
+              {(message.reasoning || folded.length > 0) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!content} trace={message.trace} />}
               {trail && <ResearchTrail trail={trail} />}
               {!isUser && <SubagentThread messageId={message.id} conversationId={message.conversation_id} events={events ?? []} />}
               {shown.length > 0 && <ToolEvents events={shown} conversationId={message.conversation_id} streaming={streaming} browserSession={browserSession} />}

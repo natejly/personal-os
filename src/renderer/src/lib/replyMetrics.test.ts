@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { replyMetrics } from './replyMetrics'
+import { replyEffort, replyMetrics } from './replyMetrics'
 import { compactCount } from './usageFormat'
 import type { Span } from '@shared/types'
 
@@ -49,4 +49,11 @@ test('compactCount stays exact under a thousand and abbreviates above it', () =>
   assert.equal(compactCount(999), '999')
   assert.equal(compactCount(1234), '1.2k')
   assert.equal(compactCount(12_345), '12k')
+})
+
+test('replyEffort reads the effort off the first model round, else null', () => {
+  const sp = (meta: Record<string, unknown>): Span => ({ id: 'a', kind: 'llm', name: 'm', start: 0, end: 1, meta, error: null }) as Span
+  assert.equal(replyEffort([sp({ effort: 'medium' })]), 'medium')
+  assert.equal(replyEffort([sp({})]), null)
+  assert.equal(replyEffort(null), null)
 })

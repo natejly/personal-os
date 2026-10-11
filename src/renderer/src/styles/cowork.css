@@ -12,14 +12,6 @@
 }
 .desk-badge.ask { background: color-mix(in srgb, var(--st-needs-you) 16%, transparent); color: var(--st-needs-you); }
 
-/* ---- status ring: the app-wide --st-* vocabulary, read by the desk strip's ring.
-   Working is amber, anything waiting on you is the accent. ---- */
-.desk-ring-draft, .desk-ring-paused, .desk-ring-queued, .desk-ring-stopped { --ring: var(--st-idle); }
-.desk-ring-planning, .desk-ring-working { --ring: var(--st-working); }
-.desk-ring-awaiting_plan, .desk-ring-needs_approval, .desk-ring-blocked, .desk-ring-review { --ring: var(--st-needs-you); }
-.desk-ring-interrupted, .desk-ring-failed { --ring: var(--st-failed); }
-.desk-ring-done { --ring: var(--st-done); }
-
 /* ---- autonomy options ---- */
 .desk-autonomy { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
 .desk-autonomy-opt {
@@ -201,11 +193,11 @@
 .aplan-invalid { margin: 4px 0 0; font-size: 11.5px; color: var(--danger); }
 
 .aplan-foot { margin-top: 10px; display: flex; flex-direction: column; gap: 7px; }
-.aplan-note, .aplan-answer {
+.aplan-note {
   width: 100%; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
   padding: 6px 9px; color: var(--text); font: inherit; font-size: 12.5px; outline: 0; resize: vertical;
 }
-.aplan-note:focus, .aplan-answer:focus { border-color: var(--accent); }
+.aplan-note:focus { border-color: var(--accent); }
 .aplan-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .aplan-decided { margin: 8px 0 0; }
 
@@ -273,7 +265,6 @@
 /* ---- Cowork settings ---- */
 .cowork-settings { display: flex; flex-direction: column; gap: 10px; }
 .cowork-settings h4 { margin: 14px 0 0; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
-.cowork-num input { max-width: 120px; }
 .cowork-net .seg { align-self: flex-start; }
 .cowork-error { margin: 0; color: var(--danger); font-size: 12px; }
 .cowork-env-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

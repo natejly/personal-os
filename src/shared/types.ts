@@ -55,8 +55,6 @@ export interface ContextUsed {
   pinned?: { document_id: string; name: string }[]
   /** The always-on standing preferences (pinned rows plus preference and instruction rows) carried in the system prompt every turn. Absent on older messages. */
   profile?: { id: string; content: string; project_id: string | null; pinned: boolean }[]
-  /** The reply was made in quick answer mode (shown as a quiet tag). */
-  quick?: boolean
   /** Items dropped per section because it hit its share of the model's context window. */
   trimmed?: Record<string, number>
   /** Built-in tools held out of the request until tool_search loads them (toolDeferAbove). Absent on older messages. */
@@ -130,34 +128,6 @@ export interface Skill {
   last_used_at?: number | null
   /** Why auto-learn suggested it: the friction it would remove, or what went wrong with the skill it revises. */
   rationale?: string
-}
-
-/** Teach a task: the step draft extracted from a screen recording (teach.py normalize). */
-export interface TeachStep {
-  n: number
-  app: string
-  action: string
-  detail: string
-  /** The recording frame that shows this step, when the model named one. */
-  frame: number | null
-}
-export interface TeachDraft {
-  title: string
-  goal: string
-  inputs: { name: string; example: string }[]
-  steps: TeachStep[]
-}
-export interface TeachRecording {
-  id: string
-  created_at: number
-  status: 'recording' | 'ready' | 'extracted' | 'saved'
-  source: 'screen' | 'import'
-  frame_count: number
-  steps: TeachDraft | null
-  skill_id: string | null
-  job_id: string | null
-  /** Seconds since Start, only while recording. */
-  elapsed?: number
 }
 
 /** A large tool result kept out of the model's context; `read_tool_result` pages it. */
@@ -848,8 +818,6 @@ export interface ConversationSettings {
   useStyle: boolean
   /** Explicit draft turn: the voice block is only injected while this is on (never on a tainted chat). Defaults off. */
   draftMode?: boolean
-  /** Quick answer mode: short answers, and the backend hides delegation and background-job tools. */
-  quick?: boolean
   /** This chat's reply style; absent reads as default. `responseStyleText` is the user's own wording for 'custom'. */
   responseStyle?: string
   responseStyleText?: string
@@ -1128,16 +1096,6 @@ export interface GoogleStatus {
   /** Connected, but the token is expired, revoked or short on scopes: sign in again. */
   needs_reauth: boolean
   reauth_reason: string | null
-}
-
-/** Which account Mail, Calendar and the agent's mail/calendar tools read from. One at a time. */
-export type PimProvider = 'google' | 'microsoft'
-
-export interface MicrosoftStatus extends GoogleStatus {
-  /** Entra object id: the identity sync keys on. */
-  oid: string | null
-  tenant: string | null
-  name: string | null
 }
 
 /** Verdict of the read-back that every external write goes through (backend verify.py).
@@ -1593,7 +1551,7 @@ export interface Settings {
    *  and are told to use coding_session_start. Missing means on. */
   codingRoute?: boolean
   /** The coding agent they are told to start. Missing means 'any' (the agent picks). */
-  codingAgent?: 'any' | 'opencode' | 'claude'
+  codingAgent?: 'any' | 'opencode' | 'claude' | 'pi'
   /** Background workers. Past `delegationAfterRounds` tool rounds in one reply the assistant hands remaining work to a worker (default on, 2, 1-20). */
   delegationForce?: boolean
   delegationAfterRounds?: number
@@ -1620,15 +1578,6 @@ export interface Settings {
   workspaceRoots?: string[]
   /** New chats start working autonomously (Ask as it goes) unless switched off per chat. Missing means on. */
   autonomousByDefault?: boolean
-  /** Mount the active desk's workspace at /workspace/desk in its sandbox container. Missing means on. */
-  sandboxMountDesk?: boolean
-  /** Linux sandbox containers: the image a fresh one starts from, the CLI. */
-  sandboxImage?: string
-  sandboxRuntime?: 'docker' | 'podman' | 'nerdctl'
-  /** A stopped sandbox nobody came back to is removed after this many days (0 = never). */
-  sandboxKeepDays?: number
-  /** The Linux sandbox's network: none, an allowlisting proxy (registries plus shellAllowedDomains), or open. A legacy stored true reads as open. */
-  sandboxNetwork?: 'off' | 'proxy' | 'open' | boolean
   /** Host shell. shellNetwork opens the network entirely; off, only the allowlist below is reachable. */
   shellNetwork?: boolean
   shellTimeoutSec?: number
@@ -1696,10 +1645,6 @@ export interface Settings {
   responseStyleText?: string
   googleClientId: string
   googleClientSecret: string
-  /** Entra app (public client, no secret). Tenant is `common` when blank. */
-  microsoftClientId: string
-  microsoftTenant: string
-  pimProvider: PimProvider
   /** Undo window on outgoing mail. `seconds` is clamped to 60-120 by the backend. */
   gmailSendHold?: { enabled: boolean; seconds: number }
 }
@@ -1859,9 +1804,9 @@ export type BackgroundEvent =
   /** A coding session moved (codingagents.py): the whole summary row. */
   | { event: 'coding_session'; data: CodingSession }
 
-/** GET /coding-sessions: one background Claude Code or OpenCode session started through the coding_session_* tools. */
+/** GET /coding-sessions: one background Claude Code, OpenCode or pi session started through the coding_session_* tools. */
 export interface CodingSession {
-  id: string; agent: 'claude' | 'opencode'; name: string
+  id: string; agent: 'claude' | 'opencode' | 'pi'; name: string
   status: 'starting' | 'working' | 'needs_you' | 'blocked' | 'done' | 'stopped' | 'failed'
   attention: Attention; detail: string | null; repo_path: string; worktree: string; branch: string | null
   external_id: string | null; model: string | null; permission_mode: string | null; log_tail: string
@@ -1894,11 +1839,6 @@ export interface ShellJobInfo {
 }
 export interface ShellJobTail extends ShellJobInfo { output: string; note?: string }
 
-/** One sandbox container (GET /sandboxes). conversation_id is null for one made before containers were labelled. */
-export interface SandboxInfo {
-  name: string; conversation_id: string | null; title: string | null; status: string; created: string
-  last_used: number | null; networked: boolean | null; holds_import: boolean; checkpoints: string[]
-}
 export interface TelegramStatus {
   enabled: boolean
   has_token: boolean
@@ -1910,8 +1850,6 @@ export interface TelegramStatus {
   last_poll_at: number | null
   pairing: { code: string; link: string; expires_at: number } | null
 }
-
-export interface SandboxStatus { available: boolean; runtime: string; reason: string; items: SandboxInfo[] }
 
 export interface BackupInfo {
   name: string; kind: 'daily' | 'manual' | 'premigrate' | 'prerestore'; created_at: number; size: number
@@ -2408,34 +2346,6 @@ export interface DocRevision {
   /** GET /docs/revisions/{id} only: a unified diff, for copying out. */
   patch?: string
 }
-/** One window captured in a space preset: content + geometry, no live state (state/popout are not kept). */
-export interface PresetWindow {
-  kind: WidgetKind
-  ref_id: string | null
-  project_id: string | null
-  title: string
-  x: number; y: number; w: number; h: number
-  z: number
-  pinned: number /** 0 | 1 */
-  /** window alpha while popped, 0.2..1 */
-  opacity: number
-  config: Record<string, unknown>
-}
-/** A named, user-saved template of a space. Instantiating it creates a new Canvas. */
-export interface CanvasPreset {
-  id: string
-  name: string
-  project_id: string | null
-  snap_mode: SnapMode
-  grid_size: number
-  zoom: number; pan_x: number; pan_y: number
-  wallpaper: string
-  windows: PresetWindow[]
-  created_at: number
-  updated_at: number
-}
-/** POST /canvas-presets/{id}/instantiate: the new canvas plus how many preset windows were dropped (dangling refs). */
-export type InstantiatedCanvas = Canvas & { skipped: number }
 
 export type DragKind =
   | 'conversation' | 'todo' | 'document' | 'memory' | 'project' | 'file' | 'nav'

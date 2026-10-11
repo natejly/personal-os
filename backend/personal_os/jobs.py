@@ -446,7 +446,8 @@ class Jobs:
                budget: dict[str, Any] | None = None, mail_query: str | None = None, target: str = "run",
                desk_autonomy: str | None = None, desk_budget: dict[str, Any] | None = None,
                calendar_query: str | None = None, calendar_id: str | None = None, minutes_before: int = 15,
-               only_on_change: bool = False, agent_id: str | None = None) -> dict[str, Any]:
+               only_on_change: bool = False, agent_id: str | None = None,
+               origin_conversation_id: str | None = None) -> dict[str, Any]:
         tz = timezone or local_tz_name()
         t = at if at is not None else now()
         jid = new_id()
@@ -458,15 +459,15 @@ class Jobs:
         with self.db.tx() as c:
             c.execute("INSERT INTO jobs(id, name, kind, cron, run_at, timezone, enabled, prompt, project_id, next_due_at, "
                       "created_at, updated_at, max_retries, allowed_tools, watch_dir, watch_seen, notify, model, budget, "
-                      "mail_query, target, desk_autonomy, desk_budget, calendar_query, calendar_id, minutes_before, only_on_change, agent_id) "
-                      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      "mail_query, target, desk_autonomy, desk_budget, calendar_query, calendar_id, minutes_before, only_on_change, agent_id, origin_conversation_id) "
+                      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (jid, name, kind, cron, run_at, tz, int(enabled), prompt, project_id, nxt, t, t, int(max_retries),
                        None if allowed_tools is None else json.dumps(list(allowed_tools)), watch_dir,
                        json.dumps(scan_dir(watch_dir)) if watch_dir else None, notify, model,
                        json.dumps(budget) if budget else None, mail_query, target,
                        (desk_autonomy or "plan") if target == "desk" else desk_autonomy,
                        json.dumps(desk_budget) if desk_budget else None, calendar_query, calendar_id,
-                       int(minutes_before), int(only_on_change), agent_id or None))
+                       int(minutes_before), int(only_on_change), agent_id or None, origin_conversation_id or None))
         return self.get(jid)  # type: ignore[return-value]
 
     def update(self, id: str, patch: dict[str, Any], at: float | None = None) -> dict[str, Any] | None:

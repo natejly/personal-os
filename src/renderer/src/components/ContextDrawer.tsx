@@ -168,7 +168,8 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
   )
 }
 
-export default function ContextDrawer({ conversationId }: { conversationId?: string }): JSX.Element {
+/** `embedded`: the body only, as a tab of the chat's side panel (no drawer chrome, closed by the panel). */
+export default function ContextDrawer({ conversationId, embedded }: { conversationId?: string; embedded?: boolean }): JSX.Element {
   const convo = useConversation(conversationId)
   const draftProjectId = useStore((s) => s.draftProjectId)
   const settings = useStore((s) => s.settings)
@@ -221,12 +222,13 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
     return () => clearTimeout(t)
   }, [tab, query, projectId, cs.useMemory, cs.useGraph, cs.useDocuments, cs.useStyle, cs.draftMode])
 
+  const Wrap = embedded ? 'div' : 'aside'
   return (
-    <aside className="context-drawer">
-      <header>
+    <Wrap className={embedded ? 'desk-pane scroll context-embedded' : 'context-drawer'}>
+      {!embedded && <header>
         <h3>Context</h3>
         <button className="icon-btn" aria-label="Close context panel" onClick={toggleContext}><X size={16} /></button>
-      </header>
+      </header>}
 
       <section className="ctx-section">
         <h4>Scope</h4>
@@ -298,6 +300,6 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
           {preview && <ContextUsedView ctx={preview} />}
         </div>
       )}
-    </aside>
+    </Wrap>
   )
 }

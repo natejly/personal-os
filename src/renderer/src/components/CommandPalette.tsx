@@ -38,7 +38,7 @@ export default function CommandPalette(): JSX.Element {
     ...SETTINGS_TABS.map((t) => ({ key: `settings:${t.id}`, label: t.label, hint: 'Settings', run: () => s.openSettings(t.id) })),
     // Advanced groups people look for by name.
     ...([['cowork', 'Desks and workers'], ['data', 'Data'], ['behavior', 'Assistant']] as const)
-      .map(([id, label]) => ({ key: `settings:advanced:${id}`, label, hint: 'Settings · Advanced', run: () => s.openSettings(id) }))
+      .map(([id, label]) => ({ key: `settings:advanced:${id}`, label, hint: 'Settings', run: () => s.openSettings(id) }))
   ]
   const needle = q.trim().toLowerCase()
   const shown = needle ? entries.filter((e) => `${e.label} ${e.hint}`.toLowerCase().includes(needle)) : entries

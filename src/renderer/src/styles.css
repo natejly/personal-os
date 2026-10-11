@@ -900,10 +900,19 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
   display: flex; flex-direction: column; overflow: hidden;
 }
 .settings-body { flex: 1; min-height: 0; display: flex; }
+.settings-rail { flex: 0 0 200px; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); }
+.settings-search { display: flex; align-items: center; gap: 6px; margin: 12px 10px 0; padding: 5px 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-faint); }
+.settings-search input { flex: 1; min-width: 0; border: 0; background: transparent; outline: 0; padding: 0; font-size: 13px; color: var(--text); }
+.settings-hits { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; overflow-y: auto; }
+.settings-hits button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 6px 10px; border-radius: 8px; font-size: 13px; text-align: left; }
+.settings-hits button:hover { background: var(--hover); }
+.settings-hits small, .settings-tabs .tab-hint { display: block; font-size: 11px; font-weight: 400; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; }
 .settings-tabs {
-  flex: 0 0 200px; display: flex; flex-direction: column; gap: 2px;
-  padding: 12px 10px; overflow-y: auto; border-right: 1px solid var(--border);
+  flex: 1; display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px 12px; overflow-y: auto; min-height: 0;
 }
+.set-sec { scroll-margin-top: 8px; border-radius: 8px; transition: background 0.4s; }
+.set-sec.set-flash { background: var(--hover); }
 .settings-tabs button {
   display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 8px;
   font-size: 13px; color: var(--text-muted); text-align: left;
@@ -984,7 +993,9 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
   .modal header, .modal section, .modal footer { padding-left: 14px; padding-right: 14px; }
   /* No room for a side rail: the tabs become a scrolling strip above the pane. */
   .settings-body { flex-direction: column; }
-  .settings-tabs { flex: 0 0 auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 8px 10px; }
+  .settings-rail { flex: 0 0 auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  .settings-tabs { flex: 0 0 auto; flex-direction: row; overflow-x: auto; padding: 8px 10px; }
+  .settings-tabs .tab-hint { display: none; }
   .settings-tabs button { flex: 0 0 auto; }
   /* In the strip a group label is an inline marker between runs of tabs. */
   .settings-tab-group, .settings-tab-group:first-child { flex: 0 0 auto; align-self: center; padding: 0 4px 0 12px; }
@@ -1090,6 +1101,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .context-drawer { width: var(--context-drawer-w, 340px); border-left: 1px solid var(--border); background: var(--bg-elev); display: flex; flex-direction: column; overflow-y: auto; font-size: 13px; flex-shrink: 0; }
 .context-drawer > header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg-elev); z-index: 1; }
+.context-embedded { font-size: 13px; padding: 0; }
 .context-drawer h3 { margin: 0; font-size: 14px; }
 /* The side panel beside a chat: what the `show` tool (or "Open in panel" on a block) put there. The reply's own
    block renderers fill it edge to edge; its resize handle sits inside its own left edge. */

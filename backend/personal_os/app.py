@@ -85,7 +85,7 @@ from . import permissions, permrules
 from . import egress
 from . import shell as shell_tool
 from . import ship as ship_mod
-from . import codingagents
+from . import codingagents, coding_events
 from . import workers as workers_mod
 from .subagents import UNATTENDED_KINDS, USER_NOTE, AgentDefs, Subagents, parallel_safe
 from .commands import Commands
@@ -659,7 +659,8 @@ QUESTION_TOOLS = frozenset({"desk_ask", "ask_user"})
 
 PERSONA_FOLDER_HINT = ("## Working folder\nThis agent keeps its work in `{path}`. Start there: pass it as cwd to shell_run and "
                        "opencode_run and as root to the fs_* tools. For a whole coding task (a feature, a fix, a refactor) prefer "
-                       "coding_session_start (or opencode_run for a quick one) with a self-contained brief, then check its diff. "
+                       "coding_session_start (or opencode_run for a quick one) with a self-contained brief (omit `agent` to use the "
+                       "user's default coding agent; pass it only if they asked for a specific one), then check its diff. "
                        "Say which files changed.")
 
 
@@ -5852,6 +5853,13 @@ async def get_coding_session(id: str) -> dict[str, Any]:
 async def coding_session_logs(id: str, limit: int = 4000) -> dict[str, Any]:
     row = _coding_row(id)
     return {"id": id, "output": row["log_tail"][-_clamp(limit, 50_000):], "status": row["status"]}
+
+
+@app.get("/coding-sessions/{id}/events")
+async def coding_session_events(id: str, after: int = 0, limit: int = 500) -> dict[str, Any]:
+    """The session's structured live feed, oldest first: events with seq above `after`."""
+    _coding_row(id)
+    return {"events": coding_events.list_after(db, id, max(0, after), _clamp(limit, coding_events.CAP))}
 
 
 @app.get("/coding-sessions/{id}/diff")

@@ -58,7 +58,9 @@ class CodingTestCase(unittest.IsolatedAsyncioTestCase):
         p = unittest.mock.patch.object(ca, "claude_binary", return_value="/bin/claude")
         p.start()
         self.addCleanup(p.stop)
-        for q in (unittest.mock.patch.object(ca, "DAEMON_FILE", self.tmp / "no-daemon.json"),
+        for q in (unittest.mock.patch.object(ca.opencode, "binary", return_value="/bin/opencode"),
+                  unittest.mock.patch.object(ca.pi, "binary", return_value="/bin/pi"),
+                  unittest.mock.patch.object(ca, "DAEMON_FILE", self.tmp / "no-daemon.json"),
                   unittest.mock.patch.object(ca, "login_path", return_value=None)):
             q.start()
             self.addCleanup(q.stop)

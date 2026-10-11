@@ -23,6 +23,10 @@ test('the Coding sessions list shows a stubbed session; Stop posts to /stop and 
       row = session({ status: 'stopped', attention: 'idle', ended_at: 3 })
       return route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify(row) })
     }
+    if (url.pathname.endsWith('/events')) {
+      const events = [{ id: 1, session_id: 'cs1', seq: 1, ts: '2026-01-01T00:00:00Z', kind: 'tool', text: 'tests/flaky.py', tool: 'Edit', data: null }]
+      return route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify({ events }) })
+    }
     return route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify({ sessions: [row] }) })
   })
   await newChat(page)
@@ -32,7 +36,7 @@ test('the Coding sessions list shows a stubbed session; Stop posts to /stop and 
   await expect(section).toContainText('Claude Code')
   await expect(section).toContainText('Editing tests/flaky.py')
   await section.getByRole('button', { name: /Fix the flaky test/ }).click()
-  await expect(section).toContainText('step two')
+  await expect(section.getByRole('log')).toContainText('tests/flaky.py')
   await section.getByRole('button', { name: 'Stop', exact: true }).click()
   await expect.poll(() => posts, { timeout: 30_000 }).toEqual(['/coding-sessions/cs1/stop'])
   await expect(section).toContainText('stopped')

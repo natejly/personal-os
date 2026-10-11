@@ -806,6 +806,7 @@ export default function AgentInbox(): JSX.Element | null {
   const draft = useStore((s) => s.routineDraft)
   const [showArchived, setShowArchived] = useState(false)
   const [archivedRuns, setArchivedRuns] = useState<ArchivedInboxRun[]>([])
+  const [archivedQ, setArchivedQ] = useState('')
   const awayCount = box?.while_you_were_away.length
   useEffect(() => {
     if (showArchived) void api.inboxArchived().then(setArchivedRuns).catch(() => undefined)
@@ -953,9 +954,10 @@ export default function AgentInbox(): JSX.Element | null {
       {showArchived && (
         <div className="inbox-group">
           <h5>Archived <span className="muted small">{archivedRuns.length} message{archivedRuns.length === 1 ? '' : 's'}</span></h5>
+          {archivedRuns.length > 0 && <input type="search" className="inbox-archive-search" placeholder="Search archived messages" aria-label="Search archived messages" value={archivedQ} onChange={(e) => setArchivedQ(e.target.value)} />}
           {archivedRuns.length === 0 ? <p className="muted">Nothing archived.</p> : (
             <ul className="inbox-list">
-              {archivedRuns.map((r) => (
+              {archivedRuns.filter((r) => `${r.job} ${r.error ?? ''} ${r.summary ?? ''}`.toLowerCase().includes(archivedQ.trim().toLowerCase())).map((r) => (
                 <li className="inbox-item mail-row seen" key={r.run_id}>
                   <div className="inbox-row">
                     <span className="inbox-job">{r.job}</span>

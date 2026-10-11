@@ -149,12 +149,10 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌃⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>
         </div>
         {/* The full-window chat gives the last title-bar slot to its own workspace panel; ⌘I still opens the quick chat. */}
-        {conversationId ? <AppSwitcher /> : (
-          <div className="app-switcher no-drag">
-            <button className={`icon-btn${deskPanel ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={deskPanel} disabled={!convo?.id}
-              onClick={() => setDeskPanel((o) => !o)}><PanelRight size={15} /></button>
-          </div>
-        )}
+        <AppSwitcher last={conversationId ? undefined : (
+          <button className={`icon-btn${deskPanel ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={deskPanel} disabled={!convo?.id}
+            onClick={() => setDeskPanel((o) => !o)}><PanelRight size={15} /></button>
+        )} />
       </header>
 
       <div className="chat-body">

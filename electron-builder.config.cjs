@@ -17,11 +17,11 @@ const notarize = Boolean(
 module.exports = {
   appId: 'com.natejly.grain',
   productName: 'Grain',
-  files: ['out/**/*', 'package.json'],
+  files: ['out/main/**/*', 'out/preload/**/*', 'out/renderer/**/*', 'package.json'],
   // The python-build-standalone + backend bundle made by scripts/bundle-backend.sh.
   extraResources: [{ from: 'build/backend-bundle', to: 'backend' }],
   afterSign: 'scripts/adhoc-sign.cjs',
-  publish: [{ provider: 'github', owner: 'natejly', repo: 'personal-os' }],
+  publish: [{ provider: 'github', owner: 'natejly', repo: 'personal-os', releaseType: 'prerelease' }],
   mac: {
     category: 'public.app-category.productivity',
     target: ['dmg', 'zip'], // electron-updater applies updates from the zip

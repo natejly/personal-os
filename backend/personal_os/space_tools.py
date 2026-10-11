@@ -7,13 +7,23 @@ by app.py once the store exists, until then the tools are not offered.
 from __future__ import annotations
 
 import math
+import sqlite3
 from typing import Any
 
 from . import redact
 from .canvas import WIDGET_KINDS
-from .presets import REF_TABLES, _exists
 
 GAP, CELL_W, CELL_H, MAX_COLS, CASCADE_STEP = 16, 480, 560, 3, 32
+# needsRef kinds -> the table their ref_id must still exist in. Mirrors `needsRef` in
+# src/renderer/src/canvas/registry.ts (chat, doc, project; crew refs are not rows).
+REF_TABLES = {"chat": "conversations", "doc": "docs", "project": "projects"}
+
+
+def _exists(c: sqlite3.Connection, table: str, rid: str | None) -> bool:
+    """`table` only ever comes from REF_TABLES or the literal "projects", never from input."""
+    # A trashed project, chat or doc is as good as gone here: a window must not be pinned to it.
+    soft = " AND deleted_at IS NULL" if table in ("projects", "conversations", "docs") else ""
+    return bool(rid) and c.execute(f"SELECT 1 FROM {table} WHERE id=?{soft}", (rid,)).fetchone() is not None
 
 
 def _rects(n: int, layout: str) -> list[tuple[float, float, float, float]]:

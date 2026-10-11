@@ -60,9 +60,6 @@ export const FUNCTIONS: Record<string, Fn> = Object.assign(Object.create(null) a
   round: { min: 1, max: 2, call: (a: number[]) => { const p = Math.pow(10, a.length > 1 ? Math.trunc(a[1]) : 0); return Math.round(a[0] * p) / p } }
 })
 
-/** Names the grammar understands without a scope entry — used to work out an expression's free variables. */
-export const RESERVED: ReadonlySet<string> = new Set([...Object.keys(FUNCTIONS), ...Object.keys(CONSTANTS), 'if'])
-
 export class ExprError extends Error {}
 
 // ---------------------------------------------------------------- coercion

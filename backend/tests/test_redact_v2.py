@@ -1,4 +1,4 @@
-"""Redaction v2: validators, context scoring, allow/deny lists, URL sanitizing, telemetry.
+"""Redaction v2: validators, context scoring, URL sanitizing.
 
 Pure stdlib: no network, no model. Runs under pytest, or directly:
 python backend/tests/test_redact_v2.py
@@ -6,18 +6,18 @@ python backend/tests/test_redact_v2.py
 from __future__ import annotations
 
 import sys
-import tempfile
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import redact  # noqa: E402
-from personal_os.db import Database  # noqa: E402
 
 
-def v2(text: str, **kw) -> str:
-    return redact.scrub_v2(text, **kw)
+def v2(text: str) -> str:
+    out = text
+    for s in reversed(redact.analyze(text)):
+        out = out[:s.start] + s.replacement + out[s.end:]
+    return out
 
 
 def test_luhn_card_redacted_but_plain_ids_are_not() -> None:
@@ -49,36 +49,10 @@ def test_entropy_validator_and_hash_context() -> None:
     assert v2(f"commit {sha}") == f"commit {sha}"
 
 
-def test_allow_and_deny_lists() -> None:
-    oid = "4111 1111 1111 1111"
-    assert v2(f"order {oid}", allow=[oid.lower()]) == f"order {oid}"
-    out = v2("project Falcon and falcon9", deny=["falcon"])
-    assert "alcon" not in out and out.count("[redacted]") == 3 - 1 or "[redacted]" in out
-    out = v2("ticket ABC-1234 here", deny=["/[A-Z]{3}-\\d{4}/"])
-    assert "ABC-1234" not in out
-    spans = redact.analyze("ticket ABC-1234", deny=["/[A-Z]{3}-\\d{4}/"])
-    assert spans[0].entity == "custom" and spans[0].score == 1.0
-    assert redact.compile_patterns(["/(/"]) == []            # bad regex skipped
-
-
-def test_overlap_keeps_higher_score() -> None:
-    # An email contains no digits run; build an overlap via deny covering a card.
-    spans = redact.analyze("4111 1111 1111 1111", deny=["4111 1111 1111 1111"])
-    assert len(spans) == 1 and spans[0].entity == "custom"
-
-
 def test_threshold_drops_borderline() -> None:
     text = "card number: 1234567812345678"          # fails Luhn, kept on context at 0.5
     assert redact.analyze(text, threshold=0.4)
     assert not redact.analyze(text, threshold=0.6)
-
-
-def test_counts_never_hold_content() -> None:
-    counts: dict[str, int] = {}
-    v2("mail ada@example.com and 4111 1111 1111 1111, password is hunter2", counts=counts)
-    assert counts.get("email") == 1 and counts.get("card") == 1 and counts.get("secret") == 1
-    blob = repr(counts)
-    assert "ada" not in blob and "4111" not in blob and "hunter2" not in blob
 
 
 def test_sanitize_url() -> None:

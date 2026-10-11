@@ -62,7 +62,7 @@ def full_toolbox(google: Any = None) -> Toolbox:
     """
     tb = Toolbox(Stub(), Stub(), Stub(), lambda: {},  # type: ignore[arg-type]
                  modules=[stub_todos_module(), stub_health_module(), stub_module(MailWatchModule),
-                          stub_module(PlannerModule)], google=google or Stub(), sandboxes=Stub(),  # type: ignore[arg-type]
+                          stub_module(PlannerModule)], google=google or Stub(),  # type: ignore[arg-type]
                  docs=Stub(), outbox=Stub(), work_plans=Stub(), results=Stub(),
                  skills=Stub(), jobs=Stub(), style=Stub(),
                  desks=Stub(), workspace=Stub())

@@ -21,7 +21,6 @@ SECRET_SETTINGS = ("apiKey", "firecrawlApiKey", "braveApiKey", "tavilyApiKey", "
 # These settings are dicts; only the listed fields are secret, the rest (email, expiry, scopes) stays in SQLite.
 TOKEN_SECRET_FIELDS = {
     "googleToken": ("token", "refresh_token", "client_secret"),
-    "microsoftToken": ("access_token", "refresh_token"),
 }
 
 SCHEMA = """

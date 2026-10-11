@@ -206,6 +206,8 @@ function similarity(a: string, b: string): number {
 }
 
 const REWORD_THRESHOLD = 0.4
+/** Word-diff cells spent on one document; past it, reworded lines show as plain delete/add rows so a huge rewrite never stalls the editor. */
+const WORD_CELLS = 3_000_000
 
 /**
  * Line diff with intra-line refinement. A run of deletions immediately followed by additions is
@@ -216,6 +218,7 @@ export function diffLines(before: string, after: string): DiffLine[] {
   // insertion rather than as replacing a phantom blank line. ('a\n' really does end in a blank line.)
   const split = (s: string): string[] => (s === '' ? [] : s.split('\n'))
   const lines = lcsDiff(split(before), split(after))
+  let spent = 0
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].op !== 'del') continue
     let dEnd = i
@@ -226,7 +229,9 @@ export function diffLines(before: string, after: string): DiffLine[] {
     for (let k = 0; i + k < dEnd && dEnd + k < aEnd; k++) {
       const del = lines[i + k]
       const add = lines[dEnd + k]
-      if (similarity(del.text, add.text) >= REWORD_THRESHOLD) {
+      const cells = (del.text.length * add.text.length) / 9 // about three characters per token
+      if (spent + cells <= WORD_CELLS && similarity(del.text, add.text) >= REWORD_THRESHOLD) {
+        spent += cells
         const { before: bp, after: ap } = wordDiff(del.text, add.text)
         del.parts = bp
         add.parts = ap

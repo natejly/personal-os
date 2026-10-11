@@ -98,7 +98,7 @@ from .workflows import ApprovalError as WorkflowApprovalError, Engine as Workflo
 from .attention import for_job, for_run
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, args_digest
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
-from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
+from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
@@ -220,6 +220,8 @@ def _run_changed(run: Run) -> None:
     telegram_bridge.on_run_change(run)  # bound near the end of this module; it never raises
     if run.conversation_id in _wake_waiting and not run.answering:
         _schedule_wake(run.conversation_id)  # a worker finished while this reply was being written: its report goes in now
+    if run.conversation_id in _coding_waiting and not run.answering:
+        _schedule_coding_wake(run.conversation_id)  # a coding session settled while this reply was being written
     if _chat_waiting and not run.answering:  # any run ending may free the chat (or the desk slot) a cross-chat turn waits on
         for cid in list(_chat_waiting):
             _schedule_chat_delivery(cid)
@@ -2825,7 +2827,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     continue
                 args = c["_args"] or {}
                 sig = tools.call_key(c["name"], args)
-                repeats = repeats + 1 if sig == last_sig else 1
+                repeats = repeats + 1 if sig == last_sig and c["name"] not in WAITING_TOOLS else 1
                 last_sig = sig
                 if repeats >= REPEAT_LIMIT:  # before the approval gate: denying the same call forever is still a loop
                     partial = "loop"
@@ -4110,6 +4112,50 @@ async def _wake_conversation(conv_id: str) -> None:
     _wake_inflight.update(wake["ids"])
     run = bus.start(conv_id, lambda r: _run_chat(r, body), input=body.model_dump())
     run.task.add_done_callback(lambda _t: _wake_inflight.difference_update(wake["ids"]))
+
+
+# Coding sessions that settled and are owed to the chat that started them, and the chats whose wake waits for a reply to end.
+_coding_owed: dict[str, list[dict[str, Any]]] = {}
+_coding_waiting: set[str] = set()
+
+
+def _schedule_coding_wake(conv_id: str) -> None:
+    try:
+        asyncio.get_running_loop()
+        asyncio.ensure_future(_wake_coding(conv_id))
+    except RuntimeError:  # called from the threadpool (the watcher refreshes off the loop)
+        if _loop is not None and not _loop.is_closed():
+            _loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_wake_coding(conv_id)))
+
+
+def _coding_finished(row: dict[str, Any]) -> None:
+    """A coding session settled: hand it to the front agent as the same hidden wake turn a finished worker gets (NO_REPLY
+    when there is nothing new to say). Sessions started by an unattended run with no chat have nobody to tell."""
+    if cid := row.get("conversation_id"):
+        _coding_owed.setdefault(cid, []).append(row)
+        _schedule_coding_wake(cid)
+
+
+async def _wake_coding(conv_id: str) -> None:
+    if not _coding_owed.get(conv_id):
+        return
+    conv = convos.get(conv_id, with_messages=False)
+    if conv is None:  # the chat is gone: nobody to tell
+        _coding_owed.pop(conv_id, None)
+        return
+    if bus.answering(conv_id):
+        _coding_waiting.add(conv_id)  # _run_changed retries when the reply ends
+        return
+    _coding_waiting.discard(conv_id)
+    rows = _coding_owed.pop(conv_id)
+    text, wake = workers_mod.build_coding_wake(rows)
+    if desk_id := conv["settings"].get("deskId"):
+        if not isinstance(_launch_desk(desk_id, text, MESSAGE_FROM, wake=wake), Run):
+            _coding_owed.setdefault(conv_id, [])[:0] = rows
+            _coding_waiting.add(conv_id)
+        return
+    body = ChatIn(content=text, wake=wake)
+    bus.start(conv_id, lambda r: _run_chat(r, body), input=body.model_dump())
 
 
 # ---------------- chats messaging each other (chatlink.py) ----------------
@@ -5751,6 +5797,18 @@ async def _coding_run(argv: list[str], cwd: str, timeout: float, env: dict[str, 
 
 coding = codingagents.CodingSessions(db, toolbox.shell, _coding_run, events.publish, settings, tb=toolbox)
 codingagents.register(toolbox, coding)
+coding.on_finish = _coding_finished
+
+
+@app.on_event("startup")
+async def _coding_watch_startup() -> None:
+    app.state.coding_watch = asyncio.create_task(coding.watch(), name="coding-watch")
+
+
+@app.on_event("shutdown")
+async def _coding_watch_shutdown() -> None:
+    if t := getattr(app.state, "coding_watch", None):
+        t.cancel()
 
 
 class CodingSendIn(BaseModel):

@@ -255,19 +255,33 @@ class Ship:
         self._save(row)
 
     async def _cmd(self, row: dict[str, Any], argv: list[str], *, sandboxed: bool = False,
-                   timeout: float = GIT_TIMEOUT) -> tuple[bool, str]:
+                   timeout: float = GIT_TIMEOUT, cwd: str | None = None) -> tuple[bool, str]:
         refuse_force(argv)
-        return await self.run(argv, row["repo_path"], sandboxed, timeout)
+        return await self.run(argv, cwd or row["repo_path"], sandboxed, timeout)
+
+    async def _checkout_of(self, row: dict[str, Any], branch: str) -> str | None:
+        """The folder with `branch` checked out (the repo itself or one of its worktrees), so tests run on the code that is pushed."""
+        ok, out = await self._cmd(row, ["git", "worktree", "list", "--porcelain"])
+        where = None
+        for line in out.splitlines() if ok else []:
+            if line.startswith("worktree "):
+                where = line[9:]
+            elif line == f"branch refs/heads/{branch}":
+                return where
+        return None
 
     async def _exec(self, row: dict[str, Any], name: str) -> tuple[bool, str, str | None]:
         branch, base = row["branch"], row["base"]
         check_branch(branch, base)  # again: the row could have been edited behind the API's back
         if name == "tests":
-            cmd = row.get("test_command") or detect_test_command(Path(row["repo_path"]))
+            where = await self._checkout_of(row, branch)
+            if not where:
+                return False, f"{branch} is not checked out in {row['repo_path']} or any of its worktrees, so its tests cannot run. Check it out (or add a worktree) and run the checklist again.", None
+            cmd = row.get("test_command") or detect_test_command(Path(where))
             if not cmd:
                 return False, "No test command found (no package.json test script, no Python project). Give test_command.", None
             check_test_command(cmd)
-            ok, out = await self._cmd(row, ["/bin/zsh", "-c", cmd], sandboxed=True, timeout=TEST_TIMEOUT)
+            ok, out = await self._cmd(row, ["/bin/zsh", "-c", cmd], sandboxed=True, timeout=TEST_TIMEOUT, cwd=where)
             return ok, f"$ {cmd}\n{out}", None
         if name == "push":
             ok, out = await self._cmd(row, ["git", "push", "-u", "origin", f"refs/heads/{branch}:refs/heads/{branch}"])

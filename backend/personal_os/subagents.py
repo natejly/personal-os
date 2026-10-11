@@ -41,7 +41,7 @@ from typing import Any, Callable
 from . import approval_log, autoreview, coding_route, compaction, fsx, limits, llm, mac, permissions, permrules, redact
 from .db import new_id, now
 from .toolcalls import parse_arguments
-from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
+from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, DISCARDED, ToolSpec, _obj, call_key, denied, summarize_result, tool_error
 from .working import escape_tags, fence_untrusted
 
@@ -69,7 +69,7 @@ CHILD_BLOCK = frozenset({
 CHILD_DANGER_BLOCK = ("plan", "schedules")
 FILE_WRITERS = ("write_local_file", "move_local_file", "fs_edit", "fs_copy", "fs_mkdir")
 SHELL_TOOLS = ("shell_run", "shell_poll", "shell_kill", "opencode_run", "coding_session_start", "coding_session_list",
-               "coding_session_status", "coding_session_send", "coding_session_stop", "coding_session_diff")
+               "coding_session_status", "coding_session_wait", "coding_session_send", "coding_session_stop", "coding_session_diff")
 # Run kinds that have nobody at the keyboard; with unattendedApprovals = "deny" a call that would ask is refused.
 UNATTENDED_KINDS = ("job", "scheduled")
 STATEFUL_GROUPS = ("browser", "shell", "sandbox")  # tools that hold session state never run side by side
@@ -79,7 +79,6 @@ STATEFUL_GROUPS = ("browser", "shell", "sandbox")  # tools that hold session sta
 SESSION_STOPS = {
     "stopped": "was stopped",
     "stale": "was stopped by the hang watchdog",
-    "stuck": "was stopped by the stuck breaker",
     "interrupted": "was stopped with the reply or agent that started it",
     "shutdown": "was halted at app shutdown",
 }
@@ -1027,7 +1026,7 @@ class Subagents:
         ch.calls += 1
         self._check(ch)
         sig = call_key(name, args)
-        ch.repeats = ch.repeats + 1 if sig == ch.last_sig else 1
+        ch.repeats = ch.repeats + 1 if sig == ch.last_sig and name not in WAITING_TOOLS else 1
         ch.last_sig = sig
         if ch.repeats >= limits.REPEAT_LIMIT and not ch.stuck_stop:
             ch.stuck_stop = f"{name} has been called with identical arguments {limits.REPEAT_LIMIT} times in a row, so tool use is stopping."

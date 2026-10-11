@@ -677,11 +677,14 @@ async def _guarded_request(client: httpx.AsyncClient, method: str, url: str, *, 
             method, content = "GET", None
 
 
+def _allow_all(ctx: dict[str, Any]) -> bool:
+    return (ctx.get("permission_mode") or permissions.get(ctx.get("settings") or {}, "permissionMode")) == "allow_all"
+
+
 def doc_edit_applies(ctx: dict[str, Any]) -> bool:
     """doc_edit writes straight into the file: under Full agentic editing, and always under Allow everything (no diff to accept)."""
     s = ctx.get("settings") or {}
-    return (ctx.get("permission_mode") or permissions.get(s, "permissionMode")) == "allow_all" or (
-        str(permissions.get(s, "docEditMode") or "review") == "apply")
+    return _allow_all(ctx) or str(permissions.get(s, "docEditMode") or "review") == "apply"
 
 
 class Toolbox:
@@ -2736,8 +2739,8 @@ def _register_docs(self: Toolbox) -> None:
         if not rev:
             return _missing(ctx, doc)
         # "apply" writes the change (Accept all). Anything else, including a missing setting, waits for review.
-        # A scheduled run has nobody at the keyboard, so accept-all does not apply there either.
-        if doc_edit_applies(ctx) and not ctx.get("proposal_only"):
+        # A scheduled run has nobody at the keyboard, so Full agentic editing does not apply there; Allow everything does.
+        if doc_edit_applies(ctx) and (not ctx.get("proposal_only") or _allow_all(ctx)):
             applied = self.docs.accept(rev["id"])
             if not applied:
                 return _missing(ctx, doc)

@@ -135,7 +135,7 @@ function PresetFiles(): JSX.Element {
   return (
     <section>
       <h3>Canvas presets</h3>
-      <p className="muted small">Save a space as a preset from the sidebar, then share it as a file. Notes travel with it; chats never do.</p>
+      <p className="muted small">Save a canvas as a preset from the sidebar, then share it as a file. Notes travel with it; chats never do.</p>
       {presets.map((p) => (
         <div className="setting-row" key={p.id}>
           <span className="toggle-text"><b>{p.name}</b><small>{p.windows.length} window{p.windows.length === 1 ? '' : 's'}</small></span>
@@ -476,7 +476,7 @@ export default function SettingsModal(): JSX.Element {
                 </div>
               </div>
               <Switch title="Daily recap on new chats" help="A short summary of your day under the greeting in a new chat." checked={homeModuleOn(draft, 'recap')} onChange={(on) => patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), recap: on } })} />
-              <Switch title="Start chat windows as blobs" help="A chat added to a space starts as just its creature, no frame. Click it to open the chat." checked={!!draft.compactChats} onChange={(compactChats) => patch({ compactChats })} />
+              <Switch title="Start chat windows as blobs" help="A chat added to a canvas starts as just its creature, no frame. Click it to open the chat." checked={!!draft.compactChats} onChange={(compactChats) => patch({ compactChats })} />
               <div className="setting-row">
                 <span className="toggle-text"><b>Default file font</b><small>How files read and edit unless a file has its own choice. Auto keeps the app's own size and line width.</small></span>
                 <TypographyControls value={draft.docTypography ?? {}} onChange={(t) => patch({ docTypography: { ...(draft.docTypography ?? {}), ...t } })}

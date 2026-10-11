@@ -192,13 +192,13 @@ export function PresetsButton({ canvasId }: { canvasId: string | null }): JSX.El
         <Popover at={at} onClose={close}>
           {canvasId && (
             <>
-              <h4>Save this space</h4>
+              <h4>Save this canvas</h4>
               <SavePresetForm key={canvasId} canvasId={canvasId} onDone={close} />
             </>
           )}
-          <h4>New space from preset</h4>
+          <h4>New canvas from preset</h4>
           {presets.map((p) => <PresetRow key={p.id} preset={p} onPicked={close} />)}
-          {loaded && presets.length === 0 && <p className="empty-hint">No presets yet. Save a space to reuse its layout.</p>}
+          {loaded && presets.length === 0 && <p className="empty-hint">No presets yet. Save a canvas to reuse its layout.</p>}
         </Popover>
       )}
     </>

@@ -22,7 +22,7 @@ from urllib.parse import quote
 
 from . import verify
 from .cache import cached, invalidates
-from .google import _parse_iso
+from .google import MAX_CALENDARS, _parse_iso
 
 _TTL = {"list": 10 * 60, "colors": 24 * 3600, "events": 60, "event": 30}
 
@@ -322,6 +322,17 @@ class CalendarMixin:
         """Calendars shown: not hidden, and selected or the default one."""
         return [c["id"] for c in self.calendars() if c.get("id") and not c.get("hidden") and (c.get("selected") or c.get("primary"))]
 
+    def calendar_resolve_ids(self, ids: list[str]) -> list[str]:
+        """["enabled"]: the calendars shown (primary when the list fails). ["all"]: every calendar. Else as given."""
+        if ids == ["enabled"]:
+            try:
+                return self.enabled_calendar_ids()[:MAX_CALENDARS] or ["primary"]
+            except Exception:  # noqa: BLE001
+                return ["primary"]
+        if ids == ["all"]:
+            return [c["id"] for c in self.calendars()][:MAX_CALENDARS]
+        return ids
+
     @invalidates("calendar")
     def calendar_ensure(self, summary: str) -> dict[str, Any]:
         """Find, or create, a secondary calendar of this name that we can write to."""
@@ -363,8 +374,7 @@ class CalendarMixin:
             now = now.astimezone()  # a naive start is the user's wall clock, same as calendar_create reads it
         end = now + dt.timedelta(days=max(1, min(int(days), 60)))
         ids = calendar_ids or [calendar_id]
-        if ids == ["all"]:
-            ids = self.enabled_calendar_ids()[:15]
+        ids = self.calendar_resolve_ids(ids)
         out: list[dict[str, Any]] = []
         failures: list[Exception] = []
         for cid in ids:
@@ -393,7 +403,7 @@ class CalendarMixin:
         a, b = _parse_iso(time_min), _parse_iso(time_max)
         a = a.astimezone() if a.tzinfo is None else a
         b = b.astimezone() if b.tzinfo is None else b
-        ids = [c for c in (calendars or []) if c and c != "all"] or ["primary"]
+        ids = [c for c in (calendars or []) if c and c not in ("all", "enabled")] or ["primary"]
         me = self._my_address()
         people = [p for p in (attendees or []) if p and p not in ids and p.lower() != me]
 

@@ -19,11 +19,10 @@ import json
 import logging
 import os
 import subprocess
-import sys
 import threading
 from pathlib import Path
 
-from . import logs
+from . import logs, osplat
 
 log = logging.getLogger("personal_os.secrets")
 
@@ -53,7 +52,7 @@ class SecretStore:
     def __init__(self, data_dir: str | Path, backend: str | None = None):
         self.path = Path(data_dir) / FILE_NAME
         want = (backend or os.environ.get("GRAIN_SECRETS_BACKEND") or "").strip().lower()
-        self.use_keychain = want != "file" and sys.platform == "darwin"
+        self.use_keychain = want != "file" and osplat.current().secrets.keychain_available()
         self._cache: dict[str, str | None] = {}
         self._lock = threading.RLock()
 

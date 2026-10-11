@@ -15,13 +15,12 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
-from . import blobs as blob_store, macos, vision
+from . import blobs as blob_store, macos, osplat, vision
 from .extract_text import safe_upload_name
 
 CAPTURE_TIMEOUT_S = 20
@@ -117,7 +116,7 @@ def register(tb: Any) -> None:
         target = (target or "screen").strip().lower()
         if target not in TARGETS:
             return tool_error("screenshot: target must be screen, window or region", field="target", example={"target": "screen"})
-        if sys.platform != "darwin" or not Path(_binary()).exists():
+        if not osplat.has("screenshot") or not Path(_binary()).exists():
             return tool_error("screenshot: screen capture is only available on macOS")
         status = macos.screen_recording_status()
         if status == macos.DENIED:
@@ -163,5 +162,5 @@ def register(tb: Any) -> None:
         screenshot, "mac", "safe",
         examples=[{"target": "screen"}, {"target": "window", "app": "Safari"}, {"target": "region", "region": "0,0,800,600"}],
         taints=True)
-    spec.available_fn = lambda: sys.platform == "darwin"
+    spec.available_fn = lambda: osplat.has("screenshot")
     tb.specs["screenshot"] = spec

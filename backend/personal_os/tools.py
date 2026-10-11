@@ -27,7 +27,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from . import egress, mac, permissions
+from . import egress, mac, osplat, permissions
 from .kinds import is_internal
 from .embed import rrf
 from . import fsx
@@ -1948,16 +1948,33 @@ def _register_google(self: Toolbox) -> None:
             out["calendar_id"] = redact.scrub_command_output(out["calendar_id"])
         return {k: v for k, v in out.items() if v is not None and v != ""}
 
-    async def calendar_events(ctx: dict[str, Any], days: int = 2, start: str | None = None, offset: int = 0, all_calendars: bool = False) -> Any:
-        rows = await run(g.calendar_events, days, "primary", 0, start, ["all"] if all_calendars else None)
-        return page(_scrub_strings([_brief_event(e) for e in rows]), offset=offset, limit=30, key="events")
-    R("calendar_events", ToolSpec("calendar_events", "List Google Calendar events (default: the next 2 days on the primary calendar). `start` is a local YYYY-MM-DD or YYYY-MM-DDTHH:MM to look from (default now); `days` is the window length. all_calendars includes every calendar. calendar_get has an event's full details.",
-        _obj({"days": {"type": "integer", "default": 2}, "start": {"type": "string"}, "offset": {"type": "integer", "default": 0}, "all_calendars": {"type": "boolean", "default": False}}, []), calendar_events, "google",
+    async def calendar_events(ctx: dict[str, Any], days: int = 2, start: str | None = None, offset: int = 0, all_calendars: bool = False,
+                              calendar_id: str | None = None) -> Any:
+        if calendar_id:
+            ids = [calendar_id]
+        else:
+            ids = ["all"] if all_calendars else ["enabled"]
+        rows = await run(g.calendar_events, days, "primary", 0, start, ids)
+        names: dict[str, str] = {}
+        if len({e.get("calendar_id") for e in rows}) > 1 or calendar_id:
+            with contextlib.suppress(Exception):  # names are a label; the events are still right without them
+                names = {c["id"]: c["summary"] for c in await run(g.calendars)}
+        out = []
+        for e in rows:
+            b = _brief_event(e)
+            if names.get(e.get("calendar_id") or ""):
+                b["calendar"] = names[e["calendar_id"]]
+            out.append(b)
+        return page(_scrub_strings(out), offset=offset, limit=30, key="events")
+    R("calendar_events", ToolSpec("calendar_events", "List Google Calendar events (default: the next 2 days across every calendar the user has checked on in Google, such as work, classes and shared ones). `start` is a local YYYY-MM-DD or YYYY-MM-DDTHH:MM to look from (default now); `days` is the window length. Each event has `calendar` (its name) and `calendar_id`: pass that calendar_id, with the event id, to calendar_get, calendar_update, calendar_delete, calendar_respond or meeting_brief, since event ids belong to one calendar. calendar_id here narrows the list to one calendar; all_calendars also includes hidden and unchecked ones. calendar_get has an event's full details.",
+        _obj({"days": {"type": "integer", "default": 2}, "start": {"type": "string"}, "offset": {"type": "integer", "default": 0},
+              "calendar_id": {"type": "string", "description": "only this calendar (an id from a previous result)"},
+              "all_calendars": {"type": "boolean", "default": False, "description": "also hidden and unchecked calendars"}}, []), calendar_events, "google",
         examples=[{}, {"days": 7, "all_calendars": True}, {"days": 1, "start": "2026-10-02T09:00"}], taints=True))
 
     async def calendar_get(ctx: dict[str, Any], event_id: str, calendar_id: str = "primary") -> Any:
         return _scrub_strings(await run(g.calendar_get, event_id, calendar_id))
-    R("calendar_get", ToolSpec("calendar_get", "Full details of one event by id (from calendar_events): recurrence, reminders, guests and their RSVPs, color, visibility.",
+    R("calendar_get", ToolSpec("calendar_get", "Full details of one event by id (from calendar_events; pass the calendar_id that row carried): recurrence, reminders, guests and their RSVPs, color, visibility.",
         _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id"]), calendar_get, "google",
         examples=[{"event_id": "7abc123def"}], taints=True))
 
@@ -1976,7 +1993,7 @@ def _register_google(self: Toolbox) -> None:
             people.append({"email": mail, "name": name, "notes": list(seen.values())[:5]})
         return _scrub_strings({"event": {k: e.get(k) for k in ("summary", "start", "end", "location", "description")},
                                "people": people})
-    R("meeting_brief", ToolSpec("meeting_brief", "Pre-meeting brief for one calendar event: for each guest, what long-term memory holds about them. Read-only. Use before a meeting, or when asked who someone on the invite is.",
+    R("meeting_brief", ToolSpec("meeting_brief", "Pre-meeting brief for one calendar event (pass the calendar_id its calendar_events row carried): for each guest, what long-term memory holds about them. Read-only. Use before a meeting, or when asked who someone on the invite is.",
         _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id"]), meeting_brief, "google",
         examples=[{"event_id": "7abc123def"}], taints=True))
 
@@ -2005,7 +2022,7 @@ def _register_google(self: Toolbox) -> None:
                            "busy": busy, "create_meet": create_meet, "clear_meet": clear_meet})
         return _scrub_strings(await _undoable("calendar_update", ctx, {"event_id": event_id, "calendar_id": calendar_id, "send_updates": send_updates},
                                g.calendar_update, event_id, f, calendar_id, send_updates))
-    R("calendar_update", ToolSpec("calendar_update", "Edit ONE Google Calendar event by id; for moving several events or rescheduling around conflicts use calendar_propose. Only the fields you pass change. `attendees` replaces the whole guest list. For a recurring event, the instance id edits that occurrence and its recurring_event_id (from calendar_get) edits the series.",
+    R("calendar_update", ToolSpec("calendar_update", "Edit ONE Google Calendar event by id (pass the calendar_id its calendar_events row carried, or the edit looks on the primary calendar); for moving several events or rescheduling around conflicts use calendar_propose. Only the fields you pass change. `attendees` replaces the whole guest list. For a recurring event, the instance id edits that occurrence and its recurring_event_id (from calendar_get) edits the series.",
         _obj({"event_id": {"type": "string"}, "clear_meet": {"type": "boolean", "description": "remove the Meet link"}, **_EVENT_PROPS}, ["event_id"]), calendar_update, "google", "external",
         examples=[{"event_id": "7abc123def", "start": "2026-10-07T16:00", "end": "2026-10-07T17:00"},
                   {"event_id": "7abc123def", "summary": "Sprint review (moved)", "send_updates": "all"},
@@ -2014,14 +2031,14 @@ def _register_google(self: Toolbox) -> None:
     async def calendar_delete(ctx: dict[str, Any], event_id: str, calendar_id: str = "primary", send_updates: str = "none") -> Any:
         return _scrub_strings(await _undoable("calendar_delete", ctx, {"event_id": event_id, "calendar_id": calendar_id, "send_updates": send_updates},
                                g.calendar_delete, event_id, calendar_id, send_updates))
-    R("calendar_delete", ToolSpec("calendar_delete", "Delete a Google Calendar event by id. For a recurring event, the instance id removes that occurrence and its recurring_event_id removes the whole series. Only when the user asked to delete it.",
+    R("calendar_delete", ToolSpec("calendar_delete", "Delete a Google Calendar event by id (pass the calendar_id its calendar_events row carried). For a recurring event, the instance id removes that occurrence and its recurring_event_id removes the whole series. Only when the user asked to delete it.",
         _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}, "send_updates": {"type": "string", "enum": ["none", "all", "externalOnly"]}}, ["event_id"]), calendar_delete, "google", "external",
         examples=[{"event_id": "7abc123def"}, {"event_id": "7abc123def", "send_updates": "all"}]))
 
     async def calendar_respond(ctx: dict[str, Any], event_id: str, response: str, calendar_id: str = "primary") -> Any:
         return _scrub_strings(await _undoable("calendar_respond", ctx, {"event_id": event_id, "calendar_id": calendar_id, "send_updates": "all"},
                                g.calendar_respond, event_id, response, calendar_id, "all"))
-    R("calendar_respond", ToolSpec("calendar_respond", "RSVP to an event the user was invited to: accepted, declined or tentative.",
+    R("calendar_respond", ToolSpec("calendar_respond", "RSVP to an event the user was invited to (pass the calendar_id its calendar_events row carried): accepted, declined or tentative.",
         _obj({"event_id": {"type": "string"}, "response": {"type": "string", "enum": ["accepted", "declined", "tentative"]}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id", "response"]), calendar_respond, "google", "external",
         examples=[{"event_id": "7abc123def", "response": "accepted"}]))
 
@@ -2034,8 +2051,8 @@ def _register_google(self: Toolbox) -> None:
     async def calendar_free_busy(ctx: dict[str, Any], time_min: str, time_max: str, calendars: list[str] | None = None,
                                  attendees: list[str] | None = None) -> Any:
         return _scrub_strings(await run(g.calendar_free_busy, time_min, time_max, calendars, attendees))
-    R("calendar_free_busy", ToolSpec("calendar_free_busy", "Busy ranges between two ISO datetimes from Google's free/busy service, across all the user's visible calendars (or the `calendars` ids you name) plus any `attendees` emails. Use it to see when people are busy; to find a time, use calendar_find_time.",
-        _obj({"time_min": {"type": "string"}, "time_max": {"type": "string"}, "calendars": {"type": "array", "items": {"type": "string"}, "description": "calendar ids; default all visible"},
+    R("calendar_free_busy", ToolSpec("calendar_free_busy", "Busy ranges between two ISO datetimes from Google's free/busy service, across the calendars the user has checked on (or the `calendars` ids you name) plus any `attendees` emails. Use it to see when people are busy; to find a time, use calendar_find_time.",
+        _obj({"time_min": {"type": "string"}, "time_max": {"type": "string"}, "calendars": {"type": "array", "items": {"type": "string"}, "description": "calendar ids; default the calendars checked on"},
               "attendees": {"type": "array", "items": {"type": "string"}, "description": "other people's emails"}}, ["time_min", "time_max"]), calendar_free_busy, "google",
         examples=[{"time_min": "2026-10-05T09:00", "time_max": "2026-10-05T18:00"}, {"time_min": "2026-10-05T00:00", "time_max": "2026-10-09T23:59", "attendees": ["mira@example.com"]}]))
 
@@ -2062,7 +2079,7 @@ def _register_google(self: Toolbox) -> None:
         if w1 - w0 > dt.timedelta(days=60):
             w1 = w0 + dt.timedelta(days=60)
         days = max(1, -(-int((w1 - w0).total_seconds()) // 86400))
-        events = await run(g.calendar_events, days, "primary", 250, w0.isoformat(), ["all"])
+        events = await run(g.calendar_events, days, "primary", 250, w0.isoformat(), ["enabled"])
         busy = scheduling.busy_from_events(events, tz)
         unreachable: list[str] = []
         if attendees:
@@ -2086,7 +2103,7 @@ def _register_google(self: Toolbox) -> None:
         if note.strip():
             out["note"] = note.strip()
         return _scrub_strings(out)
-    R("calendar_find_time", ToolSpec("calendar_find_time", "Find free slots for a meeting: ranked candidates inside working hours (default 9-18 local, weekdays) that avoid the user's events on every visible calendar (declined and 'free' events do not block) and, when given, the attendees' busy time. ALWAYS use this before proposing a time. Then call calendar_propose with the chosen slot.",
+    R("calendar_find_time", ToolSpec("calendar_find_time", "Find free slots for a meeting: ranked candidates inside working hours (default 9-18 local, weekdays) that avoid the user's events on every calendar they have checked on (declined and 'free' events do not block) and, when given, the attendees' busy time. ALWAYS use this before proposing a time. Then call calendar_propose with the chosen slot.",
         _obj({"duration_minutes": {"type": "integer"}, "window_start": {"type": "string", "description": "ISO datetime or date to search from"},
               "window_end": {"type": "string", "description": "ISO datetime, or a date meaning through the end of that day"},
               "attendees": {"type": "array", "items": {"type": "string"}, "description": "emails whose busy time must also be free"},
@@ -2840,9 +2857,7 @@ def _mac_available(name: str) -> bool:
         return mac.page_bridge.connected
     if name in FILE_TOOLS:  # plain file system work: no Spotlight, no Shortcuts, no platform check
         return True
-    if not mac.is_mac():
-        return False
-    return mac.has_binary("mdfind" if name == "find_files" else "shortcuts")
+    return osplat.has("file_search" if name == "find_files" else "shortcuts")
 
 
 def _register_mac(self: Toolbox) -> None:

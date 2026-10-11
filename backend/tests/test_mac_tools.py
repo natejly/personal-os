@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from personal_os import mac, tools  # noqa: E402
+from personal_os import mac, osplat, tools  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 
 
@@ -70,6 +70,7 @@ def fake_exec(monkeypatch: pytest.MonkeyPatch, proc: FakeProc | Any) -> list[lis
         calls.append(list(argv))
         return proc(list(argv)) if callable(proc) and not isinstance(proc, FakeProc) else proc
     monkeypatch.setattr(mac.asyncio, "create_subprocess_exec", _exec)
+    monkeypatch.setattr(osplat, "_current", osplat._build("darwin"))  # the fake stands in for mdfind, which only macOS has
     return calls
 
 

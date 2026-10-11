@@ -30,10 +30,11 @@ from typing import Any
 
 import httpx
 
+from . import osplat
 from .extract_text import extract_text
 
 DEFAULT_ROOTS = ("~/Desktop", "~/Documents")
-APP_BUNDLE = "/Applications/Grain.app"
+APP_BUNDLE = osplat.current().paths.app_bundle()
 MAX_READ_BYTES = 20 * 1024 * 1024
 MAX_WRITE_CHARS = 400_000
 # Suffixes macOS will run when the user double-clicks the file. The agent writes documents, not launchers.
@@ -49,10 +50,6 @@ PAGE_MAX_CHARS = 60_000
 
 class LocalPathError(Exception):
     pass
-
-
-def is_mac() -> bool:
-    return sys.platform == "darwin"
 
 
 def has_binary(name: str) -> bool:
@@ -161,8 +158,8 @@ SENSITIVE_PREFIXES = ("/dev/", "/proc/")
 KEY_TYPES = ("rsa", "dsa", "ecdsa", "ed25519")
 KEY_FILE_RE = re.compile(rf"^id_({'|'.join(KEY_TYPES)})(?!.*\.pub$)")
 # Keychains and cookie jars: whole folders under the home folder (or /Library) the user has to approve.
-KEYCHAIN_DIRS = ("Library/Keychains", "Library/Cookies", "Library/Containers/com.apple.Safari/Data/Library/Cookies")
-SYSTEM_KEYCHAINS = ("/Library/Keychains",)
+KEYCHAIN_DIRS = osplat.current().paths.keychain_dirs()
+SYSTEM_KEYCHAINS = osplat.current().paths.system_keychains()
 # Where the browsers keep a profile, relative to ~/Library/Application Support, and the files in it that hold sessions
 # and saved passwords.
 BROWSER_DIRS = ("Google/Chrome", "Arc", "BraveSoftware", "Microsoft Edge", "Chromium", "Vivaldi", "Firefox")
@@ -223,7 +220,7 @@ def sensitive_reason(*paths: str | Path) -> str | None:
                 return "keychains and cookie jars hold secrets"
             if any(_under(p, h / f) for f in SENSITIVE_HOME_FILES):
                 return "access tokens hold secrets"
-            support = h / "Library" / "Application Support"
+            support = h / osplat.current().paths.browser_support_dir()
             if low in BROWSER_FILES and any(_under(p, support / d) for d in BROWSER_DIRS):
                 return "browser cookies and saved passwords hold secrets"
     return None
@@ -290,10 +287,9 @@ async def mdfind(query: str, *, folders: list[str] | None = None, name_only: boo
     if not roots:
         raise LocalPathError("none of the folders to search exist")
     lim = max(1, min(int(limit), 100))
-    argv = ["mdfind"]
-    for r in roots:
-        argv += ["-onlyin", str(r)]
-    argv += ["-name", q] if name_only else [q]
+    argv = osplat.current().desktop.file_search_argv(q, [str(r) for r in roots], name_only)
+    if argv is None:
+        raise LocalPathError("file search is not available on this platform")
     proc = await asyncio.create_subprocess_exec(*argv, stdin=asyncio.subprocess.DEVNULL,
                                                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
     paths: list[str] = []
@@ -498,7 +494,7 @@ def _open_trash() -> tuple[int, Path]:
     would drop the file there while the returned path still said `~/.Trash/...`. Open the directory
     itself (`O_NOFOLLOW`) and rename into that fd.
     """
-    trash = home() / ".Trash"
+    trash = osplat.current().paths.trash_dir()
     if trash.is_symlink():
         raise LocalPathError("the Trash is a symlink and is off limits")
     if not trash.exists():

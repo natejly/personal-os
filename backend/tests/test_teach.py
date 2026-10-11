@@ -11,7 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PIL import Image  # noqa: E402
 
-from personal_os import macos, skillbuild, teach  # noqa: E402
+from unittest import mock  # noqa: E402
+
+from personal_os import macos, osplat, skillbuild, teach  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.learn import Skills  # noqa: E402
 
@@ -79,6 +81,9 @@ class StoreTest(unittest.TestCase):
                       macos.focused_window_title, macos.secure_input_active, teach.INTERVAL)
         self.addCleanup(self._restore)
         macos.IS_MAC = True
+        patch = mock.patch.object(osplat, "has", lambda cap: True)
+        patch.start()
+        self.addCleanup(patch.stop)
         macos.frontmost_app = lambda: ("Mail", "", 1)
         macos.focused_window_title = lambda pid: "Inbox"
         macos.secure_input_active = lambda: False

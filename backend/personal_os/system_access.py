@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from . import codingagents, mac, macos, opencode, shell
+from . import codingagents, mac, macos, opencode, osplat, shell
 
 AUTOMATION = {"finder": "com.apple.finder", "systemEvents": "com.apple.systemevents",
               "contacts": "com.apple.AddressBook", "calendar": "com.apple.iCal", "reminders": "com.apple.reminders"}
@@ -34,7 +34,7 @@ def _safe(fn: Callable[[], str]) -> str:
 
 
 def _full_disk() -> str:
-    if not macos.IS_MAC:
+    if not osplat.has("full_disk_access"):
         return macos.UNKNOWN
     return macos.GRANTED if macos.full_disk_access() else macos.DENIED
 

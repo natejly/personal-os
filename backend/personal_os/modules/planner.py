@@ -82,7 +82,7 @@ class PlannerModule(Module):
         now = self.clock().replace(second=0, microsecond=0)
         # Read at least the configured lookahead so a Focus block accepted later in the week still locks its todo.
         span = max(cfg["lookaheadDays"], base["lookaheadDays"])
-        events = self.ctx.google.calendar_events(span + 1, "primary", 100, None, ["all"])
+        events = self.ctx.google.calendar_events(span + 1, "primary", 100, None, ["enabled"])
         mirror = self._mirror_ids()
         scope = "__all__" if project_id in (None, "", "all") else self.ctx.sid(project_id)
         todos = self.todos.list(scope, include_done=False)

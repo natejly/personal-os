@@ -98,7 +98,7 @@ Always forced to ask in a reply that has read untrusted content (tainted): netwo
 |---|---|---|---|
 | `mail_followups` | safe | on | Email threads waiting on someone: 'awaiting_reply' = the user sent last and is still waiting on a reply; 't... |
 | `schedule_suggest` | safe | on | Suggest calendar time blocks for the user's open todos (uses their estimates, due dates, priorities, work h... |
-| `calendar_events` | safe | on | List Google Calendar events (default: the next 2 days on the primary calendar). |
+| `calendar_events` | safe | on | List Google Calendar events (default: the next 2 days across the calendars checked on in Google). |
 | `calendar_get` | safe | on | Full details of one event by id (from calendar_events): recurrence, reminders, guests and their RSVPs, colo... |
 | `meeting_brief` | safe | on | Pre-meeting brief for one calendar event: for each guest, what long-term memory holds about them and the la... |
 | `calendar_create` | external | on | Create ONE Google Calendar event. |

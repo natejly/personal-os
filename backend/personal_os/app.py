@@ -30,7 +30,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import AfterValidator, BaseModel, Field
 
 from . import auth_breaker, blobs, system_access, telegram
-from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
+from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, thinking_summary, titles
 from . import chatlink, coding_route, fsx, opencode_usage
 from .fsx import sensitive_reason
@@ -939,6 +939,12 @@ def list_tools() -> dict[str, Any]:
     cfg = settings()
     modes = toolbox.effective(permissions.get(cfg, "tools") or {}, None, None)
     return {"tools": toolbox.list(), "modes": modes}
+
+
+@app.get("/capabilities")
+def get_capabilities() -> dict[str, Any]:
+    """What this operating system can do (the platform layer, osplat): the platform name and a map of capability -> bool."""
+    return {"platform": osplat.name(), "capabilities": osplat.capabilities()}
 
 
 class PageBridgeIn(BaseModel):
@@ -5185,6 +5191,9 @@ def _job_prompt(job: dict[str, Any], fire: dict[str, Any]) -> str:
     """The run's user turn: the job's own prompt, the late notice in front of it when the fire is late, and the
     folder's changed names after it when a directory change fired it."""
     prompt = _mail_block(fire) + _calendar_block(fire) + redact.scrub_command_output(str(job.get("prompt") or ""))
+    if job.get("id") and (prior := job_history.prior_proposals_block(
+            proposals.undecided_or_refused(job["id"], time.time() - job_history.PRIOR_DAYS * 86400))):
+        prompt += "\n\n" + prior
     if fire.get("trigger") in ("dir", "clock+dir"):
         prompt += "\n\n" + _changed_block(job, fire)
     if not fire.get("late"):
@@ -5303,8 +5312,9 @@ def _mail_threads(query: str) -> list[dict[str, Any]]:
 
 
 def _calendar_events(calendar_id: str | None) -> list[dict[str, Any]]:
-    """A calendar job's look: the next two days from the read cache (the 24 h look-ahead is cut by the scheduler)."""
-    return google.calendar_events(2, calendar_ids=[calendar_id or "primary"], max_results=0)
+    """A calendar job's look: the next two days from the read cache (the 24 h look-ahead is cut by the scheduler).
+    Without a named calendar, every calendar the user has checked on."""
+    return pim.calendar_events(2, calendar_ids=[calendar_id] if calendar_id else ["enabled"], max_results=0)
 
 
 scheduler = Scheduler(jobs, _launch_job, policy=job_policy, wake=PowerWake(), mail=_mail_threads, calendar=_calendar_events)
@@ -6861,21 +6871,21 @@ _RUNS_CODE = {".app", ".command", ".sh", ".bash", ".zsh", ".csh", ".ksh", ".fish
               ".exe", ".msi", ".bat", ".cmd", ".ps1"}
 
 
-def _mac_open(*args: str) -> None:
-    subprocess.run(["open", *args], check=True, timeout=10, capture_output=True)
+def _desktop_open(path: str, reveal: bool = False) -> None:
+    osplat.current().desktop.open_path(path, reveal=reveal)
 
 
-def _run_open(*args: str) -> dict[str, bool]:
+def _run_open(path: str, reveal: bool = False) -> dict[str, bool]:
     try:
-        _mac_open(*args)
+        _desktop_open(path, reveal)
     except (OSError, subprocess.SubprocessError) as e:
-        raise HTTPException(400, "macOS could not open this file.") from e
+        raise HTTPException(400, "This computer could not open the file.") from e
     return {"ok": True}
 
 
 @app.post("/documents/{id}/reveal")
 def document_reveal(id: str) -> dict[str, bool]:
-    return _run_open("-R", str(_original(id)[1]))
+    return _run_open(str(_original(id)[1]), reveal=True)
 
 
 @app.post("/documents/{id}/open")
@@ -6896,7 +6906,7 @@ def _artifact_or_404(id: str) -> tuple[dict[str, Any], Path]:
 @app.post("/chat-files/{id}/reveal")
 def artifact_reveal(id: str) -> dict[str, bool]:
     """Files → Artifacts: show a chat's output in Finder (the raw route is in chat_files.py)."""
-    return _run_open("-R", str(_artifact_or_404(id)[1]))
+    return _run_open(str(_artifact_or_404(id)[1]), reveal=True)
 
 
 @app.post("/chat-files/{id}/open")
@@ -7360,7 +7370,7 @@ async def stt_transcribe(audio: UploadFile = File(...), prompt: str = Form("")) 
     backend = stt.resolve_backend(cfg, db.data_dir)
     if backend == "off":
         raise HTTPException(409, f"Transcription is off. {stt.OFF_FIX}")
-    if backend == "speech" and not (macos.IS_MAC and stt.speech_ready()):
+    if backend == "speech" and not (osplat.has("speech_recognition") and stt.speech_ready()):
         row = next((r for r in stt.capabilities(cfg, db.data_dir) if r["id"] == "stt"), {})
         raise HTTPException(409, row.get("fix") or "On-device Speech Recognition is not available.")
     data = bytearray()
@@ -7471,7 +7481,7 @@ async def _internal_data() -> dict[str, Any]:
     }
     if pst["connected"]:
         try:
-            out["calendar"] = json_safe(await asyncio.to_thread(pim.calendar_events, 3))
+            out["calendar"] = json_safe(await asyncio.to_thread(pim.calendar_events, 3, "primary", 30, None, ["enabled"]))
         except Exception as e:  # noqa: BLE001
             out["calendar_error"] = str(e)
         try:

@@ -17,15 +17,16 @@ import contextlib
 import logging
 import re
 import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
+from . import osplat
+
 log = logging.getLogger("personal_os.macos")
 
-IS_MAC = sys.platform == "darwin"
+IS_MAC = osplat.name() == "darwin"
 
 _pyobjc: dict[str, Any] = {}
 _pyobjc_error = ""

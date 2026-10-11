@@ -19,7 +19,6 @@ import asyncio
 import os
 import re
 import shutil
-import signal
 import struct
 import subprocess
 import tempfile
@@ -27,7 +26,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from . import fsx, mac, shell
+from . import fsx, mac, osplat, shell
 from .workspace import WorkspaceError
 
 TIMEOUT_S = 120
@@ -59,14 +58,11 @@ class ConvertTimeout(Exception):
 def _run_proc(argv: list[str], cwd: str, env: dict[str, str], timeout: float) -> tuple[int, str, str]:
     """No shell, own process group, and on timeout the whole group dies (soffice forks helpers)."""
     p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         start_new_session=True)
+                         **osplat.current().proc.new_group_kwargs())
     try:
         out, err = p.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        try:
-            os.killpg(p.pid, signal.SIGKILL)
-        except OSError:
-            p.kill()
+        osplat.current().proc.kill_tree(p.pid, p)
         p.communicate()
         raise ConvertTimeout(f"{Path(argv[0]).name} did not finish within {int(timeout)}s") from None
     return p.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")

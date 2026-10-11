@@ -204,7 +204,7 @@ def test_preview_falls_back_when_textutil_fails(monkeypatch: pytest.MonkeyPatch)
 @pytest.fixture
 def opened(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
     calls: list[tuple[str, ...]] = []
-    monkeypatch.setattr(appmod, "_mac_open", lambda *a: calls.append(a))
+    monkeypatch.setattr(appmod, "_desktop_open", lambda p, reveal=False: calls.append(("-R", p) if reveal else (p,)))
     return calls
 
 

@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import llm, macos, redact, vision
+from . import llm, macos, osplat, redact, vision
 from .audiocap import ffmpeg_path
 from .db import Database, new_id, now, row_to_dict
 from .learn import MAX_SKILL_DESCRIPTION, MAX_SKILL_NAME, _fence, _parse_json
@@ -261,7 +261,7 @@ class Teach:
     # ---- screen capture ----
     def start(self) -> dict[str, Any]:
         """Begin recording, or {needs_permission, state} when macOS has not granted Screen Recording."""
-        if not macos.IS_MAC:
+        if not osplat.has("screen_recording"):
             raise TeachError("Screen recording is macOS-only. Import a video instead.")
         state = macos.screen_recording_status()
         if state == macos.DENIED:  # an unknown answer (no pyobjc) is let through: the OS asks on first capture

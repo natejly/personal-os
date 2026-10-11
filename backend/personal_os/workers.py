@@ -26,14 +26,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
-import subprocess
-import sys
 from collections import deque
 from typing import Any, Callable, Iterable
 
-from . import limits, redact
+from . import limits, osplat, redact
+from .osplat.darwin import parse_vm_stat  # noqa: F401  (kept for callers and tests)
 from .subagents import GROUP, MAX_TASK_CHARS, Child, Subagents, _now_line, _one_line
 from .tools import ToolSpec, _obj, tool_error
 from .working import escape_tags
@@ -243,28 +241,9 @@ def wake_decision(answering: bool, pending: int, conversation_exists: bool) -> s
 
 # ---- machine state -------------------------------------------------------------------------------
 
-def parse_vm_stat(text: str, total_bytes: int) -> float | None:
-    """(free + inactive + speculative pages) / total memory, from `vm_stat` output; None when it cannot be read."""
-    m = re.search(r"page size of (\d+) bytes", text or "")
-    if not m or total_bytes <= 0:
-        return None
-    page = int(m.group(1))
-    got = {k: int(v) for k, v in re.findall(r"Pages (free|inactive|speculative):\s+(\d+)", text)}
-    if len(got) < 3:
-        return None
-    return min(1.0, sum(got.values()) * page / total_bytes)
-
-
 def free_memory_fraction() -> float | None:
-    """Share of system memory that is free or readily reclaimable (macOS vm_stat). None = unknown, which never holds work."""
-    if sys.platform != "darwin":
-        return None
-    try:
-        total = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
-        out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=3).stdout
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return None
-    return parse_vm_stat(out, total)
+    """Share of system memory that is free or readily reclaimable (the platform's probe). None = unknown, which never holds work."""
+    return osplat.current().proc.memory_available_fraction()
 
 
 DEFAULT_REPORT = ("What changed (files, branch, ids); where (paths, links); the verification you ran and its result; "

@@ -82,7 +82,7 @@ const scrolls = (el: HTMLElement, dx: number, dy: number): boolean => {
  */
 const wheelHit = (e: WheelEvent): 'scroll' | 'win' | null => {
   for (let el = e.target instanceof HTMLElement ? e.target : null; el; el = el.parentElement) {
-    if (el.classList.contains('win')) return 'win'
+    if (el.classList.contains('win')) return el.dataset.kind === 'chat' ? 'scroll' : 'win'
     if (scrolls(el, e.deltaX, e.deltaY)) return 'scroll'
   }
   return null
@@ -326,7 +326,7 @@ export default function Canvas(): JSX.Element {
         return
       }
       // A two-finger scroll over a window belongs to that window's content while it has room to
-      // move; the canvas only pans from bare canvas or a window with nothing left to scroll.
+      // move; the canvas only pans from bare canvas or a window with nothing left to scroll. Chat windows never hand the scroll to the canvas.
       const hit = wheelHit(e)
       if (hit === 'scroll') {
         latchUntil = e.timeStamp + 250

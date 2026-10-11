@@ -271,7 +271,7 @@ function buildMenu(): void {
       ]
     },
     {
-      label: 'Spaces',
+      label: 'Canvases',
       submenu: [
         item('canvas-toggle'),
         item('canvas-new'),

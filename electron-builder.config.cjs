@@ -43,7 +43,7 @@ module.exports = {
       NSAppleEventsUsageDescription:
         'Grain uses AppleScript and Shortcuts to read the frontmost app and to run actions you ask for.',
       NSScreenCaptureUsageDescription:
-        'Grain captures the screen when you teach it a task or ask it to look at your screen.',
+        'Grain captures the screen when you ask it to look at your screen.',
       NSCameraUsageDescription: 'Grain uses the camera only for photos and video you choose to capture.',
       NSContactsUsageDescription: 'Grain reads and updates Contacts when you ask it to.',
       NSCalendarsUsageDescription: 'Grain reads and updates Calendar events when you ask it to.',

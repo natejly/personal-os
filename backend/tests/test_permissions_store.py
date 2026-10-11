@@ -110,11 +110,6 @@ class GatesReadTheSameValues(unittest.TestCase):
         self.assertEqual(modes["calendar_delete"], "on")
         self.assertEqual(modes["gmail_send"], "ask")
 
-    def test_skip_permissions(self) -> None:
-        # skipPermissions is legacy: only the global permissionMode skips cards.
-        self.assertFalse(permrules.skip_permissions_on({}, self.cfg))
-        self.assertTrue(permrules.skip_permissions_on({}, {**self.cfg, "permissionMode": "allow_all"}))
-
     def test_permission_rule(self) -> None:
         rules = permrules.load_rules(permissions.get(self.cfg, "permissionRules"))
         res = permrules.resolve("web_search", {"query": "x"}, "on", False, rules=rules)

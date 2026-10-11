@@ -15,7 +15,6 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from personal_os import fsx, mac  # noqa: E402
-from personal_os.microvm import DESK_MOUNT, Sandboxes  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 from personal_os.workspace import Workspace  # noqa: E402
 
@@ -515,43 +514,6 @@ def test_desk_workspace_is_always_granted(home: Path, tmp_path: Path) -> None:
     call(tb, "fs_grep", ctx, pattern="hello")
     ed = call(tb, "fs_edit", ctx, path="work/n.txt", old="hello", new="bye")
     assert ed["replacements"] == 1 and (root / "work" / "n.txt").read_text() == "bye"
-
-
-# ---- microvm: the desk mount
-class Recorder:
-    def __init__(self) -> None:
-        self.argv: list[list[str]] = []
-
-    def __call__(self, argv: list[str], *, input: bytes | None = None, timeout: float = 60) -> "subprocess.CompletedProcess[bytes]":
-        self.argv.append(list(argv))
-        if argv[1] == "inspect":
-            return subprocess.CompletedProcess(argv, 1, b"", b"No such object")
-        return subprocess.CompletedProcess(argv, 0, b"/usr/bin/bash", b"")
-
-
-def test_docker_argv_mounts_only_an_active_desk(tmp_path: Path) -> None:
-    cfg: dict[str, Any] = {}
-    rec = Recorder()
-    sb = Sandboxes(lambda: cfg, runner=rec)
-    sb.desk_workspace = lambda conv: str(tmp_path / "cowork" / "d1") if conv == "desk-conv" else None
-    sb.ensure("plain-conv")
-    run = next(a for a in rec.argv if a[1] == "run")
-    assert "-v" not in run
-    rec.argv.clear()
-    sb.ensure("desk-conv")
-    run = next(a for a in rec.argv if a[1] == "run")
-    assert run[run.index("-v") + 1] == f"{tmp_path / 'cowork' / 'd1'}:{DESK_MOUNT}:rw"
-    assert run.count("-v") == 1
-    # switched off by setting
-    cfg["sandboxMountDesk"] = False
-    rec.argv.clear()
-    Sandboxes(lambda: cfg, runner=rec).ensure("x")
-    assert "-v" not in next(a for a in rec.argv if a[1] == "run")
-    sb2 = Sandboxes(lambda: cfg, runner=rec)
-    sb2.desk_workspace = lambda conv: str(tmp_path)
-    rec.argv.clear()
-    sb2.ensure("desk-conv")
-    assert "-v" not in next(a for a in rec.argv if a[1] == "run")
 
 
 def test_rg_output_is_parsed_and_filtered(home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

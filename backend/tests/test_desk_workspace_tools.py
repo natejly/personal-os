@@ -66,14 +66,14 @@ DESK = "desk1"
 
 
 class Box:
-    def __init__(self, tmp: Path, sandboxes: Any = None, **ws_kw: Any) -> None:
+    def __init__(self, tmp: Path, **ws_kw: Any) -> None:
         self.settings: dict[str, Any] = {"workspaceRoots": []}
         self.db = Database(tmp / "data")
         with self.db.tx() as c:
             c.execute("INSERT INTO conversations(id, title, model, created_at, updated_at) VALUES(?,?,?,?,?)", ("c1", "t", "m", 0.0, 0.0))
         self.ws = Workspace(Path(os.environ["PERSONAL_OS_DATA_DIR"]) / f"ws-{tmp.name}", **ws_kw)
         self.tb = Toolbox(None, None, None, lambda: self.settings, results=ToolResults(self.db), workspace=self.ws,
-                          sandboxes=sandboxes, desks=Desks(self.db, self.ws))  # type: ignore[arg-type]
+                          desks=Desks(self.db, self.ws))  # type: ignore[arg-type]
         self.ctx: dict[str, Any] = {"conversation_id": "c1", "desk_id": DESK, "message_id": None, "settings": self.settings,
                                     "tainted": False, "taint_sources": []}
         self.root = self.ws.ensure(DESK)
@@ -526,67 +526,3 @@ def test_a_token_in_a_desk_download_url_is_stripped(box: Box) -> None:
     r = box.run("desk_fetch_file", url=f"https://example.com/{pat}.pdf")
     assert pat not in str(r) and "refused" in r["error"] and "[github-pat]" in r["error"]
 
-
-def test_a_token_in_a_sandbox_import_path_is_stripped(tmp_path: Path) -> None:
-    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
-
-    class Sb:
-        def __init__(self) -> None:
-            self.seen: list[str] = []
-
-        def read_file(self, cid: str, path: str, off: int, length: int) -> dict[str, Any]:
-            self.seen.append(path)
-            if path.endswith(".png"):
-                return {"path": path, "bytes": 4}
-            return {"text": f"hello {pat}", "path": path}
-
-        def networked(self, cid: str) -> bool:
-            return False
-
-        def holds_import(self, cid: str) -> bool:
-            return False
-
-    sb = Sb()
-    box = Box(tmp_path, sandboxes=sb)
-    err = box.run("desk_import_sandbox", sandbox_path=f"shot-{pat}.png", path="work/x.md")
-    assert sb.seen == [f"shot-{pat}.png"]
-    assert pat not in str(err) and "[github-pat]" in err["error"]
-    ok = box.run("desk_import_sandbox", sandbox_path=f"note-{pat}.md", path=f"work/{pat}.md")
-    assert pat not in str(ok)
-    assert "[github-pat]" in ok["path"] and "[github-pat]" in ok["from_sandbox"]
-    assert (box.root / "work" / f"{pat}.md").read_text() == f"hello {pat}"
-
-
-def test_a_networked_sandbox_import_stays_untrusted_after_clear(tmp_path: Path) -> None:
-    class Sb:
-        def __init__(self, net: bool) -> None:
-            self.net = net
-
-        def read_file(self, cid: str, path: str, off: int, length: int) -> dict[str, str]:
-            return {"text": "from the net\n", "path": path}
-
-        def networked(self, cid: str) -> bool:
-            return self.net
-
-        def holds_import(self, cid: str) -> bool:
-            return False
-
-    dirty = Box(tmp_path / "dirty", sandboxes=Sb(True))
-    out = dirty.run("desk_import_sandbox", sandbox_path="out.md", path="work/out.md")
-    assert out["path"] == "work/out.md" and dirty.ws.was_fetched(DESK, "work/out.md")
-    dirty.ctx["tainted"] = False
-    dirty.ctx["taint_sources"] = []
-    got = dirty.run("desk_read_file", path="work/out.md")
-    assert "from the net" in got["text"] and dirty.ctx["tainted"] is True
-
-    clean = Box(tmp_path / "clean", sandboxes=Sb(False))
-    clean.run("desk_import_sandbox", sandbox_path="out.md", path="work/out.md")
-    assert clean.ws.was_fetched(DESK, "work/out.md") is False
-    clean.ctx["tainted"] = False
-    clean.run("desk_read_file", path="work/out.md")
-    assert clean.ctx["tainted"] is False
-
-
-def test_import_sandbox_description_is_truthful(box: Box) -> None:
-    d = box.tb.specs["desk_import_sandbox"].description
-    assert "share no directory" not in d and "/workspace/desk" in d

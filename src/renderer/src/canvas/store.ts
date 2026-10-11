@@ -853,7 +853,6 @@ export const useCanvas = create<CanvasState>((set, get) => {
 
 export const useActiveCanvas = (): Canvas | null => useCanvas((s) => (s.activeCanvasId ? s.canvases[s.activeCanvasId] ?? null : null))
 export const useWindows = (): CanvasWindow[] => useCanvas((s) => (s.activeCanvasId ? s.canvases[s.activeCanvasId]?.windows ?? EMPTY : EMPTY))
-export const useWindow = (windowId: string): CanvasWindow | undefined => useCanvas((s) => findWin(s, windowId))
 export const useIsFocused = (windowId: string): boolean => useCanvas((s) => s.focusedWindowId === windowId)
 /** The active space's lock, as a boolean: what the plane, the frames and the bar all render from. */
 export const useSpaceLocked = (): boolean => useCanvas((s) => !!(s.activeCanvasId ? s.canvases[s.activeCanvasId]?.locked : 0))

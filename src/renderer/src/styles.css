@@ -2782,3 +2782,6 @@ select:focus-visible {
 .inbox-modal > .agent-inbox { margin: 0; background: none; }
 .inbox-modal-close { position: absolute; top: 8px; right: 8px; z-index: 1; }
 .inbox-archive-search { width: 100%; margin: 4px 0 6px; }
+/* A file path inside a reply sentence: the attachment chip, sized to the line. */
+.file-chip.inline { margin: 0 1px; padding: 0 7px; font-size: inherit; line-height: inherit; vertical-align: baseline; }
+.file-chip.inline svg { color: var(--text-muted); flex: none; }

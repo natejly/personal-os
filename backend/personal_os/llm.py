@@ -105,6 +105,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "autoRoute": False,  # new chats start on Auto: the fast or the default model per message
     "consolidateEvery": CONSOLIDATE_EVERY,  # propose a memory tidy-up after this many new auto memories; 0 = manual only
     "autoLearn": True,
+    "captureRequests": True,  # keep the exact request of each model round (last 50 replies) for the Context drawer
     "followUps": True,  # up to 3 suggested next questions under the latest reply (uses the extraction model)
     "autoTitle": True,  # a short model-written chat title after the first reply (uses the extraction model)
     # Pre-image copies of local files the agent overwrites or moves, so Undo works (filesnap.py).

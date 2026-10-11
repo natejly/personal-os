@@ -6,7 +6,9 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
-import { Copy, Check } from 'lucide-react'
+import { Copy, Check } from '../icons'
+import { fileKind, baseName } from '../lib/fileKind'
+import { FILE_KIND_ICON } from './FileKindIcon'
 import { normalizeMathBlocks } from '../lib/mathBlocks'
 import { repairStreamingMarkdown } from '../lib/streamRepair'
 import { splitMarkdown, blockStartLine } from '../lib/splitMarkdown'
@@ -64,11 +66,20 @@ function ExternalLink({ href, children, ...rest }: React.AnchorHTMLAttributes<HT
   )
 }
 
-/** A path a chat reply names: the text itself is the link (no icon), and only inside a chat, where there is a panel to open it in. */
+/**
+ * A path a chat reply names, as a chip: type icon + file name, opening in the side panel. Only paths the reply
+ * itself names reach here (remarkFilePaths wraps them, and the link text is the path), so the chip stands in
+ * for the text. Outside a chat there is no panel to open it in, so the text stays as is.
+ */
 function FileLink({ path, children }: { path: string; children?: React.ReactNode }): JSX.Element {
   const chat = useContext(ShowCtx)
   if (!chat) return <>{children}</>
-  return <a href="#" className="file-link" title={path} onClick={(e) => { e.preventDefault(); void openPathLink(path, chat) }}>{children}</a>
+  const Icon = FILE_KIND_ICON[fileKind(path)]
+  return (
+    <button type="button" className="file-chip inline" title={path} onClick={() => { void openPathLink(path, chat) }}>
+      <Icon size={13} /><span>{baseName(path)}</span>
+    </button>
+  )
 }
 
 /** A doc's own pasted image: the asset route wants the app token, which an <img> cannot send, so it is fetched into a blob. */

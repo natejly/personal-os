@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ExternalLink, Search } from 'lucide-react'
+import { ExternalLink, Search } from '../../icons'
 import { api } from '../../lib/api'
 import type { McpRegistryResult } from '@shared/types'
 import { REGISTRY_LIMIT } from './catalog'

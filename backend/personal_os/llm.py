@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Callable
 import httpx
 
 from . import auth_breaker, providers
-from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_AT_TOKENS, COMPACT_KEEP_RECENT, COMPACT_KEEP_TOKENS, MICRO_AT_TOKENS, CONSOLIDATE_EVERY, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, SANDBOX_KEEP_DAYS, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SUBAGENT_MAX_DEPTH, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, WORKER_MAX_CONCURRENT, WORKFLOW_MAX_FAN_OUT)
+from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_AT_TOKENS, COMPACT_KEEP_RECENT, COMPACT_KEEP_TOKENS, MICRO_AT_TOKENS, CONSOLIDATE_EVERY, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SUBAGENT_MAX_DEPTH, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, WORKER_MAX_CONCURRENT, WORKFLOW_MAX_FAN_OUT)
 from .permissions import DEFAULTS as PERMISSION_DEFAULTS
 log = logging.getLogger("personal_os.llm")
 
@@ -236,12 +236,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "fetchCacheSeconds": FETCH_CACHE_SECONDS,
     # github_search/github_read; empty = the gh CLI's login (`gh auth token`), else unauthenticated (60 requests/h).
     "githubToken": "",
-    # A stopped sandbox (containers are stopped, not removed, at app quit) is deleted after this many idle days.
-    "sandboxKeepDays": SANDBOX_KEEP_DAYS,
-    # Mount the active desk's workspace read-write at /workspace/desk in that desk's sandbox container.
-    "sandboxMountDesk": True,
-    # fs_edit and an overwriting write_local_file refuse a file this conversation has not read (or that changed since).
-    "requireReadBeforeWrite": True,
     # Host shell (shell.py): shell_run runs in a Seatbelt sandbox: any folder, minus Grain's own data and the credential stores.
     "shellTimeoutSec": SHELL_TIMEOUT_SECONDS,      # foreground default; a call may ask for up to 600
     "shellMaxBackground": SHELL_MAX_BACKGROUND,     # live background jobs at once
@@ -260,12 +254,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "googleClientId": "",
     "googleClientSecret": "",
     "googleToken": {},
-    # Entra public client (PKCE, no secret). Tenant "" means "common".
-    "microsoftClientId": "",
-    "microsoftTenant": "",
-    "microsoftToken": {},
-    # Which account Mail, Calendar, the mail/calendar tools, the reply tracker and the outbox use: "google" | "microsoft".
-    "pimProvider": "google",
     # Google Tasks <-> todos sync. Shape and defaults live in gtasks.DEFAULT_CONFIG; patched
     # through /integrations/google/tasks-sync rather than /settings for the same reason.
     # Empty on purpose: anything named here would override that module's defaults.
@@ -297,6 +285,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "telegramEnabled": False,
     "telegramNotifyLongRuns": False,  # also send approvals and finish notices for runs that were not started from Telegram
     "telegramLongRunMinutes": TELEGRAM_LONG_RUN_MINUTES,
+    "telegramBotName": "",  # the bot's display name; blank = "Grain · <this Mac's name>", set when this Mac claims the bot
     "telegramPushWorkerResults": False,  # also text the owner the reply Grain writes when a background worker finishes
     # Todo time-block planner (planner.py); PlannerModule.config() merges stored values over these.
     "planner": {"workStart": "09:00", "workEnd": "17:30", "workDays": [1, 2, 3, 4, 5], "bufferMin": 10, "minBlockMin": 15,

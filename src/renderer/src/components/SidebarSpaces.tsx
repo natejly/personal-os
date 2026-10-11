@@ -1,12 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronRight, LayoutGrid, Lock, MoreHorizontal } from 'lucide-react'
+import { ChevronRight, LayoutGrid, Lock, MoreHorizontal } from '../icons'
 import { useProject, useStore } from '../store'
 import type { DragKind } from '@shared/types'
 import { useCanvas } from '../canvas/store'
 import { useDropTarget } from '../canvas/dnd'
 import { openPayload } from '../canvas/drops'
-import { PresetsButton, SavePresetForm } from '../canvas/PresetsMenu'
 import { focusFirstItem, menuKeyDown, useReturnFocus } from '../canvas/Menu'
 import { rowButton } from '../lib/rowButton'
 
@@ -16,14 +15,12 @@ const ALL: DragKind[] = ['conversation', 'todo', 'document', 'memory', 'project'
 /** Keep a fixed popover this far inside the viewport. */
 const MENU_GAP = 8
 
-/** `keep`: the item swaps the menu's body instead of closing it. */
-interface MenuItem { label: string; danger?: boolean; keep?: boolean; run: () => void }
+interface MenuItem { label: string; danger?: boolean; run: () => void }
 
 /** A space row's actions, in a body portal so the sidebar's scroll container cannot clip it. */
 function SpaceMenu({ at, canvasId, onClose }: { at: { x: number; y: number }; canvasId: string; onClose: () => void }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState(at)
-  const [saving, setSaving] = useState(false)
   useReturnFocus()
   useEffect(() => focusFirstItem(ref.current), [])
 
@@ -35,7 +32,7 @@ function SpaceMenu({ at, canvasId, onClose }: { at: { x: number; y: number }; ca
       x: Math.max(MENU_GAP, Math.min(at.x, window.innerWidth - r.width - MENU_GAP)),
       y: Math.max(MENU_GAP, Math.min(at.y, window.innerHeight - r.height - MENU_GAP))
     })
-  }, [at, saving])
+  }, [at])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -54,7 +51,6 @@ function SpaceMenu({ at, canvasId, onClose }: { at: { x: number; y: number }; ca
   const locked = useCanvas((s) => !!s.canvases[canvasId]?.locked)
   const items: MenuItem[] = [
     { label: locked ? 'Unlock canvas' : 'Lock canvas', run: () => void useCanvas.getState().setLocked(canvasId, !locked) },
-    { label: 'Save as preset…', keep: true, run: () => setSaving(true) },
     // Left in place while locked: `deleteSpace` refuses, and the toast says why.
     {
       label: 'Delete canvas',
@@ -79,8 +75,8 @@ function SpaceMenu({ at, canvasId, onClose }: { at: { x: number; y: number }; ca
         }}
       />
       <div ref={ref} className="project-menu space-menu" style={{ position: 'fixed', left: pos.x, top: pos.y }} role="menu" onKeyDown={(e) => menuKeyDown(e, onClose)}>
-        {saving ? <SavePresetForm canvasId={canvasId} onDone={onClose} /> : items.map((it) => (
-          <button key={it.label} className={`project-item${it.danger ? ' danger' : ''}`} role="menuitem" onClick={it.keep ? it.run : run(it.run)}>
+        {items.map((it) => (
+          <button key={it.label} className={`project-item${it.danger ? ' danger' : ''}`} role="menuitem" onClick={run(it.run)}>
             {it.label}
           </button>
         ))}
@@ -167,9 +163,6 @@ export default function SidebarSpaces(): JSX.Element {
         <button className="section-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
           <ChevronRight size={12} className={open ? 'rot90' : ''} /><LayoutGrid size={13} /> Canvases
         </button>
-        <span className="section-actions">
-          <PresetsButton canvasId={null} />
-        </span>
       </div>
       {open && (
         <div className="project-list space-list">

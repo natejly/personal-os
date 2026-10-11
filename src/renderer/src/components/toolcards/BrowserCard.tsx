@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Eye, EyeOff, Globe, MonitorUp } from 'lucide-react'
+import { Eye, EyeOff, Globe, MonitorUp } from '../../icons'
 import { hostPath } from '../../lib/browserApproval'
 import DeskBrowser from '../DeskBrowser'
 import { browserLine, num, str, strList } from '../../lib/toolResult'

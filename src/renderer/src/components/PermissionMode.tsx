@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent } from 'react'
-import { ShieldAlert, ShieldCheck } from 'lucide-react'
+import { ShieldAlert, ShieldCheck } from '../icons'
 import { useStore } from '../store'
 import { MODES, modeOf, needsConfirm, pillLabel, pillTitle, type PermissionMode } from '../lib/permissionMode'
 

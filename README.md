@@ -75,7 +75,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    or right-click the plane to add a chat, lists, calendar, doc, memory, graph,
    uploads, recap, project, usage, face or crew window; drag a chat, a
    Files note or a sidebar row onto it. ⌘⌃O pops a window out of the Space into
-   its own OS window. Save a layout as a preset from the Spaces bar, and lock a
+   its own OS window. Lock a
    Space with ⌃⌘L so it cannot be rearranged. See [docs/spaces.md](docs/spaces.md).
 7. **Agents and crews.** Library → Agents lists roles. Describe one and the
    model drafts its label, hue, skills, boundaries and prompt; edit it, then
@@ -201,7 +201,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   windows sit side by side. Drag anything from the sidebar, or a Files note
   (it becomes its own editable `doc` window), or right-click to add. A window can
   pop out into its own OS window, pinned on top and see-through, and one
-  global shortcut gathers them all. Save a space as a preset, lock it so
+  global shortcut gathers them all. Lock a space so
   neither you nor the assistant can rearrange it, and let the assistant add
   windows with the `space_*` and `widget_*` tools. See
   [docs/spaces.md](docs/spaces.md).
@@ -603,28 +603,6 @@ used). For anything those cannot express, `run_python` has numpy and matplotlib;
 figures saved with `plt.savefig()` come back as images attached to the tool
 call and are stored with the message.
 
-## MicroVM sandboxes
-
-Beyond one-shot `run_python`, each chat can get a persistent Linux sandbox the
-assistant drives with the `sandbox_*` tools: `sandbox_exec` (shell),
-`sandbox_write_file` / `sandbox_read_file` / `sandbox_list_files` (state in
-`/workspace` persists between calls), `sandbox_put_document` (copy an uploaded
-document's text in for editing or analysis) and `sandbox_reset`. Sandboxes are
-containers run through the `docker` CLI — on this machine's colima setup they
-execute inside a Virtualization.framework Linux VM, so the host filesystem is
-unreachable by construction. Containers are created with `--network none`
-(settings `sandboxNetwork: true` attaches the network, and networked results
-then taint the run exactly like `fetch_url`), capabilities dropped, and
-memory/cpu/pids caps; at most 5 exist at once (LRU-reaped). They are stopped on
-app shutdown and kept for `sandboxKeepDays` (default 14), so `/workspace` and
-installed packages survive a relaunch. `sandbox_checkpoint` / `sandbox_restore`
-snapshot the filesystem to a local image (3 per chat) and roll back to it;
-`sandbox_reset` also drops the checkpoints. `sandboxImage` (default `python:3.12-slim`) and
-`sandboxRuntime` (default `docker`) are configurable in settings. The tools
-only appear when the runtime is actually reachable. A container left idle for five
-minutes is stopped by a one-minute reaper (its files and installs survive and it
-restarts on next use) and every container is stopped at exit.
-
 ## Host shell
 
 `shell_run(command, cwd?, timeout_s?, background?)` runs a command in `/bin/zsh` on
@@ -773,7 +751,7 @@ scripts/litellm.sh  LiteLLM proxy alone
 litellm.yaml        Model routing (Fireworks by default)
 docs/research/      Feature research, the roadmap, per-track source reports
 docs/docs-editor.md The Files editor: revisions, diffs and the doc_* tools
-docs/spaces.md      Spaces: windows, pop-outs, presets, lock, agent tools
+docs/spaces.md      Spaces: windows, pop-outs, lock, agent tools
 docs/agents.md      Agents: scope, boundaries, routines, agent page, @mentions
 docs/health.md      Health: metrics and connected services
 docs/voice-input.md Voice input: backends, settings, permissions

@@ -23,7 +23,7 @@ REAL = appmod.toolbox.specs["gmail_send"]
 import test_permrules_external_loop as T  # noqa: E402  (swaps in a fake gmail_send; the real one goes back below)
 
 appmod.toolbox.specs["gmail_send"] = REAL
-from fake_google_api import FakeGoogle, FakeServer  # noqa: E402
+from fake_google_api import FakeGoogle, FakeServer, impersonate  # noqa: E402
 from personal_os import autoreview, llm, permrules, verify  # noqa: E402
 from personal_os.runs import Run  # noqa: E402
 
@@ -67,13 +67,14 @@ def drive(cid: str, rounds: list[list[dict[str, Any]]], answers: list[Any], run:
     prev, appmod_ok = llm.stream_chat, appmod.toolbox._google_ok
     llm.stream_chat = T._scripted
     appmod.toolbox._google_ok = lambda: True  # type: ignore[method-assign]
-    real_google, appmod.pim.google = appmod.pim.google, FakeGoogle(SERVER)
+    undo_google = impersonate(appmod.google, FakeGoogle(SERVER))
     d, s = verify.MAIL_RETRY_DELAYS, verify.SLEEP
     verify.MAIL_RETRY_DELAYS, verify.SLEEP = (0.0,), lambda s: None
     try:
         return asyncio.run(go())
     finally:
-        llm.stream_chat, appmod.toolbox._google_ok, appmod.pim.google = prev, appmod_ok, real_google
+        llm.stream_chat, appmod.toolbox._google_ok = prev, appmod_ok
+        undo_google()
         verify.MAIL_RETRY_DELAYS, verify.SLEEP = d, s
 
 

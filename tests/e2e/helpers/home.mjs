@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { expect } from '@playwright/test'
 
-export const TABS = ['Model', 'Usage', 'Permissions', 'Integrations', 'Texting', 'Memory', 'Appearance', 'System access', 'Advanced']
+export const TABS = ['Model', 'Usage', 'Permissions', 'Integrations', 'Agents', 'Memory', 'General', 'Sidebar', 'System access', 'Advanced']
 
 export const dialog = (page) => page.getByRole('dialog', { name: 'Settings' })
 
@@ -14,11 +14,14 @@ export async function openSettings(page, tab) {
   return dialog(page)
 }
 
-/** Open Settings on its Advanced tab with one collapsed group (e.g. 'Approvals', 'Search', 'Data') expanded. */
+/** Where each former Advanced group now lives. Only Memory search and Data/Developer are still collapsed groups. */
+const GROUP_TAB = { Assistant: 'Model', Approvals: 'Permissions', 'Files and web': 'Permissions', 'Desks and workers': 'Agents', 'Voice and shortcuts': 'General', Search: 'Memory', Data: 'Advanced', Developer: 'Advanced' }
+
+/** Open the Settings tab holding `group` (a former Advanced group name), expanding it when it is still collapsed. */
 export async function openAdvanced(page, group) {
-  await openSettings(page, 'Advanced')
-  const summary = dialog(page).locator('.adv-group > summary', { hasText: group })
-  if (!(await summary.evaluate((el) => el.parentElement.open))) await summary.click()
+  await openSettings(page, GROUP_TAB[group] ?? 'Advanced')
+  const summary = dialog(page).locator('.adv-group > summary', { hasText: group === 'Search' ? 'Memory search' : group })
+  if (await summary.count() && !(await summary.evaluate((el) => el.parentElement.open))) await summary.click()
   return dialog(page)
 }
 

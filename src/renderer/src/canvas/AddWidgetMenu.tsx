@@ -1,5 +1,5 @@
 import { cloneElement, useCallback, useMemo, useState } from 'react'
-import { MessageSquarePlus, Plus, SquarePlus } from 'lucide-react'
+import { MessageSquarePlus, Plus, SquarePlus } from '../icons'
 import type { WidgetKind } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X } from 'lucide-react'
+import { X } from '../icons'
 import type { ShowItem } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'

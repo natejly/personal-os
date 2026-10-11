@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
-import { Loader2, Mic, Square } from 'lucide-react'
+import { Loader2, Mic, Square } from '../icons'
 import { api } from '../lib/api'
 import { ApiError } from '../lib/apiError'
 import { startWavRecording, type WavRecording } from '../lib/wavRecorder'
@@ -80,7 +80,7 @@ export default function MicButton({ scope, onText }: { scope: RefObject<HTMLElem
       }
     } catch (e) {
       const fixable = e instanceof ApiError && e.status === 409
-      toast((e as Error).message, 'error', fixable ? { label: 'Open settings', run: () => useStore.getState().openSettings('advanced', 'voice') } : undefined)
+      toast((e as Error).message, 'error', fixable ? { label: 'Open settings', run: () => useStore.getState().openSettings('appearance') } : undefined)
     } finally {
       setPhase('idle')
     }

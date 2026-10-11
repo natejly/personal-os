@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fnmatch
 import hashlib
 import inspect
 import datetime as dt
@@ -35,7 +36,7 @@ from . import sendfiles
 from . import skillbuild
 from .style import voice_wanted
 from .cowork import UNDECIDED_OUTPUTS
-from .workspace import MAX_FILE_CHARS, Workspace, WorkspaceError
+from .workspace import Workspace, WorkspaceError
 from . import plans, router
 from . import coding_route
 from . import firecrawl, reach
@@ -52,7 +53,6 @@ from .extract_text import safe_upload_name
 from . import scheduling, verify
 from .jobs import check_watch_dir, local_tz_name, parse_when, valid_cron, valid_tz
 from .learn import SELF_LABELS, SKILL_STATUSES, induce_skill, run_transcript
-from .microvm import SandboxError, Sandboxes, net_mode
 from .repos import Documents, Graph, Memories, is_isolated
 from .sandbox import WORKSPACE_REPORT_CAP, run_python
 
@@ -120,6 +120,11 @@ def times_body(found: dict[str, Any]) -> str:
         f"- {s['start'].replace('T', ' ')} to {s['end'][11:]} ({found['timezone']})" for s in found["slots"])
 
 
+def allows_slug(patterns: Any, slug: str) -> bool:
+    """Does an agent's tool list name this connector slug? Exact slugs or globs (`mcp__server__*`). An empty list names nothing."""
+    return any(fnmatch.fnmatchcase(slug, str(p)) for p in patterns or ())
+
+
 class ToolSpec:
     def __init__(self, name: str, description: str, parameters: dict[str, Any], fn: ToolFn, group: str, danger: str = "safe",
                  examples: list[dict[str, Any]] | None = None, taints: bool = False):
@@ -181,15 +186,6 @@ ALTERNATIVE = {
     "search_documents": "list_documents to see what exists, or ask the user to paste the text",
     "read_document": "search_documents for the relevant excerpt",
     "run_python": "do the arithmetic or the reasoning directly in your reply",
-    "sandbox_exec": "run_python for a one-shot sandboxed script",
-    "sandbox_write_file": "include the file contents in your reply so the user can save them",
-    "sandbox_read_file": "ask the user to paste the file contents",
-    "sandbox_list_files": "ask the user what the sandbox should contain",
-    "sandbox_put_document": "read_document, then sandbox_write_file the excerpt you need",
-    "sandbox_export_file": "tell the user the path in the sandbox, or print a text file's contents in your reply",
-    "sandbox_reset": "continue with the sandbox as it is",
-    "sandbox_checkpoint": "continue without a checkpoint, or copy the files you care about out with sandbox_read_file",
-    "sandbox_restore": "sandbox_reset to start fresh",
     "save_memory": "state the fact in your reply so the user can keep it",
     "writing_style": "write in plain, direct prose, or ask the user for a sample of their own writing",
     "save_writing_sample": "tell the user they can add the passage themselves under Memory → Voice",
@@ -221,7 +217,6 @@ ALTERNATIVE = {
     "desk_write_file": "write to work/ instead, or desk_trash_file something you no longer need",
     "desk_trash_file": "leave the file; nothing in a workspace is deleted anyway",
     "desk_deliver": "desk_write_file it into outputs/ first, then deliver that path",
-    "desk_import_sandbox": "sandbox_read_file the file, then desk_write_file what you need",
     "desk_ask": "make the most reasonable assumption, say what it was, and carry on",
     "ask_user": "make the most reasonable assumption, say what it was, and carry on",
     "desk_done": "summarise what you did in your reply; the user can finish the desk",
@@ -308,7 +303,7 @@ def denied(name: str, reason: str) -> dict[str, Any]:
 
 # Reads that may be called again after a transient network failure (Toolbox._dispatch).
 RETRY_DANGER = ("safe", "network")
-NO_RETRY_GROUPS = ("browser", "shell", "sandbox")  # they hold session state
+NO_RETRY_GROUPS = ("browser", "shell")  # they hold session state
 # The `show` tool: what the chat's side panel can render, and how much of it travels on one tool event.
 SHOW_KINDS = ("html", "svg", "mermaid", "chart", "interactive", "markdown", "file")
 SHOW_MAX_CHARS = 200_000
@@ -677,11 +672,14 @@ async def _guarded_request(client: httpx.AsyncClient, method: str, url: str, *, 
             method, content = "GET", None
 
 
+def _allow_all(ctx: dict[str, Any]) -> bool:
+    return (ctx.get("permission_mode") or permissions.get(ctx.get("settings") or {}, "permissionMode")) == "allow_all"
+
+
 def doc_edit_applies(ctx: dict[str, Any]) -> bool:
     """doc_edit writes straight into the file: under Full agentic editing, and always under Allow everything (no diff to accept)."""
     s = ctx.get("settings") or {}
-    return (ctx.get("permission_mode") or permissions.get(s, "permissionMode")) == "allow_all" or (
-        str(permissions.get(s, "docEditMode") or "review") == "apply")
+    return _allow_all(ctx) or str(permissions.get(s, "docEditMode") or "review") == "apply"
 
 
 class Toolbox:
@@ -695,13 +693,13 @@ class Toolbox:
     style_relearn: Any = None  # (project_id) -> None: queues a background voice relearn; wired in app.py
 
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], modules: list[Any] | None = None, google: Any = None,
-                 sandboxes: Sandboxes | None = None, docs: Any = None, outbox: Any = None,
+                 docs: Any = None, outbox: Any = None,
                  work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None,
                  style: Any = None, desks: Any = None, workspace: Any = None, filesnap: Any = None,
                  conversations: Any = None, extundo: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
         self.modules = modules or []  # feature modules (modules/); each registers its own tools
-        self.google, self.sandboxes, self.docs = google, sandboxes, docs
+        self.google, self.docs = google, docs
         self.filesnap = filesnap  # pre-image snapshots for local file writes (filesnap.py); None skips them
         self.extundo = extundo  # undo rows for calendar / Google Tasks writes (extundo.py); None skips them
         self.outbox = outbox  # delayed Gmail send; gmail_send queues through it when it is wired up
@@ -713,7 +711,7 @@ class Toolbox:
         # autonomy is exactly the boundary of the workspace directory, and the root is derived from
         # ctx["desk_id"] inside each handler so desk A cannot address desk B's files.
         self.desks, self.workspace = desks, workspace
-        # A plain chat's outbox (<data>/chats/<conversation_id>/): where sandbox exports, browser downloads and
+        # A plain chat's outbox (<data>/chats/<conversation_id>/): where browser downloads and
         # run_python's outputs/ land when there is no desk. Same containment and quotas as a desk.
         root = getattr(workspace, "root", None)
         self.chat_outputs = Workspace(Path(root).parent, sub="chats") if isinstance(root, (str, Path)) else None
@@ -735,8 +733,6 @@ class Toolbox:
             self._register_docs()
         if google is not None:
             self._register_google()
-        if sandboxes is not None:
-            self._register_sandbox()
         from . import space_tools
         space_tools.register(self)
         self._register_mac()
@@ -797,8 +793,6 @@ class Toolbox:
                 if (self.settings().get("googleTasksSync") or {}).get("enabled", gtasks_default["enabled"]):
                     return False
             return self._google_ok() if google_ok is None else google_ok
-        if spec and spec.group == "sandbox":  # needs a container runtime; the check is TTL-cached
-            return self.sandboxes is not None and self.sandboxes.available()
         if spec and name in MAC_TOOLS:
             return _mac_available(name)
         if spec and spec.available_fn is not None:
@@ -897,17 +891,6 @@ class Toolbox:
         spec = self.specs.get(name)
         return bool(ctx.get("tainted")) and not (spec and spec.taint_ok and spec.taint_ok(args, ctx))
 
-    def _networked_sandbox_call(self, spec: ToolSpec, ctx: dict[str, Any]) -> bool:
-        """True for a sandbox_* tool whose sandbox can reach the internet (or will, once created). The proxy mode counts:
-        an allowed host can still carry out what a tainted reply read, so it asks like the shell's allowlist does."""
-        sb = self.sandboxes
-        if not sb or spec.group != "sandbox" or spec.danger != "executes":
-            return False
-        try:
-            return bool(sb.reaches_out(ctx.get("conversation_id") or "") or net_mode(permissions.get(sb.settings(), "sandboxNetwork")) != "off")
-        except Exception:  # noqa: BLE001 - unknown means assume it can reach out
-            return True
-
     def _own_words_save(self, name: str, args: dict[str, Any] | None, ctx: dict[str, Any]) -> bool:
         """A plain save_memory (no replaces/forget) whose content the user's own words in this chat back: a chat that
         read untrusted text cannot plant a memory the user never said, but may keep one they did."""
@@ -939,7 +922,7 @@ class Toolbox:
         """Effective mode for one call. Untrusted content forces alwaysAsk tools, and anything that writes lasting text, to ask.
 
         A tainted run also asks before a web fetch or search (the address or query can carry what was
-        just read), before running code in a networked sandbox, and before cancelling a queued email.
+        just read), and before cancelling a queued email.
         Listing that hold does not ask.
         """
         spec = self.specs.get(name)
@@ -949,7 +932,7 @@ class Toolbox:
         reviewed = name == "doc_edit" and not doc_edit_applies(ctx)
         if spec and mode == "on" and self.tainted_for(name, args or {}, ctx) and not reviewed and (
                 spec.danger == "network" or self.ask_locked(spec) or (name in PROMPT_WRITES and not self._own_words_save(name, args, ctx))
-                or self._networked_sandbox_call(spec, ctx) or cancel_send):
+                or cancel_send):
             return "ask"
         if mode == "on" and args is not None and self.forces_ask(name, args, ctx):
             return "ask"
@@ -1003,10 +986,6 @@ class Toolbox:
             return tool_error(refused.format(name=name), alternative=ALTERNATIVE.get(name))
         if routed := coding_route.check(self, name, args, ctx):  # every caller (chat, desk, worker, subagent, script, workflow)
             return tool_error(routed, alternative="coding_session_start")
-        if ctx.get("proposal_only") and self._networked_sandbox_call(spec, ctx):
-            return tool_error(f"{name} would run code in a sandbox that has network access, and this is an unattended "
-                              "background run, so it is refused: code could send data out with nobody watching.",
-                              alternative="run_python, which has no network")
         # The precheck above judges the command's text; this diffs the repo it ran in, for what the text hid (a script, a heredoc).
         guard = await asyncio.to_thread(coding_route.guard_start, self, args, ctx) if name == "shell_run" else None
         try:
@@ -1679,6 +1658,7 @@ class Toolbox:
                                   expected="`cron` for something repeating, or `when`/`in_minutes` for a one-off")
             pid = ctx.get("project_id")
             aid = ctx.get("agent_id")  # a task scheduled from an agent's chat keeps running as that agent
+            origin = ctx.get("conversation_id")  # and its result comes back to this chat
             if watch_dir:
                 if when or in_minutes:
                     return tool_error("A folder-watching task runs when files change, not at one time.",
@@ -1692,14 +1672,15 @@ class Toolbox:
                     return tool_error(f"I can't watch that folder: {e}", field="watch_dir",
                                       expected="a folder on this Mac, e.g. ~/Downloads")
                 job = self.jobs.create(name.strip(), cron or "", prompt, kind="watch", timezone=tz, enabled=True,
-                                       project_id=pid, watch_dir=folder, agent_id=aid)
+                                       project_id=pid, watch_dir=folder, agent_id=aid, origin_conversation_id=origin)
             elif cron:
                 if not valid_cron(cron):
                     return tool_error(redact.scrub_command_output(f"'{cron}' is not a cron expression I can read."), field="cron",
                                       expected="five fields: minute hour day-of-month month day-of-week",
                                       example={"name": "Weekly review", "prompt": "Write my weekly review…",
                                                "cron": "0 17 * * 5"})
-                job = self.jobs.create(name.strip(), cron, prompt, kind="cron", timezone=tz, enabled=True, project_id=pid, agent_id=aid)
+                job = self.jobs.create(name.strip(), cron, prompt, kind="cron", timezone=tz, enabled=True, project_id=pid, agent_id=aid,
+                                       origin_conversation_id=origin)
             else:
                 if in_minutes is not None:
                     run_at = time.time() + max(1, int(in_minutes)) * 60
@@ -1716,7 +1697,7 @@ class Toolbox:
                                       expected="a time in the future",
                                       alternative="do it now instead of scheduling it")
                 job = self.jobs.create(name.strip(), "", prompt, kind="once", run_at=run_at, timezone=tz,
-                                       enabled=True, project_id=pid, agent_id=aid)
+                                       enabled=True, project_id=pid, agent_id=aid, origin_conversation_id=origin)
             return {**_row(job), "scheduled": True,
                     "note": "It will run on its own, with nobody watching. It can read and write inside Grain; "
                             "anything that leaves the app (mail, calendar, Docs) comes back to the user as a "
@@ -2412,151 +2393,6 @@ def _register_google(self: Toolbox) -> None:
         examples=[{"title": "Job applications", "values": [["Company", "Role", "Status"]]}]))
 
 
-def _register_sandbox(self: Toolbox) -> None:
-    """Persistent microVM sandbox per conversation (see microvm.py for the isolation story)."""
-    R = self.specs.__setitem__
-    sb = self.sandboxes
-    run = asyncio.to_thread
-
-    def _shown_file(out: Any) -> Any:
-        """Credentials out of paths and text. Image bytes stay, so a plot still renders."""
-        if not isinstance(out, dict) or "images" not in out:
-            return _scrub_strings(out)
-        images = out.get("images")
-        rest = _scrub_strings({k: v for k, v in out.items() if k != "images"})
-        kept: list[Any] = []
-        for img in images if isinstance(images, list) else []:
-            if not isinstance(img, dict):
-                kept.append(img)
-                continue
-            shown = dict(img)
-            if isinstance(shown.get("name"), str):
-                shown["name"] = redact.scrub_command_output(shown["name"])
-            kept.append(shown)
-        rest["images"] = kept
-        return rest
-
-    def _sandbox_error(name: str, e: SandboxError) -> dict[str, Any]:
-        return tool_error(redact.scrub_command_output(str(e)), alternative=ALTERNATIVE.get(name))
-
-    def _mark(ctx: dict[str, Any], out: Any, name: str) -> Any:
-        # A networked sandbox can read the internet, so anything it returns is untrusted,
-        # exactly like fetch_url output. The flag is set here rather than via ToolSpec.taints
-        # because the same tool is clean when the sandbox was created without network.
-        cid = ctx.get("conversation_id") or ""
-        imported = bool(cid) and sb.holds_import(cid)
-        if isinstance(out, dict) and (out.get("network") or imported):
-            ctx["tainted"] = True
-            ctx.setdefault("taint_sources", []).append(name)
-        return out
-
-    async def sandbox_exec(ctx: dict[str, Any], command: str, timeout: int = 60) -> Any:
-        return _mark(ctx, await run(sb.exec, ctx["conversation_id"], command, timeout), "sandbox_exec")
-    R("sandbox_exec", ToolSpec("sandbox_exec", "Run a shell command in this chat's persistent Linux sandbox (a VM-isolated container; the host machine is unreachable). State persists between calls: files you write, packages you install with apt/pip (only if network is enabled in Settings; it is off by default). Working directory is /workspace. Returns stdout/stderr/exit_code; output is capped, so pipe long output through head/tail/grep.",
-        _obj({"command": {"type": "string"}, "timeout": {"type": "integer", "default": 60, "description": "seconds, max 600"}}, ["command"]), sandbox_exec, "sandbox", "executes",
-        examples=[{"command": "python3 - <<'EOF'\nprint(2**100)\nEOF"}, {"command": "ls -la && wc -l notes.md"},
-                  {"command": "python3 analyze.py 2>&1 | tail -40", "timeout": 120}]))
-
-    async def sandbox_write_file(ctx: dict[str, Any], path: str, content: str, append: bool = False) -> Any:
-        try:
-            out = _shown_file(await run(sb.write_file, ctx["conversation_id"], path, content, append))
-        except SandboxError as e:
-            return _sandbox_error("sandbox_write_file", e)
-        return _mark(ctx, out, "sandbox_write_file")
-    R("sandbox_write_file", ToolSpec("sandbox_write_file", "Write (or append to) a text file in the sandbox. Relative paths land in /workspace; parent directories are created. Use this for code and documents you then run or edit with sandbox_exec.",
-        _obj({"path": {"type": "string"}, "content": {"type": "string"}, "append": {"type": "boolean", "default": False}}, ["path", "content"]), sandbox_write_file, "sandbox", "executes",
-        examples=[{"path": "analyze.py", "content": "import json\nprint('hi')"}, {"path": "notes/draft.md", "content": "## Plan\n", "append": True}]))
-
-    async def sandbox_read_file(ctx: dict[str, Any], path: str, offset: int = 0, length: int = 6000) -> Any:
-        try:
-            out = _shown_file(await run(sb.read_file, ctx["conversation_id"], path, offset, length))
-        except SandboxError as e:
-            return _sandbox_error("sandbox_read_file", e)
-        return _mark(ctx, out, "sandbox_read_file")
-    R("sandbox_read_file", ToolSpec("sandbox_read_file", "Read a file from the sandbox. Text comes back as a byte window (page with offset/length); images (.png, .jpg…) are shown to the user inline, so plots a script saved can be displayed this way.",
-        _obj({"path": {"type": "string"}, "offset": {"type": "integer", "default": 0}, "length": {"type": "integer", "default": 6000}}, ["path"]), sandbox_read_file, "sandbox", "executes",
-        examples=[{"path": "out.csv"}, {"path": "out.csv", "offset": 6000}, {"path": "plot.png"}]))
-
-    async def sandbox_list_files(ctx: dict[str, Any], path: str | None = None, offset: int = 0) -> Any:
-        try:
-            out = _shown_file(await run(sb.list_files, ctx["conversation_id"], path))
-        except SandboxError as e:
-            return _sandbox_error("sandbox_list_files", e)
-        out = _mark(ctx, out, "sandbox_list_files")
-        if isinstance(out, dict) and "entries" in out:
-            return page(out["entries"], offset=offset, limit=50, key="entries", path=out["path"])
-        return out
-    R("sandbox_list_files", ToolSpec("sandbox_list_files", "List files in the sandbox (default /workspace, up to 3 levels deep).",
-        _obj({"path": {"type": "string"}, "offset": {"type": "integer", "default": 0}}, []), sandbox_list_files, "sandbox", "executes",
-        examples=[{}, {"path": "notes"}, {"offset": 50}]))
-
-    async def sandbox_put_document(ctx: dict[str, Any], document_id: str, path: str | None = None) -> Any:
-        d = self.documents.get(document_id)
-        if not d:
-            return tool_error(redact.scrub_command_output(f"No uploaded file with id '{document_id}'."), field="document_id",
-                              expected="an id from search_documents or list_documents",
-                              example={"document_id": "doc_3f2a91"}, alternative=ALTERNATIVE["sandbox_put_document"])
-        dest = path or (d["name"] + ("" if d["name"].lower().endswith((".txt", ".md", ".csv", ".json")) else ".txt"))
-        try:
-            out = await run(sb.write_file, ctx["conversation_id"], dest, d["text"])
-        except SandboxError as e:
-            return _sandbox_error("sandbox_put_document", e)
-        # The extracted text is now guest state. Later commands can print it, so the chat stays
-        # untrusted until the sandbox is reset — clearing the banner alone must not be enough.
-        sb.note_import(ctx["conversation_id"])
-        ctx["tainted"] = True
-        ctx.setdefault("taint_sources", []).append("sandbox_put_document")
-        return _shown_file({**out, "document": d["name"]})
-    R("sandbox_put_document", ToolSpec("sandbox_put_document", "Copy an uploaded file's extracted text into the sandbox as a file, so you can edit, transform or analyse it with sandbox_exec.",
-        _obj({"document_id": {"type": "string"}, "path": {"type": "string", "description": "destination path; defaults to the file's name"}}, ["document_id"]), sandbox_put_document, "sandbox", "executes",
-        examples=[{"document_id": "doc_3f2a91"}, {"document_id": "doc_3f2a91", "path": "input/report.txt"}]))
-
-    async def sandbox_export_file(ctx: dict[str, Any], path: str, dest: str | None = None) -> Any:
-        box = self.files_for(ctx)
-        if box is None:
-            return tool_error("sandbox_export_file has nowhere to save: this run belongs to no chat or desk.",
-                              alternative=ALTERNATIVE["sandbox_export_file"])
-        ws, owner = box
-        try:
-            gp, data = await run(sb.export_file, ctx["conversation_id"], path)
-            rel = (dest or "").strip() or "outputs/" + posixpath.basename(gp)
-            entry = ws.save_bytes(owner, rel, data)
-        except (SandboxError, WorkspaceError) as e:
-            return tool_error(redact.scrub_command_output(str(e)), field="path", alternative=ALTERNATIVE["sandbox_export_file"])
-        out: dict[str, Any] = {"saved": entry["path"], "bytes": len(data), "from_sandbox": gp}
-        if not ctx.get("desk_id"):
-            out = {"outputs": [entry], **out,
-                   "note": "Saved in this chat's files; the user can download it from the card. write_local_file puts text "
-                           "files elsewhere on their Mac."}
-        if sb.networked(ctx["conversation_id"]):
-            out["network"] = True
-        return _mark(ctx, _shown_file(out), "sandbox_export_file")
-    R("sandbox_export_file", ToolSpec("sandbox_export_file", "Copy any file (binary included, up to 10 MB) from the sandbox's /workspace to the user so they can open it: into this desk's workspace, or in a plain chat into the chat's files, which the user can download from the card (default outputs/<name>). Never overwrites an existing file.",
-        _obj({"path": {"type": "string", "description": "file under /workspace"}, "dest": {"type": "string", "description": "destination relative to the desk workspace or chat files; default outputs/<file name>"}}, ["path"]),
-        sandbox_export_file, "sandbox", "writes",
-        examples=[{"path": "report.pdf"}, {"path": "build/chart.xlsx", "dest": "outputs/chart.xlsx"}]))
-
-    async def sandbox_reset(ctx: dict[str, Any]) -> Any:
-        return await run(sb.reset, ctx["conversation_id"])
-    R("sandbox_reset", ToolSpec("sandbox_reset", "Destroy this chat's sandbox and its checkpoints and start the next call from a fresh container. Use when the environment is wedged and no checkpoint helps (sandbox_restore rolls back instead); all sandbox files are lost.",
-        _obj({}, []), sandbox_reset, "sandbox", "executes", examples=[{}]))
-
-    async def sandbox_checkpoint(ctx: dict[str, Any], label: str = "") -> Any:
-        try:
-            return _scrub_strings(await run(sb.checkpoint, ctx["conversation_id"], label))
-        except SandboxError as e:
-            return tool_error(redact.scrub_command_output(str(e)), alternative=ALTERNATIVE["sandbox_checkpoint"])
-    R("sandbox_checkpoint", ToolSpec("sandbox_checkpoint", "Save the sandbox's files and installed packages under a name so you can roll back to them with sandbox_restore. Take one before a risky install or a destructive edit. Filesystem only (running processes are not saved); the last 3 are kept.",
-        _obj({"label": {"type": "string", "description": "short name, e.g. 'clean' or 'deps-installed'"}}, []), sandbox_checkpoint, "sandbox", "executes",
-        examples=[{"label": "clean"}, {"label": "before-pip-install"}]))
-
-    async def sandbox_restore(ctx: dict[str, Any], label: str) -> Any:
-        try:
-            return _scrub_strings(await run(sb.restore, ctx["conversation_id"], label))
-        except SandboxError as e:
-            return tool_error(redact.scrub_command_output(str(e)), alternative=ALTERNATIVE["sandbox_restore"])
-    R("sandbox_restore", ToolSpec("sandbox_restore", "Replace the sandbox with a checkpoint made by sandbox_checkpoint. Files changed since then are lost; network access follows the current setting, not the checkpoint's.",
-        _obj({"label": {"type": "string"}}, ["label"]), sandbox_restore, "sandbox", "executes", examples=[{"label": "clean"}]))
 
 
 Toolbox._register_working = _register_working  # type: ignore[attr-defined]
@@ -2616,7 +2452,6 @@ def _register_style(self: Toolbox) -> None:
 
 Toolbox._register_style = _register_style  # type: ignore[attr-defined]
 Toolbox._register_google = _register_google  # type: ignore[attr-defined]
-Toolbox._register_sandbox = _register_sandbox  # type: ignore[attr-defined]
 
 
 def _register_docs(self: Toolbox) -> None:
@@ -2736,8 +2571,8 @@ def _register_docs(self: Toolbox) -> None:
         if not rev:
             return _missing(ctx, doc)
         # "apply" writes the change (Accept all). Anything else, including a missing setting, waits for review.
-        # A scheduled run has nobody at the keyboard, so accept-all does not apply there either.
-        if doc_edit_applies(ctx) and not ctx.get("proposal_only"):
+        # A scheduled run has nobody at the keyboard, so Full agentic editing does not apply there; Allow everything does.
+        if doc_edit_applies(ctx) and (not ctx.get("proposal_only") or _allow_all(ctx)):
             applied = self.docs.accept(rev["id"])
             if not applied:
                 return _missing(ctx, doc)
@@ -3241,7 +3076,7 @@ def _register_cowork(self: Toolbox) -> None:
     and the belt is cheaper than the consequence.
     """
     R = self.specs.__setitem__
-    ws, desks, sb = self.workspace, self.desks, self.sandboxes
+    ws, desks = self.workspace, self.desks
     from pathlib import PurePosixPath
     from . import extract_text as xt
     NO_DESK = "This tool only works inside a cowork desk."
@@ -3493,50 +3328,6 @@ def _register_cowork(self: Toolbox) -> None:
         examples=[{"summary": "Compared both pricing pages and left the table in outputs/comparison.md."},
                   {"summary": "Drafted the reply but did not send it.", "next_steps": "Send it once you have checked the figure."}]))
 
-    async def desk_import_sandbox(ctx: dict[str, Any], sandbox_path: str, path: str) -> Any:
-        desk_id = _id(ctx, "desk_import_sandbox")
-        if not isinstance(desk_id, str):
-            return desk_id
-        if sb is None:
-            return tool_error("This desk has no sandbox, so there is nothing to import from.",
-                              alternative=ALTERNATIVE["desk_import_sandbox"])
-        out = await asyncio.to_thread(sb.read_file, ctx["conversation_id"], sandbox_path, 0, MAX_FILE_CHARS)
-        text = out.get("text") if isinstance(out, dict) else None
-        if text is None:
-            return tool_error(redact.scrub_command_output(
-                f"{sandbox_path} is not a text file, so it cannot be imported into the workspace."),
-                              field="sandbox_path", expected="a text file in the sandbox",
-                              alternative=ALTERNATIVE["desk_import_sandbox"])
-        # Conditional taint, the _mark() pattern from _register_sandbox: a networked sandbox may have
-        # fetched these bytes from the internet, and an imported library file is third-party text too.
-        # ToolSpec.taints is static and the same call is clean otherwise, so it is set by hand.
-        # The written path is recorded outside the workspace, so a later desk_read_file taints again
-        # after the chat is cleared.
-        cid = ctx.get("conversation_id") or ""
-        untrusted = bool(cid) and (sb.networked(cid) or sb.holds_import(cid))
-        if untrusted:
-            ctx["tainted"] = True
-            ctx.setdefault("taint_sources", []).append("desk_import_sandbox")  # appended every time: the fence reads growth
-        try:
-            res = ws.write(desk_id, path, text, "overwrite")
-        except WorkspaceError as e:
-            return _fail("desk_import_sandbox", e)
-        if untrusted:
-            ws.note_fetch(desk_id, str(res.get("path") or path))
-        res["from_sandbox"] = out.get("path", sandbox_path)
-        if out.get("truncated"):  # say so rather than hand over a prefix as if it were the file
-            res["truncated"] = True
-            res["note"] = ("Only the first part of the sandbox file fit in one read. Page the rest with "
-                           "sandbox_read_file and desk_write_file(mode='append') before you deliver it.")
-        return _scrub_strings(res)
-    R("desk_import_sandbox", ToolSpec("desk_import_sandbox", "Copy a text file out of this chat's sandbox into the desk's workspace, overwriting the destination. With sandboxMountDesk on (the default) the workspace is also mounted in the sandbox at /workspace/desk, so files written there are already in the workspace; this copies out of any other sandbox path, which is how work done with sandbox_exec becomes something the user can review.",
-        _obj({"sandbox_path": {"type": "string", "description": "Path in the sandbox, relative to /workspace"},
-              "path": {"type": "string", "description": "Destination in the desk workspace, e.g. 'outputs/report.md'"}},
-             ["sandbox_path", "path"]),
-        desk_import_sandbox, "desk", "writes",
-        examples=[{"sandbox_path": "out.csv", "path": "outputs/results.csv"},
-                  {"sandbox_path": "report.md", "path": "work/draft.md"}]))
-
     # desk_fetch_file: a download into the workspace. The SSRF machinery is fetch_url's own (_check_url on every hop,
     # taint rule included, a connect to the address _resolve accepted), only the body is streamed to disk under a cap.
     DOWNLOAD_CAP = 50_000_000
@@ -3784,12 +3575,6 @@ CORE_GROUPS = frozenset({"memory", "docs", "todos", "knowledge", "plan", "utilit
 CORE_TOOLS = frozenset({"calendar_events", "calendar_get", "gmail_search", "gmail_read", "web_search", "fetch_url",
                         "skill_list", "skill_view", "writing_style", "deep_research",  # writing_style: the prompt's voice hint tells the model to call it
                         "delegate", "message_worker", "check_worker", "stop_worker", "resume_worker"})  # the front agent always has its hand-off tools
-
-
-# Quick answer mode hides these for the turn: everything that hands work to someone else or starts a long job.
-QUICK_HIDDEN = frozenset({"delegate", "message_worker", "check_worker", "stop_worker", "resume_worker", "agent_spawn", "agent_stop",
-                          "agent_wait", "schedule_task", "cancel_scheduled_task", "workflow_run", "workflow_resume", "opencode_run",
-                          "coding_session_start", "coding_session_send", "deep_research", "desk_start"})
 
 
 def is_core(spec: ToolSpec) -> bool:

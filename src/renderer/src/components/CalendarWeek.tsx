@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react'
-import { Plus, SlidersHorizontal } from 'lucide-react'
+import { Plus, SlidersHorizontal } from '../icons'
 import type { CalendarEvent, Todo } from '@shared/types'
 import { hasDrag, readDrag } from '../canvas/dnd'
 import { layoutDay, type Lane } from '../lib/calendarLayout'

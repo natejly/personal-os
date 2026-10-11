@@ -199,40 +199,10 @@ def _context_before(text: str, start: int, words: tuple[str, ...]) -> bool:
     return any(re.search(r"\b" + re.escape(w) + r"\b", window) for w in words)
 
 
-def compile_patterns(items: Iterable[str]) -> list[str | re.Pattern[str]]:
-    """User list entries: a plain string, or /regex/. A bad regex is skipped, never raised."""
-    out: list[str | re.Pattern[str]] = []
-    for raw in items or []:
-        s = str(raw).strip()
-        if not s:
-            continue
-        if len(s) > 2 and s.startswith("/") and s.endswith("/"):
-            try:
-                out.append(re.compile(s[1:-1], re.I))
-            except re.error:
-                continue
-        else:
-            out.append(s)
-    return out
-
-
-def _allowed(span_text: str, allow: list[str | re.Pattern[str]]) -> bool:
-    low = span_text.strip().lower()
-    for a in allow:
-        if isinstance(a, str):
-            if a.lower() == low:
-                return True
-        elif a.search(span_text):
-            return True
-    return False
-
-
-def analyze(text: str, rules: Iterable[str] = ALL_RULES, *, allow: Iterable[str] = (),
-            deny: Iterable[str] = (), threshold: float = THRESHOLD) -> list[Span]:
+def analyze(text: str, rules: Iterable[str] = ALL_RULES, *, threshold: float = THRESHOLD) -> list[Span]:
     """Scored spans for `text`, overlaps resolved, sorted by position."""
     if not text:
         return []
-    allow_c, deny_c = compile_patterns(allow), compile_patterns(deny)
     cands: list[Span] = []
     for name in rules:
         rule = RULES.get(name)
@@ -241,8 +211,6 @@ def analyze(text: str, rules: Iterable[str] = ALL_RULES, *, allow: Iterable[str]
         validator = VALIDATORS.get(name)
         for m in rule[0].finditer(text):
             frag = m.group(0)
-            if _allowed(frag, allow_c):
-                continue
             ctx = _context_before(text, m.start(), CONTEXT_WORDS.get(name, ()))
             if validator is None:
                 score = 0.85 if name in _SELF_VALIDATING else 0.5
@@ -262,11 +230,6 @@ def analyze(text: str, rules: Iterable[str] = ALL_RULES, *, allow: Iterable[str]
                     continue
             if score >= threshold:
                 cands.append(Span(m.start(), m.end(), name, round(score, 3), rule[1]))
-    for d in deny_c:
-        it = re.finditer(re.escape(d), text, re.I) if isinstance(d, str) else d.finditer(text)
-        for m in it:
-            if m.end() > m.start():
-                cands.append(Span(m.start(), m.end(), "custom", 1.0, "[redacted]"))
     cands.sort(key=lambda s: (-s.score, -(s.end - s.start), s.start))
     kept: list[Span] = []
     for s in cands:
@@ -274,30 +237,6 @@ def analyze(text: str, rules: Iterable[str] = ALL_RULES, *, allow: Iterable[str]
             kept.append(s)
     kept.sort(key=lambda s: s.start)
     return kept
-
-
-def scrub_v2(text: str, rules: Iterable[str] = ALL_RULES, allow: Iterable[str] = (),
-             deny: Iterable[str] = (), counts: dict[str, int] | None = None,
-             threshold: float = THRESHOLD) -> str:
-    """`scrub` with validation, context and allow/deny lists. Counts entities, never content."""
-    if not text:
-        return ""
-    out = text
-    for s in reversed(analyze(text, rules, allow=allow, deny=deny, threshold=threshold)):
-        out = out[:s.start] + s.replacement + out[s.end:]
-        if counts is not None:
-            counts[s.entity] = counts.get(s.entity, 0) + 1
-    n_secret = 0
-
-    def _sweep(_m: re.Match[str]) -> str:
-        nonlocal n_secret
-        n_secret += 1
-        return "[secret]"
-
-    out = SECRET_ASSIGN.sub(_sweep, out)
-    if counts is not None and n_secret:
-        counts["secret"] = counts.get("secret", 0) + n_secret
-    return out
 
 
 _SENSITIVE_KEY = re.compile(r"token|code|key|secret|auth|sig|password|session|access|state|jwt|otp", re.I)

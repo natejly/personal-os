@@ -87,7 +87,6 @@ RETAIN_USAGE_DAYS = 365              # bookkeeping age: usage rows
 RETAIN_TRACE_DAYS = 60               # bookkeeping age: traces
 RETAIN_TOOL_RESULT_DAYS = 30         # bookkeeping age: stored tool results
 RETAIN_APPROVAL_DAYS = 90            # bookkeeping age: decided approvals
-SANDBOX_KEEP_DAYS = 14               # a stopped sandbox is deleted after this many idle days
 FETCH_CACHE_SECONDS = 3600           # fetch_url reuses a page fetched this recently (0 = never)
 
 # ---- Retrieval / misc ----
@@ -127,7 +126,6 @@ RANGES: dict[str, tuple[float, float]] = {
     "parallelReads": (1, 8),
     "browserMaxTabs": (1, 12),
     "browserIdleSeconds": (30, 86_400),
-    "sandboxKeepDays": (0, 3_650),
     "retrievalMinSimilarity": (0, 1),
     "retrievalPerDocCap": (1, 10),
     "retrievalCandidates": (5, 50),

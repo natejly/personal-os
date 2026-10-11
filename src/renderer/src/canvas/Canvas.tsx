@@ -18,7 +18,7 @@ import { canvasFromScreen, screenFromCanvas, snapValue, visibleRect, type Point,
 import { setLiveViewport, setViewportEl, spaceLocked, useActiveCanvas, useCanvas, useWindows, viewport, viewportPoint } from './store'
 import { getDragOverlay, schedule, subscribeDragOverlay } from './useDrag'
 import '../styles/canvas.css'
-import { MessageSquarePlus, Plus } from 'lucide-react'
+import { MessageSquarePlus, Plus } from '../icons'
 import { lines, usePageContext } from '../lib/pageContext'
 
 const MIN_ZOOM = 0.5

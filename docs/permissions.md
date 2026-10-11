@@ -26,7 +26,6 @@ It holds only what the user changed; `permissions.DEFAULTS` fills in the rest on
 | `shellAllowedDomains` | Hosts the shell's and sandbox's egress proxy let through, beside package registries |
 | `docEditMode` | `review` (diff to accept) or `apply` |
 | `workspaceRoots` | Folders file tools write in without asking |
-| `sandboxNetwork`, `sandboxImage`, `sandboxRuntime` | The Linux sandbox containers |
 | `shellNetwork`, `shellRegistryAccess` | Network for shell commands |
 | `deskShellAuto`, `deskDoneGate`, `deskSelfReview` | What a desk may do unasked, and what it must pass to finish |
 | `browserEnabled` | Whether desks get a browser |

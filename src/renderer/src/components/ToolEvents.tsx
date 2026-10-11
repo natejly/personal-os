@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { ChevronRight, MessageSquare, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, PenLine, ShieldAlert, ShieldCheck,
   FolderOpen, FileText, FilePen, Trash2, PackageCheck, CircleHelp, CircleCheck,
-  Youtube, Github, Rss, Undo2, Bot, Eye, FileOutput, PanelRight, BookOpen, Download, MousePointerClick, Keyboard, ListFilter, ArrowDownUp, MonitorCog, Package, Search, Copy, FolderPlus, OctagonX, Hourglass, ShieldQuestion, CalendarDays, CalendarClock, CalendarSearch, CalendarPlus, CalendarX } from 'lucide-react'
+  Youtube, Github, Rss, Undo2, Bot, Eye, FileOutput, PanelRight, BookOpen, Download, MousePointerClick, Keyboard, ListFilter, ArrowDownUp, MonitorCog, Package, Search, Copy, FolderPlus, OctagonX, Hourglass, ShieldQuestion, CalendarDays, CalendarClock, CalendarSearch, CalendarPlus, CalendarX } from '../icons'
 import type { DocRevision, RunTapeEvent, ToolEvent, Verification } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
@@ -32,7 +32,7 @@ const ICONS: Record<string, JSX.Element> = {
   calendar_update: <CalendarClock size={13} />, calendar_delete: <CalendarX size={13} />,
   desk_list_files: <FolderOpen size={13} />, desk_read_file: <FileText size={13} />, desk_write_file: <FilePen size={13} />,
   desk_trash_file: <Trash2 size={13} />, desk_deliver: <PackageCheck size={13} />, desk_ask: <CircleHelp size={13} />, ask_user: <CircleHelp size={13} />,
-  desk_done: <CircleCheck size={13} />, desk_import_sandbox: <FolderOpen size={13} />,
+  desk_done: <CircleCheck size={13} />,
   web_search: <Globe size={13} />, fetch_url: <Globe size={13} />, open_page: <Globe size={13} />,
   youtube_video: <Youtube size={13} />, youtube_search: <Youtube size={13} />,
   github_search: <Github size={13} />, github_read: <Github size={13} />, read_feed: <Rss size={13} />,
@@ -45,9 +45,6 @@ const ICONS: Record<string, JSX.Element> = {
   search_memory: <Brain size={13} />, save_memory: <Brain size={13} />,
   graph_search: <Share2 size={13} />, graph_traverse: <Share2 size={13} />, graph_add: <Share2 size={13} />,
   run_python: <Terminal size={13} />, current_time: <Clock size={13} />,
-  sandbox_exec: <Terminal size={13} />, sandbox_write_file: <Terminal size={13} />, sandbox_read_file: <Terminal size={13} />,
-  sandbox_list_files: <Terminal size={13} />, sandbox_put_document: <Terminal size={13} />, sandbox_export_file: <Terminal size={13} />, sandbox_reset: <Terminal size={13} />,
-  sandbox_checkpoint: <Terminal size={13} />, sandbox_restore: <Terminal size={13} />,
   shell_run: <Terminal size={13} />, opencode_run: <Bot size={13} />, shell_poll: <Hourglass size={13} />, shell_kill: <OctagonX size={13} />, python_install: <Package size={13} />,
   fs_glob: <Search size={13} />, fs_grep: <FileSearch size={13} />, fs_edit: <FilePen size={13} />, fs_copy: <Copy size={13} />, fs_mkdir: <FolderPlus size={13} />,
   desk_fetch_file: <Download size={13} />, todo_write: <ListChecks size={13} />,

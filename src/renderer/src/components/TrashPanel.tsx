@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { RotateCcw, Trash2 } from 'lucide-react'
+import { RotateCcw, Trash2 } from '../icons'
 import type { TrashItem, TrashKind, TrashListing } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'

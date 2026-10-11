@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Globe, MonitorUp, EyeOff } from 'lucide-react'
+import { Globe, MonitorUp, EyeOff } from '../icons'
 import type { AgentBrowserFrame, AgentBrowserSession } from '@shared/types'
 import { splitUrl } from '../lib/deskFiles'
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Download, FolderOpen, History, RotateCcw } from 'lucide-react'
+import { Download, FolderOpen, History, RotateCcw } from '../icons'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import type { DataOverview } from '@shared/types'

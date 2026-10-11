@@ -37,3 +37,9 @@ export function replyMetrics(spans: Span[] | null | undefined): ReplyMetrics | n
   if (!llm || tokens <= 0) return null
   return { tokens, tokPerSec: completion > 0 && genMs > 0 ? completion / (genMs / 1000) : null, genMs }
 }
+
+/** The reasoning effort a reply's model rounds ran with, off its own trace; null when none was recorded. */
+export function replyEffort(spans: Span[] | null | undefined): string | null {
+  for (const s of spans ?? []) if (s.kind === 'llm' && typeof s.meta?.effort === 'string') return s.meta.effort
+  return null
+}

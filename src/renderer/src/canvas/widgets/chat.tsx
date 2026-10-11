@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { isClear } from '../../lib/workers'
-import { Check, MessageSquare, MessagesSquare, Pencil, Smile } from 'lucide-react'
+import { Check, MessageSquare, MessagesSquare, Pencil, Smile } from '../../icons'
 import type { Attachment, CanvasWindow, DragKind, DragPayload, Rect } from '@shared/types'
 import MessageView from '../../components/Message'
 import RegenRow from '../../components/RegenRow'

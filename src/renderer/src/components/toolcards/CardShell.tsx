@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { Pencil } from 'lucide-react'
+import { Pencil } from '../../icons'
 import type { ToolEvent } from '@shared/types'
 import { changedKeys, wasEdited } from '../../lib/toolDisplay'
 import { RawDetails, ResultBlock, StatusChip } from './parts'

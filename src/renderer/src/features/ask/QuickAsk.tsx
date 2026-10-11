@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { isClear } from '../../lib/workers'
-import { Check, Clipboard, Copy, ExternalLink, Plus } from 'lucide-react'
+import { Check, Clipboard, Copy, ExternalLink, Plus } from '../../icons'
 import MessageView, { PendingUserMessage } from '../../components/Message'
 import { quickAskMessage, quickAskTitle } from '../../lib/quickAsk'
 import { stripNoReply } from '../../lib/noReply'

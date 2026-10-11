@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Lock } from 'lucide-react'
+import { Lock } from '../../icons'
 import { api } from '../../lib/api'
 import type { McpImportSource, McpServer } from '@shared/types'
 import { joinArgv } from './catalog'

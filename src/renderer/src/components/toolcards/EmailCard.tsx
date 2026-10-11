@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent, ClipboardEvent, ReactNode } from 'react'
-import { AlertTriangle, ArrowLeft, Check, ChevronRight, ExternalLink, SquarePen, FileText, Mail, Paperclip, Pencil, Reply, Send, ShieldCheck, Trash2, Undo2, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Check, ChevronRight, ExternalLink, SquarePen, FileText, Mail, Paperclip, Pencil, Reply, Send, ShieldCheck, Trash2, Undo2, X } from '../../icons'
 import type { Document, PendingSend, ToolEvent, Verification } from '@shared/types'
 import { api, verificationMessage } from '../../lib/api'
 import { fmtBytes } from '../../lib/showPanel'

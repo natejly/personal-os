@@ -212,15 +212,6 @@ or side by side, and can copy the change out as a unified patch.
 
 Restoring an old version is itself a revision, so it can be undone too.
 
-**Append revisions.** A revision that only ever adds a section to the end of a doc
-(`Docs.propose_append`) stores that section in its own `append` column instead of
-freezing a whole new body. While it is pending, both the card and `accept` build
-the result from the doc *as it stands*: the diff shows only the addition, typing
-after the proposal does not make it stale, and accepting cannot overwrite what you
-wrote in between. This is what `doc_edit`'s `append` uses. `accept` still rewrites
-`before` and `after` to what actually happened, so undo behaves as for any other
-revision. Applied and rejected rows keep what was stored.
-
 ## Tools
 
 | tool | danger | what it does |

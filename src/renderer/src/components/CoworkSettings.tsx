@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { X } from 'lucide-react'
+import { X } from '../icons'
 import type { AgentBrowserSignIn, Settings } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
-import { hostError, networkMode, networkPatch, normalizeHost, sandboxNetMode, type NetworkMode } from '../lib/coworkSettings'
+import { hostError, networkMode, networkPatch, normalizeHost, type NetworkMode } from '../lib/coworkSettings'
 
 /**
  * Settings > Advanced > Desks and background: which model reads pictures, and the Python environment its
@@ -181,8 +181,7 @@ function PackageList({ value, onChange }: { value: string[]; onChange: (next: st
   )
 }
 
-/** Network for shell commands (the egress proxy), and the hosts it lets through. The sandbox's own network is one
- *  control in SandboxSettings; the host list shows when either one uses it. */
+/** Network for shell commands (the egress proxy), and the hosts it lets through. */
 export function ShellNetwork({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
   const mode = networkMode(draft)
   const hosts = draft.shellAllowedDomains ?? []
@@ -198,8 +197,8 @@ export function ShellNetwork({ draft, patch }: { draft: Settings; patch: (p: Par
         </div>
         {mode === 'open' && <p className="cowork-error">Open network lets a command send files off this Mac, and whatever it downloads is untrusted text. Prefer allowed hosts.</p>}
       </div>
-      {(mode !== 'off' || sandboxNetMode(draft.sandboxNetwork) === 'proxy') && (
-        <HostList title="Allowed hosts" help="Hostnames a command or the Linux sandbox may reach, such as pypi.org. A name also allows its subdomains. No scheme, path, wildcard or IP address."
+      {mode !== 'off' && (
+        <HostList title="Allowed hosts" help="Hostnames a command may reach, such as pypi.org. A name also allows its subdomains. No scheme, path, wildcard or IP address."
           value={hosts} onChange={(shellAllowedDomains) => patch({ shellAllowedDomains })} />
       )}
     </div>
@@ -247,18 +246,6 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
 
       <h4>Work environment</h4>
       <WorkEnv draft={draft} saved={saved} patch={patch} />
-    </div>
-  )
-}
-
-/** The desk sandbox folder switch, under Settings > Advanced > Desks and background. */
-export function CoworkAdvanced({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
-  return (
-    <div className="cowork-settings">
-      <label className="toggle-row plain">
-        <span className="toggle-text"><b>Share the desk folder with its sandbox</b><small>A desk's Linux sandbox sees that desk's workspace at /workspace/desk. Nothing else of your Mac is shared.</small></span>
-        <input type="checkbox" checked={draft.sandboxMountDesk !== false} onChange={(e) => patch({ sandboxMountDesk: e.target.checked })} /><span className="switch" />
-      </label>
     </div>
   )
 }

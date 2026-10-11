@@ -305,7 +305,7 @@
    gutter spend most of the window on whitespace, so a window shows two turns instead of four. */
 .widget .messages-inner .msg { gap: 8px; margin-bottom: 12px; }
 .widget .messages-inner .avatar { width: 20px; height: 20px; margin-top: 1px; }
-.widget .messages-inner .avatar .lucide { width: 11px; height: 11px; }
+.widget .messages-inner .avatar svg { width: 11px; height: 11px; }
 /* The assistant's face: the page sizes it to 38px, which out-ranks the 20px above by stylesheet order. */
 .widget .messages-inner .avatar.face-avatar { width: 28px; height: 28px; margin-top: 0; }
 /* Rows that line up with the reply text, re-aligned to the 28px face + 8px gap (the page uses 46px). */

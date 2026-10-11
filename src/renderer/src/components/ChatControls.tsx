@@ -3,7 +3,7 @@ import { PAGE_AGENT_DRAFT, useStore, useConversation } from '../store'
 import ModelMenu from './ModelMenu'
 
 /**
- * Model, reasoning effort and fast mode, under the text box rather than above the transcript — the
+ * Model, effort and fast mode, under the text box rather than above the transcript — the
  * same control on the chat page and in a canvas chat window. A draft chat has no row to PATCH, so the
  * store parks the choices (`draftModel`, `draftEffort`, `draftFast`) and `send` applies them to the
  * chat it creates.

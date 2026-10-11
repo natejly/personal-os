@@ -57,7 +57,7 @@ function CalendarRail({ calendars, ready, shown, toggle }: {
 }
 
 export default function CalendarView(): JSX.Element {
-  // The active calendar account (Google or Microsoft).
+  // The active calendar account.
   const google = useStore(pimStatus)
   const label = useStore(pimLabel)
   const todos = useStore((s) => s.todos)

@@ -1130,16 +1130,6 @@ export interface GoogleStatus {
   reauth_reason: string | null
 }
 
-/** Which account Mail, Calendar and the agent's mail/calendar tools read from. One at a time. */
-export type PimProvider = 'google' | 'microsoft'
-
-export interface MicrosoftStatus extends GoogleStatus {
-  /** Entra object id: the identity sync keys on. */
-  oid: string | null
-  tenant: string | null
-  name: string | null
-}
-
 /** Verdict of the read-back that every external write goes through (backend verify.py).
  *  Anything other than 'verified' must not be rendered as success. */
 export interface Verification {
@@ -1696,10 +1686,6 @@ export interface Settings {
   responseStyleText?: string
   googleClientId: string
   googleClientSecret: string
-  /** Entra app (public client, no secret). Tenant is `common` when blank. */
-  microsoftClientId: string
-  microsoftTenant: string
-  pimProvider: PimProvider
   /** Undo window on outgoing mail. `seconds` is clamped to 60-120 by the backend. */
   gmailSendHold?: { enabled: boolean; seconds: number }
 }

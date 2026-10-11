@@ -184,7 +184,12 @@ _WALLS = (  # (words near the denial, sandbox rule, plain reason); the first tha
 )
 
 
-def wall_note(output: str, network: bool = False) -> dict[str, str] | None:
+def _escape(allow_all: bool) -> str:
+    """What unsandboxed=true does in the current permission mode."""
+    return "runs it without asking (Allow everything is on)" if allow_all else "asks the user for approval on every call"
+
+
+def wall_note(output: str, network: bool = False, allow_all: bool = False) -> dict[str, str] | None:
     """The sandbox rule behind a failed call, the OS error quoted: None unless the output holds a denial. With open
     network the network rule is not what blocked it."""
     line = next((ln.strip()[:300] for ln in output.splitlines() if _DENIED.search(ln)), None)
@@ -192,7 +197,7 @@ def wall_note(output: str, network: bool = False) -> dict[str, str] | None:
         return None
     for pat, rule, why in _WALLS:
         if pat.search(output) and not (network and rule.startswith("network")):
-            return {"rule": rule, "error": line, "why": why, "retry": "unsandboxed=true asks the user for this one command"}
+            return {"rule": rule, "error": line, "why": why, "retry": "unsandboxed=true " + _escape(allow_all).replace(" on every call", " for this one command")}
     return None
 
 
@@ -719,11 +724,12 @@ def register(tb: Any) -> None:
         except ShellError as e:
             return tool_error(_scrub(str(e)))
         network = bool(permissions.get(s, "shellNetwork"))
+        is_allow_all = (ctx.get("permission_mode") or permissions.get(s, "permissionMode")) == "allow_all"
         usable = sandbox_available()
         if not unsandboxed and not usable:
             return tool_error("The OS sandbox this shell runs in is not available here (it needs macOS sandbox-exec), so "
                               "nothing was run.", alternative="run_python for a calculation, or retry with "
-                              "unsandboxed=true, which asks the user for approval on every call")
+                              f"unsandboxed=true, which {_escape(is_allow_all)}")
         default_t = BACKGROUND_TIMEOUT if background else int(s.get("shellTimeoutSec") or DEFAULT_TIMEOUT)
         try:
             timeout = max(1, min(int(timeout_s or default_t), MAX_TIMEOUT))
@@ -820,9 +826,9 @@ def register(tb: Any) -> None:
         if not unsandboxed and job.exit_code in (65, 71) and text.lstrip().startswith("sandbox-exec:"):
             jobs.sandbox_failed = True
             return tool_error(_scrub("The OS sandbox refused to start (" + text.strip()[:200] + "), so nothing was run."),
-                              alternative="retry with unsandboxed=true, which asks the user for approval on every call")
+                              alternative=f"retry with unsandboxed=true, which {_escape(is_allow_all)}")
         shown, cut = truncate(text)
-        wall = None if unsandboxed else wall_note(text, network)
+        wall = None if unsandboxed else wall_note(text, network, is_allow_all)
         if job.end_cwd:
             try:
                 ended = resolve_cwd(job.end_cwd, default, dr)

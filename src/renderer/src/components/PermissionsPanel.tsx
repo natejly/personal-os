@@ -101,7 +101,7 @@ export function PermissionsPanel({ compact }: { compact?: boolean }): JSX.Elemen
       <p className="small">Grain can read and write anywhere on this Mac, in every permission mode. Two kinds of place are held back.</p>
       <p className="small"><b>Off limits</b> (never, in any mode): {backend?.scope?.protected.length ? backend.scope.protected.join(', ') : 'its own data folder and the Grain app'}.</p>
       <p className="small"><b>Always asks first</b> (reads and writes, in every mode): {backend?.scope?.sensitive.length ? backend.scope.sensitive.join(', ') : 'passwords, keys and sign-in files'}.</p>
-      {backend && <ul className="small"><CliLine name="claude" cli={backend.clis.claude} /><CliLine name="opencode" cli={backend.clis.opencode} /></ul>}
+      {backend && <ul className="small"><CliLine name="claude" cli={backend.clis.claude} /><CliLine name="opencode" cli={backend.clis.opencode} /><CliLine name="pi" cli={backend.clis.pi} /></ul>}
 
       <p className="muted small">Some grants only take effect after Grain restarts. Rows marked Unknown are ones macOS gives no way to check; Grant opens the right pane.</p>
     </div>

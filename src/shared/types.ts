@@ -1593,7 +1593,7 @@ export interface Settings {
    *  and are told to use coding_session_start. Missing means on. */
   codingRoute?: boolean
   /** The coding agent they are told to start. Missing means 'any' (the agent picks). */
-  codingAgent?: 'any' | 'opencode' | 'claude'
+  codingAgent?: 'any' | 'opencode' | 'claude' | 'pi'
   /** Background workers. Past `delegationAfterRounds` tool rounds in one reply the assistant hands remaining work to a worker (default on, 2, 1-20). */
   delegationForce?: boolean
   delegationAfterRounds?: number
@@ -1859,9 +1859,9 @@ export type BackgroundEvent =
   /** A coding session moved (codingagents.py): the whole summary row. */
   | { event: 'coding_session'; data: CodingSession }
 
-/** GET /coding-sessions: one background Claude Code or OpenCode session started through the coding_session_* tools. */
+/** GET /coding-sessions: one background Claude Code, OpenCode or pi session started through the coding_session_* tools. */
 export interface CodingSession {
-  id: string; agent: 'claude' | 'opencode'; name: string
+  id: string; agent: 'claude' | 'opencode' | 'pi'; name: string
   status: 'starting' | 'working' | 'needs_you' | 'blocked' | 'done' | 'stopped' | 'failed'
   attention: Attention; detail: string | null; repo_path: string; worktree: string; branch: string | null
   external_id: string | null; model: string | null; permission_mode: string | null; log_tail: string

@@ -597,6 +597,7 @@ export default function SettingsModal(): JSX.Element {
                     <option value="any">Let the agent choose</option>
                     <option value="opencode">OpenCode</option>
                     <option value="claude">Claude Code</option>
+                    <option value="pi">pi</option>
                   </select>
                 </label>
                 <label className="setting-row"><span className="toggle-text"><b>Coding sessions at once</b><small>Their own limit, separate from background shell jobs.</small></span>

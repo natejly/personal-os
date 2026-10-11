@@ -343,7 +343,7 @@ class Workers:
 
     # ---- context ---------------------------------------------------------------------------------
     KEEP = ("project_id", "conversation_id", "agent_id", "settings", "conv_settings", "permission_mode", "skip_permissions",
-            "user_text", "explicit_modes", "tool_overrides", "model", "effort", "allowed_urls", "mcp_loaded", "tool_loaded", "auto_attach",
+            "user_text", "explicit_modes", "tool_overrides", "model", "effort", "allowed_urls", "mcp_loaded", "tool_loaded", "mcp_modes", "mcp_schemas", "auto_attach",
             "chat_link")  # a worker started by another chat's message keeps that hop's depth
 
     def worker_ctx(self, parent: dict[str, Any], allow_subworkers: bool) -> dict[str, Any]:
@@ -676,8 +676,8 @@ def register(tb: Any) -> None:
     R("delegate", ToolSpec(
         "delegate",
         "Hand work to a background worker that runs on its own while you keep talking to the user. Use it for anything that needs more than a "
-        "couple of steps. The worker has your tools (minus asking the user, planning, scheduling and delegating) and the same ask/allow "
-        "rules, but it cannot see this conversation: the brief must carry everything it needs, with concrete locations (absolute paths, "
+        "couple of steps. The worker has your built-in tools and your connected connector tools (minus asking the user, planning, scheduling and "
+        "delegating) and the same ask/allow rules, but it cannot see this conversation: the brief must carry everything it needs, with concrete locations (absolute paths, "
         "the repo and branch, doc or event ids) and acceptance criteria. Code changes in a repo happen on a new branch in a separate "
         "git worktree, never in the user's checkout. Returns a worker_id at once. When the worker ends, its report comes back to you on "
         "its own; verify what it claims (diff, test output, files) before passing it on. To continue finished work, use resume_worker "

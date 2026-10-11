@@ -6,13 +6,14 @@
  */
 import { app, dialog } from 'electron'
 import { autoUpdater } from 'electron-updater'
+import { platform } from './platform'
 import { stopPageBridge } from './pagefetch'
 import { markQuitting } from './popouts'
 
 const RECHECK_MS = 6 * 60 * 60 * 1000
 
 export function startUpdater(): void {
-  if (!app.isPackaged || process.env.GRAIN_DISABLE_UPDATES) return
+  if (!app.isPackaged || process.env.GRAIN_DISABLE_UPDATES || !platform.updaterEnabled) return
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
   autoUpdater.on('error', (e) => console.warn('[updater]', e?.message ?? e))

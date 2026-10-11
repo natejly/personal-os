@@ -1,4 +1,5 @@
 import { app, type BrowserWindow } from 'electron'
+import { platform } from './platform'
 
 /** GRAIN_E2E_BACKGROUND=1: windows are real but never take focus or bring the app forward (automated test runs). */
 export const background =
@@ -6,9 +7,7 @@ export const background =
 
 /** Call before any window exists: no Dock icon, and the app is never the frontmost one. */
 export const goBackground = (): void => {
-  if (!background || process.platform !== 'darwin') return
-  app.setActivationPolicy('accessory')
-  app.dock?.hide()
+  if (background) platform.enterBackgroundMode()
 }
 
 /** show(), or showInactive() in background mode. */

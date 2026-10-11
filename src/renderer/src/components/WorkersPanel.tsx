@@ -54,8 +54,9 @@ export default function WorkersPanel({ conversationId: focusId, all = false }: {
       <header>
         <button className="plan-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
           <b>Workers</b>
-          <span className="muted">· {live ? `${live} running` : workers.length}</span>
-          {!open && workers.filter(workerIsLive).map((w) => <WorkerFace key={w.id} w={w} />)}
+          {open
+            ? <span className="muted">· {live ? `${live} running` : workers.length}</span>
+            : <span className="worker-faces">{workers.filter(workerIsLive).map((w) => <WorkerFace key={w.id} w={w} />)}</span>}
         </button>
       </header>
       {open && (

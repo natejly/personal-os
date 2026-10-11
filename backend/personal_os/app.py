@@ -7503,7 +7503,8 @@ async def _internal_data() -> dict[str, Any]:
     }
     if st["connected"]:
         try:
-            out["calendar"] = json_safe(await asyncio.to_thread(google.calendar_events, 3))
+            # Team and shared calendars hold most of the day; read every visible one, as the agent tool does.
+            out["calendar"] = json_safe(await asyncio.to_thread(google.calendar_events, 3, calendar_ids=["all"]))
         except Exception as e:  # noqa: BLE001
             out["calendar_error"] = str(e)
         try:

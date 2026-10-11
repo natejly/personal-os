@@ -463,7 +463,7 @@ export default function Canvas(): JSX.Element {
     () => {
       if (!menu || !canvasId) return []
       // Nothing can be added to a frozen space, so the menu offers the one thing that can be done.
-      if (locked) return [{ label: 'Unlock space', accel: '⌃⌘L', run: () => useCanvas.getState().toggleLock() }]
+      if (locked) return [{ label: 'Unlock canvas', accel: '⌃⌘L', run: () => useCanvas.getState().toggleLock() }]
       return [{ kind: 'header', label: 'Add widget' }, ...addWidgetEntries({ canvasId, at: menu.at })]
     },
     [menu, canvasId, locked]

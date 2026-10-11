@@ -107,7 +107,7 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
         ...(win.state === 'popped' ? [{ label: 'Return to canvas', accel: '⌃⌘⇧O', run: () => void returnToCanvas(win.id) }] : []),
         // Expand only navigates the main window; it moves nothing on the plane, so a lock keeps it.
         ...(canExpand(win) ? [{ label: 'Open full view', run: () => expandWindow(win) }] : []),
-        { label: 'Unlock space', accel: '⌃⌘L', run: () => useCanvas.getState().toggleLock() }
+        { label: 'Unlock canvas', accel: '⌃⌘L', run: () => useCanvas.getState().toggleLock() }
       ]
     : [
         { label: 'Bring to front', run: () => focusWindow(win.id) },

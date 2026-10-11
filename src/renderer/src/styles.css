@@ -903,8 +903,8 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 }
 .settings-body { flex: 1; min-height: 0; display: flex; }
 .settings-rail { flex: 0 0 200px; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); }
-.settings-search { display: flex; align-items: center; gap: 6px; margin: 12px 10px 0; padding: 5px 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-faint); }
-.settings-search input { flex: 1; min-width: 0; border: 0; background: transparent; outline: 0; padding: 0; font-size: 13px; color: var(--text); }
+.settings-modal label.settings-search { display: flex; flex-direction: row; align-items: center; gap: 6px; margin: 12px 10px 0; padding: 5px 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-faint); }
+.settings-modal .settings-search input { flex: 1; min-width: 0; border: 0; background: transparent; outline: 0; padding: 0; font-size: 13px; color: var(--text); }
 .settings-hits { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; overflow-y: auto; }
 .settings-hits button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 6px 10px; border-radius: 8px; font-size: 13px; text-align: left; }
 .settings-hits button:hover { background: var(--hover); }
@@ -945,6 +945,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .settings-pane > section:not(.knowledge-section) > h3 { margin-bottom: -8px; }
 .settings-pane .knowledge-head h3:not(.modal-free *) { margin: 0 auto 0 0; }
 .settings-pane h4:not(.modal-free *) { margin: 12px 0 -4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); }
+.settings-pane .set-sec > h4:first-child { margin-bottom: 10px; }
 .settings-pane .trash-group h4 { margin: 12px 0 4px; }
 /* What a setting is, and one line about it: the same block beside a switch, above a field, left of a control. */
 .settings-pane .toggle-text:not(.modal-free *) { gap: 2px; min-width: 0; font-size: 13px; }
@@ -974,20 +975,26 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .settings-modal .footer-note { margin-right: auto; font-size: 13px; color: var(--text-muted); }
 .settings-modal .footer-note.ask { color: var(--text); font-weight: 500; }
 /* Knowledge base: the Memory panel and the document library, filling the pane instead of scrolling it. */
-.settings-pane section.knowledge-section { display: flex; flex-direction: column; height: 100%; padding-bottom: 16px; }
+.settings-pane:has(.knowledge-section) { overflow: hidden; }
+.settings-pane section.knowledge-section { display: flex; flex-direction: column; gap: 14px; height: 100%; }
+/* The browser owns the tab's one scroll; the settings above it stay collapsed or scroll in their own box. */
+.knowledge-top { flex: 0 1 auto; min-height: 0; max-height: 45%; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.knowledge-top .adv-group { margin: 0; }
+.settings-pane .knowledge-section > * { margin: 0; }
 .knowledge-section > .muted { margin: 8px 0 12px; }
 .knowledge-head { display: flex; align-items: center; gap: 10px; }
 .knowledge-head h3 { margin: 0 auto 0 0; }
 .knowledge-controls { display: flex; align-items: center; gap: 8px; }
-.knowledge-section > details { margin: 8px 0 10px; font-size: 13px; }
-.knowledge-section > details > summary { cursor: pointer; color: var(--text-muted); }
-.knowledge-section > details .toggle-row { padding: 6px 0; }
-.knowledge-section > details .toggle-text { display: flex; flex-direction: column; gap: 2px; }
-.knowledge-section > details .toggle-text small { color: var(--text-muted); }
 .knowledge-body { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg); }
 .knowledge-body .memory-panel.embedded .memory-body { min-height: 0; }
 .knowledge-body .memory-toolbar { padding: 8px 12px; flex-wrap: wrap; row-gap: 4px; }
 .knowledge-body .memory-body.mode-split .mem-pane { width: 340px; }
+/* The graph pane is narrow in here: the rebuild card goes under the tools instead of over them. */
+/* Split's list column is narrow: the add row keeps one line by letting the text field give way. */
+.memory-body.mode-split .mem-body .add-row > input { min-width: 0; flex: 1 1 0; }
+.memory-body.mode-split .mem-body .add-row > select { width: 84px; padding-left: 8px; padding-right: 4px; }
+.knowledge-body .graph-backfill { top: 58px; right: auto; left: 10px; }
+.knowledge-body .graph-canvas .empty-hint.center { inset: 150px 16px 0; align-items: flex-start; }
 .knowledge-body > .page-body { padding: 12px 14px 24px; max-width: none; }
 /* Narrow windows: keep a real gutter instead of going nearly full-bleed. */
 @media (max-width: 720px) {
@@ -1437,9 +1444,6 @@ textarea.instructions:focus { border-color: var(--accent); }
 .memory-body.mode-list .mem-pane { flex: 1; }
 .memory-body.mode-split .mem-pane { width: 400px; flex-shrink: 0; border-left: 1px solid var(--border); }
 .memory-body.mode-split .mem-body { max-width: none; padding: 14px 16px 32px; }
-.memory-body.mode-split .mem-body .add-row { flex-wrap: wrap; }
-.memory-body.mode-split .mem-body .add-row > input { flex: 1 1 100%; }
-.memory-body.mode-split .mem-body .add-row select { margin-left: auto; }
 .memory-body.mode-split .mem-row { padding: 9px 10px; font-size: 12.5px; }
 .memory-body.mode-split .mem-meta { flex-wrap: wrap; row-gap: 4px; }
 .memory-body.mode-split .mem-tools { flex-wrap: wrap; }
@@ -2783,7 +2787,6 @@ select:focus-visible {
 .recap-inline { max-width: 560px; width: 100%; margin: 14px auto 0; padding: 10px 14px; text-align: left; background: transparent; border: 1px solid var(--border); }
 .recap-inline > header { font-weight: 500; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
 .recap-inline .markdown { font-size: 12.5px; }
-.recap-inline .markdown.clamped { max-height: 5.4em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
 .inbox-modal { width: min(760px, 94vw); max-height: 86vh; overflow-y: auto; padding: 0; position: relative; }
 .inbox-modal > .agent-inbox { margin: 0; background: none; }
 .inbox-modal-close { position: absolute; top: 8px; right: 8px; z-index: 1; }

@@ -55,8 +55,6 @@ from . import vision
 from .docs import ASSET_MIMES, asset_path, AssetError, Docs, clean_typography, save_asset, unified_diff
 from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
-from .pim import Pim
-from .microsoft import Microsoft
 from . import job_history, job_tools
 from .jobs_policy import JobPolicy
 from .jobs import (DESK_JOB_AUTONOMY, KINDS, MAIL_MAX_THREADS, TARGETS, PowerWake, check_watch_dir, PROPOSAL_STATUSES, Jobs, Proposals,
@@ -141,7 +139,7 @@ def _resolve_auth_token() -> str:
 
 
 AUTH_TOKEN = _resolve_auth_token()
-PUBLIC_PATHS = ("/health", "/integrations/google/callback", "/integrations/microsoft/callback", "/mcp/oauth/callback")
+PUBLIC_PATHS = ("/health", "/integrations/google/callback", "/mcp/oauth/callback")
 
 
 def _token_eq(sent: str, expected: str) -> bool:
@@ -328,13 +326,10 @@ jobs = Jobs(db)
 proposals = Proposals(db)
 recaps = Recaps(db)
 google = Google(settings, db.set_settings, cache_dir=db.data_dir)
-microsoft = Microsoft(settings, db.set_settings, cache_dir=db.data_dir)
-# Mail + calendar follow settings.pimProvider; Tasks/Drive/Docs stay on Google (see pim.py).
-pim = Pim(google, microsoft, settings)
-app.include_router(setup_router(settings, set_settings_via_provider, lambda: pim.status()["connected"], db.secrets))
+app.include_router(setup_router(settings, set_settings_via_provider, lambda: google.status()["connected"], db.secrets))
 # sid/wsid are defined further down, so the module context looks them up late.
 modules: list[Module] = build_modules(ModuleContext(
-    db=db, settings=settings, set_settings=db.set_settings, google=pim,
+    db=db, settings=settings, set_settings=db.set_settings, google=google,
     sid=lambda p: sid(p), wsid=lambda p: wsid(p), mcp=lambda: mcp))
 _todos_module = module_get(modules, "todos", TodosModule)
 todos, tasks_sync = _todos_module.store, _todos_module.tasks_sync
@@ -471,13 +466,13 @@ sandboxes = Sandboxes(settings, import_dir=db.data_dir / "sandbox-imports")
 # A desk's container sees the desk's workspace at /workspace/desk (microvm.DESK_MOUNT); other chats mount nothing.
 sandboxes.desk_workspace = lambda conv_id: (str(workspace.ensure(d["id"])) if (d := desks.by_conversation(conv_id)) else None)
 # Every Gmail send is held here first so it can be undone (outbox.py); its own routes are included below.
-outbox = Outbox(db, pim, settings, documents=documents)
+outbox = Outbox(db, google, settings, documents=documents)
 app.include_router(outbox_router(outbox))
 # Pre-images of local files the agent overwrites or moves; the restore route is the user's, never a tool (filesnap.py).
 filesnap = FileSnapshots(db, db.data_dir / "snapshots", settings)
 app.include_router(filesnap_router(filesnap))
 # Undo for the agent's calendar and Google Tasks writes; same rule: a user route, never a tool (extundo.py).
-extundo = ExternalUndo(db, pim)
+extundo = ExternalUndo(db, google)
 app.include_router(extundo_router(extundo))
 # Whole-folder snapshots per reply, so Undo can take back shell effects too (snapshots.py); user-only routes.
 snaps = Snapshots(db, db.data_dir / "snapshots", settings, workspace.desk_root)
@@ -518,7 +513,7 @@ guide.ensure(skills)  # the built-in "Using Grain" skill: created approved, text
 # Auto-learn may only ever *propose* a skill (a friction fix, or a revised copy of one that failed); the lint it
 # runs is the approval gate's, so a draft that claims authority never even becomes a candidate.
 learner.skills, learner.known_tools = skills, lambda: _known_tools()
-toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=pim, sandboxes=sandboxes, docs=docs,
+toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, sandboxes=sandboxes, docs=docs,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, desks=desks, workspace=workspace, filesnap=filesnap,
                   conversations=convos, extundo=extundo)
@@ -781,7 +776,7 @@ def health() -> dict[str, Any]:
 
 
 # Google OAuth material lives in settings but never leaves the backend.
-PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "microsoftToken", "microsoftAuthPending", "modelCaps", "telegramState"}
+PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "modelCaps", "telegramState"}
 # Readable through /settings, but only writable through its own route: a plain PUT would replace the
 # whole nested dict and silently drop the signal switches and exclusion lists.
 SETTINGS_READ_ONLY = {"googleTasksSync", "voice"}
@@ -861,8 +856,6 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             # (A secret takes null to clear it; its own check below.)
             # Stored as given, a wrong-typed value (tools: "x", systemPrompt: null) 500s every route that reads it.
             raise HTTPException(422, f"{k} must be a {type(d).__name__}")
-        elif k == "pimProvider" and v not in ("google", "microsoft"):
-            raise HTTPException(400, "pimProvider must be 'google' or 'microsoft'")
         elif k == "baseUrl":
             try:
                 clean[k] = providers.check_base_url(v)
@@ -5302,7 +5295,7 @@ job_policy = JobPolicy(jobs, run_store, _launch_job, settings=settings)
 def _mail_threads(query: str) -> list[dict[str, Any]]:
     """A mail job's look: fresh (the read cache's TTL is not the poll interval), metadata only."""
     with google_cache.bypass():
-        return pim.gmail_threads_recent(query, MAIL_MAX_THREADS)
+        return google.gmail_threads_recent(query, MAIL_MAX_THREADS)
 
 
 def _calendar_events(calendar_id: str | None) -> list[dict[str, Any]]:
@@ -7021,50 +7014,6 @@ def google_disconnect() -> dict[str, Any]:
     return google.status()
 
 
-# ---------------- Microsoft integration ----------------
-@app.get("/integrations/microsoft/status")
-def microsoft_status() -> dict[str, Any]:
-    return microsoft.status()
-
-
-@app.post("/integrations/microsoft/auth/start")
-def microsoft_auth_start(request: Request) -> dict[str, str]:
-    # The backend binds 127.0.0.1, which Entra accepts as a loopback redirect (any port) once registered; see docs/microsoft.md.
-    redirect = str(request.base_url).rstrip("/") + "/integrations/microsoft/callback"
-    try:
-        return {"url": microsoft.start_auth(redirect)}
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-
-
-@app.get("/integrations/microsoft/callback", response_class=HTMLResponse)
-def microsoft_callback(state: str = "", code: str = "", error: str = "", error_description: str = "") -> str:
-    if error or not code:
-        detail = (error_description or error or "Microsoft did not send an authorization code.").strip().splitlines()[0]
-        if "AADSTS65001" in detail or error == "consent_required":
-            detail += " Ask your administrator to approve the app, or sign in with a personal account."
-        elif "AADSTS50011" in detail:
-            detail += " Register http://127.0.0.1/integrations/microsoft/callback as a redirect URI (docs/microsoft.md)."
-        log.warning("Microsoft OAuth callback error: %s", detail)
-        return _oauth_page("Microsoft sign-in failed", html.escape(detail))
-    try:
-        st = microsoft.finish_auth(state, code)
-    except Exception as e:  # noqa: BLE001
-        log.warning("Microsoft OAuth callback could not finish: %s", e)
-        return _oauth_page("Could not complete sign-in", html.escape(str(e)))
-    return _oauth_page(
-        f"Connected {st.get('email') or 'Microsoft account'} ✓",
-        "You can close this tab and return to Grain.",
-        ok=True,
-    )
-
-
-@app.post("/integrations/microsoft/disconnect")
-def microsoft_disconnect() -> dict[str, Any]:
-    microsoft.disconnect()
-    return microsoft.status()
-
-
 def _gcall(fn, *args, refresh: bool = False):  # type: ignore[no-untyped-def]
     """Call a Google method and map its failures onto HTTP.
 
@@ -7079,12 +7028,12 @@ def _gcall(fn, *args, refresh: bool = False):  # type: ignore[no-untyped-def]
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"{pim.provider.capitalize()} API error: {e}") from e
+        raise HTTPException(502, f"Google API error: {e}") from e
 
 
 @app.get("/integrations/google/calendars")
 def google_calendars(refresh: bool = False) -> Any:
-    return _gcall(pim.calendars, refresh=refresh)
+    return _gcall(google.calendars, refresh=refresh)
 
 
 class GoogleDocIn(BaseModel):
@@ -7101,7 +7050,7 @@ def google_doc_create(body: GoogleDocIn) -> Any:
 @app.get("/integrations/google/calendar")
 def google_calendar(days: int = 2, start: str | None = None, calendars: str = "primary", refresh: bool = False) -> Any:
     ids = None if calendars in ("", "primary") else [c.strip() for c in calendars.split(",") if c.strip()]
-    return _gcall(pim.calendar_events, days, "primary", 0, start, ids, refresh=refresh)
+    return _gcall(google.calendar_events, days, "primary", 0, start, ids, refresh=refresh)
 
 
 class AttendeeIn(BaseModel):
@@ -7158,28 +7107,28 @@ def _event_fields(body: EventIn) -> dict[str, Any]:
 def google_calendar_create(body: EventIn) -> Any:
     if not (body.summary or "").strip() or not body.start:
         raise HTTPException(400, "An event needs at least a summary and a start.")
-    return _gcall(pim.calendar_create, _event_fields(body), body.calendar_id, body.send_updates)
+    return _gcall(google.calendar_create, _event_fields(body), body.calendar_id, body.send_updates)
 
 
 # Registered before the {event_id} routes so "colors" is not read as an event id.
 @app.get("/integrations/google/calendar/colors")
 def google_calendar_colors() -> Any:
-    return _gcall(pim.calendar_colors)
+    return _gcall(google.calendar_colors)
 
 
 @app.get("/integrations/google/calendar/{event_id}")
 def google_calendar_get(event_id: str, calendar_id: str = "primary") -> Any:
-    return _gcall(pim.calendar_get, event_id, calendar_id)
+    return _gcall(google.calendar_get, event_id, calendar_id)
 
 
 @app.patch("/integrations/google/calendar/{event_id}")
 def google_calendar_update(event_id: str, body: EventIn) -> Any:
-    return _gcall(pim.calendar_update, event_id, _event_fields(body), body.calendar_id, body.send_updates)
+    return _gcall(google.calendar_update, event_id, _event_fields(body), body.calendar_id, body.send_updates)
 
 
 @app.delete("/integrations/google/calendar/{event_id}")
 def google_calendar_delete(event_id: str, calendar_id: str = "primary", send_updates: str = "none") -> Any:
-    return _gcall(pim.calendar_delete, event_id, calendar_id, send_updates)
+    return _gcall(google.calendar_delete, event_id, calendar_id, send_updates)
 
 
 class RespondIn(BaseModel):
@@ -7190,23 +7139,23 @@ class RespondIn(BaseModel):
 
 @app.post("/integrations/google/calendar/{event_id}/respond")
 def google_calendar_respond(event_id: str, body: RespondIn) -> Any:
-    return _gcall(pim.calendar_respond, event_id, body.response, body.calendar_id, body.send_updates)
+    return _gcall(google.calendar_respond, event_id, body.response, body.calendar_id, body.send_updates)
 
 
 @app.get("/integrations/google/gmail")
 def google_gmail(q: str = "is:unread in:inbox newer_than:14d", max_results: int = 12, refresh: bool = False) -> Any:
-    return _gcall(pim.gmail_search, q, max_results, refresh=refresh)
+    return _gcall(google.gmail_search, q, max_results, refresh=refresh)
 
 
 # Registered before the {message_id} route so "labels" is not read as a message id.
 @app.get("/integrations/google/gmail/labels")
 def google_gmail_labels() -> Any:
-    return _gcall(pim.gmail_labels)
+    return _gcall(google.gmail_labels)
 
 
 @app.get("/integrations/google/gmail/{message_id}")
 def google_gmail_message(message_id: str) -> Any:
-    return _gcall(pim.gmail_get, message_id)
+    return _gcall(google.gmail_get, message_id)
 
 
 class GmailModifyIn(BaseModel):
@@ -7217,7 +7166,7 @@ class GmailModifyIn(BaseModel):
 
 @app.post("/integrations/google/gmail/{message_id}/modify")
 def google_gmail_modify(message_id: str, body: GmailModifyIn) -> Any:
-    return _gcall(pim.gmail_modify, message_id, body.mark_read, body.archive, body.star)
+    return _gcall(google.gmail_modify, message_id, body.mark_read, body.archive, body.star)
 
 
 class GmailComposeIn(BaseModel):
@@ -7234,7 +7183,7 @@ class GmailComposeIn(BaseModel):
 def google_gmail_draft(body: GmailComposeIn) -> Any:
     def draft() -> Any:
         items = mail_attachments.resolve(documents, db.data_dir, body.attachments)  # ValueError -> 400 in _gcall
-        return pim.gmail_draft(body.to, body.subject, body.body, body.reply_to_message_id, **mail_extras(items, body.cc, body.bcc))
+        return google.gmail_draft(body.to, body.subject, body.body, body.reply_to_message_id, **mail_extras(items, body.cc, body.bcc))
     return _gcall(draft)
 
 
@@ -7262,10 +7211,10 @@ def google_gmail_send(body: GmailComposeIn) -> Any:
 
 def _gmail_attachment(message_id: str, attachment_id: str) -> tuple[dict[str, Any], bytes]:
     """The attachment's name and mime as Gmail lists them for the message (never the client's), and its bytes."""
-    att = next((a for a in pim.gmail_get(message_id).get("attachments") or [] if a["id"] == attachment_id), None)
+    att = next((a for a in google.gmail_get(message_id).get("attachments") or [] if a["id"] == attachment_id), None)
     if att is None:
         raise HTTPException(404, "That message has no such attachment.")
-    return att, pim.gmail_attachment(message_id, attachment_id)
+    return att, google.gmail_attachment(message_id, attachment_id)
 
 
 async def _fetch_attachment(message_id: str, attachment_id: str) -> tuple[dict[str, Any], bytes]:
@@ -7276,7 +7225,7 @@ async def _fetch_attachment(message_id: str, attachment_id: str) -> tuple[dict[s
     except GoogleNotConnected as e:
         raise HTTPException(409, str(e)) from e
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"{pim.provider.capitalize()} API error: {e}") from e
+        raise HTTPException(502, f"Google API error: {e}") from e
 
 
 @app.post("/integrations/google/gmail/{message_id}/attachments/{attachment_id}/import")
@@ -7415,26 +7364,23 @@ def _google_has(status: dict[str, Any], scope_tail: str) -> bool:
 
 def _home_calendar() -> list[dict[str, Any]]:
     """Today's calendar card: the next 48 hours on every calendar checked on in Google."""
-    ids = pim.enabled_calendar_ids()
-    return pim.calendar_events(2, calendar_ids=ids or None)
+    ids = google.enabled_calendar_ids()
+    return google.calendar_events(2, calendar_ids=ids or None)
 
 
 # ---------------- dashboard ----------------
 @app.get("/dashboard")
 async def dashboard() -> dict[str, Any]:
     st = google.status()
-    pst = pim.status()  # the mail/calendar account, which may be the Microsoft one
     out: dict[str, Any] = {
         "google": st,
-        "microsoft": microsoft.status(),
-        "pim_provider": pim.provider,
         **{k: v for m in modules for k, v in m.today().items()},
         "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
         "recent_memories": memories.list(ALL)[:6],
         "recent_conversations": convos.list(ALL)[:6],
         "calendar": None, "gmail": None, "tasks": None, "drive": None, "errors": {},
     }
-    if st["connected"] or pst["connected"]:
+    if st["connected"]:
         async def fetch(key: str, fn, *args) -> None:  # type: ignore[no-untyped-def]
             try:
                 out[key] = json_safe(await asyncio.to_thread(fn, *args))
@@ -7443,8 +7389,8 @@ async def dashboard() -> dict[str, Any]:
 
         # Not `jobs`: that name is the scheduled-job repo at module scope.
         fetches = []
-        if pst["connected"]:
-            fetches += [fetch("calendar", _home_calendar), fetch("gmail", pim.gmail_search, "is:unread in:inbox newer_than:14d", 10)]
+        if st["connected"]:
+            fetches += [fetch("calendar", _home_calendar), fetch("gmail", google.gmail_search, "is:unread in:inbox newer_than:14d", 10)]
         if st["connected"]:
             fetches.append(fetch("tasks", google.tasks_list, "@default", False))
         # Drive is a newer scope; before the user reconnects, skip the call instead of
@@ -7463,22 +7409,21 @@ async def dashboard() -> dict[str, Any]:
 async def _internal_data() -> dict[str, Any]:
     """What the recap sees of the app and of Google."""
     st = google.status()
-    pst = pim.status()
     out: dict[str, Any] = {
         "todos": todos.list("__all__", include_done=False),
         "memories": memories.list(ALL)[:40],
         "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
         "calendar": [], "gmail": [], "tasks": [], "drive": [],
         # "google_connected" is read by the recap facts as "mail and calendar are available".
-        "google_connected": bool(pst["connected"]),
+        "google_connected": bool(st["connected"]),
     }
-    if pst["connected"]:
+    if st["connected"]:
         try:
-            out["calendar"] = json_safe(await asyncio.to_thread(pim.calendar_events, 3))
+            out["calendar"] = json_safe(await asyncio.to_thread(google.calendar_events, 3))
         except Exception as e:  # noqa: BLE001
             out["calendar_error"] = str(e)
         try:
-            out["gmail"] = json_safe(await asyncio.to_thread(pim.gmail_search, "is:unread in:inbox newer_than:14d", 15))
+            out["gmail"] = json_safe(await asyncio.to_thread(google.gmail_search, "is:unread in:inbox newer_than:14d", 15))
         except Exception as e:  # noqa: BLE001
             out["gmail_error"] = str(e)
     if st["connected"]:
@@ -9463,7 +9408,7 @@ async def _promote_to(desk_id: str, rel: str, title: str, item: AcceptItem) -> d
             return {"ref": None, "verified": False, "error": str(e)}
         # A draft, never a send: the same call and read-back as the gmail_draft tool.
         try:
-            d = await asyncio.to_thread(pim.gmail_draft, to, subject, body)
+            d = await asyncio.to_thread(google.gmail_draft, to, subject, body)
         except GoogleNotConnected:
             return {"ref": None, "verified": False, "error": "Google is not connected"}
         ok = bool(d.get("verified"))

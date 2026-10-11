@@ -260,12 +260,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "googleClientId": "",
     "googleClientSecret": "",
     "googleToken": {},
-    # Entra public client (PKCE, no secret). Tenant "" means "common".
-    "microsoftClientId": "",
-    "microsoftTenant": "",
-    "microsoftToken": {},
-    # Which account Mail, Calendar, the mail/calendar tools, the reply tracker and the outbox use: "google" | "microsoft".
-    "pimProvider": "google",
     # Google Tasks <-> todos sync. Shape and defaults live in gtasks.DEFAULT_CONFIG; patched
     # through /integrations/google/tasks-sync rather than /settings for the same reason.
     # Empty on purpose: anything named here would override that module's defaults.

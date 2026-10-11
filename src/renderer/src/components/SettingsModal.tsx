@@ -27,7 +27,6 @@ import { PermissionModeCards } from './PermissionMode'
 import SandboxSettings from './SandboxSettings'
 import TelegramSettings from './TelegramSettings'
 import GoogleSettings from './GoogleSettings'
-import MicrosoftSettings from './MicrosoftSettings'
 import VoiceInputSettings from './VoiceInputSettings'
 import SupportSettings from './SupportSettings'
 import UsageView from './UsageView'
@@ -341,7 +340,7 @@ export default function SettingsModal(): JSX.Element {
   const hintOf = (id: Tab): string | null => {
     if (id === 'model') return settings.defaultModel ? modelLabel(settings.defaultModel) : null
     if (id === 'permissions') return MODES.find((m) => m.id === mode)?.label ?? null
-    if (id === 'integrations') return (settings.pimProvider ?? 'google') === 'microsoft' ? 'Microsoft' : google?.connected ? google.email ?? 'Google connected' : 'Google not connected'
+    if (id === 'integrations') return google?.connected ? google.email ?? 'Google connected' : 'Google not connected'
     if (id === 'appearance') return THEMES.find((t) => t.id === settings.theme)?.label ?? null
     return null
   }
@@ -495,22 +494,11 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'integrations' && <section>
               <h3>Integrations</h3>
               <p className="muted">Accounts the assistant can read from and act on. Signing in and the sync switches take effect at once; the rest is saved with Save.</p>
-              <Sec id="accounts"><div className="integration">
-                <div role="radiogroup" aria-label="Mail & Calendar provider" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <b style={{ marginRight: 'auto' }}>Mail &amp; Calendar account</b>
-                  {(['google', 'microsoft'] as const).map((p) => (
-                    <button key={p} type="button" role="radio" aria-checked={(draft.pimProvider ?? 'google') === p}
-                      className={(draft.pimProvider ?? 'google') === p ? 'primary-btn' : 'ghost-btn'}
-                      onClick={() => { patch({ pimProvider: p }); void saveEarly({ pimProvider: p }) }}>{p === 'google' ? 'Google' : 'Microsoft'}</button>
-                  ))}
-                </div>
-                <p className="muted small">One account is active at a time. Mail, Calendar, the assistant&apos;s mail and calendar tools and the undo outbox follow it. Todos sync and Files stay on Google.</p>
-              </div></Sec>
+              <Sec id="accounts">
               <Switch title="Hold outgoing email so I can undo" help="A held send shows a countdown with an Undo button. Off sends at once." checked={hold.enabled} onChange={(enabled) => patch({ gmailSendHold: { ...hold, enabled } })} />
               <GoogleSettings clientId={draft.googleClientId ?? ''} clientSecret={draft.googleClientSecret ?? ''} secretSaved={!!settings.googleClientSecretSet} onChange={(p) => patch(p)}
                 onSaveCreds={() => saveEarly({ googleClientId: draft.googleClientId, googleClientSecret: draft.googleClientSecret })} />
-              <MicrosoftSettings clientId={draft.microsoftClientId ?? ''} tenant={draft.microsoftTenant ?? ''} onChange={(p) => patch(p)}
-                onSaveCreds={() => saveEarly({ microsoftClientId: draft.microsoftClientId, microsoftTenant: draft.microsoftTenant })} />
+              </Sec>
               <Sec id="connectors"><h4>Connectors</h4>
               <div className="setting-row">
                 <span className="toggle-text"><b>Connectors</b><small>Tools from other services, added and managed in the Library.</small></span>

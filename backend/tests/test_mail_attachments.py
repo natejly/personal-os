@@ -21,7 +21,7 @@ os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="mailatt-"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from fake_google_api import FakeGoogle, FakeServer  # noqa: E402
+from fake_google_api import FakeGoogle, FakeServer, impersonate  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -212,16 +212,6 @@ class CcBccTests(Base):
         for name in ("gmail_send", "gmail_draft"):
             self.assertTrue({"cc", "bcc", "attachments"} <= set(tools.specs[name].parameters["properties"]))
 
-    def test_outlook_refuses_what_it_cannot_do(self) -> None:
-        from test_microsoft_mail import FakeMs
-        ms = FakeMs()
-        for kw in ({"attachments": [{"name": "a", "path": "/x"}]}, {"cc": "b@example.com"}, {"bcc": "b@example.com"}):
-            with self.assertRaises(NotSent):
-                ms.gmail_send("a@example.com", "Hi", "b", **kw)
-            with self.assertRaises(ValueError):
-                ms.gmail_draft("a@example.com", "Hi", "b", **kw)
-        self.assertEqual(ms.calls, [])
-
 
 class SaveTests(unittest.TestCase):
     def test_names_cannot_leave_the_folder(self) -> None:
@@ -356,7 +346,7 @@ class RouteTests(unittest.TestCase):
         self.server = FakeServer()
         self.server.messages["m1"] = {"id": "m1", "threadId": "t", "labelIds": [], "payload": ReceivedTests.PAYLOAD}
         self.server.attachments[("m1", "att1")] = b"%PDF-data"
-        self.real, appmod.pim.google = appmod.pim.google, FakeGoogle(self.server)
+        self.undo_google = impersonate(appmod.google, FakeGoogle(self.server))
         self.out = tempfile.TemporaryDirectory()
         self._env = os.environ.get("PERSONAL_OS_DOWNLOADS_DIR")
         os.environ["PERSONAL_OS_DOWNLOADS_DIR"] = self.out.name
@@ -364,7 +354,7 @@ class RouteTests(unittest.TestCase):
         self.h = {"X-Personal-OS-Token": appmod.AUTH_TOKEN}
 
     def tearDown(self) -> None:
-        appmod.pim.google = self.real
+        self.undo_google()
         self.out.cleanup()
         if self._env is None:
             os.environ.pop("PERSONAL_OS_DOWNLOADS_DIR", None)

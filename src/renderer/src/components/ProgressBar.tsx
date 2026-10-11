@@ -1,4 +1,4 @@
-/** A thin done/total bar, shared by the progress card and the side panel's checklist headers. */
+/** A thin done/total bar, in the header of a desk's plan (DeskPlan). */
 export default function ProgressBar({ done, total, label = 'Progress' }: { done: number; total: number; label?: string }): JSX.Element {
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
   return (

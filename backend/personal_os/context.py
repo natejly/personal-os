@@ -61,16 +61,6 @@ def _omitted(n: int) -> str:
     return f"({n} more omitted)"
 
 
-def _trim_block(block: str, share: int, section: str, trimmed: dict[str, int]) -> str:
-    """Fit a pre-built text block to its window share line by line: the first line is its heading, later lines rank by position."""
-    head, *rest = block.split("\n")
-    kept, n = _fit(rest, share, head + "\n")
-    if not n:
-        return block
-    trimmed[section] = n
-    return "\n".join([head, *kept, _omitted(n)])
-
-
 def _day(ts: float) -> str:
     return time.strftime("%Y-%m-%d", time.localtime(ts))
 

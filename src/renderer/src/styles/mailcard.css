@@ -26,7 +26,6 @@
 .mc-from { flex: 1; min-width: 0; padding-top: 3px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mc-more { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; color: var(--text-faint); padding: 3px 4px; border-radius: 4px; cursor: pointer; }
 .mc-more:hover { color: var(--text); background: var(--hover); }
-.mc-note { margin: 0; padding: 4px 12px 6px 72px; font-size: 11px; color: var(--text-faint); border-bottom: 1px solid var(--border); }
 
 .mc-chips { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .mc-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 2px 4px 2px 9px; border-radius: 12px; background: var(--active); font-size: 12px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -7,7 +7,6 @@ import SidebarToggle from './SidebarToggle'
 import ChatPulse from './ChatPulse'
 import MemoryPanel from './MemoryPanel'
 import ProjectContext from './ProjectContext'
-import SendToSpace from './SendToSpace'
 import { oneLine } from '../lib/emailAsk'
 import { useProjectFileCount } from '../lib/useChatFiles'
 import { PROJECT_SECTION_LABEL as L } from '../lib/projectTabs'
@@ -70,7 +69,6 @@ export default function ProjectView(): JSX.Element {
         <SidebarToggle />
         <h2><span className="project-dot" style={{ background: project.color }} />{project.name}</h2>
         <div className="no-drag header-right">
-          <SendToSpace items={[{ kind: 'project', refId: project.id }]} />
           <button className="ghost-btn" onClick={() => setProjectModal({ mode: 'edit', project })}><Pencil size={13} /> Edit</button>
           <button className="primary-btn" onClick={() => newChat(id)}><MessageSquarePlus size={14} /> New chat</button>
         </div>

@@ -75,15 +75,11 @@ class StickyNotesIntoDocs(unittest.TestCase):
         hit = c.execute("SELECT doc_id FROM docs_fts WHERE docs_fts MATCH 'bread'").fetchall()
         self.assertEqual([r["doc_id"] for r in hit], ["n1"])
 
-    def test_windows_and_presets_are_rewritten(self) -> None:
+    def test_windows_are_rewritten(self) -> None:
         c = _db()
         migrations.run(c)
         wins = {r["id"]: (r["kind"], r["ref_id"]) for r in c.execute("SELECT * FROM canvas_windows")}
         self.assertEqual(wins, {"w1": ("doc", "n1"), "w2": ("todos", None), "w3": ("chat", "n1")})
-        presets = {r["id"]: r["windows"] for r in c.execute("SELECT * FROM canvas_presets")}
-        self.assertEqual(json.loads(presets["s1"]), [{"kind": "doc", "ref_id": "n2", "x": 1}, {"kind": "todos", "ref_id": None}])
-        self.assertEqual(json.loads(presets["s2"]), [{"kind": "todos"}])
-        self.assertEqual(presets["s3"], "not json")
 
     def test_notes_table_is_dropped_and_version_stamped(self) -> None:
         c = _db()

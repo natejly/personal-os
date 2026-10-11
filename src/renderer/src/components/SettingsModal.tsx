@@ -8,7 +8,6 @@ import { useOnboarding } from './onboarding/onboardingStore'
 import { api } from '../lib/api'
 import { DEFAULT_ZOOM, stepZoom } from '../lib/zoom'
 import { downloadJson, pickJson } from '../lib/jsonFile'
-import { usePresets } from '../canvas/presets'
 import { homeModuleOn } from '../moduleToggles'
 import { navEntries } from '../shell/nav'
 import { useModal } from '../lib/useModal'
@@ -21,13 +20,11 @@ import ProviderSettings from './ProviderSettings'
 import PermissionRules from './PermissionRules'
 import GrantsPanel from './GrantsPanel'
 import { PermissionsPanel } from './PermissionsPanel'
-import CoworkSettings, { BrowserAccess, CoworkAdvanced, DeskGates, ShellNetwork } from './CoworkSettings'
+import CoworkSettings, { BrowserAccess, DeskGates, ShellNetwork } from './CoworkSettings'
 import RunSafetySettings, { SnapshotToggle } from './RunSafetySettings'
 import { PermissionModeCards } from './PermissionMode'
-import SandboxSettings from './SandboxSettings'
 import TelegramSettings from './TelegramSettings'
 import GoogleSettings from './GoogleSettings'
-import MicrosoftSettings from './MicrosoftSettings'
 import VoiceInputSettings from './VoiceInputSettings'
 import SupportSettings from './SupportSettings'
 import UsageView from './UsageView'
@@ -118,38 +115,6 @@ function IndexStatusLine(): JSX.Element | null {
       <span className="toggle-text"><b>Search index</b><small>{done} of {total} passages embedded ({st.mode}{st.model ? `, ${st.model}` : ', no embedding model'}).</small></span>
       <button className="ghost-btn" type="button" disabled={busy} onClick={() => void rebuild()}><RefreshCw size={14} /> {busy ? 'Rebuilding…' : 'Rebuild search index'}</button>
     </div>
-  )
-}
-
-/** Space presets as files: export one to a JSON file, or import one (it is added to the presets list, not opened). */
-function PresetFiles(): JSX.Element {
-  const presets = usePresets((s) => s.presets)
-  const toast = useStore((s) => s.toast)
-  useEffect(() => { void usePresets.getState().load() }, [])
-  const exportOne = async (p: { id: string; name: string }): Promise<void> => {
-    try { downloadJson(`${p.name.replace(/[^\w-]+/g, '-') || 'preset'}.grain-preset.json`, await api.presets.exportFile(p.id)) } catch (e) { toast((e as Error).message, 'error') }
-  }
-  const importOne = async (): Promise<void> => {
-    try {
-      const file = await pickJson()
-      if (!file) return
-      const r = await api.presets.importFile(file)
-      toast(`Imported preset "${r.preset.name}"`)
-      await usePresets.getState().load()
-    } catch (e) { toast((e as Error).message, 'error') }
-  }
-  return (
-    <section>
-      <h3>Space presets</h3>
-      <p className="muted small">Save a space as a preset from the sidebar, then share it as a file. Notes travel with it; chats never do.</p>
-      {presets.map((p) => (
-        <div className="setting-row" key={p.id}>
-          <span className="toggle-text"><b>{p.name}</b><small>{p.windows.length} window{p.windows.length === 1 ? '' : 's'}</small></span>
-          <button className="ghost-btn sm" type="button" onClick={() => void exportOne(p)}><Download size={13} /> Export</button>
-        </div>
-      ))}
-      <div className="button-row"><button className="ghost-btn" type="button" onClick={() => void importOne()}><Upload size={14} /> Import preset…</button></div>
-    </section>
   )
 }
 
@@ -341,7 +306,7 @@ export default function SettingsModal(): JSX.Element {
   const hintOf = (id: Tab): string | null => {
     if (id === 'model') return settings.defaultModel ? modelLabel(settings.defaultModel) : null
     if (id === 'permissions') return MODES.find((m) => m.id === mode)?.label ?? null
-    if (id === 'integrations') return (settings.pimProvider ?? 'google') === 'microsoft' ? 'Microsoft' : google?.connected ? google.email ?? 'Google connected' : 'Google not connected'
+    if (id === 'integrations') return google?.connected ? google.email ?? 'Google connected' : 'Google not connected'
     if (id === 'appearance') return THEMES.find((t) => t.id === settings.theme)?.label ?? null
     return null
   }
@@ -488,29 +453,17 @@ export default function SettingsModal(): JSX.Element {
                 <SnapshotToggle draft={draft} patch={patch} />
                 <h4>Network for commands</h4>
                 <ShellNetwork draft={draft} patch={patch} />
-                <SandboxSettings draft={draft} patch={patch} />
               </Sec>
             </section>}
 
             {tab === 'integrations' && <section>
               <h3>Integrations</h3>
               <p className="muted">Accounts the assistant can read from and act on. Signing in and the sync switches take effect at once; the rest is saved with Save.</p>
-              <Sec id="accounts"><div className="integration">
-                <div role="radiogroup" aria-label="Mail & Calendar provider" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <b style={{ marginRight: 'auto' }}>Mail &amp; Calendar account</b>
-                  {(['google', 'microsoft'] as const).map((p) => (
-                    <button key={p} type="button" role="radio" aria-checked={(draft.pimProvider ?? 'google') === p}
-                      className={(draft.pimProvider ?? 'google') === p ? 'primary-btn' : 'ghost-btn'}
-                      onClick={() => { patch({ pimProvider: p }); void saveEarly({ pimProvider: p }) }}>{p === 'google' ? 'Google' : 'Microsoft'}</button>
-                  ))}
-                </div>
-                <p className="muted small">One account is active at a time. Mail, Calendar, the assistant&apos;s mail and calendar tools and the undo outbox follow it. Todos sync and Files stay on Google.</p>
-              </div></Sec>
+              <Sec id="accounts">
               <Switch title="Hold outgoing email so I can undo" help="A held send shows a countdown with an Undo button. Off sends at once." checked={hold.enabled} onChange={(enabled) => patch({ gmailSendHold: { ...hold, enabled } })} />
               <GoogleSettings clientId={draft.googleClientId ?? ''} clientSecret={draft.googleClientSecret ?? ''} secretSaved={!!settings.googleClientSecretSet} onChange={(p) => patch(p)}
                 onSaveCreds={() => saveEarly({ googleClientId: draft.googleClientId, googleClientSecret: draft.googleClientSecret })} />
-              <MicrosoftSettings clientId={draft.microsoftClientId ?? ''} tenant={draft.microsoftTenant ?? ''} onChange={(p) => patch(p)}
-                onSaveCreds={() => saveEarly({ microsoftClientId: draft.microsoftClientId, microsoftTenant: draft.microsoftTenant })} />
+              </Sec>
               <Sec id="connectors"><h4>Connectors</h4>
               <div className="setting-row">
                 <span className="toggle-text"><b>Connectors</b><small>Tools from other services, added and managed in the Library.</small></span>
@@ -539,7 +492,6 @@ export default function SettingsModal(): JSX.Element {
               <p className="muted">How the assistant works on its own: desks, background workers, coding sessions, the browser and the checks it runs.</p>
               <Sec id="desks">
                 <CoworkSettings draft={draft} patch={patch} />
-                <CoworkAdvanced draft={draft} patch={patch} />
               </Sec>
               <Sec id="workers">
                 <h4>Background workers</h4>
@@ -561,6 +513,7 @@ export default function SettingsModal(): JSX.Element {
                     <option value="any">Let the agent choose</option>
                     <option value="opencode">OpenCode</option>
                     <option value="claude">Claude Code</option>
+                    <option value="pi">pi</option>
                   </select>
                 </label>
                 <label className="setting-row"><span className="toggle-text"><b>Coding sessions at once</b><small>Their own limit, separate from background shell jobs.</small></span>
@@ -582,17 +535,18 @@ export default function SettingsModal(): JSX.Element {
                 <h3>Memory</h3>
                 <div className="knowledge-controls modal-free"><ScopeSelect value={libraryScope} onChange={(sc) => void setLibraryScope(sc)} /></div>
               </div>
-              <Sec id="learning"><details className="modal-free">
-                <summary>Learning</summary>
-                <Switch title="Learn from chats" help="Save useful facts after replies." checked={draft.autoLearn} onChange={(autoLearn) => patch({ autoLearn })} />
-                <Switch title="Learn how I write" help="Keep a profile of your writing so drafts sound like you." checked={draft.learnStyle !== false} onChange={(learnStyle) => patch({ learnStyle })} />
-              </details></Sec>
-              <Sec id="search"><AdvGroup id="search" title="Memory search and index" {...gp}>
+              <div className="knowledge-top">
+                <Sec id="learning"><AdvGroup id="learning" title="Learning" {...gp}>
+                  <Switch title="Learn from chats" help="Save useful facts after replies." checked={draft.autoLearn} onChange={(autoLearn) => patch({ autoLearn })} />
+                  <Switch title="Learn how I write" help="Keep a profile of your writing so drafts sound like you." checked={draft.learnStyle !== false} onChange={(learnStyle) => patch({ learnStyle })} />
+                </AdvGroup></Sec>
+                <Sec id="search"><AdvGroup id="search" title="Memory search and index" {...gp}>
                   <IndexStatusLine />
                   <Switch title="Smarter memory search" help="Combine keywords, meaning, recency and links. Off means keywords only." checked={draft.hybridRetrieval !== false} onChange={(hybridRetrieval) => patch({ hybridRetrieval })} />
                   <AdvancedRetrieval draft={draft} patch={patch} />
                   <Switch title="Describe each file passage when indexing" help="One extra model call per passage. Off by default." checked={draft.contextualChunks === true} onChange={(contextualChunks) => patch({ contextualChunks })} />
               </AdvGroup></Sec>
+              </div>
               <div className="knowledge-body modal-free"><MemoryPanel /></div>
             </section>}
 
@@ -637,7 +591,7 @@ export default function SettingsModal(): JSX.Element {
                 </div>
               </div>
               <Switch title="Daily recap on new chats" help="A short summary of your day under the greeting in a new chat." checked={homeModuleOn(draft, 'recap')} onChange={(on) => patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), recap: on } })} />
-              <Switch title="Start chat windows as blobs" help="A chat added to a space starts as just its creature, no frame. Click it to open the chat." checked={!!draft.compactChats} onChange={(compactChats) => patch({ compactChats })} />
+              <Switch title="Start chat windows as blobs" help="A chat added to a canvas starts as just its creature, no frame. Click it to open the chat." checked={!!draft.compactChats} onChange={(compactChats) => patch({ compactChats })} />
               <div className="setting-row">
                 <span className="toggle-text"><b>Default file font</b><small>How files read and edit unless a file has its own choice. Auto keeps the app's own size and line width.</small></span>
                 <TypographyControls value={draft.docTypography ?? {}} onChange={(t) => patch({ docTypography: { ...(draft.docTypography ?? {}), ...t } })}
@@ -670,7 +624,7 @@ export default function SettingsModal(): JSX.Element {
             </section>}
             {tab === 'sidebar' && <section>
               <h3>Sidebar</h3>
-              <p className="muted small">New chat, your chats and Settings always show. Hiding Files, Spaces, Projects or Jobs only removes the row: ⌘K and shortcuts still open them. Hiding Lists, Calendar, Mail, Health or Library turns that view off.</p>
+              <p className="muted small">New chat, your chats and Settings always show. Hiding Files, Canvases, Projects or Jobs only removes the row: ⌘K and shortcuts still open them. Hiding Lists, Calendar, Mail, Health or Library turns that view off.</p>
               <Sec id="sidebar"><div className="setting-list">
                 {([['docs', 'Files']] as const).map(([k, label]) => (
                   <label key={k} className="toggle-row">
@@ -684,7 +638,7 @@ export default function SettingsModal(): JSX.Element {
                     <input type="checkbox" aria-label={e.label} checked={!hidden.includes(e.view)} onChange={(ev) => void setRowShown(e.view, ev.target.checked)} /><span className="switch" />
                   </label>
                 ))}
-                {([['spaces', 'Spaces'], ['projects', 'Projects'], ['jobs', 'Jobs']] as const).map(([k, label]) => (
+                {([['spaces', 'Canvases'], ['projects', 'Projects'], ['jobs', 'Jobs']] as const).map(([k, label]) => (
                   <label key={k} className="toggle-row">
                     <span className="toggle-text"><b>{label}</b></span>
                     <input type="checkbox" aria-label={label} checked={!sbHidden.includes(k)} onChange={(ev) => void setSectionShown(k, ev.target.checked)} /><span className="switch" />
@@ -704,7 +658,6 @@ export default function SettingsModal(): JSX.Element {
 
               <Sec id="data"><AdvGroup id="data" title="Data" {...gp}>
                   <DataSettings />
-                  <PresetFiles />
                   <label><span className="toggle-text"><b>Auto-archive after (days)</b><small>Chats and inbox messages with no activity for this long move to Archived. They stay searchable and can be restored. 0 turns it off.</small></span>
                     <input type="number" min={0} max={3650} value={draft.autoArchiveDays ?? 0} onChange={(e) => patch({ autoArchiveDays: Math.min(3650, Math.max(0, Math.round(Number(e.target.value)) || 0)) })} />
                   </label>

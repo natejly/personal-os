@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { File, FileDown, FileText, FolderOpen, Files, GitBranch, Paperclip, Pin } from '../icons'
-import { Popover } from '../canvas/PresetsMenu'
+import { Popover } from '../canvas/Popover'
 import { useIsStreaming } from '../store'
 import { fmtAgo } from '../lib/deskFiles'
 import { actionLabel, groupByKind, rowAction, type ChatFile, type ChatFileKind } from '../lib/chatFiles'

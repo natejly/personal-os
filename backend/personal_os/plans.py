@@ -64,28 +64,26 @@ PLAN_BLOCKED = ("not available while planning; put it in a plan step with these 
 PROPOSE_ONLY = "this desk may only propose external actions"
 
 PLAN_DESCRIPTION = (
-    "Ask the user to approve several consequential actions at once, instead of one approval modal per call. "
-    "Use it when a request needs two or more actions that reach outside the app (sending mail, creating or "
-    "changing calendar events, writing to Google) -- list every one of them, with the exact arguments you will "
-    "pass. The user sees one card and can accept, edit, or reject it. Approval is bound to those argument "
-    "values: afterwards call each step once, with byte-identical arguments. Anything you change, add, or repeat "
-    "asks the user again, so do not propose placeholders you intend to fill in later."
+    "Get one approval for several consequential actions. Use it when a request needs two or more actions that reach "
+    "outside the app (sending mail, changing calendar events, writing to Google): list every one with its exact arguments. "
+    "The user accepts, edits or rejects the card. Approval is bound to those values: afterwards call each step once with "
+    "byte-identical arguments; anything changed, added or repeated asks again, so no placeholders."
 )
 
 PLAN_PARAMETERS: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "title": {"type": "string", "description": "One line naming what the whole plan accomplishes"},
+        "title": {"type": "string", "description": "One line naming the plan"},
         "steps": {
             "type": "array",
             "maxItems": MAX_STEPS,
-            "description": "The consequential calls to authorise, in the order you will make them",
+            "description": "Calls to authorise, in order",
             "items": {
                 "type": "object",
                 "properties": {
-                    "tool": {"type": "string", "description": "Name of the tool this step calls"},
-                    "arguments": {"type": "object", "description": "The exact arguments this step will be called with"},
-                    "why": {"type": "string", "description": "One short line: why this step"},
+                    "tool": {"type": "string", "description": "Tool this step calls"},
+                    "arguments": {"type": "object", "description": "Exact arguments"},
+                    "why": {"type": "string", "description": "Why"},
                 },
                 "required": ["tool", "arguments"],
             },
@@ -94,13 +92,10 @@ PLAN_PARAMETERS: dict[str, Any] = {
     "required": ["steps"],
 }
 
-PLAN_EXAMPLES = [{"title": "Reply to the three interview requests",
+PLAN_EXAMPLES = [{"title": "Reply to Ana",
                   "steps": [{"tool": "gmail_send", "arguments": {"to": "ana@example.com", "subject": "Re: Thursday",
-                                                                 "body": "Thursday at 10 works. See you then."},
-                             "why": "accept Ana's slot"},
-                            {"tool": "calendar_create", "arguments": {"summary": "Interview: Ana", "start": "2026-10-02T10:00:00",
-                                                                      "end": "2026-10-02T11:00:00"},
-                             "why": "hold the time"}]}]
+                                                                 "body": "Thursday at 10 works."},
+                             "why": "accept her slot"}]}]
 
 APPROVED_NOTE = ("Approved. Call each approved step exactly once, with exactly these arguments -- the approval is bound "
                  "to these values. A changed argument, an extra call, or a repeat asks the user again.")

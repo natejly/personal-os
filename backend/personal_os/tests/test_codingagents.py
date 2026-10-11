@@ -6,6 +6,7 @@ asked for one, that a follow-up never goes to a session that is still working, a
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 import unittest
@@ -119,10 +120,10 @@ class Validation(CodingTestCase):
             row = await self.cs.start("opencode", str(self.repo), "Fix the bug")
             self.assertRegex(row["branch"], r"^grain/fix-the-bug-[0-9a-f]{4}$")
             self.assertEqual(launched[-1], row["worktree"])
-            self.assertIn("worktree", self.fake.calls[-1])
+            self.assertIn("worktree", self.fake.calls[-2])  # then rev-parse HEAD records the base
             n = len(self.fake.calls)
             row = await self.cs.start("opencode", str(self.repo), "in place", new_worktree=False)
-            self.assertEqual((row["worktree"], row["branch"], len(self.fake.calls)), (str(self.repo), None, n))
+            self.assertEqual((row["worktree"], row["branch"], len(self.fake.calls)), (str(self.repo), None, n + 1))  # only the base rev-parse: no worktree add
         with unittest.mock.patch.object(ca.opencode, "repo_of", return_value=(self.repo, False)), \
                 unittest.mock.patch.object(self.cs, "_launch_opencode", launch):  # already a linked worktree
             row = await self.cs.start("opencode", str(self.repo), "x")
@@ -132,7 +133,7 @@ class Validation(CodingTestCase):
             row = await self.cs.start("claude", str(self.repo), "Fix it")  # Claude Code too
             wt = str(self.repo / ".claude" / "worktrees" / row["branch"].rsplit("/", 1)[-1])
             self.assertRegex(row["branch"], r"^grain/fix-it-[0-9a-f]{4}$")
-            self.assertEqual((row["worktree"], self.fake.calls[-2][-5:-1]), (wt, ["worktree", "add", "-b", row["branch"]]))
+            self.assertEqual((row["worktree"], self.fake.calls[-3][-5:-1]), (wt, ["worktree", "add", "-b", row["branch"]]))
             n = len(self.fake.calls)
             row = await self.cs.start("claude", str(self.repo), "in place", new_worktree=False)
             self.assertEqual((row["worktree"], row["branch"]), (str(self.repo), None))
@@ -380,6 +381,22 @@ class OpencodeDriver(CodingTestCase):
         self.assertEqual(ca.map_job(job("timed_out"))[0], "failed")
         self.assertEqual(ca.map_job(job("orphaned"))[0], "blocked")
 
+    async def test_follow_up_resumes_this_session_not_the_last_one_in_the_folder(self) -> None:
+        wt, t = str(self.repo), 1.0
+        with self.cs.db.tx() as c:
+            c.execute("INSERT INTO coding_sessions(id, agent, external_id, session_id, repo_path, worktree, name, prompt, status, "
+                      "log_tail, created_at, updated_at) VALUES('s5','opencode','j5','ses_mine',?,?,'n','p','done','',?,?)", (wt, wt, t, t))
+        self.jobs.jobs["j5"] = SimpleNamespace(status="exited", exit_code=0, buf="", total=0, live=lambda: False)
+        got: dict[str, Any] = {}
+
+        async def launch(tb: Any, ctx: Any, prompt: str, **kw: Any) -> Any:
+            got.update(kw)
+            return SimpleNamespace(id="j6"), {}
+        self.cs.tb = object()
+        with unittest.mock.patch.object(ca.opencode, "launch", launch):
+            await self.cs.send("s5", "more")
+        self.assertEqual((got["continue_session"], got["session"]), (True, "ses_mine"))
+
     async def test_send_refused_when_the_job_record_was_lost(self) -> None:
         wt, t = str(self.repo), 1.0
         with self.cs.db.tx() as c:
@@ -426,7 +443,60 @@ class OpencodeDriver(CodingTestCase):
         self.assertEqual(cs.get("s4")["status"], "starting")  # still launching: not mistaken for a lost job
 
 
+class Wake(CodingTestCase):
+    async def test_a_session_settling_wakes_its_owner_once_and_a_waiter_reports_it_itself(self) -> None:
+        woken: list[str] = []
+        self.cs.on_finish = lambda r: woken.append(r["status"])
+        row = await self.started()
+        self.cs.refresh(self.cs.get(row["id"]))
+        self.assertEqual(woken, [])  # still working
+        self.job_files("deadbeef", "done", "finished")
+        self.cs.refresh(self.cs.get(row["id"]))
+        self.cs.refresh(self.cs.get(row["id"]))
+        self.assertEqual(woken, ["done"])  # once
+
+    async def test_wait_returns_when_all_settled_or_on_timeout_and_does_not_wake(self) -> None:
+        woken: list[str] = []
+        self.cs.on_finish = lambda r: woken.append(r["id"])
+        row = await self.started()
+        out = await self.cs.wait([row["id"]], "all", 1)
+        self.assertTrue(out["timed_out"])
+        self.assertEqual(self.cs.waiting[row["id"]], 0)
+
+        async def finish() -> None:
+            await asyncio.sleep(0.2)
+            self.job_files("deadbeef", "done", "finished")
+        t = asyncio.ensure_future(finish())
+        out = await self.cs.wait([row["id"]], "any", 20)
+        await t
+        self.assertEqual((out["timed_out"], out["settled"], out["sessions"][0]["status"]), (False, [row["id"]], "done"))
+        self.assertEqual(woken, [])  # the waiter was told directly
+
+    async def test_our_own_stop_is_not_news(self) -> None:
+        woken: list[str] = []
+        self.cs.on_finish = lambda r: woken.append(r["id"])
+        row = await self.started()
+        self.job_files("deadbeef", "stopped")
+        await self.cs.stop(row["id"])
+        self.assertEqual(woken, [])
+
+
 class Diff(CodingTestCase):
+    async def test_diff_is_against_the_recorded_base_and_lists_new_files(self) -> None:
+        sha = "a" * 40
+        self.fake.out["HEAD"] = (True, sha + "\n")
+        self.fake.out["--exclude-standard"] = (True, "new.py\nsub/two.py\n")
+        row = await self.started()
+        self.assertEqual(self.cs.get(row["id"])["base_sha"], sha)
+        self.fake.calls.clear()
+        out = await self.cs.diff(row["id"], full=True)
+        self.assertEqual((out["base"], out["new_files"]), (sha, ["new.py", "sub/two.py"]))
+        flat = [" ".join(a) for a in self.fake.calls]
+        self.assertTrue(any(c.endswith(f"diff {sha} --stat --no-ext-diff --no-textconv") for c in flat), flat)
+        self.assertTrue(any(c.endswith(f"log --oneline --stat -n 20 {sha}..HEAD") for c in flat), flat)
+        self.assertFalse(any("origin/main" in c for c in flat))
+        self.assertEqual(sum("--no-index" in c and c.endswith("/dev/null new.py") for c in flat), 1)
+
     async def test_outputs_are_capped_and_flagged(self) -> None:
         row = await self.started()
         self.fake.out["git -c core.fsmonitor=false"] = (True, "x" * 100_000)

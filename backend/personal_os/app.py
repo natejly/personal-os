@@ -18,11 +18,12 @@ import sqlite3
 import subprocess
 import time
 import urllib.parse
+from types import SimpleNamespace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, AsyncIterator, Callable, Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,8 +32,8 @@ from pydantic import AfterValidator, BaseModel, Field
 
 from . import auth_breaker, blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
-from . import compaction, followups, otel_export, router, thinking_summary, titles
-from . import chatlink, coding_route, fsx, opencode_usage
+from . import branch_summary, compaction, followups, otel_export, router, thinking_summary, titles
+from . import chatlink, coding_route, fsx, opencode_usage, request_log
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .drive_backup import DriveBackup
@@ -55,8 +56,6 @@ from . import vision
 from .docs import ASSET_MIMES, asset_path, AssetError, Docs, clean_typography, save_asset, unified_diff
 from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
-from .pim import Pim
-from .microsoft import Microsoft
 from . import job_history, job_tools
 from .jobs_policy import JobPolicy
 from .jobs import (DESK_JOB_AUTONOMY, KINDS, MAIL_MAX_THREADS, TARGETS, PowerWake, check_watch_dir, PROPOSAL_STATUSES, Jobs, Proposals,
@@ -67,11 +66,10 @@ from .mcp_client import MCP_DANGER, McpClient, McpError
 from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthStore
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers, review_text as mcp_review_text
 from .cowork import (AUTO_RESUME_FROM, internal_kind, AUTONOMY, CHAT_HANDOFF, CONTINUE_MESSAGES, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, inputs_line, read_notes,
-                     STATUSES as DESK_STATUSES, TERMINAL as DESK_TERMINAL, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
+                     STATUSES as DESK_STATUSES, TERMINAL as DESK_TERMINAL, DeskRuntime, Desks,
                      OUTPUT_KINDS, checklist_items, mail_parts, origin_report, parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
 from .envs import WorkEnv
-from .microvm import SandboxError, Sandboxes
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
                     normalize_plan, parse_plan_edits, plan_voided_by_taint, taint_expected)
 from .chat_files import ChatFiles, router as chat_files_router
@@ -82,7 +80,6 @@ from .outbox import Outbox, extras as mail_extras, router as outbox_router
 from .setup import router as setup_router
 from .reliability import router as reliability_router, secret_values
 from .retention import RetentionWorker
-from .presets import CanvasPresets
 from . import limits, resume
 from . import permissions, permrules
 from . import egress
@@ -98,11 +95,11 @@ from .workflows import ApprovalError as WorkflowApprovalError, Engine as Workflo
 from .attention import for_job, for_run
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, args_digest
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
-from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
+from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
-from .tools import ASK_LOCKED_DANGER, QUICK_HIDDEN, Toolbox, UrlBlocked, guarded_request, page_title, summarize_result, times_body
+from .tools import ASK_LOCKED_DANGER, Toolbox, UrlBlocked, guarded_request, page_title, summarize_result, times_body
 from .webread import WebCache
 from .trash import Trash, router as trash_router
 from .trace import Tracer, now_ms
@@ -141,7 +138,7 @@ def _resolve_auth_token() -> str:
 
 
 AUTH_TOKEN = _resolve_auth_token()
-PUBLIC_PATHS = ("/health", "/integrations/google/callback", "/integrations/microsoft/callback", "/mcp/oauth/callback")
+PUBLIC_PATHS = ("/health", "/integrations/google/callback", "/mcp/oauth/callback")
 
 
 def _token_eq(sent: str, expected: str) -> bool:
@@ -220,6 +217,8 @@ def _run_changed(run: Run) -> None:
     telegram_bridge.on_run_change(run)  # bound near the end of this module; it never raises
     if run.conversation_id in _wake_waiting and not run.answering:
         _schedule_wake(run.conversation_id)  # a worker finished while this reply was being written: its report goes in now
+    if run.conversation_id in _coding_waiting and not run.answering:
+        _schedule_coding_wake(run.conversation_id)  # a coding session settled while this reply was being written
     if _chat_waiting and not run.answering:  # any run ending may free the chat (or the desk slot) a cross-chat turn waits on
         for cid in list(_chat_waiting):
             _schedule_chat_delivery(cid)
@@ -328,13 +327,10 @@ jobs = Jobs(db)
 proposals = Proposals(db)
 recaps = Recaps(db)
 google = Google(settings, db.set_settings, cache_dir=db.data_dir)
-microsoft = Microsoft(settings, db.set_settings, cache_dir=db.data_dir)
-# Mail + calendar follow settings.pimProvider; Tasks/Drive/Docs stay on Google (see pim.py).
-pim = Pim(google, microsoft, settings)
-app.include_router(setup_router(settings, set_settings_via_provider, lambda: pim.status()["connected"], db.secrets))
+app.include_router(setup_router(settings, set_settings_via_provider, lambda: google.status()["connected"], db.secrets))
 # sid/wsid are defined further down, so the module context looks them up late.
 modules: list[Module] = build_modules(ModuleContext(
-    db=db, settings=settings, set_settings=db.set_settings, google=pim,
+    db=db, settings=settings, set_settings=db.set_settings, google=google,
     sid=lambda p: sid(p), wsid=lambda p: wsid(p), mcp=lambda: mcp))
 _todos_module = module_get(modules, "todos", TodosModule)
 todos, tasks_sync = _todos_module.store, _todos_module.tasks_sync
@@ -467,17 +463,14 @@ desks.on_change = _desk_changed
 # The supervisor task per live desk: it owns the CHAIN, not the turn in flight. Cancelling one ends
 # the chain and leaves the running turn to settle cooperatively.
 _desk_tasks: dict[str, asyncio.Task[None]] = {}
-sandboxes = Sandboxes(settings, import_dir=db.data_dir / "sandbox-imports")
-# A desk's container sees the desk's workspace at /workspace/desk (microvm.DESK_MOUNT); other chats mount nothing.
-sandboxes.desk_workspace = lambda conv_id: (str(workspace.ensure(d["id"])) if (d := desks.by_conversation(conv_id)) else None)
 # Every Gmail send is held here first so it can be undone (outbox.py); its own routes are included below.
-outbox = Outbox(db, pim, settings, documents=documents)
+outbox = Outbox(db, google, settings, documents=documents)
 app.include_router(outbox_router(outbox))
 # Pre-images of local files the agent overwrites or moves; the restore route is the user's, never a tool (filesnap.py).
 filesnap = FileSnapshots(db, db.data_dir / "snapshots", settings)
 app.include_router(filesnap_router(filesnap))
 # Undo for the agent's calendar and Google Tasks writes; same rule: a user route, never a tool (extundo.py).
-extundo = ExternalUndo(db, pim)
+extundo = ExternalUndo(db, google)
 app.include_router(extundo_router(extundo))
 # Whole-folder snapshots per reply, so Undo can take back shell effects too (snapshots.py); user-only routes.
 snaps = Snapshots(db, db.data_dir / "snapshots", settings, workspace.desk_root)
@@ -512,13 +505,11 @@ async def _reliability_shutdown() -> None:
 work_plans = WorkPlans(db)
 tool_results = ToolResults(db)
 skills = Skills(db)
-from . import teach  # noqa: E402
-teach_svc = teach.Teach(db)  # teach-a-task recordings (screen frames -> a candidate skill)
 guide.ensure(skills)  # the built-in "Using Grain" skill: created approved, text refreshed when the bundle changes
 # Auto-learn may only ever *propose* a skill (a friction fix, or a revised copy of one that failed); the lint it
 # runs is the approval gate's, so a draft that claims authority never even becomes a candidate.
 learner.skills, learner.known_tools = skills, lambda: _known_tools()
-toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=pim, sandboxes=sandboxes, docs=docs,
+toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, docs=docs,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, desks=desks, workspace=workspace, filesnap=filesnap,
                   conversations=convos, extundo=extundo)
@@ -563,6 +554,11 @@ subagent_mgr = Subagents(run_store, toolbox, settings, defs=agent_defs, results=
                          projects=projects, workspace=workspace, approvals=_approvals, skills=skills)
 toolbox.subagents = subagent_mgr
 subagent_mgr.snaps = snaps
+subagent_mgr.connectors = SimpleNamespace(
+    call=lambda slug, args: _mcp_call(slug, args), hints=lambda slug: _mcp_event(slug) or {},
+    review_text=lambda slug: _mcp_review_text(slug),
+    mode=lambda slug, ctx: mcp_store.effective_mode(slug, ctx.get("project_id"), ctx.get("conversation_id"))["mode"],
+    denied=lambda slug: permrules.mcp_denied(slug, subagent_mgr.settings().get("permissionRules")))
 # Workers (workers.py): detached background subagents the chat's delegate tool starts. The callbacks are late-bound:
 # the wake machinery and the Telegram bridge are defined further down.
 workers_mgr = workers_mod.Workers(subagent_mgr, run_store, publish=events.publish, answering=bus.answering,
@@ -651,7 +647,7 @@ def _gate(name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None
     Toolbox applies to built-ins has to apply to them too - they are not in Toolbox.specs.
     """
     if mcp_is(name):
-        return "ask" if mode == "on" and ctx.get("tainted") else mode
+        return autoreview.connector_gate(mode, bool(ctx.get("tainted")))
     return toolbox.gate(name, mode, ctx, args)
 
 
@@ -781,7 +777,7 @@ def health() -> dict[str, Any]:
 
 
 # Google OAuth material lives in settings but never leaves the backend.
-PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "microsoftToken", "microsoftAuthPending", "modelCaps", "telegramState"}
+PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "modelCaps", "telegramState"}
 # Readable through /settings, but only writable through its own route: a plain PUT would replace the
 # whole nested dict and silently drop the signal switches and exclusion lists.
 SETTINGS_READ_ONLY = {"googleTasksSync", "voice"}
@@ -861,8 +857,6 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             # (A secret takes null to clear it; its own check below.)
             # Stored as given, a wrong-typed value (tools: "x", systemPrompt: null) 500s every route that reads it.
             raise HTTPException(422, f"{k} must be a {type(d).__name__}")
-        elif k == "pimProvider" and v not in ("google", "microsoft"):
-            raise HTTPException(400, "pimProvider must be 'google' or 'microsoft'")
         elif k == "baseUrl":
             try:
                 clean[k] = providers.check_base_url(v)
@@ -884,8 +878,6 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
     set_settings_via_provider(clean)
     if {"apiKey", "baseUrl", "provider"} & clean.keys():
         auth_breaker.reset()  # a new key or endpoint gets a fresh start, whatever the old one's record
-    if "sandboxRuntime" in perm:
-        sandboxes._avail = None  # the status line answers for the new runtime now, not after the cache expires
     if "telegramEnabled" in clean and _loop is not None and not _loop.is_closed():
         asyncio.run_coroutine_threadsafe(telegram_bridge.reconcile(), _loop)  # a sync route runs in the threadpool
     if "workerMaxConcurrent" in clean and _loop is not None and not _loop.is_closed():
@@ -1321,10 +1313,6 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
         settings_patch["tools"] = toolbox.cap_modes(settings_patch["tools"])  # external and schedules tools top out at ask
     settings_patch.pop("deskId", None)  # bound and unbound by the cowork routes only, never by a settings PATCH
     settings_patch.pop("workingFolder", None)  # retired: the file tools reach the whole Mac, so a chat needs no folder bound to it
-    # Clearing the banner has to drop library text that was copied into the sandbox, or the next
-    # command can print it back as if the chat were trusted again.
-    if settings_patch.get("tainted") is False and sandboxes.holds_import(id):
-        sandboxes.reset(id)
     new_title = (patch.get("title") or "").strip()
     if new_title:
         cur = convos.get(id, with_messages=False)
@@ -1340,10 +1328,11 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
 
 class ForkIn(BaseModel):
     message_id: str
+    summarize: bool = True  # add a short note on what the source chat did after this message
 
 
 @app.post("/conversations/{id}/fork")
-def fork_conversation(id: str, body: ForkIn) -> dict[str, Any]:
+def fork_conversation(id: str, body: ForkIn, bg: BackgroundTasks) -> dict[str, Any]:
     """Branch into a new chat from any live message. Allowed while a reply runs: it copies committed rows only.
     No approvals, runs, grants, plans or summaries come along; taint does, including a sandbox import the source
     holds, because the fork does not hold that import and would otherwise start clean."""
@@ -1358,10 +1347,8 @@ def fork_conversation(id: str, body: ForkIn) -> dict[str, Any]:
         raise HTTPException(404, "No such message in this chat") from None
     except ValueError:
         raise HTTPException(409, "That message was replaced; branch from the current one") from None
-    if sandboxes.holds_import(id):
-        srcs = sorted({*(out["settings"].get("taint_sources") or []), "fork:sandbox_import"})
-        convos.update(out["id"], {"settings": {"tainted": True, "taint_sources": srcs}})
-        out = convos.get(out["id"]) or out
+    if body.summarize:
+        bg.add_task(branch_summary.add, convos, settings(), id, body.message_id, out["id"])
     return out
 
 
@@ -1458,20 +1445,19 @@ def _resolve_attachments(conv: dict[str, Any], ids: list[str] | None) -> list[di
 
 
 RENDER_HINT = """## Rendering
-Besides normal markdown, the UI renders three fenced code blocks inline:
-- ```chart — a small JSON spec for a data chart: {"type": "bar" | "line" | "area" | "pie" | "scatter", "title": "...", "x": "<key used for the x axis / category>", "series": ["<numeric key>", ...], "data": [{"<x key>": ..., "<numeric key>": ..., ...}, ...], "stacked": false, "xLabel": "...", "yLabel": "...", "unit": "", "transforms": [{"op": "sort", "by": "<key>", "dir": "desc"}, {"op": "limit", "n": 10}]}. `data` is an array of objects (one per x value); keep it under 200 rows. `transforms` is optional (ops: sort, limit, filter {field, cmp, value}, group {by, agg: {<key>: "sum|mean|count|min|max"}}) for trimming or aggregating raw rows; ISO dates (2026-03-01) as x values get a date axis. Use a chart whenever numbers would be clearer that way (comparisons, trends, breakdowns).
-- ```interactive — a chart the user steers with sliders and other controls; it recomputes instantly as they drag, with no new request to you: {"title": "Compound growth", "type": "line", "controls": [{"id": "rate", "label": "Annual return", "type": "slider", "min": 0, "max": 15, "step": 0.25, "value": 7, "unit": "%"}, {"id": "start", "label": "Starting amount", "type": "number", "value": 5000, "unit": "$"}], "x": {"id": "year", "label": "Year", "from": 0, "to": 30, "steps": 120}, "series": [{"key": "balance", "label": "Balance", "expr": "start * pow(1 + rate/100, year)"}], "readouts": [{"label": "Final balance", "expr": "balance_last", "unit": "$"}], "unit": "$", "yLabel": "Balance"}
-  - `controls` (max 12): `type` is slider (the default), number, select (needs "options": [...]), or toggle. Every `id` must be a plain name, because the formulas reference it by that name.
-  - `x` is either a swept range — `from`/`to`/`steps` (max 400), each a number or a formula over the controls — or `{"id": "...", "values": [...]}` for fixed categories. To drive real rows instead, pass `"data": [{...}, ...]` and set `"x"` to the column name; formulas then also see that row's columns.
-  - `series[].expr` (max 8) is a formula over the control ids, the x variable (also available as `x`), `index` and `n`.
-  - `readouts` (optional, max 6) are scalars shown under the chart. Besides the controls they can use `<series key>_last`, `_first`, `_min`, `_max`, `_sum`, `_mean`.
-  - Formulas may use `+ - * / % ^`, comparisons, `&& || !`, `cond ? a : b`, `pi`, `e`, and only these functions: abs sqrt cbrt exp log ln log2 log10 sin cos tan asin acos atan sinh cosh tanh sign floor ceil trunc round(x[,digits]) sqr pow atan2 mod logb lerp clamp step min max hypot if(cond,a,b). There is nothing else — no assignment, no indexing, no other names.
-  Reach for it when the interesting part of an answer is an assumption worth playing with (a rate, a price, a threshold, a growth curve); use ```chart for numbers that are already fixed.
-- ```mermaid — diagrams (flowchart, sequenceDiagram, gantt, mindmap, timeline, ...).
-- ```html — a self-contained HTML document or fragment (inline CSS/JS, no network, no external files). It is shown as a sandboxed live preview with a Code/Preview toggle; inline scripts do not run there. Use it for a mock-up or a formatted layout. ```svg renders as an image.
-Maths renders when written inline as `$...$` and as a display block with `$$` on its own lines; do not use `\\(` `\\)` or `\\[` `\\]`.
-Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual.
-The `show` tool opens the same kinds of content (plus markdown and files on this Mac: PDFs, images, text) in a side panel beside the chat, with more room than an inline block. Use it when the user should look at something while you talk about it, e.g. a PDF they asked about or a full-page mock-up."""
+Besides markdown, the UI renders these fenced blocks inline:
+- ```chart: {"type": "bar" | "line" | "area" | "pie" | "scatter", "title": "...", "x": "<x/category key>", "series": ["<numeric key>", ...], "data": [{"<x key>": ..., "<numeric key>": ...}, ...], "stacked": false, "xLabel": "...", "yLabel": "...", "unit": "", "transforms": [{"op": "sort", "by": "<key>", "dir": "desc"}, {"op": "limit", "n": 10}]}. `data` is one object per x value, under 200 rows. `transforms` is optional (sort, limit, filter {field, cmp, value}, group {by, agg: {<key>: "sum|mean|count|min|max"}}).
+- ```interactive: a chart the user steers with controls; it recomputes as they drag, with no new request: {"title": "Compound growth", "type": "line", "controls": [{"id": "rate", "label": "Annual return", "type": "slider", "min": 0, "max": 15, "step": 0.25, "value": 7, "unit": "%"}], "x": {"id": "year", "label": "Year", "from": 0, "to": 30, "steps": 120}, "series": [{"key": "balance", "label": "Balance", "expr": "5000 * pow(1 + rate/100, year)"}], "readouts": [{"label": "Final", "expr": "balance_last", "unit": "$"}], "yLabel": "Balance"}
+  - `controls` (max 12): `type` slider (default), number, select (needs "options": [...]) or toggle; `id` is a plain name.
+  - `x`: a swept range `from`/`to`/`steps` (max 400; numbers or formulas), or `{"id": "...", "values": [...]}` for categories; or pass `"data": [{...}]` and set `"x"` to a column name (formulas then see its columns).
+  - `series[].expr` (max 8): a formula over the control ids, the x variable (also `x`), `index`, `n`.
+  - `readouts` (optional, max 6): scalars; may use `<series key>_last|_first|_min|_max|_sum|_mean`.
+  - Formulas: `+ - * / % ^`, comparisons, `&& || !`, `cond ? a : b`, `pi`, `e`, and only these functions: abs sqrt cbrt exp log ln log2 log10 sin cos tan asin acos atan sinh cosh tanh sign floor ceil trunc round(x[,digits]) sqr pow atan2 mod logb lerp clamp step min max hypot if(cond,a,b). No assignment, indexing or other names.
+  Use it for assumptions worth playing with, ```chart for fixed numbers.
+- ```mermaid: diagrams.
+- ```html: a self-contained document or fragment (inline CSS, no network or external files), shown as a sandboxed preview with a Code/Preview toggle; inline scripts do not run. ```svg renders as an image.
+Maths: inline `$...$`, display `$$` on its own lines; not `\\(` `\\)` or `\\[` `\\]`.
+The `show` tool opens these (plus markdown and Mac files) in a side panel beside the chat."""
 
 # The Texts conversation is answered on the user's phone (telegram.py).
 TELEGRAM_HINT = ("You are talking over Telegram on the user's phone. Reply first in one or two lines, then work. At meaningful milestones send a "
@@ -1479,37 +1465,30 @@ TELEGRAM_HINT = ("You are talking over Telegram on the user's phone. Reply first
                  "reach the phone; the final reply may carry them too.")
 
 # Always on, every path (chats, desks, subagents, scheduled jobs, drafts, Telegram): static, so it sits in the cached prefix.
-NO_EMOJI_HINT = "Don't use emoji in replies, documents, or messages unless the user explicitly asks for them."
+NO_EMOJI_HINT = "No emoji in replies, documents or messages unless asked."
 
-TOOLS_HINT = ("You have tools. Reach for them whenever they could make the answer more accurate, more current or grounded in "
-              "the user's own data; answer directly only when nothing you could look up would change it. "
-              "Be direct: when what is already in front of you answers the question, answer it in plain text — do not make "
-              "tool calls or retrieve context that would not change the answer. "
-              "After using tools, write the final answer for the user. "
+TOOLS_HINT = ("Use tools when they would make the answer more accurate, current or grounded in the user's data. "
+              "Be direct: when what is already in front of you answers the question, skip them. "
               + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT + " " + FENCE_RULE)
 # The agent stance for an ordinary chat (desks and scheduled runs carry their own). Text only: the leash is the
 # alwaysAsk list and the approval cards, so the model is told to act and let the app stop it where a card is due.
 PROACTIVE_HINT = (  # chats that cannot delegate (a persona without the hand-off tools); a delegating chat gets FRONT_AGENT_HINT
     "## How to work\n"
-    "You are an agent, not a lookup. Own the request end to end: do the obvious work with your tools instead of "
-    "describing it or asking for what you could find out yourself. When a request touches time, people or commitments, "
-    "check the calendar, inbox or todos first and say what you found that bears on it (a clash, a reply waiting, a "
-    "deadline). Act where the app lets you; it stops you where an approval is needed, so do not ask permission in advance. "
-    "Prefer a draft or proposal over a silent change to anything the user owns. If they describe a recurring want, offer "
-    "schedule_task once. End with at most one specific next step you can do right now, or none; never a generic offer. "
-    "A wrong suggestion costs more than silence. "
+    "When a request touches time, people or commitments, "
+    "check the calendar, inbox or todos first and say what bears on it. Act where the app lets you; it stops you where "
+    "an approval is needed, so do not ask permission in advance. Prefer a draft or proposal over a silent change. "
+    "If they describe a recurring want, offer schedule_task once. End with at most one specific next step you can do "
+    "now, or none. "
     + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT
 )
 # A plain chat turn that can delegate is told this instead of PROACTIVE_HINT and PLAN_HINT (workers.py).
 FRONT_AGENT_HINT = workers_mod.FRONT_AGENT_HINT
 # Only added when todo_write is actually available in this chat (see _chat_stream).
-PLAN_HINT = ("When a request needs more than a couple of tool calls, open with todo_write to lay out the steps, then update it "
-             "as each one lands. Your current plan is re-sent to you at the end of every round, so it — not your memory of "
-             "earlier rounds — is what keeps a long task on track. If a decision is genuinely the user's, call ask_user once "
-             "instead of guessing.")
+PLAN_HINT = ("For more than a couple of tool calls, open with todo_write and update it as steps land."
+             " If a decision is genuinely the user's, call ask_user once instead of guessing.")
 # Only added when save_memory or search_memory is available in this chat. Static text: it sits in the cached prefix.
-MEMORY_HINT = ("Save corrections, standing instructions and durable facts the user states with save_memory (kind instruction for always/never rules, until for facts that stop holding on a date).\n"
-               "Call search_memory before answering a question about the user's past or preferences that is not already in context.")
+MEMORY_HINT = ("Save corrections, standing instructions and durable facts with save_memory (kind instruction for always/never rules; until for facts that expire).\n"
+               "Call search_memory before answering about the user's past or preferences not already in context.")
 
 
 def _today_hint() -> str:
@@ -1551,6 +1530,22 @@ JOB_HINT = ("## This is a scheduled background run\nNobody is watching it. Anyth
             "**Verified** (what you checked yourself), **Assumptions** (what you took as true without checking), "
             "**Done** (what you did here), **Awaiting approval** (the proposals you made), **Open questions** (what "
             "you need from the user). Give every claim its evidence: a URL, a time, or an id.")
+
+
+JOB_QUIET = ("[If this run found nothing new and nothing needs the user, make your whole final answer exactly "
+             f"{workers_mod.NO_REPLY} and nothing else, and no notification is sent.]")
+
+
+def _job_hint(run: Run | None) -> str:
+    """JOB_HINT for an unattended run, plus leave to stay quiet when no chat will judge the result (a task booked from a
+    chat hands its result back there instead). A manual run is answered, not suppressed."""
+    if not proposal_only(run):
+        return ""
+    inp = getattr(run, "input", None) or {}
+    job = jobs.get(inp.get("job_id") or "") or {}
+    if job.get("origin_conversation_id") or inp.get("manual") or inp.get("dry_run") or job.get("target") == "desk":
+        return JOB_HINT
+    return JOB_HINT + "\n\n" + JOB_QUIET
 
 
 def proposal_only(run: Run | None) -> bool:
@@ -1995,9 +1990,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             "citations": used["chunks"],
             # Taint is sticky for the whole conversation: the injected instructions live on in the replayed history, so
             # waiting one turn must not re-arm a standing 'always' grant. Only the user clears it (Context -> this chat).
-            "tainted": bool(conv["settings"].get("tainted")) or bool(ctx_taints) or sandboxes.holds_import(conv_id),
-            "taint_sources": list(conv["settings"].get("taint_sources") or []) + [f"context:{k}" for k in ctx_taints]
-                + (["sandbox_import"] if sandboxes.holds_import(conv_id) else []),
+            "tainted": bool(conv["settings"].get("tainted")) or bool(ctx_taints),
+            "taint_sources": list(conv["settings"].get("taint_sources") or []) + [f"context:{k}" for k in ctx_taints],
             # a chat tainted with no recorded source: no tool's own-subject exemption may read its taint as explained
             "taint_unsourced": bool(conv["settings"].get("tainted")) and not conv["settings"].get("taint_sources"),
             "allowed_urls": set() if internal else _urls(user_text), "settings": cfg, "conv_settings": conv["settings"],
@@ -2028,13 +2022,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         explicit_modes = toolbox.explicit(*_tool_maps) if use_tools else {}  # what the user set on purpose (auto mode trusts those)
         if persona is not None:
             modes = {n: v for n, v in modes.items() if n in persona.tools}
-        if conv["settings"].get("quick"):  # enforced here, not just asked for in the prompt (context.QUICK_RULES)
-            modes = {n: v for n, v in modes.items() if n not in QUICK_HIDDEN}
         # MCP slugs all carry a reserved prefix no built-in may use, so the two mode maps cannot collide.
         mcp_modes, mcp_schemas = _mcp_tooling(conv["project_id"], conv_id) if use_tools else ({}, [])
         # A job's allowlist (job_tools) writes 'off' for tools outside it into the chat's tool map; MCP modes come from
         # mcp_grants, not that map, so the narrowing is applied to them here.
         chat_off = {n for n, v in (conv["settings"].get("tools") or {}).items() if v == "off"}
+        if persona is not None:  # an agent's tool list narrows its connectors too, by slug or glob (mcp__server__*)
+            mcp_modes = {k: v for k, v in mcp_modes.items() if tools.allows_slug(persona.tools, k)}
+            mcp_schemas = [s for s in mcp_schemas if s["function"]["name"] in mcp_modes]
         if chat_off and mcp_modes:
             mcp_modes = {k: v for k, v in mcp_modes.items() if k not in chat_off}
             mcp_schemas = [s for s in mcp_schemas if s["function"]["name"] not in chat_off]
@@ -2196,6 +2191,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         tool_ctx["tool_overrides"] = {**((project or {}).get("tools") or {}), **(conv["settings"].get("tools") or {})}
         # What agent_spawn needs to start a child under this reply: its live tool modes (a child never has more),
         # the run its cards and status ride on, its stop flag, and where it sits in the spawn tree.
+        # The connectors a child may be given (granted, connected, past the agent's list); it decides each call itself (Subagents._exec_mcp).
+        tool_ctx.update(mcp_modes=dict(mcp_modes), mcp_schemas={s["function"]["name"]: s for s in mcp_schemas})
         tool_ctx.update(modes=modes, run=run, stop=stop, depth=0, agent_run_id=run.run_id if run else "", model=model,
                         effort=str(conv["settings"].get("effort") or "default"))
 
@@ -2266,7 +2263,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             net = ("open" if permissions.get(cfg, "shellNetwork") or permissions.get(cfg, "allowAllConnections") else
                    "allowlist" if permissions.get(cfg, "shellRegistryAccess") or permissions.get(cfg, "shellAllowedDomains") else "off")
             text = desk_manual({s["function"]["name"] for s in tool_schemas},
-                               {"shell_network": net, "sandbox_mount": bool(cfg.get("sandboxMountDesk", True))})
+                               {"shell_network": net})
             return "\n\n" + text if text else ""
 
         def _desk_inputs_block() -> str:
@@ -2303,7 +2300,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             tools_hint = "\n\n".join(p for p in (tools_hint, _mcp_server_notes(set(mcp_modes))) if p)
         hints = (NO_EMOJI_HINT, RENDER_HINT, tools_hint,
                  FRONT_AGENT_HINT if front_hint else PROACTIVE_HINT if tool_schemas and not desk and not proposal_only(run) else "",
-                 _agents_hint(modes, front=front_hint), JOB_HINT if proposal_only(run) else "",
+                 _agents_hint(modes, front=front_hint), _job_hint(run),
                  job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
                  PERSONA_FOLDER_HINT.format(path=folder) if folder and not desk and tool_schemas else "",
@@ -2493,6 +2490,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             tracer.end(span, {"cleared": cleared, "summarized": summarized, "tokens_saved": saved})
             return {"span": span}
 
+        def _capture(tool_choice: str) -> None:
+            """Snapshot exactly what goes to llm.stream_chat this round (messages are mutated afterwards, so copy now)."""
+            if cfg.get("captureRequests", True):
+                with contextlib.suppress(Exception):
+                    request_log.record(db.data_dir, am["id"], _round, model, messages, tool_schemas, tool_choice)
+
         async def _stream_round() -> AsyncIterator[dict[str, Any]]:
             """The round's model stream. A provider overflow before anything streamed is recovered once per reply:
             the stream is re-issued over the compacted context and a synthetic `overflow_recovered` event says so.
@@ -2500,6 +2503,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             nonlocal overflow_retried
             while True:
                 streamed = False
+                _capture("auto")
                 stream = llm.stream_chat(cfg, model, messages, tool_schemas or None,
                                          effort=str(conv["settings"].get("effort") or "default"),
                                          fast=bool(conv["settings"].get("fast")),
@@ -2548,6 +2552,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             llm.stream_deadline.set(time.monotonic() + FINAL_ROUND_SECONDS)
             # tools are still declared, with tool_choice "none": the history holds tool_calls, and some OpenAI-compatible
             # backends reject that when no tool list is sent. "none" is the portable way to say "answer, do not call".
+            _capture("none")
             async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
                                             effort=str(conv["settings"].get("effort") or "default"), tool_choice="none",
                                             fast=bool(conv["settings"].get("fast")),
@@ -2825,7 +2830,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     continue
                 args = c["_args"] or {}
                 sig = tools.call_key(c["name"], args)
-                repeats = repeats + 1 if sig == last_sig else 1
+                repeats = repeats + 1 if sig == last_sig and c["name"] not in WAITING_TOOLS else 1
                 last_sig = sig
                 if repeats >= REPEAT_LIMIT:  # before the approval gate: denying the same call forever is still a loop
                     partial = "loop"
@@ -3025,7 +3030,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     hints = _mcp_event(c["name"]) or {}
                     # A connector call forced by untrusted content stays a card (allow-all runs it: autoreview.route).
                     mcp_tainted = bool(hints) and hard_forced and bool(tool_ctx["tainted"])
-                    rt = autoreview.route(
+                    rt = autoreview.connector_route(
+                        pmode, mode=mode, raw_mode=raw_mode, hints=hints, hard_forced=hard_forced, tainted=bool(tool_ctx["tainted"]),
+                        covered=desk_cleared or (pre_mode == "ask" and perm.mode == "on") or bool(perm.rule and perm.mode == "on"),
+                        question=c["name"] in permrules.STILL_ASK) if mcp_is(c["name"]) else autoreview.route(
                         # handing work to a worker needs no review of its own: each call the worker makes is reviewed in its turn
                         pmode, mode=mode, danger="safe" if c["name"] in workers_mod.FRONT_TOOLS else danger, explicit_on=explicit == "on",
                         # an alwaysAsk tool's stored "ask" is only the cap on "on", not a choice, so it is not an explicit ask
@@ -3964,7 +3972,7 @@ toolbox.shell.on_note = _shell_wake
 toolbox.shell.on_change = lambda: events.publish("shell_jobs", {"live": toolbox.shell.running_background()})
 
 
-# ---------------- running views: shell jobs and sandboxes ----------------
+# ---------------- running views: shell jobs ----------------
 def _shell_job(job_id: str) -> Any:
     job = toolbox.shell.jobs.get(job_id)
     if not job:
@@ -3988,34 +3996,6 @@ async def kill_shell_job(job_id: str) -> dict[str, Any]:
     job = _shell_job(job_id)
     await toolbox.shell.kill(job)
     return job.info()
-
-
-@app.get("/sandboxes")
-def list_sandboxes() -> dict[str, Any]:
-    st = sandboxes.status()
-    items: list[dict[str, Any]] = []
-    if st["available"]:
-        try:
-            items = sandboxes.list()
-        except SandboxError as e:
-            st = {**st, "reason": str(e)}
-        for it in items:
-            c = convos.get(it["conversation_id"], with_messages=False) if it["conversation_id"] else None
-            it["title"] = c["title"] if c else None
-    return {**st, "items": items}
-
-
-@app.post("/sandboxes/{key}/reset")
-def reset_sandbox(key: str) -> dict[str, Any]:
-    """Remove a sandbox and its checkpoints. `key` is a conversation id, or the container name of one made before
-    containers carried their conversation."""
-    if not sandboxes.available():
-        raise HTTPException(409, "The sandbox runtime is not available")
-    if key.startswith("pos-sbx-"):
-        if not re.fullmatch(r"pos-sbx-[0-9a-f]{12}", key):
-            raise HTTPException(400, "Not a sandbox name")
-        return sandboxes.reset_name(key)
-    return sandboxes.reset(key)
 
 
 @app.post("/conversations/{id}/chat")
@@ -4086,8 +4066,9 @@ async def _wake_conversation(conv_id: str) -> None:
     a reply run started here, so it works with no window open. While a reply is being written the wake waits (_run_changed
     retries when it ends); several reports waiting fold into one turn. Whether it was delivered is on each worker's row."""
     pending = [r for r in workers_mgr.pending_wakes(conv_id) if r["run_id"] not in _wake_inflight]
+    booked = _job_wakes.get(conv_id, [])
     row = convos.get(conv_id, with_messages=False)
-    verdict = workers_mod.wake_decision(bool(bus.answering(conv_id)), len(pending), row is not None)
+    verdict = workers_mod.wake_decision(bool(bus.answering(conv_id)), len(pending) + len(booked), row is not None)
     if verdict == "wait":
         _wake_waiting.add(conv_id)
         return
@@ -4095,21 +4076,68 @@ async def _wake_conversation(conv_id: str) -> None:
     if verdict == "skip":
         if row is None:  # the chat is gone: nobody to tell
             workers_mgr.mark_delivered(r["run_id"] for r in pending)
+            _job_wakes.pop(conv_id, None)
         return
-    text, wake = workers_mod.build_wake(_wake_reports(pending))
+    text, wake = workers_mod.build_wake(_wake_reports(pending) + booked)
     if desk_id := row["settings"].get("deskId"):
         # A desk-bound chat is woken through its desk, so the turn runs under the desk runtime, supervisor and settle.
         started = _launch_desk(desk_id, text, MESSAGE_FROM, wake=wake)
         if started is None:  # a run is still live on the conversation (its learn tail), or the desk is in no status that takes a message
             _wake_waiting.add(conv_id)
         elif isinstance(started, Run):
+            _job_wakes.pop(conv_id, None)
             _wake_inflight.update(wake["ids"])
             started.task.add_done_callback(lambda _t: _wake_inflight.difference_update(wake["ids"]))
         return
     body = ChatIn(content=text, wake=wake)
     _wake_inflight.update(wake["ids"])
     run = bus.start(conv_id, lambda r: _run_chat(r, body), input=body.model_dump())
+    _job_wakes.pop(conv_id, None)
     run.task.add_done_callback(lambda _t: _wake_inflight.difference_update(wake["ids"]))
+
+
+# Coding sessions that settled and are owed to the chat that started them, and the chats whose wake waits for a reply to end.
+_coding_owed: dict[str, list[dict[str, Any]]] = {}
+_coding_waiting: set[str] = set()
+
+
+def _schedule_coding_wake(conv_id: str) -> None:
+    try:
+        asyncio.get_running_loop()
+        asyncio.ensure_future(_wake_coding(conv_id))
+    except RuntimeError:  # called from the threadpool (the watcher refreshes off the loop)
+        if _loop is not None and not _loop.is_closed():
+            _loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_wake_coding(conv_id)))
+
+
+def _coding_finished(row: dict[str, Any]) -> None:
+    """A coding session settled: hand it to the front agent as the same hidden wake turn a finished worker gets (NO_REPLY
+    when there is nothing new to say). Sessions started by an unattended run with no chat have nobody to tell."""
+    if cid := row.get("conversation_id"):
+        _coding_owed.setdefault(cid, []).append(row)
+        _schedule_coding_wake(cid)
+
+
+async def _wake_coding(conv_id: str) -> None:
+    if not _coding_owed.get(conv_id):
+        return
+    conv = convos.get(conv_id, with_messages=False)
+    if conv is None:  # the chat is gone: nobody to tell
+        _coding_owed.pop(conv_id, None)
+        return
+    if bus.answering(conv_id):
+        _coding_waiting.add(conv_id)  # _run_changed retries when the reply ends
+        return
+    _coding_waiting.discard(conv_id)
+    rows = _coding_owed.pop(conv_id)
+    text, wake = workers_mod.build_coding_wake(rows)
+    if desk_id := conv["settings"].get("deskId"):
+        if not isinstance(_launch_desk(desk_id, text, MESSAGE_FROM, wake=wake), Run):
+            _coding_owed.setdefault(conv_id, [])[:0] = rows
+            _coding_waiting.add(conv_id)
+        return
+    body = ChatIn(content=text, wake=wake)
+    bus.start(conv_id, lambda r: _run_chat(r, body), input=body.model_dump())
 
 
 # ---------------- chats messaging each other (chatlink.py) ----------------
@@ -4166,7 +4194,7 @@ def _push_wake_reply(text: str, attachments: list[dict[str, Any]] | None = None,
     """The reply written for a finished worker (and the files it sent), to the phone when telegramPushWorkerResults is on,
     and into the Telegram chat in Grain when it came from another chat (that chat is the phone's transcript)."""
     text = workers_mod.strip_no_reply(text)
-    if not settings().get("telegramPushWorkerResults") or not (text or attachments):
+    if not (settings().get("telegramPushWorkerResults") or telegram_bridge.is_texts_conversation(conv_id)) or not (text or attachments):
         return
     telegram_bridge.push(text, attachments or None)
     texts = telegram_bridge.texts_conversation_id()
@@ -5243,8 +5271,37 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     # Runs after _drive has ended the run, so the row the renderer then asks about is final. Ids only: the
     # app topic is a doorbell, and what to notify about is decided from rows by GET /inbox/notify.
     if run.task is not None:
-        run.task.add_done_callback(lambda _t, rid=run.run_id, jid=job["id"]: events.publish("job_finished", {"run_id": rid, "job_id": jid}))
+        run.task.add_done_callback(lambda _t, rid=run.run_id, jid=job["id"]: (_job_ended(rid, jid), events.publish("job_finished", {"run_id": rid, "job_id": jid})))
     return run.run_id
+
+
+_job_wakes: dict[str, list[dict[str, Any]]] = {}  # origin chat -> finished task reports waiting to be handed over (ponytail: lost on restart)
+
+
+def _job_ended(run_id: str, job_id: str) -> None:
+    """A finished run that answered NO_REPLY is flagged unchanged, so the inbox and notifications skip it. A run of a task
+    booked from a chat (schedule_task) hands its result to that chat as a hidden wake turn, where the assistant decides
+    whether there is anything to say."""
+    try:
+        row = run_store.get(run_id)
+        inp = (row or {}).get("input") or {}
+        if not row or row.get("status") != "done" or inp.get("dry_run"):
+            return
+        text = run_store.transcript(run_id, row["message_id"])[0] if row.get("message_id") else ""
+        if not text.strip() or workers_mod.is_silent(text):
+            if text.strip() and not inp.get("manual"):
+                run_store.mark_unchanged(run_id)
+            return
+        job = jobs.get(job_id) or {}
+        origin = job.get("origin_conversation_id")
+        if not origin or not convos.get(origin):
+            return
+        tainted = bool((convos.get(row["conversation_id"], with_messages=False) or {}).get("settings", {}).get("tainted"))
+        _job_wakes.setdefault(origin, []).append({"id": run_id, "label": "Scheduled task", "title": job.get("name") or "",
+                                                   "goal": job.get("prompt") or "", "status": "done", "text": text, "tainted": tainted})
+        _schedule_wake(origin)
+    except Exception:  # noqa: BLE001 - delivery must never break the scheduler
+        log.warning("could not hand job run %s to its chat", run_id, exc_info=True)
 
 
 def _job_desk(job_id: str, due_at: float) -> dict[str, Any] | None:
@@ -5302,7 +5359,7 @@ job_policy = JobPolicy(jobs, run_store, _launch_job, settings=settings)
 def _mail_threads(query: str) -> list[dict[str, Any]]:
     """A mail job's look: fresh (the read cache's TTL is not the poll interval), metadata only."""
     with google_cache.bypass():
-        return pim.gmail_threads_recent(query, MAIL_MAX_THREADS)
+        return google.gmail_threads_recent(query, MAIL_MAX_THREADS)
 
 
 def _calendar_events(calendar_id: str | None) -> list[dict[str, Any]]:
@@ -5751,6 +5808,18 @@ async def _coding_run(argv: list[str], cwd: str, timeout: float, env: dict[str, 
 
 coding = codingagents.CodingSessions(db, toolbox.shell, _coding_run, events.publish, settings, tb=toolbox)
 codingagents.register(toolbox, coding)
+coding.on_finish = _coding_finished
+
+
+@app.on_event("startup")
+async def _coding_watch_startup() -> None:
+    app.state.coding_watch = asyncio.create_task(coding.watch(), name="coding-watch")
+
+
+@app.on_event("shutdown")
+async def _coding_watch_shutdown() -> None:
+    if t := getattr(app.state, "coding_watch", None):
+        t.cancel()
 
 
 class CodingSendIn(BaseModel):
@@ -6154,6 +6223,15 @@ async def put_prices(body: PricesIn) -> dict[str, Any]:
     cfg = settings()
     await pricing.refresh(cfg, force=True)
     return {"repriced": usage.reprice(pricing, cfg), "prices": pricing.table(cfg)}
+
+
+@app.get("/messages/{mid}/requests")
+def message_requests(mid: str) -> list[dict[str, Any]]:
+    """The exact request of each model round of a reply (messages, tool schemas, model), if captured."""
+    rounds = request_log.read(db.data_dir, mid)
+    if rounds is None:
+        raise HTTPException(404, "no captured request for this reply")
+    return rounds
 
 
 @app.post("/messages/{mid}/stop")
@@ -6941,7 +7019,6 @@ async def _shutdown() -> None:
     await followup_jobs.stop()
     await learner.stop()  # after the runs, so nothing is still queueing work at it
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)
-    await asyncio.to_thread(sandboxes.shutdown)  # after the runs: a live sandbox_exec would just see its container vanish
 
 
 # ---------------- Google integration ----------------
@@ -7021,50 +7098,6 @@ def google_disconnect() -> dict[str, Any]:
     return google.status()
 
 
-# ---------------- Microsoft integration ----------------
-@app.get("/integrations/microsoft/status")
-def microsoft_status() -> dict[str, Any]:
-    return microsoft.status()
-
-
-@app.post("/integrations/microsoft/auth/start")
-def microsoft_auth_start(request: Request) -> dict[str, str]:
-    # The backend binds 127.0.0.1, which Entra accepts as a loopback redirect (any port) once registered; see docs/microsoft.md.
-    redirect = str(request.base_url).rstrip("/") + "/integrations/microsoft/callback"
-    try:
-        return {"url": microsoft.start_auth(redirect)}
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-
-
-@app.get("/integrations/microsoft/callback", response_class=HTMLResponse)
-def microsoft_callback(state: str = "", code: str = "", error: str = "", error_description: str = "") -> str:
-    if error or not code:
-        detail = (error_description or error or "Microsoft did not send an authorization code.").strip().splitlines()[0]
-        if "AADSTS65001" in detail or error == "consent_required":
-            detail += " Ask your administrator to approve the app, or sign in with a personal account."
-        elif "AADSTS50011" in detail:
-            detail += " Register http://127.0.0.1/integrations/microsoft/callback as a redirect URI (docs/microsoft.md)."
-        log.warning("Microsoft OAuth callback error: %s", detail)
-        return _oauth_page("Microsoft sign-in failed", html.escape(detail))
-    try:
-        st = microsoft.finish_auth(state, code)
-    except Exception as e:  # noqa: BLE001
-        log.warning("Microsoft OAuth callback could not finish: %s", e)
-        return _oauth_page("Could not complete sign-in", html.escape(str(e)))
-    return _oauth_page(
-        f"Connected {st.get('email') or 'Microsoft account'} ✓",
-        "You can close this tab and return to Grain.",
-        ok=True,
-    )
-
-
-@app.post("/integrations/microsoft/disconnect")
-def microsoft_disconnect() -> dict[str, Any]:
-    microsoft.disconnect()
-    return microsoft.status()
-
-
 def _gcall(fn, *args, refresh: bool = False):  # type: ignore[no-untyped-def]
     """Call a Google method and map its failures onto HTTP.
 
@@ -7079,12 +7112,12 @@ def _gcall(fn, *args, refresh: bool = False):  # type: ignore[no-untyped-def]
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"{pim.provider.capitalize()} API error: {e}") from e
+        raise HTTPException(502, f"Google API error: {e}") from e
 
 
 @app.get("/integrations/google/calendars")
 def google_calendars(refresh: bool = False) -> Any:
-    return _gcall(pim.calendars, refresh=refresh)
+    return _gcall(google.calendars, refresh=refresh)
 
 
 class GoogleDocIn(BaseModel):
@@ -7101,7 +7134,7 @@ def google_doc_create(body: GoogleDocIn) -> Any:
 @app.get("/integrations/google/calendar")
 def google_calendar(days: int = 2, start: str | None = None, calendars: str = "primary", refresh: bool = False) -> Any:
     ids = None if calendars in ("", "primary") else [c.strip() for c in calendars.split(",") if c.strip()]
-    return _gcall(pim.calendar_events, days, "primary", 0, start, ids, refresh=refresh)
+    return _gcall(google.calendar_events, days, "primary", 0, start, ids, refresh=refresh)
 
 
 class AttendeeIn(BaseModel):
@@ -7158,28 +7191,28 @@ def _event_fields(body: EventIn) -> dict[str, Any]:
 def google_calendar_create(body: EventIn) -> Any:
     if not (body.summary or "").strip() or not body.start:
         raise HTTPException(400, "An event needs at least a summary and a start.")
-    return _gcall(pim.calendar_create, _event_fields(body), body.calendar_id, body.send_updates)
+    return _gcall(google.calendar_create, _event_fields(body), body.calendar_id, body.send_updates)
 
 
 # Registered before the {event_id} routes so "colors" is not read as an event id.
 @app.get("/integrations/google/calendar/colors")
 def google_calendar_colors() -> Any:
-    return _gcall(pim.calendar_colors)
+    return _gcall(google.calendar_colors)
 
 
 @app.get("/integrations/google/calendar/{event_id}")
 def google_calendar_get(event_id: str, calendar_id: str = "primary") -> Any:
-    return _gcall(pim.calendar_get, event_id, calendar_id)
+    return _gcall(google.calendar_get, event_id, calendar_id)
 
 
 @app.patch("/integrations/google/calendar/{event_id}")
 def google_calendar_update(event_id: str, body: EventIn) -> Any:
-    return _gcall(pim.calendar_update, event_id, _event_fields(body), body.calendar_id, body.send_updates)
+    return _gcall(google.calendar_update, event_id, _event_fields(body), body.calendar_id, body.send_updates)
 
 
 @app.delete("/integrations/google/calendar/{event_id}")
 def google_calendar_delete(event_id: str, calendar_id: str = "primary", send_updates: str = "none") -> Any:
-    return _gcall(pim.calendar_delete, event_id, calendar_id, send_updates)
+    return _gcall(google.calendar_delete, event_id, calendar_id, send_updates)
 
 
 class RespondIn(BaseModel):
@@ -7190,23 +7223,23 @@ class RespondIn(BaseModel):
 
 @app.post("/integrations/google/calendar/{event_id}/respond")
 def google_calendar_respond(event_id: str, body: RespondIn) -> Any:
-    return _gcall(pim.calendar_respond, event_id, body.response, body.calendar_id, body.send_updates)
+    return _gcall(google.calendar_respond, event_id, body.response, body.calendar_id, body.send_updates)
 
 
 @app.get("/integrations/google/gmail")
 def google_gmail(q: str = "is:unread in:inbox newer_than:14d", max_results: int = 12, refresh: bool = False) -> Any:
-    return _gcall(pim.gmail_search, q, max_results, refresh=refresh)
+    return _gcall(google.gmail_search, q, max_results, refresh=refresh)
 
 
 # Registered before the {message_id} route so "labels" is not read as a message id.
 @app.get("/integrations/google/gmail/labels")
 def google_gmail_labels() -> Any:
-    return _gcall(pim.gmail_labels)
+    return _gcall(google.gmail_labels)
 
 
 @app.get("/integrations/google/gmail/{message_id}")
 def google_gmail_message(message_id: str) -> Any:
-    return _gcall(pim.gmail_get, message_id)
+    return _gcall(google.gmail_get, message_id)
 
 
 class GmailModifyIn(BaseModel):
@@ -7217,7 +7250,7 @@ class GmailModifyIn(BaseModel):
 
 @app.post("/integrations/google/gmail/{message_id}/modify")
 def google_gmail_modify(message_id: str, body: GmailModifyIn) -> Any:
-    return _gcall(pim.gmail_modify, message_id, body.mark_read, body.archive, body.star)
+    return _gcall(google.gmail_modify, message_id, body.mark_read, body.archive, body.star)
 
 
 class GmailComposeIn(BaseModel):
@@ -7234,7 +7267,7 @@ class GmailComposeIn(BaseModel):
 def google_gmail_draft(body: GmailComposeIn) -> Any:
     def draft() -> Any:
         items = mail_attachments.resolve(documents, db.data_dir, body.attachments)  # ValueError -> 400 in _gcall
-        return pim.gmail_draft(body.to, body.subject, body.body, body.reply_to_message_id, **mail_extras(items, body.cc, body.bcc))
+        return google.gmail_draft(body.to, body.subject, body.body, body.reply_to_message_id, **mail_extras(items, body.cc, body.bcc))
     return _gcall(draft)
 
 
@@ -7262,10 +7295,10 @@ def google_gmail_send(body: GmailComposeIn) -> Any:
 
 def _gmail_attachment(message_id: str, attachment_id: str) -> tuple[dict[str, Any], bytes]:
     """The attachment's name and mime as Gmail lists them for the message (never the client's), and its bytes."""
-    att = next((a for a in pim.gmail_get(message_id).get("attachments") or [] if a["id"] == attachment_id), None)
+    att = next((a for a in google.gmail_get(message_id).get("attachments") or [] if a["id"] == attachment_id), None)
     if att is None:
         raise HTTPException(404, "That message has no such attachment.")
-    return att, pim.gmail_attachment(message_id, attachment_id)
+    return att, google.gmail_attachment(message_id, attachment_id)
 
 
 async def _fetch_attachment(message_id: str, attachment_id: str) -> tuple[dict[str, Any], bytes]:
@@ -7276,7 +7309,7 @@ async def _fetch_attachment(message_id: str, attachment_id: str) -> tuple[dict[s
     except GoogleNotConnected as e:
         raise HTTPException(409, str(e)) from e
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"{pim.provider.capitalize()} API error: {e}") from e
+        raise HTTPException(502, f"Google API error: {e}") from e
 
 
 @app.post("/integrations/google/gmail/{message_id}/attachments/{attachment_id}/import")
@@ -7415,26 +7448,23 @@ def _google_has(status: dict[str, Any], scope_tail: str) -> bool:
 
 def _home_calendar() -> list[dict[str, Any]]:
     """Today's calendar card: the next 48 hours on every calendar checked on in Google."""
-    ids = pim.enabled_calendar_ids()
-    return pim.calendar_events(2, calendar_ids=ids or None)
+    ids = google.enabled_calendar_ids()
+    return google.calendar_events(2, calendar_ids=ids or None)
 
 
 # ---------------- dashboard ----------------
 @app.get("/dashboard")
 async def dashboard() -> dict[str, Any]:
     st = google.status()
-    pst = pim.status()  # the mail/calendar account, which may be the Microsoft one
     out: dict[str, Any] = {
         "google": st,
-        "microsoft": microsoft.status(),
-        "pim_provider": pim.provider,
         **{k: v for m in modules for k, v in m.today().items()},
         "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
         "recent_memories": memories.list(ALL)[:6],
         "recent_conversations": convos.list(ALL)[:6],
         "calendar": None, "gmail": None, "tasks": None, "drive": None, "errors": {},
     }
-    if st["connected"] or pst["connected"]:
+    if st["connected"]:
         async def fetch(key: str, fn, *args) -> None:  # type: ignore[no-untyped-def]
             try:
                 out[key] = json_safe(await asyncio.to_thread(fn, *args))
@@ -7443,8 +7473,8 @@ async def dashboard() -> dict[str, Any]:
 
         # Not `jobs`: that name is the scheduled-job repo at module scope.
         fetches = []
-        if pst["connected"]:
-            fetches += [fetch("calendar", _home_calendar), fetch("gmail", pim.gmail_search, "is:unread in:inbox newer_than:14d", 10)]
+        if st["connected"]:
+            fetches += [fetch("calendar", _home_calendar), fetch("gmail", google.gmail_search, "is:unread in:inbox newer_than:14d", 10)]
         if st["connected"]:
             fetches.append(fetch("tasks", google.tasks_list, "@default", False))
         # Drive is a newer scope; before the user reconnects, skip the call instead of
@@ -7463,22 +7493,22 @@ async def dashboard() -> dict[str, Any]:
 async def _internal_data() -> dict[str, Any]:
     """What the recap sees of the app and of Google."""
     st = google.status()
-    pst = pim.status()
     out: dict[str, Any] = {
         "todos": todos.list("__all__", include_done=False),
         "memories": memories.list(ALL)[:40],
         "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
         "calendar": [], "gmail": [], "tasks": [], "drive": [],
         # "google_connected" is read by the recap facts as "mail and calendar are available".
-        "google_connected": bool(pst["connected"]),
+        "google_connected": bool(st["connected"]),
     }
-    if pst["connected"]:
+    if st["connected"]:
         try:
-            out["calendar"] = json_safe(await asyncio.to_thread(pim.calendar_events, 3))
+            # Team and shared calendars hold most of the day; read every visible one, as the agent tool does.
+            out["calendar"] = json_safe(await asyncio.to_thread(google.calendar_events, 3, calendar_ids=["all"]))
         except Exception as e:  # noqa: BLE001
             out["calendar_error"] = str(e)
         try:
-            out["gmail"] = json_safe(await asyncio.to_thread(pim.gmail_search, "is:unread in:inbox newer_than:14d", 15))
+            out["gmail"] = json_safe(await asyncio.to_thread(google.gmail_search, "is:unread in:inbox newer_than:14d", 15))
         except Exception as e:  # noqa: BLE001
             out["gmail_error"] = str(e)
     if st["connected"]:
@@ -7531,7 +7561,6 @@ async def recap(force: bool = False) -> dict[str, Any]:
 # ---------------- canvas mode: spaces and windows ----------------
 canvases = Canvases(db)
 toolbox.canvases = canvases
-presets = CanvasPresets(db, canvases, docs)
 # 'popped' rows are NOT reset here: import runs before the main process can restore them (it clears the ones it declines).
 
 
@@ -8125,84 +8154,6 @@ def delete_doc_comment(cid: str) -> dict[str, bool]:
     return {"ok": True}
 
 
-# ---------------- space presets: named templates of a canvas ----------------
-class PresetIn(BaseModel):
-    canvas_id: str
-    name: str = ""
-
-
-class PresetPatch(BaseModel):
-    name: str | None = None
-
-
-class PresetInstantiateIn(BaseModel):
-    name: str | None = None
-
-
-@app.get("/canvas-presets")
-def list_canvas_presets() -> list[dict[str, Any]]:
-    return presets.list()
-
-
-@app.get("/canvas-presets/{pid}")
-def get_canvas_preset(pid: str) -> dict[str, Any]:
-    p = presets.get(pid)
-    if not p:
-        raise HTTPException(404, "No such preset")
-    return p
-
-
-@app.post("/canvas-presets")
-def create_canvas_preset(body: PresetIn) -> dict[str, Any]:
-    p = presets.create_from_canvas(body.canvas_id, body.name)
-    if not p:
-        raise HTTPException(404, "Unknown canvas")
-    return p
-
-
-@app.get("/canvas-presets/{pid}/export")
-def export_canvas_preset(pid: str) -> dict[str, Any]:
-    p = presets.export(pid)
-    if not p:
-        raise HTTPException(404, "No such preset")
-    return p
-
-
-@app.post("/canvas-presets/import")
-def import_canvas_preset(body: dict[str, Any]) -> dict[str, Any]:
-    try:
-        return presets.import_file(body.get("file") or {}, bool(body.get("instantiate", True)))
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-
-@app.put("/canvas-presets/{pid}")
-def update_canvas_preset(pid: str, body: PresetPatch) -> dict[str, Any]:
-    patch = body.model_dump(exclude_none=True)
-    if "name" in patch:
-        patch["name"] = patch["name"].strip()
-        if not patch["name"]:
-            raise HTTPException(400, "Preset name required")
-    p = presets.update(pid, patch)
-    if not p:
-        raise HTTPException(404, "No such preset")
-    return p
-
-
-@app.delete("/canvas-presets/{pid}")
-def delete_canvas_preset(pid: str) -> dict[str, bool]:
-    presets.delete(pid)
-    return {"ok": True}
-
-
-@app.post("/canvas-presets/{pid}/instantiate")
-def instantiate_canvas_preset(pid: str, body: PresetInstantiateIn) -> dict[str, Any]:
-    c = presets.instantiate(pid, body.name)
-    if not c:
-        raise HTTPException(404, "No such preset")
-    return c
-
-
 # ---------------- outbox: the delayed-send worker (outbox.py) ----------------
 @app.on_event("startup")
 async def _outbox_startup() -> None:
@@ -8461,144 +8412,6 @@ def preview_skills(project_id: str | None = None) -> dict[str, Any]:
     return {"block": block, "tokens_estimate": estimate_tokens(block),
             "included": [{"id": s["id"], "name": s["name"]} for s in rows[:MAX_INJECTED_SKILLS]],
             "omitted": [{"id": s["id"], "name": s["name"]} for s in rows[MAX_INJECTED_SKILLS:]]}
-
-
-# ---------------- teach a task: a screen recording becomes a candidate skill (teach.py) ----------------
-class TeachStepsIn(BaseModel):
-    title: str = ""
-    goal: str = ""
-    inputs: list[dict[str, Any]] = []
-    steps: list[dict[str, Any]] = []
-
-
-class TeachScheduleIn(BaseModel):
-    kind: Literal["cron", "once"] = "cron"
-    cron: str = ""
-    run_at: float | None = None
-    timezone: str | None = None
-    test: bool = False  # kick a dry run of the new job as the test run
-
-
-def _teach_row(rid: str) -> dict[str, Any]:
-    row = teach_svc.get(rid)
-    if not row:
-        raise HTTPException(404, "No such recording")
-    return row
-
-
-@app.get("/teach")
-def teach_list() -> list[dict[str, Any]]:
-    return teach_svc.list()
-
-
-@app.post("/teach/start")
-def teach_start() -> dict[str, Any]:
-    """Start a screen recording. {needs_permission: true} when macOS has not granted Screen Recording: the panel
-    then offers Grant / Open System Settings (/system/permissions/*)."""
-    try:
-        return teach_svc.start()
-    except teach.TeachError as e:
-        raise HTTPException(409, str(e)) from e
-
-
-@app.post("/teach/stop")
-async def teach_stop() -> dict[str, Any]:
-    row = await asyncio.to_thread(teach_svc.stop)
-    if not row:
-        raise HTTPException(409, "Nothing is recording")
-    return row
-
-
-@app.post("/teach/import")
-async def teach_import(file: UploadFile = File(...)) -> dict[str, Any]:
-    """Cut an existing screen recording into frames (needs ffmpeg). The video is deleted once its frames are out."""
-    tmp = db.data_dir / "tmp"
-    tmp.mkdir(parents=True, exist_ok=True)
-    dest = tmp / f"teach-{new_id()}{teach.safe_suffix(file.filename or '')}"
-    size = 0
-    try:
-        with dest.open("wb") as out:
-            while chunk := await file.read(1 << 20):
-                size += len(chunk)
-                if size > teach.MAX_IMPORT_BYTES:
-                    raise HTTPException(413, "That file is over the 1 GiB import limit.")
-                out.write(chunk)
-        return await asyncio.to_thread(teach_svc.import_video, dest)
-    except teach.TeachError as e:
-        raise HTTPException(422, str(e)) from e
-    finally:
-        dest.unlink(missing_ok=True)
-
-
-@app.get("/teach/{rid}")
-def teach_get(rid: str) -> dict[str, Any]:
-    return _teach_row(rid)
-
-
-@app.get("/teach/{rid}/frames/{n}")
-def teach_frame(rid: str, n: int) -> FileResponse:
-    _teach_row(rid)
-    p = teach_svc.frame_path(rid, n)
-    if not p:
-        raise HTTPException(404, "No such frame")
-    return FileResponse(p, media_type="image/jpeg", headers={"X-Content-Type-Options": "nosniff"})
-
-
-@app.post("/teach/{rid}/extract")
-async def teach_extract(rid: str) -> dict[str, Any]:
-    """One model call over a spread of frames and the app timeline. The result is a draft the user edits."""
-    _teach_row(rid)
-    try:
-        return await teach_svc.extract(rid, settings())
-    except teach.TeachError as e:
-        raise HTTPException(422, str(e)) from e
-
-
-@app.put("/teach/{rid}/steps")
-def teach_steps(rid: str, body: TeachStepsIn) -> dict[str, Any]:
-    _teach_row(rid)
-    return teach_svc.set_steps(rid, body.model_dump())
-
-
-@app.post("/teach/{rid}/save")
-def teach_save(rid: str) -> dict[str, Any]:
-    """The draft as a *candidate* skill (source 'teach'): lint and approval apply exactly as to any other skill."""
-    row = _teach_row(rid)
-    if not (row.get("steps") or {}).get("steps"):
-        raise HTTPException(422, "Extract or write the steps first")
-    name, desc, procedure = teach.to_skill(row["steps"])
-    s = skills.propose(name, desc, procedure, source="teach",
-                       rationale=f"Taught from a screen recording ({time.strftime('%Y-%m-%d', time.localtime(row['created_at']))})")
-    teach_svc.attach(rid, skill_id=s["id"], status="saved")
-    return {"skill": s, "findings": _lint_skill(s["name"], s["description"], s["procedure"], s["id"]), "recording": teach_svc.get(rid)}
-
-
-@app.post("/teach/{rid}/schedule")
-async def teach_schedule(rid: str, body: TeachScheduleIn) -> dict[str, Any]:
-    """A routine that follows the saved skill, created through POST /jobs so every job check applies. Only an
-    approved skill can be scheduled: a job run reads it with skill_view, which shows approved skills only."""
-    row = _teach_row(rid)
-    s = skills.get(row.get("skill_id") or "")
-    if not s:
-        raise HTTPException(409, "Save the steps to the library first")
-    if s["status"] != "approved":
-        raise HTTPException(409, "Approve the skill in the Library first: a routine can only follow an approved skill")
-    job = await create_job(JobIn(name=s["name"][:120], kind=body.kind, cron=body.cron, run_at=body.run_at,
-                                 timezone=body.timezone, enabled=True,
-                                 prompt=f'Follow the approved skill "{s["name"]}" (read it with skill_view {s["id"]}) and carry out the task.'))
-    teach_svc.attach(rid, job_id=job["id"])
-    out: dict[str, Any] = {"job": job, "recording": teach_svc.get(rid)}
-    if body.test:
-        out["test"] = await dry_run_job(job["id"])
-    return out
-
-
-@app.delete("/teach/{rid}")
-async def teach_delete(rid: str) -> dict[str, bool]:
-    """Discard a recording: its frames and timeline are deleted. A skill or routine made from it stays."""
-    _teach_row(rid)
-    await asyncio.to_thread(teach_svc.delete, rid)
-    return {"ok": True}
 
 
 class InduceIn(BaseModel):
@@ -9463,7 +9276,7 @@ async def _promote_to(desk_id: str, rel: str, title: str, item: AcceptItem) -> d
             return {"ref": None, "verified": False, "error": str(e)}
         # A draft, never a send: the same call and read-back as the gmail_draft tool.
         try:
-            d = await asyncio.to_thread(pim.gmail_draft, to, subject, body)
+            d = await asyncio.to_thread(google.gmail_draft, to, subject, body)
         except GoogleNotConnected:
             return {"ref": None, "verified": False, "error": "Google is not connected"}
         ok = bool(d.get("verified"))
@@ -9689,6 +9502,7 @@ telegram_bridge = telegram.TelegramBridge(telegram.Deps(
     attachment_path=_telegram_attachment_path,
     store_upload=_telegram_store_upload,
     mark_texts_conversation=_telegram_mark_conversation,
+    computer_name=telegram.computer_name,
 ))
 
 
@@ -9745,6 +9559,14 @@ def telegram_pairing() -> dict[str, Any]:
     if not db.secrets.get(telegram.SECRET_NAME):
         raise HTTPException(400, "Add a bot token first")
     telegram_bridge.issue_pairing()
+    return telegram_bridge.status()
+
+
+@app.post("/telegram/takeover")
+async def telegram_takeover() -> dict[str, Any]:
+    if not db.secrets.get(telegram.SECRET_NAME):
+        raise HTTPException(400, "Add a bot token first")
+    await telegram_bridge.take_over()
     return telegram_bridge.status()
 
 

@@ -74,9 +74,9 @@ Notarization:
 
 Entitlements (`build/entitlements.mac.plist`): `allow-jit`, `allow-unsigned-executable-memory`,
 `disable-library-validation` (Python loads wheel-signed `.so` files), `device.audio-input`, and
-`automation.apple-events`. Info.plist usage strings are in `electron-builder.config.cjs`
-(microphone, Apple events, screen capture, Desktop/Documents/Downloads). Calendar and Contacts are
-not requested: Google Calendar is reached over the API, not EventKit.
+`automation.apple-events`, `personal-information.calendars` and `personal-information.addressbook`.
+Info.plist usage strings are in `electron-builder.config.cjs` (microphone, Apple events, screen
+capture, Contacts, Calendar, Reminders, Desktop/Documents/Downloads).
 
 ## Installing a local build
 
@@ -103,6 +103,23 @@ npm run package -- --publish always       # uploads dmg, zip, blockmaps, latest-
 
 Publishing as a draft first (`--publish always` with `releaseType: draft` via
 `-c.publish.releaseType=draft`) lets you test before users see it.
+
+## Friends beta
+
+`.github/workflows/release.yml` builds, signs, notarizes and publishes an arm64 prerelease when a
+`v*` tag is pushed (or from the Actions tab). Users bring their own model API keys.
+
+- Repo secrets: `CSC_LINK` (base64 or URL of the Developer ID .p12), `CSC_KEY_PASSWORD`, `APPLE_ID`,
+  `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`, `GRAIN_GOOGLE_CLIENT_ID`, `GRAIN_GOOGLE_CLIENT_SECRET`.
+  `GITHUB_TOKEN` is automatic.
+- Release: the tag must match `package.json`'s version. `npm version prerelease --preid=beta` (bumps,
+  commits and tags `v0.x.y-beta.N`), then `git push --follow-tags`.
+- The Google client is a Desktop app client. `bundle-backend.sh` writes it to
+  `Resources/backend/oauth_client.json` when both `GRAIN_GOOGLE_CLIENT_*` variables are set; the backend
+  uses it only when neither Settings nor the environment supplies one.
+- In the Google Cloud console set the OAuth consent screen to External and publishing status "In
+  production" without verification. Friends' addresses do not need to be listed as test users. They
+  see an "unverified app" screen once: Advanced, then continue. Unverified apps are capped at 100 users.
 
 ## Auto-update
 

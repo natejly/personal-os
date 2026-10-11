@@ -16,18 +16,16 @@ The three host allowlists are separate fields with separate jobs:
 - fetchAllowlist: hosts fetch_url may still read once a reply touched untrusted content.
 - browserAllowlist: the same, for the agent's browser opening a typed URL; the browser also honours fetchAllowlist
   (browser.py merges the two), fetch_url does not honour this one.
-- shellAllowedDomains: hosts the shell's and sandbox's egress proxy lets through, beside the package registries.
+- shellAllowedDomains: hosts the shell's egress proxy lets through, beside the package registries.
 """
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 from typing import Any, Callable
 
 
 VERSION = 2  # 2: permissionMode added; migrate_mode stamps it
-DEFAULT_IMAGE = "python:3.12-slim"  # microvm.DEFAULT_IMAGE
 KEY = "permissions"
 
 DEFAULTS: dict[str, Any] = {
@@ -60,12 +58,6 @@ DEFAULTS: dict[str, Any] = {
     # Legacy: a list of folders the file tools once needed a grant for. The file tools now reach the whole Mac, so nothing
     # reads it for scope; it is still stored and returned so an older client keeps working.
     "workspaceRoots": [],
-    # The Linux sandbox's network: "off" (none), "proxy" (an internal-only network whose one way out is an allowlisting
-    # proxy: package registries plus shellAllowedDomains), "open" (every result taints). A stored true reads as "open".
-    "sandboxNetwork": "off",
-    # The sandbox_* containers: the image a fresh one starts from, and the CLI that drives them.
-    "sandboxImage": DEFAULT_IMAGE,
-    "sandboxRuntime": "docker",
     # Host shell (shell.py): a networked shell run taints the reply, whatever it prints may be third-party text.
     "shellNetwork": False,
     # While shellNetwork is off, outbound connections go through a local allowlisting proxy (egress.py).
@@ -94,32 +86,25 @@ DEFAULTS: dict[str, Any] = {
     "trustExternalContent": False,
     # Coding goes to a coding agent (coding_route.py): Grain's own file writers and file-changing shell commands are refused
     # inside a git work tree under every permission mode, and the agents are told to use coding_session_start. codingAgent is
-    # the agent they are told to start: "opencode", "claude", or "any" (the agent picks). A code default: nothing to migrate.
+    # the agent they are told to start: "opencode", "claude", "pi", or "any" (the agent picks). A code default: nothing to migrate.
     "codingRoute": True,
     "codingAgent": "any",
 }
 KEYS = frozenset(DEFAULTS)
-# An image reference as an argv word: no leading dash (it would read as a flag), no spaces or shell characters.
-IMAGE_REF = re.compile(r"^[a-z0-9][A-Za-z0-9._/:-]{0,254}(@sha256:[a-f0-9]{64})?$")
 HOST_LISTS = frozenset({"fetchAllowlist", "shellAllowedDomains", "browserAllowlist"})
-SANDBOX_RUNTIMES = ("docker", "podman", "nerdctl")
 CHOICES: dict[str, tuple[str, ...]] = {
     "permissionMode": ("auto", "manual", "allow_all"),
     "unattendedApprovals": ("ask", "deny"),
     "autoReview": ("off", "risky", "all-writes"),
-    "sandboxRuntime": SANDBOX_RUNTIMES,
-    "sandboxNetwork": ("off", "proxy", "open"),
     "docEditMode": ("review", "apply"),
-    "codingAgent": ("any", "opencode", "claude"),
+    "codingAgent": ("any", "opencode", "claude", "pi"),
 }
 CHOICE_ERRORS = {
     "permissionMode": "permissionMode must be 'auto', 'manual' or 'allow_all'",
     "unattendedApprovals": "unattendedApprovals must be 'ask' or 'deny'",
     "autoReview": "autoReview must be 'off', 'risky' or 'all-writes'",
-    "sandboxRuntime": f"sandboxRuntime must be one of {', '.join(SANDBOX_RUNTIMES)}",
-    "sandboxNetwork": "sandboxNetwork must be 'off', 'proxy' or 'open'",
     "docEditMode": "docEditMode must be 'review' or 'apply'",
-    "codingAgent": "codingAgent must be 'any', 'opencode' or 'claude'",
+    "codingAgent": "codingAgent must be 'any', 'opencode', 'claude' or 'pi'",
 }
 
 
@@ -243,8 +228,6 @@ def validate(key: str, v: Any, *, cap_modes: Callable[[dict[str, Any]], dict[str
             if h not in hosts:
                 hosts.append(h)
         return hosts
-    if key == "sandboxImage" and v and not IMAGE_REF.match(v):  # empty = the default image
-        raise ValueError("sandboxImage must be an image reference such as python:3.12-slim")
     if key == "workspaceRoots":
         if not all(isinstance(x, str) for x in v):
             raise ValueError("workspaceRoots must be a list of folders")

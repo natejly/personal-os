@@ -23,9 +23,14 @@ class Fake:
     def __init__(self, fail: set[str] | None = None):
         self.fail = fail or set()
         self.calls: list[list[str]] = []
+        self.cwds: list[str] = []
+        self.checked_out: dict[str, str | None] = {}  # branch -> folder (None: the repo itself); default: "feature" in the repo
 
     async def __call__(self, argv: list[str], cwd: str, sandboxed: bool, timeout: float) -> tuple[bool, str]:
         self.calls.append(argv)
+        self.cwds.append(cwd)
+        if argv[:3] == ["git", "worktree", "list"]:
+            return True, "".join(f"worktree {p or cwd}\nHEAD abc\nbranch refs/heads/{b}\n\n" for b, p in (self.checked_out or {"feature": None}).items())
         key = "tests" if argv[0] == "/bin/zsh" else " ".join(argv[:3])
         if key in self.fail:
             return False, f"{key} failed"
@@ -78,6 +83,33 @@ def test_runs_to_the_merge_and_waits_for_confirm(tmp_path: Path) -> None:
     asyncio.run(go())
     assert all(e["event"] == "ship_checklist" for e in events)
     assert len(events) >= 9, "every transition is published"
+
+
+def test_tests_run_where_the_shipped_branch_is_checked_out(tmp_path: Path) -> None:
+    fake = Fake()
+    fake.checked_out = {"main": None, "feature": str(tmp_path / "wt")}  # the repo has main; the branch lives in a worktree
+    s, _events, repo = make(tmp_path, fake)
+
+    async def go() -> None:
+        row = s.create(repo_path=str(repo), branch="feature", test_command="make test")
+        s.start(row["id"])
+        await settle(s, row["id"])
+    asyncio.run(go())
+    assert fake.cwds[fake.calls.index(next(a for a in fake.calls if a[0] == "/bin/zsh"))] == str(tmp_path / "wt")
+
+
+def test_tests_are_refused_when_the_branch_is_not_checked_out(tmp_path: Path) -> None:
+    fake = Fake()
+    fake.checked_out = {"main": None}
+    s, _events, repo = make(tmp_path, fake)
+
+    async def go() -> None:
+        row = s.create(repo_path=str(repo), branch="feature", test_command="make test")
+        s.start(row["id"])
+        row = await settle(s, row["id"])
+        assert row["status"] == "failed" and "not checked out" in row["steps"][0]["log_tail"]
+    asyncio.run(go())
+    assert fake.ran("/bin/zsh") == 0 and fake.ran("git push") == 0
 
 
 def test_red_step_stops_and_skips_the_rest(tmp_path: Path) -> None:

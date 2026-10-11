@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -16,7 +15,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from personal_os import mac, microvm, outbox as outbox_mod, reach, sandbox, tools, verify  # noqa: E402
+from personal_os import mac, outbox as outbox_mod, reach, sandbox, tools, verify  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.outbox import Outbox  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
@@ -34,13 +33,6 @@ def test_run_python_caps_runaway_output_and_survives_bad_bytes() -> None:
 def test_run_python_timeout_keeps_partial_output() -> None:
     r = sandbox.run_python('import time\nprint("hi", flush=True)\ntime.sleep(10)', timeout=2)
     assert r["timed_out"] and r["stdout"] == "hi\n"
-
-
-def test_microvm_run_kills_endless_output() -> None:
-    p = microvm._run(["yes"], timeout=30, hard_cap=100_000, keep=1000)
-    assert p.truncated and len(p.stdout) <= 1000  # type: ignore[attr-defined]
-    with pytest.raises(subprocess.TimeoutExpired):
-        microvm._run(["sleep", "5"], timeout=1)
 
 
 # ---- 3/11 verify ----
@@ -147,49 +139,18 @@ def test_reserved_desk_folders_are_reserved_in_any_case() -> None:
 
 
 # ---- 7 taint gate ----
-class FakeSandboxes:
-    def __init__(self, net: bool = False, setting: Any = False):
-        self.net, self.setting = net, setting
-
-    def networked(self, cid: str) -> bool:
-        return self.net
-
-    def reaches_out(self, cid: str) -> bool:
-        return self.net
-
-    def settings(self) -> dict[str, Any]:
-        return {"sandboxNetwork": self.setting}
-
-    def available(self) -> bool:
-        return True
-
-
-def _box_with(sb: Any) -> Toolbox:
-    box = Toolbox(None, None, None, lambda: {}, sandboxes=sb)  # type: ignore[arg-type]
+def _gate_box() -> Toolbox:
+    box = Toolbox(None, None, None, lambda: {})  # type: ignore[arg-type]
     box.specs["schedule_task"] = tools.ToolSpec("schedule_task", "", {}, None, "schedule", "schedules")  # type: ignore[arg-type]
-    box.specs["sandbox_exec"] = tools.ToolSpec("sandbox_exec", "", {}, None, "sandbox", "executes")  # type: ignore[arg-type]
     return box
 
 
-def test_taint_gate_covers_schedules_and_networked_sandboxes() -> None:
+def test_taint_gate_covers_schedules() -> None:
     tainted: dict[str, Any] = {"tainted": True, "conversation_id": "c"}
     clean: dict[str, Any] = {"conversation_id": "c"}
-    box = _box_with(FakeSandboxes(net=True))
+    box = _gate_box()
     assert box.gate("schedule_task", "on", tainted) == "ask"
     assert box.gate("schedule_task", "on", clean) == "on"
-    assert box.gate("sandbox_exec", "on", tainted) == "ask"
-    assert box.gate("sandbox_exec", "on", clean) == "on"
-    assert _box_with(FakeSandboxes(setting=True)).gate("sandbox_exec", "on", tainted) == "ask"
-    assert _box_with(FakeSandboxes()).gate("sandbox_exec", "on", tainted) == "on"  # no network: nothing to leak through
-    # the allowlisting proxy still lets a command reach a host, so a tainted reply asks there too; "off" is no network
-    assert _box_with(FakeSandboxes(setting="proxy")).gate("sandbox_exec", "on", tainted) == "ask"
-    assert _box_with(FakeSandboxes(setting="off")).gate("sandbox_exec", "on", tainted) == "on"
-
-
-def test_proposal_only_runs_refuse_a_networked_sandbox() -> None:
-    box = _box_with(FakeSandboxes(net=True))
-    out = asyncio.run(box.call("sandbox_exec", {"command": "curl x"}, {"proposal_only": True, "conversation_id": "c"}))
-    assert "error" in out and "network" in out["error"]
 
 
 # ---- 8/9/12 HTTP ----

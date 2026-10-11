@@ -79,5 +79,3 @@ a.wikilink.unknown { text-decoration-style: dashed; opacity: 0.75; }
 .fmt-sep { width: 1px; height: 14px; margin: 0 4px; background: var(--border); }
 
 /* A path a reply names: plain text that opens on click. */
-.file-link { color: inherit; text-decoration: underline dotted; text-underline-offset: 2px; cursor: pointer; }
-.file-link:hover { text-decoration-style: solid; }

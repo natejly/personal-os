@@ -3,7 +3,8 @@ import { useStore } from '../store'
 import { inboxBadge } from '../lib/inboxBadge'
 
 /** The last thing in every title bar: the agent inbox (with its unread count), then the ⌘I page agent panel. */
-export default function AppSwitcher(): JSX.Element {
+/** `last` replaces the quick-chat button, for a window that gives that slot to its own panel. */
+export default function AppSwitcher({ last }: { last?: React.ReactNode } = {}): JSX.Element {
   const open = useStore((s) => s.pageAgentOpen)
   const toggle = useStore((s) => s.togglePageAgent)
   const unread = useStore((s) => inboxBadge(s.agentInbox))
@@ -15,9 +16,11 @@ export default function AppSwitcher(): JSX.Element {
         <Inbox size={15} />
         {unread > 0 && <span className="inbox-btn-count" aria-hidden="true">{unread > 99 ? '99+' : unread}</span>}
       </button>
-      <button className={`icon-btn ${open ? 'on' : ''}`} title="Quick chat (⌘I)" aria-label="Quick chat (⌘I)" aria-pressed={open} onClick={toggle}>
-        <MessageSquare size={15} />
-      </button>
+      {last ?? (
+        <button className={`icon-btn ${open ? 'on' : ''}`} title="Quick chat (⌘I)" aria-label="Quick chat (⌘I)" aria-pressed={open} onClick={toggle}>
+          <MessageSquare size={15} />
+        </button>
+      )}
     </div>
   )
 }

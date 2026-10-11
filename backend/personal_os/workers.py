@@ -77,7 +77,7 @@ OBSERVABILITY_HINT = (
 
 FRONT_AGENT_HINT = (
     "## How to work\n"
-    "Anything over a couple of steps goes to a background worker with delegate: write a "
+    "Answer what you can and do quick lookups yourself. Anything over a couple of steps goes to a background worker with delegate: write a "
     "self-contained brief (goal, context, constraints, done criteria, report format) naming exact locations (absolute "
     "paths, repo and branch, doc or event ids, links) and how the result will be checked, because the worker cannot see "
     "this conversation. A worker's report is a claim: check its evidence (diff, test output, file) yourself before telling "

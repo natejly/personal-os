@@ -18,6 +18,7 @@ import sqlite3
 import subprocess
 import time
 import urllib.parse
+from types import SimpleNamespace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, AsyncIterator, Callable, Literal
@@ -563,6 +564,11 @@ subagent_mgr = Subagents(run_store, toolbox, settings, defs=agent_defs, results=
                          projects=projects, workspace=workspace, approvals=_approvals, skills=skills)
 toolbox.subagents = subagent_mgr
 subagent_mgr.snaps = snaps
+subagent_mgr.connectors = SimpleNamespace(
+    call=lambda slug, args: _mcp_call(slug, args), hints=lambda slug: _mcp_event(slug) or {},
+    review_text=lambda slug: _mcp_review_text(slug),
+    mode=lambda slug, ctx: mcp_store.effective_mode(slug, ctx.get("project_id"), ctx.get("conversation_id"))["mode"],
+    denied=lambda slug: permrules.mcp_denied(slug, subagent_mgr.settings().get("permissionRules")))
 # Workers (workers.py): detached background subagents the chat's delegate tool starts. The callbacks are late-bound:
 # the wake machinery and the Telegram bridge are defined further down.
 workers_mgr = workers_mod.Workers(subagent_mgr, run_store, publish=events.publish, answering=bus.answering,
@@ -651,7 +657,7 @@ def _gate(name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None
     Toolbox applies to built-ins has to apply to them too - they are not in Toolbox.specs.
     """
     if mcp_is(name):
-        return "ask" if mode == "on" and ctx.get("tainted") else mode
+        return autoreview.connector_gate(mode, bool(ctx.get("tainted")))
     return toolbox.gate(name, mode, ctx, args)
 
 
@@ -2035,6 +2041,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # A job's allowlist (job_tools) writes 'off' for tools outside it into the chat's tool map; MCP modes come from
         # mcp_grants, not that map, so the narrowing is applied to them here.
         chat_off = {n for n, v in (conv["settings"].get("tools") or {}).items() if v == "off"}
+        if persona is not None:  # an agent's tool list narrows its connectors too, by slug or glob (mcp__server__*)
+            mcp_modes = {k: v for k, v in mcp_modes.items() if tools.allows_slug(persona.tools, k)}
+            mcp_schemas = [s for s in mcp_schemas if s["function"]["name"] in mcp_modes]
         if chat_off and mcp_modes:
             mcp_modes = {k: v for k, v in mcp_modes.items() if k not in chat_off}
             mcp_schemas = [s for s in mcp_schemas if s["function"]["name"] not in chat_off]
@@ -2196,6 +2205,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         tool_ctx["tool_overrides"] = {**((project or {}).get("tools") or {}), **(conv["settings"].get("tools") or {})}
         # What agent_spawn needs to start a child under this reply: its live tool modes (a child never has more),
         # the run its cards and status ride on, its stop flag, and where it sits in the spawn tree.
+        # The connectors a child may be given (granted, connected, past the agent's list); it decides each call itself (Subagents._exec_mcp).
+        tool_ctx.update(mcp_modes=dict(mcp_modes), mcp_schemas={s["function"]["name"]: s for s in mcp_schemas})
         tool_ctx.update(modes=modes, run=run, stop=stop, depth=0, agent_run_id=run.run_id if run else "", model=model,
                         effort=str(conv["settings"].get("effort") or "default"))
 
@@ -3025,7 +3036,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     hints = _mcp_event(c["name"]) or {}
                     # A connector call forced by untrusted content stays a card (allow-all runs it: autoreview.route).
                     mcp_tainted = bool(hints) and hard_forced and bool(tool_ctx["tainted"])
-                    rt = autoreview.route(
+                    rt = autoreview.connector_route(
+                        pmode, mode=mode, raw_mode=raw_mode, hints=hints, hard_forced=hard_forced, tainted=bool(tool_ctx["tainted"]),
+                        covered=desk_cleared or (pre_mode == "ask" and perm.mode == "on") or bool(perm.rule and perm.mode == "on"),
+                        question=c["name"] in permrules.STILL_ASK) if mcp_is(c["name"]) else autoreview.route(
                         # handing work to a worker needs no review of its own: each call the worker makes is reviewed in its turn
                         pmode, mode=mode, danger="safe" if c["name"] in workers_mod.FRONT_TOOLS else danger, explicit_on=explicit == "on",
                         # an alwaysAsk tool's stored "ask" is only the cap on "on", not a choice, so it is not an explicit ask

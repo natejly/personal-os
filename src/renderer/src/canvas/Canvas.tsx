@@ -201,7 +201,7 @@ export default function Canvas(): JSX.Element {
 
   usePageContext(() => ({
     view: 'canvas',
-    label: canvas ? `Space “${canvas.name}”` : 'Spaces',
+    label: canvas ? `Canvas “${canvas.name}”` : 'Canvases',
     detail: windows.length
       ? `The space has these widgets open:\n${lines(windows, (w) => `${w.kind}${w.title ? ` “${w.title}”` : ''}${w.ref_id ? ` (\`${w.ref_id}\`)` : ''}`)}`
       : 'The space is empty.',

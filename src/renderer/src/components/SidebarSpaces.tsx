@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronRight, LayoutGrid, Lock, MoreHorizontal, Plus } from 'lucide-react'
+import { ChevronRight, LayoutGrid, Lock, MoreHorizontal } from 'lucide-react'
 import { useProject, useStore } from '../store'
 import type { DragKind } from '@shared/types'
 import { useCanvas } from '../canvas/store'
@@ -9,7 +9,6 @@ import { openPayload } from '../canvas/drops'
 import { PresetsButton, SavePresetForm } from '../canvas/PresetsMenu'
 import { focusFirstItem, menuKeyDown, useReturnFocus } from '../canvas/Menu'
 import { rowButton } from '../lib/rowButton'
-import Face, { SPACE_HUE } from './Face'
 
 /** A space row takes everything the plane does. A project opens a Project window; binding stays a tab gesture. */
 const ALL: DragKind[] = ['conversation', 'todo', 'document', 'memory', 'project', 'file', 'nav', 'doc']
@@ -21,7 +20,7 @@ const MENU_GAP = 8
 interface MenuItem { label: string; danger?: boolean; keep?: boolean; run: () => void }
 
 /** A space row's actions, in a body portal so the sidebar's scroll container cannot clip it. */
-function SpaceMenu({ at, canvasId, onClose, onRename }: { at: { x: number; y: number }; canvasId: string; onClose: () => void; onRename: () => void }): JSX.Element {
+function SpaceMenu({ at, canvasId, onClose }: { at: { x: number; y: number }; canvasId: string; onClose: () => void }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState(at)
   const [saving, setSaving] = useState(false)
@@ -54,12 +53,11 @@ function SpaceMenu({ at, canvasId, onClose, onRename }: { at: { x: number; y: nu
   }
   const locked = useCanvas((s) => !!s.canvases[canvasId]?.locked)
   const items: MenuItem[] = [
-    { label: 'Rename', run: onRename },
-    { label: locked ? 'Unlock space' : 'Lock space', run: () => void useCanvas.getState().setLocked(canvasId, !locked) },
+    { label: locked ? 'Unlock canvas' : 'Lock canvas', run: () => void useCanvas.getState().setLocked(canvasId, !locked) },
     { label: 'Save as preset…', keep: true, run: () => setSaving(true) },
     // Left in place while locked: `deleteSpace` refuses, and the toast says why.
     {
-      label: 'Delete space',
+      label: 'Delete canvas',
       danger: true,
       run: () => {
         const c = useCanvas.getState().canvases[canvasId]
@@ -103,20 +101,13 @@ export function SpaceRow({ canvasId }: { canvasId: string }): JSX.Element | null
   const inCanvas = useStore((s) => s.view === 'canvas')
   const active = isActiveSpace && inCanvas
   const project = useProject(projectId)
-  const [editing, setEditing] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   // Drops land in this space without navigating or changing the active space.
   const { over, handlers } = useDropTarget(ALL, (p, e) => void (async () => {
     const w = await openPayload(p, { canvasId, files: e.dataTransfer.files })
-    if (w) useStore.getState().toast(`Added to "${useCanvas.getState().canvases[canvasId]?.name ?? name}"`, 'info')
+    if (w) useStore.getState().toast(`Added to "Canvas 1"`, 'info')
   })())
   if (name === undefined) return null
-
-  const commit = (): void => {
-    const next = (editing ?? '').trim()
-    setEditing(null)
-    if (next && next !== name) void useCanvas.getState().renameSpace(canvasId, next)
-  }
 
   // The menu is the row's sibling, not its child: React events bubble through a portal, so a click in
   // it would otherwise reach the row's onClick and navigate. The row div is the root element below,
@@ -127,37 +118,21 @@ export function SpaceRow({ canvasId }: { canvasId: string }): JSX.Element | null
         className={`project-item space-row${active ? ' active' : ''}${over ? ' drop-target' : ''}`}
         {...handlers}
         {...rowButton(() => void useCanvas.getState().enterSpace(canvasId))}
-        title={`${name}${project ? ` · ${project.name}` : ''} · ${count} window${count === 1 ? '' : 's'}${locked ? ' · locked' : ''}`}
+        title={`Canvas 1${project ? ` · ${project.name}` : ''} · ${count} window${count === 1 ? '' : 's'}${locked ? ' · locked' : ''}`}
         onContextMenu={(e) => {
           e.preventDefault()
           setMenu({ x: e.clientX, y: e.clientY })
         }}
       >
-        <Face name={canvasId} size={14} {...SPACE_HUE} />
-        {editing === null ? <span className="project-name">{name}</span> : (
-          <span className="project-name">
-            <input
-              autoFocus
-              value={editing}
-              onChange={(e) => setEditing(e.target.value)}
-              onBlur={commit}
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => {
-                e.stopPropagation()
-                if (e.key === 'Enter') commit()
-                if (e.key === 'Escape') setEditing(null)
-              }}
-            />
-          </span>
-        )}
+        <span className="project-name">Canvas 1</span>
         {project && <span className="space-hint">{project.name}</span>}
         {locked && <Lock size={11} className="space-lock" />}
         {count > 0 && <span className="count">{count}</span>}
         <button
           className="icon-btn ghost xs"
-          aria-label={`Actions for ${name}`}
+          aria-label="Actions for Canvas 1"
           aria-haspopup="menu"
-          title="Space actions"
+          title="Canvas actions"
           aria-expanded={!!menu}
           onClick={(e) => {
             e.stopPropagation()
@@ -173,7 +148,6 @@ export function SpaceRow({ canvasId }: { canvasId: string }): JSX.Element | null
           at={menu}
           canvasId={canvasId}
           onClose={() => setMenu(null)}
-          onRename={() => setEditing(useCanvas.getState().canvases[canvasId]?.name ?? name)}
         />
       )}
     </>
@@ -191,23 +165,22 @@ export default function SidebarSpaces(): JSX.Element {
     <>
       <div className="section-row">
         <button className="section-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-          <ChevronRight size={12} className={open ? 'rot90' : ''} /><LayoutGrid size={13} /> Spaces
+          <ChevronRight size={12} className={open ? 'rot90' : ''} /><LayoutGrid size={13} /> Canvases
         </button>
         <span className="section-actions">
           <PresetsButton canvasId={null} />
-          <button className="icon-btn ghost sm" aria-label="New space" title="New space (⌃⌘N)" onClick={() => void useCanvas.getState().newSpace()}><Plus size={14} /></button>
         </span>
       </div>
       {open && (
         <div className="project-list space-list">
-          {loaded && order.length === 0 && <p className="empty-hint">No spaces yet.</p>}
+          {loaded && order.length === 0 && <p className="empty-hint">No canvases yet.</p>}
           {!loaded && loadFailed && (
             <p className="empty-hint">
-              Couldn't load spaces.{' '}
+              Couldn't load canvases.{' '}
               <button className="link" onClick={() => void useCanvas.getState().load().catch(() => undefined)}>Retry</button>
             </p>
           )}
-          {order.map((id) => <SpaceRow key={id} canvasId={id} />)}
+          {order.length > 0 && <SpaceRow canvasId={order[0]} />}
         </div>
       )}
     </>

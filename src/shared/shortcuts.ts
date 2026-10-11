@@ -22,7 +22,7 @@ export interface Shortcut {
 }
 
 const SPACES: Shortcut[] = Array.from({ length: 9 }, (_, i) => ({
-  id: `space-${i + 1}`, label: `Space ${i + 1}`, keys: `Control+${i + 1}`, group: 'Spaces', action: `canvas:space:${i + 1}`, scope: 'menu' as const
+  id: `space-${i + 1}`, label: `Canvas ${i + 1}`, keys: `Control+${i + 1}`, group: 'Canvases', action: `canvas:space:${i + 1}`, scope: 'menu' as const
 }))
 
 export const SHORTCUTS: readonly Shortcut[] = [
@@ -78,19 +78,19 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'md-indent', label: 'Indent', keys: 'Tab', group: 'Files', scope: 'component' },
 
   // Spaces
-  { id: 'canvas-toggle', label: 'Toggle Spaces', keys: 'CmdOrCtrl+Shift+C', group: 'Spaces', action: 'canvas:toggle', scope: 'menu' },
-  { id: 'canvas-new', label: 'New Space', keys: 'Control+Command+N', group: 'Spaces', action: 'canvas:new-space', scope: 'menu' },
+  { id: 'canvas-toggle', label: 'Toggle Canvases', keys: 'CmdOrCtrl+Shift+C', group: 'Canvases', action: 'canvas:toggle', scope: 'menu' },
+  { id: 'canvas-new', label: 'New Canvas', keys: 'Control+Command+N', group: 'Canvases', action: 'canvas:new-space', scope: 'menu' },
   // ⌥⌘arrows, not ⌃arrows: macOS owns ⌃←/⌃→/⌃↑ and an app accelerator loses to a system one.
-  { id: 'canvas-prev', label: 'Previous Space', keys: 'Alt+Command+Left', group: 'Spaces', action: 'canvas:prev-space', scope: 'menu' },
-  { id: 'canvas-next', label: 'Next Space', keys: 'Alt+Command+Right', group: 'Spaces', action: 'canvas:next-space', scope: 'menu' },
-  { id: 'canvas-overview', label: 'Overview', keys: 'Alt+Command+Up', group: 'Spaces', action: 'canvas:overview', scope: 'menu' },
+  { id: 'canvas-prev', label: 'Previous Canvas', keys: 'Alt+Command+Left', group: 'Canvases', action: 'canvas:prev-space', scope: 'menu' },
+  { id: 'canvas-next', label: 'Next Canvas', keys: 'Alt+Command+Right', group: 'Canvases', action: 'canvas:next-space', scope: 'menu' },
+  { id: 'canvas-overview', label: 'Overview', keys: 'Alt+Command+Up', group: 'Canvases', action: 'canvas:overview', scope: 'menu' },
   ...SPACES,
-  { id: 'canvas-tidy', label: 'Tidy Up', keys: 'Control+Command+T', group: 'Spaces', action: 'canvas:tidy', scope: 'menu' },
-  { id: 'canvas-lock', label: 'Lock / Unlock Space', keys: 'Control+Command+L', group: 'Spaces', action: 'canvas:lock', scope: 'menu' },
-  { id: 'canvas-deselect', label: 'Deselect, leave the overview', keys: 'Escape', group: 'Spaces', scope: 'component' },
-  { id: 'canvas-delete', label: 'Close selected windows', keys: 'Backspace', group: 'Spaces', scope: 'component' },
-  { id: 'canvas-zoom', label: 'Zoom the plane', keys: 'Command+Scroll', group: 'Spaces', scope: 'component' },
-  { id: 'canvas-drag', label: 'Move a window from anywhere in it', keys: 'Command+Drag', group: 'Spaces', scope: 'component' },
+  { id: 'canvas-tidy', label: 'Tidy Up', keys: 'Control+Command+T', group: 'Canvases', action: 'canvas:tidy', scope: 'menu' },
+  { id: 'canvas-lock', label: 'Lock / Unlock Canvas', keys: 'Control+Command+L', group: 'Canvases', action: 'canvas:lock', scope: 'menu' },
+  { id: 'canvas-deselect', label: 'Deselect, leave the overview', keys: 'Escape', group: 'Canvases', scope: 'component' },
+  { id: 'canvas-delete', label: 'Close selected windows', keys: 'Backspace', group: 'Canvases', scope: 'component' },
+  { id: 'canvas-zoom', label: 'Zoom the plane', keys: 'Command+Scroll', group: 'Canvases', scope: 'component' },
+  { id: 'canvas-drag', label: 'Move a window from anywhere in it', keys: 'Command+Drag', group: 'Canvases', scope: 'component' },
 
   // Windows
   { id: 'close-window', label: 'Close Window', keys: 'CmdOrCtrl+W', group: 'Windows', action: 'close-window', scope: 'window' },

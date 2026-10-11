@@ -6750,7 +6750,7 @@ def _store_upload(project_id: str | None, name: str, mime: str, data: bytes) -> 
 
 
 UNREADABLE_UPLOAD = ("No readable text came out of this file. It is stored and can be referred to by name, "
-                     "but the assistant cannot see what is in it.")
+                     "but the assistant cannot see what is in it. For a PDF it can still try render_preview + view_image and web_search.")
 
 
 @app.post("/documents")

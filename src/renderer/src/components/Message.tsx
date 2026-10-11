@@ -2,7 +2,7 @@ import { Component, memo, useCallback, useEffect, useMemo, useState, type ReactN
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite, splitSources } from '../lib/remarkCites'
-import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2, Zap } from '../icons'
+import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Play, RotateCw, Pencil, GitBranch, Trash2, Zap } from '../icons'
 import type { Attachment, Message, RunChanges, Span, ToolEvent } from '@shared/types'
 import { useStore, useMessageSubagents, useSubagents } from '../store'
 import { api } from '../lib/api'
@@ -12,7 +12,7 @@ import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 import { ShowCtx } from './ShowButton'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
-import { replyEffort, replyMetrics } from '../lib/replyMetrics'
+import { replyMetrics } from '../lib/replyMetrics'
 import { compactCount } from '../lib/usageFormat'
 import { parseChatMessage } from '../lib/chatLink'
 import { parseQuotedMessage } from '../lib/selectionActions'
@@ -47,45 +47,24 @@ class BodyBoundary extends Component<{ resetKey: string; children: ReactNode }, 
   }
 }
 
-/** A reply that called tools can be turned into a candidate skill. The id sent is this message, not the whole chat. */
-function SaveSkill({ conversationId, messageId }: { conversationId: string; messageId: string }): JSX.Element {
-  const [busy, setBusy] = useState(false)
-  return (
-    <button
-      type="button"
-      className="ctx-chip"
-      disabled={busy}
-      title="Save as skill: turn this run into a skill for you to review. It is not used until you approve it."
-      aria-label={busy ? 'Saving skill…' : 'Save as skill'}
-      aria-busy={busy || undefined}
-      onClick={() => {
-        setBusy(true)
-        void useStore.getState().induceSkill(conversationId, messageId).finally(() => setBusy(false))
-      }}
-    >
-      <GraduationCap size={11} />
-    </button>
-  )
-}
-
-/** A reply's trace: one plain gray line per step (the thinking summary, then each quiet tool call). Nothing opens; the live step shimmers. */
+/**
+ * A reply's trace as one short gray line: the newest step (thinking summary, then each quiet tool call)
+ * replaces the one before it, and the live step shimmers.
+ */
 function ReplyActivity({ reasoning, events, conversationId, streaming, answering, trace }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; streaming: boolean; answering: boolean; trace?: Span[] | null }): JSX.Element {
   const subs = useSubagents(conversationId)
-  // The effort this reply ran with; a reply from before it was recorded falls back to the chat's current setting.
-  const effort = replyEffort(trace) ?? useStore.getState().sessions[conversationId]?.conversation.settings?.effort
-  const effortLabel = effort && effort !== 'default' ? effort : null
   const live = streaming && !answering
   const lines = traceLines(reasoning, events)
   // The live step is the call in flight (or its subagents) when there is one, else the newest summary line.
   const now = live ? nowText({ tool_events: events, content: '' }, subs) : null
   if (!lines.length) return <></>
+  const line = (l: (typeof lines)[number], i: number): JSX.Element => {
+    const isLive = live && i === lines.length - 1
+    return <span key={i} className={`trace-line ${l.error ? 'err' : ''} ${isLive ? 'shimmer' : ''}`}>{isLive && now && !l.error ? now : l.text}</span>
+  }
   return (
-    <div className="trace" role="list">
-      {lines.map((l, i) => {
-        const isLive = live && i === lines.length - 1
-        return <div key={i} role="listitem" className={`trace-line ${l.error ? 'err' : ''} ${isLive ? 'shimmer' : ''}`}>{isLive && now && !l.error ? now : l.text}</div>
-      })}
-      {effortLabel && <div className="trace-line trace-effort">{effortLabel} effort</div>}
+    <div className="trace" aria-live="polite">
+      {line(lines[lines.length - 1], lines.length - 1)}
     </div>
   )
 }
@@ -180,7 +159,7 @@ function ErrorAction({ conversationId, kind }: { conversationId: string; kind: s
 }
 
 // Tools that can change a granted folder; a reply without one never asks the backend for a change list.
-const FILE_CHANGING = /^(write_local_file|move_local_file|trash_local_file|shell_run|opencode_run|fs_edit|fs_copy|fs_mkdir|desk_write_file|desk_trash_file|desk_import_sandbox)$/
+const FILE_CHANGING = /^(write_local_file|move_local_file|trash_local_file|shell_run|opencode_run|fs_edit|fs_copy|fs_mkdir|desk_write_file|desk_trash_file)$/
 
 /** "Files changed (n) · Undo" under a reply that changed files in a granted folder. Undo and Redo are the user's clicks. */
 function FilesChanged({ messageId }: { messageId: string }): JSX.Element | null {
@@ -359,18 +338,8 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
                 <span><Share2 size={11} />{ctx.nodes.filter((n) => !n.kind).length}</span>
               </button>
             )}
-            {showContextChips && !isUser && <MemoryChips messageId={message.id} ctx={ctx ?? null} />}
-            {!isUser && events.length > 0 && (
-              <SaveSkill conversationId={message.conversation_id} messageId={message.id} />
-            )}
-            {!isUser && !streaming && content.trim() && (
-              <button type="button" className="ctx-chip" title="Schedule as routine: repeat this on a schedule. It starts switched off, and you can test-run it first."
-                aria-label="Schedule as routine" onClick={() => useStore.getState().scheduleAsRoutine(message.conversation_id, message.id)}>
-                <CalendarClock size={11} />
-              </button>
-            )}
+            {showContextChips && !isUser && <MemoryChips messageId={message.id} />}
             {showContextChips && <TraceChip message={message} />}
-            {!isUser && !streaming && message.context_used?.quick && <span className="ctx-chip" title="Made in quick answer mode"><span><Zap size={11} />Quick</span></span>}
             {!isUser && !streaming && <TokenChip message={message} />}
             {!bare && <CopyButton text={content} />}
             {resendable && isUser && !message.kind && (

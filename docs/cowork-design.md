@@ -1124,13 +1124,12 @@ braces, because `Toolbox.available()` (`tools.py`) cannot see `ctx`.
 | `desk_deliver(path, title, summary="")` | `writes` | Nominates a file under `outputs/` as a deliverable: upserts a `desk_outputs` row at `proposed` with its sha. Returns `{"status": "awaiting_review", ...}`. The `docs.propose` (`docs.py`) propose-not-apply shape — the agent never promotes anything itself. |
 | `desk_ask(question, context="")` | `plan` | Writes `desks.question`, sets `blocked`, returns `{"status": "waiting_for_user", "note": "Stop here and end your turn."}`. **No second blocking primitive**: the model ends its turn, the desk sits in Needs you, the user's answer through the steer box starts the next turn — which survives a restart for free. |
 | `desk_done(summary, next_steps="")` | `safe` | `review` if there are proposed outputs, else `done`. A desk's terminal state is a decision, not an inference. |
-| `desk_import_sandbox(sandbox_path, path)` | `writes` | Copies a file out of the desk's own container (`sandboxes.read_file(ctx["conversation_id"], ...)`, `microvm.py`) into the workspace. Taints *conditionally* via a local `_mark()` closure reading `sandboxes.networked(conv_id)` (`microvm.py`), the `tools.py` pattern, and appends to `ctx["taint_sources"]` itself because `ToolSpec.taints` is static. |
 
 `Toolbox.__init__` (`tools.py`) gains `desks=None, plans=None, workspace=None`, stores them, and adds
 the two guarded `self._register_plan()` / `self._register_cowork()` calls to the chain at `tools.py`.
 
 **Mandatory registrations.** All nine names (`propose_plan`, `desk_list_files`, `desk_read_file`,
-`desk_write_file`, `desk_trash_file`, `desk_deliver`, `desk_ask`, `desk_done`, `desk_import_sandbox`) go into
+`desk_write_file`, `desk_trash_file`, `desk_deliver`, `desk_ask`, `desk_done`) go into
 `RESERVED_TOOL_NAMES` (`mcp_servers.py`) or `backend/personal_os/tests/test_mcp_servers.py` fails.
 That test regexes `ToolSpec\(\s*"([A-Za-z0-9_]+)"`, so every `ToolSpec` first argument must be a string literal.
 `ALTERNATIVE` (`tools.py`) gains an entry for each, including the plan-mode fallbacks

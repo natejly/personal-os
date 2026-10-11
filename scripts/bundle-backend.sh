@@ -67,6 +67,12 @@ find "$DOCS" -name '*.json' ! \( -name 'gmail.v1.json' -o -name 'calendar.v3.jso
 rm -rf "$SP/site-packages/PyObjCTest"
 find "$SP/site-packages/babel/locale-data" -name '*.dat' ! -name 'en*.dat' ! -name 'root.dat' -delete 2>/dev/null || true
 
+# Built-in Google OAuth client (a Desktop client's secret is not confidential); google.py reads it as the
+# last fallback. Absent unless both variables are set at build time.
+if [ -n "${GRAIN_GOOGLE_CLIENT_ID:-}" ] && [ -n "${GRAIN_GOOGLE_CLIENT_SECRET:-}" ]; then
+  "$PY" -c 'import json,os; print(json.dumps({"client_id": os.environ["GRAIN_GOOGLE_CLIENT_ID"], "client_secret": os.environ["GRAIN_GOOGLE_CLIENT_SECRET"]}))' > "$OUT/oauth_client.json"
+fi
+
 # Smoke test from a neutral cwd so a stray source tree cannot mask a missing install.
 SMOKE="$(mktemp -d)"
 (cd / && PYTHONDONTWRITEBYTECODE=1 PERSONAL_OS_DATA_DIR="$SMOKE" "$PY" -c "import personal_os.app, personal_os.__main__; print('bundle ok:', personal_os.__file__)")

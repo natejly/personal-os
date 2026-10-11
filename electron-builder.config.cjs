@@ -17,11 +17,11 @@ const notarize = Boolean(
 module.exports = {
   appId: 'com.natejly.grain',
   productName: 'Grain',
-  files: ['out/**/*', 'package.json'],
+  files: ['out/main/**/*', 'out/preload/**/*', 'out/renderer/**/*', 'package.json'],
   // The python-build-standalone + backend bundle made by scripts/bundle-backend.sh.
   extraResources: [{ from: 'build/backend-bundle', to: 'backend' }],
   afterSign: 'scripts/adhoc-sign.cjs',
-  publish: [{ provider: 'github', owner: 'natejly', repo: 'personal-os' }],
+  publish: [{ provider: 'github', owner: 'natejly', repo: 'personal-os', releaseType: 'prerelease' }],
   mac: {
     category: 'public.app-category.productivity',
     target: ['dmg', 'zip'], // electron-updater applies updates from the zip
@@ -43,7 +43,7 @@ module.exports = {
       NSAppleEventsUsageDescription:
         'Grain uses AppleScript and Shortcuts to read the frontmost app and to run actions you ask for.',
       NSScreenCaptureUsageDescription:
-        'Grain captures the screen when you teach it a task or ask it to look at your screen.',
+        'Grain captures the screen when you ask it to look at your screen.',
       NSCameraUsageDescription: 'Grain uses the camera only for photos and video you choose to capture.',
       NSContactsUsageDescription: 'Grain reads and updates Contacts when you ask it to.',
       NSCalendarsUsageDescription: 'Grain reads and updates Calendar events when you ask it to.',

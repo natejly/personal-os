@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type Dispatch, type SetStateAction } from 'react'
 import { Mail as MailIcon, RefreshCw, Search, Star, Archive, MailOpen, Mail, ExternalLink, MessageSquare, Paperclip, SquarePen, Reply, Sparkles, Send, X, Forward, Download, File as FileIcon, FileText, FileSpreadsheet, FileArchive, Image as ImageIcon } from '../icons'
 import { useStore } from '../store'
-import { PIM_SETTINGS_TAB, pimLabel, pimProvider, pimStatus } from '../lib/pim'
+import { PIM_SETTINGS_TAB, pimLabel, pimStatus } from '../lib/pim'
 import { api } from '../lib/api'
 import SmartTextarea from './SmartTextarea'
 import type { Document, GmailAttachment, GmailFullMessage, GmailLabel, GmailMessage } from '@shared/types'
@@ -82,7 +82,6 @@ function MailReader({ message: m, full, onClose, onReply, onForward, onStar, onA
 }): JSX.Element {
   const { titleId, backdrop, modal } = useModal(onClose)
   const starred = isStarred(m)
-  const gmail = useStore(pimProvider) === 'google'
   const toast = useStore((s) => s.toast)
   const [fetching, setFetching] = useState<string | null>(null)
   // Row click: store the attachment in Uploads and show it in the upload viewer. Download: write it to Downloads.
@@ -130,7 +129,7 @@ function MailReader({ message: m, full, onClose, onReply, onForward, onStar, onA
           </button>
           <button className="icon-btn" title="Mark unread" aria-label="Mark unread" onClick={onUnread}><Mail size={15} /></button>
           <span className="spacer" />
-          {gmail && <a className="ghost-btn" href={`https://mail.google.com/mail/u/0/#all/${m.thread_id}`} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Gmail</a>}
+          <a className="ghost-btn" href={`https://mail.google.com/mail/u/0/#all/${m.thread_id}`} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Gmail</a>
           <button className="ghost-btn" onClick={onArchive}><Archive size={14} /> Archive</button>
           <button className="ghost-btn" onClick={onSnooze}>Snooze</button>
           <button className="ghost-btn" onClick={onAsk}><MessageSquare size={14} /> Ask assistant</button>
@@ -250,7 +249,7 @@ function MailCompose({ compose, setCompose, review, setReview, busy, valid, onDi
 }
 
 export default function MailView(): JSX.Element {
-  // The active mail account (Google or Microsoft); the name keeps the old one to keep the diff small.
+  // The active mail account.
   const google = useStore(pimStatus)
   const label = useStore(pimLabel)
   const { toast, askAboutEmail } = useStore()

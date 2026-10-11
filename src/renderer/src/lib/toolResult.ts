@@ -99,38 +99,6 @@ export function shellState(name: string, d: Fields | null, pending: boolean): { 
   return { label: code === 0 ? 'exit 0' : `exit ${code}`, tone: code === 0 ? 'ok' : 'bad' }
 }
 
-/** A sandbox_list_files row. */
-export interface SandboxEntry { type: 'dir' | 'file'; bytes: number; path: string }
-
-/** The rows of a sandbox_list_files result (the backend drops trailing rows rather than cutting one). */
-export function sandboxEntries(d: Fields | null): SandboxEntry[] {
-  const rows: unknown[] = Array.isArray(d?.entries) ? d.entries : []
-  return rows.flatMap((r) => {
-    const e = (r && typeof r === 'object' ? r : {}) as Fields
-    return str(e.path) ? [{ type: e.type === 'dir' ? 'dir' as const : 'file' as const, bytes: num(e.bytes) ?? 0, path: str(e.path) }] : []
-  })
-}
-
-/** The one-line outcome of a sandbox write, export or checkpoint call; '' when the result says nothing readable. */
-export function sandboxLine(name: string, d: Fields | null): string {
-  if (!d) return ''
-  const bytes = num(d.bytes)
-  const size = bytes === null ? '' : `${bytes.toLocaleString('en-US')} bytes `
-  switch (name) {
-    case 'sandbox_write_file':
-    case 'sandbox_put_document':
-      return str(d.written) ? `${d.appended === true ? 'appended' : 'wrote'} ${size}to ${str(d.written)}` : ''
-    case 'sandbox_export_file': return str(d.saved) ? `saved ${size}to ${str(d.saved)}` : ''
-    case 'sandbox_checkpoint': {
-      const kept = strList(d.kept)
-      return str(d.checkpoint) ? `saved checkpoint “${str(d.checkpoint)}”${kept.length > 1 ? ` (keeping ${kept.join(', ')})` : ''}` : ''
-    }
-    case 'sandbox_restore': return str(d.restored) ? `restored checkpoint “${str(d.restored)}”` : ''
-    case 'sandbox_reset': return d.reset === true ? 'reset; the next call starts from a fresh container' : ''
-    default: return ''
-  }
-}
-
 /** "1.4 s", "2 min 5 s". */
 export function fmtSeconds(s: number | null): string {
   if (s === null) return ''
@@ -204,7 +172,7 @@ const isOutput = (f: unknown): f is OutputFile => !!f && typeof f === 'object' &
   typeof (f as Fields).size === 'number' && typeof (f as Fields).path === 'string'
 
 /**
- * The `outputs` a result lists (sandbox_export_file, run_python, a browser download in a chat). The backend puts the key
+ * The `outputs` a result lists (run_python, a browser download in a chat). The backend puts the key
  * first, so when the preview was cut the complete entries at its start are still read.
  */
 export function outputFiles(preview: string | null | undefined): OutputFile[] {

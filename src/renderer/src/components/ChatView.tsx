@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { isClear } from '../lib/workers'
-import { Pencil, Sparkles, SlidersHorizontal, ArrowDown, PanelRight } from '../icons'
+import { isBranchNote, isClear } from '../lib/workers'
+import BranchNote from '../components/BranchNote'
+import { Pencil, Sparkles, ArrowDown, PanelRight } from '../icons'
 import { useStore, useProject, useChatFace, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
 import MessageView, { PendingUserMessage, Thinking } from './Message'
 import RegenRow from './RegenRow'
@@ -10,8 +11,8 @@ import ChatControls from './ChatControls'
 import ContextDrawer from './ContextDrawer'
 import ResizeHandle from './ResizeHandle'
 import WorkersPanel from './WorkersPanel'
+import ProgressCard from './ProgressCard'
 import ShowPanel from './ShowPanel'
-import SendToSpace from './SendToSpace'
 import ChatFilesButton from './ChatFilesPanel'
 import { fenced, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
@@ -145,8 +146,6 @@ export default function ChatView({ conversationId }: { conversationId?: string }
         </div>
         <div className="no-drag header-right">
           {conversationId && <ChatFilesButton conversationId={convo?.id} />}
-          <SendToSpace items={[{ kind: 'chat', refId: convo?.id }]} disabled={!convo?.id} />
-          <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌃⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>
         </div>
         {/* The full-window chat gives the last title-bar slot to its own workspace panel; ⌘I still opens the quick chat. */}
         <AppSwitcher last={conversationId ? undefined : (
@@ -176,7 +175,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {msgs.map((m, i) => (
                   <Fragment key={m.id}>
                     {m.created_at > 0 && (i === 0 || dayKey(m.created_at) !== dayKey(msgs[i - 1].created_at)) && <div className="day-divider" role="separator">{dayLabel(m.created_at)}</div>}
-                    {isClear(m) ? <div className="day-divider" role="separator">Context cleared</div> : <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} resendable={!isStreamingHere && !isDeskOrJob} showContextChips
+                    {isClear(m) ? <div className="day-divider" role="separator">Context cleared</div> : isBranchNote(m) ? <BranchNote content={m.content} /> : <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} resendable={!isStreamingHere && !isDeskOrJob} showContextChips
                       branchable={m.created_at > 0 && !isDeskOrJob}
                       browserSession={m.id === watchId ? (deskId ? deskBrowserSession(deskId) : chatBrowserSession(m.conversation_id)) : undefined} />}
                   </Fragment>
@@ -199,6 +198,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
             </button>
           )}
           <WorkersPanel conversationId={conversationId} />
+          <ProgressCard conversationId={conversationId} desk={desk} />
           <Composer conversationId={conversationId} footer={<ChatControls conversationId={conversationId} />} />
         </div>
         {showing && <ShowPanel conversationId={showKey} />}

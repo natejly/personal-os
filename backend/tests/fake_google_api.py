@@ -300,3 +300,17 @@ class FakeGoogle(Google):
 
     def _svc(self, name: str, version: str) -> Any:  # type: ignore[override]
         return self.server.service(name)
+
+
+def impersonate(real: Any, fake: Any) -> Any:
+    """Make `real` behave as `fake` (class and state) so every holder of it sees the fake; returns the undo callable."""
+    cls, state = real.__class__, dict(real.__dict__)
+    real.__class__ = fake.__class__
+    real.__dict__.clear()
+    real.__dict__.update(fake.__dict__)
+
+    def undo() -> None:
+        real.__class__ = cls
+        real.__dict__.clear()
+        real.__dict__.update(state)
+    return undo

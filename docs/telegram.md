@@ -28,6 +28,20 @@ with a different bot's clears the pairing and issues a fresh code.
 Turning it on starts from now: messages sent while Grain was off are not replayed. After a restart
 Grain picks up where it left off but ignores messages older than ten minutes.
 
+## One bot per Mac
+
+A bot has one inbox, so two Macs reading the same bot take its messages from each other. Give each
+Mac its own bot (BotFather `/newbot`, suggested name `Grain · <Mac name>`).
+
+When Grain starts polling a bot it names the bot `Grain · <Mac name>` (change it with the
+`telegramBotName` setting; blank is automatic) and writes a claim into the bot's short description,
+`Grain on <Mac name> · <id>`. The id is random and kept in this Mac's Grain data, never a hardware
+serial. If the claim names another Mac, this Grain does not poll: the status line says "This bot is
+used by Grain on <name>" and offers **Set up a bot for this Mac** (the BotFather steps) or **Take over
+this bot**, which rewrites the claim and starts polling here; the other Mac notices on its next
+poll conflict and stands down. Sending (replies, pushes, test message) works regardless. Telegram
+rate-limits renaming, so a rename that is refused is retried on a later connect.
+
 ## The Telegram chat in Grain
 
 Once paired, the bridge's conversation is an ordinary chat in Grain: it sits first in the sidebar,
@@ -188,7 +202,8 @@ The status line in Settings → Texting names the problem.
 | Off | The switch is off. Turn it on. |
 | Not paired | Open the link or send `/start <code>` to the bot. A used or expired code needs **New code**. |
 | Telegram rejected the token | The token is wrong or was revoked. Paste a new one (BotFather `/token`). |
-| Another program is reading this bot's updates, or a webhook is set | Telegram allows one reader per bot. Stop the other program, or clear the webhook, and Grain retries every 30 seconds. |
+| Another program is reading this bot's updates, or a webhook is set | Telegram allows one reader per bot. Stop the other program, clear the webhook, or, if the reader is a Grain from before the claim marker, update it or give each Mac its own bot. Grain retries every 30 seconds. |
+| This bot is used by Grain on <name> | Another Mac claimed this bot. Use **Set up a bot for this Mac**, or **Take over this bot** to move it here. |
 | Another Grain is polling this bot | Another Grain backend on this Mac holds the lock for the token. Quit it, or use a separate bot per backend. |
 | Polling error | A network or Telegram failure. Grain retries with a growing delay up to a minute; press Re-check. |
 

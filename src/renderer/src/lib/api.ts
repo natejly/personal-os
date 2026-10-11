@@ -1,10 +1,10 @@
 import type {
   ArchivedInboxRun,
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, DriveBackupRun, DriveBackupStatus, Recap, Conversation, ConversationSettings, WorkerInfo, ContextUsed, ContextMeter, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message, MicrosoftStatus,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, DriveBackupRun, DriveBackupStatus, Recap, Conversation, ConversationSettings, WorkerInfo, ContextUsed, ContextMeter, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
   Memory, MemoryProposal, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
-  Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
+  Canvas, CanvasWindow, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
   DeskQueued, DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
   AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobSkipRecord, JobStats,
@@ -15,8 +15,7 @@ import type {
   PendingSend, SendHoldConfig, Verification, Verified,
   PermissionGrantResult, VoiceConfig,
   RunChanges, RunUndoResult,
-  BackupInfo, DataOverview, SandboxStatus, ShellJobInfo, ShellJobTail, TelegramStatus,
-  TeachDraft, TeachRecording
+  BackupInfo, DataOverview, ShellJobInfo, ShellJobTail, TelegramStatus
 } from '@shared/types'
 import type { CodingSession, CodingSessionDiff, ShipChecklist } from '@shared/types'
 import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
@@ -195,15 +194,14 @@ export const api = {
   shellJobs: () => req<{ jobs: ShellJobInfo[] }>('/shell/jobs'),
   shellJobTail: (id: string, limit = 4000) => req<ShellJobTail>(`/shell/jobs/${encodeURIComponent(id)}/tail?limit=${limit}`),
   killShellJob: (id: string) => req<ShellJobInfo>(`/shell/jobs/${encodeURIComponent(id)}/kill`, { method: 'POST' }),
-  sandboxes: () => req<SandboxStatus>('/sandboxes'),
   telegramStatus: () => req<TelegramStatus>('/telegram/status'),
   telegramSaveToken: (token: string) => req<TelegramStatus>('/telegram/token', { method: 'PUT', body: json({ token }) }),
   telegramRemoveToken: () => req<TelegramStatus>('/telegram/token', { method: 'DELETE' }),
   telegramNewCode: () => req<TelegramStatus>('/telegram/pairing', { method: 'POST' }),
+  telegramTakeOver: () => req<TelegramStatus>('/telegram/takeover', { method: 'POST' }),
   telegramUnpair: () => req<TelegramStatus>('/telegram/unpair', { method: 'POST' }),
   telegramTest: () => req<{ ok: boolean; error?: string }>('/telegram/test', { method: 'POST' }),
   telegramSetEnabled: (enabled: boolean) => req<TelegramStatus>('/telegram/enabled', { method: 'POST', body: json({ enabled }) }),
-  resetSandbox: (key: string) => req<{ reset: boolean; note: string }>(`/sandboxes/${encodeURIComponent(key)}/reset`, { method: 'POST' }),
   dashboard: () => req<TodayDashboard>('/dashboard'),
   recap: (force = false) => req<Recap>(`/recap?force=${force}`, undefined, NO_TIMEOUT),
   // `steps` / `note` are for a propose_plan card: the steps the user is authorising (with any edited arguments,
@@ -399,11 +397,6 @@ export const api = {
     clearGrant: (slug: string, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string) =>
       req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant?scope=${scope}${scopeId ? `&scope_id=${encodeURIComponent(scopeId)}` : ''}`, { method: 'DELETE' })
   },
-  microsoft: {
-    status: () => req<MicrosoftStatus>('/integrations/microsoft/status'),
-    start: () => req<{ url: string }>('/integrations/microsoft/auth/start', { method: 'POST' }),
-    disconnect: () => req<MicrosoftStatus>('/integrations/microsoft/disconnect', { method: 'POST' })
-  },
   google: {
     status: () => req<GoogleStatus>('/integrations/google/status'),
     start: () => req<{ url: string }>('/integrations/google/auth/start', { method: 'POST' }),
@@ -596,28 +589,6 @@ export const api = {
       req<{ skill: Skill; findings: SkillFinding[]; warnings: string[] }>('/skills/import', { method: 'POST', body: json(src) }, NO_TIMEOUT),
     exportMd: (id: string) => req<{ filename: string; text: string }>(`/skills/${id}/export`)
   },
-  /** Teach a task: a screen recording (or an imported video) becomes a candidate skill. */
-  teach: {
-    list: () => req<TeachRecording[]>('/teach'),
-    get: (id: string) => req<TeachRecording>(`/teach/${id}`),
-    /** `needs_permission` when macOS has not granted Screen Recording; nothing is recorded then. */
-    start: () => req<TeachRecording | { needs_permission: true; state: string }>('/teach/start', { method: 'POST' }),
-    stop: () => req<TeachRecording>('/teach/stop', { method: 'POST' }, CONTROL_TIMEOUT_MS),
-    importVideo: (file: File) => {
-      const fd = new FormData()
-      fd.append('file', file)
-      return req<TeachRecording>('/teach/import', { method: 'POST', body: fd }, NO_TIMEOUT)
-    },
-    extract: (id: string) => req<TeachRecording>(`/teach/${id}/extract`, { method: 'POST' }, NO_TIMEOUT),
-    setSteps: (id: string, d: TeachDraft) => req<TeachRecording>(`/teach/${id}/steps`, { method: 'PUT', body: json(d) }),
-    save: (id: string) => req<{ skill: Skill; findings: SkillFinding[]; recording: TeachRecording }>(`/teach/${id}/save`, { method: 'POST' }),
-    schedule: (id: string, s: { kind: 'cron' | 'once'; cron?: string; run_at?: number | null; test?: boolean }) =>
-      req<{ job: Job; recording: TeachRecording; test?: { ok: boolean; run_id: string | null; conversation_id: string | null } }>(
-        `/teach/${id}/schedule`, { method: 'POST', body: json(s) }, NO_TIMEOUT),
-    delete: (id: string) => req<{ ok: boolean }>(`/teach/${id}`, { method: 'DELETE' }),
-    /** One frame as an object URL (an <img> cannot send the token header). Revoke it when done. */
-    frame: async (id: string, n: number): Promise<string> => URL.createObjectURL(await (await fetchRaw(`/teach/${id}/frames/${n}`)).blob())
-  },
   /** Starts the reply as a background task and returns at once; watch it with `chatStream(convId, seq)`. Throws a 409 carrying a `RunConflict` when that conversation already has a live run. */
   chat: (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string; attachments?: string[] }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }, CONTROL_TIMEOUT_MS),
   /** Injects a user message into a live run (steering). Throws a 409 when nothing is running. */
@@ -652,6 +623,8 @@ export const api = {
   messageOtlp: (messageId: string) => req<unknown>(`/messages/${messageId}/otlp`),
   testTraceExport: () => req<{ sent: boolean; reason?: string; status: number | null; error: string | null }>('/traces/export-test', { method: 'POST' }),
   conversationUsage: (conversationId: string) => req<ConversationUsage>(`/conversations/${conversationId}/usage`),
+  messageRequests: (messageId: string) =>
+    req<{ round: number; model: string; tool_choice: string; tokens: number; messages: unknown[]; tools: unknown[] }[]>(`/messages/${messageId}/requests`),
   contextMeter: (conversationId: string) => req<ContextMeter>(`/conversations/${conversationId}/context-meter`),
   compactConversation: (conversationId: string, focus?: string) =>
     req<{ compacted: boolean }>(`/conversations/${conversationId}/compact`, { method: 'POST', body: json({ focus: focus ?? null }) }, NO_TIMEOUT),
@@ -847,18 +820,6 @@ export const api = {
     patchComment: (cid: string, patch: { body?: string; resolved?: boolean }) => req<DocComment>(`/docs/comments/${cid}`, { method: 'PATCH', body: json(patch) }),
     deleteComment: (cid: string) => req(`/docs/comments/${cid}`, { method: 'DELETE' })
   },
-  /** Space presets (`/canvas-presets`): named templates of a canvas. */
-  presets: {
-    list: () => req<CanvasPreset[]>('/canvas-presets'),
-    /** The server snapshots the canvas; a blank name takes the canvas's name. */
-    create: (p: { canvas_id: string; name?: string }) => req<CanvasPreset>('/canvas-presets', { method: 'POST', body: json(p) }),
-    update: (id: string, patch: { name?: string }) => req<CanvasPreset>(`/canvas-presets/${id}`, { method: 'PUT', body: json(patch) }),
-    delete: (id: string) => req<{ ok: boolean }>(`/canvas-presets/${id}`, { method: 'DELETE' }),
-    /** Creates a NEW canvas; `skipped` counts windows whose referent no longer exists. */
-    instantiate: (id: string, opts: { name?: string } = {}) => req<InstantiatedCanvas>(`/canvas-presets/${id}/instantiate`, { method: 'POST', body: json(opts) }),
-    exportFile: (id: string) => req<Record<string, unknown>>(`/canvas-presets/${id}/export`),
-    importFile: (file: unknown) => req<{ preset: CanvasPreset }>('/canvas-presets/import', { method: 'POST', body: json({ file, instantiate: false }) })
-  }
 }
 
 const STREAM_RETRIES = 8

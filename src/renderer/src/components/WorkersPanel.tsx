@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, RotateCcw, Square } from '../icons'
+import { RotateCcw, Square } from '../icons'
 import type { WorkerInfo } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore, useConversation, useWorkerFace, useWorkers } from '../store'
@@ -53,10 +53,10 @@ export default function WorkersPanel({ conversationId: focusId, all = false }: {
     <section className="plan-panel worker-panel" aria-label="Workers">
       <header>
         <button className="plan-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
           <b>Workers</b>
-          <span className="muted">· {live ? `${live} running` : workers.length}</span>
-          {!open && workers.filter(workerIsLive).map((w) => <WorkerFace key={w.id} w={w} />)}
+          {open
+            ? <span className="muted">· {live ? `${live} running` : workers.length}</span>
+            : <span className="worker-faces">{workers.filter(workerIsLive).map((w) => <WorkerFace key={w.id} w={w} />)}</span>}
         </button>
       </header>
       {open && (
@@ -68,7 +68,6 @@ export default function WorkersPanel({ conversationId: focusId, all = false }: {
               <li key={w.id} className={`worker-row ${on ? 'on' : ''}`}>
                 <div className="worker-line">
                   <button className="worker-open" aria-expanded={on} title={on ? 'Hide chat' : 'Open chat'} onClick={() => setUnfolded(on ? null : w.id)}>
-                    {on ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
                     <WorkerFace w={w} />
                     <span className="worker-title">{w.title || w.goal}</span>
                     <small>{workerWord(w)}</small>

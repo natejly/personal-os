@@ -17,6 +17,7 @@ import { AttentionDot } from './ChatPulse'
 import type { Attention, ChatSearchHit, Conversation, Job, WidgetKind } from '@shared/types'
 import { ATTENTION_RANK, jobAttention, wantsYou } from '../lib/attention'
 import { mergeChatSearch, snippetParts } from '../lib/chatSearch'
+import { useChatSelection } from '../lib/chatSelection'
 import { rowButton } from '../lib/rowButton'
 import { projectGroupOpen, toggleProjectGroup } from '../lib/projectGroups'
 import { useChatFileCountsSync } from '../lib/useChatFiles'
@@ -24,17 +25,18 @@ import SidebarChatFiles from './SidebarChatFiles'
 
 /** Project groups the user folded shut. Stored as exceptions, so a new project starts open. */
 const COLLAPSED_KEY = 'grain.sidebar.collapsedProjects'
-const readCollapsed = (): Set<string> => {
+const DATE_GROUPS_KEY = 'grain.sidebar.collapsedDateGroups'
+const readCollapsed = (key = COLLAPSED_KEY): Set<string> => {
   try {
-    const v: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]')
+    const v: unknown = JSON.parse(localStorage.getItem(key) ?? '[]')
     return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
   } catch {
     return new Set()
   }
 }
-const writeCollapsed = (ids: Set<string>): void => {
+const writeCollapsed = (ids: Set<string>, key = COLLAPSED_KEY): void => {
   try {
-    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...ids]))
+    localStorage.setItem(key, JSON.stringify([...ids]))
   } catch {
     // Per-viewer convenience only; without it the groups are open again next launch.
   }
@@ -150,7 +152,16 @@ export default function Sidebar(): JSX.Element {
   }, [needsOnly, conversations, chatStates, shownJobs])
   // A search reaches every chat: typing a query lifts the filter until the box is cleared.
   const filtering = needsOnly && !query.trim()
-  const [collapsed, setCollapsed] = useState(readCollapsed)
+  const [collapsed, setCollapsed] = useState(() => readCollapsed())
+  const [foldedDates, setFoldedDates] = useState(() => readCollapsed(DATE_GROUPS_KEY))
+  const toggleDateGroup = (label: string): void => {
+    setFoldedDates((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(label)) next.add(label)
+      writeCollapsed(next, DATE_GROUPS_KEY)
+      return next
+    })
+  }
   useEffect(() => {
     if (searching) searchRef.current?.focus()
   }, [searching])
@@ -188,6 +199,36 @@ export default function Sidebar(): JSX.Element {
   }, [archivedOpen, archiveBump, query.trim() !== ''])
   const archiveChat = useStore((s) => s.archiveChat)
   const deleteChat = useStore((s) => s.deleteChat)
+  const picked = useChatSelection((s) => s.selected)
+  useEffect(() => {
+    if (picked.length < 2) return
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') useChatSelection.getState().reset() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [picked.length < 2])
+  /** Clear drops each chat's earlier context (the /clear marker); delete trashes them, each with its own Undo. */
+  const bulk = async (what: 'clear' | 'delete'): Promise<void> => {
+    const ids = picked
+    useChatSelection.getState().reset()
+    let failed = 0
+    const deleted: { type: 'conversation'; id: string }[] = []
+    for (const id of ids) {
+      try {
+        if (what === 'delete') { await deleteChat(id, true); deleted.push({ type: 'conversation', id }) }
+        else {
+          const row = await api.clearContext(id)
+          useStore.setState((st) => {
+            const se = st.sessions[id]
+            return se ? { sessions: { ...st.sessions, [id]: { ...se, conversation: { ...se.conversation, messages: [...(se.conversation.messages ?? []), row] } } } } : {}
+          })
+        }
+      } catch { failed++ }
+    }
+    const t = useStore.getState().toast
+    if (deleted.length) useStore.getState().offerUndo(`${deleted.length} chats`, deleted)
+    if (failed) t(`Could not ${what} ${failed} chat${failed === 1 ? '' : 's'}.`, 'error')
+    else if (what === 'clear') t(`Cleared ${ids.length} chats.`, 'info')
+  }
   // Search narrows the archived rows by title too, like the active list.
   const shownArchived = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -363,6 +404,12 @@ export default function Sidebar(): JSX.Element {
           />
         </label>
       )}
+      {picked.length > 1 && (
+        <div className="select-bar" role="toolbar" aria-label="Selected chats">
+          <button className="ghost-btn" onClick={() => void bulk('clear')}>Clear {picked.length} chats</button>
+          <button className="ghost-btn danger" onClick={() => void bulk('delete')}>Delete {picked.length} chats</button>
+        </div>
+      )}
       <div className="convo-list">
         {filtering && (
           <section>
@@ -380,12 +427,16 @@ export default function Sidebar(): JSX.Element {
           </section>
         )}
         {!filtering && groups.length === 0 && pinned.length === 0 && inMessages.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No personal chats yet.'}</p>}
-        {!filtering && groups.map((g) => (
+        {!filtering && groups.map((g) => {
+          // A search always shows its hits, folded or not.
+          const folded = foldedDates.has(g.label) && !query.trim()
+          return (
           <section key={g.label}>
-            <h4>{g.label}</h4>
-            {g.items.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} trail={<Snippet hit={hitById.get(c.id)} />} />)}
+            <h4><button className="section-toggle" aria-expanded={!folded} onClick={() => toggleDateGroup(g.label)}><ChevronRight size={11} className={folded ? '' : 'rot90'} /> {g.label}</button></h4>
+            {!folded && g.items.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} trail={<Snippet hit={hitById.get(c.id)} />} />)}
           </section>
-        ))}
+          )
+        })}
         {!filtering && inMessages.length > 0 && (
           <section>
             <h4>In messages</h4>

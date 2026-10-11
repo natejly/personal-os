@@ -1,4 +1,4 @@
-import { ShieldQuestion } from 'lucide-react'
+import { ShieldQuestion } from '../../icons'
 import { browserApprovalSentence } from '../../lib/browserApproval'
 import CardShell from './CardShell'
 import { registerToolCard, type ToolCardProps } from './registry'

@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import type { Desk, DeskAutonomy, DeskStatus } from '@shared/types'
 
 /** Words and clocks for a desk's state, shared by the chat strip, the crew widget and the Agent inbox. */
@@ -31,21 +30,4 @@ export const fmtDur = (seconds: number): string => {
   if (s < 3600) return `${Math.round(s / 60)}m`
   if (s < 86400) return `${(s / 3600).toFixed(1)}h`
   return `${Math.round(s / 86400)}d`
-}
-
-/** How long this desk has been going: wall clock since it was created, frozen once it ended. */
-export const deskElapsed = (d: Desk): number => (d.ended_at ?? Date.now() / 1000) - d.created_at
-
-/**
- * A slow re-render while anything is live. Elapsed time is the one number on screen that moves on its
- * own, and `desk_status` only arrives when the agent does something — without this a desk that sits
- * on one tool call for ten minutes keeps claiming "2m".
- */
-export function useTick(active: boolean, ms = 30_000): void {
-  const [, bump] = useState(0)
-  useEffect(() => {
-    if (!active) return
-    const t = setInterval(() => bump((n) => n + 1), ms)
-    return () => clearInterval(t)
-  }, [active, ms])
 }

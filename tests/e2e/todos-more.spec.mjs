@@ -60,22 +60,13 @@ test('projects scope todos separately from personal', async ({ grain }) => {
   expect(ignoreErrs(grain.consoleErrors)).toEqual([])
 })
 
-test('persistence across relaunch, Today card matches and can be hidden', async ({ grain }) => {
+test('persistence across relaunch', async ({ grain }) => {
   await grain.api('/todos', { method: 'POST', body: { title: 'Persist me', due: dayStr(0) } })
   await grain.api('/todos', { method: 'POST', body: { title: 'Done one' } }).then((t) => grain.api(`/todos/${t.id}`, { method: 'PUT', body: { done: true } }))
   const page = await grain.relaunch()
   await openTodos(page)
   await expect(page.locator('.todo')).toHaveCount(1)
   await expect(row(page, 'Persist me')).toBeVisible()
-  // Today
-  await page.getByRole('button', { name: 'Today', exact: true }).first().click()
-  const card = page.locator('section.widget', { hasText: 'View all' }).filter({ hasText: 'Lists' })
-  await expect(card.locator('.todo')).toHaveCount(1)
-  await expect(card).toContainText('Persist me')
-  await expect(card).toContainText('1 open')
-  await page.getByRole('button', { name: 'Choose what shows on Today' }).click()
-  await page.locator('.home-customize label', { hasText: 'Lists' }).locator('input').click()
-  await expect(page.locator('section.widget', { hasText: 'Persist me' })).toHaveCount(0)
   expect(ignoreErrs(grain.consoleErrors)).toEqual([])
 })
 

@@ -1,7 +1,7 @@
 import { useCallback, type FC, type PointerEvent as ReactPointerEvent } from 'react'
 import {
   Brain, Calendar, CheckSquare, FileText, MessageSquare, Network,
-  FolderKanban, Sparkles, Gauge, FilePen, Smile, Users } from 'lucide-react'
+  FolderKanban, Sparkles, Gauge, FilePen, Smile, Users } from '../icons'
 import type { CanvasWindow, WidgetKind } from '@shared/types'
 import { WIDGETS, type WidgetProps } from './registry'
 import { useCanvas } from './store'

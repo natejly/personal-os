@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { MessageSquarePlus, Pin, PinOff, SquareArrowOutUpRight, X } from 'lucide-react'
+import { MessageSquarePlus, Pin, PinOff, SquareArrowOutUpRight, X } from '../icons'
 import { PAGE_AGENT_DRAFT, useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../store'
 import { panelConversationFor } from '../lib/pagePanel'
 import ChatControls from './ChatControls'

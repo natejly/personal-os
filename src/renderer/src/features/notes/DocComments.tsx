@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Check, MessageSquarePlus, RotateCcw, Trash2, Unlink } from 'lucide-react'
+import { Check, MessageSquarePlus, RotateCcw, Trash2, Unlink } from '../../icons'
 import type { DocComment } from '@shared/types'
 import { api } from '../../lib/api'
 import { buildThreads, makeAnchor, type Anchor, type Span, type Thread } from './comments'

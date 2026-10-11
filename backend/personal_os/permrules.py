@@ -31,7 +31,7 @@ DENIAL_LIMIT = 3
 # The call that would be this many identical ones in a row (counting those that ran) gets a card no rule lifts.
 DOOM_LIMIT = 3
 # Cards that are the user answering, not granting a tool. Skip-permissions does not settle these.
-STILL_ASK = frozenset({"propose_plan", "desk_ask", "ask_user", "gmail_send"})  # gmail_send: the email card is the user writing, not granting
+STILL_ASK = frozenset({"propose_plan", "desk_ask", "ask_user"})
 HARD_STOP = ("Three calls in a row were refused. Stop attempting variations of them; tell the user what you were trying "
              "to do and ask how they would like to proceed.")
 
@@ -876,21 +876,6 @@ def touches_protected(cmd: str, cwd: str | None = None, roots: Iterable[str] = (
     return walk(normalize(cmd or ""), 0, cwd)
 
 
-def allow_all_floor(tool: str, args: dict[str, Any], cwd: str | None = None,
-                    scratch: Iterable[str] = ()) -> tuple[str, str] | None:
-    """What Allow everything still cards for this call, as (card kind, reason): an unsandboxed command that names a
-    credential store or Grain's own data or app ("external_directory"), or a command `destructive` flags
-    ("destructive"), sandboxed or not. None for anything else. `scratch` (the desk's work folder) also marks the desk
-    whose own folder is not Grain's data."""
-    if tool != "shell_run" or not isinstance(args, dict):
-        return None
-    cmd = str(args.get("command") or "")
-    if args.get("unsandboxed") and (why := touches_protected(cmd, cwd, scratch)):
-        return "external_directory", why
-    why = destructive(cmd, cwd, scratch)
-    return ("destructive", why) if why else None
-
-
 # The claude.ai Gmail connector's sending tools, as the Claude Code CLI names them (it ships with the user's account).
 CLAUDE_MAIL_SENDS = ("mcp__claude_ai_Gmail__send_message", "mcp__claude_ai_Gmail__reply", "mcp__claude_ai_Gmail__forward")
 
@@ -1340,27 +1325,6 @@ def mcp_denied(slug: str, rules: RuleSet | dict[str, Any] | None) -> str | None:
         if r.pattern is None and (r.tool.lower() == slug.lower() or slug.lower().startswith(r.tool.lower() + "__")):
             return f"blocked by your permission rule {r.text}"
     return None
-
-
-def skip_permissions_on(conv_settings: dict[str, Any] | None, cfg: dict[str, Any] | None) -> bool:
-    """Whether approval cards are skipped: only the global Allow all mode does (a chat's own skipPermissions is legacy)."""
-    return permissions.get(cfg or {}, "permissionMode") == "allow_all"
-
-
-def lift_permission_ask(name: str, mode: str, *, skip: bool, forced: bool = False, danger: str = "",
-                        fenced: bool = False) -> str:
-    """Turn a plain ask into a run. A deny is not an ask (the caller keeps the refusal). Off stays off.
-
-    Stays a card: a plan or desk question (the user deciding, not granting a tool), a forced ask (taint,
-    doom loop, desk ask-as-you-go), an ask rule or an outside-folder write (`fenced`), an external or
-    schedules tool (except coding_session_start/send, which skip lifts), and a shell command no read-only list
-    or allow rule already cleared (a shell_run that is still `ask` here was not cleared).
-    """
-    if (skip and mode == "ask" and name not in STILL_ASK and not forced and not fenced
-            and (danger not in ("external", "schedules") or name in ("coding_session_start", "coding_session_send"))
-            and name not in ("shell_run", "opencode_run")):
-        return "on"
-    return mode
 
 
 class DenialStreak:

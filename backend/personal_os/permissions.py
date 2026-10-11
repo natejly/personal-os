@@ -16,18 +16,16 @@ The three host allowlists are separate fields with separate jobs:
 - fetchAllowlist: hosts fetch_url may still read once a reply touched untrusted content.
 - browserAllowlist: the same, for the agent's browser opening a typed URL; the browser also honours fetchAllowlist
   (browser.py merges the two), fetch_url does not honour this one.
-- shellAllowedDomains: hosts the shell's and sandbox's egress proxy lets through, beside the package registries.
+- shellAllowedDomains: hosts the shell's egress proxy lets through, beside the package registries.
 """
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 from typing import Any, Callable
 
 
 VERSION = 2  # 2: permissionMode added; migrate_mode stamps it
-DEFAULT_IMAGE = "python:3.12-slim"  # microvm.DEFAULT_IMAGE
 KEY = "permissions"
 
 DEFAULTS: dict[str, Any] = {
@@ -36,7 +34,7 @@ DEFAULTS: dict[str, Any] = {
     # External and schedules tools that always show a card (tools.Toolbox.ask_locked): no map switches one on, no
     # card grants one whole-tool, and untrusted content in the reply forces its card. Every other tool that acts
     # outside the app runs on a plain yes. Sending mail and deleting things that are hard to get back stay here.
-    # Auto and Manual honour this list; Allow everything lifts it except gmail_send (ALWAYS_CARD, permrules.STILL_ASK).
+    # Auto and Manual honour this list; Allow everything lifts all of it.
     "alwaysAsk": ["gmail_send", "calendar_delete", "trash_local_file", "move_local_file", "run_shortcut",
                   "python_install", "schedule_task"],
     # Argument-pattern rules over the per-tool modes: {allow: [], ask: [], deny: []} of "Tool(pattern)" strings
@@ -44,9 +42,7 @@ DEFAULTS: dict[str, Any] = {
     "permissionRules": {"allow": [], "ask": [], "deny": []},
     # How calls that would run or ask are decided (autoreview.route): "auto" has a reviewer model read every call that is
     # not known safe; "manual" is the per-tool modes, grants and rules alone; "allow_all" runs everything (unsandboxed
-    # shell included) except denied calls (hard-deny paths included), credential-store reads and writes, writes after
-    # untrusted content, the email card, and the shell floor (permrules.allow_all_floor: deletes that skip the Trash,
-    # disk wipes, force-pushes, and an unsandboxed command naming a credential store or Grain's own data or app).
+    # shell included) with no card at all; only denied calls (hard-deny paths included) are refused.
     "permissionMode": "auto",
     # Legacy, kept so stored values load and PUT keeps accepting them. skipPermissions and autoReview are no longer read
     # by any gate (migrate_mode folds an existing install into "auto"); unattendedApprovals is read only in manual mode.
@@ -62,12 +58,6 @@ DEFAULTS: dict[str, Any] = {
     # Legacy: a list of folders the file tools once needed a grant for. The file tools now reach the whole Mac, so nothing
     # reads it for scope; it is still stored and returned so an older client keeps working.
     "workspaceRoots": [],
-    # The Linux sandbox's network: "off" (none), "proxy" (an internal-only network whose one way out is an allowlisting
-    # proxy: package registries plus shellAllowedDomains), "open" (every result taints). A stored true reads as "open".
-    "sandboxNetwork": "off",
-    # The sandbox_* containers: the image a fresh one starts from, and the CLI that drives them.
-    "sandboxImage": DEFAULT_IMAGE,
-    "sandboxRuntime": "docker",
     # Host shell (shell.py): a networked shell run taints the reply, whatever it prints may be third-party text.
     "shellNetwork": False,
     # While shellNetwork is off, outbound connections go through a local allowlisting proxy (egress.py).
@@ -88,34 +78,33 @@ DEFAULTS: dict[str, Any] = {
     # "off". Private addresses, the MCP taint rule, deny rules and permissionMode are unchanged. migration 25 turns it on for
     # an install that already has user data; a fresh install starts off.
     "allowAllConnections": False,
+    # Off by default. A reply that has read content from outside Grain (a web page, mail, a connector) otherwise asks
+    # before a shell command that could reach the network and before a write outside the desk workspace, because what
+    # it read could be steering it. On, exactly those two taint-forced cards are lifted: an unsandboxed shell command,
+    # credential stores, Grain's own data folder and app, the destructive-command floor, PROMPT_WRITES, ask_locked
+    # tools, the network-tool taint rule and cancel_send all still ask, and every deny rule and off mode still wins.
+    "trustExternalContent": False,
     # Coding goes to a coding agent (coding_route.py): Grain's own file writers and file-changing shell commands are refused
     # inside a git work tree under every permission mode, and the agents are told to use coding_session_start. codingAgent is
-    # the agent they are told to start: "opencode", "claude", or "any" (the agent picks). A code default: nothing to migrate.
+    # the agent they are told to start: "opencode", "claude", "pi", or "any" (the agent picks). A code default: nothing to migrate.
     "codingRoute": True,
     "codingAgent": "any",
 }
 KEYS = frozenset(DEFAULTS)
-# An image reference as an argv word: no leading dash (it would read as a flag), no spaces or shell characters.
-IMAGE_REF = re.compile(r"^[a-z0-9][A-Za-z0-9._/:-]{0,254}(@sha256:[a-f0-9]{64})?$")
 HOST_LISTS = frozenset({"fetchAllowlist", "shellAllowedDomains", "browserAllowlist"})
-SANDBOX_RUNTIMES = ("docker", "podman", "nerdctl")
 CHOICES: dict[str, tuple[str, ...]] = {
     "permissionMode": ("auto", "manual", "allow_all"),
     "unattendedApprovals": ("ask", "deny"),
     "autoReview": ("off", "risky", "all-writes"),
-    "sandboxRuntime": SANDBOX_RUNTIMES,
-    "sandboxNetwork": ("off", "proxy", "open"),
     "docEditMode": ("review", "apply"),
-    "codingAgent": ("any", "opencode", "claude"),
+    "codingAgent": ("any", "opencode", "claude", "pi"),
 }
 CHOICE_ERRORS = {
     "permissionMode": "permissionMode must be 'auto', 'manual' or 'allow_all'",
     "unattendedApprovals": "unattendedApprovals must be 'ask' or 'deny'",
     "autoReview": "autoReview must be 'off', 'risky' or 'all-writes'",
-    "sandboxRuntime": f"sandboxRuntime must be one of {', '.join(SANDBOX_RUNTIMES)}",
-    "sandboxNetwork": "sandboxNetwork must be 'off', 'proxy' or 'open'",
     "docEditMode": "docEditMode must be 'review' or 'apply'",
-    "codingAgent": "codingAgent must be 'any', 'opencode' or 'claude'",
+    "codingAgent": "codingAgent must be 'any', 'opencode', 'claude' or 'pi'",
 }
 
 
@@ -239,8 +228,6 @@ def validate(key: str, v: Any, *, cap_modes: Callable[[dict[str, Any]], dict[str
             if h not in hosts:
                 hosts.append(h)
         return hosts
-    if key == "sandboxImage" and v and not IMAGE_REF.match(v):  # empty = the default image
-        raise ValueError("sandboxImage must be an image reference such as python:3.12-slim")
     if key == "workspaceRoots":
         if not all(isinstance(x, str) for x in v):
             raise ValueError("workspaceRoots must be a list of folders")

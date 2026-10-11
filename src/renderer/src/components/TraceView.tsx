@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Layers, Sparkles, Wrench, Wand2, Shrink, AlertCircle, ChevronRight } from 'lucide-react'
+import { Layers, Sparkles, Wrench, Wand2, Shrink, AlertCircle, ChevronRight } from '../icons'
 import { api } from '../lib/api'
 import type { Span, SpanKind } from '@shared/types'
 import { modelLabel } from '../lib/modelLabel'

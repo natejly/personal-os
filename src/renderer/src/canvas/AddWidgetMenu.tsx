@@ -1,5 +1,5 @@
 import { cloneElement, useCallback, useMemo, useState } from 'react'
-import { MessageSquarePlus, Plus, SquarePlus } from 'lucide-react'
+import { MessageSquarePlus, Plus, SquarePlus } from '../icons'
 import type { WidgetKind } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
@@ -141,7 +141,7 @@ export function AddWidgetButton(): JSX.Element {
     <>
       <button
         className="icon-btn ghost sm"
-        title={locked ? 'Space locked (⌃⌘L to unlock)' : 'Add widget'}
+        title={locked ? 'Canvas locked (⌃⌘L to unlock)' : 'Add widget'}
         disabled={!activeId || locked}
         aria-haspopup="menu"
         aria-expanded={!!at}

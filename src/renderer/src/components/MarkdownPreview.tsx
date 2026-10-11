@@ -6,7 +6,9 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
-import { Copy, Check } from 'lucide-react'
+import { Copy, Check } from '../icons'
+import { fileKind, baseName } from '../lib/fileKind'
+import { FILE_KIND_ICON } from './FileKindIcon'
 import { normalizeMathBlocks } from '../lib/mathBlocks'
 import { repairStreamingMarkdown } from '../lib/streamRepair'
 import { splitMarkdown, blockStartLine } from '../lib/splitMarkdown'
@@ -17,6 +19,9 @@ import MermaidBlock from './MermaidBlock'
 import HtmlBlock, { SvgBlock } from './HtmlBlock'
 import { fenceKind } from '../lib/htmlFence'
 import remarkWikilinks from '../features/notes/remarkWikilinks'
+import remarkFilePaths, { filePathOf } from '../lib/pathLinks'
+import { openPathLink } from '../lib/useChatFiles'
+import { ShowCtx } from './ShowButton'
 import remarkAi from '../features/notes/remarkAi'
 import { WIKI_HREF, titleKey } from '../features/notes/wikilinks'
 import { taskLineMap } from '../features/notes/tasks'
@@ -52,10 +57,28 @@ function CopyButton({ text, label = false }: { text: string; label?: boolean }):
  * (it carries the preload), and a remote <img> is an exfiltration channel, so it is downgraded to a link.
  */
 function ExternalLink({ href, children, ...rest }: React.AnchorHTMLAttributes<HTMLAnchorElement>): JSX.Element {
+  const file = filePathOf(href)
+  if (file !== null) return <FileLink path={file}>{children}</FileLink>
   const ok = !!href && /^https?:\/\//i.test(href)
   return (
     <a {...rest} href={ok ? href : undefined} title={href} rel="noreferrer noopener"
       onClick={(e) => { e.preventDefault(); if (ok) window.open(href, '_blank', 'noopener') }}>{children}</a>
+  )
+}
+
+/**
+ * A path a chat reply names, as a chip: type icon + file name, opening in the side panel. Only paths the reply
+ * itself names reach here (remarkFilePaths wraps them, and the link text is the path), so the chip stands in
+ * for the text. Outside a chat there is no panel to open it in, so the text stays as is.
+ */
+function FileLink({ path, children }: { path: string; children?: React.ReactNode }): JSX.Element {
+  const chat = useContext(ShowCtx)
+  if (!chat) return <>{children}</>
+  const Icon = FILE_KIND_ICON[fileKind(path)]
+  return (
+    <button type="button" className="file-chip inline" title={path} onClick={() => { void openPathLink(path, chat) }}>
+      <Icon size={13} /><span>{baseName(path)}</span>
+    </button>
   )
 }
 
@@ -131,7 +154,7 @@ function Table({ node, ...props }: React.TableHTMLAttributes<HTMLTableElement> &
 /** The one component map every plain render shares; its identity never changes. */
 export const MD_COMPONENTS: Components = { ...SAFE_MD, pre: Pre as Components['pre'], table: Table as Components['table'] }
 
-const REMARK = [remarkGfm, remarkMath, remarkAi]
+const REMARK = [remarkGfm, remarkMath, remarkAi, remarkFilePaths]
 // `strict: false` keeps an unknown macro as red source text instead of throwing the whole render away,
 // which matters while someone is mid-formula and the markup is briefly invalid.
 const REHYPE = [[rehypeKatex, { strict: false, throwOnError: false }], rehypeHighlight] as never[]

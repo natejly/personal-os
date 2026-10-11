@@ -2,8 +2,8 @@ import {
   BarChart3, BookOpen, Bot, Box, Brain, Briefcase, Calendar, Cloud, Code, CreditCard, Database, FileText, Figma, Folder,
   Github, Gitlab, Globe, HardDrive, Image, Link, Mail, MapPin, MessageSquare, Palette, Plug, Search, Server, Slack,
   Terminal, Wrench, Activity, Bug, ChartLine, CheckSquare, Chrome, Clock, GitBranch, Kanban, Layers, LayoutDashboard,
-  ListChecks, Notebook, Receipt, Sparkles, Table, Triangle, Wallet, Zap, type LucideIcon
-} from 'lucide-react'
+  ListChecks, Notebook, Receipt, Sparkles, Table, Triangle, Wallet, Zap, type Icon
+} from '../../icons'
 import type { McpCatalogEntry, McpRegistryResult, McpServer } from '@shared/types'
 
 /** A connector that is coming up gets polled at this interval; one that has settled does not. */
@@ -12,8 +12,8 @@ export const POLL_MS = 2500
 /** Registry hits asked for per search. */
 export const REGISTRY_LIMIT = 20
 
-/** Every icon a catalog entry may name, by its lucide kebab-case name. An explicit map keeps the bundle small. */
-const ICONS: Record<string, LucideIcon> = {
+/** Every icon a catalog entry may name, by its kebab-case name. An explicit map keeps the bundle small. */
+const ICONS: Record<string, Icon> = {
   'bar-chart': BarChart3, 'bar-chart-3': BarChart3, 'book-open': BookOpen, bot: Bot, box: Box, brain: Brain,
   briefcase: Briefcase, calendar: Calendar, cloud: Cloud, code: Code, 'credit-card': CreditCard, database: Database,
   'file-text': FileText, figma: Figma, folder: Folder, github: Github, gitlab: Gitlab, globe: Globe,
@@ -24,7 +24,7 @@ const ICONS: Record<string, LucideIcon> = {
   notebook: Notebook, receipt: Receipt, sparkles: Sparkles, table: Table, triangle: Triangle, wallet: Wallet, zap: Zap
 }
 
-export const iconFor = (name: string | undefined): LucideIcon => ICONS[name ?? ''] ?? Plug
+export const iconFor = (name: string | undefined): Icon => ICONS[name ?? ''] ?? Plug
 
 /** Case-insensitive match on name, description, publisher and category; `category` '' or 'All' is no filter. */
 export function filterCatalog(entries: McpCatalogEntry[], query: string, category: string): McpCatalogEntry[] {

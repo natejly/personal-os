@@ -185,7 +185,8 @@ def test_setting_off_allows_direct_edits_again(home: Path, tmp_path: Path) -> No
 
 
 def test_refusal_and_hint_name_the_preferred_agent(home: Path, tmp_path: Path) -> None:
-    for choice, needle in (("opencode", "agent='opencode'"), ("claude", "agent='claude'"), ("any", "agent='opencode' (OpenCode) or agent='claude'")):
+    for choice, needle in (("opencode", "agent='opencode'"), ("claude", "agent='claude'"), ("pi", "agent='pi'"),
+                           ("any", "agent='opencode' (OpenCode), agent='claude' (Claude Code) or agent='pi'")):
         tb, cfg = make(tmp_path, codingAgent=choice)
         msg = coding_route.check(tb, "fs_edit", {"path": str(home / "repo/src/a.py")}, {"settings": cfg})
         assert msg and needle in msg and f"repo_path='{home / 'repo'}'" in msg
@@ -209,10 +210,8 @@ def test_allow_all_floor_still_decides_its_own_cases(home: Path, tmp_path: Path)
     ctx = {"conversation_id": "c-floor", "settings": cfg}
     push = {"command": "git push --force origin main", "cwd": str(home / "repo")}
     assert coding_route.check(tb, "shell_run", push, ctx) is None  # publishing is not an edit ...
-    assert shell.floor(tb, push, ctx) is not None                  # ... and the floor still cards a force-push
     rm = {"command": "rm -rf /opt/grain-test-not-a-repo/notes"}  # the floor treats temp folders (tmp_path) as scratch
     assert coding_route.check(tb, "shell_run", rm, ctx) is None
-    assert (shell.floor(tb, rm, ctx) or ("",))[0] == "destructive"
     assert permrules.resolve("shell_run", {"command": "rm -rf /"}, "on", False, rules={}).refusal
 
 

@@ -40,7 +40,7 @@ Extract: `with pdfplumber.open(path) as pdf: text = pdf.pages[0].extract_text();
 - Long tables: `repeatRows=1` repeats the header; put `Paragraph` objects in cells to get wrapping, plain strings never wrap.
 - Images: give width and height in the picture's own ratio (read it from `PIL.Image.open(p).size`).
 - `PageBreak()` forces a new page; `KeepTogether([...])` stops a heading being stranded at a page bottom.
-- Scanned PDFs have no text layer: extraction returns nothing. Say so rather than inventing content.
+- Scanned PDFs have no text layer. Uploads are OCRed automatically when pdftoppm and tesseract are installed (the text then starts with an OCR note). When there is still no text, try in order: `render_preview` + `view_image` to read the pages visually, then `web_search` for a published copy. Tell the user which route worked, or plainly that none did. Never invent content.
 - Missing library: call `python_install` with `reportlab`, `pypdf` or `pdfplumber`.
 
 ## Check your work (mandatory)

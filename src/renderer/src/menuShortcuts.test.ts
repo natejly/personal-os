@@ -229,15 +229,15 @@ test("the doc editor's chords are not menu accelerators, which would swallow the
   }
 })
 
-test('⌘0…⌘n are contiguous, each used once, each a distinct target', async () => {
+test('⌘1…⌘n are contiguous, each used once, each a distinct target', async () => {
   const { SHORTCUTS } = await import('@shared/shortcuts')
   const rows = SHORTCUTS.flatMap((s) => {
     const d = /^CmdOrCtrl\+(\d)$/.exec(s.keys)
     return d && s.action ? [[Number(d[1]), s.action] as const] : []
   })
-  assert.equal(rows.length, 7, 'Today, Chats, Todos, Calendar, Files, Mail, Memory')
+  assert.equal(rows.length, 6, 'Chats, Todos, Calendar, Files, Mail, Memory')
   const digits = rows.map(([d]) => d).sort((a, b) => a - b)
-  assert.deepEqual(digits, digits.map((_, i) => i), 'no gaps, no repeats')
+  assert.deepEqual(digits, digits.map((_, i) => i + 1), 'no gaps, no repeats')
   assert.equal(new Set(rows.map(([, a]) => a)).size, rows.length, 'no two digits open the same thing')
   assert.ok(!rows.some(([, a]) => a === 'view:graph' || a === 'view:documents'))
 })

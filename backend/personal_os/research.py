@@ -148,10 +148,9 @@ def register(tb: Any) -> None:
 
     tb.specs["deep_research"] = ToolSpec(
         "deep_research",
-        "Answer a question that needs many searches: plans sub-questions, runs several read-only researchers in parallel, and returns one "
-        "answer with [n] source numbers (keep them in your reply). Use it for broad or contested questions; use web_search for a quick fact. "
-        "depth 'normal' runs up to 3 researchers, 'deep' up to 6 plus a second pass for gaps and costs more. focus narrows the angle.",
+        "Answer a question that needs many searches: parallel read-only researchers, one answer with [n] source numbers (keep them in your reply). "
+        "For broad or contested questions; web_search for a quick fact. depth 'normal' = up to 3 researchers, 'deep' = up to 6 plus a gap pass, costs more.",
         _obj({"question": {"type": "string"}, "depth": {"type": "string", "enum": ["normal", "deep"], "default": "normal"},
-              "focus": {"type": "string", "description": "Optional angle or constraint"}}, ["question"]),
+              "focus": {"type": "string", "description": "Angle or constraint"}}, ["question"]),
         deep_research, "research", "network", taints=True,
         examples=[{"question": "What changed in Python 3.14 packaging?"}, {"question": "State of solid-state batteries in 2026", "depth": "deep"}])

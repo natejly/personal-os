@@ -1,4 +1,4 @@
-import { Smile } from 'lucide-react'
+import { Smile } from '../../icons'
 import { NEEDS_YOU } from '../../../../shared/types'
 import { useStore } from '../../store'
 import type { WidgetDef, WidgetProps } from '../registry'

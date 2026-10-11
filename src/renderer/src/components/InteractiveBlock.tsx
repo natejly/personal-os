@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ResponsiveContainer } from 'recharts'
-import { SlidersHorizontal, AlertCircle, RotateCcw } from 'lucide-react'
+import { SlidersHorizontal, AlertCircle, RotateCcw } from '../icons'
 import { Chart, ChartTools, DataTable, type ChartView, fmtNum, TYPES, type ChartType, type Row, type Series, type Spec } from './ChartBlock'
 import { tryCompile, type Compiled, type Scope, type Value } from '../lib/expr'
 

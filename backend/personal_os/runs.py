@@ -161,6 +161,16 @@ class RunStore:
         self._exec(f"DELETE FROM run_events WHERE run_id IN ({old})", (job_id, job_id, keep))
         self._exec(f"DELETE FROM agent_runs WHERE run_id IN ({old})", (job_id, job_id, keep))
 
+    def delete(self, run_id: str) -> bool:
+        """Erase one run and the journal rows the Agent Inbox reads from it. agent_runs cascades to run_events,
+        approvals and proposals (db.py); inbox_seen has no foreign key, so it is cleared here. Conversation and
+        message history are not touched: a run is a journal row, not the chat it ran in."""
+        self._exec("DELETE FROM inbox_seen WHERE run_id=?", (run_id,))
+        return self._exec("DELETE FROM agent_runs WHERE run_id=?", (run_id,)) > 0
+
+    def set_archived(self, run_id: str, on: bool) -> bool:
+        return self._exec("UPDATE agent_runs SET archived_at=? WHERE run_id=?", (time.time() if on else None, run_id)) > 0
+
     def children(self, run_id: str) -> list[dict[str, Any]]:
         """Runs started by `run_id` (subagents), oldest first."""
         return [self._run_row(r) for r in self._all("SELECT * FROM agent_runs WHERE parent_run_id=? ORDER BY started_at, rowid", (run_id,))]  # type: ignore[misc]
@@ -222,9 +232,9 @@ class RunStore:
         sql = "SELECT * FROM agent_runs" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY started_at DESC LIMIT ?"
         return [r for r in (self._run_row(x) for x in self._all(sql, (*params, max(1, min(int(limit), 500))))) if r]
 
-    def of_kind(self, kind: str, since: float = 0.0, limit: int = 50) -> list[dict[str, Any]]:
-        """Runs of one kind (e.g. 'job'), newest first. What the Agent Inbox's history is built from."""
-        rows = self._all("SELECT * FROM agent_runs WHERE kind=? AND started_at>=? ORDER BY started_at DESC LIMIT ?",
+    def of_kind(self, kind: str, since: float = 0.0, limit: int = 50, archived: bool = False) -> list[dict[str, Any]]:
+        """Runs of one kind (e.g. 'job'), newest first. What the Agent Inbox's history is built from; archived ones only when asked."""
+        rows = self._all(f"SELECT * FROM agent_runs WHERE kind=? AND started_at>=? AND archived_at IS {'NOT ' if archived else ''}NULL ORDER BY started_at DESC LIMIT ?",
                          (kind, since, max(1, min(int(limit), 500))))
         return [r for r in (self._run_row(x) for x in rows) if r]
 

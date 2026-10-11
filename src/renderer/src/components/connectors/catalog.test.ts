@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { McpCatalogEntry, McpRegistryResult } from '@shared/types'
 import { connectorName, detectionLabel, fieldsValid, filterCatalog, iconFor, initialValues, oneClick, registryDraft, runtimeWarning, tokenize } from './catalog'
-import { Plug } from 'lucide-react'
+import { Plug } from '../../icons'
 
 const entry = (over: Partial<McpCatalogEntry>): McpCatalogEntry => ({
   id: 'x', name: 'X', description: '', category: 'Developer', icon: 'plug', publisher: 'Acme', official: false, docs: '',
@@ -66,7 +66,7 @@ test('registryDraft pre-fills a local hit with empty secret keys and a remote hi
   assert.equal(remote.argv, '')
 })
 
-test('every icon the bundled catalog names has a real lucide component, not the fallback', async () => {
+test('every icon the bundled catalog names has a real icon component, not the fallback', async () => {
   const { readFileSync } = await import('node:fs')
   const doc = JSON.parse(readFileSync('backend/personal_os/data/mcp_catalog.json', 'utf8')) as { entries: { id: string; icon: string }[] }
   const missing = doc.entries.filter((e) => iconFor(e.icon) === Plug).map((e) => `${e.id}:${e.icon}`)

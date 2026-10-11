@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, RotateCcw } from 'lucide-react'
+import { Check, RotateCcw } from '../icons'
 import { DEFAULT_EFFORT, type Effort } from '@shared/types'
 import { chatModelIds, modelChoices, modelLabel, showsEffort } from '../lib/modelLabel'
 import { useStore } from '../store'
@@ -30,8 +30,8 @@ interface ModelMenuProps {
 }
 
 /**
- * Model, reasoning level, and fast mode. The model list shows the model name, not the
- * provider path. Reasoning is the dropdown beside the model; Edit holds Fast and Restore defaults.
+ * Model, effort, and fast mode. The model list shows the model name, not the
+ * provider path. Effort is the dropdown beside the model; Edit holds Fast and Restore defaults.
  */
 export default function ModelMenu({ model, effort, fast, onChange, placement = 'up' }: ModelMenuProps): JSX.Element {
   const models = useStore((s) => s.models)
@@ -182,14 +182,13 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
       >
         <span className="model-menu-name">{shown}</span>
         {suffix && <span className="model-menu-suffix">{suffix}</span>}
-        <ChevronDown size={12} className="model-menu-chevron" />
       </button>
       {effortShown && <label className="composer-ctl model-menu-effort">
-        <span>Reasoning</span>
+        <span>Effort</span>
         <select
           className="chat-control"
-          aria-label="Reasoning level"
-          title="Reasoning level"
+          aria-label="Effort level"
+          title="Effort level"
           value={effort}
           onChange={(e) => onChange({ effort: e.target.value as Effort })}
         >

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ChevronRight, X, Trash2 } from 'lucide-react'
+import { ChevronRight, X, Trash2 } from '../icons'
 import { useStore } from '../store'
 import { useModal } from '../lib/useModal'
 import { ToolOverrides } from './ToolPermissions'

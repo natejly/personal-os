@@ -1,4 +1,4 @@
-import { Calendar, Mail, Library } from 'lucide-react'
+import { Calendar, Mail, Library } from '../icons'
 import type { WidgetKind } from '@shared/types'
 import type { View } from '../store'
 import { MODULES } from './registry'

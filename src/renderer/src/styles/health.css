@@ -112,14 +112,6 @@
 .hl-new > input[type=text] { flex: 1 1 220px; }
 .hl-new > .hl-in.unit { height: 38px; }
 
-/* ---------- Today card ---------- */
-.hl-card { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 2px 16px; }
-.hl-card li { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; padding: 3px 0; min-width: 0; }
-.hl-card-label { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hl-card-val { color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.hl-card-val.none { color: var(--text-faint); }
-.hl-card-met { margin-left: 4px; color: var(--accent); }
-
 /* ---------- Connected services ---------- */
 .hl-source { padding: 8px 2px; border-bottom: 1px solid var(--border); }
 .hl-source-head { display: flex; align-items: center; gap: 8px; min-height: 30px; }

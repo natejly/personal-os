@@ -1,4 +1,4 @@
-import type { SandboxInfo, ShellJobInfo } from '@shared/types'
+import type { ShellJobInfo } from '@shared/types'
 
 /** Still holding a process: a job this backend runs, or one an earlier run of the app left behind. */
 export const jobIsLive = (j: Pick<ShellJobInfo, 'status'>): boolean => j.status === 'running' || j.status === 'orphaned'
@@ -19,11 +19,3 @@ export function jobStateLabel(j: Pick<ShellJobInfo, 'status' | 'exit_code'>): st
   if (j.status === 'timed_out') return 'timed out'
   return j.status
 }
-
-/** What a sandbox row is called: its chat's title, else the chat id, else the container (made before labels). */
-export function sandboxTitle(s: Pick<SandboxInfo, 'title' | 'conversation_id' | 'name'>): string {
-  return s.title || s.conversation_id || `${s.name} (unknown chat)`
-}
-
-/** The key the reset route takes: the conversation when known, the container name otherwise. */
-export const sandboxKey = (s: Pick<SandboxInfo, 'conversation_id' | 'name'>): string => s.conversation_id || s.name

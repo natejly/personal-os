@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { isClear } from '../lib/workers'
-import { Pencil, Sparkles, SlidersHorizontal, ArrowDown, PanelRight } from 'lucide-react'
+import { isBranchNote, isClear } from '../lib/workers'
+import BranchNote from '../components/BranchNote'
+import { Pencil, Sparkles, ArrowDown, PanelRight } from '../icons'
 import { useStore, useProject, useChatFace, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
 import MessageView, { PendingUserMessage, Thinking } from './Message'
 import RegenRow from './RegenRow'
@@ -10,8 +11,8 @@ import ChatControls from './ChatControls'
 import ContextDrawer from './ContextDrawer'
 import ResizeHandle from './ResizeHandle'
 import WorkersPanel from './WorkersPanel'
+import ProgressCard from './ProgressCard'
 import ShowPanel from './ShowPanel'
-import SendToSpace from './SendToSpace'
 import ChatFilesButton from './ChatFilesPanel'
 import { fenced, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
@@ -25,6 +26,7 @@ import { chatBrowserSession, deskBrowserSession, latestBrowserMessage } from '..
 import { DeskInline } from './DeskStrip'
 import DeskPanel from './DeskPanel'
 import Face from './Face'
+import DailyRecap from './DailyRecap'
 import TelegramIcon from './TelegramIcon'
 import { chatLabel, isTelegramChat } from '../lib/chatRows'
 
@@ -144,16 +146,12 @@ export default function ChatView({ conversationId }: { conversationId?: string }
         </div>
         <div className="no-drag header-right">
           {conversationId && <ChatFilesButton conversationId={convo?.id} />}
-          <SendToSpace items={[{ kind: 'chat', refId: convo?.id }]} disabled={!convo?.id} />
-          <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌃⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>
         </div>
         {/* The full-window chat gives the last title-bar slot to its own workspace panel; ⌘I still opens the quick chat. */}
-        {conversationId ? <AppSwitcher /> : (
-          <div className="app-switcher no-drag">
-            <button className={`icon-btn${deskPanel ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={deskPanel} disabled={!convo?.id}
-              onClick={() => setDeskPanel((o) => !o)}><PanelRight size={15} /></button>
-          </div>
-        )}
+        <AppSwitcher last={conversationId ? undefined : (
+          <button className={`icon-btn${deskPanel || contextOpen ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={deskPanel || contextOpen} disabled={!convo?.id}
+            onClick={() => { if (contextOpen) toggleContext(); setDeskPanel(!(deskPanel || contextOpen)) }}><PanelRight size={15} /></button>
+        )} />
       </header>
 
       <div className="chat-body">
@@ -165,6 +163,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
               <div className="empty-state">
                 <h1>{greeting()}</h1>
                 {project && <p>New chat in {project.name}</p>}
+                {!conversationId && !project && <DailyRecap />}
                 {showFirstPrompts && (
                   <div className="ob-first-prompts" role="group" aria-label="Things to try">
                     {firstPrompts(pimOn).map((t) => <button key={t} className="ghost-btn" onClick={() => { setFirstPrompts(false); void send(t, conversationId) }}>{t}</button>)}
@@ -176,7 +175,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {msgs.map((m, i) => (
                   <Fragment key={m.id}>
                     {m.created_at > 0 && (i === 0 || dayKey(m.created_at) !== dayKey(msgs[i - 1].created_at)) && <div className="day-divider" role="separator">{dayLabel(m.created_at)}</div>}
-                    {isClear(m) ? <div className="day-divider" role="separator">Context cleared</div> : <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} resendable={!isStreamingHere && !isDeskOrJob} showContextChips
+                    {isClear(m) ? <div className="day-divider" role="separator">Context cleared</div> : isBranchNote(m) ? <BranchNote content={m.content} /> : <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} resendable={!isStreamingHere && !isDeskOrJob} showContextChips
                       branchable={m.created_at > 0 && !isDeskOrJob}
                       browserSession={m.id === watchId ? (deskId ? deskBrowserSession(deskId) : chatBrowserSession(m.conversation_id)) : undefined} />}
                   </Fragment>
@@ -199,13 +198,14 @@ export default function ChatView({ conversationId }: { conversationId?: string }
             </button>
           )}
           <WorkersPanel conversationId={conversationId} />
+          <ProgressCard conversationId={conversationId} desk={desk} />
           <Composer conversationId={conversationId} footer={<ChatControls conversationId={conversationId} />} />
         </div>
         {showing && <ShowPanel conversationId={showKey} />}
-        {convo?.id && !conversationId && deskPanel && <DeskPanel key={convo.id} desk={desk} conversationId={convo.id} onClose={() => setDeskPanel(false)} />}
-        {/* The drawer scrolls, so its handle sits on the chat body, pinned to the drawer's left edge. */}
-        {contextOpen && <ResizeHandle id="context-drawer-w" defaultSize={340} min={260} max={640} grows="left" onCollapse={toggleContext} label="Context panel width" className="ctx-edge" />}
-        {contextOpen && <ContextDrawer conversationId={conversationId} />}
+        {/* Full-window: Context is a tab of the side panel (a context request opens it). Quick chats keep the drawer, whose handle sits on the chat body, pinned to the drawer's left edge. */}
+        {!conversationId && (deskPanel || contextOpen) && <DeskPanel key={convo?.id ?? ''} desk={desk} conversationId={convo?.id} onClose={() => { setDeskPanel(false); if (contextOpen) toggleContext() }} />}
+        {conversationId && contextOpen && <ResizeHandle id="context-drawer-w" defaultSize={340} min={260} max={640} grows="left" onCollapse={toggleContext} label="Context panel width" className="ctx-edge" />}
+        {conversationId && contextOpen && <ContextDrawer conversationId={conversationId} />}
       </div>
     </main>
   )

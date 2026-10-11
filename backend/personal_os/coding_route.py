@@ -1,4 +1,4 @@
-"""Coding goes to OpenCode or Claude Code: Grain's own agents plan, brief, delegate and verify; they do not hand-edit repos.
+"""Coding goes to OpenCode, Claude Code or pi: Grain's own agents plan, brief, delegate and verify; they do not hand-edit repos.
 
 While the `codingRoute` permission setting is on (the default), a call from any Grain agent (chat, desk, worker, subagent,
 workflow step, a run_python tool bridge) that would change files inside a git work tree is refused, under every
@@ -44,7 +44,7 @@ from . import permissions, permrules
 
 log = logging.getLogger(__name__)
 
-AGENT_NAMES = {"opencode": "OpenCode", "claude": "Claude Code"}
+AGENT_NAMES = {"opencode": "OpenCode", "claude": "Claude Code", "pi": "pi"}
 
 # Commands whose operands are all changed; and the ones whose last operand is the one written.
 ALL_OPERANDS = {"rm", "rmdir", "mv", "touch", "mkdir", "chmod", "chown", "tee", "truncate", "unlink", "shred", "patch"}
@@ -88,7 +88,7 @@ def enabled(cfg: dict[str, Any] | None) -> bool:
 
 
 def agent_choice(cfg: dict[str, Any] | None) -> str:
-    """'opencode' | 'claude' | 'any'."""
+    """'opencode' | 'claude' | 'pi' | 'any'."""
     v = permissions.get(cfg or {}, "codingAgent")
     return v if v in AGENT_NAMES else "any"
 
@@ -96,7 +96,7 @@ def agent_choice(cfg: dict[str, Any] | None) -> str:
 def _agent_phrase(cfg: dict[str, Any] | None) -> str:
     a = agent_choice(cfg)
     return (f"agent='{a}' ({AGENT_NAMES[a]}, the user's preferred coding agent)" if a != "any"
-            else "agent='opencode' (OpenCode) or agent='claude' (Claude Code), whichever suits the task")
+            else "agent='opencode' (OpenCode), agent='claude' (Claude Code) or agent='pi' (pi), whichever suits the task")
 
 
 def hint(cfg: dict[str, Any] | None) -> str:
@@ -104,15 +104,13 @@ def hint(cfg: dict[str, Any] | None) -> str:
     if not enabled(cfg):
         return ""
     return ("## Coding goes to a coding agent\n"
-            "Any coding task (writing or changing code, config or tests in a git repository) is done by a coding agent, never by "
-            "you editing files or running file-changing commands in the repo; those calls are refused. You plan, delegate and "
-            f"verify: find the repo and what the change touches, then call coding_session_start with {_agent_phrase(cfg)}, the "
-            "absolute repo_path, new_worktree=true, and a self-contained brief (goal, files and context, constraints, how to "
-            "test, what to report), because the coding agent cannot see this conversation. Follow it with coding_session_status, "
-            "then review the result yourself with coding_session_diff and by running the tests, typecheck or build in its "
-            "worktree, and send a follow-up with coding_session_send if something is wrong. opencode_run (OpenCode in the "
-            "foreground) is also allowed for a small, quick change. Reading, searching and running tests in a repo, and "
-            "git push / gh pr to publish a session's branch, stay yours.")
+            "Code, config or test changes in a git repository are done by a coding agent; your own file edits and "
+            "file-changing commands there are refused. Call coding_session_start with "
+            f"{_agent_phrase(cfg)}, the absolute repo_path, new_worktree=true and a self-contained brief (goal, files, "
+            "constraints, how to test, what to report); the agent cannot see this conversation. Track it with "
+            "coding_session_wait (not repeated status polls) until it has finished, then review coding_session_diff and run the tests in its worktree; fix via "
+            "coding_session_send. Reading, searching, "
+            "running tests and git push / gh pr stay yours.")
 
 
 def refusal_text(cfg: dict[str, Any] | None, what: str, root: str) -> str:

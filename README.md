@@ -10,22 +10,20 @@ instructions, files, memories and graph.
 
 ```
 ┌──────────────┬──────────────────────────────────────┬──────────────┐
-│ + New chat   │  Today · Monday, September 29        │  Context     │
-│ Today      2 │  ┌ Calendar ─────┐ ┌ Lists ────────┐ │  ☑ Memory    │
-│ Files        │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
-│              │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Files     │
-│ Library      │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
-│ SPACES     + │  ┌ Unread mail ──┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
-│ ▦ Space 1    │  │ Alice: Q4 …   │ │ ■ Grain       │ │   web search │
-│ PROJECTS   + │  └───────────────┘ └───────────────┘ │   run python │
-│ ■ Grain      │                                      │   gmail send │
-│ RECENTS      │  [Brief me]                          │  Last reply… │
-│ · …          │                                      │              │
-│              │                                      │              │
+│ + New chat   │            Good afternoon.           │  Context     │
+│ Files        │  ┌ Daily recap ───────────────────┐  │  ☑ Memory    │
+│              │  │ Two meetings, one deadline …   │  │  ☑ Graph     │
+│ Library      │  └────────────────────────────────┘  │  ☑ Files     │
+│ SPACES     + │                                      │  ☑ Auto-learn│
+│ ▦ Space 1    │  [ Message …                      ]  │  ☑ Tools  ▾  │
+│ PROJECTS   + │                                      │   web search │
+│ ■ Grain      │                                      │   run python │
+│ RECENTS      │                                      │   gmail send │
+│ · …          │                                      │  Last reply… │
 └──────────────┴──────────────────────────────────────┴──────────────┘
 ```
 
-Lists, Calendar, Mail and Health are sidebar rows under Today and Files.
+Lists, Calendar, Mail and Health are sidebar rows under Files. A new chat shows the daily recap under its greeting.
 Settings → Appearance → Sidebar turns any of them off (it takes effect at once). A **Quick chat** button at the top right of
 every view opens the ⌘I panel. Bars are 40 px and
 sidebar rows 26 px, so more fits on screen.
@@ -77,7 +75,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    or right-click the plane to add a chat, lists, calendar, doc, memory, graph,
    uploads, recap, project, usage, face or crew window; drag a chat, a
    Files note or a sidebar row onto it. ⌘⌃O pops a window out of the Space into
-   its own OS window. Save a layout as a preset from the Spaces bar, and lock a
+   its own OS window. Lock a
    Space with ⌃⌘L so it cannot be rearranged. See [docs/spaces.md](docs/spaces.md).
 7. **Agents and crews.** Library → Agents lists roles. Describe one and the
    model drafts its label, hue, skills, boundaries and prompt; edit it, then
@@ -189,7 +187,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
     A `/` menu, `[[wikilinks]]` and backlinks, an outline, templates and a
     daily note. Export menu → *Export as PDF…* typesets the note (maths,
     code, tables) for A4 or Letter, or files the PDF straight into Uploads. See [docs/docs-editor.md](docs/docs-editor.md).
-  - *Uploads* — any file up to 50 MB (⌘U). Text, PDF and Word are read; other
+  - *Uploads* — any file up to 100 MB (⌘U). Text, PDF and Word are read; other
     files are kept by name. Chunked, indexed, and the best excerpts pulled
     into replies.
   - *Artifacts* — everything the assistant made in any chat (documents, data,
@@ -203,7 +201,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   windows sit side by side. Drag anything from the sidebar, or a Files note
   (it becomes its own editable `doc` window), or right-click to add. A window can
   pop out into its own OS window, pinned on top and see-through, and one
-  global shortcut gathers them all. Save a space as a preset, lock it so
+  global shortcut gathers them all. Lock a space so
   neither you nor the assistant can rearrange it, and let the assistant add
   windows with the `space_*` and `widget_*` tools. See
   [docs/spaces.md](docs/spaces.md).
@@ -232,9 +230,9 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   Turning autonomy off detaches the desk and the chat answers as a plain chat again; the workspace is kept.
   Another chat can also hand work to a desk (`desk_start`) along with the docs it needs; when the desk
   finishes, fails or waits for review, its report is posted back into that chat.
-  A desk that needs you also shows up in the Agent inbox on Today. See [docs/cowork-design.md](docs/cowork-design.md).
-- **Agent inbox.** Everything agents left for you, in one list on Today, with the
-  total on the sidebar's Today row: approval cards from any chat, desks waiting on
+  A desk that needs you also shows up in the Agent inbox behind the title-bar Inbox icon. See [docs/cowork-design.md](docs/cowork-design.md).
+- **Agent inbox.** Everything agents left for you, in one list behind the title-bar Inbox icon (it opens by
+  itself while something is unread): approval cards from any chat, desks waiting on
   you, scheduled-job proposals and paused jobs, and a count with a link for every
   other review queue (proposed doc edits, skills and workflow runs
   to approve, memory tidy-ups). A plan or a desk's question
@@ -309,9 +307,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   cost. Settings shows spend, tokens, calls and frequency charts over 7/30/90
   days, broken down by model, kind and project. Prices come from your LiteLLM
   proxy and can be overridden per model.
-- **Today, lists, calendar.** A Today screen with a generated daily
-  recap, calendar, unread inbox, todos, projects and recently learned memories,
-  plus a one-click brief. Lists is a native todo view with a rail of lists and a
+- **Daily recap, lists, calendar.** A generated daily recap under the greeting of
+  every new chat. Lists is a native todo view with a rail of lists and a
   one-line add row, a week calendar (Google events
   plus due todos, double-click to add), and a board view of the same todos (columns by status or by list, drag and
   drop to move). Each older board is now a list, each card a todo with the column as its status.
@@ -319,7 +316,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 - **Scheduled tasks and the agent inbox.** Give the assistant work to do later:
   once at a time you pick ("tomorrow at 3pm, check whether they replied") or
   repeatedly on a cron expression ("every Friday at 17:00, write my weekly
-  review"). Schedule it from the Scheduled tab of the Agent inbox on Today, or just ask in a chat —
+  review"). Schedule it from the Scheduled tab of the Agent inbox, or just ask in a chat —
   the assistant has a `schedule_task` tool, which asks before it books anything.
   A scheduled run happens with nobody watching, so it is deliberately boxed in:
   it runs in a fresh chat, it can read and write inside
@@ -511,7 +508,7 @@ and its verdict is kept on the row.
 | ⌘N | New chat |
 | ⌘⇧N / ⌘⇧D | New note / today's note |
 | ⌘U | Upload file (Files → Uploads) |
-| ⌘0 … ⌘6 | Today / Chats / Lists / Calendar / Files / Mail / Settings → Memory |
+| ⌘1 … ⌘6 | Chats / Lists / Calendar / Files / Mail / Settings → Memory |
 | ⌘⇧M | Maths (while typing in a doc) |
 | ⌘⇧F | Search chats |
 | ⌘⇧[ / ⌘⇧] | Previous / next chat |
@@ -605,28 +602,6 @@ Diagrams use ```` ```mermaid ```` (loaded lazily, so it costs nothing until
 used). For anything those cannot express, `run_python` has numpy and matplotlib;
 figures saved with `plt.savefig()` come back as images attached to the tool
 call and are stored with the message.
-
-## MicroVM sandboxes
-
-Beyond one-shot `run_python`, each chat can get a persistent Linux sandbox the
-assistant drives with the `sandbox_*` tools: `sandbox_exec` (shell),
-`sandbox_write_file` / `sandbox_read_file` / `sandbox_list_files` (state in
-`/workspace` persists between calls), `sandbox_put_document` (copy an uploaded
-document's text in for editing or analysis) and `sandbox_reset`. Sandboxes are
-containers run through the `docker` CLI — on this machine's colima setup they
-execute inside a Virtualization.framework Linux VM, so the host filesystem is
-unreachable by construction. Containers are created with `--network none`
-(settings `sandboxNetwork: true` attaches the network, and networked results
-then taint the run exactly like `fetch_url`), capabilities dropped, and
-memory/cpu/pids caps; at most 5 exist at once (LRU-reaped). They are stopped on
-app shutdown and kept for `sandboxKeepDays` (default 14), so `/workspace` and
-installed packages survive a relaunch. `sandbox_checkpoint` / `sandbox_restore`
-snapshot the filesystem to a local image (3 per chat) and roll back to it;
-`sandbox_reset` also drops the checkpoints. `sandboxImage` (default `python:3.12-slim`) and
-`sandboxRuntime` (default `docker`) are configurable in settings. The tools
-only appear when the runtime is actually reachable. A container left idle for five
-minutes is stopped by a one-minute reaper (its files and installs survive and it
-restarts on next use) and every container is stopped at exit.
 
 ## Host shell
 
@@ -776,7 +751,7 @@ scripts/litellm.sh  LiteLLM proxy alone
 litellm.yaml        Model routing (Fireworks by default)
 docs/research/      Feature research, the roadmap, per-track source reports
 docs/docs-editor.md The Files editor: revisions, diffs and the doc_* tools
-docs/spaces.md      Spaces: windows, pop-outs, presets, lock, agent tools
+docs/spaces.md      Spaces: windows, pop-outs, lock, agent tools
 docs/agents.md      Agents: scope, boundaries, routines, agent page, @mentions
 docs/health.md      Health: metrics and connected services
 docs/voice-input.md Voice input: backends, settings, permissions

@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from personal_os import app as appmod  # noqa: E402
-from personal_os import llm, mac, sendfiles, tools  # noqa: E402
+from personal_os import llm, mac, sendfiles  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.docs import Docs  # noqa: E402
 from personal_os.repos import Documents  # noqa: E402

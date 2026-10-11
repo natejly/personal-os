@@ -70,7 +70,7 @@ from .cowork import (AUTO_RESUME_FROM, internal_kind, AUTONOMY, CHAT_HANDOFF, CO
                      OUTPUT_KINDS, checklist_items, mail_parts, origin_report, parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
 from .envs import WorkEnv
-from .microvm import SandboxError, Sandboxes
+from .microvm import DECLARED_LIMITS as LINUX_LIMITS, SandboxError, Sandboxes
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
                     normalize_plan, parse_plan_edits, plan_voided_by_taint, taint_expected)
 from .chat_files import ChatFiles, router as chat_files_router
@@ -85,6 +85,7 @@ from .presets import CanvasPresets
 from . import limits, resume
 from . import permissions, permrules
 from . import egress
+from . import sandbox
 from . import shell as shell_tool
 from . import ship as ship_mod
 from . import codingagents
@@ -4016,6 +4017,14 @@ def reset_sandbox(key: str) -> dict[str, Any]:
             raise HTTPException(400, "Not a sandbox name")
         return sandboxes.reset_name(key)
     return sandboxes.reset(key)
+
+
+@app.get("/sandbox/limits")
+def sandbox_limits() -> dict[str, Any]:
+    """What each sandbox blocks and how to ask for an exception, so a caller can plan around the walls before a call.
+    The same text rides on the run_python / shell_run / sandbox_exec tool descriptions; this route is for clients."""
+    return {"host": sandbox.declared_limits(), "linux": {**LINUX_LIMITS, "available": sandboxes.available()},
+            "shell_available": shell_tool.sandbox_available()}
 
 
 @app.post("/conversations/{id}/chat")

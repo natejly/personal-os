@@ -52,9 +52,9 @@ from .extract_text import safe_upload_name
 from . import scheduling, verify
 from .jobs import check_watch_dir, local_tz_name, parse_when, valid_cron, valid_tz
 from .learn import SELF_LABELS, SKILL_STATUSES, induce_skill, run_transcript
-from .microvm import SandboxError, Sandboxes, net_mode
+from .microvm import DECLARED_LIMITS as LINUX_LIMITS, SandboxError, Sandboxes, net_mode
 from .repos import Documents, Graph, Memories, is_isolated
-from .sandbox import WORKSPACE_REPORT_CAP, run_python
+from .sandbox import WORKSPACE_REPORT_CAP, blocked_note, declared_limits, limits_text, profile_failed, run_python
 
 ToolFn = Callable[..., Awaitable[Any]]
 log = logging.getLogger(__name__)
@@ -1541,6 +1541,16 @@ class Toolbox:
                 await _carry(bridged)
                 return bridged
             out = await asyncio.to_thread(run_python, code, secs, py, None, wroot, keep)
+            if isinstance(out, dict) and profile_failed(out.get("exit_code"), str(out.get("stderr") or "")):
+                # The profile never applied, so nothing ran: name the rule and the way to ask for an exception, with the
+                # OS message quoted, rather than handing back a bare exit code the model would retry forever.
+                detail = " ".join(str(out.get("stderr") or "").split())[:200]
+                return tool_error(f"run_python's OS sandbox refused to start ({detail}), so the script did not run.",
+                                  alternative="shell_run with unsandboxed=true asks the user to run it outside the profile; "
+                                              "sandbox_exec runs it in the Linux sandbox when a container runtime is available")
+            if isinstance(out, dict) and out.get("exit_code") not in (0, None):
+                if note := blocked_note(str(out.get("stderr") or ""), str(out.get("stdout") or "")):
+                    out["note"] = (str(out.get("note", "")) + " " + note).strip()  # stderr keeps the OS error verbatim
             await _carry(out)
             if wroot:
                 use = self.workspace.usage(desk_id)
@@ -1549,7 +1559,7 @@ class Toolbox:
                                       f"{self.workspace.max_files} files / {self.workspace.max_total_bytes} bytes. Nothing was deleted, "
                                       "but further writes will be refused until you desk_trash_file what you no longer need.")
             return out
-        R("run_python", ToolSpec("run_python", "Run a Python 3 script in an isolated sandbox and return stdout/stderr. No network, no subprocesses, and writes only inside the temp working directory (CPU/memory/time limits apply). In a cowork desk the script runs inside the desk workspace instead: it can read and write files there, and the result lists workspace_files it created or changed. Outside a desk, files the script saves under outputs/ (os.makedirs('outputs', exist_ok=True) first; up to 10 files of 25 MB) are kept in this chat's files, listed as outputs, for the user to download. The document and data libraries (pandas, openpyxl, python-docx, ...) are there once the work environment is set up; python_install adds more. Use for calculations, data wrangling, quick prototypes. Print what you want to see. numpy and matplotlib are installed: any figure saved with plt.savefig('name.png') is shown to the user inline (prefer a ```chart block for simple bar/line/pie charts of small data; use matplotlib for anything it can't express).",
+        R("run_python", ToolSpec("run_python", "Run a Python 3 script in an isolated sandbox and return stdout/stderr. No network, no subprocesses, and writes only inside the temp working directory (CPU/memory/time limits apply). In a cowork desk the script runs inside the desk workspace instead: it can read and write files there, and the result lists workspace_files it created or changed. Outside a desk, files the script saves under outputs/ (os.makedirs('outputs', exist_ok=True) first; up to 10 files of 25 MB) are kept in this chat's files, listed as outputs, for the user to download. The document and data libraries (pandas, openpyxl, python-docx, ...) are there once the work environment is set up; python_install adds more. Use for calculations, data wrangling, quick prototypes. Print what you want to see. numpy and matplotlib are installed: any figure saved with plt.savefig('name.png') is shown to the user inline (prefer a ```chart block for simple bar/line/pie charts of small data; use matplotlib for anything it can't express)." + limits_text(declared_limits()["run_python"]),
             _obj({"code": {"type": "string"}, "timeout": {"type": "integer", "default": 30},
                   "tools": {"type": "array", "items": {"type": "string"}, "description": "App tools the script may call as grain_tools.call(name, **args) (import grain_tools). Allowed: fs_glob, fs_grep, read_local_file, fs_edit, search_documents, web_search, fetch_url. Each call is gated like your own: off tools are refused, ask tools wait for the user. At most 300s per script; only what the script prints comes back."}},
                  ["code"]), run_python_tool, "code", "executes",
@@ -2445,7 +2455,7 @@ def _register_sandbox(self: Toolbox) -> None:
 
     async def sandbox_exec(ctx: dict[str, Any], command: str, timeout: int = 60) -> Any:
         return _mark(ctx, await run(sb.exec, ctx["conversation_id"], command, timeout), "sandbox_exec")
-    R("sandbox_exec", ToolSpec("sandbox_exec", "Run a shell command in this chat's persistent Linux sandbox (a VM-isolated container; the host machine is unreachable). State persists between calls: files you write, packages you install with apt/pip (only if network is enabled in Settings; it is off by default). Working directory is /workspace. Returns stdout/stderr/exit_code; output is capped, so pipe long output through head/tail/grep.",
+    R("sandbox_exec", ToolSpec("sandbox_exec", "Run a shell command in this chat's persistent Linux sandbox (a VM-isolated container; the host machine is unreachable). State persists between calls: files you write, packages you install with apt/pip (only if network is enabled in Settings; it is off by default). Working directory is /workspace. Returns stdout/stderr/exit_code; output is capped, so pipe long output through head/tail/grep." + limits_text(LINUX_LIMITS),
         _obj({"command": {"type": "string"}, "timeout": {"type": "integer", "default": 60, "description": "seconds, max 600"}}, ["command"]), sandbox_exec, "sandbox", "executes",
         examples=[{"command": "python3 - <<'EOF'\nprint(2**100)\nEOF"}, {"command": "ls -la && wc -l notes.md"},
                   {"command": "python3 analyze.py 2>&1 | tail -40", "timeout": 120}]))

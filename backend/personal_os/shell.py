@@ -801,7 +801,7 @@ def register(tb: Any) -> None:
             net_report(res)
             _note_shell_copies(ctx, since_ns)
             return res
-        if not unsandboxed and job.exit_code in (65, 71) and text.lstrip().startswith("sandbox-exec:"):
+        if not unsandboxed and sandbox.profile_failed(job.exit_code, text):
             jobs.sandbox_failed = True
             return tool_error(_scrub("The OS sandbox refused to start (" + text.strip()[:200] + "), so nothing was run."),
                               alternative="retry with unsandboxed=true, which asks the user for approval on every call")
@@ -820,6 +820,9 @@ def register(tb: Any) -> None:
                                "timed_out": job.status == "timed_out", "duration_s": round(time.time() - t0, 2), **base}
         if job.status == "timed_out":
             out["note"] = f"Killed after {timeout}s (the whole process group). Use background=true for long-running work."
+        if job.exit_code not in (0, None):
+            if note := sandbox.blocked_note(text):  # the OS error is already in output verbatim; this names the wall
+                out["note"] = (str(out.get("note", "")) + " " + note).strip()
         net_report(out)
         if cut:
             out["note"] = (out.get("note", "") + " " + hint(ctx)).strip()
@@ -840,8 +843,10 @@ def register(tb: Any) -> None:
                     "(on_timeout=background, the default; poll it with shell_poll) or, with on_timeout=kill, the whole process "
                     "group is killed. For anything long-running pass background=true, then shell_poll and shell_kill with the job_id. "
                     "Outside a desk, background jobs are stopped when the reply ends and a timeout always kills. "
-                    "unsandboxed=true escapes the sandbox and asks the user (except under Allow everything). Under Allow everything "
-                    "a command that deletes outside a temp folder, wipes a disk or force-pushes still asks.",
+                    "unsandboxed=true is only for a machine where the OS sandbox cannot start: it runs the one command outside "
+                    "the profile and asks the user (except under Allow everything). While the sandbox works it is refused. Under "
+                    "Allow everything a command that deletes outside a temp folder, wipes a disk or force-pushes still asks."
+                    + sandbox.limits_text(sandbox.declared_limits()["shell_run"]),
                     _obj({"command": {"type": "string"}, "cwd": {"type": "string", "description": "Any folder on this Mac; relative to the default folder"},
                           "timeout_s": {"type": "integer", "default": 120}, "background": {"type": "boolean", "default": False},
                           "notify_on_complete": {"type": "boolean", "default": True},

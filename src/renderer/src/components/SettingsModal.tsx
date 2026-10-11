@@ -590,7 +590,7 @@ export default function SettingsModal(): JSX.Element {
                 </div>
               </div>
               <Switch title="Daily recap on new chats" help="A short summary of your day under the greeting in a new chat." checked={homeModuleOn(draft, 'recap')} onChange={(on) => patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), recap: on } })} />
-              <Switch title="Start chat windows as blobs" help="A chat added to a space starts as just its creature, no frame. Click it to open the chat." checked={!!draft.compactChats} onChange={(compactChats) => patch({ compactChats })} />
+              <Switch title="Start chat windows as blobs" help="A chat added to a canvas starts as just its creature, no frame. Click it to open the chat." checked={!!draft.compactChats} onChange={(compactChats) => patch({ compactChats })} />
               <div className="setting-row">
                 <span className="toggle-text"><b>Default file font</b><small>How files read and edit unless a file has its own choice. Auto keeps the app's own size and line width.</small></span>
                 <TypographyControls value={draft.docTypography ?? {}} onChange={(t) => patch({ docTypography: { ...(draft.docTypography ?? {}), ...t } })}
@@ -623,7 +623,7 @@ export default function SettingsModal(): JSX.Element {
             </section>}
             {tab === 'sidebar' && <section>
               <h3>Sidebar</h3>
-              <p className="muted small">New chat, your chats and Settings always show. Hiding Files, Spaces, Projects or Jobs only removes the row: ⌘K and shortcuts still open them. Hiding Lists, Calendar, Mail, Health or Library turns that view off.</p>
+              <p className="muted small">New chat, your chats and Settings always show. Hiding Files, Canvases, Projects or Jobs only removes the row: ⌘K and shortcuts still open them. Hiding Lists, Calendar, Mail, Health or Library turns that view off.</p>
               <Sec id="sidebar"><div className="setting-list">
                 {([['docs', 'Files']] as const).map(([k, label]) => (
                   <label key={k} className="toggle-row">
@@ -637,7 +637,7 @@ export default function SettingsModal(): JSX.Element {
                     <input type="checkbox" aria-label={e.label} checked={!hidden.includes(e.view)} onChange={(ev) => void setRowShown(e.view, ev.target.checked)} /><span className="switch" />
                   </label>
                 ))}
-                {([['spaces', 'Spaces'], ['projects', 'Projects'], ['jobs', 'Jobs']] as const).map(([k, label]) => (
+                {([['spaces', 'Canvases'], ['projects', 'Projects'], ['jobs', 'Jobs']] as const).map(([k, label]) => (
                   <label key={k} className="toggle-row">
                     <span className="toggle-text"><b>{label}</b></span>
                     <input type="checkbox" aria-label={label} checked={!sbHidden.includes(k)} onChange={(ev) => void setSectionShown(k, ev.target.checked)} /><span className="switch" />

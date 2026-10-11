@@ -107,7 +107,7 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
         ...(win.state === 'popped' ? [{ label: 'Return to canvas', accel: '⌃⌘⇧O', run: () => void returnToCanvas(win.id) }] : []),
         // Expand only navigates the main window; it moves nothing on the plane, so a lock keeps it.
         ...(canExpand(win) ? [{ label: 'Open full view', run: () => expandWindow(win) }] : []),
-        { label: 'Unlock space', accel: '⌃⌘L', run: () => useCanvas.getState().toggleLock() }
+        { label: 'Unlock canvas', accel: '⌃⌘L', run: () => useCanvas.getState().toggleLock() }
       ]
     : [
         { label: 'Bring to front', run: () => focusWindow(win.id) },
@@ -158,7 +158,7 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
           stays as the status glyph's home. */}
       <div
         className="win-move"
-        title={locked ? 'Space locked · right-click for window options' : 'Drag to move · right-click for window options'}
+        title={locked ? 'Canvas locked · right-click for window options' : 'Drag to move · right-click for window options'}
         onPointerDown={locked ? undefined : onDragPointerDown}
       >
         <span className="win-grip">{status}</span>

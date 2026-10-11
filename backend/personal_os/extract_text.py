@@ -174,9 +174,14 @@ def extract_structured(name: str, data: bytes, mime: str = "") -> list[Block]:
 
 # What is stored for a file nothing could be read out of; _image_text has its own longer wording.
 NO_TEXT_NOTE = "[File {name} ({kind}, {size} bytes). No text could be extracted. The file is stored and can be referred to by name.]"
+# A PDF with no text layer: names the fallback chain so the agent tries each route and reports which one worked.
+PDF_NO_TEXT_NOTE = ("[PDF has no text layer. No text could be extracted; OCR {ocr}. "
+                    "Try in order: render_preview then view_image to read the pages visually; web_search for a published copy. "
+                    "Tell the user which route worked, or plainly that none did; do not guess its contents. "
+                    "The file is stored and can be referred to by name.]")
 # Either wording, and nothing else: a document that merely quotes the sentence is real text.
 _NO_TEXT_RE = re.compile(
-    r"\[File .+? \(.*?, \d+ bytes\)\. No text could be extracted[.;].*?The file is stored and can be referred to by name\.\]",
+    r"\[(?:File .+? \(.*?, \d+ bytes\)\.|PDF has no text layer\.) No text could be extracted[.;].*?The file is stored and can be referred to by name\.\]",
     re.DOTALL,
 )
 
@@ -235,6 +240,9 @@ def _parsed(ext: str, mime: str, data: bytes) -> str | None:
             body = _bounded(texts, MAX_PDF_PAGES)
             if ocr:
                 return _OCR_NOTE + "\n\n" + body
+            if not body.strip():
+                return PDF_NO_TEXT_NOTE.format(ocr="found no words" if _which("pdftoppm") and _which("tesseract")
+                                               else "did not run (pdftoppm or tesseract is not installed)")
             return body
         if ext == ".docx" or mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
             import docx

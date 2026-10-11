@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { X } from 'lucide-react'
+import { X } from './icons'
 import { useStore } from './store'
 import { watchSelection } from './lib/pageContext'
 import Sidebar from './components/Sidebar'
@@ -7,7 +7,6 @@ import GrainLogo from './components/GrainLogo'
 import ChatView from './components/ChatView'
 import DocsView from './components/DocsView'
 import ProjectView from './components/ProjectView'
-import HomeView from './components/HomeView'
 import CalendarView from './components/CalendarView'
 import MailView from './components/MailView'
 import PendingSends from './components/PendingSends'
@@ -18,6 +17,7 @@ import RenderBoundary from './components/RenderBoundary'
 import { collectNotices } from './lib/deskNotify'
 import { notify } from './lib/notify'
 import SettingsModal from './components/SettingsModal'
+import InboxModal from './components/InboxModal'
 import CommandPalette from './components/CommandPalette'
 import HelpOverlay from './components/HelpOverlay'
 import ProjectModal from './components/ProjectModal'
@@ -95,11 +95,11 @@ const writeSeen = (t: number): void => {
   }
 }
 
-/** A job notification's click: 'run:<conversation_id>' opens that run's transcript, anything else Today's inbox. */
+/** A job notification's click: 'run:<conversation_id>' opens that run's transcript, anything else the Agent inbox. */
 function openNotifyTarget(target: string | undefined): void {
   const s = useStore.getState()
   const cid = target?.startsWith('run:') ? target.slice(4) : ''
-  if (!cid) return s.setView('home')
+  if (!cid) return s.openInbox()
   s.setView('chat')
   void s.selectChat(cid)
 }
@@ -147,9 +147,18 @@ function Toasts(): JSX.Element {
   const toasts = useStore((s) => s.toasts)
   const hold = useStore((s) => s.holdToasts)
   const dismiss = useStore((s) => s.dismissToast)
+  const completion = useStore((s) => s.completionPopup)
+  const selectChat = useStore((s) => s.selectChat)
+  const snoozeCompletion = useStore((s) => s.snoozeCompletion)
+  const dismissCompletion = useStore((s) => s.dismissCompletion)
   // Hovered or focused, the stack keeps still; it resumes only once neither holds it.
   const release = (el: HTMLElement): void => {
     if (!el.matches(':hover') && !el.contains(document.activeElement)) hold(false)
+  }
+  const openCompletion = (): void => {
+    if (!completion) return
+    try { window.os.showMain() } catch { /* no bridge: selectChat brings the view back anyway */ }
+    void selectChat(completion.convId)
   }
   return (
     <div
@@ -165,11 +174,23 @@ function Toasts(): JSX.Element {
       <PendingSends />
       {toasts.map((t) => (
         <div key={t.id} className={`toast ${t.kind}${t.action ? ' with-action' : ''}`} role={t.kind === 'error' ? 'alert' : undefined}>
-          <span>{t.text}</span>
+          {t.onClick
+            ? <button type="button" className="toast-body" onClick={() => t.onClick?.()}>{t.text}</button>
+            : <span>{t.text}</span>}
           {t.action && <button className="toast-action" onClick={() => { t.action?.run(); dismiss(t.id) }}>{t.action.label}</button>}
           <button className="toast-close" aria-label="Dismiss" onClick={() => dismiss(t.id)}><X size={12} /></button>
         </div>
       ))}
+      {/* The in-app completion popup: a reply that finished while the user was elsewhere. Its own
+          controls, not a toast: Open goes to the chat, Snooze brings it back later, × drops it. */}
+      {completion && (
+        <div className="toast learned with-action" role="status">
+          <span>Reply ready in “{completion.title}”</span>
+          <button className="toast-action" onClick={openCompletion}>Open</button>
+          <button className="toast-action" onClick={snoozeCompletion}>Snooze</button>
+          <button className="toast-close" aria-label="Dismiss" onClick={dismissCompletion}><X size={12} /></button>
+        </div>
+      )}
     </div>
   )
 }
@@ -193,6 +214,7 @@ export default function App(): JSX.Element {
   const accent = useStore((s) => s.settings.accent)
   const inCanvas = useStore((s) => s.view === 'canvas')
   const pageAgentOpen = useStore((s) => s.pageAgentOpen)
+  const inboxOpen = useStore((s) => s.inboxOpen)
   const wizardOpen = useOnboarding((s) => s.open)
 
   useEffect(() => {
@@ -260,7 +282,6 @@ export default function App(): JSX.Element {
             </main>
           )}
         >
-          {view === 'home' && <HomeView />}
           {view === 'chat' && <ChatView />}
           {ModView && <ModView />}
           {view === 'calendar' && <CalendarView />}
@@ -272,6 +293,7 @@ export default function App(): JSX.Element {
       )}
       {pageAgentOpen && <PageAgentPanel />}
       {settingsOpen && <SettingsModal />}
+      {inboxOpen && <InboxModal />}
       {paletteOpen && <CommandPalette />}
       {helpOpen && <HelpOverlay />}
       {projectModal && <ProjectModal />}

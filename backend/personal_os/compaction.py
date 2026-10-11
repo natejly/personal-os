@@ -490,7 +490,7 @@ def router(compactor: Compactor, convos: Any, settings_fn: Callable[[], dict[str
 
     @r.post("/conversations/{conv_id}/compact")
     async def compact_now(conv_id: str, body: CompactIn | None = None) -> dict[str, Any]:
-        conv = _conv(conv_id)
+        _conv(conv_id)  # 404 when it does not exist
         cfg = settings_fn()
         model = providers.tier_model(cfg, "medium")
         try:

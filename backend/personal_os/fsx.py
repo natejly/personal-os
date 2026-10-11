@@ -151,13 +151,13 @@ def untrusted(ctx: dict[str, Any]) -> bool:
 def approval_reason(p: Path, ctx: dict[str, Any], g: Grants, *, write: bool = True, raw: Any = None) -> str | None:
     """Why this access needs the user's OK, or None. Inside the desk workspace never. Elsewhere a credential store
     (the spelled path or the resolved one) always does, for a read as well as a write, and a write also does while
-    the reply has read untrusted content."""
+    the reply has read untrusted content unless trustExternalContent is on."""
     if g.in_desk(p):
         return None
     spelled = mac._spelled(raw) if isinstance(raw, (str, Path)) and str(raw).strip() else p
     if why := mac.sensitive_reason(spelled, p):
         return why
-    if write and untrusted(ctx):
+    if write and untrusted(ctx) and not permissions.get(ctx.get("settings") or {}, "trustExternalContent"):
         return "this reply has read untrusted content, so a write outside the desk workspace needs a yes"
     return None
 

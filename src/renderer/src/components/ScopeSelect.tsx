@@ -1,4 +1,4 @@
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown } from '../icons'
 import { useStore, type Scope } from '../store'
 
 export default function ScopeSelect({ value, onChange }: { value: Scope; onChange: (s: Scope) => void }): JSX.Element {

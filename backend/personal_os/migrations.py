@@ -201,6 +201,13 @@ def _coding_sessions(c: sqlite3.Connection) -> None:
     c.execute("CREATE INDEX IF NOT EXISTS idx_coding_sessions_conv ON coding_sessions(conversation_id, created_at)")
 
 
+def _coding_session_base(c: sqlite3.Connection) -> None:
+    """coding_sessions.base_sha: the repo's HEAD when the session started, what its diff and commit list are taken against."""
+    cols = {r[1] for r in c.execute("PRAGMA table_info(coding_sessions)")}
+    if cols and "base_sha" not in cols:
+        c.execute("ALTER TABLE coding_sessions ADD COLUMN base_sha TEXT")
+
+
 def _sticky_notes_into_docs(c: sqlite3.Connection) -> None:
     """Sticky notes become docs. Each note row turns into a doc with the SAME id (so a space window keeps its
     ref_id), titled from its first line (docs.title_from_body), body, project and timestamps kept, filed at the
@@ -548,6 +555,29 @@ def _deepseek_default(c: sqlite3.Connection) -> None:
               "WHERE json_valid(settings) AND json_extract(settings, '$.effort') = 'medium'")
 
 
+_UNUSED_TABLES = ("turns", "turns_fts", "dashboards", "data_sources", "artifact_versions", "teach_recordings", "canvas_presets")
+_DEAD_SETTINGS = ("maxRunCost", "deskMaxCost", "workflowMaxCost", "subagentMaxCost", "meetingEmbeddings", "activity",
+                  "microsoftClientId", "microsoftTenant", "microsoftToken", "microsoftAuthPending", "pimProvider",
+                  "sandboxImage", "sandboxRuntime", "sandboxNetwork", "sandboxKeepDays", "sandboxMountDesk")
+
+
+def _drop_unused_tables_and_settings(c: sqlite3.Connection) -> None:
+    """Tables and settings of features that are gone (Microsoft mail and calendar, the Docker sandboxes, teach-a-task,
+    space presets) or that nothing ever read (turns, dashboards, data_sources, artifact_versions); the stale cost caps and
+    the activity monitor's config; and the `dashboards` entry in hiddenViews. `meetings` stays: stt.py still reads it as a
+    legacy fallback. A virtual table takes its shadow tables with it."""
+    for table in _UNUSED_TABLES:
+        c.execute(f"DROP TABLE IF EXISTS {table}")
+    c.executemany("DELETE FROM settings WHERE key = ?", [(k,) for k in _DEAD_SETTINGS])
+    row = c.execute("SELECT value FROM settings WHERE key = 'hiddenViews'").fetchone()
+    try:
+        views = json.loads(row[0]) if row else None
+    except ValueError:
+        return
+    if isinstance(views, list) and "dashboards" in views:
+        c.execute("UPDATE settings SET value = ? WHERE key = 'hiddenViews'", (json.dumps([v for v in views if v != "dashboards"]),))
+
+
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
     (2, "messages_fts", _messages_fts),
@@ -583,6 +613,8 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (32, "plan_mode_into_plan_first", _plan_mode_into_plan_first),
     (33, "usage_sources_and_backfill", _usage_sources_and_backfill),
     (34, "deepseek_default", _deepseek_default),
+    (35, "coding_session_base", _coding_session_base),
+    (36, "drop_unused_tables_and_settings", _drop_unused_tables_and_settings),
 ]
 
 

@@ -75,7 +75,6 @@ Groups, by what they do (every tool, danger and default in reference.md):
 | google | Calendar (events, find time, propose), Gmail (search, draft, send with undo hold), Tasks, Drive, Docs, Sheets |
 | todos, health, style | lists, health data, writing voice |
 | files, mac, shell, opencode, code | local files (home-scoped), shortcuts, shell in a working folder, coding agent, Python |
-| sandbox | isolated Linux container tools (`sandbox_*`), needs a container runtime |
 | agents, workflows, desk, schedule, skills, spaces | subagents, saved workflows, desks, scheduling, skill authoring, arranging Spaces |
 | plan, utility, context | plans and questions, `show`, `current_time`, paged tool results |
 

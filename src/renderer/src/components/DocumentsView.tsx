@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Upload, Trash2, FileText, Pin } from 'lucide-react'
+import { Upload, Trash2, FileText, Pin } from '../icons'
 import { useStore, type Scope } from '../store'
 import ProjectChip from './ProjectChip'
 

@@ -613,7 +613,7 @@ async def test_status_precedence(env: Env) -> None:
     env.bridge.issue_pairing()
     s = b.status()
     assert s["status"] == "not_paired" and s["pairing"]["link"] == f"https://t.me/{BOT}?start={s['pairing']['code']}"
-    assert set(s) == {"enabled", "has_token", "bot_username", "paired", "owner_name", "status", "last_error", "last_poll_at", "pairing"}
+    assert set(s) == {"enabled", "has_token", "bot_username", "paired", "owner_name", "status", "last_error", "last_poll_at", "pairing", "claimed_by", "machine_name"}
     env.state.update(ownerChatId=OWNER, ownerName="Nate")
     s = b.status()
     assert (s["status"], s["paired"], s["owner_name"], s["pairing"]) == ("connected", True, "Nate", None)
@@ -848,3 +848,118 @@ def test_the_migration_drops_the_old_texting_settings_and_nothing_else() -> None
     migrations._drop_legacy_texting_keys(c)
     assert sorted(r[0] for r in c.execute("SELECT key FROM settings")) == ["model", "telegramEnabled"]
     assert any(n == "drop_legacy_texting_keys" for _, n, _ in migrations.MIGRATIONS)
+
+
+# ---------------------------------------------------------------- one bot per Mac
+
+class ClaimApi:
+    """Stands in for the Bot API's name and short-description methods; getUpdates can be made to 409."""
+
+    def __init__(self) -> None:
+        self.name, self.desc, self.calls, self.fail_name, self.conflict = "", "", [], None, False
+
+    async def __call__(self, token: str, method: str, params: dict[str, Any], timeout: float | None = None) -> Any:
+        self.calls.append(method)
+        if method == "getMyName":
+            return {"name": self.name}
+        if method == "setMyName":
+            if self.fail_name:
+                raise self.fail_name
+            self.name = params["name"]
+        elif method == "getMyShortDescription":
+            return {"short_description": self.desc}
+        elif method == "setMyShortDescription":
+            self.desc = params["short_description"]
+        elif method == "getUpdates":
+            if self.conflict:
+                raise tg.TelegramError(409, "terminated by other getUpdates request")
+        return []
+
+
+def claim_env(tmp: Path, api: ClaimApi, mac: str = "Nate's MacBook") -> Env:
+    env = Env(tmp)
+    env.bridge.deps.api = api
+    env.bridge.deps.computer_name = lambda: mac
+    return env
+
+
+async def one_loop(env: Env, loops: int = 1) -> list[float]:
+    sleeps: list[float] = []
+
+    async def sleep(d: float) -> None:
+        sleeps.append(d)
+        if len(sleeps) >= loops:
+            env.settings["telegramEnabled"] = False
+
+    env.bridge._sleep = sleep
+    await asyncio.wait_for(env.bridge._run(), 5)
+    env.settings["telegramEnabled"] = True
+    return sleeps
+
+
+@case
+async def test_connect_names_and_claims_the_bot_once(env: Env) -> None:
+    api = ClaimApi()
+    e = claim_env(env.bridge.deps.lock_path.parent, api)
+    await one_loop(e)
+    mid = e.state["machineId"]
+    assert api.name == "Grain · Nate's MacBook" and api.desc == f"Grain on Nate's MacBook · {mid}" and len(mid) == 8
+    api.calls.clear()
+    e.bridge._claim_ok = False
+    await one_loop(e)  # same name, same marker: nothing is written
+    assert "setMyName" not in api.calls and "setMyShortDescription" not in api.calls
+    e.settings["telegramBotName"] = "x" * 100
+    api.calls.clear()
+    e.bridge._claim_ok = False
+    await one_loop(e)
+    assert api.name == "x" * 64
+
+
+@case
+async def test_a_rate_limited_rename_is_skipped_quietly(env: Env) -> None:
+    api = ClaimApi()
+    api.fail_name = tg.TelegramError(429, "Too Many Requests: retry after 9", retry_after=9)
+    e = claim_env(env.bridge.deps.lock_path.parent, api)
+    await one_loop(e)
+    assert e.bridge.health == "" and "getUpdates" in api.calls and api.desc.startswith("Grain on ")
+    api.calls.clear()
+    e.bridge._claim_ok = False
+    await one_loop(e)
+    assert "setMyName" not in api.calls  # backing off
+
+
+@case
+async def test_a_bot_claimed_by_another_mac_is_not_polled_until_taken_over(env: Env) -> None:
+    api = ClaimApi()
+    api.desc = "Grain on Studio · deadbeef"
+    e = claim_env(env.bridge.deps.lock_path.parent, api)
+    sleeps = await one_loop(e)
+    assert sleeps == [30.0] and "getUpdates" not in api.calls
+    s = e.bridge.status()
+    assert s["status"] == "claimed_elsewhere" and s["claimed_by"] == "Studio"
+    await e.bridge.take_over()
+    await asyncio.sleep(0.05)
+    await e.bridge.stop()
+    assert api.desc == f"Grain on Nate's MacBook · {e.state['machineId']}" and "getUpdates" in api.calls
+    assert e.bridge.status()["status"] != "claimed_elsewhere"
+
+
+@case
+async def test_a_409_rechecks_the_marker_and_stands_down_after_a_takeover(env: Env) -> None:
+    api = ClaimApi()
+    e = claim_env(env.bridge.deps.lock_path.parent, api)
+    api.conflict = True
+    await one_loop(e)
+    assert e.bridge.health == "conflict" and e.bridge._claim_ok is False
+    api.desc = "Grain on Studio · deadbeef"  # the other Mac took over
+    await one_loop(e, 2)
+    assert e.bridge.health == "claimed_elsewhere"
+
+
+@case
+async def test_a_foreign_description_is_left_alone(env: Env) -> None:
+    api = ClaimApi()
+    api.desc = "My personal assistant"
+    e = claim_env(env.bridge.deps.lock_path.parent, api)
+    await one_loop(e)
+    assert api.desc == "My personal assistant" and api.name == "" and "getUpdates" in api.calls

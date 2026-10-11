@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Download, ExternalLink, FileWarning, FolderOpen } from 'lucide-react'
+import { Download, ExternalLink, FileWarning, FolderOpen } from '../icons'
 import type { ShowItem } from '@shared/types'
 import { useStore } from '../store'
 import { api, fetchRaw, saveDownload } from '../lib/api'

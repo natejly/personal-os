@@ -1,4 +1,4 @@
-import { AlertTriangle, BadgeCheck, Check, ExternalLink } from 'lucide-react'
+import { AlertTriangle, BadgeCheck, Check, ExternalLink } from '../../icons'
 import type { McpCatalogEntry } from '@shared/types'
 import { detectionLabel, iconFor } from './catalog'
 

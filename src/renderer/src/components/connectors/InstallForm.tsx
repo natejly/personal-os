@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, ExternalLink, Loader2, X } from 'lucide-react'
+import { Check, ExternalLink, Loader2, X } from '../../icons'
 import { api } from '../../lib/api'
 import type { McpCatalogEntry, McpServer } from '@shared/types'
 import { POLL_MS, fieldsValid, initialValues, needsSignIn } from './catalog'

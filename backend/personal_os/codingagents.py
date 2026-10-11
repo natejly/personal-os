@@ -1,6 +1,6 @@
-"""Coding sessions: hand a coding task to Claude Code or OpenCode on a repo (or a fresh git worktree of it) and follow it.
+"""Coding sessions: hand a coding task to Claude Code, OpenCode or pi on a repo (or a fresh git worktree of it) and follow it.
 
-Two drivers behind one row (`coding_sessions`, migration 11):
+Three drivers behind one row (`coding_sessions`, migration 11):
 
 - claude: `claude --bg` starts a background session that outlives this app. It runs OUTSIDE the OS sandbox with the
   user's own account and tools, and prompts for permission inside its own session: a prompt shows as state "blocked",
@@ -20,8 +20,11 @@ Two drivers behind one row (`coding_sessions`, migration 11):
   has no prompt to answer: the sandbox is its boundary. It runs until it exits or Stop ends it (no time limit: app shutdown
   kills every shell job group, and a session a crash orphaned is recorded as `orphaned`); a follow-up
   `--continue`s the same opencode state folder.
+- pi: `pi.launch` (`pi --mode json`) the same way as opencode, under the OS sandbox in the shell registry. pi has no
+  permission prompts at all, so the sandbox is its only boundary; a follow-up reopens the same pi session by id
+  (`--session`). pi exits 0 even when its model call failed, so a final error in its event stream marks the row failed.
 
-On a repo's main checkout either agent gets its own worktree unless the caller passes new_worktree=false, so neither
+On a repo's main checkout every agent gets its own worktree unless the caller passes new_worktree=false, so neither
 edits a checkout the user or another agent is working in by default.
 
 A session belongs to the run that started it (`run_id`: the calling subagent or worker, else the chat or desk reply).
@@ -38,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import logging
 import os
 import re
 import secrets
@@ -48,14 +52,18 @@ import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from . import claude_hook, mac, opencode, permrules, shell
+from . import claude_hook, mac, opencode, permrules, pi, shell
+from .coding_route import AGENT_NAMES
 from .db import new_id
 from .limits import CODING_SESSION_MAX_CONCURRENT, LOGIN_SHELL_TIMEOUT_SECONDS
 from .ship import BRANCH_RE, PROTECTED
 
-AGENTS = ("claude", "opencode")
+log = logging.getLogger(__name__)
+
+AGENTS = ("claude", "opencode", "pi")
 PERMISSION_MODES = (None, "acceptEdits", "auto", "dontAsk", "bypassPermissions")
 LIVE = ("starting", "working", "needs_you")
+SETTLED = ("done", "failed", "stopped", "needs_you", "blocked")  # a session in one of these has something to report
 ATTENTION = {"starting": "working", "working": "working", "needs_you": "needs_you", "blocked": "blocked"}
 LOG_TAIL = 4000
 READ_CAP = 256 * 1024
@@ -166,27 +174,32 @@ CLAUDE_AGENTS = json.dumps({
 }, separators=(",", ":"))
 
 
-def floor_settings(worktree: str | None = None) -> str:
+def floor_settings(worktree: str | None = None, lifted: bool = False) -> str:
     """The `--settings` JSON every claude start and resume carries: the allow-all floor as permission rules plus the
     Bash PreToolUse hook (claude_hook) that judges what a command runs. `worktree` is a worktree Grain made for this
     session, where deleting files is the session's own work. Inline, so nothing on disk can be swapped under the
-    session; the CLI merges these lists with the user's own settings."""
+    session; the CLI merges these lists with the user's own settings. `lifted` (the session runs in bypassPermissions,
+    which is Allow everything): keep the denies on Grain's own data and disk wipes, drop every ask and the delete hook."""
+    if lifted:
+        return json.dumps({"permissions": {"deny": permrules.claude_code_floor()["permissions"]["deny"]}}, separators=(",", ":"))
     return json.dumps({**permrules.claude_code_floor(), "hooks": claude_hook.settings_hooks(worktree)}, separators=(",", ":"))
 
 
 def claude_argv(exe: str, name: str, prompt: str, model: str | None = None, permission_mode: str | None = None,
-                worktree: str | None = None) -> list[str]:
+                worktree: str | None = None, lifted: bool | None = None) -> list[str]:
     """The start command, with the two inline sub-agents and the floor settings. A model flag appears only when the caller
     named one: the session runs on the user's own account, so their own CLI default is the one model they are known to
     have quota for (pinning one here started every session on it and failed the moment that model's limit was reached).
     A permission flag likewise appears only when the caller asked for a mode."""
     return [exe, "--bg", "-n", name, *(["--model", model] if model else []), "--agents", CLAUDE_AGENTS,
-            "--settings", floor_settings(worktree), *(["--permission-mode", permission_mode] if permission_mode else []), _lead(prompt)]
+            "--settings", floor_settings(worktree, permission_mode == "bypassPermissions" if lifted is None else lifted), *(["--permission-mode", permission_mode] if permission_mode else []), _lead(prompt)]
 
 
-def resume_argv(exe: str, session_id: str, message: str, worktree: str | None = None) -> list[str]:
+def resume_argv(exe: str, session_id: str, message: str, worktree: str | None = None, permission_mode: str | None = None,
+                lifted: bool | None = None) -> list[str]:
     """A follow-up is a new CLI process: it needs the floor settings again (the mode is the session's own)."""
-    return [exe, "--bg", "--resume", session_id, "--settings", floor_settings(worktree), _lead(message)]
+    return [exe, "--bg", "--resume", session_id, "--settings",
+            floor_settings(worktree, permission_mode == "bypassPermissions" if lifted is None else lifted), _lead(message)]
 
 
 def own_worktree(row: dict[str, Any]) -> str | None:
@@ -267,7 +280,7 @@ def map_claude(state: dict[str, Any]) -> tuple[str, str] | None:
 
 
 def map_job(job: Any) -> tuple[str, str]:
-    """(status, detail) for an opencode job in the shell registry."""
+    """(status, detail) for an opencode or pi job in the shell registry."""
     st = job.status
     if st == "exited":
         return ("done", "") if job.exit_code == 0 else ("failed", f"exited with code {job.exit_code}")
@@ -298,17 +311,20 @@ class CodingSessions:
         self.claude_home = claude_home or Path.home() / ".claude" / "jobs"
         self.resumed: dict[str, float] = {}   # id -> when a follow-up started: a stale "done" in state.json is ignored for a moment
         self.seen: dict[str, tuple[int, str]] = {}   # id -> (output size, job status) at the last opencode refresh
+        self.on_finish: Callable[[dict[str, Any]], None] | None = None  # a session settled: wake the chat or run that owns it
+        self.waiting: dict[str, int] = {}   # id -> coding_session_wait calls blocked on it (they report it themselves, no wake)
+        self.stopping: set[str] = set()     # ids Grain is stopping itself: that stop is not news
         self.closing = False  # set at app shutdown, after the halted workers' sessions are stopped (see stop_owned)
         self._recover()
         self._prev_on_change = getattr(jobs, "on_change", None)
         jobs.on_change = self._job_changed
 
     def _job_changed(self) -> None:
-        """A shell job started or ended: a live OpenCode session publishes its new state now, not at the next poll."""
+        """A shell job started or ended: a live OpenCode or pi session publishes its new state now, not at the next poll."""
         if self._prev_on_change:
             self._prev_on_change()
         with self.db.tx() as c:
-            rows = [dict(r) for r in c.execute(f"SELECT * FROM coding_sessions WHERE agent = 'opencode' AND external_id IS NOT NULL "
+            rows = [dict(r) for r in c.execute(f"SELECT * FROM coding_sessions WHERE agent != 'claude' AND external_id IS NOT NULL "
                                                f"AND status IN ({','.join('?' * len(LIVE))})", LIVE)]
         for row in rows:
             self.refresh(row)
@@ -376,9 +392,55 @@ class CodingSessions:
     # ---- progress ----
     def refresh(self, row: dict[str, Any]) -> dict[str, Any]:
         """Re-read the driver's state and save when it changed. Reads files and the in-memory job registry only."""
+        prev = row["status"]
         if row["agent"] == "claude":
-            return self._refresh_claude(row) if row.get("external_id") and row["status"] != "failed" else row
-        return self._refresh_opencode(row) if row["status"] in LIVE else row
+            row = self._refresh_claude(row) if row.get("external_id") and row["status"] != "failed" else row
+        else:
+            row = self._refresh_opencode(row) if row["status"] in LIVE else row
+        if prev in ("starting", "working") and row["status"] in SETTLED and self.on_finish:
+            if not (self.waiting.get(row["id"]) or row["id"] in self.stopping):
+                try:
+                    self.on_finish(row)
+                except Exception:  # noqa: BLE001 - a wake-up that fails must not break the refresh
+                    log.warning("coding session wake failed", exc_info=True)
+        return row
+
+    async def watch(self, every: float = 5.0) -> None:
+        """Claude Code sessions have no process of ours to hear from: re-read the live ones so a finish is noticed (and woken
+        for) without anyone calling status."""
+        while True:
+            await asyncio.sleep(every)
+            try:
+                with self.db.tx() as c:
+                    rows = [dict(r) for r in c.execute("SELECT * FROM coding_sessions WHERE agent = 'claude' AND status IN ('starting','working')")]
+                for row in rows:
+                    await asyncio.to_thread(self.refresh, row)
+            except Exception:  # noqa: BLE001 - the watcher outlives any one bad row
+                log.warning("coding session watcher failed", exc_info=True)
+
+    async def wait(self, ids: list[str], mode: str = "all", timeout_s: float = 120) -> dict[str, Any]:
+        """Block (asynchronously) until the sessions have settled (all of them, or any one) or the timeout passes."""
+        ids = [str(i) for i in ids][:20]
+        for i in ids:
+            self._known(i)
+        if not ids:
+            raise CodingError("ids is empty.")
+        try:
+            deadline = time.monotonic() + max(1.0, min(float(timeout_s or 120), 600.0))
+        except (TypeError, ValueError):
+            deadline = time.monotonic() + 120
+        for i in ids:
+            self.waiting[i] = self.waiting.get(i, 0) + 1
+        try:
+            while True:
+                rows = [self.refresh(self._known(i)) for i in ids]
+                settled = [r for r in rows if r["status"] not in ("starting", "working")]
+                if (settled if mode == "any" else len(settled) == len(rows)) or time.monotonic() >= deadline:
+                    return {"sessions": rows, "settled": [r["id"] for r in settled], "timed_out": not (settled if mode == "any" else len(settled) == len(rows))}
+                await asyncio.sleep(min(2.0, max(0.05, deadline - time.monotonic())))
+        finally:
+            for i in ids:
+                self.waiting[i] -= 1
 
     def _refresh_claude(self, row: dict[str, Any]) -> dict[str, Any]:
         state, lines = read_claude(self.claude_home, row["external_id"])
@@ -408,7 +470,12 @@ class CodingSessions:
         raw = job.buf
         if job.live() and not raw.endswith("\n"):
             raw = raw[:raw.rfind("\n") + 1]  # the last line is still being written
-        text, session = opencode.summarize(shell._scrub(raw))
+        if row["agent"] == "pi":
+            text, session, err = pi.summarize(shell._scrub(raw))
+            if err and status == "done":
+                status, detail = "failed", err
+        else:
+            text, session = opencode.summarize(shell._scrub(raw))
         lines = text.splitlines()
         step = next((ln for ln in reversed(lines) if ln.startswith("[")), lines[-1] if lines else "")
         return self._apply(row, status=status, detail=(detail or step)[:300] or None, log_tail=text[-LOG_TAIL:],
@@ -447,13 +514,13 @@ class CodingSessions:
         if permission_mode not in PERMISSION_MODES:
             raise CodingError("permission_mode must be acceptEdits, auto, dontAsk or bypassPermissions, or left out to follow Grain's permission mode.")
         if permission_mode and agent != "claude":
-            raise CodingError("permission_mode is for Claude Code only: OpenCode already runs with every permission allowed "
-                              "inside the OS sandbox.")
+            raise CodingError("permission_mode is for Claude Code only: OpenCode and pi already run with every permission "
+                              "allowed inside the OS sandbox.")
         model = (str(model).strip() or None) if model else None
         if model and not MODEL_RE.fullmatch(model):
             raise CodingError(f"'{model}' is not a model id this tool accepts.")
         repo = self.check_repo(repo_path, opencode._desk_root(self.tb, ctx))
-        if new_worktree is None:  # either agent stays off a main checkout unless asked
+        if new_worktree is None:  # every agent stays off a main checkout unless asked
             found = await asyncio.to_thread(opencode.repo_of, repo)
             new_worktree = bool(found and found[1])
         self._check_capacity()
@@ -471,40 +538,56 @@ class CodingSessions:
                 raise CodingError(CLAUDE_HINT)
             if agent == "opencode" and not opencode.binary():
                 raise CodingError(opencode.INSTALL_HINT)
+            if agent == "pi" and not pi.binary():
+                raise CodingError(pi.INSTALL_HINT)
             wt = worktree_path(repo, branch)
             if wt.exists():
                 raise CodingError(f"{wt} already exists. Pick another branch name.")
             ok, out = await self.run([*GIT, "worktree", "add", "-b", branch, str(wt)], str(repo), GIT_TIMEOUT)
             if not ok:
                 raise CodingError(f"git could not create the worktree: {out.strip()[-300:]}")
+        ok, head = await self.run([*GIT, "rev-parse", "HEAD"], str(wt), GIT_TIMEOUT)
+        base = head.strip() if ok and re.fullmatch(r"[0-9a-f]{40}", head.strip()) else None  # what diff and the commit list compare to
         t = time.time()
         row = {"id": sid, "agent": agent, "external_id": None, "session_id": None, "repo_path": str(repo), "worktree": str(wt),
                "branch": branch, "conversation_id": ctx.get("conversation_id"), "desk_id": ctx.get("desk_id"),
                # the owner: the subagent or worker that called (agent_run_id), else the chat or desk reply (stop_owned)
                "run_id": ctx.get("agent_run_id") or ctx.get("run_id"), "name": name, "prompt": prompt, "model": model, "permission_mode": permission_mode,
-               "status": "starting", "detail": None, "log_tail": "", "created_at": t, "updated_at": t, "ended_at": None}
+               "status": "starting", "detail": None, "log_tail": "", "created_at": t, "updated_at": t, "ended_at": None,
+               "base_sha": base}
         with self.db.tx() as c:
             c.execute("INSERT INTO coding_sessions(id, agent, external_id, session_id, repo_path, worktree, branch, conversation_id, "
                       "desk_id, run_id, name, prompt, model, permission_mode, status, detail, log_tail, created_at, updated_at, "
-                      "ended_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      "ended_at, base_sha) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (sid, agent, None, None, row["repo_path"], row["worktree"], branch, row["conversation_id"], row["desk_id"],
-                       row["run_id"], name, prompt, model, permission_mode, "starting", None, "", t, t, None))
+                       row["run_id"], name, prompt, model, permission_mode, "starting", None, "", t, t, None, base))
         self.publish("coding_session", summary(row, None))
         shell.taint(ctx, f"coding_session:start:{sid}")  # the agent's text comes back through status, logs and diff
         try:
             if agent == "claude":
-                await self._start_claude(row)
+                await self._start_claude(row, ctx)
+            elif agent == "pi":
+                await self._launch_pi(row, ctx, prompt)
             else:
                 await self._launch_opencode(row, ctx, prompt, False)
         except (CodingError, shell.ShellError) as e:
             return self._apply(row, status="failed", detail=shell._scrub(str(e))[:300])
         return self._apply(row, status="working", detail="started")
 
-    async def _start_claude(self, row: dict[str, Any]) -> None:
+    def _lifted(self, row: dict[str, Any], ctx: dict[str, Any] | None) -> bool:
+        """The floor's asks and delete hook are dropped only when Grain itself is in Allow everything: an explicit
+        bypassPermissions the user approved under Auto or Manual keeps every gate."""
+        from . import autoreview
+        ctx = ctx or {}
+        return row["permission_mode"] == "bypassPermissions" and (
+            ctx.get("permission_mode") or autoreview.mode_of(ctx.get("settings") or self.settings())) == "allow_all"
+
+    async def _start_claude(self, row: dict[str, Any], ctx: dict[str, Any] | None = None) -> None:
         exe = claude_binary()
         if not exe:
             raise CodingError(CLAUDE_HINT)
-        ok, out = await self.run(claude_argv(exe, row["name"], row["prompt"], row["model"], row["permission_mode"], own_worktree(row)),
+        ok, out = await self.run(claude_argv(exe, row["name"], row["prompt"], row["model"], row["permission_mode"], own_worktree(row),
+                                           self._lifted(row, ctx)),
                                  row["worktree"], START_TIMEOUT, await asyncio.to_thread(claude_env))
         if not ok:
             raise CodingError(f"claude did not start: {out.strip()[-300:]}")
@@ -543,10 +626,19 @@ class CodingSessions:
             raise CodingError("OpenCode is not wired into this backend.")
         ctx = {**ctx, "taint_sources": []}  # opencode's own "network" label stays off the caller's ctx; the session's label covers it
         job, _base = await opencode.launch(self.tb, ctx, prompt, cwd=row["worktree"],
-                                           continue_session=continue_session, model=row["model"], background=True,
+                                           continue_session=continue_session, session=row.get("session_id") if continue_session else None,
+                                           model=row["model"], background=True,
                                            no_timeout=True, conversation_id=f"coding:{row['id']}",
                                            run_id=row.get("run_id"), notify=False, on_timeout="kill",
                                            pool="coding", max_background=self._max_concurrent())
+        row["external_id"] = job.id
+
+    async def _launch_pi(self, row: dict[str, Any], ctx: dict[str, Any], prompt: str) -> None:
+        if self.tb is None:
+            raise CodingError("pi is not wired into this backend.")
+        job = await pi.launch(self.tb, ctx, prompt, cwd=row["worktree"], session=row.get("session_id"), model=row["model"],
+                              conversation_id=f"coding:{row['id']}", run_id=row.get("run_id"),
+                              max_background=self._max_concurrent())
         row["external_id"] = job.id
 
     async def send(self, sid: str, message: str, ctx: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -567,7 +659,7 @@ class CodingSessions:
             exe = claude_binary()
             if not exe:
                 raise CodingError(CLAUDE_HINT)
-            ok, out = await self.run(resume_argv(exe, row["session_id"], message, own_worktree(row)), row["worktree"], START_TIMEOUT,
+            ok, out = await self.run(resume_argv(exe, row["session_id"], message, own_worktree(row), row["permission_mode"], self._lifted(row, ctx)), row["worktree"], START_TIMEOUT,
                                      await asyncio.to_thread(claude_env))
             if not ok:
                 raise CodingError(f"claude did not resume: {out.strip()[-300:]}")
@@ -584,12 +676,17 @@ class CodingSessions:
         else:
             job = self.jobs.jobs.get(row.get("external_id") or "")
             if (job is not None and job.status in ("running", "orphaned")) or row["status"] in LIVE:
-                raise CodingError("OpenCode is still working on this session; wait for it to finish or stop it first.")
+                raise CodingError(f"{AGENT_NAMES[row['agent']]} is still working on this session; wait for it to finish or stop it first.")
             if row["status"] == "blocked":  # the job record was lost; the process may still run on the same state folder
-                raise CodingError("OpenCode may still be running on this session (its job record was lost); Stop it first, then send the follow-up.")
+                raise CodingError(f"{AGENT_NAMES[row['agent']]} may still be running on this session (its job record was lost); Stop it first, then send the follow-up.")
+            if row["agent"] == "pi" and not row.get("session_id"):
+                raise CodingError("pi's session id was not seen yet, so it cannot be reopened for a follow-up.")
             self._check_capacity()
             try:
-                await self._launch_opencode(row, ctx, message, True)
+                if row["agent"] == "pi":
+                    await self._launch_pi(row, ctx, message)
+                else:
+                    await self._launch_opencode(row, ctx, message, True)
             except shell.ShellError as e:
                 raise CodingError(shell._scrub(str(e))) from e
             detail = "follow-up sent"
@@ -599,6 +696,13 @@ class CodingSessions:
         row = self._known(sid)
         if row["status"] not in (*LIVE, "blocked"):
             return row
+        self.stopping.add(row["id"])
+        try:
+            return await self._stop(row, reason)
+        finally:
+            self.stopping.discard(row["id"])
+
+    async def _stop(self, row: dict[str, Any], reason: str) -> dict[str, Any]:
         if row["agent"] == "claude":
             exe = claude_binary()
             if not (exe and ID_RE.fullmatch(row.get("external_id") or "")):
@@ -660,14 +764,27 @@ class CodingSessions:
                 out, cut = out[:cap], True
             return ok, out
 
+        base = row.get("base_sha") or "HEAD"  # sessions from before the base was recorded: working tree vs HEAD
         _, status = await git("status", "--short")
-        _, stat = await git("diff", "HEAD", "--stat", "--no-ext-diff", "--no-textconv")
-        ok, log = await git("log", "--oneline", "--stat", "-n", "20", "origin/main..HEAD")
-        if not ok:
-            _, log = await git("log", "--oneline", "--stat", "-n", "5")
-        out: dict[str, Any] = {"worktree": wt, "branch": row.get("branch"), "status": status, "diff_stat": stat, "log": log}
+        _, stat = await git("diff", base, "--stat", "--no-ext-diff", "--no-textconv")
+        _, new = await git("ls-files", "--others", "--exclude-standard")  # new files the diff against a commit cannot show
+        new_files = new.splitlines()[:200]
+        if row.get("base_sha"):
+            _, log = await git("log", "--oneline", "--stat", "-n", "20", f"{base}..HEAD")
+        else:
+            ok, log = await git("log", "--oneline", "--stat", "-n", "20", "origin/main..HEAD")
+            if not ok:
+                _, log = await git("log", "--oneline", "--stat", "-n", "5")
+        out: dict[str, Any] = {"worktree": wt, "branch": row.get("branch"), "base": row.get("base_sha"), "status": status,
+                               "diff_stat": stat, "new_files": new_files, "log": log}
         if full:
-            _, out["diff"] = await git("diff", "HEAD", "--no-ext-diff", "--no-textconv", cap=DIFF_CAP)
+            _, out["diff"] = await git("diff", base, "--no-ext-diff", "--no-textconv", cap=DIFF_CAP)
+            for f in new_files:  # git diff --no-index exits 1 when the files differ, so the output is read whatever the code
+                if len(out["diff"]) >= DIFF_CAP:
+                    break
+                _, patch = await git("diff", "--no-index", "--no-ext-diff", "--no-textconv", "--", "/dev/null", f, cap=DIFF_CAP)
+                out["diff"] += patch
+            out["diff"] = out["diff"][:DIFF_CAP]
         out["truncated"] = cut
         return out
 
@@ -679,10 +796,10 @@ def register(tb: Any, sessions: CodingSessions) -> None:
     tb.coding = sessions
 
     def available() -> bool:
-        return claude_binary() is not None or opencode.binary() is not None
+        return claude_binary() is not None or opencode.binary() is not None or pi.binary() is not None
 
     def installed() -> str:
-        have = [n for n, b in (("claude", claude_binary()), ("opencode", opencode.binary())) if b]
+        have = [n for n, b in (("claude", claude_binary()), ("opencode", opencode.binary()), ("pi", pi.binary())) if b]
         return ", ".join(have) or "none"
 
     def unattended(name: str) -> dict[str, Any]:
@@ -709,18 +826,18 @@ def register(tb: Any, sessions: CodingSessions) -> None:
                               alternative="fix the cause named above, or run the task another way")
         note = ("Started. It works in the background; coding_session_status(id) reads progress. "
                 + ("If it needs a permission answer its status becomes needs_you and the user runs `claude attach <external_id>`."
-                   if agent == "claude" else "OpenCode runs until it finishes or coding_session_stop; send a follow-up to continue."))
+                   if agent == "claude" else f"{AGENT_NAMES[agent]} runs until it finishes or coding_session_stop; send a follow-up to continue."))
         return {**summary(row), "note": note}
 
     spec = ToolSpec("coding_session_start",
-                    "Start a coding agent on a repo and let it work in the background: agent 'claude' (Claude Code) or 'opencode' "
-                    f"(installed here: {installed()}). repo_path must be a git repo anywhere on this Mac; new_worktree=true gives "
+                    "Start a coding agent on a repo and let it work in the background: agent 'claude' (Claude Code), 'opencode' "
+                    f"or 'pi' (installed here: {installed()}). repo_path must be a git repo anywhere on this Mac; new_worktree=true gives "
                     "the agent its own branch and git worktree under <repo>/.claude/worktrees so the repo's checkout stays "
-                    "untouched (on a repo's main checkout either agent gets one unless new_worktree=false). Give a complete, self-contained task: it does not see this conversation. Claude Code runs OUTSIDE "
+                    "untouched (on a repo's main checkout every agent gets one unless new_worktree=false). Give a complete, self-contained task: it does not see this conversation. Claude Code runs OUTSIDE "
                     "the OS sandbox with the user's own account and tools, and asks for permission inside its own session "
                     "(status needs_you; the user answers with `claude attach <id>`); in every mode it is refused Grain's own data folder and app "
-                    "and asks before credential stores, deletes, force-pushes and sending mail. OpenCode runs inside the OS sandbox (Grain's own data folder and app, credential stores and the "
-                    "files that run code later are off limits). permission_mode ('acceptEdits', 'auto', 'dontAsk' or 'bypassPermissions', "
+                    "and asks before credential stores, deletes, force-pushes and sending mail. OpenCode and pi run inside the OS sandbox (Grain's own data folder and app, credential stores and the "
+                    "files that run code later are off limits); pi has no permission prompts of its own, so the sandbox is all that limits it. permission_mode ('acceptEdits', 'auto', 'dontAsk' or 'bypassPermissions', "
                     "Claude Code only) overrides the mode this session runs in (default follows Grain's permission mode); only 'bypassPermissions' "
                     "(under Auto or Manual) asks the user first. Leave it out unless the user asked. Follow progress with coding_session_status and review with coding_session_diff.",
                     _obj({"agent": {"type": "string", "enum": list(AGENTS)}, "repo_path": {"type": "string"},
@@ -763,6 +880,14 @@ def register(tb: Any, sessions: CodingSessions) -> None:
         out["log_tail"] = "\n".join(out["log_tail"].splitlines()[-n:])[-LOG_TAIL:]
         return out
 
+    async def coding_session_wait(ctx: dict[str, Any], ids: list[str], mode: str = "all", timeout_s: int = 120) -> Any:
+        try:
+            out = await sessions.wait(list(ids or []), "any" if mode == "any" else "all", timeout_s)
+        except CodingError as e:
+            return tool_error(shell._scrub(str(e)), field="ids")
+        shell.taint(ctx, "coding_session:wait:" + ",".join(r["id"] for r in out["sessions"]))  # logs and details are agent-written
+        return {**out, "sessions": [summary(r, 1500) for r in out["sessions"]]}
+
     async def coding_session_send(ctx: dict[str, Any], id: str, message: str) -> Any:
         if ctx.get("proposal_only"):
             return unattended("coding_session_send")
@@ -795,17 +920,22 @@ def register(tb: Any, sessions: CodingSessions) -> None:
          "for the user to answer a permission prompt in its own window.", _obj({}, []), coding_session_list, "safe"),
         ("coding_session_status", "Read one coding session's status, current step and the end of its log. Refreshes it first.",
          _obj({**sid, "lines": {"type": "integer", "default": 30}}, ["id"]), coding_session_status, "safe"),
+        ("coding_session_wait", "Wait (without polling) until the named coding sessions have finished, stopped, failed or need the user: "
+         "mode 'all' (default) or 'any' of them; returns their summaries, or timed_out=true after timeout_s (default 120, max 600): "
+         "call it again to keep waiting. Prefer this to repeated coding_session_status calls.",
+         _obj({"ids": {"type": "array", "items": {"type": "string"}}, "mode": {"type": "string", "enum": ["all", "any"], "default": "all"},
+               "timeout_s": {"type": "integer", "default": 120}}, ["ids"]), coding_session_wait, "safe"),
         ("coding_session_send", "Send a follow-up message to a coding session that has finished or been stopped. A session "
          "that is still working or waiting for the user cannot take one: wait, or stop it first. A finished Claude Code session "
          "may continue as a copy with a new external_id. Asks the user in Manual mode, and whenever the run read other untrusted content.",
          _obj({**sid, "message": {"type": "string"}}, ["id", "message"]), coding_session_send, "external"),
         ("coding_session_stop", "Stop a running coding session. It keeps its files and can be continued with "
          "coding_session_send. Never removes a session.", _obj(sid, ["id"]), coding_session_stop, "executes"),
-        ("coding_session_diff", "What a coding session changed in its worktree: git status, diff stat and the commits "
-         "ahead of origin/main; full=true adds the whole working-tree patch (cut at 60 KB).",
+        ("coding_session_diff", "What a coding session changed in its worktree: git status, diff stat and new files and the commits "
+         "since the session started; full=true adds the whole working-tree patch (cut at 60 KB).",
          _obj({**sid, "full": {"type": "boolean", "default": False}}, ["id"]), coding_session_diff, "safe"),
     ):
-        s = ToolSpec(name, desc, params, fn, "shell", danger, examples=[{"id": "a1b2c3d4e5f60718"}] if name != "coding_session_list" else [])
+        s = ToolSpec(name, desc, params, fn, "shell", danger, examples=[{"id": "a1b2c3d4e5f60718"}] if name not in ("coding_session_list", "coding_session_wait") else [])
         s.available_fn = available
         if name == "coding_session_send":
             s.default = "ask"

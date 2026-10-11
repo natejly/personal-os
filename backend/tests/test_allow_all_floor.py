@@ -1,5 +1,5 @@
-"""Allow everything runs routine work without a card and keeps one floor: Grain's data and credential stores, deletes that
-skip the Trash, disk wipes, force-pushes and the email card. Auto and Manual are unchanged.
+"""Allow everything never asks: deletes, force-pushes, credential and data-folder shell commands, unsandboxed runs, the
+email card, doc edits. Auto and Manual are unchanged (they still card the destructive detector's cases).
 
 Pure detector cases, then the real chat loop (app._chat_stream) with a scripted model and stand-in tools.
 Run: python -m pytest -q backend/tests/test_allow_all_floor.py
@@ -54,7 +54,6 @@ def test_relative_paths_follow_cwd_and_scratch() -> None:
     assert permrules.destructive("rm -rf build", cwd="/tmp/w") is None
     assert permrules.destructive("rm -rf build", cwd="/Users/someone/proj")
     assert permrules.destructive("rm -rf work/old", cwd="/desk", scratch=["/desk/work"]) is None
-    assert permrules.allow_all_floor("write_local_file", {"command": "rm -rf ~"}) is None
 
 
 def test_fresh_install_defaults_to_auto_and_keeps_the_always_ask_list() -> None:
@@ -143,16 +142,8 @@ def test_auto_and_manual_still_card_unsandboxed_shell(pmode: str) -> None:
 @pytest.mark.parametrize("cmd", ["rm -rf ~/Documents/x", "git push --force", "find ~ -name x -delete", "ls | xargs rm",
                                  "diskutil apfs deleteVolume disk3s1", "shred ~/a"])
 @pytest.mark.parametrize("unsandboxed", [False, True])
-def test_allow_all_floor_cards_destructive_commands(cmd: str, unsandboxed: bool) -> None:
-    c = go("allow_all", sh(cmd, unsandboxed=unsandboxed))
-    assert len(c) == 1 and not T.RAN, cmd
-    perm = c[0]["permission"]
-    assert c[0]["forced"] and perm["kind"] == "destructive" and perm["subject"] and not perm["session"]
-
-
-def test_floor_beats_an_allow_rule_and_a_tool_set_on() -> None:
-    c = go("allow_all", sh("rm -rf ~/x"), {"allow": ["Bash(rm *)"]}, shell_mode="on")
-    assert len(c) == 1 and not T.RAN and c[0]["permission"]["kind"] == "destructive"
+def test_allow_all_runs_destructive_commands_without_a_card(cmd: str, unsandboxed: bool) -> None:
+    assert not go("allow_all", sh(cmd, unsandboxed=unsandboxed)) and T.RAN == [cmd], cmd
 
 
 def test_deny_rule_still_refuses_under_allow_all() -> None:
@@ -164,20 +155,14 @@ def test_rm_in_temp_runs_under_allow_all() -> None:
     assert not go("allow_all", sh("rm -rf build", cwd="/tmp")) and len(T.RAN) == 1
 
 
-@pytest.mark.parametrize("cmd", ["cat ~/.ssh/id_rsa", "cp ~/.aws/credentials /tmp/x", "tar czf /tmp/k.tgz ~/Library/Keychains",
-                                 "security find-generic-password -s x -w", "bash -c 'cat ~/.ssh/id_ed25519'"])
-def test_unsandboxed_credential_access_still_cards_under_allow_all(cmd: str) -> None:
-    c = go("allow_all", sh(cmd, unsandboxed=True))
-    assert len(c) == 1 and not T.RAN and c[0]["forced"] and c[0]["permission"]["kind"] == "external_directory", cmd
+@pytest.mark.parametrize("cmd", ["cat ~/.ssh/id_rsa", "security find-generic-password -s x -w", "bash -c 'cat ~/.ssh/id_ed25519'"])
+def test_allow_all_runs_unsandboxed_credential_access_without_a_card(cmd: str) -> None:
+    assert not go("allow_all", sh(cmd, unsandboxed=True)) and T.RAN == [cmd], cmd
 
 
-def test_grain_data_folder_still_cards_under_allow_all() -> None:
+def test_allow_all_runs_a_grain_data_folder_command_without_a_card() -> None:
     data = os.environ["PERSONAL_OS_DATA_DIR"]
-    for unsandboxed in (False, True):
-        c = go("allow_all", sh(f"cp x {data}/x", unsandboxed=unsandboxed))
-        assert len(c) == 1 and not T.RAN, unsandboxed
-    assert permrules.touches_protected(f"sqlite3 {data}/grain.db .dump")
-    assert permrules.touches_protected("ls -la ~/proj") is None
+    assert not go("allow_all", sh(f"cp x {data}/x", unsandboxed=True)) and len(T.RAN) == 1
 
 
 @pytest.mark.parametrize("name", CODING)
@@ -198,9 +183,26 @@ def test_auto_and_manual_still_card_a_bypass_session(pmode: str) -> None:
     assert len(go(pmode, call)) == 1 and not CALLS
 
 
-def test_floor_still_cards_in_a_tainted_reply() -> None:
-    c = go("allow_all", sh("rm -rf ~/Documents/x"), tainted=True)
-    assert len(c) == 1 and not T.RAN and c[0]["permission"]["kind"] == "destructive"
+def test_allow_all_runs_a_delete_in_a_tainted_reply() -> None:
+    assert not go("allow_all", sh("rm -rf ~/Documents/x"), tainted=True) and len(T.RAN) == 1
+
+
+@pytest.mark.parametrize("name", ["gmail_send", "calendar_propose"])
+def test_allow_all_never_cards_mail_or_calendar_cards(name: str) -> None:
+    from personal_os import autoreview
+    for pmode in ("manual", "auto"):
+        assert autoreview.route(pmode, mode="ask", danger="external", hard_forced=True) == "card"
+    assert autoreview.route("allow_all", mode="ask", danger="external", hard_forced=True) == "run"
+    assert name not in permrules.STILL_ASK
+
+
+def test_allow_all_applies_doc_edits_directly() -> None:
+    from personal_os import tools
+    assert tools.doc_edit_applies({"settings": {"permissionMode": "allow_all", "docEditMode": "review"}})
+    assert tools.doc_edit_applies({"settings": {"docEditMode": "apply"}})
+    assert not tools.doc_edit_applies({"settings": {"permissionMode": "auto", "docEditMode": "review"}})
+    assert not tools.doc_edit_applies({"settings": {"permissionMode": "auto"}, "permission_mode": "auto"})
+    assert tools.doc_edit_applies({"settings": {"permissionMode": "auto"}, "permission_mode": "allow_all"})
 
 
 # ---- the same floor handed to Claude Code sessions (codingagents.floor_settings), which run outside the sandbox

@@ -27,7 +27,7 @@ export default function Dock(): JSX.Element | null {
           className={focusedId === w.id ? 'dock-tile focused' : 'dock-tile'}
           style={{ transform: `scale(${magnify(i, hover)})` }}
           disabled={locked}
-          title={locked ? 'Space locked' : undefined}
+          title={locked ? 'Canvas locked' : undefined}
           onPointerEnter={() => setHover(i)}
           onClick={() => {
             void setWindowState(w.id, 'normal')

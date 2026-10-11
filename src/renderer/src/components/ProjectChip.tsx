@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { Globe, Lock } from 'lucide-react'
+import { Globe, Lock } from '../icons'
 import { useProject, useStore } from '../store'
 
 /** Small coloured label naming the project an item belongs to (or "personal"). */

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { FileText, X } from 'lucide-react'
+import { FileText, X } from '../icons'
 import { api } from '../lib/api'
 import { lineAt, rangeSpan, splitHighlight } from '../lib/highlight'
 import { useStore } from '../store'

@@ -38,10 +38,6 @@ const VERBS: Record<string, string> = {
   save_writing_sample: 'Save writing sample', writing_style: 'Read writing style',
   desk_list_files: 'List desk files', desk_read_file: 'Read desk file', desk_write_file: 'Write desk file',
   desk_trash_file: 'Trash desk file', desk_deliver: 'Deliver to desk', desk_ask: 'Ask a question', ask_user: 'Ask a question', desk_done: 'Finish desk task',
-  desk_import_sandbox: 'Import from sandbox',
-  sandbox_exec: 'Run in sandbox', sandbox_write_file: 'Write sandbox file', sandbox_read_file: 'Read sandbox file',
-  sandbox_list_files: 'List sandbox files', sandbox_put_document: 'Copy uploaded file to sandbox', sandbox_export_file: 'Export sandbox file', sandbox_reset: 'Reset sandbox',
-  sandbox_checkpoint: 'Save sandbox checkpoint', sandbox_restore: 'Restore sandbox checkpoint',
   shell_run: 'Run command', opencode_run: 'Run coding agent', shell_poll: 'Check command output', shell_kill: 'Stop command', python_install: 'Install Python packages',
   coding_session_start: 'Start coding session', coding_session_list: 'Coding sessions', coding_session_status: 'Check coding session',
   coding_session_send: 'Message coding session', coding_session_stop: 'Stop coding session', coding_session_diff: 'Coding session diff',
@@ -233,6 +229,18 @@ export function readVerdict(preview: string | null | undefined): Verdict | null 
   } catch { return null }
 }
 
+/** What a doc_edit result's status says happened: 'waiting' in Diff review, 'written' in Full agentic editing.
+ *  null when the preview is cut or carries no status, so the row shows no label rather than a guess. */
+export function docEditStatus(preview: string | null | undefined): 'waiting' | 'written' | null {
+  if (!preview) return null
+  try {
+    const s = (JSON.parse(preview) as { status?: unknown }).status
+    if (s === 'pending_review') return 'waiting'
+    if (s === 'applied') return 'written'
+  } catch { /* a cut preview */ }
+  return null
+}
+
 export function cardStatus(t: Pick<ToolEvent, 'pending' | 'needs_approval' | 'error' | 'approval' | 'result_preview'>): CardStatus {
   if (t.pending) return t.needs_approval ? 'awaiting' : 'running'
   if (t.approval === 'deny') return 'denied'
@@ -292,7 +300,6 @@ export function staysVisible(t: ToolEvent): boolean {
 }
 
 export type ToolItem = { kind: 'single'; event: ToolEvent } | { kind: 'group'; key: string; events: ToolEvent[] }
-
 /** Maximal runs of at least `min` foldable events become one group keyed by the first id; order is kept. */
 export function partitionEvents(events: ToolEvent[], hasCard: (name: string) => boolean, min = 3): ToolItem[] {
   const out: ToolItem[] = []
@@ -353,5 +360,16 @@ export function recalledChats(preview: string | null | undefined): { id: string;
   } catch { /* cut short: fall through to the ids */ }
   const out: { id: string; title: string }[] = []
   for (const m of raw.matchAll(/conversation_id\\?"\s*:\s*\\?"([0-9a-f]{8,})/g)) if (!out.some((c) => c.id === m[1])) out.push({ id: m[1], title: 'Past chat' })
+  return out
+}
+
+/** The steps of a reply as plain lines: its thinking summary (one per line), then one per tool call; a failed call says so. */
+export function traceLines(reasoning: string | null | undefined, events: { name: string; arguments: Record<string, unknown> | null; error?: string | null }[]): { text: string; error: boolean }[] {
+  const out = (reasoning ?? '').split('\n').map((t) => t.trim()).filter(Boolean).map((text) => ({ text, error: false }))
+  for (const t of events) {
+    const d = describeCall(t.name, t.arguments)
+    const text = [d.verb, d.subject].filter(Boolean).join(' ')
+    out.push({ text: t.error ? `${text} failed: ${clip(t.error, 100)}` : text, error: !!t.error })
+  }
   return out
 }

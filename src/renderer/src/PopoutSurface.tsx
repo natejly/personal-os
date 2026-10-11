@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Blend, Pin, PinOff, X } from 'lucide-react'
+import { Blend, Pin, PinOff, X } from './icons'
 import type { CanvasWindow } from '@shared/types'
 import { api } from './lib/api'
 import { useStore } from './store'

@@ -1,8 +1,22 @@
-import { useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
-import { Check, Columns2, AlignLeft, Copy, RotateCcw, Sparkles, User, AlertTriangle } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Check, Columns2, AlignLeft, Copy, RotateCcw, Sparkles, User, AlertTriangle } from '../icons'
 import type { DocRevision } from '@shared/types'
 import { diffLines, diffStat, hunks, toUnified, type DiffLine, type Hunk, type WordPart } from '../lib/diff'
-import { DIFF_ROW_HEIGHT, rowWindow } from '../lib/diffWindow'
+
+/** Rows drawn up front, and added each time the end of the list scrolls into view: a rewrite of a long doc is thousands of rows. */
+const ROW_CHUNK = 300
+
+/** `hunks` cut to the first `budget` lines. */
+function takeRows(hs: Hunk[], budget: number): Hunk[] {
+  const out: Hunk[] = []
+  let left = budget
+  for (const h of hs) {
+    if (left <= 0) break
+    out.push(h.lines.length <= left ? h : { ...h, lines: h.lines.slice(0, left) })
+    left -= h.lines.length
+  }
+  return out
+}
 
 /** Word parts of a reworded line, so only the words that actually moved are marked. */
 export function Parts({ parts, text, op }: { parts: WordPart[] | undefined; text: string; op: DiffLine['op'] }): JSX.Element {
@@ -18,129 +32,67 @@ export function Parts({ parts, text, op }: { parts: WordPart[] | undefined; text
 
 const SIGN = { same: ' ', add: '+', del: '-' } as const
 
+function UnifiedRows({ lines }: { lines: DiffLine[] }): JSX.Element {
+  return (
+    <>
+      {lines.map((l, i) => (
+        <div key={i} className={`diff-row ${l.op}`}>
+          <span className="diff-no">{l.oldNo ?? ''}</span>
+          <span className="diff-no">{l.newNo ?? ''}</span>
+          <span className="diff-sign">{SIGN[l.op]}</span>
+          <span className="diff-text"><Parts parts={l.parts} text={l.text} op={l.op} /></span>
+        </div>
+      ))}
+    </>
+  )
+}
+
 /**
  * Split view pairs each deletion with the addition that replaced it, so a rewording sits on one row
  * with the old wording on the left and the new on the right.
  */
-export function pairLines(lines: DiffLine[]): { left: DiffLine | null; right: DiffLine | null }[] {
-  const out: { left: DiffLine | null; right: DiffLine | null }[] = []
-  for (let i = 0; i < lines.length; i++) {
-    const l = lines[i]
-    if (l.op === 'same') {
-      out.push({ left: l, right: l })
-      continue
-    }
-    if (l.op === 'del') {
-      const dels: DiffLine[] = []
-      while (i < lines.length && lines[i].op === 'del') dels.push(lines[i++])
-      const adds: DiffLine[] = []
-      while (i < lines.length && lines[i].op === 'add') adds.push(lines[i++])
-      i--
-      for (let k = 0; k < Math.max(dels.length, adds.length); k++) out.push({ left: dels[k] ?? null, right: adds[k] ?? null })
-      continue
-    }
-    out.push({ left: null, right: l })
-  }
-  return out
-}
-
-function UnifiedRow({ line: l }: { line: DiffLine }): JSX.Element {
-  return (
-    <div className={`diff-row ${l.op}`}>
-      <span className="diff-no">{l.oldNo ?? ''}</span>
-      <span className="diff-no">{l.newNo ?? ''}</span>
-      <span className="diff-sign">{SIGN[l.op]}</span>
-      <span className="diff-text"><Parts parts={l.parts} text={l.text} op={l.op} /></span>
-    </div>
-  )
-}
-
-function SplitRow({ left, right }: { left: DiffLine | null; right: DiffLine | null }): JSX.Element {
-  return (
-    <div className="diff-split-row">
-      <span className="diff-no">{left?.oldNo ?? ''}</span>
-      <span className={`diff-text ${left ? (left.op === 'same' ? 'same' : 'del') : 'void'}`}>
-        {left ? <Parts parts={left.parts} text={left.text} op="del" /> : ''}
-      </span>
-      <span className="diff-no">{right?.newNo ?? ''}</span>
-      <span className={`diff-text ${right ? (right.op === 'same' ? 'same' : 'add') : 'void'}`}>
-        {right ? <Parts parts={right.parts} text={right.text} op="add" /> : ''}
-      </span>
-    </div>
-  )
-}
-
-/** One display row of the diff: a hunk head, a unified line, or a split pair. `i` keys it across scrolls. */
-type Row =
-  | { i: number; hunk: number; kind: 'head'; newStart: number }
-  | { i: number; hunk: number; kind: 'line'; line: DiffLine }
-  | { i: number; hunk: number; kind: 'split'; left: DiffLine | null; right: DiffLine | null }
-
-function DiffRow({ row }: { row: Row }): JSX.Element {
-  if (row.kind === 'head') return <div className="diff-hunk-head">@@ line {row.newStart} @@</div>
-  if (row.kind === 'line') return <UnifiedRow line={row.line} />
-  return <SplitRow left={row.left} right={row.right} />
-}
-
-const INITIAL_ROWS = 80
-
-/** The nearest element that actually scrolls, the element itself, or the window. */
-function scrollParent(el: HTMLElement): HTMLElement | Window {
-  const scrolls = (n: HTMLElement): boolean => {
-    const oy = getComputedStyle(n).overflowY
-    return (oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight + 1
-  }
-  if (scrolls(el)) return el
-  for (let n = el.parentElement; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
-    if (scrolls(n)) return n
-  }
-  return window
-}
-
-/**
- * How many rows to build. The diff body is not always the scroller — a review queue scrolls around
- * it, and a card in the history panel scrolls with its pane — so the nearest scrolling ancestor is
- * measured, and its scroll offset says which rows are on screen. A scroll listener on the window in
- * the capture phase hears every scroller, so no listener is attached to a target that can change.
- */
-function useVisibleRows(total: number): { ref: RefObject<HTMLDivElement>; start: number; end: number } {
-  const ref = useRef<HTMLDivElement>(null)
-  const [range, setRange] = useState(() => ({ start: 0, end: Math.min(total, INITIAL_ROWS) }))
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const measure = (): void => {
-      const node = ref.current
-      if (!node) return
-      const box = node.getBoundingClientRect()
-      const scroller = scrollParent(node)
-      let top = 0
-      let viewport = window.innerHeight
-      if (scroller === node) {
-        top = node.scrollTop
-        viewport = node.clientHeight
-      } else if (scroller instanceof HTMLElement) {
-        const r = scroller.getBoundingClientRect()
-        top = Math.max(0, r.top - box.top)
-        viewport = r.height
-      } else {
-        top = Math.max(0, -box.top)
+function SplitRows({ lines }: { lines: DiffLine[] }): JSX.Element {
+  const rows = useMemo(() => {
+    const out: { left: DiffLine | null; right: DiffLine | null }[] = []
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i]
+      if (l.op === 'same') {
+        out.push({ left: l, right: l })
+        continue
       }
-      const w = rowWindow(total, top, viewport)
-      setRange((p) => (p.start === w.start && p.end === w.end ? p : { start: w.start, end: w.end }))
+      if (l.op === 'del') {
+        const dels: DiffLine[] = []
+        while (i < lines.length && lines[i].op === 'del') dels.push(lines[i++])
+        const adds: DiffLine[] = []
+        while (i < lines.length && lines[i].op === 'add') adds.push(lines[i++])
+        i--
+        for (let k = 0; k < Math.max(dels.length, adds.length); k++) out.push({ left: dels[k] ?? null, right: adds[k] ?? null })
+        continue
+      }
+      out.push({ left: null, right: l })
     }
-    measure()
-    window.addEventListener('scroll', measure, true)
-    window.addEventListener('resize', measure)
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => {
-      window.removeEventListener('scroll', measure, true)
-      window.removeEventListener('resize', measure)
-      ro.disconnect()
-    }
-  }, [total])
-  return { ref, ...range }
+    return out
+  }, [lines])
+
+  const cell = (l: DiffLine | null, side: 'left' | 'right'): JSX.Element => (
+    <>
+      <span className="diff-no">{(side === 'left' ? l?.oldNo : l?.newNo) ?? ''}</span>
+      <span className={`diff-text ${l ? (l.op === 'same' ? 'same' : side === 'left' ? 'del' : 'add') : 'void'}`}>
+        {l ? <Parts parts={l.parts} text={l.text} op={side === 'left' ? 'del' : 'add'} /> : ''}
+      </span>
+    </>
+  )
+
+  return (
+    <>
+      {rows.map((r, i) => (
+        <div key={i} className="diff-split-row">
+          {cell(r.left, 'left')}
+          {cell(r.right, 'right')}
+        </div>
+      ))}
+    </>
+  )
 }
 
 const ago = (ts: number): string => {
@@ -177,32 +129,19 @@ export default function DiffView({
 
   const lines = useMemo(() => diffLines(before, revision.after), [before, revision.after])
   const stat = useMemo(() => diffStat(lines), [lines])
-  const shown = useMemo(() => (whole ? [{ oldStart: 1, newStart: 1, lines }] : hunks(lines, 3)), [lines, whole])
-
-  // Every row of every hunk, flattened once, so the window can slice across hunk boundaries.
-  const rows = useMemo(() => {
-    const out: Row[] = []
-    let i = 0
-    shown.forEach((h: Hunk, hi: number) => {
-      if (!whole) out.push({ i: i++, hunk: hi, kind: 'head', newStart: h.newStart })
-      if (mode === 'unified') for (const line of h.lines) out.push({ i: i++, hunk: hi, kind: 'line', line })
-      else for (const r of pairLines(h.lines)) out.push({ i: i++, hunk: hi, kind: 'split', left: r.left, right: r.right })
-    })
-    return out
-  }, [shown, whole, mode])
-
-  const { ref: bodyRef, start, end } = useVisibleRows(rows.length)
-  const visible = rows.slice(start, end)
-  // Rebuild the hunk wrappers around whichever rows are on screen; a hunk's rows are contiguous.
-  const groups = useMemo(() => {
-    const out: { hunk: number; rows: Row[] }[] = []
-    for (const r of visible) {
-      const last = out[out.length - 1]
-      if (last && last.hunk === r.hunk) last.rows.push(r)
-      else out.push({ hunk: r.hunk, rows: [r] })
-    }
-    return out
-  }, [visible])
+  const all = useMemo(() => (whole ? [{ oldStart: 1, newStart: 1, lines }] : hunks(lines, 3)), [lines, whole])
+  const total = useMemo(() => all.reduce((n, h) => n + h.lines.length, 0), [all])
+  const [budget, setBudget] = useState(ROW_CHUNK)
+  useEffect(() => setBudget(ROW_CHUNK), [all])
+  const shown = useMemo(() => (total > budget ? takeRows(all, budget) : all), [all, total, budget])
+  const more = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = more.current
+    if (!el || budget >= total) return
+    const io = new IntersectionObserver((e) => e[0]?.isIntersecting && setBudget((b) => b + ROW_CHUNK), { rootMargin: '600px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [budget, total])
 
   const copy = (): void => {
     void navigator.clipboard.writeText(toUnified(before, revision.after))
@@ -250,20 +189,18 @@ export default function DiffView({
         <p className="diff-retitle">Title → <strong>{revision.title_after}</strong></p>
       )}
 
-      <div className={`diff-body ${mode}`} ref={bodyRef}>
+      <div className={`diff-body ${mode}`}>
         {shown.length === 0 ? (
           <p className="muted small pad">Nothing changed.</p>
         ) : (
-          <>
-            {start > 0 && <div className="diff-pad" style={{ height: start * DIFF_ROW_HEIGHT }} />}
-            {groups.map((g) => (
-              <div key={g.hunk} className="diff-hunk">
-                {g.rows.map((r) => <DiffRow key={r.i} row={r} />)}
-              </div>
-            ))}
-            {end < rows.length && <div className="diff-pad" style={{ height: (rows.length - end) * DIFF_ROW_HEIGHT }} />}
-          </>
+          shown.map((h, i) => (
+            <div key={i} className="diff-hunk">
+              {!whole && shown.length > 0 && <div className="diff-hunk-head">@@ line {h.newStart} @@</div>}
+              {mode === 'unified' ? <UnifiedRows lines={h.lines} /> : <SplitRows lines={h.lines} />}
+            </div>
+          ))
         )}
+        {budget < total && <div ref={more} className="muted small pad">Loading {total - budget} more lines…</div>}
       </div>
 
       {/* The decision leads, primary first, as on every other card; the view toggle trails. */}

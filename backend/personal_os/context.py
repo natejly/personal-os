@@ -61,16 +61,6 @@ def _omitted(n: int) -> str:
     return f"({n} more omitted)"
 
 
-def _trim_block(block: str, share: int, section: str, trimmed: dict[str, int]) -> str:
-    """Fit a pre-built text block to its window share line by line: the first line is its heading, later lines rank by position."""
-    head, *rest = block.split("\n")
-    kept, n = _fit(rest, share, head + "\n")
-    if not n:
-        return block
-    trimmed[section] = n
-    return "\n".join([head, *kept, _omitted(n)])
-
-
 def _day(ts: float) -> str:
     return time.strftime("%Y-%m-%d", time.localtime(ts))
 
@@ -99,6 +89,14 @@ def _public(text: str) -> str:
 # from there (tools._cite), so a "[3]" in the answer names one passage the UI can open.
 CITE_RULE = "When a sentence relies on an excerpt, end it with that excerpt's number in brackets, like [1] or [1][3]."
 
+# Fixed working-style rules, always applied. They ride in the stable prefix so they survive prompt caching
+# and reach an install whose stored systemPrompt predates them; llm.DEFAULT_SETTINGS["systemPrompt"] mirrors
+# the same wording for the Settings box. Kept short: they are behaviour, not context.
+DIRECTNESS_RULES = (
+    "## Working style\n"
+    "- Be direct: answer what was asked, with no preamble and without restating the question. When what is in front of "
+    "you already answers, answer in plain text without tool calls."
+)
 
 def cite_ref(h: dict[str, Any], n: int) -> dict[str, Any]:
     """What a message keeps about cited excerpt `n`: enough to label it and open the passage in its source."""
@@ -263,6 +261,7 @@ def build_context(
     # Two lists so a caller can keep the stable prefix byte-identical turn to turn (prompt caching):
     # `parts` holds what does not depend on the query, `volatile` what does. `system` is both, as shown to the user.
     parts: list[str] = [redact.scrub_command_output(global_system_prompt.strip())] if global_system_prompt.strip() else []
+    parts.append(DIRECTNESS_RULES)
     hidden = [{"docs": "Files"}.get(v, v.title()) for v in settings.get("hiddenViews") or () if isinstance(v, str)]  # the sidebar labels 'docs' Files
     if hidden:
         # Without this the model sends users to views they cannot see (approvals end in Library, for one).
@@ -272,7 +271,6 @@ def build_context(
     used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None,
                             "skills": [], "profile": [], "page": None, "style": None, "pinned": [], "trimmed": {}}
     trimmed: dict[str, int] = used["trimmed"]
-
     if project:
         used["project"] = {"id": project["id"], "name": project["name"]}
         # Name and description are labels. A newline in either one would open a new prompt section.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FileText, Upload } from 'lucide-react'
+import { FileText, Upload } from '../icons'
 import { useStore } from '../store'
 import { groupByChat, groupByKind, projectFilter, type ChatFile } from '../lib/chatFiles'
 import { chatFilesApi } from '../lib/useChatFiles'

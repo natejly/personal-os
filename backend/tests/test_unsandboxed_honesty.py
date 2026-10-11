@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+from unittest import mock
 from pathlib import Path
 
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="unsandboxed-"))
@@ -41,7 +42,7 @@ def test_linux_descriptions_are_honest() -> None:
 
 
 def test_darwin_unchanged() -> None:
-    with osplat.use("darwin"):
+    with osplat.use("darwin"), mock.patch("personal_os.osplat.darwin.shutil.which", return_value="/usr/bin/sandbox-exec"):
         tb = _box({})
         spec = tb.specs["run_python"]
         assert not tb.ask_locked(spec)
@@ -50,4 +51,5 @@ def test_darwin_unchanged() -> None:
         assert d.startswith("Run a Python 3 script in an isolated sandbox and return stdout/stderr. No network, no subprocesses, "
                             "and writes only inside the temp working directory (CPU/memory/time limits apply). In a cowork desk")
         assert tb.specs["shell_run"].description.startswith("Run a shell command (zsh) on this Mac. It is sandboxed by the OS")
+    with osplat.use("darwin"):
         assert shell.no_sandbox_reason() == "it needs macOS sandbox-exec"

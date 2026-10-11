@@ -122,7 +122,7 @@ function ContextUsedView({ ctx, messageId }: { ctx: ContextUsed; messageId?: str
   const devTools = useStore((s) => s.settings.devTools === true)
   const [viewing, setViewing] = useState<ChunkRef | null>(null)
   const has = ctx.memories.length + (ctx.profile?.length ?? 0) + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
-    || Boolean(ctx.page) || Boolean(ctx.style) || (ctx.pinned?.length ?? 0) > 0
+    || Boolean(ctx.map) || Boolean(ctx.page) || Boolean(ctx.style) || (ctx.pinned?.length ?? 0) > 0
   return (
     <div className="ctx-used">
       <div className="ctx-meta">
@@ -179,6 +179,17 @@ function ContextUsedView({ ctx, messageId }: { ctx: ContextUsed; messageId?: str
           <ul>{ctx.skills?.map((s) => <li key={s.id}><b>{s.name}</b>{s.description ? ` — ${s.description}` : ''}</li>)}</ul>
         </section>
       )}
+      {ctx.map && (
+        <section>
+          <h5><Share2 size={12} /> Workspace map (~{ctx.map.tokens} tokens{ctx.map.shrunk ? ', shortened' : ''})</h5>
+          {Object.keys(ctx.map.sections).length > 0 && <p className="muted small">{Object.entries(ctx.map.sections).map(([k, n]) => `${k} ${n}`).join(' · ')}</p>}
+          {ctx.map.volatile && <p className="muted small">Changes each turn: ~{ctx.map.volatile.tokens} tokens{Object.keys(ctx.map.volatile.sections).length > 0 ? ` (${Object.entries(ctx.map.volatile.sections).map(([k, n]) => `${k} ${n}`).join(', ')})` : ''}</p>}
+          <details>
+            <summary className="link small">view the map</summary>
+            <pre className="ctx-prompt">{ctx.map.text}</pre>
+          </details>
+        </section>
+      )}
       {(ctx.pinned?.length ?? 0) > 0 && (
         <section>
           <h5><FileText size={12} /> Pinned ({ctx.pinned!.length})</h5>
@@ -220,7 +231,7 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
   const [preview, setPreview] = useState<ContextUsed | null>(null)
 
   const hasStyle = useStore((s) => Boolean(s.style?.effective))
-  const cs: ConversationSettings = convo?.settings ?? { effort: DEFAULT_EFFORT, useMemory: true, useGraph: true, useDocuments: true, useStyle: true, autoLearn: true, useTools: true, tools: {}, ...draftChatSettings }
+  const cs: ConversationSettings = convo?.settings ?? { effort: DEFAULT_EFFORT, useMemory: true, useGraph: true, useDocuments: true, useStyle: true, useMap: true, autoLearn: true, useTools: true, tools: {}, ...draftChatSettings }
   const [toolsOpen, setToolsOpen] = useState(false)
   const allTools = useStore((s) => s.tools)
   const norm = (v: unknown, fb: 'on' | 'ask' | 'off'): 'on' | 'ask' | 'off' => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fb)
@@ -285,6 +296,7 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
         <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Off for every chat'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} disabled={!settings.autoLearn} fix={settings.autoLearn ? undefined : { label: 'Turn on in Settings → Memory', open: () => openSettings('memory') }} />
         <Toggle icon={<Wrench size={14} />} label="Tools" hint={settings.permissionMode === 'allow_all' ? 'Allow everything is on: tools run without asking. Deny rules still apply.' : 'Web, files, memory, graph, todos, Python… Risky actions follow the permission mode in Settings.'} value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
         <Toggle icon={<GraduationCap size={14} />} label="Skills" hint="Skills you approved, added to the context as steps to follow. Candidates are never added." value={cs.useSkills !== false} onChange={(v) => void setChatSettings({ useSkills: v }, conversationId)} />
+        <Toggle icon={<Share2 size={14} />} label="Workspace map" hint="A short overview of what exists (memory, files, projects) and today's state, so the assistant knows where to look. Sections are chosen in Settings → Memory." value={cs.useMap !== false} onChange={(v) => void setChatSettings({ useMap: v }, conversationId)} fix={{ label: 'Choose sections in Settings → Memory', open: () => openSettings('memory') }} />
         {convo && (
           <div className="ctx-tools">
             <button className="link small" onClick={() => void induceSkill(convo.id)}>Save this chat as a skill…</button>

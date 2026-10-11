@@ -42,6 +42,7 @@ Always forced to ask in a reply that has read untrusted content (tainted): netwo
 | tool | danger | default | what it does |
 |---|---|---|---|
 | `read_tool_result` | safe | on | Read part of a large tool result that was stored instead of put in your context. |
+| `context_map` | safe | on | List what exists in the workspace as labels with ids (memory topics, notes, uploads, projects, skills, sources, today), paged, filterable by section and keyword. |
 | `search_tool_results` | safe | on | Keyword search over the large tool results already stored in this chat. |
 
 ### deliver

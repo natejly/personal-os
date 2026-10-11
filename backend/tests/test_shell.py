@@ -889,7 +889,11 @@ def test_outside_a_desk_jobs_end_with_the_reply(box: Box) -> None:
 def test_the_tool_describes_its_network_modes_and_timeout_choice(box: Box) -> None:
     spec = box.tb.specs["shell_run"]
     d = spec.description
-    assert "proxy" in d and "on_timeout" in d and "environment variables do not" in d
+    if shell.sandbox_available():
+        assert "proxy" in d
+    else:
+        assert "unsandboxed" in d and "only after the user approves" in d
+    assert "on_timeout" in d and "environment variables do not" in d
     assert spec.parameters["properties"]["on_timeout"]["enum"] == ["background", "kill"]
     assert box.tb.default_mode(spec) == "ask"
 

@@ -95,12 +95,12 @@ def test_shell_commands_naming_linux_stores_are_not_readonly(home: Path) -> None
             assert permrules.touches_protected(c), c
         assert permrules.evaluate("shell_run", {"command": "cat ~/notes.txt"}, None).action == "allow"
         assert not permrules.touches_protected("cat ~/notes.txt")
-        floor = permrules.claude_code_floor()["ask"]
+        floor = permrules.claude_code_floor()["permissions"]["ask"]
         assert "Read(~/.local/share/keyrings/**)" in floor and "Read(~/.mozilla/**)" in floor
         assert not any("Library/Application Support" in r for r in floor)
     with osplat.use("darwin"):
         assert permrules.evaluate("shell_run", {"command": "cat ~/.local/share/keyrings/login.keyring"}, None).action == "allow"
-        floor = permrules.claude_code_floor()["ask"]
+        floor = permrules.claude_code_floor()["permissions"]["ask"]
         assert any(r.startswith("Read(~/Library/Application Support/Google/Chrome/") for r in floor)
 
 

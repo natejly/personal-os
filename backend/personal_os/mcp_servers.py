@@ -53,7 +53,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "delegate", "message_worker", "check_worker", "stop_worker", "resume_worker",
     "list_chats", "read_chat", "message_chat",
     "workflow_list", "workflow_run", "workflow_resume", "command_list", "command_run",
-    "todo_write", "read_tool_result", "search_tool_results", "skill_list", "skill_draft", "skill_revise", "skill_view", "skill_from_run",
+    "todo_write", "read_tool_result", "search_tool_results", "context_map", "skill_list", "skill_draft", "skill_revise", "skill_view", "skill_from_run",
     "mcp_tool_search", "tool_search",
     "fs_glob", "fs_grep", "fs_edit", "fs_copy", "fs_mkdir",
     "todo_list", "todo_add", "todo_update", "todo_delete",

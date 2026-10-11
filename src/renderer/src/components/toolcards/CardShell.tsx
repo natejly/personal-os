@@ -2,7 +2,7 @@ import { useRef, useState, type ReactNode } from 'react'
 import { Pencil } from '../../icons'
 import type { ToolEvent } from '@shared/types'
 import { changedKeys, wasEdited } from '../../lib/toolDisplay'
-import { RawDetails, ResultBlock, StatusChip } from './parts'
+import { RawDetails, ResultBlock, StatusChip, StatusDot } from './parts'
 import type { ToolCardProps } from './registry'
 import './toolcards.css'
 
@@ -57,6 +57,7 @@ export default function CardShell({ event, pending, decide, rules, icon, title, 
       }}
     >
       <header className="tc-head">
+        <StatusDot event={event} />
         <span className="tc-icon">{icon}</span>
         <span className="tc-title">{title}</span>
         {subject && <span className="tc-subject">{subject}</span>}

@@ -3,7 +3,6 @@ import { Check, ChevronLeft, ChevronRight, Calendar as CalIcon, Plus, RefreshCw 
 import { useStore } from '../store'
 import { PIM_SETTINGS_TAB, pimLabel, pimStatus } from '../lib/pim'
 import { api } from '../lib/api'
-import SendToSpace from './SendToSpace'
 import CalendarWeek, { addDays, fmtTime, slotIso, startOfWeek, withoutTodoEvents, type Slot } from './CalendarWeek'
 import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from './EventEditor'
 import CalendarMonth, { monthGridStart } from './CalendarMonth'
@@ -226,7 +225,6 @@ export default function CalendarView(): JSX.Element {
         </div>
         <span className="cal-range">{mode === 'month' ? span : rangeLabel(days[0], days[6])}</span>
         <div className="no-drag header-right">
-          <SendToSpace items={[{ kind: 'calendar' }]} />
           {google?.connected && <button className="icon-btn" title="Refresh" aria-label="Refresh calendar" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>}
           <div className="cal-plan"><PlannerPanel days={7} onApplied={() => void load(true)} /></div>
           {google?.connected && <button className="primary-btn" onClick={() => setEditing({ event: null, draft: {} })}><Plus size={14} /> New event</button>}

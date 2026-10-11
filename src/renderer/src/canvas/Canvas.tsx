@@ -206,7 +206,7 @@ export default function Canvas(): JSX.Element {
       ? `The canvas has these widgets open:\n${lines(windows, (w) => `${w.kind}${w.title ? ` “${w.title}”` : ''}${w.ref_id ? ` (\`${w.ref_id}\`)` : ''}`)}`
       : 'The canvas is empty.',
     refs: windows.filter((w) => w.ref_id).slice(0, 40).map((w) => ({ kind: w.kind, id: w.ref_id as string, name: w.title })),
-    hints: ['What is on this space?', 'What should I look at first?']
+    hints: ['What is on this canvas?', 'What should I look at first?']
   }), [canvas?.id, canvas?.name, windows])
 
   const zoom = canvas?.zoom ?? 1
@@ -526,7 +526,7 @@ export default function Canvas(): JSX.Element {
         {loaded && !shown.length && !(intro && !locked && canvas) && (
           <div className="canvas-empty">
             <strong>Empty canvas</strong>
-            <span>{locked ? 'This space is locked. Unlock it (⌃⌘L) to add widgets.' : 'Drag anything from the sidebar, or right-click to add a widget.'}</span>
+            <span>{locked ? 'This canvas is locked. Unlock it (⌃⌘L) to add widgets.' : 'Drag anything from the sidebar, or right-click to add a widget.'}</span>
           </div>
         )}
         <Dock />

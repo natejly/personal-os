@@ -24,7 +24,7 @@ export async function openPayload(p: DragPayload | null, t: OpenTarget = {}): Pr
   const projectId = st.canvases[cid]?.project_id ?? null
   const open = (kind: WidgetKind, ref: string | null = null, config?: Record<string, unknown>): Promise<CanvasWindow | null> =>
     useCanvas.getState().openWindow(kind, ref, t.at, config, cid)
-  // A referent already open in this canvas is surfaced, not duplicated: the same rule the Add menu and Send to canvas follow.
+  // A referent already open in this canvas is surfaced, not duplicated: the same rule the Add menu follows.
   const ensure = async (kind: WidgetKind, ref: string, config?: Record<string, unknown>): Promise<CanvasWindow | null> =>
     (await useCanvas.getState().ensureWindow(cid, kind, ref, config, t.at)).win
   const upload = async (): Promise<CanvasWindow | null> => {

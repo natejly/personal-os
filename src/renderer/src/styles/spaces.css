@@ -1,5 +1,5 @@
 /*
- * Classic-side spaces popovers: Send to Space (classic view headers) and the chat Files popover. Tokens only from styles.css, so both themes follow.
+ * Classic-side popovers (the chat Files popover). Tokens only from styles.css, so both themes follow.
  * z 200/201 puts them over the canvas chrome as well as the classic shell.
  */
 
@@ -25,25 +25,3 @@
 .preset-pop h4 { margin: 0; padding: 6px 8px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
 .preset-pop h4 ~ h4 { margin-top: 6px; }
 .preset-pop .empty-hint { padding: 2px 8px 6px; font-size: 12px; margin: 0; }
-
-/* Rows: the `.project-item` metrics, with the actions revealed on hover. */
-.send-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  font-size: 13px;
-  text-align: left;
-  color: var(--text);
-  cursor: pointer;
-}
-.send-row:hover { background: var(--hover); }
-.send-row .count { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
-.send-row-icon { color: var(--text-faint); flex-shrink: 0; }
-.send-row.new { color: var(--text-muted); border-top: 1px solid var(--border); border-radius: 0 0 6px 6px; margin-top: 4px; padding-top: 8px; }
-.send-row.new:only-of-type { border-top: 0; margin-top: 0; }
-
-.send-btn:disabled { opacity: 0.4; cursor: default; }
-.send-btn:disabled:hover { background: none; color: var(--text-muted); }

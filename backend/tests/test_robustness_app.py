@@ -306,3 +306,18 @@ def test_recap_runs_without_a_key_and_marks_google_unknown(monkeypatch: pytest.M
     appmod.db.set_settings({"apiKey": "", "defaultModel": "m"})
     assert client.get("/recap?force=true").json()["content"] == "recap"
     assert "not connected" in seen[0]["calendar_next_3_days"] and "not connected" in seen[0]["unread_mail"]
+
+
+def test_recap_reads_every_visible_calendar_not_only_primary(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+
+    def events(*args: Any, **kw: Any) -> list[dict[str, Any]]:
+        seen["args"], seen["kw"] = args, kw
+        return []
+
+    monkeypatch.setattr(appmod.pim, "status", lambda: {"connected": True})
+    monkeypatch.setattr(appmod.google, "status", lambda: {"connected": False})
+    monkeypatch.setattr(appmod.pim, "calendar_events", events, raising=False)
+    monkeypatch.setattr(appmod.pim, "gmail_search", lambda *a, **k: [], raising=False)
+    asyncio.run(appmod._internal_data())
+    assert seen["kw"].get("calendar_ids") == ["all"]

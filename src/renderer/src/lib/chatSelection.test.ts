@@ -17,3 +17,19 @@ test('cmd-click toggles one chat', () => {
 test('shift-click without a usable anchor selects just that chat', () => {
   assert.deepEqual(nextSelection(order, [], null, 'c', true), ['c'])
 })
+
+test('a duplicated row does not widen the range or repeat in the selection', () => {
+  assert.deepEqual(nextSelection(['a', 'b', 'a', 'c'], [], 'a', 'c', true), ['a', 'b', 'c'])
+})
+
+test('plain-click anchor then shift-click selects the range between', async () => {
+  const { useChatSelection } = await import('./chatSelection')
+  const st = useChatSelection.getState()
+  st.anchorAt('b')
+  assert.deepEqual(useChatSelection.getState().selected, [])
+  useChatSelection.getState().pick(order, 'd', true)
+  assert.deepEqual(useChatSelection.getState().selected, ['b', 'c', 'd'])
+  useChatSelection.getState().reset()
+  useChatSelection.getState().pick(order, 'c', true, 'a') // no anchor: the open chat stands in
+  assert.deepEqual(useChatSelection.getState().selected, ['a', 'b', 'c'])
+})

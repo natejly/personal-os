@@ -438,7 +438,8 @@ export interface State {
   closeSession: (conversationId: string) => void
   /** Called on focus: clears unread and maps done/error back to idle, but never needs-approval. */
   clearSessionStatus: (conversationId: string) => void
-  deleteChat: (id: string) => Promise<void>
+  /** `quiet` skips the per-chat Undo toast, for a caller that offers one Undo for the batch. */
+  deleteChat: (id: string, quiet?: boolean) => Promise<void>
   pinChat: (id: string, on: boolean) => Promise<void>
   archiveChat: (id: string, on: boolean) => Promise<void>
   moveChat: (id: string, projectId: string | null) => Promise<void>
@@ -2220,13 +2221,13 @@ export const useStore = create<State>((set, get) => {
         return { ...s, unread: 0, touchedAt: Date.now(), status: settled ? 'idle' : s.status, finishedAt: settled ? null : s.finishedAt }
       })
     },
-    deleteChat: async (id) => {
+    deleteChat: async (id, quiet) => {
       const title = get().conversations.find((c) => c.id === id)?.title
       const res = await api.conversations.delete(id)
       get().closeSession(id)
       set((s) => ({ conversations: s.conversations.filter((c) => c.id !== id) }))
       void get().refreshProjects()
-      get().offerUndo(title ? `chat “${title}”` : 'chat', [{ type: 'conversation', id }], res?.stopped ? 'Reply stopped.' : undefined)
+      if (!quiet) get().offerUndo(title ? `chat “${title}”` : 'chat', [{ type: 'conversation', id }], res?.stopped ? 'Reply stopped.' : undefined)
     },
     pinChat: async (id, on) => {
       await guard(on ? 'Could not pin chat' : 'Could not unpin chat', async () => {

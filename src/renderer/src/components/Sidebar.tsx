@@ -201,9 +201,10 @@ export default function Sidebar(): JSX.Element {
     const ids = picked
     useChatSelection.getState().reset()
     let failed = 0
+    const deleted: { type: 'conversation'; id: string }[] = []
     for (const id of ids) {
       try {
-        if (what === 'delete') await deleteChat(id)
+        if (what === 'delete') { await deleteChat(id, true); deleted.push({ type: 'conversation', id }) }
         else {
           const row = await api.clearContext(id)
           useStore.setState((st) => {
@@ -214,6 +215,7 @@ export default function Sidebar(): JSX.Element {
       } catch { failed++ }
     }
     const t = useStore.getState().toast
+    if (deleted.length) useStore.getState().offerUndo(`${deleted.length} chats`, deleted)
     if (failed) t(`Could not ${what} ${failed} chat${failed === 1 ? '' : 's'}.`, 'error')
     else if (what === 'clear') t(`Cleared ${ids.length} chats.`, 'info')
   }

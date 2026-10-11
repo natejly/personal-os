@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowUp, Globe } from 'lucide-react'
+import { ArrowUp, Globe } from '../icons'
 import type { PendingApproval, ToolEvent } from '@shared/types'
 import { useStore } from '../store'
 import { browserAllowLabel, browserSentence } from '../lib/browserApproval'

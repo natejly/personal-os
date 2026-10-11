@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
-import { ChevronDown, ChevronUp, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, X } from '../icons'
 import { findMatches } from '../lib/findText'
 
 const SKIP = '.katex-mathml, .doc-find'

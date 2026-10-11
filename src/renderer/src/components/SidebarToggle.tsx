@@ -1,4 +1,4 @@
-import { PanelLeftOpen } from 'lucide-react'
+import { PanelLeftOpen } from '../icons'
 import { useStore } from '../store'
 
 /**

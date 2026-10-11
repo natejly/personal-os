@@ -8,7 +8,7 @@ import { clientCommand, scheduleForm, skillSlug, slashItems, suggestSkills, type
 import { composerContext, EMPTY_CONTEXT, overlap, rankByContext, rankChats, type ComposerContext } from '../lib/composerRank'
 import ScheduleForm from './ScheduleForm'
 import { mentionChats, mentionItems, routeMention } from '../lib/mentions'
-import { ArrowUp, Square, Paperclip, Loader2, Sparkles, Download, FileText, X } from 'lucide-react'
+import { ArrowUp, Square, Paperclip, Loader2, Sparkles, Download, FileText, X } from '../icons'
 import AutonomyToggle from './AutonomyToggle'
 import QuickToggle from './QuickToggle'
 import { PermissionModePill } from './PermissionMode'

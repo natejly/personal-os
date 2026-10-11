@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type Dispatch, type SetStateAction } from 'react'
-import { Mail as MailIcon, RefreshCw, Search, Star, Archive, MailOpen, Mail, ExternalLink, MessageSquare, Paperclip, SquarePen, Reply, Sparkles, Send, X, Forward, Download, File as FileIcon, FileText, FileSpreadsheet, FileArchive, Image as ImageIcon } from 'lucide-react'
+import { Mail as MailIcon, RefreshCw, Search, Star, Archive, MailOpen, Mail, ExternalLink, MessageSquare, Paperclip, SquarePen, Reply, Sparkles, Send, X, Forward, Download, File as FileIcon, FileText, FileSpreadsheet, FileArchive, Image as ImageIcon } from '../icons'
 import { useStore } from '../store'
 import { PIM_SETTINGS_TAB, pimLabel, pimProvider, pimStatus } from '../lib/pim'
 import { api } from '../lib/api'

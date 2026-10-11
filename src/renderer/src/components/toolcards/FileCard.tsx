@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FilePen } from 'lucide-react'
+import { FilePen } from '../../icons'
 import { changedKeys, wasEdited } from '../../lib/toolDisplay'
 import CardShell from './CardShell'
 import { LongText } from './parts'

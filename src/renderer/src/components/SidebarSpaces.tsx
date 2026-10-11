@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronRight, LayoutGrid, Lock, MoreHorizontal, Plus } from 'lucide-react'
+import { ChevronRight, LayoutGrid, Lock, MoreHorizontal, Plus } from '../icons'
 import { useProject, useStore } from '../store'
 import type { DragKind } from '@shared/types'
 import { useCanvas } from '../canvas/store'

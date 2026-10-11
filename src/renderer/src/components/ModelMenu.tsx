@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, RotateCcw } from 'lucide-react'
+import { Check, ChevronDown, RotateCcw } from '../icons'
 import { DEFAULT_EFFORT, type Effort } from '@shared/types'
 import { chatModelIds, modelChoices, modelLabel, showsEffort } from '../lib/modelLabel'
 import { useStore } from '../store'

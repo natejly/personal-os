@@ -1,4 +1,4 @@
-import { Check, Loader2, Lock, TriangleAlert } from 'lucide-react'
+import { Check, Loader2, Lock, TriangleAlert } from '../icons'
 import type { SessionStatus } from '@shared/types'
 import { useRingStatus } from './useRingStatus'
 // Also imported by registry.ts; a ring rendered by the frame alone must still bring its own styles.
@@ -15,13 +15,13 @@ const LABEL: Record<Exclude<SessionStatus, 'idle'>, string> = {
 export const StatusGlyph = ({ status, size = 11 }: { status: SessionStatus; size?: number }): JSX.Element | null => {
   switch (status) {
     case 'working':
-      return <span className="status-glyph working"><Loader2 size={size} strokeWidth={2.5} /></span>
+      return <span className="status-glyph working"><Loader2 size={size} weight="bold" /></span>
     case 'done':
-      return <span className="status-glyph done"><Check size={size} strokeWidth={3} /></span>
+      return <span className="status-glyph done"><Check size={size} weight="bold" /></span>
     case 'error':
-      return <span className="status-glyph error"><TriangleAlert size={size} strokeWidth={2.5} /></span>
+      return <span className="status-glyph error"><TriangleAlert size={size} weight="bold" /></span>
     case 'needs-approval':
-      return <span className="status-glyph needs-approval"><Lock size={size} strokeWidth={2.5} /></span>
+      return <span className="status-glyph needs-approval"><Lock size={size} weight="bold" /></span>
     default:
       return null
   }

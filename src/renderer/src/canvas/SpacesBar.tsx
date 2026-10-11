@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlignJustify, LayoutGrid, Lock, LockOpen, Plus } from 'lucide-react'
+import { AlignJustify, LayoutGrid, Lock, LockOpen, Plus } from '../icons'
 import type { DragPayload, SnapMode } from '@shared/types'
 import { api } from '../lib/api'
 import { useProject, useStore } from '../store'

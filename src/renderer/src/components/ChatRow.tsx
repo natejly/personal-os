@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { MoreHorizontal, Paperclip } from 'lucide-react'
+import { MoreHorizontal, Paperclip } from '../icons'
 import ContextMenu, { type MenuEntry } from '../canvas/Menu'
 import { dragProps } from '../canvas/dnd'
 import { useChatAttention, useStore } from '../store'

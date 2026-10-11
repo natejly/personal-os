@@ -1,4 +1,4 @@
-import { Loader2 } from 'lucide-react'
+import { Loader2 } from '../icons'
 import { useStore } from '../store'
 
 /** Shown while the main process is restarting a sidecar that died; the UI stays up underneath it. */

@@ -1,5 +1,5 @@
 import { memo, useRef, useState } from 'react'
-import { Check, Trash2, Calendar, CalendarPlus, ExternalLink, Repeat, ListPlus, Lock } from 'lucide-react'
+import { Check, Trash2, Calendar, CalendarPlus, ExternalLink, Repeat, ListPlus, Lock } from '../icons'
 import { useStore } from '../store'
 import { pimConnected } from '../lib/pim'
 import { api } from '../lib/api'

@@ -1,4 +1,4 @@
-import { Bold, Code, Italic, Link, List, ListChecks, Quote } from 'lucide-react'
+import { Bold, Code, Italic, Link, List, ListChecks, Quote } from '../../icons'
 import type { MarkdownEditorHandle } from './handle'
 import { toggleLinePrefix, wrapToggle, type Edit } from './format'
 import { diffRange } from './textEdit'

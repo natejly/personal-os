@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { isClear } from '../lib/workers'
-import { Pencil, Sparkles, SlidersHorizontal, ArrowDown, PanelRight } from 'lucide-react'
+import { Pencil, Sparkles, SlidersHorizontal, ArrowDown, PanelRight } from '../icons'
 import { useStore, useProject, useChatFace, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
 import MessageView, { PendingUserMessage, Thinking } from './Message'
 import RegenRow from './RegenRow'
@@ -150,8 +150,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
         </div>
         {/* The full-window chat gives the last title-bar slot to its own workspace panel; ⌘I still opens the quick chat. */}
         <AppSwitcher last={conversationId ? undefined : (
-          <button className={`icon-btn${deskPanel ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={deskPanel} disabled={!convo?.id}
-            onClick={() => setDeskPanel((o) => !o)}><PanelRight size={15} /></button>
+          <button className={`icon-btn${deskPanel || contextOpen ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={deskPanel || contextOpen} disabled={!convo?.id}
+            onClick={() => { if (contextOpen) toggleContext(); setDeskPanel(!(deskPanel || contextOpen)) }}><PanelRight size={15} /></button>
         )} />
       </header>
 
@@ -202,10 +202,10 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           <Composer conversationId={conversationId} footer={<ChatControls conversationId={conversationId} />} />
         </div>
         {showing && <ShowPanel conversationId={showKey} />}
-        {convo?.id && !conversationId && deskPanel && <DeskPanel key={convo.id} desk={desk} conversationId={convo.id} onClose={() => setDeskPanel(false)} />}
-        {/* The drawer scrolls, so its handle sits on the chat body, pinned to the drawer's left edge. */}
-        {contextOpen && <ResizeHandle id="context-drawer-w" defaultSize={340} min={260} max={640} grows="left" onCollapse={toggleContext} label="Context panel width" className="ctx-edge" />}
-        {contextOpen && <ContextDrawer conversationId={conversationId} />}
+        {/* Full-window: Context is a tab of the side panel (a context request opens it). Quick chats keep the drawer, whose handle sits on the chat body, pinned to the drawer's left edge. */}
+        {!conversationId && (deskPanel || contextOpen) && <DeskPanel key={convo?.id ?? ''} desk={desk} conversationId={convo?.id} onClose={() => { setDeskPanel(false); if (contextOpen) toggleContext() }} />}
+        {conversationId && contextOpen && <ResizeHandle id="context-drawer-w" defaultSize={340} min={260} max={640} grows="left" onCollapse={toggleContext} label="Context panel width" className="ctx-edge" />}
+        {conversationId && contextOpen && <ContextDrawer conversationId={conversationId} />}
       </div>
     </main>
   )

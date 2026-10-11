@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, ListChecks, RefreshCw, Bookmark, X, ChevronDown, KanbanSquare, List, SlidersHorizontal, Pencil, Trash2, Inbox, Layers } from 'lucide-react'
+import { Plus, ListChecks, RefreshCw, Bookmark, X, ChevronDown, KanbanSquare, List, SlidersHorizontal, Pencil, Trash2, Inbox, Layers } from '../icons'
 import type { TodoFilter, TodoRepeat } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore, type Scope } from '../store'

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { LayoutTemplate, Pencil, Trash2 } from 'lucide-react'
+import { LayoutTemplate, Pencil, Trash2 } from '../icons'
 import type { CanvasPreset } from '@shared/types'
 import { usePresets } from './presets'
 import { useCanvas } from './store'

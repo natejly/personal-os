@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from 'react'
-import { Eye, EyeOff, Plug, ExternalLink } from 'lucide-react'
+import { Eye, EyeOff, Plug, ExternalLink } from '../icons'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { chatModelIds } from '../lib/modelLabel'

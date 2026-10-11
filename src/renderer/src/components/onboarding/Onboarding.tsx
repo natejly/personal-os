@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type KeyboardEvent } from 'react'
-import { ArrowLeft, ArrowRight, Check, ExternalLink, Eye, EyeOff, Loader2, Lock, RefreshCw } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, ExternalLink, Eye, EyeOff, Loader2, Lock, RefreshCw } from '../../icons'
 import GrainLogo from '../GrainLogo'
 import { api } from '../../lib/api'
 import { useStore } from '../../store'

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Circle, CircleDot, CircleCheck, CircleAlert, CircleMinus, ListChecks, Wrench } from 'lucide-react'
+import { Circle, CircleDot, CircleCheck, CircleAlert, CircleMinus, ListChecks, Wrench } from '../icons'
 import type { FullDesk, PlanStepStatus } from '@shared/types'
 import { argRows } from '../lib/planDigest'
 import { useStore } from '../store'

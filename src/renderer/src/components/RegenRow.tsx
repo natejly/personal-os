@@ -1,4 +1,4 @@
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw } from '../icons'
 import { useStore } from '../store'
 import VariantSwitcher from './VariantSwitcher'
 import { followupsFor } from '../lib/followups'

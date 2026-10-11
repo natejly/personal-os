@@ -134,3 +134,38 @@ def test_new_turn_in_the_fork_sees_the_copied_history() -> None:
     sent = [m["content"] for m in SEEN[-1] if m["role"] in ("user", "assistant")]
     check(sent == ["one", "ok", "next"], f"the model saw the branch's history, got {sent}")
     check(len(msgs(cid)) == 6, "the source did not grow")
+
+
+def test_branch_summary_note() -> None:
+    asked: list[Any] = []
+
+    async def fake(cfg: Any, model: Any, messages: Any, kind: str = "other", **k: Any) -> str:
+        if kind != "branch_summary":
+            return ""
+        asked.append((kind, messages))
+        return "Tried X; it failed."
+
+    real = llm.complete
+    llm.complete = fake  # type: ignore[assignment]
+    try:
+        cid = three_turns()
+        ms = msgs(cid)
+        f = fork(cid, ms[1]["id"]).json()
+        notes = [m for m in msgs(f["id"]) if m["kind"] == "branch_summary"]
+        check(len(notes) == 1 and "Tried X" in notes[0]["content"], f"one summary note, got {notes}")
+        check(asked[0][0] == "branch_summary" and "three" in asked[0][1][1]["content"], "the later turns were summarised")
+        hist = app_mod.convos.history(f["id"])
+        check(hist[-1]["role"] == "system" and hist[-1]["content"].startswith("Before this fork"), f"replayed as a system note, got {hist[-1]}")
+        n = len(asked)
+        f2 = fork(cid, ms[-1]["id"]).json()
+        check(not any(m["kind"] for m in msgs(f2["id"])) and len(asked) == n, "forking at the last message adds no note")
+        f3 = client.post(f"/conversations/{cid}/fork", json={"message_id": ms[1]["id"], "summarize": False}).json()
+        check(len(asked) == n and not any(m["kind"] for m in msgs(f3["id"])), "summarize=false skips it")
+
+        async def boom(*a: Any, **k: Any) -> str:
+            raise llm.LLMError("down")
+        llm.complete = boom  # type: ignore[assignment]
+        r = fork(cid, ms[1]["id"])
+        check(r.status_code == 200 and not any(m["kind"] for m in msgs(r.json()["id"])), "an LLM failure leaves a plain fork")
+    finally:
+        llm.complete = real  # type: ignore[assignment]

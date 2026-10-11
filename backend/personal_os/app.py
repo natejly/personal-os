@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, AsyncIterator, Callable, Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,7 +31,7 @@ from pydantic import AfterValidator, BaseModel, Field
 
 from . import auth_breaker, blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
-from . import compaction, followups, otel_export, router, thinking_summary, titles
+from . import branch_summary, compaction, followups, otel_export, router, thinking_summary, titles
 from . import chatlink, coding_route, fsx, opencode_usage, request_log
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
@@ -1340,10 +1340,11 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
 
 class ForkIn(BaseModel):
     message_id: str
+    summarize: bool = True  # add a short note on what the source chat did after this message
 
 
 @app.post("/conversations/{id}/fork")
-def fork_conversation(id: str, body: ForkIn) -> dict[str, Any]:
+def fork_conversation(id: str, body: ForkIn, bg: BackgroundTasks) -> dict[str, Any]:
     """Branch into a new chat from any live message. Allowed while a reply runs: it copies committed rows only.
     No approvals, runs, grants, plans or summaries come along; taint does, including a sandbox import the source
     holds, because the fork does not hold that import and would otherwise start clean."""
@@ -1362,6 +1363,8 @@ def fork_conversation(id: str, body: ForkIn) -> dict[str, Any]:
         srcs = sorted({*(out["settings"].get("taint_sources") or []), "fork:sandbox_import"})
         convos.update(out["id"], {"settings": {"tainted": True, "taint_sources": srcs}})
         out = convos.get(out["id"]) or out
+    if body.summarize:
+        bg.add_task(branch_summary.add, convos, settings(), id, body.message_id, out["id"])
     return out
 
 

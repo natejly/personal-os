@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { isClear } from '../../lib/workers'
+import { isBranchNote, isClear } from '../../lib/workers'
+import BranchNote from '../../components/BranchNote'
 import { Check, Clipboard, Copy, ExternalLink, Plus } from 'lucide-react'
 import MessageView, { PendingUserMessage } from '../../components/Message'
 import { quickAskMessage, quickAskTitle } from '../../lib/quickAsk'
@@ -122,7 +123,7 @@ export default function QuickAsk(): JSX.Element {
           <div ref={scroll} className="messages" style={{ flex: 'none', maxHeight: 460, overflowY: 'auto' }}>
             <div className="widget" style={{ height: 'auto' }}>
               <div className="messages-inner">
-                {msgs.map((m) => isClear(m) ? <div key={m.id} className="day-divider" role="separator">Context cleared</div> : <MessageView key={m.id} message={m} face={face} streaming={streaming && streamingId === m.id} last={m.id === last?.id} />)}
+                {msgs.map((m) => isClear(m) ? <div key={m.id} className="day-divider" role="separator">Context cleared</div> : isBranchNote(m) ? <BranchNote content={m.content} /> : <MessageView key={m.id} message={m} face={face} streaming={streaming && streamingId === m.id} last={m.id === last?.id} />)}
                 {pending.map((p) => <PendingUserMessage key={p.key} text={p.text} attachments={p.attachments} />)}
               </div>
             </div>

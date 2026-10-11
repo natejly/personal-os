@@ -2777,3 +2777,6 @@ select:focus-visible {
 .inbox-modal > .agent-inbox { margin: 0; background: none; }
 .inbox-modal-close { position: absolute; top: 8px; right: 8px; z-index: 1; }
 .inbox-archive-search { width: 100%; margin: 4px 0 6px; }
+.branch-note { margin: 6px 0; font-size: 11px; color: var(--text-faint); }
+.branch-note summary { cursor: pointer; }
+.branch-note div { margin-top: 4px; white-space: pre-wrap; }

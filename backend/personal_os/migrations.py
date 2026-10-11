@@ -201,6 +201,13 @@ def _coding_sessions(c: sqlite3.Connection) -> None:
     c.execute("CREATE INDEX IF NOT EXISTS idx_coding_sessions_conv ON coding_sessions(conversation_id, created_at)")
 
 
+def _coding_session_base(c: sqlite3.Connection) -> None:
+    """coding_sessions.base_sha: the repo's HEAD when the session started, what its diff and commit list are taken against."""
+    cols = {r[1] for r in c.execute("PRAGMA table_info(coding_sessions)")}
+    if cols and "base_sha" not in cols:
+        c.execute("ALTER TABLE coding_sessions ADD COLUMN base_sha TEXT")
+
+
 def _sticky_notes_into_docs(c: sqlite3.Connection) -> None:
     """Sticky notes become docs. Each note row turns into a doc with the SAME id (so a space window keeps its
     ref_id), titled from its first line (docs.title_from_body), body, project and timestamps kept, filed at the
@@ -583,6 +590,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (32, "plan_mode_into_plan_first", _plan_mode_into_plan_first),
     (33, "usage_sources_and_backfill", _usage_sources_and_backfill),
     (34, "deepseek_default", _deepseek_default),
+    (35, "coding_session_base", _coding_session_base),
 ]
 
 

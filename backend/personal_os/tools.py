@@ -1682,6 +1682,7 @@ class Toolbox:
                                   expected="`cron` for something repeating, or `when`/`in_minutes` for a one-off")
             pid = ctx.get("project_id")
             aid = ctx.get("agent_id")  # a task scheduled from an agent's chat keeps running as that agent
+            origin = ctx.get("conversation_id")  # and its result comes back to this chat
             if watch_dir:
                 if when or in_minutes:
                     return tool_error("A folder-watching task runs when files change, not at one time.",
@@ -1695,14 +1696,15 @@ class Toolbox:
                     return tool_error(f"I can't watch that folder: {e}", field="watch_dir",
                                       expected="a folder on this Mac, e.g. ~/Downloads")
                 job = self.jobs.create(name.strip(), cron or "", prompt, kind="watch", timezone=tz, enabled=True,
-                                       project_id=pid, watch_dir=folder, agent_id=aid)
+                                       project_id=pid, watch_dir=folder, agent_id=aid, origin_conversation_id=origin)
             elif cron:
                 if not valid_cron(cron):
                     return tool_error(redact.scrub_command_output(f"'{cron}' is not a cron expression I can read."), field="cron",
                                       expected="five fields: minute hour day-of-month month day-of-week",
                                       example={"name": "Weekly review", "prompt": "Write my weekly review…",
                                                "cron": "0 17 * * 5"})
-                job = self.jobs.create(name.strip(), cron, prompt, kind="cron", timezone=tz, enabled=True, project_id=pid, agent_id=aid)
+                job = self.jobs.create(name.strip(), cron, prompt, kind="cron", timezone=tz, enabled=True, project_id=pid, agent_id=aid,
+                                       origin_conversation_id=origin)
             else:
                 if in_minutes is not None:
                     run_at = time.time() + max(1, int(in_minutes)) * 60
@@ -1719,7 +1721,7 @@ class Toolbox:
                                       expected="a time in the future",
                                       alternative="do it now instead of scheduling it")
                 job = self.jobs.create(name.strip(), "", prompt, kind="once", run_at=run_at, timezone=tz,
-                                       enabled=True, project_id=pid, agent_id=aid)
+                                       enabled=True, project_id=pid, agent_id=aid, origin_conversation_id=origin)
             return {**_row(job), "scheduled": True,
                     "note": "It will run on its own, with nobody watching. It can read and write inside Grain; "
                             "anything that leaves the app (mail, calendar, Docs) comes back to the user as a "

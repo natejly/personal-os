@@ -340,11 +340,12 @@ export default function SettingsModal(): JSX.Element {
 
         <div className="settings-body">
           <div className="settings-rail">
-            <label className="settings-search">
+            {/* modal-free keeps the generic `.modal label` / `.modal input` form rules off the search field. */}
+            <div className="settings-search modal-free">
               <Search size={14} aria-hidden />
               <input type="search" value={q} aria-label="Search settings" placeholder="Search settings" spellCheck={false}
                 onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && hits[0]) goTo(hits[0]) }} />
-            </label>
+            </div>
             {q.trim() ? (
               <div className="settings-hits" role="list" aria-label="Search results">
                 {hits.length ? hits.map((h) => (

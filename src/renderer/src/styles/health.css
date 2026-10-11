@@ -39,7 +39,7 @@
 .hl-quick-num { display: flex; gap: 6px; }
 .hl-quick-num input {
   flex: 1; min-width: 0; height: 100%; padding: 4px 8px; border-radius: 8px;
-  background: var(--bg-input); border: 1px solid var(--border-strong); outline: 0; font-variant-numeric: tabular-nums;
+  background: var(--bg-input); border: 1px solid var(--control-border); outline: 0; font-variant-numeric: tabular-nums;
 }
 .hl-quick-num input:focus { border-color: var(--accent); }
 .hl-quick-num .ghost-btn { height: 100%; padding-block: 0; flex-shrink: 0; }
@@ -67,7 +67,7 @@
 .hl-tip {
   position: absolute; top: -4px; transform: translate(-50%, -100%); pointer-events: none; white-space: nowrap;
   display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 5px 9px; border-radius: 8px;
-  background: var(--bg-input); border: 1px solid var(--border-strong); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  background: var(--bg-input); border: 1px solid var(--control-border); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
   font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; z-index: 2;
 }
 .hl-tip-day { font-size: 11px; color: var(--text-muted); }
@@ -97,8 +97,8 @@
 .hl-mrow { display: flex; align-items: center; gap: 8px; padding: 5px 2px; border-bottom: 1px solid var(--border); min-height: 40px; }
 .hl-mrow.off .hl-in.name, .hl-mrow.off .hl-mrow-icon { opacity: 0.55; }
 .hl-mrow-icon { display: inline-flex; color: var(--text-muted); }
-.hl-mrow select, .hl-new select { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 5px 8px; outline: 0; font-size: 12.5px; }
-.hl-in { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 5px 8px; outline: 0; font-size: 12.5px; min-width: 0; }
+.hl-mrow select, .hl-new select { background: var(--bg-input); border: 1px solid var(--control-border); border-radius: 8px; padding: 5px 8px; outline: 0; font-size: 12.5px; }
+.hl-in { background: var(--bg-input); border: 1px solid var(--control-border); border-radius: 8px; padding: 5px 8px; outline: 0; font-size: 12.5px; min-width: 0; }
 .hl-in:focus, .hl-mrow select:focus { border-color: var(--accent); }
 /* One height for everything in a metric row, Save included. */
 .hl-mrow .hl-in, .hl-mrow select, .hl-mrow .primary-btn { height: 30px; }
@@ -136,7 +136,7 @@
 .hl-provider-body { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 0 12px 12px 32px; }
 .hl-provider-body .muted { margin: 0; }
 .hl-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); width: min(360px, 100%); }
-.hl-field select { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 8px; outline: 0; }
+.hl-field select { background: var(--bg-input); border: 1px solid var(--control-border); border-radius: 8px; padding: 6px 8px; outline: 0; }
 .hl-cmd { margin: 0; max-width: 100%; overflow-x: auto; padding: 6px 9px; border-radius: 8px; background: var(--bg-input); border: 1px solid var(--border); font-size: 11.5px; user-select: text; white-space: pre-wrap; word-break: break-all; }
 .hl-src-note { margin: 10px 0 0; }
 

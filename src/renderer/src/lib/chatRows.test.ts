@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Conversation } from '@shared/types'
-import { adjacentChatId, chatLabel, isTelegramChat, partitionChats, sidebarOrder } from './chatRows'
+import { adjacentChatId, chatLabel, plainTitle, isTelegramChat, partitionChats, sidebarOrder } from './chatRows'
 
 const NOW = new Date('2026-10-02T12:00:00').getTime()
 const t = (daysAgo: number): number => (NOW - daysAgo * 86_400_000) / 1000
@@ -72,4 +72,16 @@ test('chatLabel is Telegram for the flagged chat, else the title', () => {
   assert.equal(isTelegramChat(c('a', 0)), false)
   assert.equal(chatLabel(tg('phone', { title: 'x' })), 'Telegram')
   assert.equal(chatLabel(c('a', 0, { title: 'Plans' })), 'Plans')
+})
+
+test('chatLabel and plainTitle show a stored markdown title as plain words', () => {
+  assert.equal(chatLabel(c('a', 0, { title: 'hello **bold** there' })), 'hello bold there')
+  assert.equal(plainTitle('__a__ and *b* and `c`'), 'a and b and c')
+  assert.equal(plainTitle('## Heading'), 'Heading')
+  assert.equal(plainTitle('> quote'), 'quote')
+  assert.equal(plainTitle('- item'), 'item')
+  assert.equal(plainTitle('1. step'), 'step')
+  assert.equal(plainTitle('see [docs](https://x.test/a_b)'), 'see docs')
+  assert.equal(plainTitle('my_var_name'), 'my_var_name')
+  assert.equal(plainTitle('**'), '**')
 })

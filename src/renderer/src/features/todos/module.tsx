@@ -1,4 +1,4 @@
-import { ListChecks } from 'lucide-react'
+import { ListChecks } from '../../icons'
 import type { ModuleDef } from '../../shell/types'
 import TodosView from '../../components/TodosView'
 import { def as todosWidget } from '../../canvas/widgets/todos'

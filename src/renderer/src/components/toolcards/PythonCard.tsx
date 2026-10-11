@@ -1,4 +1,4 @@
-import { FileCode2 } from 'lucide-react'
+import { FileCode2 } from '../../icons'
 import { fmtSeconds, num, str, strList } from '../../lib/toolResult'
 import CardShell from './CardShell'
 import { Badge, ErrorLine, Meta, MonoBlock, unreadable, useParsed } from './blocks'

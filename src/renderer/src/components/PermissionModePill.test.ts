@@ -21,7 +21,7 @@ test('Allow everything only turns the mode pill red: same single button, no extr
   for (const html of [on, off]) {
     assert.equal(html.match(/<button/g)?.length, 1)
     assert.doesNotMatch(html, /All domains|data-allow-all-connections/)
-    assert.match(html, /lucide-shield-check/) // the same icon in every mode: no alert icon under Allow everything
+    assert.match(html, /viewBox="0 0 256 256"/) // the same icon in every mode: no alert icon under Allow everything
   }
   const css = readFileSync('src/renderer/src/styles.css', 'utf8').match(/\.ghost-btn\.skip-perms\.on \{([^}]*)\}/)?.[1] ?? ''
   assert.match(css, /color: var\(--danger\)/)

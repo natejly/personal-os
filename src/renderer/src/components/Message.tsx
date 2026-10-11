@@ -2,7 +2,7 @@ import { Component, memo, useCallback, useEffect, useMemo, useState, type ReactN
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite, splitSources } from '../lib/remarkCites'
-import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2, Zap } from 'lucide-react'
+import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2, Zap } from '../icons'
 import type { Attachment, Message, RunChanges, Span, ToolEvent } from '@shared/types'
 import { useStore, useMessageSubagents, useSubagents } from '../store'
 import { api } from '../lib/api'

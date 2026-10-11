@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bot } from 'lucide-react'
+import { Bot } from '../../icons'
 import type { CodingSession, CodingSessionDiff } from '@shared/types'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'

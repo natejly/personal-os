@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { CalendarClock } from 'lucide-react'
+import { CalendarClock } from '../icons'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import { pimConnected } from '../lib/pim'

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Copy, ExternalLink } from 'lucide-react'
+import { Copy, ExternalLink } from '../icons'
 import type { Settings, TelegramStatus } from '@shared/types'
 import { api } from '../lib/api'
 

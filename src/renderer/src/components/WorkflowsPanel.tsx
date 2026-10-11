@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, ChevronRight, Pencil, Play, Plus, RotateCw, Square, Workflow as WorkflowIcon, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Pencil, Play, Plus, RotateCw, Square, Workflow as WorkflowIcon, X } from '../icons'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { rowButton } from '../lib/rowButton'

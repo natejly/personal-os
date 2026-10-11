@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { RefreshCw, ExternalLink, X, ListPlus, ScanSearch } from 'lucide-react'
+import { RefreshCw, ExternalLink, X, ListPlus, ScanSearch } from '../icons'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import type { MailWatchList as WatchData, MailWatchThread } from '@shared/types'

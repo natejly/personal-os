@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronRight, Telescope } from 'lucide-react'
+import { ChevronRight, Telescope } from '../icons'
 import type { TrailView } from '../lib/researchTrail'
 
 /** The research trail above a reply: the plan with each step's outcome, then the sources the researchers considered. Closed by default. */

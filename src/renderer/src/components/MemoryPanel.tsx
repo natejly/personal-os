@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Search, Columns2, List, Share2, PenLine } from 'lucide-react'
+import { Search, Columns2, List, Share2, PenLine } from '../icons'
 import { useStore, type MemoryMode, type Scope } from '../store'
 import MemoryView from './MemoryView'
 import GraphView from './GraphView'

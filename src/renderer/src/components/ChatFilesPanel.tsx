@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { File, FileDown, FileText, FolderOpen, Files, GitBranch, Paperclip, Pin } from 'lucide-react'
+import { File, FileDown, FileText, FolderOpen, Files, GitBranch, Paperclip, Pin } from '../icons'
 import { Popover } from '../canvas/PresetsMenu'
 import { useIsStreaming } from '../store'
 import { fmtAgo } from '../lib/deskFiles'

@@ -1,5 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
-import { AlertTriangle, RotateCw } from 'lucide-react'
+import { AlertTriangle, RotateCw } from '../icons'
 
 interface Props {
   /** Shown in the fallback so a failing widget is identifiable without opening devtools. */

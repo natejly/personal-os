@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
-import { Calendar as CalIcon, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import { Calendar as CalIcon, ChevronLeft, ChevronRight, Plus } from '../../icons'
 import type { CalendarEvent, DragKind, Todo } from '@shared/types'
 import { useStore } from '../../store'
 import { PIM_SETTINGS_TAB, pimConnected, pimLabel } from '../../lib/pim'

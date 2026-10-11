@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ExternalLink, Rocket } from 'lucide-react'
+import { ExternalLink, Rocket } from '../../icons'
 import type { ShipChecklist } from '@shared/types'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'

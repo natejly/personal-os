@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Brain, Sparkles } from 'lucide-react'
+import { Brain, Sparkles } from '../icons'
 import type { ContextUsed } from '@shared/types'
 import { useStore } from '../store'
 import { memoriesUsed, memoryLine, type MemoryItem } from '../lib/memoryChip'

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, Copy, FolderOpen, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Copy, FolderOpen, RefreshCw } from '../icons'
 import { useStore } from '../store'
 
 /** Shown when the Python backend could not start. Plain language first; the developer detail sits behind a disclosure. */

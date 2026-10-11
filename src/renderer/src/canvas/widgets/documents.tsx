@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { FileText, Trash2, Upload } from 'lucide-react'
+import { FileText, Trash2, Upload } from '../../icons'
 import type { DragKind, Document } from '@shared/types'
 import { useStore, type Scope } from '../../store'
 import { dragProps, useDropTarget } from '../dnd'

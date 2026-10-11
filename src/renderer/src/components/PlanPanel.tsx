@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Circle, CircleDot, CheckCircle2 } from 'lucide-react'
+import { Circle, CircleDot, CheckCircle2 } from '../icons'
 import { useStore, useConversation } from '../store'
 import type { PlanStep } from '@shared/types'
 import { planSummary } from '../lib/plan'

@@ -10,7 +10,7 @@
 import { splitReport } from '../lib/report'
 import { type RoutineDraft } from '../lib/routine'
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Archive, ArchiveRestore, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Rocket, Timer, Trash2, Users, Wrench, X } from 'lucide-react'
+import { AlertTriangle, Archive, ArchiveRestore, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Rocket, Timer, Trash2, Users, Wrench, X } from '../icons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AgentInbox as AgentInboxData, ArchivedInboxRun, AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobSkipRecord, JobStats } from '@shared/types'

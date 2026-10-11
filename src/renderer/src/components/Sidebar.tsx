@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, Files, Plus, Folder, FolderKanban, ChevronRight, Bell, CalendarClock } from 'lucide-react'
+import { ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, Files, Plus, Folder, FolderKanban, ChevronRight, Bell, CalendarClock } from '../icons'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { chatAttentionOf, useStore, type View } from '../store'

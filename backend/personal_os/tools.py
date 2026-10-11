@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fnmatch
 import hashlib
 import inspect
 import datetime as dt
@@ -118,6 +119,11 @@ def times_body(found: dict[str, Any]) -> str:
     """The draft text for calendar_find_time's result: one line per slot."""
     return "Would any of these times work?\n\n" + "\n".join(
         f"- {s['start'].replace('T', ' ')} to {s['end'][11:]} ({found['timezone']})" for s in found["slots"])
+
+
+def allows_slug(patterns: Any, slug: str) -> bool:
+    """Does an agent's tool list name this connector slug? Exact slugs or globs (`mcp__server__*`). An empty list names nothing."""
+    return any(fnmatch.fnmatchcase(slug, str(p)) for p in patterns or ())
 
 
 class ToolSpec:

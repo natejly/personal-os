@@ -33,3 +33,9 @@ test('plain-click anchor then shift-click selects the range between', async () =
   useChatSelection.getState().pick(order, 'c', true, 'a') // no anchor: the open chat stands in
   assert.deepEqual(useChatSelection.getState().selected, ['a', 'b', 'c'])
 })
+
+test('cmd-click with nothing selected seeds the selection with the anchor', () => {
+  assert.deepEqual(nextSelection(order, [], 'a', 'c', false), ['a', 'c'])
+  assert.deepEqual(nextSelection(order, [], null, 'c', false), ['c'])
+  assert.deepEqual(nextSelection(order, [], 'c', 'c', false), ['c'])
+})

@@ -10,7 +10,9 @@ export function nextSelection(rows: string[], selected: string[], anchor: string
   const a = anchor ? order.indexOf(anchor) : -1
   const b = order.indexOf(id)
   if (range && a >= 0 && b >= 0) return order.slice(Math.min(a, b), Math.max(a, b) + 1)
-  return selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]
+  // First ⌘-click after a plain click: the anchor chat joins the selection.
+  const base = selected.length === 0 && a >= 0 && a !== b ? [order[a]] : selected
+  return base.includes(id) ? base.filter((x) => x !== id) : [...base, id]
 }
 
 interface SelectionState {

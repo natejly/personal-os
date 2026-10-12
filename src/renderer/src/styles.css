@@ -2821,7 +2821,8 @@ select:focus-visible {
 /* The unfolded step list is a vertical timeline: a bar joins finished (green) steps and ends just below the current (accent) step.
    Pending steps have no bar. Finished circles are filled and hide the bar; the current one is an outline, so the bar shows through. */
 .progress-card .plan-steps .plan-step { position: relative; }
-.progress-card .plan-steps .plan-step::after { content: ''; position: absolute; left: 6px; width: 1.5px; border-radius: 1px; top: 10px; bottom: -4px; display: none; }
+/* The bar starts at the bottom edge of the 13px icon (3px row + 1px mark padding + 13px) and ends at the next icon's top (-4px): it fills the gaps and never crosses a circle. */
+.progress-card .plan-steps .plan-step::after { content: ''; position: absolute; left: 6px; width: 1.5px; border-radius: 1px; top: 17px; bottom: -4px; display: none; }
 .progress-card .plan-steps .plan-step.done::after { display: block; background: var(--ok); }
 .progress-card .plan-steps .plan-step.in_progress::after, .progress-card .plan-steps .plan-step.consumed::after { display: block; bottom: 0; background: var(--accent); }
 .progress-card .plan-steps .plan-step:last-child::after { display: none; }

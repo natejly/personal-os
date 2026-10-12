@@ -3,6 +3,7 @@ import { argRows, changedKeys, describeCall, wasEdited } from '../../lib/toolDis
 import ApprovalRules from '../ApprovalRules'
 import { ArgList, RawDetails, ResultBlock } from './parts'
 import { useStore, useChatTainted } from '../../store'
+import { useItemLabel, withLabel } from '../../lib/itemLabel'
 import ToolBadges from '../connectors/ToolBadges'
 import { connectorName } from '../connectors/catalog'
 import './toolcards.css'
@@ -14,9 +15,10 @@ import './toolcards.css'
 export function GenericBody({ event }: { event: ToolEvent }): JSX.Element {
   const edited = wasEdited(event)
   const changed = edited ? changedKeys(event.original_arguments, event.edited_arguments) : []
+  const label = useItemLabel(event.name, event.arguments)
   return (
     <div className="tc-generic">
-      <ArgList rows={argRows(event.arguments)} highlight={changed} />
+      <ArgList rows={argRows(withLabel(event.arguments, event.name, label))} highlight={changed} />
       <ResultBlock event={event} />
       <RawDetails event={event} />
     </div>
@@ -38,7 +40,8 @@ export function GenericApproval({ event, conversationId, decide, onWhy }: {
   const connector = connectorName(event.name, event.mcp)
   // A doc tool names its doc by id; show the title the user knows it by.
   const docTitle = useStore((s) => s.docs.find((x) => x.id === event.arguments?.doc)?.title)
-  const args = docTitle ? { ...event.arguments, doc: docTitle } : event.arguments
+  const label = useItemLabel(event.name, event.arguments)
+  const args = withLabel(docTitle ? { ...event.arguments, doc: docTitle } : event.arguments, event.name, label)
   // `forced` marks a card forced by taint, plan mode or an always-ask tool, so the taint line needs the taint itself.
   const tainted = useChatTainted(conversationId)
   return (
@@ -49,7 +52,7 @@ export function GenericApproval({ event, conversationId, decide, onWhy }: {
       onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !(e.target as HTMLElement).closest('form, input, textarea')) { e.preventDefault(); void decide(true) } }}
     >
       <div className="approval-text">
-        <b>{d.verb}</b>{d.subject ? <> {d.subject}</> : null}. {event.forced
+        <b>{d.verb}</b>{label ?? d.subject ? <> {label ?? d.subject}</> : null}. {event.forced
           ? tainted
             ? <>This chat has read untrusted content, so this needs your OK each time.
               {onWhy && <>{' '}<button type="button" className="link small" onClick={onWhy}>See why</button></>}</>

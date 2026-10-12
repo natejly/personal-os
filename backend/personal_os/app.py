@@ -33,7 +33,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from . import auth_breaker, blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
 from . import branch_summary, compaction, followups, otel_export, router, thinking_summary, titles
-from . import chatlink, coding_route, duel, fsx, opencode_usage, request_log
+from . import chatlink, coding_route, duel, fsx, labels, opencode_usage, request_log
 from .fsx import sensitive_reason
 from . import context_map
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
@@ -1577,7 +1577,7 @@ TOOLS_HINT = ("Use tools when they would make the answer more accurate, current 
               "Be direct: when what is already in front of you answers the question, skip them. "
               "Issue independent tool calls together in one response (several lookups, or several tool_search queries) "
               "instead of one per round; a call that needs an earlier result waits for it. "
-              + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT + " " + MAP_HINT + " " + FENCE_RULE)
+              + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT + " " + workers_mod.NAME_HINT + " " + MAP_HINT + " " + FENCE_RULE)
 # The agent stance for an ordinary chat (desks and scheduled runs carry their own). Text only: the leash is the
 # alwaysAsk list and the approval cards, so the model is told to act and let the app stop it where a card is due.
 PROACTIVE_HINT = (  # chats that cannot delegate (a persona without the hand-off tools); a delegating chat gets FRONT_AGENT_HINT
@@ -1586,7 +1586,7 @@ PROACTIVE_HINT = (  # chats that cannot delegate (a persona without the hand-off
     "could find out yourself. " + workers_mod.CHECK_HINT + " Act where the app lets you; it stops you where an approval is "
     "needed, so do not ask permission in advance. Prefer a draft or proposal over a silent change. If they describe a "
     "recurring want, offer schedule_task once. " + workers_mod.CLOSE_HINT + " "
-    + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT
+    + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT + " " + workers_mod.NAME_HINT
 )
 # A plain chat turn that can delegate is told this instead of PROACTIVE_HINT and PLAN_HINT (workers.py).
 FRONT_AGENT_HINT = workers_mod.FRONT_AGENT_HINT
@@ -7612,6 +7612,12 @@ def google_calendar_colors() -> Any:
     return _gcall(google.calendar_colors)
 
 
+@app.get("/labels")
+async def item_label(kind: str, id: str, calendar_id: str | None = None) -> dict[str, Any]:
+    """The human name of an email, event, task, todo or file id (labels.py). `label` is null when it cannot be resolved."""
+    return {"kind": kind, "id": id, "label": await asyncio.to_thread(labels.lookup, toolbox, kind, id, calendar_id)}
+
+
 @app.get("/integrations/google/calendar/{event_id}")
 def google_calendar_get(event_id: str, calendar_id: str = "primary") -> Any:
     return _gcall(google.calendar_get, event_id, calendar_id)
@@ -9916,6 +9922,7 @@ telegram_bridge = telegram.TelegramBridge(telegram.Deps(
     store_upload=_telegram_store_upload,
     mark_texts_conversation=_telegram_mark_conversation,
     computer_name=telegram.computer_name,
+    call_label=lambda tool, args: labels.for_call(toolbox, tool, args),
 ))
 toolbox.setup_probes.update(telegram=telegram_bridge.paired, mcp=lambda: bool(mcp_store.servers()))  # setup_request's checks
 

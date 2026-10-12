@@ -28,7 +28,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from . import duel, egress, mac, osplat, permissions
+from . import duel, egress, labels, mac, osplat, permissions
 from .kinds import is_internal
 from .embed import rrf
 from . import fsx
@@ -1019,6 +1019,8 @@ class Toolbox:
             return tool_error(routed, alternative="coding_session_start")
         # The precheck above judges the command's text; this diffs the repo it ran in, for what the text hid (a script, a heredoc).
         guard = await asyncio.to_thread(coding_route.guard_start, self, args, ctx) if name == "shell_run" else None
+        # The item's human name, read before the write (a deleted event can no longer be looked up).
+        item = await asyncio.to_thread(labels.for_call, self, name, args) if name in labels.ECHO else None
         try:
             out = await self._dispatch(spec, ctx, args)
             if guard and (routed := await asyncio.to_thread(coding_route.guard_finish, guard)):
@@ -1042,6 +1044,8 @@ class Toolbox:
         # One gate for every external write: a result whose read-back did not prove the write is
         # reported as a failure, here, so no individual tool can forget to do it.
         res = checked(name, out)
+        if item and isinstance(res, dict) and not res.get("error"):
+            res = {**res, "item": _scrub_strings(item)}  # so the reply can name the email, event, task or file, not its id
         if ctx.get("auto_attach"):  # a Telegram chat turn: whatever the agent just made (and the check accepted) rides on the reply
             try:
                 await sendfiles.attach_made(self, ctx, name, res)

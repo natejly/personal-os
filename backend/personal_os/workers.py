@@ -73,6 +73,11 @@ OBSERVABILITY_HINT = (
     "When you hand work to a subagent or background worker, say so and name what is running, so a reply is never bare tool calls."
 )
 
+NAME_HINT = (
+    "Refer to emails, events, tasks and files by their human details (an email's subject and sender, an event's title "
+    "and time, a task's title, a file's name), never by a raw id, unless the user asks for the id."
+)
+
 # Shared by FRONT_AGENT_HINT and PROACTIVE_HINT (app.py): reconcile sources, then close with one offer.
 CHECK_HINT = (
     "When a request touches time, people or commitments, check the calendar, inbox or todos first and say what you "
@@ -103,7 +108,7 @@ FRONT_AGENT_HINT = (
     "not ask permission in advance. Prefer a draft or proposal over a silent change. If they describe a recurring want, "
     "offer schedule_task once. If a decision is genuinely the user's, call ask_user once instead of guessing. "
     + CLOSE_HINT + " "
-    + ORCHESTRATION_HINT + " " + OBSERVABILITY_HINT
+    + ORCHESTRATION_HINT + " " + OBSERVABILITY_HINT + " " + NAME_HINT
 )
 
 FORCE_DELEGATE_NUDGE = (

@@ -3346,3 +3346,6 @@ select:focus-visible {
 .accent-custom { position: relative; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; font-size: 15px; line-height: 1; color: var(--text-muted); border: 2px dashed var(--control-border); border-radius: 50%; width: 28px; height: 28px; flex-shrink: 0; }
 .accent-custom.on { border-style: solid; border-color: var(--text); }
 .accent-custom input { position: absolute; inset: -6px; width: 44px; height: 44px; opacity: 0; cursor: pointer; }
+.settings-pane .setting-row.stack { flex-direction: column; align-items: stretch; gap: 4px; }
+.settings-pane .setting-row.stack > :not(.toggle-text) { flex: 1 1 auto; }
+.modal label.accent-custom { margin: 0; gap: 0; }

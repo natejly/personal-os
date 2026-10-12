@@ -591,7 +591,7 @@ export default function SettingsModal(): JSX.Element {
                   ))}
                 </div>
               </div>
-              <div className="setting-row">
+              <div className="setting-row stack">
                 <span className="toggle-text"><b>Accent colour</b><small>{accentId(draft.accent) === CUSTOM_ACCENT ? hexColor(draft.accentCustom) : ACCENTS.find((a) => a.id === accentId(draft.accent))?.label}</small></span>
                 <div className="accent-picks" role="radiogroup" aria-label="Accent color">
                   {ACCENTS.map((a) => {
@@ -647,7 +647,7 @@ export default function SettingsModal(): JSX.Element {
                   ))}
                 </div>
               </div>
-              <div className="setting-row">
+              <div className="setting-row stack">
                 <span className="toggle-text"><b>Interface font</b><small>The typeface for menus, lists and chat. Zoom below scales text and everything else.</small></span>
                 <div className="font-picks" role="radiogroup" aria-label="Interface font">
                   {UI_FONTS.map((f) => (
@@ -655,7 +655,7 @@ export default function SettingsModal(): JSX.Element {
                   ))}
                 </div>
               </div>
-              <div className="setting-row">
+              <div className="setting-row stack">
                 <span className="toggle-text"><b>Code font</b><small>Code blocks, editors and tags.</small></span>
                 <div className="font-picks" role="radiogroup" aria-label="Code font">
                   {CODE_FONTS.map((f) => (

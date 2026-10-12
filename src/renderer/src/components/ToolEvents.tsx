@@ -9,7 +9,10 @@ import DiffView from './DiffView'
 import ActionPlanCard from './ActionPlanCard'
 import RenderBoundary from './RenderBoundary'
 import ApprovalRules from './ApprovalRules'
+import { learnLabels, useItemLabel } from '../lib/itemLabel'
 import { describeCall, docEditStatus, errorLine, fmtMs, groupSummary, partitionEvents, QUESTION_TOOLS, recalledChats } from '../lib/toolDisplay'
+import { statusWord } from '../lib/statusWord'
+import { fmtCost } from '../lib/chatMeta'
 import { AskQuestion } from './DeskApprovalCard'
 import { GenericApproval, GenericBody } from './toolcards/GenericCard'
 import { OutputFiles, StatusDot } from './toolcards/parts'
@@ -154,10 +157,21 @@ export function agentIds(preview: string): string[] {
 
 const AGENT_DONE = ['done', 'error', 'interrupted']
 
+/** One tape line in words: the verb for the call and what it acts on, or the start of its result. */
+function describeTape(e: RunTapeEvent): string {
+  const name = String(e.data.name ?? '')
+  if (e.event === 'tool_call') {
+    const d = describeCall(name, (e.data.arguments ?? {}) as Record<string, unknown>)
+    return `${d.verb}${d.subject ? ` · ${d.subject}` : ''}`
+  }
+  return `${describeCall(name, {}).verb}: ${String(e.data.error ?? e.data.result_preview ?? '').slice(0, 140)}`
+}
+
 /** One child run: live status while it works, then its recorded calls on expand. */
 function AgentRunCard({ id }: { id: string }): JSX.Element {
   const [status, setStatus] = useState('running')
   const [cost, setCost] = useState<number | null>(null)
+  const [name, setName] = useState('')
   const [open, setOpen] = useState(false)
   const [tape, setTape] = useState<RunTapeEvent[] | null>(null)
   useEffect(() => {
@@ -168,6 +182,8 @@ function AgentRunCard({ id }: { id: string }): JSX.Element {
         const r = await api.agentRun(id)
         if (dead) return
         setStatus(r.status)
+        const inp = r.input ?? {}
+        setName(String(inp.title || inp.role || String(inp.task ?? '').split('\n').find((l) => l.replace(/^#+\s*/, '').trim() && !l.startsWith('#')) || '').slice(0, 60))
         setCost(typeof r.budget?.cost === 'number' ? r.budget.cost : null)
         if (!AGENT_DONE.includes(r.status)) timer = setTimeout(() => void poll(), 2000)
       } catch { /* the row may not exist yet; try again */ if (!dead) timer = setTimeout(() => void poll(), 3000) }
@@ -189,9 +205,9 @@ function AgentRunCard({ id }: { id: string }): JSX.Element {
       <button className="tool-head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <ChevronRight size={12} className={open ? 'rot90' : ''} />
         <Face name={id} status={status} size={18} />
-        <span className="tool-name">subagent {id.slice(-4)}</span>
-        <span className={`tag ${status === 'error' ? 'unproven' : ''}`}>{status === 'awaiting_approval' ? 'needs approval' : status}</span>
-        {cost !== null && cost > 0 && <span className="tool-ms">${cost.toFixed(3)}</span>}
+        <span className="tool-name" title={id}>{name || 'Subagent'}</span>
+        <span className={`tag ${status === 'error' ? 'unproven' : ''}`}>{statusWord(status)}</span>
+        {cost !== null && cost > 0 && <span className="tool-ms">{fmtCost(cost)}</span>}
       </button>
       <button className="icon-btn ghost agent-talk" aria-label="Open this subagent" title="Read its transcript and message it"
         onClick={() => useStore.getState().openSubagent(id)}><MessageSquare size={13} /></button>
@@ -202,8 +218,7 @@ function AgentRunCard({ id }: { id: string }): JSX.Element {
             ? <p className="muted small">No tool calls.</p>
             : tape.filter((e) => e.event === 'tool_call' || e.event === 'tool_result').map((e) => (
               <div key={e.seq} className="muted small">
-                {e.event === 'tool_call' ? '→ ' : '← '}{String(e.data.name ?? '')}{' '}
-                {e.event === 'tool_call' ? JSON.stringify(e.data.arguments ?? {}).slice(0, 140) : String(e.data.error ?? e.data.result_preview ?? '').slice(0, 140)}
+                {e.event === 'tool_call' ? '→ ' : '← '}{describeTape(e)}
               </div>
             ))}
         </div>
@@ -288,6 +303,12 @@ function ProposedPlanCard({ event, conversationId }: { event: ToolEvent; convers
   )
 }
 
+/** The row's subject: the email, event, task or file a call acts on by name; the call's own subject until the name is known. */
+function ItemSubject({ event, fallback }: { event: ToolEvent; fallback: string }): JSX.Element {
+  const label = useItemLabel(event.name, event.arguments)
+  return <span className="tool-summary" title={label ? fallback : undefined}>{label ?? fallback}</span>
+}
+
 function Row({ render }: { render: () => JSX.Element }): JSX.Element {
   return render()
 }
@@ -297,6 +318,7 @@ const hasCard = (t: ToolEvent): boolean => t.name !== 'propose_plan' && !(QUESTI
 /** `browserSession`: set on the transcript's latest reply that used the browser; its last browser card offers the viewer. */
 function ToolEvents({ events: all, conversationId, streaming = false, browserSession }: { events: ToolEvent[]; conversationId: string; streaming?: boolean; browserSession?: string }): JSX.Element {
   const events = useMemo(() => quietEvents(all), [all]) // hand-offs to workers are not cards: the app shows the workers
+  useMemo(() => learnLabels(all), [all]) // ids seen in these results get their human names before any row below asks for one
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
@@ -323,7 +345,7 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
           <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
           <span className={`tool-name human ${t.pending && !t.needs_approval ? 'shimmer' : ''}`}>{d.verb}</span>
           {t.agent && <span className="tag" title="Raised by a subagent">via {t.agent}</span>}
-          <span className="tool-summary">{d.subject}</span>
+          <ItemSubject event={t} fallback={d.subject} />
           <Verdict event={t} />
           {t.name === 'doc_edit' && (() => {
             const s = docEditStatus(t.result_preview)

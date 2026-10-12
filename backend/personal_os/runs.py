@@ -917,7 +917,9 @@ class RunBus:
             raise
         except Exception as e:  # noqa: BLE001 - a dead run must still tell its subscribers why
             log.exception("run %s failed", run.run_id)
-            run.publish("error", {"message": str(e)})
+            # A bare KeyError('x') or AttributeError reads as an internal name, not a reason: say what happened instead.
+            plain = isinstance(e, (KeyError, AttributeError, TypeError, IndexError, AssertionError)) or not str(e).strip()
+            run.publish("error", {"message": "Something went wrong while running this reply. Try again." if plain else str(e)})
         finally:
             for hook in self.after_hooks:
                 try:

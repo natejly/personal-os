@@ -1,3 +1,4 @@
+import { formatBytes } from '../../components/dataFormat'
 import { CircleCheck, CircleHelp, PackageCheck, TriangleAlert } from '../../icons'
 import { gateProblems, num, str, strList } from '../../lib/toolResult'
 import CardShell from './CardShell'
@@ -16,7 +17,7 @@ export function DeliverCard(props: ToolCardProps): JSX.Element {
     <CardShell {...props} icon={<PackageCheck size={14} />} title="Deliver for review" subject={str(a.title) || undefined} hideResult={!unreadable(p, event)}>
       <Meta items={[
         ['File', <span className="mono" key="p">{str(d?.path) || str(a.path)}</span>],
-        ['Size', bytes !== null ? (bytes < 1024 ? `${bytes} bytes` : `${Math.round(bytes / 1024).toLocaleString()} KB`) : null]
+        ['Size', bytes !== null ? formatBytes(bytes) : null]
       ]} />
       {str(a.summary) && <LongText text={str(a.summary)} />}
       {d && str(d.warning) && <div className="tc-hint warn tc-warning"><TriangleAlert size={12} /> {str(d.warning)}</div>}

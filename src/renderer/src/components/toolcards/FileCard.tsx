@@ -1,3 +1,4 @@
+import { formatBytes } from '../../components/dataFormat'
 import { useState } from 'react'
 import { FilePen } from '../../icons'
 import { changedKeys, wasEdited } from '../../lib/toolDisplay'
@@ -49,7 +50,7 @@ function FileCard(props: ToolCardProps): JSX.Element {
           </label>
           {mode === 'overwrite' && <div className="tc-hint warn">Replaces the file if it already exists.</div>}
           <div className="tc-field">
-            <span>Content <em className="tc-muted">{bytes.toLocaleString()} bytes</em></span>
+            <span>Content <em className="tc-muted">{formatBytes(bytes)}</em></span>
             {editing ? (
               <textarea className="mono" rows={10} value={content} onChange={(e) => setContent(e.target.value)} aria-label="File content" />
             ) : (
@@ -63,7 +64,7 @@ function FileCard(props: ToolCardProps): JSX.Element {
           <div className={`tc-arg ${changed.includes('path') ? 'changed' : ''}`}><dt>Path</dt><dd className="mono">{str(a.path)}</dd></div>
           <div className={`tc-arg ${changed.includes('mode') ? 'changed' : ''}`}><dt>Mode</dt><dd>{MODES[shownMode] ?? shownMode}</dd></div>
           <div className={`tc-arg ${changed.includes('content') ? 'changed' : ''}`}>
-            <dt>Content</dt><dd><LongText text={str(a.content)} mono /><span className="tc-muted"> {bytes.toLocaleString()} bytes</span></dd>
+            <dt>Content</dt><dd><LongText text={str(a.content)} mono /><span className="tc-muted"> {formatBytes(bytes)}</span></dd>
           </div>
         </dl>
       )}

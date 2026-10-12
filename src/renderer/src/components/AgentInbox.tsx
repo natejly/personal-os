@@ -527,7 +527,7 @@ export function JobRow({ job }: { job: Job }): JSX.Element {
         </select>
         {job.target !== 'desk' && (
           <>
-            <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={(job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools') + (job.model ? ` · ${job.model}` : '')}
+            <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={(job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools') + (job.model ? ` · ${modelLabel(job.model)}` : '')}
               aria-label={`Tools for ${job.name}`} aria-expanded={toolsOpen} onClick={() => setToolsOpen((v) => !v)}>
               <Wrench size={12} />
             </button>

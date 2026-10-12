@@ -1,3 +1,4 @@
+import { statusWord } from '../lib/statusWord'
 import { useState } from 'react'
 import { Circle, CircleDot, CircleCheck, CircleAlert, CircleMinus, ListChecks, Wrench } from '../icons'
 import type { FullDesk, PlanStepStatus } from '@shared/types'
@@ -57,7 +58,7 @@ export default function DeskPlan({ desk }: { desk: FullDesk }): JSX.Element {
       <header className="desk-plan-head">
         <ListChecks size={14} />
         <b>{plan.title || 'Plan'}</b>
-        <span className="muted small">{done}/{live.length} done · {plan.status}</span>
+        <span className="muted small">{done}/{live.length} done · {statusWord(plan.status)}</span>
         <span className="spacer" />
         <button className="ghost-btn sm" aria-expanded={amending} onClick={() => setAmending((v) => !v)}>Amend plan</button>
       </header>

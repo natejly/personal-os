@@ -1,3 +1,4 @@
+import { statusWord } from '../lib/statusWord'
 import { useEffect, useState } from 'react'
 import { ArrowRight, Scheduled, Play, Trash2 } from '../icons'
 import type { Job, JobRunRecord, JobSkipRecord } from '@shared/types'
@@ -97,7 +98,7 @@ function JobDetail({ job, onBack }: { job: Job; onBack: () => void }): JSX.Eleme
       {reports.map((r) => (
         <section key={r.run_id} className="job-report">
           <div className="job-report-head small muted">
-            <span>{fmtDate(r.started_at)} · {r.status}</span>
+            <span>{fmtDate(r.started_at)} · {statusWord(r.status)}</span>
             <span className="spacer" />
             {r.conversation_id && <button className="link small" onClick={() => void selectChat(r.conversation_id as string)}>Open chat <ArrowRight size={11} /></button>}
           </div>

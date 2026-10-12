@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Blend, Pin, PinOff, X } from './icons'
 import type { CanvasWindow } from '@shared/types'
 import { api } from './lib/api'
+import { useShallow } from 'zustand/react/shallow'
 import { useStore } from './store'
+import { applyAppearance } from './lib/appearance'
 import { WIDGETS } from './canvas/registry'
 import { clampOpacity, MIN_OPACITY, nextOpacity, opacityPercent } from './canvas/opacity'
 import StatusRing from './canvas/StatusRing'
@@ -18,7 +20,7 @@ export default function PopoutSurface({ windowId }: { windowId: string }): JSX.E
   const [error, setError] = useState('')
   const [focused, setFocused] = useState(() => document.hasFocus())
   const [tuning, setTuning] = useState(false)
-  const theme = useStore((s) => s.settings.theme)
+  const appearance = useStore(useShallow((s) => [s.settings.theme, s.settings.accent, s.settings.textTone, s.settings.surfaceTone, s.settings.uiFont] as const))
   /** The slider fires per pixel; the window follows every tick, the backend only once the drag rests. */
   const saveOpacity = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -46,8 +48,8 @@ export default function PopoutSurface({ windowId }: { windowId: string }): JSX.E
   }, [reload])
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme
-  }, [theme])
+    applyAppearance({ theme: appearance[0], accent: appearance[1], textTone: appearance[2], surfaceTone: appearance[3], uiFont: appearance[4] })
+  }, [appearance])
 
   useEffect(() => {
     const on = (): void => setFocused(true)

@@ -116,6 +116,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "learnStyle": True,
     "theme": "dark",
     "accent": "sage",
+    "textTone": "neutral",  # text colour family: neutral, warm, cream, soft, cool
+    "surfaceTone": "neutral",  # background tint: neutral, warm, cool, black
+    "uiFont": "system",  # interface typeface: system, serif, rounded, mono
     "mode": "classic",
     "gatherShortcut": "Control+Alt+Command+Space",
     # Global quick capture: a small window that appends a timestamped bullet to today's daily note.

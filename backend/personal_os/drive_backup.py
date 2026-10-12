@@ -1,4 +1,12 @@
-"""Back up the user's files (uploads and editor docs, nothing else) to a "Grain Backup" folder in Google Drive.
+"""Back up the user's files (uploads and editor docs, nothing else) to a per-computer folder in Google Drive.
+
+The folder is "Grain Backup (<label>)", so two Grain installs on one Google account each get their own instead of
+overwriting one another's copies. The label is the `driveBackupLabel` setting, read fresh each run; blank means this
+computer's hostname. A folder already recorded in the state whose Drive name matches is kept as is. When the wanted
+name differs (the first run after this per-machine change, or after the label is edited) the run re-uploads every
+file into the folder of the new name, and the old folder's files are left in Drive: there is no delete path.
+Switching back to a label whose folder already exists (or sharing a label with another install) re-uploads into that
+folder as new copies, because the state tracks only one folder; older copies there are not reused.
 
 Incremental: <data dir>/drive-backup.json remembers, per file, the signature last uploaded and its Drive id, so an
 unchanged file is skipped and an edited doc updates its Drive copy in place. Every run ends with a summary
@@ -12,8 +20,11 @@ import hashlib
 import json
 import logging
 import os
+import platform
+import re
 import threading
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -23,8 +34,20 @@ from .google import Google, GoogleNotConnected
 
 log = logging.getLogger("personal_os.drive_backup")
 FOLDER = "Grain Backup"
+FALLBACK_LABEL = "this computer"
+LABEL_MAX = 60
 EVERY_S = 24 * 3600
 TICK_S = 3600
+
+
+def device_label(raw: str | None) -> str:
+    """The name of this computer for the folder: the setting, else the hostname, made safe for a Drive name."""
+    label = raw if raw and raw.strip() else (platform.node() or FALLBACK_LABEL)
+    label = label.replace("/", "-").replace("\\", "-")
+    label = re.sub(r"\s+", " ", label)  # tabs and newlines become a space before the other control characters go
+    label = "".join(ch for ch in label if not unicodedata.category(ch).startswith("C"))
+    label = label.strip()[:LABEL_MAX].strip()
+    return label or FALLBACK_LABEL
 
 
 class DriveBackup:
@@ -43,8 +66,13 @@ class DriveBackup:
         tmp.write_text(json.dumps(self.state))
         os.replace(tmp, self.path)
 
+    def _label(self) -> str:
+        return device_label(self.db.get_settings().get("driveBackupLabel"))
+
     def status(self) -> dict[str, Any]:
-        return {"last": self.state.get("last"), "tracked": len(self.state["files"])}
+        label = self._label()
+        return {"last": self.state.get("last"), "tracked": len(self.state["files"]),
+                "folder": f"{FOLDER} ({label})", "label": label, "folder_id": self.state.get("folder_id")}
 
     def _items(self) -> list[dict[str, Any]]:
         """What would be backed up: key, Drive name, signature, and either a local path or text bytes."""
@@ -90,20 +118,31 @@ class DriveBackup:
             if st["needs_reauth"]:
                 raise GoogleNotConnected(f"{st['reauth_reason']} Reconnect Google in Settings → Integrations.")
             files: dict[str, Any] = self.state["files"]
+            label = self._label()
+            wanted = f"{FOLDER} ({label})"
+            props = {"grainDevice": label}
             folder = self.state.get("folder_id")
-            if folder and not self.google.drive_backup_folder_alive(folder):
-                # Folder deleted or trashed in Drive: its files went with it, so start over this run.
-                folder = self.state["folder_id"] = None
-                files.clear()
+            if folder:
+                current = self.google.drive_backup_folder_name(folder)
+                if current is None:
+                    # Folder deleted or trashed in Drive: its files went with it, so start over this run.
+                    folder = self.state["folder_id"] = None
+                    files.clear()
+                elif current != wanted:
+                    log.info("Drive backup: re-pointing from folder %r to %r (device label %r); the old folder's files are left in place",
+                             current, wanted, label)
+                    folder = self.state["folder_id"] = None
+                    files.clear()
             if not folder:
-                folder = self.state["folder_id"] = self.google.drive_backup_folder(FOLDER)
+                folder = self.state["folder_id"] = self.google.drive_backup_folder(wanted, props)
+            self.state["folder_name"], self.state["label"] = wanted, label
             for it in self._items():
                 prev = files.get(it["key"])
                 if prev and prev["sig"] == it["sig"]:
                     res["skipped"] += 1
                     continue
                 try:
-                    did = self.google.drive_backup_put(folder, it["name"], it.get("file"), it.get("data"), prev and prev["id"])
+                    did = self.google.drive_backup_put(folder, it["name"], it.get("file"), it.get("data"), prev and prev["id"], props=props)
                     files[it["key"]] = {"sig": it["sig"], "id": did}
                     res["copied"] += 1
                 except GoogleNotConnected:

@@ -34,7 +34,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from . import redact
+from . import labels, redact
 from .workers import strip_no_reply
 from .telegram_format import html_to_plain, plan, render, split_plain, to_plain  # noqa: F401 - to_plain is re-exported
 
@@ -233,6 +233,7 @@ class Deps:
     store_upload: Callable[[str, str, bytes], Any] | None = None  # (name, mime, data) -> {"id", ...}; sync or async
     download: Callable[[str, str], Awaitable[bytes]] | None = None  # (token, file_path) -> bytes; default: api.download
     mark_texts_conversation: Callable[[str, bool], None] = lambda cid, flag: None  # (conversation id, is the Texts chat): the app labels it
+    call_label: Callable[[str, Any], str | None] = lambda tool, args: None  # (tool, args) -> the email/event/task the call acts on, by name; blocking
     computer_name: Callable[[], str] | None = None  # set = one bot per Mac: name the bot and claim it; None leaves the bot alone
 
 
@@ -1086,7 +1087,13 @@ class TelegramBridge:
                     if await self._send(chat_id, f"{_tool_words(a.get('tool'))} is waiting in Grain. Open the app to answer."):
                         self._told.add(cid)
                     continue
-                preview, shortened = _args_preview(a.get("args"))
+                args = a.get("args")
+                item = await asyncio.to_thread(self.deps.call_label, a.get("tool") or "", args)
+                if item and isinstance(args, dict):  # the name replaces the id it came from
+                    args = {k: v for k, v in args.items() if k != labels.TARGETS[a["tool"]][1]}
+                preview, shortened = _args_preview(args)
+                if item:
+                    preview = f"{item}\n{preview}" if preview else item
                 forced = bool(a.get("forced"))
                 code = self._code_seq + 1
                 why = ("untrusted content asked for this; extra confirmation needed" if forced

@@ -330,6 +330,13 @@ async def card(env: Env, call_id: str = "call-1", **kw: Any) -> tuple[int, dict[
 
 
 @case
+async def test_approval_card_names_the_item_not_its_id(env: Env) -> None:
+    env.bridge.deps.call_label = lambda tool, args: "Robotics midterm study · Mon Oct 12, 8:30 – 10:00 PM"
+    _, p = await card(env, tool="calendar_delete", args={"event_id": "abc123evt", "calendar_id": "primary"})
+    assert "Robotics midterm study" in p["text"] and "abc123evt" not in p["text"]
+
+
+@case
 async def test_approval_card_has_buttons_and_no_secrets(env: Env) -> None:
     code, p = await card(env, args={"to": "a@b.co", "api_key": "sk-abcdefghijklmnopqrstuvwxyz123456"})
     assert p["chat_id"] == OWNER and p["text"].startswith(f"Approval needed [{code}]: Send email — external action\n")

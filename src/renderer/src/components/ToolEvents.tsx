@@ -9,6 +9,7 @@ import DiffView from './DiffView'
 import ActionPlanCard from './ActionPlanCard'
 import RenderBoundary from './RenderBoundary'
 import ApprovalRules from './ApprovalRules'
+import { learnLabels, useItemLabel } from '../lib/itemLabel'
 import { describeCall, docEditStatus, errorLine, fmtMs, groupSummary, partitionEvents, QUESTION_TOOLS, recalledChats } from '../lib/toolDisplay'
 import { statusWord } from '../lib/statusWord'
 import { fmtCost } from '../lib/chatMeta'
@@ -302,6 +303,12 @@ function ProposedPlanCard({ event, conversationId }: { event: ToolEvent; convers
   )
 }
 
+/** The row's subject: the email, event, task or file a call acts on by name; the call's own subject until the name is known. */
+function ItemSubject({ event, fallback }: { event: ToolEvent; fallback: string }): JSX.Element {
+  const label = useItemLabel(event.name, event.arguments)
+  return <span className="tool-summary" title={label ? fallback : undefined}>{label ?? fallback}</span>
+}
+
 function Row({ render }: { render: () => JSX.Element }): JSX.Element {
   return render()
 }
@@ -311,6 +318,7 @@ const hasCard = (t: ToolEvent): boolean => t.name !== 'propose_plan' && !(QUESTI
 /** `browserSession`: set on the transcript's latest reply that used the browser; its last browser card offers the viewer. */
 function ToolEvents({ events: all, conversationId, streaming = false, browserSession }: { events: ToolEvent[]; conversationId: string; streaming?: boolean; browserSession?: string }): JSX.Element {
   const events = useMemo(() => quietEvents(all), [all]) // hand-offs to workers are not cards: the app shows the workers
+  useMemo(() => learnLabels(all), [all]) // ids seen in these results get their human names before any row below asks for one
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
@@ -337,7 +345,7 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
           <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
           <span className={`tool-name human ${t.pending && !t.needs_approval ? 'shimmer' : ''}`}>{d.verb}</span>
           {t.agent && <span className="tag" title="Raised by a subagent">via {t.agent}</span>}
-          <span className="tool-summary">{d.subject}</span>
+          <ItemSubject event={t} fallback={d.subject} />
           <Verdict event={t} />
           {t.name === 'doc_edit' && (() => {
             const s = docEditStatus(t.result_preview)

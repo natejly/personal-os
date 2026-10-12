@@ -1,3 +1,5 @@
+import { useItemLabel } from '../lib/itemLabel'
+import { describeCall } from '../lib/toolDisplay'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { useStore } from '../store'
@@ -63,7 +65,7 @@ function Column({ conversationId, messageId, sideKey, side, label, hot, canRegen
             {side.held.length > 0 && (
               <div className="duel-calls">
                 <small>Will do if picked:</small>
-                {side.held.map((c, i) => <code key={i}>{c.name}({c.args})</code>)}
+                {side.held.map((c, i) => <HeldCall key={i} name={c.name} args={c.args} />)}
               </div>
             )}
           </div>
@@ -77,6 +79,15 @@ function Column({ conversationId, messageId, sideKey, side, label, hot, canRegen
       </div>
     </div>
   )
+}
+
+/** One action that runs only if this side is picked: what it does to which email, event, task or file, by name; its arguments are on hover. */
+function HeldCall({ name, args }: { name: string; args: string }): JSX.Element {
+  let parsed: Record<string, unknown> = {}
+  try { const v = JSON.parse(args); if (v && typeof v === 'object') parsed = v } catch { /* cut at 300 characters: the text is shown as is */ }
+  const label = useItemLabel(name, parsed)
+  const d = describeCall(name, parsed)
+  return label || d.subject ? <code title={`${name}(${args})`}>{d.verb} {label ?? d.subject}</code> : <code>{name}({args})</code>
 }
 
 /** The two replies of a developer-mode duel, side by side and blind (no model names), until one is picked. */

@@ -4,6 +4,7 @@ import type { PendingApproval, ToolEvent } from '@shared/types'
 import { useStore } from '../store'
 import { browserAllowLabel, browserSentence } from '../lib/browserApproval'
 import { describeCall, QUESTION_TOOLS } from '../lib/toolDisplay'
+import { useItemLabel } from '../lib/itemLabel'
 import { parseResult } from '../lib/toolResult'
 import ApprovalRules from './ApprovalRules'
 import { GenericApproval } from './toolcards/GenericCard'
@@ -139,9 +140,11 @@ function BrowserApproval({ event, decide, conversationId, note }: {
 /** The raw arguments, one click away, for the rare card where the sentence is not enough. */
 function ArgDetails({ event }: { event: ToolEvent }): JSX.Element {
   const d = describeCall(event.name, event.arguments)
+  const label = useItemLabel(event.name, event.arguments)
+  const subject = label ?? d.subject
   return (
     <details className="desk-approval-details">
-      <summary>Details{d.subject ? ` — ${d.subject}` : ''}</summary>
+      <summary>Details{subject ? ` — ${subject}` : ''}</summary>
       <ArgListOf args={event.arguments} />
     </details>
   )

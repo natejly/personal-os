@@ -118,7 +118,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "accent": "sage",
     "textTone": "neutral",  # text colour family: neutral, warm, cream, soft, cool
     "surfaceTone": "neutral",  # background tint: neutral, warm, cool, black
-    "uiFont": "system",  # interface typeface: system, serif, rounded, mono
+    "accentCustom": "#7c8cf0",  # the colour behind accent "custom"
+    "uiFont": "system",  # interface typeface: system, serif, rounded, mono and macOS faces (see lib/appearance.ts)
+    "codeFont": "default",  # code typeface: default, sfmono, menlo, monaco, courier
     "mode": "classic",
     "gatherShortcut": "Control+Alt+Command+Space",
     # Global quick capture: a small window that appends a timestamped bullet to today's daily note.

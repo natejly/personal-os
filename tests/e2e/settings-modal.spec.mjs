@@ -19,7 +19,7 @@ test('every settings tab opens and renders cleanly', async ({ grain }) => {
   // Arrow keys walk the rail.
   await dialog(page).getByRole('tab', { name: 'Advanced' }).focus()
   await page.keyboard.press('ArrowDown')
-  await expect(dialog(page).getByRole('tab', { name: 'Model' })).toHaveAttribute('aria-selected', 'true')
+  await expect(dialog(page).getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('End')
   await expect(dialog(page).getByRole('tab', { name: 'Advanced' })).toHaveAttribute('aria-selected', 'true')
   await closeSettings(page)

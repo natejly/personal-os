@@ -103,7 +103,7 @@ test('view:documents and upload open Files on uploads, where the upload input re
   assert.deepEqual(clicked, ['doc-upload-input'])
   // ⌘, after that still opens on Model.
   fire('settings')
-  assert.equal(useStore.getState().settingsTab, 'model')
+  assert.equal(useStore.getState().settingsTab, 'appearance')
   useStore.getState().setSettingsOpen(false)
 })
 

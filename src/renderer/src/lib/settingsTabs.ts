@@ -48,7 +48,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'agents', sec: 'checks', title: 'Checks and commands', keys: 'gates test lint build verify commands' },
   { tab: 'memory', sec: 'learning', title: 'Learning', keys: 'learn from chats writing style remember profile' },
   { tab: 'memory', sec: 'search', title: 'Memory search and index', keys: 'embedding rebuild index retrieval vectors passages hybrid reranker chunks' },
-  { tab: 'appearance', sec: 'look', title: 'Theme, accent and zoom', keys: 'dark light colour color font size scale recap blobs' },
+  { tab: 'appearance', sec: 'look', title: 'Theme, accent, fonts and zoom', keys: 'preset presets dark light colour color custom accent font typeface code monospace size scale recap blobs' },
   { tab: 'appearance', sec: 'notifications', title: 'Notifications', keys: 'notify alerts unread dot jobs finish' },
   { tab: 'appearance', sec: 'shortcuts', title: 'Shortcuts and voice', keys: 'keyboard hotkey dictation microphone speech quick note quick ask gather widgets' },
   { tab: 'sidebar', sec: 'sidebar', title: 'Sidebar rows', keys: 'hide show lists calendar mail health library files spaces projects jobs modules views' },

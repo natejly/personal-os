@@ -11,7 +11,7 @@ import { downloadJson, pickJson } from '../lib/jsonFile'
 import { homeModuleOn } from '../moduleToggles'
 import { navEntries } from '../shell/nav'
 import { useModal } from '../lib/useModal'
-import { ACCENTS, SURFACE_TONES, TEXT_TONES, UI_FONTS, accentId, applyAppearance, isLightTheme, surfaceToneId, textToneId, uiFontId } from '../lib/appearance'
+import { ACCENTS, CODE_FONTS, CUSTOM_ACCENT, PRESETS, SURFACE_TONES, TEXT_TONES, UI_FONTS, accentId, activePreset, applyAppearance, codeFontId, hexColor, isLightTheme, surfaceToneId, textToneId, uiFontId } from '../lib/appearance'
 import { modelLabel } from '../lib/modelLabel'
 import { chatRows } from '../lib/pickerModels'
 import { RESPONSE_STYLES, RESPONSE_STYLE_TEXT_MAX } from '../lib/responseStyle'
@@ -43,16 +43,16 @@ import ScopeSelect from './ScopeSelect'
 type Tab = SettingsTab
 
 const TABS: { id: Tab; label: string; icon: Icon }[] = [
-  { id: 'model', label: 'Model', icon: Cpu },
-  { id: 'models', label: 'Models', icon: Layers },
-  { id: 'usage', label: 'Usage', icon: Gauge },
-  { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
-  { id: 'integrations', label: 'Integrations', icon: Plug },
-  { id: 'agents', label: 'Agents', icon: Bot },
-  { id: 'memory', label: 'Memory', icon: Brain },
   { id: 'appearance', label: 'General', icon: Palette },
   { id: 'sidebar', label: 'Sidebar', icon: PanelLeft },
+  { id: 'model', label: 'Model', icon: Cpu },
+  { id: 'models', label: 'Models', icon: Layers },
+  { id: 'agents', label: 'Agents', icon: Bot },
+  { id: 'memory', label: 'Memory', icon: Brain },
+  { id: 'integrations', label: 'Integrations', icon: Plug },
+  { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
   { id: 'system', label: 'System access', icon: KeyRound },
+  { id: 'usage', label: 'Usage', icon: Gauge },
   { id: 'advanced', label: 'Advanced', icon: SlidersHorizontal }
 ]
 
@@ -138,7 +138,7 @@ export default function SettingsModal(): JSX.Element {
   const [askShortcut, setAskShortcut] = useState<ShortcutState | null>(null)
   const storeTab = useStore((s) => s.settingsTab)
   const storeGroup = useStore((s) => s.settingsGroup)
-  const [tab, setTabState] = useState<Tab>(() => (TABS.some((x) => x.id === storeTab) ? storeTab : 'model'))
+  const [tab, setTabState] = useState<Tab>(() => (TABS.some((x) => x.id === storeTab) ? storeTab : 'appearance'))
   // The store keeps the shown tab, so openSettings from a toast or a link switches the open modal too.
   const setTab = (t: Tab): void => { setTabState(t); useStore.setState({ settingsTab: t }) }
   // Advanced groups start collapsed; one opens when Settings was asked for a topic inside it.
@@ -248,7 +248,7 @@ export default function SettingsModal(): JSX.Element {
   // Preview the appearance options on the page while the modal is open; discard restores saved values.
   useEffect(() => {
     applyAppearance(draft)
-  }, [draft.theme, draft.accent, draft.textTone, draft.surfaceTone, draft.uiFont])
+  }, [draft.theme, draft.accent, draft.textTone, draft.surfaceTone, draft.uiFont, draft.codeFont, draft.accentCustom])
   useEffect(() => () => applyAppearance(useStore.getState().settings), [])
 
   const showShortcuts = (): void => { setTab('appearance'); setJump('shortcuts') }
@@ -568,7 +568,22 @@ export default function SettingsModal(): JSX.Element {
 
             {tab === 'appearance' && <section>
               <h3>General</h3>
-              <Sec id="look"><div className="setting-row">
+              <Sec id="look">
+              <div className="preset-row" role="radiogroup" aria-label="Appearance presets">
+                {PRESETS.map((p) => {
+                  const on = activePreset(draft) === p.id
+                  return (
+                    <button key={p.id} type="button" role="radio" aria-checked={on} className={`preset-card${on ? ' on' : ''}`}
+                      onClick={() => patch({ theme: p.theme, accent: p.accent, uiFont: p.uiFont, codeFont: p.codeFont })}>
+                      <span className="preset-prev" style={{ background: p.bg, color: p.fg, fontFamily: UI_FONTS.find((f) => f.id === p.uiFont)?.stack }}>
+                        Aa<i style={{ background: p.dot }} />
+                      </span>
+                      <b>{p.label}</b>
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="setting-row">
                 <span className="toggle-text"><b>Theme</b><small>System follows your Mac.</small></span>
                 <div className="seg" role="radiogroup" aria-label="Theme">
                   {THEMES.map((t) => (
@@ -576,8 +591,8 @@ export default function SettingsModal(): JSX.Element {
                   ))}
                 </div>
               </div>
-              <div className="setting-row">
-                <span className="toggle-text"><b>Accent colour</b><small>{ACCENTS.find((a) => a.id === accentId(draft.accent))?.label}</small></span>
+              <div className="setting-row stack">
+                <span className="toggle-text"><b>Accent colour</b><small>{accentId(draft.accent) === CUSTOM_ACCENT ? hexColor(draft.accentCustom) : ACCENTS.find((a) => a.id === accentId(draft.accent))?.label}</small></span>
                 <div className="accent-picks" role="radiogroup" aria-label="Accent color">
                   {ACCENTS.map((a) => {
                     const on = accentId(draft.accent) === a.id
@@ -595,6 +610,12 @@ export default function SettingsModal(): JSX.Element {
                       />
                     )
                   })}
+                  <label className={`accent-custom${accentId(draft.accent) === CUSTOM_ACCENT ? ' on' : ''}`} title="Custom colour"
+                    style={{ background: accentId(draft.accent) === CUSTOM_ACCENT ? hexColor(draft.accentCustom) : undefined }}>
+                    {accentId(draft.accent) === CUSTOM_ACCENT ? null : '+'}
+                    <input type="color" aria-label="Custom accent colour" value={hexColor(draft.accentCustom)}
+                      onChange={(e) => patch({ accent: CUSTOM_ACCENT, accentCustom: e.target.value })} />
+                  </label>
                 </div>
               </div>
               <div className="setting-row">
@@ -626,11 +647,19 @@ export default function SettingsModal(): JSX.Element {
                   ))}
                 </div>
               </div>
-              <div className="setting-row">
-                <span className="toggle-text"><b>Interface font</b><small>The typeface for menus, lists and chat.</small></span>
-                <div className="seg" role="radiogroup" aria-label="Interface font">
+              <div className="setting-row stack">
+                <span className="toggle-text"><b>Interface font</b><small>The typeface for menus, lists and chat. Zoom below scales text and everything else.</small></span>
+                <div className="font-picks" role="radiogroup" aria-label="Interface font">
                   {UI_FONTS.map((f) => (
-                    <button key={f.id} type="button" role="radio" aria-checked={uiFontId(draft.uiFont) === f.id} className={uiFontId(draft.uiFont) === f.id ? 'on' : ''} onClick={() => patch({ uiFont: f.id })}>{f.label}</button>
+                    <button key={f.id} type="button" role="radio" aria-checked={uiFontId(draft.uiFont) === f.id} className={uiFontId(draft.uiFont) === f.id ? 'on' : ''} style={{ fontFamily: f.stack }} onClick={() => patch({ uiFont: f.id })}>{f.label}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="setting-row stack">
+                <span className="toggle-text"><b>Code font</b><small>Code blocks, editors and tags.</small></span>
+                <div className="font-picks" role="radiogroup" aria-label="Code font">
+                  {CODE_FONTS.map((f) => (
+                    <button key={f.id} type="button" role="radio" aria-checked={codeFontId(draft.codeFont) === f.id} className={codeFontId(draft.codeFont) === f.id ? 'on' : ''} style={{ fontFamily: f.stack }} onClick={() => patch({ codeFont: f.id })}>{f.label}</button>
                   ))}
                 </div>
               </div>

@@ -92,11 +92,20 @@ def _local_naive(value: str) -> datetime:
     return d.astimezone().replace(tzinfo=None) if d.tzinfo else d
 
 
-def in_busy_calendars(events: list[dict[str, Any]], busy_calendar_ids: list[str] | tuple[str, ...] = ()) -> list[dict[str, Any]]:
-    """Events on a calendar that counts as busy: all of them when `busy_calendar_ids` is empty, else only those calendars."""
+def read_calendars(busy_calendar_ids: list[str] | tuple[str, ...], mirror_calendar_ids: list[str] | tuple[str, ...] = ()) -> list[str]:
+    """The calendar list to read events from: the checked ones when no busy calendars are chosen, else the chosen ones
+    plus the planner's own calendar (so accepted Focus blocks still lock their todos)."""
+    return list(dict.fromkeys([*busy_calendar_ids, *mirror_calendar_ids])) if busy_calendar_ids else ["enabled"]
+
+
+def in_busy_calendars(events: list[dict[str, Any]], busy_calendar_ids: list[str] | tuple[str, ...] = (),
+                      mirror_calendar_ids: list[str] | tuple[str, ...] = ()) -> list[dict[str, Any]]:
+    """Events on a calendar that counts as busy: all of them when `busy_calendar_ids` is empty, else only those calendars
+    and the planner's own (kept for locked_from_events; busy_from_events still leaves it out of busy time)."""
     if not busy_calendar_ids:
         return list(events)
-    return [e for e in events if e.get("calendar_id") in busy_calendar_ids]
+    keep = {*busy_calendar_ids, *mirror_calendar_ids}
+    return [e for e in events if e.get("calendar_id") in keep]
 
 
 def busy_from_events(events: list[dict[str, Any]], mirror_calendar_ids: tuple[str, ...] | list[str] = ()) -> list[Busy]:

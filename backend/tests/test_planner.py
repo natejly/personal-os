@@ -148,6 +148,10 @@ class PlanTests(unittest.TestCase):
         ev = [{"calendar_id": "a"}, {"calendar_id": "b"}, {"calendar_id": "c"}]
         self.assertEqual(pl.in_busy_calendars(ev, []), ev)
         self.assertEqual(pl.in_busy_calendars(ev, ["a", "c"]), [ev[0], ev[2]])
+        self.assertEqual(pl.in_busy_calendars(ev, ["a"], ["b"]), [ev[0], ev[1]])  # the planner's own calendar is kept
+        self.assertEqual(pl.in_busy_calendars(ev, [], ["b"]), ev)
+        self.assertEqual(pl.read_calendars([], ["m"]), ["enabled"])
+        self.assertEqual(pl.read_calendars(["a", "m"], ["m"]), ["a", "m"])
 
 
 class StubGoogle:
@@ -208,6 +212,9 @@ class ModuleTests(unittest.TestCase):
         self.assertEqual(r.json()["busyCalendarIds"], ["primary", "work"])
         self.client.post("/planner/suggest", json={})
         self.assertEqual(self.google.event_calls[-1][4], ["primary", "work"])
+        self.stored["planner"] = {**self.stored["planner"], "calendarId": "grain-cal"}
+        self.client.post("/planner/suggest", json={})
+        self.assertEqual(self.google.event_calls[-1][4], ["primary", "work", "grain-cal"])
         self.assertEqual(self.client.put("/planner/config", json={"busyCalendarIds": []}).json()["busyCalendarIds"], [])
         self.assertEqual(self.client.put("/planner/config", json={"busyCalendarIds": [""]}).status_code, 422)
 
@@ -233,7 +240,7 @@ class ModuleTests(unittest.TestCase):
     def test_accepted_focus_block_is_locked_next_time(self) -> None:
         self.google.events.append({"start": "2026-10-05T11:10:00", "end": "2026-10-05T12:40:00", "all_day": False, "calendar_id": "grain-cal",
                                    "summary": "Focus: Write spec", "description": f"Planned by Grain from todo {self.t1['id']}"})
-        self.stored["planner"] = {"calendarId": "grain-cal"}
+        self.stored["planner"] = {**self.stored["planner"], "calendarId": "grain-cal"}
         body = self.client.post("/planner/suggest", json={}).json()
         self.assertEqual(body["already_planned"], [self.t1["id"]])
         for b in body["blocks"]:

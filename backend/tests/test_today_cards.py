@@ -76,6 +76,19 @@ class TodayCardTests(unittest.TestCase):
         self.assertEqual(block_for(["other"]), [])
         todos_mod.store.trash(t["id"])
 
+    def test_busy_calendars_still_read_the_planner_calendar_for_locks(self) -> None:
+        t = todos_mod.store.create("Needs a slot", due="2026-10-05", estimate_min=30)
+        saved = [{"start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "all_day": False, "calendar_id": "grain-cal",
+                  "summary": "Focus: Needs a slot", "description": f"Planned by Grain from todo {t['id']}"}]
+        cfg = {**planner_mod.config(), "busyCalendarIds": ["mine"]}
+        with mock.patch.object(google, "calendar_saved", return_value=saved), \
+             mock.patch.object(planner_mod, "config", lambda: cfg), \
+             mock.patch.object(planner_mod, "_mirror_ids", lambda: ["grain-cal"]), \
+             mock.patch.object(planner_mod, "clock", lambda: NOW):
+            blocks = planner_mod.today()["planner_blocks"]
+        self.assertEqual([b for b in blocks if b["todo_id"] == t["id"] and b["start"] != "2026-10-05T09:00"], [])
+        todos_mod.store.trash(t["id"])
+
     def test_no_snapshot_means_no_blocks(self) -> None:
         t = todos_mod.store.create("Needs a slot", due="2026-10-06", estimate_min=30)
         self.assertEqual(dashboard(saved=None)["planner_blocks"], [])

@@ -153,3 +153,12 @@
 .group-failed { color: var(--danger); }
 @keyframes status-dot-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .status-dot.running { animation: none; } }
+
+/* setup card: a feature the assistant needs that is not configured yet */
+.setup-card { display: flex; align-items: center; gap: 10px; margin: 4px 0; padding: 8px 10px; border-radius: 10px; font-size: 12.5px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+.setup-card .setup-icon { flex: none; display: inline-flex; color: var(--accent); }
+.setup-card .setup-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.setup-card .setup-text small { color: var(--text-muted); font-size: 11.5px; }
+.setup-card .primary-btn { flex: none; }
+.setup-card .setup-ok { flex: none; color: var(--accent); font-weight: 600; }

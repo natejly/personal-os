@@ -39,7 +39,7 @@ from .cowork import UNDECIDED_OUTPUTS
 from .workspace import Workspace, WorkspaceError
 from . import plans, router
 from . import coding_route
-from . import firecrawl, reach
+from . import firecrawl, reach, setup_cards
 from . import mcp_search
 from .learn import KINDS as MEMORY_KINDS, normalize_memory, skill_block, until_ts
 from .memory_limits import SEARCH_HITS, SEARCH_PAGE, TAINT_SAVE_MIN_OVERLAP
@@ -734,6 +734,7 @@ class Toolbox:
         root = getattr(workspace, "root", None)
         self.chat_outputs = Workspace(Path(root).parent, sub="chats") if isinstance(root, (str, Path)) else None
         self.user_update: Callable[[dict[str, Any], str, list[dict[str, Any]]], Awaitable[bool]] | None = None  # send_files' live delivery: (ctx, text, attachments) -> accepted; set by app.py
+        self.setup_probes: dict[str, Callable[[], bool]] = {}  # setup_request's "is it set up" checks for stores app.py owns (telegram, mcp)
         self.chat_files: Any = None  # chat_files.ChatFiles: which chat each file belongs to; set by app.py
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
         self.trash: Any = None  # soft delete (trash.py); set by app.py
@@ -1018,8 +1019,9 @@ class Toolbox:
         except Exception as e:  # noqa: BLE001
             log.warning("tool %s failed", name, exc_info=True)
             if type(e).__name__ == "GoogleNotConnected":
-                return tool_error(f"{name}: Google is not connected.",
-                                  alternative="ask the user to connect Google under Settings → Integrations, then retry")
+                c = setup_cards.google_card(self)  # a connect/reconnect button inline; the user's click, not this call, starts the sign-in
+                return {**tool_error(f"{name}: " + ("Google needs to be reconnected." if c.get("reauth") else "Google is not connected."),
+                                     alternative="a connect button was shown in the chat; tell the user to click it, then retry"), "setup": c}
             if isinstance(e, httpx.HTTPStatusError):
                 return tool_error(redact.scrub_command_output(f"{name}: HTTP {e.response.status_code} from {e.request.url.host}"),
                                   alternative=ALTERNATIVE.get(name))
@@ -1565,6 +1567,20 @@ class Toolbox:
             examples=[{"code": "print(sum(1 / n**2 for n in range(1, 10000)))"},
                       {"code": "import grain_tools\nr = grain_tools.call('search_documents', query='TODO')\nprint(r)", "tools": ["search_documents"], "timeout": 120},
                       {"code": "import matplotlib\nmatplotlib.use('Agg')\nimport matplotlib.pyplot as plt\nplt.plot([1, 4, 9])\nplt.savefig('squares.png')", "timeout": 60}]))
+
+        async def setup_request(ctx: dict[str, Any], feature: str, reason: str = "") -> Any:
+            if feature not in setup_cards.TARGETS:
+                return tool_error(f"Unknown feature '{feature}'.", field="feature", expected="one of " + ", ".join(setup_cards.FEATURES),
+                                  example={"feature": "google", "reason": "to read your calendar"})
+            have = await asyncio.to_thread(setup_cards.status, self)
+            if have[feature]:
+                return {"feature": feature, "configured": True, "message": "Already set up; nothing to ask the user.", "status": have}
+            return {"feature": feature, "configured": False, "setup": setup_cards.card(feature, reason), "status": have,
+                    "message": "A setup card with a button was shown to the user. Say in one line what it is for and wait; do not retry until they say it is done."}
+        R("setup_request", ToolSpec("setup_request",
+            "Show a one-click setup card when a needed integration (Google, model or search key, Telegram, health, connectors, macOS access) is missing, instead of sending the user to Settings. Says so if already set up.",
+            _obj({"feature": {"type": "string", "enum": setup_cards.FEATURES}, "reason": {"type": "string", "description": "shown on the card"}}, ["feature"]),
+            setup_request, "setup", examples=[{"feature": "google", "reason": "to read your calendar"}]))
 
         async def current_time(ctx: dict[str, Any]) -> Any:
             return {"iso": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "weekday": time.strftime("%A"), "unix": int(time.time()), "timezone": time.strftime("%Z")}
@@ -3633,7 +3649,7 @@ Toolbox._register_mcp_search = _register_mcp_search  # type: ignore[attr-defined
 # so a plain question never costs a search round. Everything else waits for tool_search.
 CORE_GROUPS = frozenset({"memory", "docs", "todos", "knowledge", "plan", "utility", "context", "desk", "mcp"})
 CORE_TOOLS = frozenset({"calendar_events", "calendar_get", "gmail_search", "gmail_read", "web_search", "fetch_url",
-                        "skill_list", "skill_view", "writing_style", "deep_research",  # writing_style: the prompt's voice hint tells the model to call it
+                        "skill_list", "skill_view", "writing_style", "deep_research", "setup_request",  # writing_style: the prompt's voice hint tells the model to call it
                         "delegate", "message_worker", "check_worker", "stop_worker", "resume_worker"})  # the front agent always has its hand-off tools
 
 

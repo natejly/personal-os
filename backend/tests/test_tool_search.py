@@ -81,7 +81,7 @@ def test_default_offers_core_plus_search() -> None:
     # wording on 2026-10-06; the worker tools (delegate, message/check/stop/resume_worker) and send_files on 2026-10-06/07
     # 2026-10-11: terse descriptions, and examples sent only for doubly nested shapes (flat ones ride in the bad-arguments
     # error); 22.8k measured. scripts/tool_schema_size.py prints the per-tool breakdown.
-    assert SIZES[0] < 23_500, SIZES[0]
+    assert SIZES[0] < 24_200, SIZES[0]  # 2026-10-12: setup_request (core, so a missing integration is one call away) adds ~500
 
 
 def test_search_loads_and_persists_per_conversation() -> None:

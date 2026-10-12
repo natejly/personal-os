@@ -77,6 +77,7 @@ Groups, by what they do (every tool, danger and default in reference.md):
 | files, mac, shell, opencode, code | local files (home-scoped), shortcuts, shell in a working folder, coding agent, Python |
 | agents, workflows, desk, schedule, skills, spaces | subagents, saved workflows, desks, scheduling, skill authoring, arranging Spaces |
 | plan, utility, context | plans and questions, `show`, `current_time`, paged tool results |
+| setup | `setup_request`: a one-click setup card in the chat (always offered) |
 
 ## Operating it as a developer or agent
 

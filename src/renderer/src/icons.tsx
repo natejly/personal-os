@@ -35,6 +35,7 @@ export {
   Bug,
   Calendar,
   CalendarDots as CalendarClock,
+  ClockCountdown as Scheduled,
   CalendarBlank as CalendarDays,
   CalendarPlus,
   CalendarDots as CalendarSearch,

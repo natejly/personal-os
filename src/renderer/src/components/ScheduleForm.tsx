@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CalendarClock, X } from '../icons'
+import { Scheduled, X } from '../icons'
 import { api } from '../lib/api'
 import { describeCron } from '../lib/cron'
 import { LOOP_PRESETS, ONCE_PRESETS, customTiming, jobTiming } from '../lib/scheduleWhen'
@@ -55,7 +55,7 @@ export default function ScheduleForm({ loop, task: initial, projectId, onClose }
   if (made) {
     return (
       <div className="skill-hints" aria-label="Scheduled">
-        <span className="file-chip"><CalendarClock size={12} /><span>Scheduled · {made}</span>
+        <span className="file-chip"><Scheduled size={12} /><span>Scheduled · {made}</span>
           <button className="link xs" onClick={openAutomations}>Open</button>
           <button className="file-chip-x" aria-label="Dismiss" onClick={onClose}><X size={11} /></button>
         </span>
@@ -67,7 +67,7 @@ export default function ScheduleForm({ loop, task: initial, projectId, onClose }
     <form className="skill-hints input-row" aria-label={loop ? 'Repeat a task' : 'Schedule a task'}
       onSubmit={(e) => { e.preventDefault(); void create() }}
       onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onClose() } }}>
-      <CalendarClock size={13} aria-hidden style={{ flexShrink: 0, color: 'var(--text-muted)' }} />
+      <Scheduled size={13} aria-hidden style={{ flexShrink: 0, color: 'var(--text-muted)' }} />
       <input autoFocus aria-label="Task" placeholder={loop ? 'What to repeat' : 'What to do'} value={task}
         onChange={(e) => setTask(e.target.value)} style={{ ...field, flex: 1, minWidth: 0 }} />
       <select aria-label="When" value={preset} onChange={(e) => setPreset(e.target.value)} style={field}>

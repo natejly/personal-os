@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowRight, CalendarClock, Play, Trash2 } from '../icons'
+import { ArrowRight, Scheduled, Play, Trash2 } from '../icons'
 import type { Job, JobRunRecord, JobSkipRecord } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -28,7 +28,7 @@ export default function JobsView(): JSX.Element {
     <main className="page jobs-page">
       <header className="page-header drag">
         <SidebarToggle />
-        <h2><CalendarClock size={16} /> Jobs</h2>
+        <h2><Scheduled size={16} /> Jobs</h2>
         {!job && <button className="primary-btn sm no-drag" onClick={() => setCreating((v) => !v)}>New job</button>}
         <AppSwitcher />
       </header>

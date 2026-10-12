@@ -15,7 +15,7 @@ Grain is running. The bot is yours: you create it, you hold its token, and nobod
 
 1. **Create a bot.** In Telegram, open **@BotFather** and send `/newbot`. Pick a name, then a
    username that ends in `bot`. BotFather replies with a token.
-2. **Paste the token** in Settings → Texting and press **Save token**. Grain checks it with
+2. **Paste the token** in Settings → Integrations → Telegram bot and press **Save token**. Grain checks it with
    Telegram, turns texting on and shows a pairing code.
 3. **Pair your chat.** Press **Open in Telegram** (or open the link yourself) and press **Start**.
    You can also send `/start <code>` to the bot by hand. Grain replies "Paired." and the status
@@ -194,7 +194,7 @@ sends approval requests from any run, not only the Telegram chat.
 
 ## Troubleshooting
 
-The status line in Settings → Texting names the problem.
+The status line in Settings → Integrations → Telegram bot names the problem.
 
 | Status | Meaning and fix |
 | --- | --- |

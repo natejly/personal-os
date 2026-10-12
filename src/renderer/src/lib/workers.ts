@@ -24,6 +24,15 @@ export function sortWorkers(ws: WorkerInfo[]): WorkerInfo[] {
   return [...ws].sort((a, b) => Number(workerIsLive(b)) - Number(workerIsLive(a)) || (workerIsLive(a) ? a.started_at - b.started_at : b.started_at - a.started_at))
 }
 
+/** Ended workers listed on request; only the newest few, to keep the card short. */
+export const ENDED_SHOWN = 4
+
+/** The rows the workers card lists: every live worker, then (only when asked) the newest ended ones, in sort order. */
+export function listedWorkers(ws: readonly WorkerInfo[], showFinished: boolean): WorkerInfo[] {
+  const sorted = sortWorkers([...ws])
+  return showFinished ? [...sorted.filter(workerIsLive), ...sorted.filter((x) => !workerIsLive(x)).slice(0, ENDED_SHOWN)] : sorted.filter(workerIsLive)
+}
+
 /** Replace or add one worker (an event's payload) in the list. */
 export const upsertWorker = (ws: WorkerInfo[], w: WorkerInfo): WorkerInfo[] => (ws.some((x) => x.id === w.id) ? ws.map((x) => (x.id === w.id ? w : x)) : [w, ...ws])
 

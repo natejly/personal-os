@@ -105,7 +105,7 @@ test('a multi-step checklist is the Progress card above the composer, not a stat
   const card = page.getByRole('region', { name: 'Progress' })
   await expect(card).toContainText('Step 1 of 2')
   await expect(card).toContainText('first step')
-  await card.getByRole('button', { name: /Step 1 of 2/ }).click()
+  await card.getByRole('button', { name: /the steps/ }).click()
   await expect(card.locator('.plan-step')).toHaveCount(2)
   await page.getByRole('button', { name: 'Workspace panel', exact: true }).click()
   await expect(page.locator('.desk-panel .desk-tabs').getByRole('button', { name: 'Checklist' })).toHaveCount(0)

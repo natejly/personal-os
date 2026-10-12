@@ -936,6 +936,10 @@ kbd {
   display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
   min-height: 24px; margin-top: 0; opacity: 0; transition: opacity 0.15s;
 }
+/* On a reply the time, model and token line always shows; only the buttons wait for hover or focus. */
+.msg.assistant .msg-actions { opacity: 1; }
+.msg.assistant .msg-actions > :not(.msg-time):not(.model-tag) { opacity: 0; transition: opacity 0.15s; }
+.msg.assistant:hover .msg-actions > *, .msg.assistant:focus-within .msg-actions > *, .msg.assistant:last-child .msg-actions > * { opacity: 1; }
 /* The row doubles as the gap to the next message, so its buttons stay one size smaller than the header's. */
 .msg-actions .icon-btn { width: 24px; height: 24px; }
 .msg-actions .ghost-btn { padding: 2px 8px; }
@@ -1479,7 +1483,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 /* ---------- Chat body + context drawer ---------- */
 .chat-body { flex: 1; display: flex; min-height: 0; position: relative; }
 .resize-handle.ctx-edge { right: calc(var(--context-drawer-w, 340px) - 4px); }
-.chat-main { flex: 1; display: flex; flex-direction: column; min-width: 360px; }
+.chat-main { flex: 1; display: flex; flex-direction: column; min-width: 360px; position: relative; container: chatmain / inline-size; }
 .context-drawer { width: var(--context-drawer-w, 340px); border-left: 1px solid var(--border); background: var(--bg-elev); display: flex; flex-direction: column; overflow-y: auto; font-size: 13px; flex-shrink: 0; }
 .context-drawer > header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg-elev); z-index: 1; }
 .context-embedded { font-size: 13px; padding: 0; }
@@ -2988,7 +2992,14 @@ select:focus-visible {
 .worker-panel .worker-faces { display: inline-flex; align-items: center; gap: 6px; }
 .worker-panel .worker-faces .face { width: 24px; height: 24px; }
 /* Multi-step progress above the composer (ProgressCard): one row, the step list unfolds beneath. Same column as the workers card. */
-.chat-main > .progress-card { margin: 12px auto 0; width: min(calc(100% - 48px), var(--chat-col)); box-sizing: border-box; padding-top: 4px; }
+.chat-main > .progress-card { margin: 12px auto 0; width: min(calc(100% - 48px), calc(var(--chat-col) - 48px)); box-sizing: border-box; padding-top: 4px; }
+/* Wide panes: a floating card in the top-right corner, clear of the centred message column (760px column + 244px gutters). */
+@container chatmain (min-width: 1200px) {
+  .chat-main > .progress-card { position: absolute; top: 10px; right: 12px; z-index: 5; margin: 0; width: 232px; max-height: 50vh; overflow-y: auto; padding: 8px 10px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-float); }
+}
+.progress-card .plan-text { min-width: 0; }
+.progress-card .plan-title { display: block; white-space: nowrap; text-overflow: ellipsis; }
+.progress-card .plan-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .progress-card .progress-row { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
 .progress-card .progress-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .progress-card button.progress-text { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }

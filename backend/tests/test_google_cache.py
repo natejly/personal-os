@@ -14,7 +14,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import cache  # noqa: E402
-from personal_os.google import Google  # noqa: E402
+from personal_os.google import _CAL_FULL_AFTER, Google  # noqa: E402
 from personal_os.google_store import ReadStore  # noqa: E402
 
 
@@ -410,6 +410,96 @@ class IncrementalTests(unittest.TestCase):
         self.assertIn("updatedMin", events.calls[-1])
         # The quiet second page must not have been a per-event refetch.
         self.assertEqual(events.counts.get("get", 0), 0)
+
+    def _two(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        return (
+            {"id": "e1", "summary": "Standup", "start": {"dateTime": _soon(1)}, "end": {"dateTime": _soon(2)}},
+            {"id": "e2", "summary": "Review", "start": {"dateTime": _soon(3)}, "end": {"dateTime": _soon(4)}},
+        )
+
+    def _age_full_list(self, g: Google, seconds: float) -> None:
+        snap = dict(g._reads.get("calendar", "primary"))
+        snap["full_at"] = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=seconds)).isoformat()
+        g._reads.put("calendar", "primary", snap, flush=False)
+
+    def test_an_old_full_list_is_repeated_even_after_a_recent_incremental_read(self) -> None:
+        e1, e2 = self._two()
+        events = _RecordingEvents([e1, e2])
+        g = _google(events)
+        g.calendar_events(days=7)
+        g.invalidate("calendar")
+        g.calendar_events(days=7)  # incremental: stamps synced_at just now
+        self.assertIn("updatedMin", events.calls[-1])
+        self._age_full_list(g, _CAL_FULL_AFTER + 60)
+        events.items = [e1]  # e2 was removed in a way an incremental list cannot report
+        g.invalidate("calendar")
+        got = g.calendar_events(days=7)
+        self.assertNotIn("updatedMin", events.calls[-1])
+        self.assertEqual([e["id"] for e in got], ["e1"])
+
+    def test_a_young_full_list_keeps_reading_incrementally(self) -> None:
+        e1, e2 = self._two()
+        events = _RecordingEvents([e1, e2])
+        g = _google(events)
+        g.calendar_events(days=7)
+        self._age_full_list(g, _CAL_FULL_AFTER - 60)
+        g.invalidate("calendar")
+        g.calendar_events(days=7)
+        self.assertIn("updatedMin", events.calls[-1])
+
+    def test_a_snapshot_without_a_full_list_stamp_is_listed_in_full(self) -> None:
+        e1, _e2 = self._two()
+        events = _RecordingEvents([e1])
+        g = _google(events)
+        g.calendar_events(days=7)
+        snap = dict(g._reads.get("calendar", "primary"))
+        snap.pop("full_at")
+        g._reads.put("calendar", "primary", snap, flush=False)
+        g.invalidate("calendar")
+        g.calendar_events(days=7)
+        self.assertNotIn("updatedMin", events.calls[-1])
+
+    def test_the_incremental_list_asks_for_deleted_entries_too(self) -> None:
+        e1, _e2 = self._two()
+        events = _RecordingEvents([e1])
+        g = _google(events)
+        g.calendar_events(days=7)
+        g.invalidate("calendar")
+        g.calendar_events(days=7)
+        self.assertIn("updatedMin", events.calls[-1])
+        self.assertIs(events.calls[-1].get("showDeleted"), True)
+        self.assertNotIn("orderBy", events.calls[-1])
+
+    def test_an_event_reported_cancelled_is_dropped(self) -> None:
+        e1, e2 = self._two()
+
+        class _Cancelling(_RecordingEvents):
+            def list(self, **kw: Any) -> _Req:
+                self._bump("list")
+                self.calls.append(kw)
+                return _Req({"items": [{"id": "e2", "status": "cancelled"}] if kw.get("updatedMin") else self.items})
+
+        events = _Cancelling([e1, e2])
+        g = _google(events)
+        self.assertEqual([e["id"] for e in g.calendar_events(days=7)], ["e1", "e2"])
+        g.invalidate("calendar")
+        got = g.calendar_events(days=7)
+        self.assertIn("updatedMin", events.calls[-1])
+        self.assertEqual([e["id"] for e in got], ["e1"])
+        self.assertEqual(sorted(g._reads.get("calendar", "primary")["events"]), ["e1"])
+
+    def test_a_refresh_the_user_asked_for_lists_in_full(self) -> None:
+        e1, e2 = self._two()
+        events = _RecordingEvents([e1, e2])
+        g = _google(events)
+        g.calendar_events(days=7)
+        events.items = [e1]  # Google no longer returns e2
+        g.invalidate("calendar")
+        with cache.bypass():
+            got = g.calendar_events(days=7)
+        self.assertNotIn("updatedMin", events.calls[-1])
+        self.assertEqual([e["id"] for e in got], ["e1"])
+        self.assertEqual(sorted(g._reads.get("calendar", "primary")["events"]), ["e1"])
 
     def test_saved_events_survive_a_new_process(self) -> None:
         start = _soon(1)

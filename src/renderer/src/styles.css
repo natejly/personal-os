@@ -578,6 +578,12 @@ kbd {
    Files, Calendar, Todos and the canvas alike. */
 .app.page-agent-open { grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--page-agent-w); }
 .app.page-agent-open.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr) var(--page-agent-w); }
+/* Same breakpoint as the workspace panel: too narrow for sidebar, view and panel side by side, so the panel floats over the view. */
+@media (max-width: 1100px) {
+  .app.page-agent-open { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
+  .app.page-agent-open.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
+  .app.page-agent-open > .page-agent { position: absolute; inset: 0 0 0 auto; width: min(var(--page-agent-w), calc(100% - 160px)); z-index: 30; box-shadow: var(--shadow, 0 8px 24px rgb(0 0 0 / 0.18)); }
+}
 .app.loading { background: var(--bg); }
 
 /* ---------- Sidebar ---------- */
@@ -1195,6 +1201,10 @@ kbd {
 .modal > section:last-of-type { border-bottom: 0; }
 .modal h3:not(.modal-free *) { margin: 0 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
 .muted { color: var(--text-muted); font-size: 13px; margin: 0 0 12px; line-height: 1.5; }
+/* The bottom margin is for paragraphs; an inline label inside a flex row would sit above its neighbours' centre line. */
+span.muted, small.muted { margin: 0; }
+.setting-list > p.muted { margin: 0; padding: 10px 12px 2px; }
+#sec-look { display: flex; flex-direction: column; gap: 14px; }
 /* .muted is paragraph-shaped (bottom margin), but it is also the inline subtitle in headers, where that
    margin lifted it off the title's baseline. */
 h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weight: 400; }
@@ -1291,7 +1301,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .settings-pane h3:not(.modal-free *) { font-size: 15px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--text); }
 .settings-pane > section:not(.knowledge-section) > h3 { margin-bottom: -8px; }
 .settings-pane .knowledge-head h3:not(.modal-free *) { margin: 0 auto 0 0; }
-.settings-pane h4:not(.modal-free *) { margin: 8px 0 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.settings-pane h4:not(.modal-free *) { margin: 8px 0 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
 .settings-pane .set-sec > h4:first-child { margin-bottom: 10px; }
 .settings-pane .trash-group h4 { margin: 12px 0 4px; }
 /* What a setting is, and one line about it: the same block beside a switch, above a field, left of a control. */
@@ -1315,6 +1325,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .settings-pane .setting-row.models-filter > input { flex: 1; min-width: 0; width: auto; }
 .settings-pane .models-filter > input, .settings-pane .models-filter > button,
 .settings-pane .key-row .input-row > * { height: 34px; }
+.settings-pane input[type=time]:not(.modal-free *) { min-width: 136px; }
 .settings-pane input[type=number]:not(.modal-free *) { width: 96px; min-width: 0; font-variant-numeric: tabular-nums; }
 .settings-pane .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
 /* Short rows that belong together (the Views switches) sit in one bordered list. */
@@ -1373,6 +1384,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 }
 
 ::-webkit-scrollbar { width: 10px; }
+::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); background-clip: content-box; }
 
@@ -1570,7 +1582,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 /* ---------- Generic pages ---------- */
 .page { background: var(--bg); display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
 .page-header { height: var(--bar-h); display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.page-header h2 { flex: 1 1 auto; margin: 0; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; white-space: nowrap; overflow: hidden; }
+.page-header h2 { flex: 1 1 auto; margin: 0; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; white-space: nowrap; overflow: hidden; min-width: 76px; }
 .page-header .search { margin: 0; width: 220px; }
 /* At the 820px minimum window a view's controls plus the app switcher outrun the bar: let the pickers give way (ellipsis) rather than push the whole page sideways. */
 .page-header .header-right { min-width: 0; }
@@ -1983,7 +1995,7 @@ textarea.instructions:focus { border-color: var(--accent); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------- Lists ---------- */
-.lists-body { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; container-type: inline-size; }
+.lists-body { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; align-content: flex-start; container-type: inline-size; }
 .list-rail { position: sticky; top: 0; width: 180px; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; }
 .lists-main { flex: 1; min-width: 0; }
 /* Narrow page: the rail becomes a row of chips above the items instead of squeezing them. */
@@ -2011,7 +2023,7 @@ textarea.instructions:focus { border-color: var(--accent); }
 .todo-add-more input, .todo-add-more select { min-height: 26px; font-size: 12px; padding: 3px 8px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); color: inherit; outline: 0; }
 
 /* ---------- Todos ---------- */
-.todo { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; background: var(--bg-elev); margin: 0; }
+.todo { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 10px; padding: 8px 10px; background: var(--bg-elev); margin: 0; }
 .todo-section .todo:first-of-type { border-radius: 10px 10px 0 0; }
 .todo-section .todo:last-child { border-radius: 0 0 10px 10px; }
 .todo-section .todo:first-of-type:last-child { border-radius: 10px; }
@@ -2027,13 +2039,13 @@ textarea.instructions:focus { border-color: var(--accent); }
 .todo.p3 .todo-check { border-color: var(--text-faint); }
 .todo.done .todo-check { background: var(--ok); border-color: var(--ok); }
 .todo-check:hover { background: var(--hover); }
-.todo-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.todo-main { flex: 1 1 160px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .todo-title { cursor: text; line-height: 1.4; overflow-wrap: anywhere; }
 /* The edit field's border and padding are pulled back out with negative margins, and it keeps the
    title's line height, so the text stays exactly where it was and the row does not grow. */
 .todo-main input { background: var(--bg-input); border: 1px solid var(--accent); border-radius: 6px; padding: 3px 6px; margin: -4px -7px; min-width: 0; outline: 0; font: inherit; line-height: 1.4; }
 .todo-notes { overflow-wrap: anywhere; font-size: 12px; color: var(--text-muted); }
-.todo-meta { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.todo-meta { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto; }
 .todo-due { position: relative; display: inline-flex; align-items: center; gap: 4px; min-height: 24px; font-size: 11px; color: var(--text-faint); padding: 2px 7px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
 .todo-due:hover { background: var(--hover); color: var(--text); }
 /* The chip is coloured by urgency: due today in the accent, overdue in red, anything later plain. */
@@ -2791,6 +2803,9 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .smart-ta-line { min-height: 38px; }
 .smart-ta-line.field textarea, .smart-ta-line.field .smart-ta-mirror { padding: 9px 12px; border-radius: 8px; min-height: 38px; max-height: 88px; }
 .widget-bar .smart-ta { min-width: 0; }
+.widget-bar .smart-ta-line { min-height: 0; }
+/* The add row's single line sits in the middle of its 38px box, the mirror (ghost suggestions) with it. */
+.todo-add .smart-ta-line textarea, .todo-add .smart-ta-line .smart-ta-mirror { padding: 8px 2px; }
 .widget-bar .smart-ta.bare textarea {
   background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px;
   padding: 4px 8px; font-size: 12px; min-height: 22px; max-height: 64px;
@@ -3003,7 +3018,7 @@ select:focus-visible {
    The connectors shelf renders McpSettings; its add form is styled under .mcp-add. */
 /* The shelves are sections of the page: underline tabs under the header, their labels on the
    header's own 16px gutter. */
-.library-tabs { display: flex; gap: 4px; flex-shrink: 0; padding: 0 max(20px, calc((100% - 900px) / 2 + 20px)); border-bottom: 1px solid var(--border); }
+.library-tabs { display: flex; gap: 4px; flex-shrink: 0; overflow-x: auto; padding: 0 max(20px, calc((100% - 900px) / 2 + 20px)); border-bottom: 1px solid var(--border); }
 .library-tabs button { display: inline-flex; align-items: center; gap: 6px; padding: 9px 10px 8px; margin-bottom: -1px; border-bottom: 2px solid transparent; font-size: 13px; color: var(--text-muted); }
 .library-tabs button:hover { color: var(--text); }
 .library-tabs button[aria-selected=true] { color: var(--text); font-weight: 500; border-bottom-color: var(--accent); }
@@ -3014,7 +3029,7 @@ select:focus-visible {
 /* A shelf's own actions: one row of same-height buttons, then what the shelf is in a muted line. */
 .library-toolbar { display: flex; flex-direction: column; gap: 6px; }
 .library-toolbar > p { margin: 0; max-width: 72ch; line-height: 1.5; }
-.library-toolbar-row { display: flex; align-items: center; gap: 8px; }
+.library-toolbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .empty-state .library-toolbar-row { margin-top: 10px; }
 .empty-state .library-toolbar-row .primary-btn { margin-top: 0; }
 
@@ -3147,7 +3162,8 @@ select:focus-visible {
 .perm-rule-group li, .workspace-roots .plain-list li { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 3px 4px 3px 10px; border-radius: 8px; background: var(--hover); font-size: 12px; }
 .perm-rule-group li code, .workspace-roots .plain-list li code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
 .perm-rule-add { display: flex; gap: 6px; align-items: center; }
-.perm-rule-add select { flex: none; }
+.perm-rule-add select { flex: none; max-width: 40%; }
+.perm-rule-add input { min-width: 0; flex: 1; }
 .perm-rule-test { display: flex; flex-direction: column; gap: 6px; }
 .perm-rule-test p { margin: 0; }
 .workspace-roots { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }

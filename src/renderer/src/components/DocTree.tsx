@@ -251,7 +251,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
       <FileText size={13} className="doc-row-icon" />
       <span className="doc-row-main">
         <span className="doc-row-title">
-          {d.title || 'Untitled'}
+          <span className="doc-row-name">{d.title || 'Untitled'}</span>
           {typeof d.pending === 'number' && d.pending > 0 && (
             <span className="doc-pending" title={`${d.pending} assistant edit${d.pending === 1 ? '' : 's'} awaiting review`}>
               <Sparkles size={9} />{d.pending}

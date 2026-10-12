@@ -47,6 +47,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const face = useChatFace(convo)
   const isStreamingHere = useIsStreaming(conversationId)
   const streamingMessageId = useStreamingMessageId(conversationId)
+  const duelLive = useStore((s) => (convo?.id ? s.sessions[convo.id]?.duel?.messageId : undefined) ?? null)
   const pending = usePendingSends(conversationId)
   // A chat with no row yet: its first message is shown (with the dots) in place of the greeting.
   const draftPending = useStore((s) => (!conversationId && s.focusedConversationId === null ? s.draftPendingSend : null))
@@ -180,7 +181,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {msgs.map((m, i) => (
                   <Fragment key={m.id}>
                     {m.created_at > 0 && (i === 0 || dayKey(m.created_at) !== dayKey(msgs[i - 1].created_at)) && <div className="day-divider" role="separator">{dayLabel(m.created_at)}</div>}
-                    {isClear(m) ? <div className="day-divider" role="separator">Context cleared</div> : isBranchNote(m) ? <BranchNote content={m.content} /> : <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} resendable={!isStreamingHere && !isDeskOrJob} showContextChips
+                    {isClear(m) ? <div className="day-divider" role="separator">Context cleared</div> : m.id === duelLive ? null : isBranchNote(m) ? <BranchNote content={m.content} /> : <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} resendable={!isStreamingHere && !isDeskOrJob} showContextChips
                       branchable={m.created_at > 0 && !isDeskOrJob}
                       browserSession={m.id === watchId ? (deskId ? deskBrowserSession(deskId) : chatBrowserSession(m.conversation_id)) : undefined} />}
                   </Fragment>
@@ -189,7 +190,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {draftPending && <PendingUserMessage text={draftPending.text} attachments={draftPending.attachments} />}
                 {/* From the click, and from user_message to the first assistant row (context assembly), nothing else shows work.
                     A brand-new chat has no id yet, so its slot stays empty rather than showing a face that would change once the row lands. */}
-                {(pending.length > 0 || draftPending || isStreamingHere) && streamingMessageId === null && (
+                {(pending.length > 0 || draftPending || isStreamingHere) && streamingMessageId === null && duelLive === null && (
                   <div className="msg assistant"><div className="avatar face-avatar">{(convo?.id ?? conversationId) && <Face {...face} name={face.name || conversationId!} status="streaming" />}</div><div className="bubble"><Thinking /></div></div>
                 )}
                 {!conversationId && <DuelPanel conversationId={convo?.id} />}

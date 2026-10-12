@@ -28,7 +28,6 @@ export default function PlannerMailSettings(): JSX.Element | null {
     <>
       {plan && <>
         <h4>Day plan</h4>
-        <p className="muted small">Focus blocks are proposed only inside these hours and days.</p>
         <label className="inline"><span>Work hours</span>
           <input type="time" defaultValue={plan.workStart} key={`s${plan.workStart}`} onBlur={(e) => e.target.value !== plan.workStart && savePlan({ workStart: e.target.value })} />
           <span>to</span>

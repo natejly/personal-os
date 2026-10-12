@@ -74,7 +74,7 @@ export default function GrantsPanel({ draft, patch }: { draft: Settings; patch: 
     <>
     <div className="perm-rules grants-panel">
       <h4>Standing grants</h4>
-      <p className="muted small">What you said "always" to, from settings, a chat, an agent, a project, a connector or an approval card. Revoking takes effect now.</p>
+      <p className="muted small">Revoking takes effect now.</p>
       {none && <p className="muted small">None yet.</p>}
       {modes.length + allow.length + globalMcp.length > 0 && (
         <div className="perm-rule-group">
@@ -107,7 +107,7 @@ export default function GrantsPanel({ draft, patch }: { draft: Settings; patch: 
       )}
       {chats.length > 0 && (
         <div className="perm-rule-group">
-          <b>Chats</b> <small className="muted">A tool turned on for one chat.</small>
+          <b>Chats</b>
           <ul>
             {chats.map((o) => (
               <li key={`${o.conversation_id}:${o.tool}`}><span><code>{o.tool}</code> <small className="muted">in {o.title}</small></span>
@@ -120,7 +120,7 @@ export default function GrantsPanel({ draft, patch }: { draft: Settings; patch: 
       )}
       {agents.length > 0 && (
         <div className="perm-rule-group">
-          <b>Agents</b> <small className="muted">A tool turned on for one agent.</small>
+          <b>Agents</b>
           <ul>
             {agents.map((o) => (
               <li key={`${o.agent_id}:${o.tool}`}><span><code>{o.tool}</code> <small className="muted">for {o.title}</small></span>
@@ -132,7 +132,7 @@ export default function GrantsPanel({ draft, patch }: { draft: Settings; patch: 
       )}
       {projects.length > 0 && (
         <div className="perm-rule-group">
-          <b>Projects</b> <small className="muted">A tool turned on for every chat in a project.</small>
+          <b>Projects</b>
           <ul>
             {projects.map((o) => (
               <li key={`${o.project_id}:${o.tool}`}><span><code>{o.tool}</code> <small className="muted">in {o.title}</small></span>
@@ -145,7 +145,7 @@ export default function GrantsPanel({ draft, patch }: { draft: Settings; patch: 
       )}
       {mcp.length > 0 && (
         <div className="perm-rule-group">
-          <b>Connectors</b> <small className="muted">A connector tool allowed for one chat or project.</small>
+          <b>Connectors</b>
           <ul>
             {mcp.map((m) => (
               <li key={m.id}><span><code>{m.tool_slug}</code> <small className="muted">in {(m.scope === 'project' ? allProjects.find((p) => p.id === m.scope_id)?.name : conversations.find((c) => c.id === m.scope_id)?.title) || m.scope_id}</small></span>

@@ -62,7 +62,7 @@ export default function DataSettings(): JSX.Element {
   return (
     <section>
       <h3>Data</h3>
-      <p className="muted">Grain keeps a database plus folders of files (uploads, pasted images, desk outputs) on this Mac. Backups snapshot the database only, daily and before any update that changes its structure, keeping the newest of each. Export also takes the files.</p>
+      <p className="muted">Backups snapshot the database only, daily and before any update that changes its structure. Export also takes the files.</p>
       {settings.secretsKeychain === false && (
         <p className="muted">Keys and sign-in tokens are stored unencrypted on this computer{settings.secretsReason ? ` (${settings.secretsReason})` : ''}.</p>
       )}

@@ -22,7 +22,7 @@ export default function TraceExportSettings({ value, onChange }: { value?: OtelE
     <>
       <h4>Trace export</h4>
       <label className="toggle-row plain">
-        <span className="toggle-text"><b>Export traces as OpenTelemetry</b><small>After each reply, post its trace (OTLP/JSON, GenAI conventions) to a collector such as a local OTLP collector. Off by default. Save settings before testing.</small></span>
+        <span className="toggle-text"><b>Export traces as OpenTelemetry</b><small>Sends each reply's trace to a collector. Save settings before testing.</small></span>
         <input type="checkbox" checked={cfg.enabled} onChange={(e) => set({ enabled: e.target.checked })} /><span className="switch" />
       </label>
       {cfg.enabled && (

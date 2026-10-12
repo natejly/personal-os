@@ -9,13 +9,13 @@ import { showsBaseUrl, type ProviderInfo } from './onboarding/steps'
 import type { ModelInfo, Settings } from '@shared/types'
 
 const HELP: Record<ModelKey, { help: string; placeholder: string }> = {
-  defaultModel: { help: 'Used for new chats and the workers they start.', placeholder: 'Model id' },
+  defaultModel: { help: '', placeholder: 'Model id' },
   modelHigh: { help: 'Drafting skills and agents.', placeholder: 'Provider default' },
   modelMedium: { help: 'Auto-review of tool calls, summaries and recaps, memory tidy-ups, and short messages under Auto.', placeholder: 'Provider default' },
   modelLow: { help: 'Titles, memories, follow-ups and other background learning.', placeholder: 'Provider default' },
   fastModel: { help: '', placeholder: '' },
   extractionModel: { help: '', placeholder: '' },
-  embeddingModel: { help: 'Turns notes and files into vectors for search. After changing it, Save, then press Rebuild search index under Advanced.', placeholder: 'qwen3-embedding-8b' },
+  embeddingModel: { help: 'After changing it, Save, then press Rebuild search index under Advanced.', placeholder: 'qwen3-embedding-8b' },
   retrievalRerankModel: { help: "Reorders memory and document search results by relevance. Empty uses the provider's default reranker.", placeholder: 'Not available on this provider' },
   visionModel: { help: 'Reads pictures. Empty uses the chat model when it can read images; otherwise pictures are read with OCR only.', placeholder: 'Same as the chat model' },
   imageModel: { help: 'Used when the assistant makes an image. The provider must offer an OpenAI-compatible images endpoint.', placeholder: 'Not set' }
@@ -90,7 +90,7 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
   return (
     <>
       {providers.length > 0 && (
-        <label className="setting-row"><span className="toggle-text"><b>Provider</b><small>Where model requests go.</small></span>
+        <label className="setting-row"><span className="toggle-text"><b>Provider</b></span>
           <select value={id} onChange={(e) => pick(e.target.value)} aria-label="Provider">
             {!preset && <option value={id}>{id}</option>}
             {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -98,7 +98,7 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
         </label>
       )}
       {!preset || showsBaseUrl(id) ? (
-        <label><span className="toggle-text"><b>Provider address</b><small>Where Grain sends model requests.</small></span>
+        <label><span className="toggle-text"><b>Provider address</b></span>
           <input value={draft.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="https://api.example.com/v1" spellCheck={false} />
         </label>
       ) : (

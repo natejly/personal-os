@@ -59,7 +59,7 @@ export default function ModelsSettings({ settings, models, savePicker }: { setti
   return (
     <div className="models-tab">
       <h4>API keys</h4>
-      <p className="muted small">Every model from a provider with a key can be used. Keys are stored on this Mac.</p>
+      <p className="muted small">Keys are stored on this Mac.</p>
       <div className="setting-list">
         {providers.filter((p) => p.needsKey).map((p) => <KeyRow key={p.id} p={p} saved={!!settings.providerKeysSet?.[p.id]} />)}
       </div>

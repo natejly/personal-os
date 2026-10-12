@@ -72,7 +72,7 @@ export default function TelegramSettings({ draft, patch }: { draft: Settings; pa
 
   return (
     <div className="workspace-roots">
-      <p className="muted small">This is a Telegram bot you create yourself with @BotFather. It is how you text Grain from your phone, through a private bot that only you can use. Works while your Mac is awake and Grain is running.</p>
+      <p className="muted small">A private bot you create with @BotFather, so you can text Grain from your phone. Works while your Mac is awake and Grain is running.</p>
       <p className="muted small">Each Mac needs its own bot: two Macs reading one bot take its messages from each other.</p>
       {st?.status === 'claimed_elsewhere' && (
         <div className="workspace-roots-add">
@@ -95,7 +95,7 @@ export default function TelegramSettings({ draft, patch }: { draft: Settings; pa
       {st?.bot_username && <p className="muted small">Bot: <code>@{st.bot_username}</code></p>}
 
       <label className="toggle-row plain">
-        <span className="toggle-text"><b>Control Grain by Telegram</b><small>Grain answers in your chat with the bot.</small></span>
+        <span className="toggle-text"><b>Control Grain by Telegram</b></span>
         <input type="checkbox" checked={!!st?.enabled} disabled={busy || !hasToken} onChange={(e) => void run(() => api.telegramSetEnabled(e.target.checked))} /><span className="switch" />
       </label>
 

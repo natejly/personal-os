@@ -21,7 +21,7 @@ export default function VoiceInputSettings(): JSX.Element | null {
   )
   return (
     <>
-      <label className="setting-row"><span className="toggle-text"><b>Transcription</b><small>“Off” turns the mic button's transcription off.</small></span>
+      <label className="setting-row"><span className="toggle-text"><b>Transcription</b></span>
         <select value={cfg.sttBackend} onChange={(e) => patch({ sttBackend: e.target.value as VoiceConfig['sttBackend'] })}>
           <option value="auto">Auto: Speech, then Whistle, then whisper.cpp, then the model provider</option>
           <option value="speech">On-device Speech</option>

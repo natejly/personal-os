@@ -436,6 +436,18 @@ def _drop_memory_hidden_view(c: sqlite3.Connection) -> None:
         c.execute("UPDATE settings SET value = ? WHERE key = 'hiddenViews'", (json.dumps([v for v in views if v != "memory"]),))
 
 
+def _default_sidebar_rows(c: sqlite3.Connection) -> None:
+    """The default sidebar shrank to Files, Lists, Calendar, Library, Jobs, Canvases and Projects. An install whose
+    sidebarHidden is missing or empty (never customized) gets the new default; a non-empty list is the user's choice."""
+    row = c.execute("SELECT value FROM settings WHERE key = 'sidebarHidden'").fetchone()
+    try:
+        cur = json.loads(row[0]) if row else []
+    except ValueError:
+        return
+    if cur == []:
+        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('sidebarHidden', ?)", (json.dumps(["mail", "health"]),))
+
+
 def _allow_all_connections_for_existing(c: sqlite3.Connection) -> None:
     """An install that already has chats keeps the connections it had: allowAllConnections on. A fresh database (every
     migration runs at once, nothing yet written) stays off. The permissions row exists either way, so it is no signal."""
@@ -645,6 +657,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (36, "drop_unused_tables_and_settings", _drop_unused_tables_and_settings),
     (37, "coding_session_events", _coding_session_events),
     (38, "model_votes", _model_votes),
+    (39, "default_sidebar_rows", _default_sidebar_rows),
 ]
 
 

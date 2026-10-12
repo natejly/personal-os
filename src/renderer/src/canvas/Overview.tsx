@@ -4,6 +4,7 @@ import type { Canvas, CanvasWindow, Rect } from '@shared/types'
 import { useProject } from '../store'
 import { useCanvas } from './store'
 import { KIND_LABEL } from './WindowHost'
+import { tip } from '../lib/tip'
 
 /** Which window is being dragged between thumbnails. Not a shared `DragKind`: it never leaves here. */
 const WINDOW_MIME = 'application/x-personal-os-window'
@@ -95,7 +96,7 @@ export default function Overview(): JSX.Element {
       <div className="overview-head">
         <b>Overview</b>
         <span>Click a canvas to open it · drag a window onto another canvas · Esc to close</span>
-        <button className="icon-btn" aria-label="Close overview" title="Close (Esc)"><X size={15} /></button>
+        <button className="icon-btn" aria-label="Close overview" title={tip('Close', 'canvas-deselect')}><X size={15} /></button>
       </div>
       {order.map((id) => canvases[id] && <Thumb key={id} canvas={canvases[id]} />)}
     </div>

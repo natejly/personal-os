@@ -8,7 +8,7 @@ const DELAY = 450
 
 /** Text to show for an element: title wins; buttons fall back to their aria-label, or the visible text of an icon button. */
 export const tipText = (el: Element): string => {
-  const t = el.getAttribute('title') ?? el.getAttribute('data-tip')
+  const t = el.getAttribute('title')
   if (t) return t.trim()
   if (!el.matches('button, [role="button"]')) return ''
   const label = (el.getAttribute('aria-label') ?? '').trim()
@@ -18,6 +18,21 @@ export const tipText = (el: Element): string => {
   return el.querySelector('svg') && text.length <= 40 ? text : ''
 }
 
+/** Park the native title in `data-tip` while hovered, and put it back afterwards. */
+export const lift = (el: Element) => {
+  const t = el.getAttribute('title')
+  if (t === null) return
+  el.setAttribute('data-tip', t)
+  el.removeAttribute('title')
+}
+export const restore = (el: Element) => {
+  const t = el.getAttribute('data-tip')
+  if (t === null) return
+  // a title React set in the meantime wins over the parked one
+  if (el.getAttribute('title') === null) el.setAttribute('title', t)
+  el.removeAttribute('data-tip')
+}
+
 export function installHoverTips(doc: Document = document): () => void {
   let box: HTMLDivElement | null = null
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -25,6 +40,7 @@ export function installHoverTips(doc: Document = document): () => void {
 
   const hide = () => {
     clearTimeout(timer)
+    if (current) restore(current)
     box?.remove()
     box = null
     current = null
@@ -44,16 +60,12 @@ export function installHoverTips(doc: Document = document): () => void {
     box.style.top = `${below ? r.bottom + 6 : r.top - 6 - box.offsetHeight}px`
   }
   const over = (e: Event) => {
-    const el = (e.target as Element | null)?.closest?.('[title], [data-tip], button[aria-label], [role="button"][aria-label]')
+    const el = (e.target as Element | null)?.closest?.('[title], button[aria-label], [role="button"][aria-label]')
     if (!el || el === current) return
     hide()
     const text = tipText(el)
     if (!text) return
-    const title = el.getAttribute('title')
-    if (title !== null) {
-      el.setAttribute('data-tip', title)
-      el.removeAttribute('title')
-    }
+    lift(el)
     current = el
     timer = setTimeout(() => show(el, text), DELAY)
   }

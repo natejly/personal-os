@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { ChevronDown, ChevronUp, X } from '../icons'
 import { findMatches } from '../lib/findText'
+import { tip } from '../lib/tip'
 
 const SKIP = '.msg-actions, .avatar, .katex-mathml'
 
@@ -131,8 +132,8 @@ export default function FindBar({ scope, resetKey }: { scope: RefObject<HTMLElem
         }}
       />
       <span className="find-count" aria-live="polite">{!query.trim() ? '' : count ? `${index + 1} of ${count}` : 'No matches'}</span>
-      <button className="icon-btn" aria-label="Previous match" title="Previous (⇧⌘G)" onClick={() => step(-1)}><ChevronUp size={14} /></button>
-      <button className="icon-btn" aria-label="Next match" title="Next (⌘G)" onClick={() => step(1)}><ChevronDown size={14} /></button>
+      <button className="icon-btn" aria-label="Previous match" title={tip('Previous', 'find-prev')} onClick={() => step(-1)}><ChevronUp size={14} /></button>
+      <button className="icon-btn" aria-label="Next match" title={tip('Next', 'find-next')} onClick={() => step(1)}><ChevronDown size={14} /></button>
       <button className="icon-btn" aria-label="Close find" title="Close (Esc)" onClick={close}><X size={14} /></button>
       <span className="find-hint">Collapsed tool rows and reasoning are not searched.</span>
     </div>

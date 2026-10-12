@@ -1,3 +1,4 @@
+import { formatAccelerator } from '@shared/shortcuts'
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { Loader2, Mic, Square } from '../icons'
 import { api } from '../lib/api'
@@ -135,7 +136,7 @@ export default function MicButton({ scope, onText }: { scope: RefObject<HTMLElem
         disabled={phase === 'starting' || phase === 'transcribing'}
         aria-pressed={recording}
         aria-label={recording ? 'Stop dictation' : phase === 'transcribing' ? 'Transcribing' : 'Dictate'}
-        title={recording ? 'Stop and insert the text (Esc discards)' : `Dictate into the message. Hold ${spec} to talk; tap it to latch`}
+        title={recording ? 'Stop and insert the text (Esc discards)' : `Dictate (${formatAccelerator(spec)})`}
         onMouseDown={(e) => e.preventDefault() /* keep the caret where it is */}
         onClick={() => void (recording ? stop() : start())}>
         {phase === 'transcribing' || phase === 'starting' ? <Loader2 size={16} className="spin" /> : recording ? <Square size={14} /> : <Mic size={16} />}

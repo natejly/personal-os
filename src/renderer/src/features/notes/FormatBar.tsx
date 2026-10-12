@@ -2,6 +2,7 @@ import { Bold, Code, Italic, Link, List, ListChecks, Quote } from '../../icons'
 import type { MarkdownEditorHandle } from './handle'
 import { toggleLinePrefix, wrapToggle, type Edit } from './format'
 import { diffRange } from './textEdit'
+import { tip } from '../../lib/tip'
 
 /** Thin row of formatting buttons. Every edit goes through the editor handle, so ⌘Z undoes it. */
 export default function FormatBar({ editor }: { editor: React.RefObject<MarkdownEditorHandle | null> }): JSX.Element {
@@ -26,10 +27,10 @@ export default function FormatBar({ editor }: { editor: React.RefObject<Markdown
   )
   return (
     <div className="fmt-bar" role="toolbar" aria-label="Formatting">
-      {btn('Bold (⇧⌘B)', wrap('**'), <Bold size={14} />)}
-      {btn('Italic (⇧⌘I)', wrap('*'), <Italic size={14} />)}
-      {btn('Code (⇧⌘E)', wrap('`'), <Code size={14} />)}
-      {btn('Link (⌘K)', link, <Link size={14} />)}
+      {btn(tip('Bold', 'md-bold'), wrap('**'), <Bold size={14} />)}
+      {btn(tip('Italic', 'md-italic'), wrap('*'), <Italic size={14} />)}
+      {btn(tip('Code', 'md-code'), wrap('`'), <Code size={14} />)}
+      {btn(tip('Link', 'md-link'), link, <Link size={14} />)}
       <span className="fmt-sep" />
       {btn('Heading 1', line('# '), 'H1')}
       {btn('Heading 2', line('## '), 'H2')}

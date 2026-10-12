@@ -287,6 +287,30 @@ def tool_error(message: str, *, field: str | None = None, expected: str | None =
     return e
 
 
+def resolve_ref(rows: list[dict[str, Any]], key: Any, id_key: str, name_key: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """Resolve what a model passed where an id or a name is wanted: an id (with a `doc_` prefix tolerated), then a name
+    (case-insensitive, a folder path or file extension ignored), then a unique substring. Returns (row, candidates):
+    the row when exactly one matches, else the several that did (empty when none)."""
+    k = str(key or "").strip()
+    if not k:
+        return None, []
+    if k.removeprefix("doc_") in {str(r.get(id_key)) for r in rows}:
+        k = k.removeprefix("doc_")
+    for r in rows:
+        if str(r.get(id_key)) == k:
+            return r, []
+    base = k.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    stem = base.rsplit(".", 1)[0] if "." in base else base
+    names = [(r, str(r.get(name_key) or "").lower().replace("\\", "/").rsplit("/", 1)[-1]) for r in rows]
+    for hit in ([r for r, n in names if n == base], [r for r, n in names if n.rsplit(".", 1)[0] == stem],
+                [r for r, n in names if stem and stem in n]):
+        if len(hit) == 1:
+            return hit[0], []
+        if hit:
+            return None, hit[:8]
+    return None, []
+
+
 UNVERIFIED_ALTERNATIVE = ("tell the user it is unconfirmed and ask them to check; do NOT repeat the write, "
                           "because it may well have landed")
 
@@ -1086,7 +1110,7 @@ class Toolbox:
                      "doc_id": h.get("doc_id"), "document": h["name"], "chunk": h["idx"], "section": h.get("heading") or None,
                      "page": h.get("page"), "text": h["text"]} for i, h in enumerate(hits)]
             return page(_scrub_strings(rows), offset=off, limit=lim, key="results")
-        R("search_documents", ToolSpec("search_documents", "Search the user's uploaded files and Files-editor docs. Excerpts are 'file' (read_document) or 'doc' (doc_read with doc_id). Cite with the excerpt number, like [4].",
+        R("search_documents", ToolSpec("search_documents", "Search the text of uploaded files and Files-editor docs (not memory or web). Excerpts are 'file' (read_document) or 'doc' (doc_read with doc_id). Cite with the excerpt number, like [4].",
             _obj({"query": {"type": "string", "description": "Search terms"}, "limit": {"type": "integer", "default": 8}, "offset": {"type": "integer", "default": 0},
                   "scope": {"type": "string", "enum": ["all", "files", "docs"], "default": "all"},
                   "queries": {"type": "array", "items": {"type": "string"}, "maxItems": 4, "description": "Up to 4 sub-queries for a compound question, instead of query"}}, []), search_documents, "knowledge",
@@ -1094,6 +1118,15 @@ class Toolbox:
 
         async def read_document(ctx: dict[str, Any], document_id: str, offset: int = 0, length: int = 6000) -> Any:
             d = self.documents.get(document_id)
+            if not d:  # a filename (or an id with a doc_ prefix) where an id is wanted
+                rows = self.documents.list(ctx["project_id"])
+                hit, cands = resolve_ref(rows, document_id, "id", "name")
+                d = self.documents.get(hit["id"]) if hit else None
+                if cands:
+                    return tool_error(redact.scrub_command_output(f"'{document_id}' matches {len(cands)} uploaded files; pass one document_id."),
+                                      field="document_id", expected="one of: " + "; ".join(f"{c['id']} ({c['name']})" for c in cands))
+                if not d and self.docs and self.docs.find(document_id):
+                    return tool_error(f"'{document_id}' is a file in Files, not an upload.", field="document_id", alternative="doc_read with that id")
             if not d:
                 return tool_error(redact.scrub_command_output(f"No uploaded file with id '{document_id}'."), field="document_id",
                                   expected="an id returned by search_documents or list_documents",
@@ -1106,7 +1139,7 @@ class Toolbox:
                 from .context import range_ref
                 out["cite"] = _cite(ctx, range_ref("file", d["name"], text, off, end, document_id=d["id"]))
             return _scrub_strings(out)
-        R("read_document", ToolSpec("read_document", "Read a slice of an uploaded file by id (from search_documents or list_documents); page with offset. Cite it with its number, like [4].",
+        R("read_document", ToolSpec("read_document", "Read an uploaded file by id or filename (not a Files doc: doc_read); page with offset. Cite it with its number, like [4].",
             _obj({"document_id": {"type": "string"}, "offset": {"type": "integer", "default": 0}, "length": {"type": "integer", "default": 6000}}, ["document_id"]), read_document, "knowledge",
             examples=[{"document_id": "doc_3f2a91"}, {"document_id": "doc_3f2a91", "offset": 6000}, {"document_id": "doc_3f2a91", "offset": 0, "length": 2000}], taints=True))
 
@@ -1186,7 +1219,7 @@ class Toolbox:
                 rows.append(row)
             return _scrub_strings(page(rows, offset=offset, limit=SEARCH_PAGE, key="memories"))
         R("search_memory", ToolSpec("search_memory", (
-            "Search long-term memory about the user. With kind or since the query may be empty (lists newest). "
+            "Search what you remember about the user (facts, preferences, past chats), not their files. With kind or since the query may be empty (lists newest). "
             "Set include_chats for 'what did we discuss / decide about X': it also returns matching past conversations "
             "under `conversations`."),
             _obj({"query": {"type": "string"}, "offset": {"type": "integer", "default": 0},
@@ -1295,7 +1328,7 @@ class Toolbox:
                      "type": n["type"], "properties": _scrub_strings(n["properties"])} for n in sub["nodes"]]
             return {"entities": ents, "relations": rels, "total_entities": len(ents), "total_relations": len(rels),
                     "truncated": len(ents) >= 40}
-        R("graph_search", ToolSpec("graph_search", "Find entities in the user's knowledge graph matching a query, with their direct relations (1 hop).",
+        R("graph_search", ToolSpec("graph_search", "Find people, projects and other entities in the knowledge graph, with direct relations; free-text facts: search_memory.",
             _obj({"query": {"type": "string"}}, ["query"]), graph_search, "graph",
             examples=[{"query": "Acme"}, {"query": "Mira"}, {"query": "migration project"}]))
 
@@ -1396,7 +1429,7 @@ class Toolbox:
                 if i >= off and row.get("url"):  # only the rows this page returns get a number, as in search_documents
                     row["cite"] = _cite(ctx, web_ref(str(row["url"]), str(row.get("title") or ""), str(row.get("snippet") or "")))
             return _scrub_strings(page(rows, offset=off, limit=n, key="results", **meta))
-        R("web_search", ToolSpec("web_search", "Search the web. Returns titles, URLs and snippets; fetch_url reads a result in full. Cite a result a sentence relies on with its number, like [4]. "
+        R("web_search", ToolSpec("web_search", "Search the public web (the user's own files and memory: search_documents, search_memory). Returns titles, URLs and snippets; fetch_url reads a result in full. Cite a result a sentence relies on with its number, like [4]. "
                                  "allowed_domains and blocked_domains are exclusive.",
             _obj({"query": {"type": "string"}, "max_results": {"type": "integer", "default": 6}, "offset": {"type": "integer", "default": 0},
                   "time_range": {"type": "string", "enum": ["day", "week", "month", "year"]}, "site": {"type": "string"},
@@ -1609,12 +1642,20 @@ class Toolbox:
                 return tool_error('show: pane must be "left" or "right"', field="pane")
             where = {"pane": pane} if pane else {}
             if kind == "file":
+                box = self.files_for(ctx)  # a desk/chat-relative path ("outputs/a.md") is the file the model just wrote
+                if box and path and not os.path.isabs(os.path.expanduser(path)):
+                    with contextlib.suppress(WorkspaceError):
+                        if (own := box[0].resolve_in(box[1], path)).is_file():
+                            path = str(own)
                 try:
                     p = mac.readable_path(path)
                 except mac.LocalPathError as e:
                     return tool_error(redact.scrub_command_output(f"show: {e}"), field="path", expected="a file on this Mac that is not a credential store",
                                       example={"kind": "file", "path": "~/Documents/Lease 2026.pdf"})
                 if not p.is_file():
+                    if self.docs and (doc := self.docs.find(path)) and doc["content"].strip():  # a Files doc id or title where a path is wanted
+                        return {"show": {"kind": "markdown", "title": title or doc["title"], "source": doc["content"], **where},
+                                "shown": title or doc["title"], "note": "The user now sees this in the side panel beside the chat."}
                     return tool_error(redact.scrub_command_output(f"show: {p} is not a file"), field="path")
                 size = p.stat().st_size
                 if size > SHOW_MAX_FILE_BYTES:
@@ -1915,7 +1956,7 @@ def _register_working(self: Toolbox) -> None:
                 ctx.setdefault("taint_sources", []).append("read_tool_result")
             return _scrub_strings(out)
         R("read_tool_result", ToolSpec("read_tool_result", (
-            "Read a large tool result stored out of context (the tool answered {result_id, total_chars, shape, preview}). "
+            "Read a stored large tool result by result_id, not a file (the tool answered {result_id, total_chars, shape, preview}). "
             "Start at offset 0 and follow next_offset; `shape` says what is in it."),
             _obj({"result_id": {"type": "string"}, "offset": {"type": "integer", "default": 0, "description": "character offset"},
                   "limit": {"type": "integer", "default": 12000, "description": "max 20000"}}, ["result_id"]),
@@ -1929,7 +1970,7 @@ def _register_working(self: Toolbox) -> None:
                 ctx.setdefault("taint_sources", []).append("read_tool_result")
             return _scrub_strings(out)
         R("search_tool_results", ToolSpec("search_tool_results", (
-            "Keyword search over stored large tool results; returns windows with result_id and offset for read_tool_result."),
+            "Keyword search inside earlier large tool results only (not files or web); returns windows with result_id and offset for read_tool_result."),
             _obj({"query": {"type": "string", "description": "keywords"},
                   "limit": {"type": "integer", "default": 3, "description": "max 10"}}, ["query"]),
             search_tool_results, "context",
@@ -2572,13 +2613,24 @@ def _register_docs(self: Toolbox) -> None:
 
     def _find(ctx: dict[str, Any], key: str) -> dict[str, Any] | None:
         d = self.docs.find(key)
+        if not d:  # a path or filename ("Notes/Plan.md"), or an id typed with a prefix
+            hit, _ = resolve_ref([r for r in self.docs.list() if _visible(ctx, r)], key, "id", "title")
+            d = self.docs.get(hit["id"]) if hit else None
         if d and is_isolated(self.docs.db, ctx.get("project_id")) and d["project_id"] != ctx.get("project_id"):
             return None
         return d
 
     def _missing(ctx: dict[str, Any], key: str) -> dict[str, Any]:
-        return _scrub_strings({"error": f"No file matching '{key}'", "docs": [str(d["title"] or "") for d in self.docs.list() if _visible(ctx, d)][:10],
-                               "hint": "pass a file id or exact title from doc_list, or use doc_create to start one"})
+        rows = [d for d in self.docs.list() if _visible(ctx, d)]
+        _, cands = resolve_ref(rows, key, "id", "title")
+        out = {"error": f"No file matching '{key}'", "docs": [str(d["title"] or "") for d in rows][:10],
+               "hint": "pass a file id or exact title from doc_list, or use doc_create to start one"}
+        if cands:
+            out["error"] = f"'{key}' matches {len(cands)} files; pass one doc_id"
+            out["candidates"] = [{"doc_id": c["id"], "title": c["title"] or ""} for c in cands]
+        elif self.documents.get(key):
+            out["hint"] = "that id is an uploaded file, not a Files doc: use read_document with it"
+        return _scrub_strings(out)
 
     async def doc_list(ctx: dict[str, Any], query: str = "") -> Any:
         return [_scrub_strings({"doc_id": d["id"], "title": d["title"] or "", "words": d["words"],
@@ -2591,7 +2643,7 @@ def _register_docs(self: Toolbox) -> None:
     async def doc_search(ctx: dict[str, Any], query: str, limit: int = 8) -> Any:
         hits = self.docs.search(query, ctx.get("project_id"), limit=max(1, min(int(limit), 20)))
         return _scrub_strings({"results": hits, "count": len(hits)})
-    R("doc_search", ToolSpec("doc_search", "Full-text search over the user's editor files; a snippet per hit.",
+    R("doc_search", ToolSpec("doc_search", "Search Files-editor docs only, a snippet per hit; uploads too: search_documents.",
         _obj({"query": {"type": "string"}, "limit": {"type": "integer", "default": 8}}, ["query"]), doc_search, "docs"))
 
     async def doc_read(ctx: dict[str, Any], doc: str, from_line: int = 1, to_line: int | None = None) -> Any:
@@ -2613,7 +2665,7 @@ def _register_docs(self: Toolbox) -> None:
             if links:
                 out["linked_from"] = links
         return _scrub_strings(out)
-    R("doc_read", ToolSpec("doc_read", "Read an editor file's markdown with line numbers (first page also has linked_from). Read before doc_edit, which matches exact text. Page with from_line/to_line. Cite lines you rely on with their number, like [4].",
+    R("doc_read", ToolSpec("doc_read", "Read a Files-editor doc by id or title, with line numbers (not uploads: read_document; first page has linked_from). Read before doc_edit, which matches exact text. Page with from_line/to_line. Cite lines you rely on with their number, like [4].",
         _obj({"doc": {"type": "string", "description": "File id or title"}, "from_line": {"type": "integer", "default": 1}, "to_line": {"type": "integer"}}, ["doc"]), doc_read, "docs"))
 
     async def doc_create(ctx: dict[str, Any], title: str, content: str = "", folder: str = "") -> Any:
@@ -2781,7 +2833,7 @@ def _register_mac(self: Toolbox) -> None:
                               example={"query": "lease agreement", "folders": ["~/Documents"]}, alternative=ALTERNATIVE["find_files"])
         except ValueError as e:
             return tool_error(redact.scrub_command_output(f"find_files: {e}"), field="query", example={"query": "invoice 2026", "name_only": True})
-    R("find_files", ToolSpec("find_files", "Spotlight search of the user's files on this Mac (default scope: ~/Desktop and ~/Documents). Matches contents and metadata, or file names only with name_only. Returns paths with kind, size and modified time; read one with read_local_file.",
+    R("find_files", ToolSpec("find_files", "Find files on this Mac by name or content with Spotlight (default ~/Desktop, ~/Documents); inside a known folder use fs_grep. Returns paths with kind, size and modified time; read one with read_local_file.",
         _obj({"query": {"type": "string", "description": "Words to look for, or a Spotlight query such as kMDItemContentType == 'com.adobe.pdf'"},
               "name_only": {"type": "boolean", "default": False, "description": "Match file names only"},
               "folders": {"type": "array", "items": {"type": "string"}, "description": "Search these folders instead, e.g. ~/Downloads"},
@@ -2802,7 +2854,7 @@ def _register_mac(self: Toolbox) -> None:
         except ValueError as e:  # extract_text: a binary format it cannot read
             return tool_error(redact.scrub_command_output(f"read_local_file: {e}"), field="path", expected="a text, markdown, PDF or .docx file",
                               alternative=ALTERNATIVE["read_local_file"])
-    R("read_local_file", ToolSpec("read_local_file", "Read the text of a file on this Mac (text, markdown, code, PDF or .docx), or list a folder. Works anywhere on this Mac: Grain's own data folder and app are off limits, credential stores (~/.ssh, keychains, browser cookies and passwords, .env files) need the user's approval, and macOS-protected folders (Desktop, Documents, Downloads, Mail, Messages...) need Full Disk Access in System Settings. Page through long files with offset.",
+    R("read_local_file", ToolSpec("read_local_file", "Read a file on this Mac by path (text, code, PDF, .docx) or list a folder; not uploads (read_document) or Files docs (doc_read). Grain's own data folder and app are off limits, credential stores (~/.ssh, keychains, browser cookies and passwords, .env files) need the user's approval, and macOS-protected folders (Desktop, Documents, Downloads, Mail, Messages...) need Full Disk Access in System Settings. Page through long files with offset.",
         _obj({"path": {"type": "string", "description": "Absolute or ~/ path, usually from find_files"},
               "offset": {"type": "integer", "default": 0}, "length": {"type": "integer", "default": 8000}}, ["path"]), read_local_file, "files",
         examples=[{"path": "~/Documents/Lease 2026.pdf"}, {"path": "~/Desktop/notes.md", "offset": 8000}], taints=True))
@@ -3231,7 +3283,20 @@ def _register_cowork(self: Toolbox) -> None:
         try:
             data = await asyncio.to_thread(ws.read_bytes, desk_id, path)
         except WorkspaceError as e:
-            return _fail("desk_read_file", e)
+            if "does not exist" not in str(e):
+                return _fail("desk_read_file", e)
+            files = [t for t in ws.tree(desk_id) if not t["is_dir"]]  # a bare filename or a slightly wrong folder
+            hit, cands = resolve_ref(files, path, "path", "path")
+            if cands:
+                return tool_error(redact.scrub_command_output(f"{path} matches {len(cands)} files; pass one path."), field="path",
+                                  expected="one of: " + "; ".join(c["path"] for c in cands))
+            if not hit:
+                return _fail("desk_read_file", e)
+            path = hit["path"]
+            try:
+                data = await asyncio.to_thread(ws.read_bytes, desk_id, path)
+            except WorkspaceError as e2:
+                return _fail("desk_read_file", e2)
         suffix = PurePosixPath(path).suffix.lower()
         if b"\x00" not in data[:8192] and suffix not in TEXT_READ_KINDS and suffix not in PICTURE_EXT:
             try:
@@ -3259,7 +3324,7 @@ def _register_cowork(self: Toolbox) -> None:
         return _scrub_strings(out)
     # Deliberately not taints=True: the workspace holds what this agent itself wrote, and marking it
     # untrusted would force every later external step of its own approved plan back to a card.
-    R("desk_read_file", ToolSpec("desk_read_file", "Read a desk workspace file. PDFs and office files (.docx, .xlsx, .pptx) come back as extracted text; for a picture use view_image. Follow next_offset to page a long file.",
+    R("desk_read_file", ToolSpec("desk_read_file", "Read a file in this desk's workspace by relative path. PDFs and office files (.docx, .xlsx, .pptx) come back as extracted text; for a picture use view_image. Follow next_offset to page a long file.",
         _obj({"path": {"type": "string", "description": "Workspace-relative"},
               "offset": {"type": "integer", "default": 0}, "length": {"type": "integer", "default": 6000}}, ["path"]),
         desk_read_file, "desk", "safe",

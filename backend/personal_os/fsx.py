@@ -910,7 +910,7 @@ def register(box: Any) -> None:
             shown.append(item)
         return {"root": redact.scrub_command_output(str(base)), "pattern": pattern, "files": shown, "total": total,
                 "truncated": truncated or total > GLOB_CAP, "note": "newest first; dot-folders, node_modules and .git are skipped"}
-    R("fs_glob", ToolSpec("fs_glob", "List files and folders under a root that match a glob (`**` crosses folders; a pattern with no slash matches at any depth), newest first, at most 500. Skips dot-folders, node_modules and .git. Root defaults to the desk workspace, else the home folder.",
+    R("fs_glob", ToolSpec("fs_glob", "List files by name pattern under a root (`**` crosses folders; no slash = any depth), newest first, max 500; to search contents use fs_grep. Skips dot-folders, node_modules and .git. Root defaults to the desk workspace, else the home folder.",
         _obj({"pattern": {"type": "string", "description": "e.g. **/*.py or src/*.ts"},
               "root": {"type": "string", "description": "Folder to search; absolute or ~/ path, anywhere on this Mac"}}, ["pattern"]), fs_glob, "files",
         examples=[{"pattern": "**/*.md", "root": "~/Documents/notes"}, {"pattern": "*.csv"}]))
@@ -963,7 +963,7 @@ def register(box: Any) -> None:
         return {"root": redact.scrub_command_output(str(base)), "pattern": pattern, "matches": shown, "count": hits,
                 "truncated": truncated,
                 **({"note": f"stopped at {GREP_CAP} matches; narrow the pattern or pass glob"} if truncated else {})}
-    R("fs_grep", ToolSpec("fs_grep", "Search file contents under a root with a regular expression. Returns path, line number and the line (cut at 400 characters), at most 200 matches; binary files and secret files are skipped. glob narrows the files (e.g. **/*.py); context adds lines around each match. Read a match's file with read_local_file, change it with fs_edit.",
+    R("fs_grep", ToolSpec("fs_grep", "Search inside files under a root with a regex (names: fs_glob). Returns path, line number and the line (cut at 400 characters), at most 200 matches; binary files and secret files are skipped. glob narrows the files (e.g. **/*.py); context adds lines around each match. Read a match's file with read_local_file, change it with fs_edit.",
         _obj({"pattern": {"type": "string", "description": "Regular expression"},
               "root": {"type": "string", "description": "Folder or file to search"},
               "glob": {"type": "string", "description": "Only files matching this glob"},

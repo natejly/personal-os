@@ -51,7 +51,7 @@ const withoutLegacyMode = (s: Settings): Settings => {
 }
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-export type View = 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'library' | 'project' | 'canvas'
+export type View = 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'library' | 'jobs' | 'project' | 'canvas'
 /** Which tab a project page shows. */
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
 export type LibraryTab = 'skills' | 'agents' | 'automations' | 'connectors'
@@ -224,6 +224,10 @@ export interface State {
   inboxOpen: boolean
   closeInbox: () => void
   openInbox: () => void
+  /** The scheduled job the Jobs screen has open (its detail pane); null shows the grid. */
+  jobsFocusId: string | null
+  /** Open the Jobs screen, on one job's detail when an id is given. */
+  openJobs: (jobId?: string | null) => void
   clearRoutineDraft: () => void
 
   projects: Project[]
@@ -1809,6 +1813,11 @@ export const useStore = create<State>((set, get) => {
       get().openInbox()
     },
     inboxOpen: false,
+    jobsFocusId: null,
+    openJobs: (jobId) => {
+      set({ jobsFocusId: jobId ?? null, inboxOpen: false, settingsOpen: false })
+      get().setView('jobs')
+    },
     openInbox: () => set({ inboxOpen: true, settingsOpen: false }),
     closeInbox: () => set({ inboxOpen: false, routineDraft: null }),
     clearRoutineDraft: () => set({ routineDraft: null }),

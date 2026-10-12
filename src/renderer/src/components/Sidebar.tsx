@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, Files, Plus, Folder, FolderKanban, ChevronRight, Bell, CalendarClock } from '../icons'
+import { ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, Files, Plus, Folder, FolderKanban, ChevronRight, Bell } from '../icons'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { chatAttentionOf, useStore, type View } from '../store'
@@ -100,7 +100,7 @@ export default function Sidebar(): JSX.Element {
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const setView = useStore((s) => s.setView)
-  const openInbox = useStore((s) => s.openInbox)
+  const openJobs = useStore((s) => s.openJobs)
   const openProject = useStore((s) => s.openProject)
   const setProjectModal = useStore((s) => s.setProjectModal)
   // Inside a space a chat opens (or focuses) as a window there; from any other view it routes to the chat view.
@@ -131,13 +131,13 @@ export default function Sidebar(): JSX.Element {
   const [chatsOpen, setChatsOpen] = useState(true)
   const [chatsTab, setChatsTab] = useState<'chats' | 'files'>('chats')
   useChatFileCountsSync()
-  const [jobsOpen, setJobsOpen] = useState(true)
   const [needsOnly, setNeedsOnly] = useState(readNeeds)
   const jobs = useStore((s) => s.jobs)
   const agentInbox = useStore((s) => s.agentInbox)
   // Job states come from GET /jobs. The inbox is re-read whenever a job run, proposal or pause moves, so the list follows it.
   useEffect(() => { if (agentInbox) void useStore.getState().refreshJobs() }, [agentInbox])
   const shownJobs = useMemo(() => jobs.filter(listedJob), [jobs])
+  const jobsWanting = useMemo(() => jobs.filter((j) => wantsYou(jobAttention(j))).length, [jobs])
   // Element-wise compared, so a streamed token that moves no chat's state re-renders nothing; empty while the filter is off.
   const chatStates = useStore(useShallow((s) => (needsOnly ? s.conversations.map((c) => chatAttentionOf(s, c)) : NO_STATES)))
   /** Everything that wants the user, needs-you first then blocked; order within each kept (chats newest first, then jobs). */
@@ -257,6 +257,7 @@ export default function Sidebar(): JSX.Element {
     const mi = NAV_MODULES.findIndex((m) => m.view?.id === v)
     if (mi >= 0) return moduleBadges[mi]
     if (v === 'library') return skillCandidates || null
+    if (v === 'jobs') return jobsWanting || null
     return null
   }
 
@@ -293,7 +294,7 @@ export default function Sidebar(): JSX.Element {
         {[...TOP, ...navEntries()]
           .filter((n) => (n.view ? !rowHidden(settings, n.view) : inCanvas)).map(navItem)}
         {/* Hidden views leave no trace otherwise; this is the way back to them. */}
-        {[...TOP, ...navEntries(), { view: 'spaces' }, { view: 'projects' }, { view: 'jobs' }].some((e) => rowHidden(settings, e.view as string)) && (
+        {[...TOP, ...navEntries(), { view: 'spaces' }, { view: 'projects' }].some((e) => rowHidden(settings, e.view as string)) && (
           <button className="nav-item nav-more" title="Turn on hidden rows in Settings → Sidebar"
             onClick={() => useStore.getState().openSettings('sidebar')}>
             <Plus size={15} /><span>More rows…</span>
@@ -306,12 +307,12 @@ export default function Sidebar(): JSX.Element {
       {!rowHidden(settings, 'projects') && <>
       <div className="section-row">
         <button className="section-toggle" aria-expanded={projectsOpen} onClick={() => setProjectsOpen((o) => !o)}>
-          <ChevronRight size={12} className={projectsOpen ? 'rot90' : ''} /><FolderKanban size={13} /> Projects
+          <span className="project-twist"><FolderKanban size={13} className="twist-folder" /><ChevronRight size={13} className={`twist-chevron${projectsOpen ? ' rot90' : ''}`} /></span> Projects
         </button>
         <button className="icon-btn ghost sm" aria-label="New project" title="New project" onClick={() => setProjectModal({ mode: 'create' })}><Plus size={14} /></button>
       </div>
       {projectsOpen && (
-        <div className="project-list">
+        <div className="project-list nested">
           {projects.length === 0 && <p className="empty-hint">No projects yet.</p>}
           {projects.map((p) => {
             const rows = chatsByProject[p.id] ?? []
@@ -346,7 +347,7 @@ export default function Sidebar(): JSX.Element {
       <div className="section-row">
         <button className="section-toggle" aria-label="Chats" aria-expanded={chatsOpen} onClick={() => setChatsOpen((o) => !o)}>
           {/* The Chats | Documents switch beside it names the section, so the toggle carries no word of its own. */}
-          <ChevronRight size={12} className={chatsOpen ? 'rot90' : ''} /><MessageSquare size={13} />
+          <span className="project-twist"><MessageSquare size={13} className="twist-folder" /><ChevronRight size={13} className={`twist-chevron${chatsOpen ? ' rot90' : ''}`} /></span>
           {/* Counted off the desk inbox: chats working autonomously that have something unseen for you. */}
           {needsYou > 0 && <span className="count pending" title={`${needsYou} chat${needsYou === 1 ? '' : 's'} working autonomously need${needsYou === 1 ? 's' : ''} you`}>{needsYou}</span>}
         </button>
@@ -417,7 +418,7 @@ export default function Sidebar(): JSX.Element {
             {wanting.length === 0 && <p className="empty-hint">Nothing needs you.</p>}
             {wanting.map((x) => ('conv' in x
               ? <ChatRow key={x.conv.id} conv={x.conv} active={x.conv.id === focusedId && view === 'chat'} lead={projectDot(x.conv)} />
-              : <JobRow key={`j${x.job.id}`} job={x.job} onOpen={openInbox} />))}
+              : <JobRow key={`j${x.job.id}`} job={x.job} onOpen={() => openJobs(x.job.id)} />))}
           </section>
         )}
         {!filtering && pinned.length > 0 && (
@@ -468,14 +469,6 @@ export default function Sidebar(): JSX.Element {
       </div>
       </>)}
 
-      {shownJobs.length > 0 && !rowHidden(settings, 'jobs') && (<>
-        <div className="section-row">
-          <button className="section-toggle" aria-expanded={jobsOpen} onClick={() => setJobsOpen((o) => !o)}>
-            <ChevronRight size={12} className={jobsOpen ? 'rot90' : ''} /><CalendarClock size={13} /> Jobs
-          </button>
-        </div>
-        {jobsOpen && <div className="convo-list">{shownJobs.map((j) => <JobRow key={j.id} job={j} onOpen={openInbox} />)}</div>}
-      </>)}
       </div>
 
       <div className="sidebar-bottom">
@@ -487,7 +480,7 @@ export default function Sidebar(): JSX.Element {
   )
 }
 
-/** A scheduled job in the sidebar: its attention state and name. Jobs are managed in the Agent inbox, so a click opens it. */
+/** A scheduled job in the sidebar: its attention state and name. A click opens the Jobs screen on that job. */
 function JobRow({ job, onOpen }: { job: Job; onOpen: () => void }): JSX.Element {
   return (
     <div className="convo-item" {...rowButton(onOpen)}>

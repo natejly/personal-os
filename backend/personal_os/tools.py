@@ -140,6 +140,11 @@ def allows_slug(patterns: Any, slug: str) -> bool:
     return any(fnmatch.fnmatchcase(slug, str(p)) for p in patterns or ())
 
 
+# Tools whose calls fail most often in the logs (wrong id/path form, a find that matches nothing, a refused finish):
+# their first example rides in the schema instead of waiting for a bad-arguments error.
+EXAMPLE_IN_SCHEMA = frozenset({"shell_run", "desk_done", "doc_read", "read_document", "show", "doc_edit", "desk_write_file", "desk_read_file"})
+
+
 class ToolSpec:
     def __init__(self, name: str, description: str, parameters: dict[str, Any], fn: ToolFn, group: str, danger: str = "safe",
                  examples: list[dict[str, Any]] | None = None, taints: bool = False):
@@ -160,7 +165,7 @@ class ToolSpec:
         # Flat arguments are self-explanatory from the schema, and a malformed call gets its example back in the
         # error (_bad_arguments). Only a doubly nested shape (an array of objects that hold an object) is shown up front, once.
         props = self.parameters.get("properties") or {}
-        if self.examples and any(q.get("type") == "object" for p in props.values() for q in ((p.get("items") or {}).get("properties") or {}).values()):
+        if self.examples and (self.name in EXAMPLE_IN_SCHEMA or any(q.get("type") == "object" for p in props.values() for q in ((p.get("items") or {}).get("properties") or {}).values())):
             d += "\nExample: " + json.dumps(self.examples[0], ensure_ascii=False)
         return {"type": "function", "function": {"name": self.name, "description": d, "parameters": self.parameters}}
 
@@ -2666,7 +2671,8 @@ def _register_docs(self: Toolbox) -> None:
                 out["linked_from"] = links
         return _scrub_strings(out)
     R("doc_read", ToolSpec("doc_read", "Read a Files-editor doc by id or title, with line numbers (not uploads: read_document; first page has linked_from). Read before doc_edit, which matches exact text. Page with from_line/to_line. Cite lines you rely on with their number, like [4].",
-        _obj({"doc": {"type": "string", "description": "File id or title"}, "from_line": {"type": "integer", "default": 1}, "to_line": {"type": "integer"}}, ["doc"]), doc_read, "docs"))
+        _obj({"doc": {"type": "string", "description": "File id or title"}, "from_line": {"type": "integer", "default": 1}, "to_line": {"type": "integer"}}, ["doc"]), doc_read, "docs",
+        examples=[{"doc": "Launch plan", "from_line": 1, "to_line": 40}]))
 
     async def doc_create(ctx: dict[str, Any], title: str, content: str = "", folder: str = "") -> Any:
         # The chat's own project decides which tree it lands in, so a doc written inside a project is
@@ -2750,7 +2756,8 @@ def _register_docs(self: Toolbox) -> None:
               "content": {"type": "string", "description": "Replacement for the entire body"},
               "title": {"type": "string"},
               "summary": {"type": "string", "description": "Shown to the user next to the diff"}}, ["doc"]),
-        doc_edit, "docs", "writes"))
+        doc_edit, "docs", "writes",
+        examples=[{"doc": "Launch plan", "edits": [{"find": "ship in Q3", "replace": "ship in Q4"}], "summary": "Move launch to Q4"}]))
 
     async def doc_delete(ctx: dict[str, Any], doc: str) -> Any:
         d = _find(ctx, doc)
@@ -3354,8 +3361,8 @@ def _register_cowork(self: Toolbox) -> None:
               "content": {"type": "string"},
               "mode": {"type": "string", "enum": ["create", "overwrite", "append"], "default": "create"}}, ["path", "content"]),
         desk_write_file, "desk", "writes",
-        examples=[{"path": "work/notes.md", "content": "## Sources\n"},
-                  {"path": "outputs/summary.md", "content": "# Summary\n", "mode": "overwrite"},
+        examples=[{"path": "outputs/summary.md", "content": "# Summary\n", "mode": "overwrite"},
+                  {"path": "work/notes.md", "content": "## Sources\n"},
                   {"path": "work/notes.md", "content": "- one more source\n", "mode": "append"}]))
 
     async def desk_trash_file(ctx: dict[str, Any], path: str) -> Any:
@@ -3476,7 +3483,7 @@ def _register_cowork(self: Toolbox) -> None:
         return {"status": status, "outputs_awaiting_review": len(pending),
                 "note": ("Your delivered files are waiting for the user's review. End your turn."
                          if pending else "The desk is finished. End your turn.")}
-    R("desk_done", ToolSpec("desk_done", "Declare the desk finished and say what you did. Call once, when the brief is met: Review if you delivered files, else Done. Without it the desk never finishes.",
+    R("desk_done", ToolSpec("desk_done", "Declare the desk finished and say what you did. Call once, when the brief is met: Review if you delivered files, else Done. Refused while todo_write steps are open or a file in outputs/ is undelivered or changed since delivery.",
         _obj({"summary": {"type": "string", "description": "What you did"},
               "next_steps": {"type": "string", "description": "What you would do next"}}, ["summary"]),
         desk_done, "desk", "safe",

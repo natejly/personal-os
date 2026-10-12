@@ -201,6 +201,14 @@ def test_gist_and_index() -> None:
     assert idx.splitlines()[1:3] == ["a: x_tool, y_tool \u2014 Do y", "b: z_tool \u2014 Do z"] and mcp_search.tool_index([]) == ""
 
 
+def test_error_prone_tools_carry_a_short_example_in_their_schema() -> None:
+    assert tools.EXAMPLE_IN_SCHEMA
+    for name in sorted(tools.EXAMPLE_IN_SCHEMA):
+        spec = appmod.toolbox.specs[name]
+        assert "\nExample: " in spec.schema()["function"]["description"], name
+        assert len(json.dumps(spec.examples[0], ensure_ascii=False)) < 150, name
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

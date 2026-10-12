@@ -905,8 +905,8 @@ def register(tb: Any) -> None:
                           "unsandboxed": {"type": "boolean", "default": False},
                           "on_timeout": {"type": "string", "enum": ["background", "kill"], "default": "background"}}, ["command"]),
                     shell_run, "shell", "executes",
-                    examples=[{"command": "ls -la"}, {"command": "python3 make_report.py && ls outputs"},
-                              {"command": "npm test", "cwd": "app", "timeout_s": 300},
+                    examples=[{"command": "npm test", "cwd": "app", "timeout_s": 300}, {"command": "ls -la"},
+                              {"command": "python3 make_report.py && ls outputs"},
                               {"command": "python3 -m http.server 8000", "background": True}])
     spec.default = "ask"
     if not sandbox_available():

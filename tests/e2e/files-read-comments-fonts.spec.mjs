@@ -10,7 +10,7 @@ const open = async (page, title) => {
   await expect(titleBox(page)).toHaveValue(title)
 }
 const rendered = (page) => page.locator('.docs-render')
-const editToggle = (page) => page.locator('.doc-edit-toggle')
+const seg = (page, title) => page.locator(`.seg button[title="${title}"]`)
 
 /** Select `text` inside the rendered page and let the mouseup handler see it. */
 const selectRendered = async (page, text) => {
@@ -30,24 +30,26 @@ const selectRendered = async (page, text) => {
   }, text)
 }
 
-test('a doc opens in the reading view; Edit, ⌘E and a double-click bring the editor up; the choice survives a relaunch', async ({ grain: g }) => {
+test('Preview only is the reading view; ⌘E and a double-click bring the editor up; the mode survives a relaunch', async ({ grain: g }) => {
   let { page } = g
   await mkDoc(g, { title: 'Reader', content: '# Reader\n\nSome prose to read.' })
   await openFiles(page)
   await open(page, 'Reader')
+  await seg(page, 'Preview only').click()
   await expect(rendered(page)).toContainText('Some prose to read.')
+  await expect(rendered(page)).toHaveClass(/reading/)
   await expect(body(page)).toHaveCount(0)
-  await editToggle(page).click()
+  await page.keyboard.press('Meta+e')
   await expect(body(page)).toBeVisible()
-  await expect(editToggle(page)).toHaveAttribute('aria-pressed', 'true')
   await page.keyboard.press('Meta+e')
   await expect(body(page)).toHaveCount(0)
   await rendered(page).dblclick()
   await expect(body(page)).toBeVisible()
+  await seg(page, 'Preview only').click()
   page = await relaunch(g)
   await openFiles(page)
   await open(page, 'Reader')
-  await expect(body(page)).toBeVisible()
+  await expect(body(page)).toHaveCount(0)
   expect(errorsOf(g)).toEqual([])
 })
 

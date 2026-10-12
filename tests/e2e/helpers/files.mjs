@@ -4,10 +4,9 @@ export const openFiles = async (page) => {
   await page.getByRole('tablist', { name: 'Files section' }).waitFor()
 }
 export const body = (page) => page.locator('textarea.md-input')
-/** Docs open in the reading view; bring the editor up (Edit toggle) unless it already is, as a doc made from New or remembered per doc. */
+/** Bring the editor up (segmented control, Editor only) unless a doc is already showing it. */
 export const editDoc = async (page) => {
-  const t = page.locator('.doc-edit-toggle')
-  if ((await t.getAttribute('aria-pressed')) !== 'true') await t.click()
+  if (!(await body(page).count())) await page.locator('.seg button[title="Editor only"]').first().click()
   await body(page).waitFor()
 }
 export const titleBox = (page) => page.getByLabel('Title', { exact: true })

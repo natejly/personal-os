@@ -87,6 +87,17 @@ def bm25_search(docs: list[Doc], query: str, limit: int = DEFAULT_LIMIT, k1: flo
     return scored[:limit]
 
 
+PRESELECT_MIN = 11.0     # bm25 score a tool needs to be loaded before the model asks (chat noise tops out near 10)
+PRESELECT_LIMIT = 3
+PRESELECT_CHARS = 300    # only the start of a message is scored, so a long one cannot pile up weak matches
+
+
+def preselect(docs: list[Doc], text: str) -> list[str]:
+    """Held-back tools a user message obviously asks for: the best bm25 hits, if strong and near the top one. Often none."""
+    hits = bm25_search(docs, (text or "")[:PRESELECT_CHARS], limit=PRESELECT_LIMIT)
+    return [s for s, v in hits if v >= PRESELECT_MIN and v >= 0.6 * hits[0][1]]
+
+
 def should_defer(n_tools: int, threshold: int) -> bool:
     return threshold > 0 and n_tools > threshold
 

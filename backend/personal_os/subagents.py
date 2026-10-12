@@ -38,9 +38,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import approval_log, autoreview, coding_route, compaction, context_map, fsx, limits, llm, mac, permissions, permrules, redact
+from . import approval_log, autoreview, coding_route, compaction, context_map, fsx, limits, llm, mac, mcp_search, permissions, permrules, redact
 from .db import new_id, now
-from .toolcalls import parse_arguments
+from .toolcalls import parse_arguments, resolve_name
 from .trace import Tracer, now_ms
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, DISCARDED, ToolSpec, _obj, allows_slug, call_key, denied, summarize_result, tool_error
@@ -60,7 +60,7 @@ GROUP = "agents"
 CHILD_BLOCK = frozenset({
     "save_memory", "graph_add", "save_writing_sample", "todo_write", "todo_add", "todo_update", "todo_delete", "doc_delete",
     "propose_plan", "desk_ask", "ask_user", "desk_done", "desk_deliver", "desk_start", "schedule_task", "cancel_scheduled_task",
-    "workflow_run", "workflow_resume", "workflow_list", "skill_draft", "skill_revise", "mcp_tool_search", "tool_search",
+    "workflow_run", "workflow_resume", "workflow_list", "skill_draft", "skill_revise", "mcp_tool_search", "tool_search",  # tool_search: _schemas adds the child's own when it defers
     "run_shortcut", "open_page", "gmail_send", "gmail_draft", "gmail_modify", "deep_research",
     # the front agent's hand-off tools (workers.py): a worker reports back, it never delegates sideways
     "delegate", "message_worker", "check_worker", "stop_worker", "resume_worker",
@@ -108,6 +108,15 @@ READ_TOOLS = (
     "doc_list", "doc_search", "doc_read", "youtube_search", "youtube_video", "github_search", "github_read", "read_feed",
     "desk_list_files", "desk_read_file", "view_image", "doc_guide",
 )
+
+# What a child is always offered once its tool list passes toolDeferAbove (tool_search joins it). The most-called tools of
+# 15 days of worker and subagent runs; every other tool it may call is in a prompt index and loads on first call or via
+# tool_search. Only names the child already has are ever offered, so a restricted role gains nothing from this list.
+# Fixed order: core first, then loaded tools in load order, so a load only appends to the tools array.
+WORKER_CORE = ("shell_run", "shell_poll", "run_python", "web_search", "fetch_url", "read_local_file", "fs_grep", "fs_glob",
+               "fs_edit", "write_local_file", "desk_list_files", "desk_read_file", "desk_write_file", "read_tool_result",
+               "search_tool_results", "read_document", "search_documents", "doc_read", "gmail_search", "gmail_read")
+
 
 def _one_line(text: Any, limit: int = 200) -> str:
     """One line. Pinned notes and folder paths sit in the system prompt, so a newline cannot open a section."""
@@ -828,6 +837,8 @@ class Subagents:
                 parts.append(block)
         if route := coding_route.hint(cfg):
             parts.append(route)
+        if index := self._tool_index(ch):
+            parts.append(index)
         if ch.roots and ch.confine:
             roots = [ln for r in ch.roots if (ln := _one_line(r, 300))]
             if roots:
@@ -931,12 +942,64 @@ class Subagents:
         ch.meter.add(pt, ct, cost)
         return "".join(buf).strip(), end
 
+    def _all_schemas(self, ch: Child) -> dict[str, dict[str, Any]]:
+        """Every schema this child may call, by name: its built-in tools, then its connector tools. Nothing outside ch.modes."""
+        out = {s["function"]["name"]: s for s in self.toolbox.schemas(ch.modes)}
+        out.pop("tool_search", None)
+        out.update({n: s for n, s in (ch.ctx.get("mcp_schemas") or {}).items() if ch.modes.get(n) in ("on", "ask")})
+        return out
+
+    def _held_back(self, ch: Child) -> list[str]:
+        """The names this child gets through the index and tool_search rather than as schemas: all but WORKER_CORE once it
+        has more than toolDeferAbove tools. Empty below that (a read-only role's short list is sent whole)."""
+        names = list(self._all_schemas(ch))
+        cfg = ch.ctx.get("settings") or self.settings()
+        if not mcp_search.should_defer(len(names), int(cfg.get("toolDeferAbove", 40) or 0)):
+            return []
+        return [n for n in names if n not in WORKER_CORE]
+
+    def _schemas(self, ch: Child) -> list[dict[str, Any]]:
+        """What the model is sent this round: everything (a short tool list), or tool_search, the worker core in its fixed order
+        and then what the child loaded, in load order. A load only appends, so the cached prefix holds. Only picks from ch.modes."""
+        by_name = self._all_schemas(ch)
+        held = set(self._held_back(ch))
+        if not held:
+            ch.modes.pop("tool_search", None)
+            ch.ctx["deferred"] = set()
+            return list(by_name.values())
+        ch.modes["tool_search"] = "on"  # reads this child's own held-back list; loading changes no gate
+        loaded: set[str] = ch.ctx["tool_loaded"]
+        order: list[str] = ch.ctx.setdefault("load_order", [])
+        order.extend(n for n in by_name if n in held and n in loaded and n not in order)
+        ch.ctx["deferred"] = held - set(order)
+        ch.ctx["tool_catalog"] = lambda: [
+            {"slug": n, "description": d, "parameters": p, "server": g}
+            for n in sorted(ch.ctx["deferred"]) for d, p, g in [self._about(n, by_name[n])]]
+        return ([self.toolbox.specs["tool_search"].schema()] + [by_name[n] for n in WORKER_CORE if n in by_name]
+                + [by_name[n] for n in order])
+
+    def _about(self, name: str, schema: dict[str, Any]) -> tuple[str, Any, str]:
+        """(description, parameters, group) for the tool index and tool_search; a connector tool has no spec."""
+        sp = self.toolbox.specs.get(name)
+        if sp is not None:
+            return sp.description, sp.parameters, sp.group
+        fn = schema["function"]
+        return str(fn.get("description") or ""), fn.get("parameters") or {}, "mcp"
+
+    def _tool_index(self, ch: Child) -> str:
+        """The static table of contents of the held-back tools, for the system prompt. Same for every sibling of one role."""
+        held, by_name = set(self._held_back(ch)), self._all_schemas(ch)
+        return mcp_search.tool_index((g, n, d) for n in by_name if n in held for d, _p, g in [self._about(n, by_name[n])])
+
     async def _loop(self, ch: Child) -> None:
         cfg = ch.ctx.get("settings") or self.settings()
-        schemas = self.toolbox.schemas(ch.modes) + [s for n, s in (ch.ctx.get("mcp_schemas") or {}).items() if ch.modes.get(n) in ("on", "ask")]
+        # A child's loaded set is its own: the parent chat's must neither seed it nor learn from its searches.
+        ch.ctx["tool_loaded"] = ch.ctx["mcp_loaded"] = set()
+        ch.ctx.pop("load_order", None)
         rnd = 0
         while True:
             rnd += 1
+            schemas = self._schemas(ch)  # a tool_search or a first call may have loaded more since the last round
             self._check(ch)
             if ch.steers:  # the user spoke to this child: their words land before the next model turn
                 ch.messages.extend({"role": "user", "content": t} for t in ch.steers)
@@ -966,6 +1029,17 @@ class Subagents:
                 return
             if end.get("finish_reason") == "length":
                 calls[-1]["_cut"] = True  # the output limit cut the last call's arguments
+            # The chat's rule: a name off by case, space or a leading `namespace.` resolves; any other unknown name is an error
+            # that lists the closest tools offered. The assistant turn replays the resolved name.
+            known = set(self.toolbox.specs) | set(ch.modes) | set(ch.ctx.get("mcp_schemas") or {})
+            offered = [s["function"]["name"] for s in schemas]
+            for c in calls:
+                name, renamed, problem = resolve_name(str(c.get("name") or ""), known, offered)
+                c["_renamed"] = renamed
+                if problem:
+                    c["name"], c["_name_problem"] = "invalid_tool", problem
+                else:
+                    c["name"] = name
             ch.messages.append({"role": "assistant", "content": text or None,
                                 **({"reasoning_content": end["reasoning"]} if end.get("reasoning") else {}),
                                 "tool_calls": [{"id": c["id"], "type": "function",
@@ -1036,7 +1110,8 @@ class Subagents:
 
     @staticmethod
     def _args(c: dict[str, Any]) -> dict[str, Any]:
-        args, _repaired, _problem = parse_arguments(c["arguments"])
+        args, repaired, _problem = parse_arguments(c["arguments"])
+        c["_repaired"] = bool(c.get("_renamed")) or repaired  # read by _exec for the tool_call event: no second parse
         return {"_raw": c["arguments"]} if args is None else args
 
     @staticmethod
@@ -1062,15 +1137,21 @@ class Subagents:
         uid = f"{ch.id}:{c['id']}"
         spec = self.toolbox.specs.get(name)
         raw_mode = ch.modes.get(name, "off")
+        if raw_mode != "off" and name in (ch.ctx.get("deferred") or ()):
+            # Called by name from the prompt's index before any search: loaded now and run now, as in a chat. Its gates below are unchanged.
+            ch.ctx["tool_loaded"].add(name)
+            ch.ctx["deferred"].discard(name)
         sources_before = len(ch.ctx.get("taint_sources") or [])
         t0 = time.time()
         self._set_now(ch, _now_line(name, args))
-        repaired = {"repaired": True} if parse_arguments(c.get("arguments"))[1] else {}
+        repaired = {"repaired": True} if c.get("_repaired") else {}
         self._emit(ch, "tool_call", {"id": uid, "name": name, "arguments": _short(args), **repaired})
         decision, result, ran = "allow", None, False
         mcp = self.connectors is not None and spec is None and name in (ch.ctx.get("mcp_schemas") or {})
         if mcp and raw_mode != "off" and "_raw" not in args:
             decision, result, ran = await self._exec_mcp(ch, uid, name, args, raw_mode)
+        elif c.get("_name_problem"):
+            result = tool_error(str(c["_name_problem"])[:500], alternative="call one of the tools listed in this request, by its exact name")
         elif spec is None or raw_mode == "off":
             result = denied(name, "not available to this subagent")
         elif "_raw" in args:

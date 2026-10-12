@@ -47,7 +47,7 @@ def call(name: str, args: dict[str, Any], i: int = 0) -> dict[str, Any]:
     return {"id": f"c{i}", "name": name, "arguments": json.dumps(args)}
 
 
-def reply(cid: str, rounds: list[list[dict[str, Any]]], **settings: Any) -> list[dict[str, Any]]:
+def reply(cid: str, rounds: list[list[dict[str, Any]]], text: str = "go", **settings: Any) -> list[dict[str, Any]]:
     appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "workspaceRoots": [], "toolDeferAbove": 40,
                             **settings})
     ROUNDS[:] = rounds
@@ -57,7 +57,7 @@ def reply(cid: str, rounds: list[list[dict[str, Any]]], **settings: Any) -> list
     out: list[dict[str, Any]] = []
 
     async def go() -> None:
-        async for ev in appmod._chat_stream(cid, appmod.ChatIn(content="go"), asyncio.Event()):
+        async for ev in appmod._chat_stream(cid, appmod.ChatIn(content=text), asyncio.Event()):
             if ev[0] in ("tool_result", "assistant_message"):
                 out.append({"event": ev[0], **ev[1]})
 
@@ -83,7 +83,26 @@ def test_default_offers_core_plus_search() -> None:
     # wording on 2026-10-06; the worker tools (delegate, message/check/stop/resume_worker) and send_files on 2026-10-06/07
     # 2026-10-11: terse descriptions, and examples sent only for doubly nested shapes (flat ones ride in the bad-arguments
     # error); 22.8k measured. scripts/tool_schema_size.py prints the per-tool breakdown.
-    assert SIZES[0] < 24_200, SIZES[0]  # 2026-10-12: setup_request (core, so a missing integration is one call away) adds ~500
+    assert SIZES[0] < 14_500, SIZES[0]  # 2026-10-12: core cut to 18 tools (tools.CORE_ORDER), from 47 and 22.8k
+    assert len(tools.CORE_ORDER) <= 18 and len(names) <= len(tools.CORE_ORDER) + 1, names
+    assert names[:len(tools.CORE_ORDER)] == [n for n in ["tool_search", *tools.CORE_ORDER[1:]] if n in names], "core is sent in its fixed order"
+
+
+def test_a_plain_request_loads_the_obvious_tool_before_round_one() -> None:
+    reply(new_conv(), [], text="move this file to the trash")
+    base = OFFERED[0]
+    assert "trash_local_file" in base and "graph_search" not in base
+    reply(new_conv(), [], text="hey how are you")
+    assert "trash_local_file" not in OFFERED[0] and len(OFFERED[0]) <= len(tools.CORE_ORDER)
+    assert base[:len(OFFERED[0])] == OFFERED[0], "the loaded tool only appends to the core"
+
+
+def test_a_load_only_appends_to_the_tools_array() -> None:
+    cid = new_conv()
+    reply(cid, [[call("tool_search", {"query": "knowledge graph entities relations"})]])
+    assert OFFERED[1][:len(OFFERED[0])] == OFFERED[0] and len(OFFERED[1]) > len(OFFERED[0])
+    reply(cid, [[call("tool_search", {"query": "move a file to the trash"})]])
+    assert OFFERED[1][:len(OFFERED[0])] == OFFERED[0], "a second load leaves the first one's place alone"
 
 
 def test_search_loads_and_persists_per_conversation() -> None:

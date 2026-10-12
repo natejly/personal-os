@@ -3658,12 +3658,17 @@ def _register_mcp_search(self: Toolbox) -> None:
 Toolbox._register_mcp_search = _register_mcp_search  # type: ignore[attr-defined]
 
 
-# Always offered while built-in tools are deferred (app._schemas): the day-to-day reading and bookkeeping tools,
-# so a plain question never costs a search round. Everything else waits for tool_search.
-CORE_GROUPS = frozenset({"memory", "docs", "todos", "knowledge", "plan", "utility", "context", "desk", "mcp"})
-CORE_TOOLS = frozenset({"calendar_events", "calendar_get", "gmail_search", "gmail_read", "web_search", "fetch_url",
-                        "skill_list", "skill_view", "writing_style", "deep_research", "setup_request",  # writing_style: the prompt's voice hint tells the model to call it
-                        "delegate", "message_worker", "check_worker", "stop_worker", "resume_worker"})  # the front agent always has its hand-off tools
+# Always offered while built-in tools are deferred (app._schemas): 18 tools, chosen from 15 days of real calls by the
+# front agent (chats + desks, by call count) plus what the standing prompt hints name (todo_write, ask_user, memory,
+# show, the hand-off tools). Everything else is in the prompt's tool index and loads on first call or via tool_search.
+# Fixed order: the tools array is core first, then loaded tools, so loading one never shifts earlier bytes.
+CORE_ORDER = ("tool_search", "todo_write", "ask_user", "delegate", "message_worker", "check_worker", "resume_worker",
+              "stop_worker", "read_tool_result", "web_search", "gmail_search", "calendar_events", "doc_read", "doc_edit",
+              "search_documents", "search_memory", "save_memory", "show")
+# A desk's own workspace tools exist only inside a desk, where they are the work.
+DESK_CORE = ("desk_list_files", "desk_read_file", "desk_write_file", "desk_done", "desk_deliver", "desk_ask")
+CORE_GROUPS = frozenset({"mcp"})  # mcp_tool_search
+CORE_TOOLS = frozenset(CORE_ORDER) | frozenset(DESK_CORE)
 
 
 def is_core(spec: ToolSpec) -> bool:

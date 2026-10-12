@@ -2955,6 +2955,8 @@ export interface AgentHomeData {
   chats: { id: string; title: string; project_id: string | null; updated_at: number }[]
   routines: Job[]
   runs: { run_id: string; conversation_id: string | null; kind: string; status: string; error: string | null; started_at: number; ended_at: number | null; title: string | null }[]
+  /** Every routine and worker run of this agent, newest first. */
+  job_history: { run_id: string; job_id: string | null; job_name: string | null; title: string | null; kind: 'job' | 'worker'; status: string; started_at: number; ended_at: number | null; conversation_id: string | null; error: string | null }[]
   working: number
   needs_you: number
 }

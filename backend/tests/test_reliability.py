@@ -72,6 +72,7 @@ class Provider:
         return True
 
     def __enter__(self) -> "Provider":
+        app_llm.auth_breaker.reset()  # a 401 test opens the process-wide breaker for this key; later tests must not inherit it
         self._old = (llm.httpx.AsyncClient, llm._backoff)
         llm.httpx.AsyncClient = self._client  # type: ignore[misc]
         llm._backoff = self._sleep  # type: ignore[assignment]

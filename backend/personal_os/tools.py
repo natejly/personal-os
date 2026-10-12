@@ -109,7 +109,7 @@ def run_python_intro() -> str:
             "inside the temp working directory (CPU/memory/time limits apply).")
 # Locked whatever the setting says: the call is itself the user's review card.
 # gmail_send: an agent never sends mail on its own. Its card is the user's own editable email: Send, Save as draft or Discard.
-ALWAYS_CARD = frozenset({"calendar_propose", "gmail_send"})
+ALWAYS_CARD = frozenset({"calendar_propose", "gmail_send", "agent_create"})
 # Lasting text, and destructive edits to the user's lists. Untrusted content must not plant or
 # erase those unnoticed.
 PROMPT_WRITES = frozenset({
@@ -772,6 +772,8 @@ class Toolbox:
         workers.register(self)  # delegate / message_worker / check_worker / stop_worker / resume_worker
         from . import chatlink
         chatlink.register(self)  # list_chats / read_chat / message_chat
+        from . import agent_tools
+        agent_tools.register(self)  # agent_create / agents_list / agent_message
         from . import research
         research.register(self)  # deep_research: planned fan-out over read-only subagents
         from . import opencode, shell
@@ -1658,7 +1660,7 @@ class Toolbox:
 
         async def schedule_task(ctx: dict[str, Any], name: str, prompt: str, when: str | None = None,
                                 in_minutes: int | None = None, cron: str | None = None,
-                                timezone: str | None = None, watch_dir: str | None = None) -> Any:
+                                timezone: str | None = None, watch_dir: str | None = None, agent: str | None = None) -> Any:
             if not (name or "").strip():
                 return tool_error("A scheduled task needs a short name.", field="name",
                                   example={"name": "Chase the invoice", "prompt": "Check whether Acme replied…",
@@ -1679,6 +1681,12 @@ class Toolbox:
                                   expected="`cron` for something repeating, or `when`/`in_minutes` for a one-off")
             pid = ctx.get("project_id")
             aid = ctx.get("agent_id")  # a task scheduled from an agent's chat keeps running as that agent
+            if agent:
+                defs = getattr(self.subagents, "defs", None)
+                row = defs.get(agent) if defs else None
+                if not row or not row["approved"]:
+                    return tool_error(redact.scrub_command_output(f"No approved agent {agent!r}."), field="agent", alternative="agents_list")
+                aid = row["id"]
             origin = ctx.get("conversation_id")  # and its result comes back to this chat
             if watch_dir:
                 if when or in_minutes:
@@ -1739,7 +1747,8 @@ class Toolbox:
                   "in_minutes": {"type": "integer", "description": "One-off, relative: run this many minutes from now"},
                   "cron": {"type": "string", "description": "Repeating: five-field cron expression, e.g. '0 17 * * 5'"},
                   "timezone": {"type": "string", "description": "IANA name; defaults to this machine's"},
-                  "watch_dir": {"type": "string", "description": "Run when files appear or change in this folder, e.g. ~/Downloads"}},
+                  "watch_dir": {"type": "string", "description": "Run when files appear or change in this folder, e.g. ~/Downloads"},
+                  "agent": {"type": "string", "description": "Run it as this custom agent (a name from agents_list)"}},
                  ["name", "prompt"]), schedule_task, "schedule", "schedules",
             examples=[{"name": "Chase the invoice", "prompt": "Check whether Acme has replied about invoice 2231; if not, draft a short follow-up.", "when": "2026-10-01T15:00"},
                       {"name": "Weekly review", "prompt": "Write my weekly review from my todos, calendar and recent chats.", "cron": "0 17 * * 5"},

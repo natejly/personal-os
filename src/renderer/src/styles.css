@@ -1795,9 +1795,18 @@ button.tag:disabled { cursor: default; }
 .project-tag:disabled { cursor: default; }
 .link.small { font-size: 11px; }
 /* Project page: Chats | Files side by side (stacked when narrow), then Context, Instructions, Memory. */
-.project-body { display: flex; flex-direction: column; gap: 24px; }
-.project-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
-.project-col { min-width: 0; max-height: 460px; overflow-y: auto; }
+.project-body { display: flex; flex-direction: column; gap: 16px; }
+/* Chats | Files take the window; each column scrolls on its own. Narrow windows stack. */
+.project-cols { flex: 1; min-height: 360px; display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); grid-template-rows: minmax(0, 1fr); gap: 20px; }
+.project-col { min-width: 0; min-height: 280px; overflow-y: auto; container-type: inline-size; }
+.project-fold { border-top: 1px solid var(--border); padding-top: 10px; }
+.project-fold summary h3 { margin: 0; }
+.project-fold[open] summary svg:not(:first-child) { transform: none; }
+.project-fold .project-hint { margin-left: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-fold textarea.instructions { resize: vertical; }
+.chat-row-meta { display: flex; gap: 8px; flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.chat-row-model { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+@container (max-width: 420px) { .chat-row-model { display: none; } }
 .project-col .empty-state { padding: 24px 12px; }
 .project-sec-head { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 13px; font-weight: 600; }
 .project-desc { margin: 0; max-width: 760px; color: var(--text-muted); font-size: 13px; line-height: 1.5; }

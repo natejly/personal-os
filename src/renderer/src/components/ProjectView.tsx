@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { MessageSquarePlus, Pencil, Files, FolderX, Brain, MessageSquare, BookOpen, Trash2, Info } from '../icons'
+import { MessageSquarePlus, Pencil, Files, FolderX, Brain, MessageSquare, BookOpen, Trash2, Info, ChevronRight } from '../icons'
 import { useStore, useProject } from '../store'
 import { dragProps } from '../canvas/dnd'
 import { rowButton } from '../lib/rowButton'
@@ -11,6 +11,8 @@ import { oneLine } from '../lib/emailAsk'
 import { useProjectFileCount } from '../lib/useChatFiles'
 import { PROJECT_SECTION_LABEL as L } from '../lib/projectTabs'
 import { fenced, lines, usePageContext } from '../lib/pageContext'
+import { ago } from './dataFormat'
+import { modelLabel } from '../lib/modelLabel'
 import AppSwitcher from './AppSwitcher'
 
 export default function ProjectView(): JSX.Element {
@@ -63,6 +65,11 @@ export default function ProjectView(): JSX.Element {
     <h3 className="project-sec-head">{icon}{label}{n !== undefined && <span className="count">{n}</span>}</h3>
   )
 
+  /** Collapsed-by-default section: chevron, icon, label, then a muted one-line hint. */
+  const fold = (icon: JSX.Element, label: string, hint: string): JSX.Element => (
+    <summary><ChevronRight size={12} />{icon}<h3 className="project-sec-head">{label}</h3><span className="muted small project-hint">{hint}</span></summary>
+  )
+
   return (
     <main className="page project-page">
       <header className="page-header drag">
@@ -93,7 +100,7 @@ export default function ProjectView(): JSX.Element {
                   {...dragProps({ kind: 'conversation', id: c.id, label: c.title, projectId: id })}>
                   <MessageSquare size={14} />
                   <span className="chat-row-title"><ChatPulse conv={c} />{c.title}</span>
-                  <span className="muted small">{c.model} · {new Date(c.updated_at * 1000).toLocaleDateString()}</span>
+                  <span className="chat-row-meta muted small"><span className="chat-row-model">{modelLabel(c.model)}</span><span>{ago(c.updated_at)}</span></span>
                   <button className="icon-btn ghost danger" aria-label={`Delete chat: ${c.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={13} /></button>
                 </div>
               ))}
@@ -104,21 +111,20 @@ export default function ProjectView(): JSX.Element {
             <ProjectContext key={id} projectId={id} />
           </section>
         </div>
-        <section className="project-sec" aria-label={L.context}>
-          {head(<Info size={14} />, L.context)}
+        <details className="project-sec project-fold project-tools" aria-label={L.context}>
+          {fold(<Info size={14} />, L.context, project.description ? oneLine(project.description, 90) : 'No description')}
           {project.description ? <p className="project-desc">{project.description}</p> : null}
-        </section>
-        <section className="project-sec" aria-label={L.instructions}>
-          {head(<BookOpen size={14} />, L.instructions)}
-          <p className="muted small">Added to the system prompt for every chat in this project, after your global system prompt.</p>
-          <textarea className="instructions" rows={12} value={prompt}
+        </details>
+        <details className="project-sec project-fold project-tools" aria-label={L.instructions}>
+          {fold(<BookOpen size={14} />, L.instructions, prompt.trim() ? oneLine(prompt, 90) : 'None')}
+          <textarea className="instructions" rows={4} value={prompt}
             onChange={(e) => setPrompt(e.target.value)} onBlur={() => prompt !== project.system_prompt && void updateProject(id, { system_prompt: prompt })} />
-          <p className="muted small">Saved when you click away.</p>
-        </section>
-        <section className="project-sec" aria-label={L.memory}>
-          {head(<Brain size={14} />, L.memory, (st?.memories ?? 0) + (st?.nodes ?? 0))}
+          <p className="muted small">Added to every chat&apos;s system prompt here, after your global one. Saved when you click away.</p>
+        </details>
+        <details className="project-sec project-fold project-tools" aria-label={L.memory}>
+          {fold(<Brain size={14} />, L.memory, String((st?.memories ?? 0) + (st?.nodes ?? 0)))}
           <MemoryPanel projectId={id} />
-        </section>
+        </details>
       </div>
     </main>
   )

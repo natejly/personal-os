@@ -6,11 +6,9 @@ import { useStore, useConversation, useWorkerFace, useWorkers } from '../store'
 import Face from './Face'
 import WorkerChat from './WorkerChat'
 import { workersCardShown } from '../lib/statusChrome'
-import { liveWorkerCount, sortWorkers, workerActions, workerIsLive, workerWord } from '../lib/workers'
+import { liveWorkerCount, listedWorkers, workerActions, workerIsLive, workerWord } from '../lib/workers'
 
 const TONE: Record<WorkerInfo['status'], string> = { queued: '', running: 'working', awaiting_approval: 'needs-you', done: 'done', error: 'failed', interrupted: 'failed', stopped: '' }
-/** Ended workers stay listed so their transcript can be opened; only the newest few, to keep the panel short. */
-const ENDED_SHOWN = 4
 
 function WorkerFace({ w }: { w: WorkerInfo }): JSX.Element {
   return <Face {...useWorkerFace(w)} status={w.status === 'awaiting_approval' ? 'needs_approval' : w.status} size={16} />
@@ -20,13 +18,14 @@ function WorkerFace({ w }: { w: WorkerInfo }): JSX.Element {
  * The chat's background workers (the assistant's `delegate` tool), under its checklist: a face, the title, a status word and
  * Stop / Resume per row; a row unfolds to the worker's chat (WorkerChat): its history, and a box to steer or stop it.
  * Approval cards the worker is waiting on stay inline. Fed by the app topic's `workers` event (see the store), with a
- * 3 s poll as a fallback while any worker is live. Hidden when the chat has none.
+ * 3 s poll as a fallback while any worker is live. The card shows only while one is live; finished workers are listed
+ * (newest few) only after "Show finished".
  */
-/** `all`: the side panel's list, finished workers included. Above the composer (the default) it shows only while one is live. */
-export default function WorkersPanel({ conversationId: focusId, all = false }: { conversationId?: string; all?: boolean }): JSX.Element | null {
+export default function WorkersPanel({ conversationId: focusId }: { conversationId?: string }): JSX.Element | null {
   const conversationId = useConversation(focusId)?.id // the main view passes no id: resolve the focused chat
   const workers = useWorkers(conversationId)
   const [open, setOpen] = useState(true)
+  const [showFinished, setShowFinished] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [unfolded, setUnfolded] = useState<string | null>(null)
   const { toast, loadWorkers } = useStore()
@@ -39,10 +38,10 @@ export default function WorkersPanel({ conversationId: focusId, all = false }: {
     return () => clearInterval(t)
   }, [anyLive, conversationId, loadWorkers])
 
-  if (!workers.length || (!all && !workersCardShown(liveWorkerCount(workers)))) return null
-  const sorted = sortWorkers([...workers])
-  const shown = [...sorted.filter(workerIsLive), ...sorted.filter((w) => !workerIsLive(w)).slice(0, ENDED_SHOWN)]
+  if (!workers.length || !workersCardShown(liveWorkerCount(workers))) return null
+  const shown = listedWorkers(workers, showFinished)
   const live = liveWorkerCount(workers)
+  const anyEnded = workers.some((w) => !workerIsLive(w))
 
   const act = async (id: string, fn: () => Promise<unknown>): Promise<void> => {
     setBusy(id)
@@ -58,6 +57,7 @@ export default function WorkersPanel({ conversationId: focusId, all = false }: {
             ? <span className="muted">· {live ? `${live} running` : workers.length}</span>
             : <span className="worker-faces">{workers.filter(workerIsLive).map((w) => <WorkerFace key={w.id} w={w} />)}</span>}
         </button>
+        {anyEnded && <button className="ghost-btn xs" aria-expanded={showFinished} aria-label={showFinished ? 'Hide finished workers' : 'Show finished workers'} onClick={() => setShowFinished((v) => !v)}>{showFinished ? 'Hide finished' : 'Show finished'}</button>}
       </header>
       {open && (
         <ul className="plan-steps worker-list">

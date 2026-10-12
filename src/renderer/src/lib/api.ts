@@ -25,7 +25,7 @@ import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/o
 
 export interface SetupBody { provider: string; baseUrl: string; apiKey: string | null; /** May be '' when only the connection is being checked. */ model: string }
 /** Day plan settings (modules/planner.py). workDays: 1 = Monday … 7 = Sunday. */
-export interface PlannerConfig { workStart: string; workEnd: string; workDays: number[]; bufferMin: number; minBlockMin: number; maxBlockMin: number; slotStepMin: number; lookaheadDays: number; calendarName: string }
+export interface PlannerConfig { workStart: string; workEnd: string; workDays: number[]; bufferMin: number; minBlockMin: number; maxBlockMin: number; slotStepMin: number; lookaheadDays: number; calendarName: string; busyCalendarIds: string[] }
 /** Reply tracker settings (modules/mailwatch.py). */
 export interface MailWatchConfig { enabled: boolean; awaitingAfterDays: number; needsReplyAfterHours: number; useLLM: boolean; query: string; proposeFollowups: boolean }
 

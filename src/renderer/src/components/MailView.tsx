@@ -15,7 +15,7 @@ import { useModal } from '../lib/useModal'
 import { shortDate, shortDateTime } from '../lib/dates'
 import SidebarToggle from './SidebarToggle'
 import { fmtBytes } from '../lib/showPanel'
-import { attachmentKind, attachmentsOverLimit, forwardCompose, type AttachmentKind } from '../lib/mailCompose'
+import { attachmentKind, attachmentsOverLimit, forwardCompose, parseAddressList, type AttachmentKind } from '../lib/mailCompose'
 
 const KIND_ICON: Record<AttachmentKind, typeof FileIcon> = { image: ImageIcon, pdf: FileText, text: FileText, sheet: FileSpreadsheet, archive: FileArchive, file: FileIcon }
 const AttachIcon = ({ a }: { a: { mime: string; name: string } }): JSX.Element => {
@@ -133,21 +133,22 @@ function MailReader({ message: m, full, onClose, onReply, onForward, onStar, onA
           <button className="ghost-btn" onClick={onArchive}><Archive size={14} /> Archive</button>
           <button className="ghost-btn" onClick={onSnooze}>Snooze</button>
           <button className="ghost-btn" onClick={onAsk}><MessageSquare size={14} /> Ask assistant</button>
-          <button className="ghost-btn" disabled={!full} onClick={onForward}><Forward size={14} /> Forward</button>
-          <button className="primary-btn" onClick={onReply}><Reply size={14} /> Reply</button>
+          <button className="ghost-btn" disabled={!full || full.id !== m.id} onClick={onForward}><Forward size={14} /> Forward</button>
+          <button className="primary-btn" disabled={!full || full.id !== m.id} onClick={onReply}><Reply size={14} /> Reply</button>
         </footer>
       </div>
     </div>
   )
 }
 
-function MailCompose({ compose, setCompose, review, setReview, busy, valid, onDiscard, onSuggestTimes, onReview, onDraft, onSend, onAttach }: {
+function MailCompose({ compose, setCompose, review, setReview, busy, valid, invalidEntry, onDiscard, onSuggestTimes, onReview, onDraft, onSend, onAttach }: {
   compose: Compose
   setCompose: Dispatch<SetStateAction<Compose | null>>
   review: Review | null
   setReview: (r: Review | null) => void
   busy: 'send' | 'draft' | 'review' | null
   valid: boolean
+  invalidEntry: string | null
   onDiscard: () => void
   onSuggestTimes: () => void
   onReview: () => void
@@ -236,6 +237,7 @@ function MailCompose({ compose, setCompose, review, setReview, busy, valid, onDi
           <button className="ghost-btn" disabled={busy !== null || !compose.body.trim()} onClick={onReview}>
             <Sparkles size={14} /> {busy === 'review' ? 'Reviewing…' : 'AI review'}
           </button>
+          {invalidEntry !== null && <span className="muted" role="alert">"{invalidEntry}" is not a valid email address.</span>}
           <button className="ghost-btn" disabled={busy !== null || !valid || compose.pending.length > 0} onClick={onDraft}>
             {busy === 'draft' ? 'Saving…' : 'Save draft'}
           </button>
@@ -437,7 +439,8 @@ export default function MailView(): JSX.Element {
     setOpen(null)
     setCompose({ to: addr, cc: '', bcc: '', subject, body: quote, replyTo: m, replyToId: m.id, replyBody: orig || m.snippet, attachments: [], pending: [] })
   }
-  const composeValid = compose !== null && /\S+@\S+/.test(compose.to) && (compose.subject.trim() !== '' || compose.body.trim() !== '')
+  const composeInvalid = compose === null ? null : parseAddressList(`${compose.to},${compose.cc},${compose.bcc}`).invalid[0] ?? null
+  const composeValid = compose !== null && composeInvalid === null && parseAddressList(compose.to).ok.length > 0 && (compose.subject.trim() !== '' || compose.body.trim() !== '')
   const doSend = async (): Promise<void> => {
     if (!compose) return
     setBusy('send')
@@ -611,7 +614,7 @@ export default function MailView(): JSX.Element {
       {compose && (
         <MailCompose
           compose={compose} setCompose={setCompose} review={review} setReview={setReview}
-          busy={busy} valid={composeValid}
+          busy={busy} valid={composeValid} invalidEntry={composeInvalid}
           onDiscard={() => { setCompose(null); setReview(null) }}
           onSuggestTimes={() => void suggestTimes()} onReview={() => void doReview()} onDraft={() => void doDraft()} onSend={() => void doSend()} onAttach={attach}
         />

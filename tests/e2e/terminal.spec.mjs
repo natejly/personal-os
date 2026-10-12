@@ -46,6 +46,7 @@ test('Terminal: shell in the worktree echoes typed text, survives a tab switch, 
     await tab.click()
     await expect(p.getByTestId(`term-chip-${SID}`)).toBeVisible()
     await expect(p.getByTestId('term-attach')).toBeVisible()
+    await expect(p.locator('.xterm-rows')).toHaveCount(0)
     await p.getByTestId('term-shell').click()
     await expect(p.locator('.xterm-rows').first()).toBeVisible()
     await p.locator('.xterm-helper-textarea').first().focus()
@@ -69,6 +70,21 @@ test('Terminal: shell in the worktree echoes typed text, survives a tab switch, 
     await p.getByTestId('term-end').click()
     await expect(p.locator('.xterm-rows')).toHaveCount(0)
     await expect(p.getByTestId('term-end')).toHaveCount(0)
+    expect(realErrors(grain)).toEqual([])
+  } finally {
+    try { rmSync(wt, { recursive: true, force: true }) } catch {}
+  }
+})
+
+test('Terminal: picking an attachable session shows the attached view without pressing Attach', async ({ grain }) => {
+  const wt = realpathSync(mkdtempSync(join(tmpdir(), 'grain-e2e-term-')))
+  try {
+    seedSession(grain, wt)
+    const p = await grain.relaunch()
+    await openPanel(p)
+    await p.getByTestId('desk-tab-terminal').click()
+    await p.getByTestId(`term-chip-${SID}`).click()
+    await expect(p.locator('.xterm-rows').first()).toBeVisible()
     expect(realErrors(grain)).toEqual([])
   } finally {
     try { rmSync(wt, { recursive: true, force: true }) } catch {}

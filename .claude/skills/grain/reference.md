@@ -278,7 +278,7 @@ From the app menu (`src/main/index.ts`); ⌘ is Cmd, ⌃ Control, ⌥ Option.
 | ⌘N | New chat |
 | ⌘⇧N / ⌘⇧D | New file / today's file |
 | ⌘U | Upload file |
-| ⌘0 ... ⌘6 | Today, Chats, Lists, Calendar, Files, Mail, Memory |
+| ⌘1 ... ⌘6 | Chats, Lists, Calendar, Files, Mail, Memory |
 | ⌘K | Command palette |
 | ⌘⇧F | Search chats |
 | ⌘⇧[ / ⌘⇧] | Previous / next chat |
@@ -299,7 +299,7 @@ From the app menu (`src/main/index.ts`); ⌘ is Cmd, ⌃ Control, ⌥ Option.
 | ⌥⌘G | Gather widgets |
 | ⌘W, ⌘M | Close, minimize window |
 
-A view hidden in Settings → Modules keeps its shortcut, which offers to turn the view back on.
+A view hidden in Settings → Sidebar keeps its shortcut, which offers to turn the view back on.
 
 ## Slash commands
 

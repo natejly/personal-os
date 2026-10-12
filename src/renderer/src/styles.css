@@ -1581,7 +1581,16 @@ textarea.instructions:focus { border-color: var(--accent); }
 .tool-perm .seg button { min-width: 40px; text-transform: capitalize; }
 .tool-perms.compact select { font-size: 11px; padding: 3px 6px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--control-border); width: auto; }
 .tool-perm b small { font-weight: 400; }
-.ctx-tools { padding: 0 0 6px 24px; }
+.ctx-tools { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 2px 0 4px 24px; }
+.ctx-tools-panel { padding: 0 0 6px 24px; }
+/* Switch rows in the context panel: label and switch only; the hint is the row's tooltip. */
+.toggle-row.compact { padding: 4px 0; }
+.toggle-row.compact .toggle-text { flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: 0 8px; min-width: 0; font-size: 13px; }
+.toggle-row.compact .toggle-text b { font-weight: 500; color: var(--text); }
+/* Untrusted-content notice: one line, the full explanation in its tooltip. */
+.ctx-taint { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; padding: 6px 8px; border-radius: 8px; background: var(--hover); color: var(--text-muted); font-size: 11px; }
+.ctx-taint > svg { flex-shrink: 0; color: var(--warn); }
+.ctx-taint-text { flex: 1; min-width: 0; line-height: 1.4; }
 
 /* ---------- Home / dashboard ---------- */
 .page-body.wide { max-width: 1180px; }
@@ -2868,7 +2877,16 @@ select:focus-visible {
 .cs-head .inbox-dot { flex-shrink: 0; }
 .cs-head .inbox-dot.working { animation: pulse-dot 1.2s ease-in-out infinite; }
 .cs-sub { display: block; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cs-latest { font-size: 11px; color: var(--text-muted); font-family: var(--mono, ui-monospace, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-latest { font-size: 11px; line-height: 1.45; color: var(--text-muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-latest[role='button'] { cursor: pointer; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
+.cs-latest[role='button'].full { display: block; -webkit-line-clamp: unset; line-clamp: unset; max-height: 220px; overflow: auto; }
+.cs-latest[role='button']:hover { color: var(--text); }
+.cs-row.done { opacity: 0.75; }
+.cs-row.done .cs-latest { color: var(--text-faint); }
+.cs-needs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 11px; }
+.cs-needs-text { color: var(--warn); font-weight: 500; }
+.cs-attach { font-size: 10px; padding: 1px 6px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text-faint); cursor: copy; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-attach:hover { color: var(--text); }
 .cs-actions { display: flex; gap: 8px; margin: 4px 0; }
 .cs-timeline { display: flex; flex-direction: column; gap: 3px; max-height: 260px; overflow: auto; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-size: 11px; }
 .cs-timeline.compact { max-height: none; overflow: hidden; }

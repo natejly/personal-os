@@ -417,7 +417,9 @@ def clear_context(conv_id: str) -> dict[str, Any]:
     if not convos.get(conv_id, with_messages=False):
         raise HTTPException(404, "No such conversation")
     compactor.clear(conv_id)
-    work_plans.clear(conv_id)  # the live checklist goes with the context; workers keep running and an approved desk plan stays
+    work_plans.clear(conv_id)  # the live checklist goes with the context; workers keep running
+    if (desk := desks.by_conversation(conv_id)):
+        plans.supersede_desk(desk["id"])  # a desk's approved plan is no longer live; the rows stay as history
     return convos.clear_context(conv_id)
 
 

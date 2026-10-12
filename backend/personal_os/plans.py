@@ -364,6 +364,11 @@ class Plans:
                           "ORDER BY created_at DESC LIMIT 1", (desk_id,)).fetchone()
             return self._plan(c, r) if r is not None else None
 
+    def supersede_desk(self, desk_id: str) -> None:
+        """`/clear`: the desk's approved plan stops being the live one (for_desk, the re-injected block). The rows stay as history."""
+        with self.db.tx() as c:
+            c.execute("UPDATE action_plans SET status='superseded' WHERE desk_id=? AND status='approved'", (desk_id,))
+
     def latest_for_desk(self, desk_id: str) -> dict[str, Any] | None:
         """The desk's newest plan whatever its state, so a plan still waiting on the user shows in the
         desk's Plan tab. `for_desk` is the authority (approved only); this is only for display."""

@@ -424,6 +424,17 @@ def test_clear_empties_the_plan_and_the_context_starts_after_the_marker() -> Non
     check(len(appmod.convos.get(cid)["messages"]) == 2, "the transcript keeps every row")
 
 
+def test_clear_supersedes_the_desk_plan() -> None:
+    cid = new_conv()
+    desk = appmod.desks.create(conversation_id=cid, brief="Send the report.")
+    p = appmod.plans.open("call-clear", {"title": "t", "steps": [{"tool": "gmail_send", "arguments": {"i": 1}}]}, conversation_id=cid, desk_id=desk["id"])
+    appmod.plans.decide("call-clear", "allow")
+    check(appmod.plans.for_desk(desk["id"]) is not None, "the desk has an approved plan before /clear")
+    appmod.clear_context(cid)
+    check(appmod.plans.for_desk(desk["id"]) is None, "no active desk plan, so no block is re-injected")
+    check(appmod.plans.get(p["plan_id"])["status"] == "superseded", "the plan row stays as history")
+
+
 def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

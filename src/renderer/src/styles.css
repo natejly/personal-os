@@ -2572,7 +2572,10 @@ select:focus-visible {
 /* Workers sit above the checklist pill, in the status block over the composer. */
 .worker-panel { padding-top: 4px; }
 .chat-main > .worker-panel { margin: 0 auto; width: min(calc(100% - 48px), var(--chat-col)); box-sizing: border-box; }
-.worker-panel .worker-faces { display: inline-flex; align-items: center; gap: 2px; }
+/* The collapsed strip: .plan-head has no rule of its own, so it was an inline-block button whose faces sat on the text baseline (riding above the label). A flex row centres them. */
+.worker-panel .plan-head { display: inline-flex; align-items: center; gap: 6px; }
+.worker-panel .worker-faces { display: inline-flex; align-items: center; gap: 6px; }
+.worker-panel .worker-faces .face { width: 24px; height: 24px; }
 /* Multi-step progress above the composer (ProgressCard): one row, the step list unfolds beneath. Same column as the workers card. */
 .chat-main > .progress-card { margin: 0 auto; width: min(calc(100% - 48px), var(--chat-col)); box-sizing: border-box; padding-top: 4px; }
 .progress-card .progress-row { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }

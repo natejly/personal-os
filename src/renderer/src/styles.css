@@ -978,7 +978,7 @@ kbd {
 }
 .jump-latest:hover { background: var(--hover); }
 .jump-count { min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--accent-solid); color: var(--on-accent); font-size: 11px; line-height: 16px; text-align: center; }
-.regen-row.followup-chips { flex-wrap: wrap; margin-top: 0; }
+.regen-row.followup-chips { flex-wrap: wrap; margin-top: 6px; }
 .regen-row { display: flex; justify-content: flex-start; align-items: center; gap: 8px; padding-left: 46px; margin-top: -4px; }
 /* Regenerate is a quiet text control under the reply, not a boxed button fighting the hover actions above it. */
 .regen-row:not(.followup-chips) > .ghost-btn { border: 0; padding: 2px 6px; font-size: 12px; }
@@ -2966,15 +2966,18 @@ select:focus-visible {
 
 /* Workers sit above the checklist pill, in the status block over the composer. */
 .worker-panel { padding-top: 4px; }
-.chat-main > .worker-panel { margin: 0 auto; width: min(calc(100% - 48px), var(--chat-col)); box-sizing: border-box; }
+.chat-main > .worker-panel { margin: 12px auto 0; width: min(calc(100% - 48px), var(--chat-col)); box-sizing: border-box; }
 /* The collapsed strip: .plan-head has no rule of its own, so it was an inline-block button whose faces sat on the text baseline (riding above the label). A flex row centres them. */
+.worker-panel .worker-finished { margin-top: 4px; color: var(--text-muted); border: 0; padding: 2px 0; }
 .worker-panel .plan-head { display: inline-flex; align-items: center; gap: 6px; }
 .worker-panel .worker-faces { display: inline-flex; align-items: center; gap: 6px; }
 .worker-panel .worker-faces .face { width: 24px; height: 24px; }
 /* Multi-step progress above the composer (ProgressCard): one row, the step list unfolds beneath. Same column as the workers card. */
-.chat-main > .progress-card { margin: 0 auto; width: min(calc(100% - 48px), var(--chat-col)); box-sizing: border-box; padding-top: 4px; }
+.chat-main > .progress-card { margin: 12px auto 0; width: min(calc(100% - 48px), var(--chat-col)); box-sizing: border-box; padding-top: 4px; }
 .progress-card .progress-row { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
 .progress-card .progress-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-card button.progress-text { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.progress-card button.progress-text:hover b { text-decoration: underline; }
 .progress-card .progress-text b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
 .progress-card .progress-plan .desk-mark { display: inline-flex; padding-top: 1px; color: var(--text-faint); }
 .progress-card .progress-plan .plan-step.consumed .desk-mark { color: var(--accent); }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, CircleCheck } from '../icons'
+import { CircleCheck } from '../icons'
 import type { FullDesk } from '@shared/types'
 import { useStore, useConversation, useIsStreaming } from '../store'
 import { progressCardShown, progressSource } from '../lib/statusChrome'
@@ -28,14 +28,13 @@ export default function ProgressCard({ conversationId, desk }: { conversationId?
   return (
     <section className="plan-panel progress-card" aria-label="Progress">
       <div className="progress-row">
-        <button className="icon-btn ghost" aria-expanded={open} aria-label={open ? 'Hide the steps' : 'Show the steps'} title={open ? 'Hide the steps' : 'Show the steps'}
+        <button className="progress-text" aria-expanded={open} title={open ? 'Hide the steps' : 'Show the steps'}
           onClick={() => setOpenBy((m) => ({ ...m, [cid]: !open }))}>
-          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <span role="status" aria-live="polite">
+            <b>{title}</b>
+            {current && <span className="muted"> · {current}</span>}
+          </span>
         </button>
-        <span className="progress-text" role="status" aria-live="polite">
-          <b>{title}</b>
-          {current && <span className="muted"> · {current}</span>}
-        </span>
       </div>
       {open && source.kind === 'checklist' && checklist && <PlanSteps cid={cid} steps={checklist} />}
       {open && source.kind === 'plan' && desk?.plan && (

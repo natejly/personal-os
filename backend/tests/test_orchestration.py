@@ -955,11 +955,11 @@ def test_a_prompt_that_looks_like_a_flag_stays_the_prompt() -> None:
 def test_deepseek_is_the_default_model_per_provider_and_a_saved_one_wins() -> None:
     assert llm.DEFAULT_SETTINGS["defaultModel"] == "", "no provider alias is hardcoded for every provider"
     by = {p["id"]: p for p in providers.PROVIDERS}
-    assert by["litellm"]["defaultModel"] == "claude-sonnet-5-5" and by["litellm"]["models"][0] == "claude-opus-5-5"
+    assert by["litellm"]["defaultModel"] == "deepseek-v4-flash" and by["litellm"]["models"][0] == "deepseek-v4-flash"
     assert by["fireworks"]["defaultModel"] == "accounts/fireworks/models/deepseek-v4p1-flash"
     assert providers.default_model({"provider": "fireworks", "baseUrl": "https://api.fireworks.ai/inference/v1"}) == "accounts/fireworks/models/deepseek-v4p1-flash"
-    assert providers.default_model({"provider": "litellm", "baseUrl": "http://localhost:4000"}) == "claude-sonnet-5-5"
-    assert providers.default_model({"baseUrl": "http://127.0.0.1:4000"}) == "claude-sonnet-5-5", "an inferred proxy too"
+    assert providers.default_model({"provider": "litellm", "baseUrl": "http://localhost:4000"}) == "deepseek-v4-flash"
+    assert providers.default_model({"baseUrl": "http://127.0.0.1:4000"}) == "deepseek-v4-flash", "an inferred proxy too"
     assert providers.default_model({"provider": "openai", "baseUrl": "https://api.openai.com/v1"}) == "gpt-6.1-sol", "the preset's own default, not its high tier"
     assert providers.default_model({}) == "", "no provider yet: nothing"
     saved = {k: v for k, v in appmod.db.get_settings().items() if k in ("provider", "baseUrl", "defaultModel")}
@@ -969,7 +969,7 @@ def test_deepseek_is_the_default_model_per_provider_and_a_saved_one_wins() -> No
         appmod.db.set_settings({"provider": "fireworks", "baseUrl": "https://api.fireworks.ai/inference/v1"})
         assert appmod.settings()["defaultModel"] == "accounts/fireworks/models/deepseek-v4p1-flash", "nothing saved: DeepSeek as Fireworks names it"
         appmod.db.set_settings({"provider": "litellm", "baseUrl": "http://localhost:4000"})
-        assert appmod.settings()["defaultModel"] == "claude-sonnet-5-5", "nothing saved: the proxy preset default"
+        assert appmod.settings()["defaultModel"] == "deepseek-v4-flash", "nothing saved: DeepSeek as the proxy names it"
         appmod.db.set_settings({"defaultModel": "my-own-model"})
         assert appmod.settings()["defaultModel"] == "my-own-model", "a saved choice is never overwritten"
         assert client.get("/settings").json()["defaultModel"] == "my-own-model"
@@ -1113,5 +1113,5 @@ def test_tier_model_saved_wins_then_preset_then_default_model() -> None:
     assert providers.tier_model(fw, "medium") == "accounts/fireworks/models/deepseek-v4p1-flash"
     assert providers.tier_model(fw, "low") == "accounts/fireworks/models/deepseek-v4p1-flash"
     assert providers.tier_model({**fw, "modelLow": "x"}, "low") == "x"
-    assert providers.tier_model({"provider": "litellm", "baseUrl": "http://localhost:4000"}, "medium") == "claude-sonnet-5-5"
+    assert providers.tier_model({"provider": "litellm", "baseUrl": "http://localhost:4000"}, "medium") == "deepseek-v4-flash"
     assert providers.tier_model({"provider": "custom", "baseUrl": "http://h/v1", "defaultModel": "mine"}, "low") == "mine"

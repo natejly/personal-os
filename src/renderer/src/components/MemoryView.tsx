@@ -230,9 +230,9 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
         </div>
       ))}
       {query && memories.map((m) => <MemoryRow key={m.id} m={m} showProject={scope === 'all'} />)}
-      {!query && ([['Profile', 'Always loaded into every chat in this scope.', sections.profile], ['Log', 'Dated facts, newest first. Recalled when relevant.', sections.log], ['Notes', 'Kept until a date, then moved to History.', sections.notes]] as const).map(([title, hint, rows]) => rows.length > 0 && (
+      {!query && ([['Profile', '', sections.profile], ['Log', '', sections.log], ['Notes', 'Kept until a date.', sections.notes]] as const).map(([title, hint, rows]) => rows.length > 0 && (
         <section key={title} className="mem-section">
-          <h5>{title}<span className="muted small">{hint}</span></h5>
+          <h5>{title}{hint && <span className="muted small">{hint}</span>}</h5>
           {rows.map((m) => <MemoryRow key={m.id} m={m} showProject={scope === 'all'} />)}
         </section>
       ))}

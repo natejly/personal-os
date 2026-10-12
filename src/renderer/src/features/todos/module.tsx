@@ -6,7 +6,7 @@ import { def as todosWidget } from '../../canvas/widgets/todos'
 export const todosModule: ModuleDef = {
   key: 'todos',
   label: 'Lists',
-  description: 'Your to-dos in lists, synced with Google Tasks',
+  description: 'To-dos, synced with Google Tasks',
   icon: <ListChecks size={15} />,
   view: { id: 'todos', Component: TodosView, optional: true },
   nav: { order: 12, badge: (s) => s.dashboard?.todo_stats?.open || null },

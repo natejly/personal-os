@@ -55,7 +55,7 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
       {tab === 'files' && (desk
         ? <><ChatFilesList conversationId={id} layout="above" /><h4 className="cf-ws">Workspace</h4><DeskFiles desk={desk} /></>
         : <ChatFilesList conversationId={id} />)}
-      {tab === 'changes' && <div className="desk-pane scroll"><p className="muted small">{desk ? 'What each turn changed in the workspace, with Undo.' : 'What each reply changed in your folders, with Undo.'}</p><DeskChanges desk={desk ?? undefined} conversationId={id} /></div>}
+      {tab === 'changes' && <div className="desk-pane scroll"><DeskChanges desk={desk ?? undefined} conversationId={id} /></div>}
       {tab === 'terminal' && <TerminalPane />}
       {tab === 'review' && desk && <div className="desk-pane scroll"><DeskReview desk={desk} /></div>}
     </aside>

@@ -34,7 +34,6 @@ export function CommandsPanel(): JSX.Element {
     <div className="library-panel">
       <div className="add-row">
         <div className="muted small">
-          <p>A command is a saved prompt the assistant follows; mark it as a subtask to run it as a separate agent.</p>
           <details><summary>Placeholders</summary>Write $ARGUMENTS where what you type after the command goes, or $1, $2 for its separate words.</details>
         </div>
         <button className="primary-btn small" onClick={() => setEdit('new')}><Plus size={13} /> New command</button>

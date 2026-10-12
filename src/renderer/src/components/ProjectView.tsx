@@ -106,7 +106,7 @@ export default function ProjectView(): JSX.Element {
         </div>
         <section className="project-sec" aria-label={L.context}>
           {head(<Info size={14} />, L.context)}
-          {project.description ? <p className="project-desc">{project.description}</p> : <p className="muted small">No description. Add one with Edit.</p>}
+          {project.description ? <p className="project-desc">{project.description}</p> : null}
         </section>
         <section className="project-sec" aria-label={L.instructions}>
           {head(<BookOpen size={14} />, L.instructions)}

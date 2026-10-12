@@ -78,7 +78,7 @@ type NavEntry = { view?: View; label: string; description?: string; icon: JSX.El
 
 // The fixed rows. Every other view (shell/nav.tsx) follows them; Settings → Sidebar can hide any of them.
 const TOP: NavEntry[] = [
-  { view: 'docs', description: 'Your documents, in folders, with the assistant editing alongside you', label: 'Files', icon: <Files size={15} /> }
+  { view: 'docs', description: 'Documents and folders', label: 'Files', icon: <Files size={15} /> }
 ]
 /** Sidebar view to the id of its Go-to shortcut. */
 const NAV_SHORTCUT: Partial<Record<string, string>> = {

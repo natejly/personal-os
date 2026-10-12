@@ -296,7 +296,7 @@ function MetricManager({ onChanged, onClose }: { onChanged: () => Promise<void>;
     <section className="hl-manage" aria-label="Metrics">
       <header className="hl-manage-head">
         <h3>Metrics</h3>
-        <span className="muted small">Shown metrics appear as tiles. Hidden ones keep their history.</span>
+        <span className="muted small">Hidden metrics keep their history.</span>
         <button className="ghost-btn" onClick={onClose}>Done</button>
       </header>
       <div className="hl-manage-list">

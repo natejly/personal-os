@@ -244,7 +244,7 @@ export default function WorkflowsPanel(): JSX.Element {
       {(wfs.length > 0 || runs.length > 0) && (
         <section className="skill-section">
           <h4>Runs {runs.length > 0 && <span className="count">{runs.length}</span>}</h4>
-          {runs.length === 0 && <p className="muted small">No runs yet. Run a workflow to review its plan here.</p>}
+          {runs.length === 0 && <p className="muted small">No runs yet.</p>}
           {runs.map((r) => <RunCard key={r.id} run={r} onChange={() => void load()} />)}
         </section>
       )}

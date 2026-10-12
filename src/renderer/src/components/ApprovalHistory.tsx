@@ -31,7 +31,6 @@ export default function ApprovalHistory(): JSX.Element {
   return (
     <div className="perm-rules">
       <h4>History</h4>
-      <p className="muted small">Every answer to an approval, every call a standing grant or an approved plan let through, and what a reviewer said.</p>
       <div className="approval-history-filters">
         <input placeholder="Tool" aria-label="Filter by tool" value={tool} onChange={(e) => filter(setTool)(e.target.value)} />
         <select aria-label="Filter by decision" value={decision} onChange={(e) => filter(setDecision)(e.target.value)}>

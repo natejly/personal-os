@@ -31,7 +31,6 @@ export default class RootBoundary extends Component<{ children: ReactNode }, Sta
     return (
       <div className="root-error">
         <h2>Something broke while rendering</h2>
-        <p className="muted">The rest of the app was torn down to avoid showing a half-rendered state.</p>
         <pre>{error.message || String(error)}</pre>
         {stack && <pre className="root-error-stack">{stack}</pre>}
         <div className="root-error-actions">

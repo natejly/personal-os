@@ -19,10 +19,10 @@ export interface NavEntry {
  * Library 40, and a module slots by its `nav.order` (Lists 12, Health 18).
  */
 const SHELL: NavEntry[] = [
-  { view: 'library', description: 'Skills, agents, automations and connectors', label: 'Library', icon: <Library size={15} />, order: 40 },
-  { view: 'jobs', description: 'Scheduled jobs: when they run, what they did, and their chats', label: 'Jobs', icon: <Scheduled size={15} />, order: 41 },
-  { view: 'calendar', description: 'Your week and the day\'s events, from Google Calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar', order: 14 },
-  { view: 'mail', description: 'Your Gmail inbox: read, reply and draft', label: 'Mail', icon: <Mail size={15} />, order: 16 }
+  { view: 'library', description: 'Skills, agents and connectors', label: 'Library', icon: <Library size={15} />, order: 40 },
+  { view: 'jobs', description: 'Scheduled jobs and their runs', label: 'Jobs', icon: <Scheduled size={15} />, order: 41 },
+  { view: 'calendar', description: 'Google Calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar', order: 14 },
+  { view: 'mail', description: 'Gmail inbox', label: 'Mail', icon: <Mail size={15} />, order: 16 }
 ]
 
 // Built on first call, never at import: the registry imports module views, and those views render the

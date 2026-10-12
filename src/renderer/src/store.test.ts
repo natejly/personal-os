@@ -33,6 +33,21 @@ const session = (over: Partial<ChatSession> = {}): ChatSession => ({
 
 const DONE: ChatEvent = { event: 'done', data: { id: 'm1', error: null, context_used: null, tool_events: [], trace: [], stopped: false, partial: null } } as unknown as ChatEvent
 
+test('a model duel fills both columns from tagged events and clears on the pick', () => {
+  const ev = (event: string, data: object): ChatEvent => ({ event, data } as unknown as ChatEvent)
+  let s = applyEvent(session(), ev('ab_start', { id: 'm1', models: { a: 'ma', b: 'mb' } }), true)
+  s = applyEvent(s, ev('ab_delta', { id: 'm1', side: 'a', text: 'he' }), true)
+  s = applyEvent(s, ev('ab_delta', { id: 'm1', side: 'b', text: 'yo' }), true)
+  s = applyEvent(s, ev('ab_delta', { id: 'm1', side: 'a', text: 'llo' }), true)
+  s = applyEvent(s, ev('ab_end', { id: 'm1', side: 'a', ms: 5, tokens: 2, error: null, calls: [{ name: 'todo_add', args: '{}' }] }), true)
+  assert.equal(s.duel?.a.text, 'hello')
+  assert.equal(s.duel?.b.text, 'yo')
+  assert.deepEqual([s.duel?.a.done, s.duel?.b.done, s.duel?.ready], [true, false, false])
+  assert.equal(s.duel?.a.calls[0].name, 'todo_add')
+  assert.equal(applyEvent(s, ev('ab_pick', { id: 'm1', winner: 'a', side: 'a' }), true).duel, null)
+  assert.equal(applyEvent(s, DONE, true).duel, null)
+})
+
 test('`done` stops the session answering while the auto-learn tail keeps the stream open', () => {
   const after = applyEvent(session(), DONE, true)
   assert.equal(after.streaming?.answering, false, 'the reply is over')

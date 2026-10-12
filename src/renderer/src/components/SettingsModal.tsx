@@ -18,6 +18,7 @@ import { RESPONSE_STYLES, RESPONSE_STYLE_TEXT_MAX } from '../lib/responseStyle'
 import type { Settings, ShortcutState } from '@shared/types'
 import { AlwaysAsk, ToolGlobalToggles } from './ToolPermissions'
 import ProviderSettings from './ProviderSettings'
+import ModelDuels from './ModelDuels'
 import ModelsSettings from './ModelsSettings'
 import PermissionRules from './PermissionRules'
 import GrantsPanel from './GrantsPanel'
@@ -402,6 +403,7 @@ export default function SettingsModal(): JSX.Element {
               <h3>Models</h3>
               <p className="muted">Add a key for each provider you use, then choose which of their models the composer offers.</p>
               <Sec id="keys"><ModelsSettings settings={settings} models={models} savePicker={(pickerModels) => saveEarly({ pickerModels }).catch((e: Error) => toast(e.message, 'error'))} /></Sec>
+              {draft.devTools === true && <Sec id="duels"><ModelDuels /></Sec>}
             </section>}
 
             {tab === 'usage' && <section className="usage-tab">

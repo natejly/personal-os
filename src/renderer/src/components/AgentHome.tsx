@@ -85,6 +85,23 @@ export default function AgentHome({ def, onBack }: { def: AgentDef; onBack: () =
           <p className="muted small">Scheduled work this agent does on its own. Each run uses its instructions, skills, boundaries and tool settings, and anything that leaves the app comes back as a proposal.</p>
           {routines.length === 0 && !adding && <p className="muted small">No routines yet.</p>}
           {routines.length > 0 && <ul>{routines.map((j) => <JobRow key={j.id} job={j} />)}</ul>}
+          {home && home.job_history?.length > 0 && (
+            <>
+              <h4>Job history</h4>
+              <ul className="agent-home-list">
+                {home.job_history.map((r) => (
+                  <li key={r.run_id}>
+                    <span className={`agent-status ${r.status === 'running' ? 'working' : r.status === 'awaiting_approval' ? 'needs-you' : 'idle'}`}>{r.kind === 'job' ? 'routine' : 'worker'} · {r.status}</span>
+                    {r.conversation_id
+                      ? <button className="link" onClick={() => void selectChat(r.conversation_id as string)}>{r.job_name || r.title || 'Untitled'}</button>
+                      : <span>{r.job_name || r.title || 'Untitled'}</span>}
+                    <span className="muted small">{stamp(r.started_at)}</span>
+                    {r.error && <span className="muted small" title={r.error}>{r.error.slice(0, 60)}</span>}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           {adding
             ? <NewTask agentId={def.id} onDone={() => { setAdding(false); void refreshJobs() }} />
             : <button className="ghost-btn sm" disabled={!def.approved} onClick={() => setAdding(true)}><Plus size={13} /> New routine…</button>}

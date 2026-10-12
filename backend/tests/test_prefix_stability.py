@@ -72,6 +72,8 @@ def test_chat_prefix_stable_across_turns(monkeypatch) -> None:  # type: ignore[n
     _setup()
     monkeypatch.setattr(llm, "stream_chat", _fake)
     cid = appmod.convos.create(None, "Prefix", "test-model")["id"]
+    for i in range(5):  # the workspace map buckets counts (0, 1, 2, 3, 5...): start mid-bucket so one more memory is no step
+        appmod.memories.create(None, f"Seed fact {i}", pinned=False)
     t1 = _turn(cid, content="hello there", page_context=appmod.PageContextIn(view="todos", label="Todos page ALPHA"))
     appmod.memories.create(None, "Zanzibar ferry leaves at dawn", pinned=False)
     monkeypatch.setattr(appmod, "datetime", _Clock)

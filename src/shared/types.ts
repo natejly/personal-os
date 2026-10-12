@@ -1784,6 +1784,7 @@ export type ChatEvent =
   | { event: 'ab_delta'; data: { id: string; side: 'a' | 'b'; text: string } }
   | { event: 'ab_end'; data: { id: string; side: 'a' | 'b'; ms: number; tokens: number; error: string | null; calls: { name: string; args: string }[] } }
   | { event: 'ab_ready'; data: { id: string } }
+  | { event: 'ab_reset'; data: { id: string; side: 'a' | 'b' } }
   | { event: 'ab_pick'; data: { id: string; winner: DuelWinner; side: 'a' | 'b' } }
   | { event: 'user_message'; data: Message }
   | { event: 'assistant_message'; data: Message }

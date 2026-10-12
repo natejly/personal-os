@@ -247,6 +247,8 @@ export const api = {
     update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'mail_query' | 'calendar_query' | 'minutes_before' | 'only_on_change' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools' | 'notify' | 'watch_dir' | 'model' | 'target' | 'desk_autonomy'>>) =>
       req<Job>(`/jobs/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req(`/jobs/${id}`, { method: 'DELETE' }),
+    /** The agent a job runs as (null = plain Grain). */
+    agent: (id: string) => req<{ agent_id: string | null; name: string | null }>(`/jobs/${id}/agent`),
     /** The next fires of a cron expression in a zone (default: this machine's), before anything is saved. Writes nothing. */
     preview: (cron: string, timezone?: string, n = 5) =>
       req<{ ok: boolean; error?: string; timezone?: string; next: number[] }>(

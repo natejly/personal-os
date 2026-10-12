@@ -41,6 +41,8 @@ class Box:
         monkeypatch.setattr(screenshot.subprocess, "run", self._run)
 
     def _run(self, cmd: list[str], **kw: Any) -> Any:
+        if cmd[0] != "/usr/sbin/screencapture":  # the platform layer's capability probes (vm_stat) also go through subprocess.run
+            return type("R", (), {"returncode": 1, "stdout": "", "stderr": ""})()
         self.calls.append(cmd)
         Path(cmd[-1]).write_bytes(self.png)
         return type("R", (), {"returncode": 0, "stdout": b"", "stderr": b""})()
@@ -75,7 +77,7 @@ def test_unknown_permission_with_a_solid_capture_is_the_same_error(box: Box) -> 
 
 
 def test_a_failed_capture_while_granted_is_a_plain_failure(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(screenshot.subprocess, "run", lambda cmd, **kw: type("R", (), {"returncode": 1})())
+    monkeypatch.setattr(screenshot.subprocess, "run", lambda cmd, **kw: type("R", (), {"returncode": 1, "stdout": "", "stderr": ""})())
     assert "capture failed" in box.call()["error"]
 
 

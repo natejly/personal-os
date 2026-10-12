@@ -70,7 +70,7 @@ async def _record(settings: dict[str, Any], model: str, messages: list[dict[str,
 def _turn(text: str, model: str = "auto") -> dict[str, Any]:
     llm.stream_chat = _record
     cid = T.new_conv()
-    j("PATCH", f"/conversations/{cid}", {"model": model})
+    j("PATCH", f"/conversations/{cid}", {"model": model, "settings": {"effort": "default"}})  # new chats start at effort high, which the router sends to the big model
     j("POST", f"/conversations/{cid}/chat", {"content": text})
     drain(cid)
     llm.stream_chat = T._scripted_stream

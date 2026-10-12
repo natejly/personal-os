@@ -122,7 +122,8 @@ class SkillsTestCase(unittest.TestCase):
             conv_settings={"useMemory": False, "useGraph": False, "useDocuments": False},
             global_system_prompt="You are Grain.",
         )
-        self.assertEqual(system, "You are Grain.")
+        self.assertTrue(system.startswith("You are Grain."))  # the standing Working style hint follows; skills add nothing
+        self.assertNotIn("Weekly review", system)
         self.assertEqual(used["skills"], [])
 
     def test_a_run_transcript_keeps_one_reply_and_the_tools_it_called(self) -> None:

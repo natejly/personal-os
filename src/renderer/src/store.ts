@@ -502,6 +502,10 @@ export interface State {
 
   libraryTab: LibraryTab
   setLibraryTab: (tab: LibraryTab) => void
+  /** The agent whose home Library > Agents shows (null = the list). */
+  openAgentId: string | null
+  /** Jump to one agent's home: Library > Agents with that agent open. */
+  openAgent: (id: string | null) => void
   filesSection: FilesSection
   /** The one way into Files: switches to it, on the given section. */
   openFiles: (section: FilesSection) => void
@@ -1843,6 +1847,7 @@ export const useStore = create<State>((set, get) => {
     contextOpen: false,
     contextTab: 'last',
     libraryTab: 'skills',
+    openAgentId: null,
     filesSection: 'notes',
     desks: [],
     activeDeskId: null,
@@ -3021,6 +3026,10 @@ export const useStore = create<State>((set, get) => {
     },
 
     setLibraryTab: (libraryTab) => set({ libraryTab }),
+    openAgent: (openAgentId) => {
+      set({ openAgentId, ...(openAgentId ? { libraryTab: 'agents' as const } : {}) })
+      if (openAgentId) get().setView('library')
+    },
     openFiles: (filesSection) => { set({ filesSection }); get().setView('docs') },
     // The docs list is already kept live elsewhere; this is for the two things the Library reads
     // that nothing else refreshes on its behalf.

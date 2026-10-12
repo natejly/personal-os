@@ -62,6 +62,20 @@ class TodayCardTests(unittest.TestCase):
         for t in (a, b):
             todos_mod.store.trash(t["id"])
 
+    def test_today_counts_only_busy_calendars_when_set(self) -> None:
+        def block_for(busy_ids: list[str]) -> list:
+            saved = [{"start": "2026-10-05T09:00:00", "end": "2026-10-05T17:30:00", "all_day": False, "calendar_id": "other", "summary": "Away"}]
+            cfg = {**planner_mod.config(), "busyCalendarIds": busy_ids}
+            with mock.patch.object(google, "calendar_saved", return_value=saved), \
+                 mock.patch.object(planner_mod, "config", lambda: cfg), \
+                 mock.patch.object(planner_mod, "clock", lambda: NOW):
+                return planner_mod.today()["planner_blocks"]
+        t = todos_mod.store.create("Needs a slot", due="2026-10-05", estimate_min=30)
+        self.assertEqual(block_for([]), [])  # every saved calendar counts: the day is full
+        self.assertEqual(block_for(["mine"])[0]["title"], "Needs a slot")  # "other" is not chosen
+        self.assertEqual(block_for(["other"]), [])
+        todos_mod.store.trash(t["id"])
+
     def test_no_snapshot_means_no_blocks(self) -> None:
         t = todos_mod.store.create("Needs a slot", due="2026-10-06", estimate_min=30)
         self.assertEqual(dashboard(saved=None)["planner_blocks"], [])

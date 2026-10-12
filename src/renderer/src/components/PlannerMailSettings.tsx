@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type MailWatchConfig, type PlannerConfig } from '../lib/api'
+import type { GoogleCalendar } from '@shared/types'
 import { useStore } from '../store'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -10,7 +11,9 @@ export default function PlannerMailSettings(): JSX.Element | null {
   const toast = useStore((s) => s.toast)
   const [plan, setPlan] = useState<PlannerConfig | null>(null)
   const [mail, setMail] = useState<MailWatchConfig | null>(null)
+  const [cals, setCals] = useState<GoogleCalendar[] | null | 'failed'>(null)
   useEffect(() => {
+    api.google.calendars().then(setCals).catch(() => setCals('failed'))
     api.planner.config().then(setPlan).catch(() => undefined)
     api.mailWatch.config().then(setMail).catch(() => undefined)
   }, [])
@@ -43,6 +46,21 @@ export default function PlannerMailSettings(): JSX.Element | null {
             )
           })}
         </div>
+        <p className="muted small">Calendars that count as busy</p>
+        {Array.isArray(cals) && cals.length > 0 ? <>
+          <p className="muted small">{plan.busyCalendarIds.length ? 'Only the calendars ticked below block time.' : 'Every calendar you have checked on in Google blocks time. Tick one to choose exactly which.'}</p>
+          <div className="input-row" role="group" aria-label="Calendars that count as busy">
+            {cals.map((c) => {
+              const on = plan.busyCalendarIds.includes(c.id)
+              return (
+                <label key={c.id} className="check">
+                  <input type="checkbox" checked={on} onChange={() => savePlan({ busyCalendarIds: on ? plan.busyCalendarIds.filter((x) => x !== c.id) : [...plan.busyCalendarIds, c.id] })} />
+                  {c.summary}{c.primary ? ' (primary)' : ''}
+                </label>
+              )
+            })}
+          </div>
+        </> : <p className="muted small">{cals === null ? 'Loading calendars...' : 'Calendars could not be loaded. Every calendar you have checked on in Google blocks time.'}</p>}
       </>}
       {mail && <>
         <h4>Reply tracker</h4>

@@ -1,4 +1,4 @@
-import { Calendar, Mail, Library } from '../icons'
+import { Calendar, CalendarClock, Mail, Library } from '../icons'
 import type { WidgetKind } from '@shared/types'
 import type { View } from '../store'
 import { MODULES } from './registry'
@@ -20,6 +20,7 @@ export interface NavEntry {
  */
 const SHELL: NavEntry[] = [
   { view: 'library', description: 'Skills, agents, automations and connectors', label: 'Library', icon: <Library size={15} />, order: 40 },
+  { view: 'jobs', description: 'Scheduled jobs: when they run, what they did, and their chats', label: 'Jobs', icon: <CalendarClock size={15} />, order: 41 },
   { view: 'calendar', description: 'Your week and the day\'s events, from Google Calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar', order: 14 },
   { view: 'mail', description: 'Your Gmail inbox: read, reply and draft', label: 'Mail', icon: <Mail size={15} />, order: 16 }
 ]

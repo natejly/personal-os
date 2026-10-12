@@ -112,6 +112,7 @@
   display: flex; align-items: center; gap: 5px;
   font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.doc-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .doc-row-meta {
   display: flex; align-items: center; gap: 5px;
   font-size: 10.5px; color: var(--text-faint);

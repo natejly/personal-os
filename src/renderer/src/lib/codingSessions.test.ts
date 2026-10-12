@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { CodingSession, CodingSessionEvent } from '@shared/types'
-import { canAttach, codingNoticeText, defaultTermMode, codingTransition, eventSummary, formatElapsed, isStepEvent, latestActivity, mergeCodingEvents, pathBase, splitSessions } from './codingSessions'
+import { canAttach, codingNoticeText, defaultTermMode, defaultTermSession, codingTransition, eventSummary, formatElapsed, isStepEvent, latestActivity, mergeCodingEvents, pathBase, splitSessions } from './codingSessions'
 
 const sess = (over: Partial<CodingSession> = {}): CodingSession => ({
   id: 's1', agent: 'claude', name: 'Fix tests', status: 'working', attention: 'working', detail: null, repo_path: '/r', worktree: '/r/.wt/fix-tests',
@@ -76,4 +76,11 @@ test('defaultTermMode attaches only a claude session with a valid attach id', ()
   assert.equal(defaultTermMode(sess({ external_id: null })), null)
   assert.equal(defaultTermMode(sess({ external_id: 'ABCDEFGH' })), null)
   assert.equal(defaultTermMode(sess({ agent: 'opencode', external_id: 'ab12cd34' })), null)
+})
+
+test('defaultTermSession prefers the newest attachable session, else the first', () => {
+  const a = sess({ id: 'a', external_id: null }), b = sess({ id: 'b', external_id: 'ab12cd34' }), c = sess({ id: 'c', external_id: 'cd34ab12' })
+  assert.equal(defaultTermSession([a, b, c])?.id, 'b')
+  assert.equal(defaultTermSession([a, sess({ id: 'd', external_id: null })])?.id, 'a')
+  assert.equal(defaultTermSession([]), undefined)
 })

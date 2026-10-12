@@ -190,6 +190,10 @@ export const api = {
     reset: () => req<SetupStatus>('/setup/reset', { method: 'POST' })
   },
   models: () => req<ModelInfo[]>('/models'),
+  /** One key per provider; null removes it. */
+  providerKeys: {
+    set: (id: string, apiKey: string | null) => req<{ providerKeysSet: Record<string, boolean> }>(`/provider-keys/${encodeURIComponent(id)}`, { method: 'PUT', body: json({ apiKey }) })
+  },
   tools: () => req<{ tools: ToolInfo[]; enabled: Record<string, boolean> }>('/tools'),
   shellJobs: () => req<{ jobs: ShellJobInfo[] }>('/shell/jobs'),
   shellJobTail: (id: string, limit = 4000) => req<ShellJobTail>(`/shell/jobs/${encodeURIComponent(id)}/tail?limit=${limit}`),

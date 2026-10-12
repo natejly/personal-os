@@ -1454,6 +1454,8 @@ export interface Settings {
   provider?: string | null
   /** Which providers have a key saved. Never the keys. Missing on an older backend. */
   providerKeysSet?: Record<string, boolean>
+  /** Model ids the composer picker offers. Empty means every model its provider suggests. */
+  pickerModels?: string[]
   firecrawlApiKeySet?: boolean
   /** FIRECRAWL_API_KEY is set in the backend's environment; used when the field is empty. Never the value. */
   firecrawlEnvKey?: boolean
@@ -1760,6 +1762,10 @@ export interface ModelInfo {
   id: string
   mode?: string | null
   reasoning?: boolean | null
+  /** The provider that owns this model (a /setup/providers id). Missing on an older backend. */
+  provider?: string
+  /** The id is one of its provider's suggested models. */
+  preset?: boolean
 }
 
 export type ChatEvent =

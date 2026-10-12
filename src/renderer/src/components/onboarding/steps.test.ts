@@ -19,6 +19,9 @@ test('walks the steps in order and stops at done', () => {
   assert.equal(reduce(s, { type: 'next' }, fw).step, 'test', 'an untested connection blocks')
   s = reduce(s, { type: 'test', test: { state: 'ok', latencyMs: 12 } })
   s = reduce(s, { type: 'next' }, fw)
+  assert.equal(s.step, 'search')
+  assert.equal(stepBlocker(s, fw), null, 'the search model is optional')
+  s = reduce(s, { type: 'next' }, fw)
   assert.equal(s.step, 'google')
   s = reduce(s, { type: 'next' }, fw)
   assert.equal(s.step, 'about', 'google and about are both skippable, never blocking')
@@ -96,4 +99,11 @@ test('seed fills a re-run from the configured setup, but never overrides a pick'
   assert.deepEqual([s.providerId, s.baseUrl, s.model], ['ollama', 'http://box:11434/v1', 'qwen3'])
   const picked = reduce(at('provider'), { type: 'pick', provider: fw })
   assert.equal(reduce(picked, { type: 'seed', provider: ol, baseUrl: 'x', model: 'y' }), picked)
+})
+
+test('the search step is skipped both ways once the search model is set', () => {
+  const s = at('test', { searchLocked: true, test: { state: 'ok' } })
+  const g = reduce(s, { type: 'next' }, fw)
+  assert.equal(g.step, 'google')
+  assert.equal(reduce(g, { type: 'back' }, fw).step, 'test')
 })

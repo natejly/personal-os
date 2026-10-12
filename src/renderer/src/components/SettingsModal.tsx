@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { X, Search, Download, Upload, Plug, Cpu, Bot, Palette, ShieldCheck, ShieldAlert, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, Gauge, Brain, PanelLeft, type Icon } from '../icons'
+import { X, Search, Download, Upload, Plug, Cpu, Bot, Palette, ShieldCheck, ShieldAlert, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, Gauge, Brain, PanelLeft, Layers, type Icon } from '../icons'
 import { useStore, type View } from '../store'
 import { modeOf } from '../lib/permissionMode'
 import { searchSettings, type SettingsTab } from '../lib/settingsTabs'
@@ -12,11 +12,13 @@ import { homeModuleOn } from '../moduleToggles'
 import { navEntries } from '../shell/nav'
 import { useModal } from '../lib/useModal'
 import { ACCENTS, SURFACE_TONES, TEXT_TONES, UI_FONTS, accentId, applyAppearance, isLightTheme, surfaceToneId, textToneId, uiFontId } from '../lib/appearance'
-import { chatModelIds, modelLabel } from '../lib/modelLabel'
+import { modelLabel } from '../lib/modelLabel'
+import { chatRows } from '../lib/pickerModels'
 import { RESPONSE_STYLES, RESPONSE_STYLE_TEXT_MAX } from '../lib/responseStyle'
 import type { Settings, ShortcutState } from '@shared/types'
 import { AlwaysAsk, ToolGlobalToggles } from './ToolPermissions'
 import ProviderSettings from './ProviderSettings'
+import ModelsSettings from './ModelsSettings'
 import PermissionRules from './PermissionRules'
 import GrantsPanel from './GrantsPanel'
 import { PermissionsPanel } from './PermissionsPanel'
@@ -41,6 +43,7 @@ type Tab = SettingsTab
 
 const TABS: { id: Tab; label: string; icon: Icon }[] = [
   { id: 'model', label: 'Model', icon: Cpu },
+  { id: 'models', label: 'Models', icon: Layers },
   { id: 'usage', label: 'Usage', icon: Gauge },
   { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
   { id: 'integrations', label: 'Integrations', icon: Plug },
@@ -58,7 +61,7 @@ function Sec({ id, children }: { id: string; children: ReactNode }): JSX.Element
   return <div className="set-sec" id={`sec-${id}`}>{children}</div>
 }
 
-const IMMEDIATE: ReadonlySet<Tab> = new Set<Tab>(['system', 'usage', 'sidebar'])
+const IMMEDIATE: ReadonlySet<Tab> = new Set<Tab>(['system', 'usage', 'sidebar', 'models'])
 
 const THEMES: { id: Settings['theme']; label: string }[] = [
   { id: 'light', label: 'Light' },
@@ -395,6 +398,12 @@ export default function SettingsModal(): JSX.Element {
               </Sec>
             </section>}
 
+            {tab === 'models' && <section>
+              <h3>Models</h3>
+              <p className="muted">Add a key for each provider you use, then choose which of their models the composer offers.</p>
+              <Sec id="keys"><ModelsSettings settings={settings} models={models} savePicker={(pickerModels) => saveEarly({ pickerModels }).catch((e: Error) => toast(e.message, 'error'))} /></Sec>
+            </section>}
+
             {tab === 'usage' && <section className="usage-tab">
               <h3>Usage</h3>
               <p className="muted">Every model call is logged on this Mac with its tokens and, when the price is known, its cost. Information only: nothing here limits Grain.</p>
@@ -715,7 +724,7 @@ export default function SettingsModal(): JSX.Element {
             </section>}
 
             {/* Outside the tabs: the model fields of several sections list from it. */}
-            <datalist id="model-options">{chatModelIds(models).map((id) => <option key={id} value={id} />)}</datalist>
+            <datalist id="model-options">{chatRows(models).map((m) => <option key={m.id} value={m.id} label={m.provider ? `${m.id} — ${m.provider}` : undefined} />)}</datalist>
           </div>
         </div>
 

@@ -42,7 +42,7 @@ from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .kinds import is_internal
 from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_index, has_readable_text, safe_upload_name
 from .consolidate import Consolidator
-from . import learn, memory_limits, provider_keys, providers
+from . import learn, memory_limits, provider_keys, provider_route, providers
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
 from .graph_backfill import BackfillRunning, GraphBackfill
@@ -277,6 +277,33 @@ def _seed_settings_from_env() -> None:
 
 _seed_settings_from_env()
 provider_keys.migrate(db)
+provider_route.set_key_source(lambda: provider_keys.load(db.secrets))  # keys reach route() here, never via settings
+
+
+def _pin_embedding_model() -> None:
+    """Startup: an index built before the model was saved pins to the model it was built with (see _lock_embedding)."""
+    if db.get_settings().get("embeddingModel"):
+        return
+    counts: dict[str, int] = {}
+    with db.tx() as c:
+        for table in ("memory_vectors", "chunk_embeddings"):
+            try:
+                for r in c.execute(f"SELECT model, COUNT(*) n FROM {table} GROUP BY model"):
+                    counts[r["model"]] = counts.get(r["model"], 0) + r["n"]
+            except Exception:  # noqa: BLE001 - the table may not exist yet
+                pass
+    if counts:
+        db.set_settings({"embeddingModel": max(counts, key=counts.__getitem__)})
+
+
+_pin_embedding_model()
+
+
+def _lock_embedding(patch: dict[str, Any]) -> None:
+    """The vector index is only valid for the model that built it: once saved, embeddingModel cannot change."""
+    cur = db.get_settings().get("embeddingModel")
+    if cur and "embeddingModel" in patch and patch["embeddingModel"] != cur:
+        raise HTTPException(409, "The search model is locked once set; changing it would invalidate the search index.")
 
 _MODULES_DEFAULT = 5
 # Stamp 4 shows these once: agent work waits for review there (desks, skill and workflow approvals), and a hidden row
@@ -872,6 +899,7 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, "retrievalMode must be 'hybrid' or 'bm25'")
         elif k == "docTypography":
             clean[k] = clean_typography(v) or {}
+    _lock_embedding(clean)
     for k in SECRET_SETTINGS:
         if k in clean and clean[k] == "":  # blank means "unchanged" (the form never holds the saved key); null clears
             del clean[k]
@@ -905,9 +933,37 @@ async def models() -> list[dict[str, Any]]:
     try:
         cfg = settings()
         await pricing.refresh(cfg)
-        return await llm.list_models(cfg)
+        await pricing.refresh_routed(provider_keys.load(db.secrets).get("anthropic"))
+        return await provider_route.all_models(cfg, llm.list_models)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, str(e)) from e
+
+
+class ProviderKeyIn(BaseModel):
+    apiKey: str | None
+
+
+@app.put("/provider-keys/{provider_id}")
+def put_provider_key(provider_id: str, body: ProviderKeyIn) -> dict[str, Any]:
+    """Save (string) or remove (null) one provider's key. The active provider's key is also the active `apiKey`."""
+    p = providers.get(provider_id)
+    if not p or not p["needsKey"]:
+        raise HTTPException(422, f"Unknown or keyless provider {provider_id!r}")
+    key = body.apiKey.strip() if body.apiKey is not None else None
+    if key == "":
+        raise HTTPException(422, "apiKey must not be blank; send null to remove it")
+    old = provider_keys.load(db.secrets).get(provider_id)
+    if providers.effective(db.get_settings()) == provider_id:
+        set_settings_via_provider({"apiKey": key})  # apply() keeps the map and the active secret together
+    else:
+        keys = provider_keys.load(db.secrets)
+        keys.pop(provider_id, None) if key is None else keys.__setitem__(provider_id, key)
+        provider_keys.save(db.secrets, keys)
+    provider_route.invalidate(provider_id)
+    for k in (old, key):
+        if k:
+            auth_breaker.reset({"baseUrl": p["baseUrl"], "apiKey": k})
+    return {"providerKeysSet": provider_keys.saved_for(db.secrets)}
 
 
 # ---------------- projects ----------------

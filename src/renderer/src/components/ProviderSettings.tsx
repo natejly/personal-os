@@ -3,6 +3,7 @@ import { Eye, EyeOff, Plug, ExternalLink } from '../icons'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { chatModelIds } from '../lib/modelLabel'
+import { embeddingLocked } from '../lib/pickerModels'
 import { MODEL_FIELDS, remapSettings, type ModelKey } from '../lib/providerModels'
 import { showsBaseUrl, type ProviderInfo } from './onboarding/steps'
 import type { ModelInfo, Settings } from '@shared/types'
@@ -58,7 +59,7 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
   const pick = (pid: string): void => {
     const to = providers.find((p) => p.id === pid)
     if (!to || pid === id) return
-    const r = remapSettings(draft, to, live[pid])
+    const r = remapSettings(draft, to, live[pid], { models, keys: settings.providerKeysSet })
     const baseUrl = to.baseUrl || draft.baseUrl
     patch({ provider: pid, baseUrl, apiKey: '', ...r.patch })
     setCleared(r.cleared)
@@ -81,7 +82,9 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
     }
   }
 
-  const options = [...new Set([...(live[id] ?? preset?.models ?? []), ...(id === savedId ? chatModelIds(models) : [])])]
+  // Every chat model of every provider with a key is selectable, not only the active provider's.
+  const options = [...new Set([...(live[id] ?? preset?.models ?? []), ...chatModelIds(models)])]
+  const ownerOf = new Map(models.map((m) => [m.id, m.provider]))
   const keyLabel = preset && !preset.needsKey ? 'API key (optional)' : 'API key'
 
   return (
@@ -134,18 +137,20 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
       </div>
       {MODEL_FIELDS.filter((f) => !('hidden' in f)).map((f) => {
         const value = draft[f.key] ?? ''
+        const locked = f.key === 'embeddingModel' && embeddingLocked(settings)
         const tier = 'tier' in f ? f.tier : undefined
         return (
           <Fragment key={f.key}>
             {tier === 'high' && <p className="muted small"><b>Model tiers</b> trade cost for quality. Leave a tier empty to use the provider's default.</p>}
           <label><span className="toggle-text"><b>{f.label}</b><small>{HELP[f.key].help}</small></span>
-            <input list="provider-model-options" value={value} onChange={(e) => patch({ [f.key]: e.target.value })} placeholder={tier && preset?.tiers?.[tier] ? preset.tiers[tier] : f.key === 'defaultModel' && preset?.defaultModel ? preset.defaultModel : f.key === 'retrievalRerankModel' && preset?.rerankModel ? preset.rerankModel : HELP[f.key].placeholder} spellCheck={false} />
+            <input list="provider-model-options" disabled={locked} value={value} onChange={(e) => patch({ [f.key]: e.target.value })} placeholder={tier && preset?.tiers?.[tier] ? preset.tiers[tier] : f.key === 'defaultModel' && preset?.defaultModel ? preset.defaultModel : f.key === 'retrievalRerankModel' && preset?.rerankModel ? preset.rerankModel : HELP[f.key].placeholder} spellCheck={false} />
+            {locked && <small>Set during setup. Changing it would invalidate the search index.</small>}
             {!value && cleared.includes(f.label) && <small className="model-prompt" role="status">Pick a model for {f.label}</small>}
           </label>
           </Fragment>
         )
       })}
-      <datalist id="provider-model-options">{options.map((m) => <option key={m} value={m} />)}</datalist>
+      <datalist id="provider-model-options">{options.map((m) => <option key={m} value={m} label={ownerOf.get(m) ? `${m} — ${ownerOf.get(m)}` : undefined} />)}</datalist>
     </>
   )
 }

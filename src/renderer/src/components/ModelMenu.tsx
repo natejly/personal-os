@@ -1,8 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, RotateCcw } from '../icons'
 import { DEFAULT_EFFORT, type Effort } from '@shared/types'
-import { chatModelIds, modelChoices, modelLabel, showsEffort } from '../lib/modelLabel'
+import { api } from '../lib/api'
+import { modelChoices, modelLabel, showsEffort } from '../lib/modelLabel'
+import { pickerVisible } from '../lib/pickerModels'
 import { useStore } from '../store'
 
 const EFFORTS: { id: Effort; label: string }[] = [
@@ -36,6 +38,9 @@ interface ModelMenuProps {
 export default function ModelMenu({ model, effort, fast, onChange, placement = 'up' }: ModelMenuProps): JSX.Element {
   const models = useStore((s) => s.models)
   const fastModel = useStore((s) => s.settings.fastModel)
+  const pickerModels = useStore((s) => s.settings.pickerModels)
+  const activeProvider = useStore((s) => s.settings.provider)
+  const [names, setNames] = useState<Record<string, string>>({})
   const modelsError = useStore((s) => s.modelsError)
   const loadModels = useStore((s) => s.loadModels)
   const [retrying, setRetrying] = useState(false)
@@ -51,12 +56,20 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
 
   const options = useMemo(() => {
     // Embedding and similar models are not chat choices; the current model stays visible whatever its kind.
-    const ids = chatModelIds(models)
+    const visible = pickerVisible(models, pickerModels)
+    const ids = visible.map((m) => m.id)
     if (model && model !== 'auto' && !ids.includes(model)) ids.unshift(model)
-    const rows = modelChoices(ids, query, model).map((id) => ({ id, label: modelLabel(id) }))
+    const owner = new Map(models.map((m) => [m.id, m.provider ?? '']))
+    // Grouped by provider, the active one first. The sort is stable, so names stay alphabetical inside a group.
+    const rank = (id: string): number => ((owner.get(id) ?? '') === activeProvider ? 0 : 1)
+    const rows = modelChoices(ids, query, model)
+      .map((id) => ({ id, label: modelLabel(id), group: owner.get(id) ?? '' }))
+      .sort((a, b) => rank(a.id) - rank(b.id) || (a.group === b.group ? 0 : a.group < b.group ? -1 : 1))
     // Auto sits first once a fast model is set (or when the chat is already on it).
-    return (fastModel || model === 'auto') && 'auto'.includes(query.trim().toLowerCase()) ? [{ id: 'auto', label: 'Auto' }, ...rows] : rows
-  }, [models, model, query, fastModel])
+    return (fastModel || model === 'auto') && 'auto'.includes(query.trim().toLowerCase()) ? [{ id: 'auto', label: 'Auto', group: '' }, ...rows] : rows
+  }, [models, model, query, fastModel, pickerModels, activeProvider])
+  // A header per provider only when more than one has rows.
+  const grouped = new Set(options.filter((o) => o.id !== 'auto').map((o) => o.group)).size > 1
 
   const suffix = variantSuffix(fast)
   const effortShown = showsEffort(models, model)
@@ -69,6 +82,7 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
     setQuery('')
     setEditing(null)
     if (modelsError || models.length === 0) void loadModels()
+    if (!Object.keys(names).length) api.setup.providers().then((r) => setNames(Object.fromEntries(r.providers.map((p) => [p.id, p.name])))).catch(() => undefined)
     const t = window.setTimeout(() => searchRef.current?.focus(), 0)
     return () => window.clearTimeout(t)
   }, [open])
@@ -225,8 +239,9 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
                 const selected = m.id === model
                 const on = editing === m.id
                 return (
+                  <Fragment key={m.id}>
+                  {grouped && m.group && m.group !== options[i - 1]?.group && <div className="model-menu-section">{names[m.group] ?? m.group}</div>}
                   <div
-                    key={m.id}
                     role="option"
                     aria-selected={selected}
                     className={`model-menu-row${selected ? ' selected' : ''}${i === hi ? ' hi' : ''}${on ? ' editing' : ''}`}
@@ -247,6 +262,7 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
                       </button>}
                     </span>
                   </div>
+                  </Fragment>
                 )
               })}
             </div>

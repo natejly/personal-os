@@ -92,7 +92,7 @@ def test_alias_pricing_and_reprice_keeps_known_costs() -> None:
     cfg = {"modelPrices": {"ember-1": {"input": 1.0, "output": 2.0}}}
     assert pricing.cost(cfg, FW, 1_000_000, 1_000_000) == 3.0, "a short-name price covers the provider's full id"
     assert pricing.cost({"modelPrices": {FW: {"input": 1.0, "output": 0}}}, "ember-1", 1_000_000, 0) == 1.0
-    assert pricing.cost({"modelPrices": {}}, "accounts/fireworks/models/minimax-m3", 10, 10) is None, "no price is unknown, never a guess"
+    assert pricing.cost({"modelPrices": {}}, "accounts/fireworks/models/deepseek-v4-pro", 10, 10) is None, "no price is unknown, never a guess"
     assert pricing.cost({"modelPrices": {}}, FW, 1_000_000, 0) == 3.0, "the Fireworks list price covers the full id"
 
     _rec(u, model="mystery-model", cost=0.42)  # priced by a proxy that is gone; no price now

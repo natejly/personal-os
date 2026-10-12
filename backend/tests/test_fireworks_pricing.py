@@ -23,6 +23,10 @@ def test_full_id_and_short_name_price_the_same() -> None:
     assert close(p.cost({}, "accounts/fireworks/models/glm-5p3-flash", M, M), 0.15 + 0.50)
 
 
+def test_gpt_oss_120b_priced() -> None:
+    assert close(Pricing().cost({}, "accounts/fireworks/models/gpt-oss-120b", M, M), 0.15 + 0.60)
+
+
 def test_cached_tokens_billed_once_at_cached_rate() -> None:
     p = Pricing()
     # 1M prompt tokens of which 600k cached: 400k at 1.40 + 600k at 0.26, plus 100k output at 4.40.
@@ -39,20 +43,20 @@ def test_embeddings_input_only() -> None:
 
 def test_unknown_model_is_none_not_zero() -> None:
     p = Pricing()
-    assert p.cost({}, "accounts/fireworks/models/minimax-m3", M, M) is None
+    assert p.cost({}, "accounts/fireworks/models/deepseek-v4-pro", M, M) is None
     assert p.cost({}, "accounts/fireworks/models/deepseek-v4-pro", 10, 10) is None
     assert p.cost({}, "", 10, 10) is None
 
 
 def test_proxy_alias_uses_list_price_over_stale_proxy_price() -> None:
     p = Pricing()
-    p._proxy = {"deepseek-v4-flash": {"input": 0.22, "output": 0.66, "cache_read": 0.007}, "minimax-m3": {"input": 0.5, "output": 1.0}}
+    p._proxy = {"deepseek-v4-flash": {"input": 0.22, "output": 0.66, "cache_read": 0.007}, "proxy-only-m1": {"input": 0.5, "output": 1.0}}
     p._targets = {"deepseek-v4-flash": "fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash", "glm-5.3": "fireworks_ai/accounts/fireworks/models/glm-5p3"}
     table = p.table({})
     assert table["deepseek-v4-flash"]["source"] == "fireworks"
     assert close(p.cost({}, "deepseek-v4-flash", M, M), 0.30 + 1.20)
     assert close(p.cost({}, "glm-5.3", M, 0, cached_tokens=M), 0.26)
-    assert close(p.cost({}, "minimax-m3", M, M), 1.5)  # a model only the proxy prices keeps that price
+    assert close(p.cost({}, "proxy-only-m1", M, M), 1.5)  # a model only the proxy prices keeps that price
 
 
 def test_override_wins_and_keeps_cached_rate() -> None:

@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from . import llm, providers
+from . import llm, provider_route, providers
 
 log = logging.getLogger("grain.rerank")
 TIMEOUT = 10.0
@@ -27,6 +27,7 @@ async def rerank_scores(settings: dict[str, Any], model: str, query: str, docs: 
     """[(doc index, score)] best first from {baseUrl}/v1/rerank; None when that route is absent; raises otherwise.
 
     Accepts both reply shapes: `data` (one provider) and `results` (the other, and the proxy)."""
+    settings = provider_route.route(settings, model)
     payload: dict[str, Any] = {"model": model, "query": query, "documents": docs, "return_documents": False}
     if top_n:
         payload["top_n"] = top_n

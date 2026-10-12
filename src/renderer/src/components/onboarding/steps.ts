@@ -1,7 +1,7 @@
 /** Pure logic of the first-run wizard: which step is next, what a step needs, what a provider changes. */
 
-export type StepId = 'welcome' | 'provider' | 'key' | 'test' | 'google' | 'about' | 'permissions' | 'done'
-export const STEPS: StepId[] = ['welcome', 'provider', 'key', 'test', 'google', 'about', 'permissions', 'done']
+export type StepId = 'welcome' | 'provider' | 'key' | 'test' | 'search' | 'google' | 'about' | 'permissions' | 'done'
+export const STEPS: StepId[] = ['welcome', 'provider', 'key', 'test', 'search', 'google', 'about', 'permissions', 'done']
 
 /** Mirrors GET /setup/providers. */
 export interface ProviderInfo {
@@ -44,6 +44,10 @@ export interface WizardState {
   model: string
   /** Free text from the about step, saved as one pinned memory. Empty means the user skipped it. */
   about: string
+  /** The search (embedding) model picked on the search step; empty skips it. */
+  embedding: string
+  /** The search model is already set, so the search step is skipped: it cannot be changed once set. */
+  searchLocked: boolean
   test: { state: 'idle' | 'testing' | 'ok' | 'fail'; error?: string; latencyMs?: number; models?: string[] }
 }
 
@@ -54,6 +58,8 @@ export type WizardAction =
   | { type: 'field'; patch: Partial<Pick<WizardState, 'baseUrl' | 'apiKey' | 'model'>> }
   | { type: 'test'; test: WizardState['test'] }
   | { type: 'about'; about: string }
+  | { type: 'embedding'; embedding: string }
+  | { type: 'searchLocked'; locked: boolean }
   /** The configured setup, applied only while the user has not picked anything yet. */
   | { type: 'seed'; provider: ProviderInfo; baseUrl: string; model: string }
 
@@ -61,7 +67,7 @@ export type WizardAction =
 const EDITABLE_BASE = new Set(['litellm', 'custom', 'ollama'])
 export const showsBaseUrl = (providerId: string | null): boolean => !!providerId && EDITABLE_BASE.has(providerId)
 
-export const initialState = (): WizardState => ({ step: 'welcome', providerId: null, baseUrl: '', apiKey: '', model: '', about: '', test: { state: 'idle' } })
+export const initialState = (): WizardState => ({ step: 'welcome', providerId: null, baseUrl: '', apiKey: '', model: '', about: '', embedding: '', searchLocked: false, test: { state: 'idle' } })
 
 /** What the current step still lacks, or null when the user may go on. */
 export function stepBlocker(s: WizardState, provider: ProviderInfo | undefined): string | null {
@@ -90,16 +96,22 @@ export function reduce(s: WizardState, a: WizardAction, provider?: ProviderInfo)
       return { ...s, test: a.test }
     case 'about':
       return { ...s, about: a.about }
+    case 'embedding':
+      return { ...s, embedding: a.embedding }
+    case 'searchLocked':
+      return { ...s, searchLocked: a.locked }
     case 'next': {
       if (stepBlocker(s, provider)) return s
       const i = STEPS.indexOf(s.step)
-      return i < STEPS.length - 1 ? { ...s, step: STEPS[i + 1] } : s
+      const to = STEPS[i + 1] === 'search' && s.searchLocked ? i + 2 : i + 1
+      return i < STEPS.length - 1 ? { ...s, step: STEPS[to] } : s
     }
     case 'back': {
       const i = STEPS.indexOf(s.step)
       // `done` has already saved; nothing to walk back into.
       if (i <= 0 || s.step === 'done') return s
-      return { ...s, step: STEPS[i - 1], test: s.step === 'test' ? { state: 'idle' } : s.test }
+      const to = STEPS[i - 1] === 'search' && s.searchLocked ? i - 2 : i - 1
+      return { ...s, step: STEPS[to], test: s.step === 'test' ? { state: 'idle' } : s.test }
     }
   }
 }

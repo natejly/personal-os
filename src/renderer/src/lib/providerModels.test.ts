@@ -54,6 +54,18 @@ test('remapSettings reports the labels of fields that lost their value', () => {
     embeddingModel: 'accounts/fireworks/models/qwen3-embedding-8b',
     visionModel: undefined
   }, openai)
-  assert.deepEqual(r.patch, { defaultModel: 'gpt-5', modelLow: 'gpt-5-mini', embeddingModel: '' })
-  assert.deepEqual(r.cleared, ['Search model'])
+  assert.deepEqual(r.patch, { defaultModel: 'gpt-5', modelLow: 'gpt-5-mini' })
+  assert.deepEqual(r.cleared, [], 'a set search model is locked and left alone')
+  assert.deepEqual(remapSettings({ embeddingModel: '' }, openai).patch, {})
+})
+
+test('a model whose own provider still has a key is not rewritten or cleared', () => {
+  const rows = [{ id: 'claude-x', provider: 'anthropic' }, { id: 'old', provider: 'fireworks' }]
+  const draft = { defaultModel: 'claude-x', modelHigh: 'old', modelLow: 'unlisted' }
+  const r = remapSettings(draft, openai, undefined, { models: rows, keys: { anthropic: true } })
+  assert.deepEqual(r.patch, { modelHigh: '', modelLow: '' })
+  assert.deepEqual(r.cleared, ['High tier', 'Low tier'])
+  const kept = remapSettings(draft, openai, undefined, { models: rows, keys: { anthropic: true, fireworks: true } })
+  assert.equal('modelHigh' in kept.patch, false)
+  assert.equal('defaultModel' in kept.patch, false)
 })

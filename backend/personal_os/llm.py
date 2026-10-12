@@ -15,7 +15,7 @@ from typing import Any, AsyncIterator, Callable
 
 import httpx
 
-from . import auth_breaker, providers
+from . import auth_breaker, provider_route, providers
 from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_AT_TOKENS, COMPACT_KEEP_RECENT, COMPACT_KEEP_TOKENS, MICRO_AT_TOKENS, CONSOLIDATE_EVERY, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SUBAGENT_MAX_DEPTH, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, WORKER_MAX_CONCURRENT, WORKFLOW_MAX_FAN_OUT)
 from .permissions import DEFAULTS as PERMISSION_DEFAULTS
 log = logging.getLogger("personal_os.llm")
@@ -129,6 +129,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
     "homeWidgets": {},
     "hiddenViews": [],
+    "pickerModels": [],  # model ids the picker lists; [] = every keyed provider's preset models
     # Rows hidden from the sidebar only (home, docs, spaces, projects, jobs); they stay reachable everywhere else.
     "sidebarHidden": [],
     # {view: "sidebar" | "apps"}; missing = the module's own default placement.
@@ -686,6 +687,19 @@ def _rejected_optional(status: int, text: str, body: dict[str, Any]) -> str | No
     return None
 
 
+def _tools_need_no_effort(status: int, text: str, body: dict[str, Any]) -> bool:
+    """A 400 saying chat completions take function tools only with reasoning_effort 'none' (OpenAI's gpt-6 models)."""
+    if status != 400 or not body.get("tools") or body.get("reasoning_effort") == "none":
+        return False
+    msg = _error_fields(text)[2]
+    return "function tools" in msg and "reasoning_effort" in msg
+
+
+def tools_effort(settings: dict[str, Any], model: str) -> str | None:
+    """'none' for a model that takes function tools on chat completions only without reasoning (see above), else None."""
+    return "none" if providers.effective(settings) == "openai" and _model_slug(model).startswith("gpt-6") else None
+
+
 async def _close_cm(cm: Any) -> None:
     if cm is not None:
         with contextlib.suppress(Exception):
@@ -758,6 +772,10 @@ async def _send_attempts(client: httpx.AsyncClient, settings: dict[str, Any], bo
         kind = classify_error(r.status_code, r.text)
         await _close_cm(cm)
         auth_breaker.failure(settings, r.status_code, r.text)
+        if _tools_need_no_effort(r.status_code, r.text, body):
+            body["reasoning_effort"] = "none"  # omitting it is not enough: the model's own default effort also refuses tools
+            log.warning("provider refuses function tools with reasoning_effort; resending with none")
+            continue
         field = _rejected_optional(r.status_code, r.text, body)
         if field == "reasoning_effort" and body[field] in ("xhigh", "max") and not stepped:
             stepped = True
@@ -910,6 +928,9 @@ def _model_slug(model: str) -> str:
 caps_lookup: Callable[[str], dict[str, Any]] = lambda _m: {}
 
 
+ANTHROPIC_FALLBACK_CAP = 64_000  # when the Models API cap is unknown (e.g. a routed call while another provider is active)
+
+
 def requires_max_tokens(settings: dict[str, Any]) -> bool:
     """Only the Anthropic API refuses a request without max_tokens. Nothing else gets the field."""
     return providers.infer(settings.get("baseUrl")) == "anthropic"
@@ -919,7 +940,7 @@ def output_cap(settings: dict[str, Any], model: str) -> int | None:
     """The max_tokens to send: the model's own output maximum for a provider that requires the field, DeepSeek V4's
     ceiling (its provider default truncates thinking replies), else None."""
     if requires_max_tokens(settings):
-        return int(caps_lookup(model).get("max_output_tokens") or 0) or None
+        return int(caps_lookup(model).get("max_output_tokens") or 0) or ANTHROPIC_FALLBACK_CAP
     return DEEPSEEK_V4_MAX_TOKENS if _model_slug(model).startswith("deepseek-v4") else None
 
 
@@ -1110,10 +1131,13 @@ async def stream_chat(
     under the one `llmRetries` cap) until the first content, reasoning or tool-call fragment; never after. `end` carries
     `effort_dropped` (the value) when the provider rejected reasoning_effort and the request went without it.
     """
+    settings = provider_route.route(settings, model)
     body: dict[str, Any] = {"model": model, "messages": wire_messages(model, messages), "stream": True, "stream_options": {"include_usage": True}}
     # Only sent when the model accepts it. A missing field is not neutral: Kimi K3 reads it as max,
     # and a model that does not support the field rejects the whole request.
     wired = effort_param(model, effort, caps=caps_lookup(model), base_url=settings.get("baseUrl"))
+    if tools and (forced := tools_effort(settings, model)):
+        wired = forced
     if wired:
         body["reasoning_effort"] = wired
     if fast and supports_service_tier(settings):
@@ -1382,6 +1406,7 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
     `cancel` (Stop) and `deadline` (a time.monotonic() value) end the call early as an LLMError of kind 'cancelled' /
     'timeout'; neither is read from a context var, so a call made after a run's deadline has passed is unaffected.
     """
+    settings = provider_route.route(settings, model)
     t0 = time.time()
     body: dict[str, Any] = {"model": model, "messages": wire_messages(model, messages), "stream": False}
     wired = effort_param(model, effort, caps=caps_lookup(model), base_url=settings.get("baseUrl"))

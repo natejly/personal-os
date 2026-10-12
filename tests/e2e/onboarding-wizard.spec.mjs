@@ -57,6 +57,9 @@ test('first run: wizard walks every step, seeds a pinned memory, finishes, and n
     await expect(w.getByText(/mock-chat-2 is ready/)).toBeVisible()
     await cont(page).click()
 
+    // search model: optional, and absent when one is already set
+    if (await w.getByRole('heading', { name: 'Search model' }).isVisible().catch(() => false)) await cont(page, 'Skip for now').click()
+
     // google: skippable
     await expect(w.getByRole('heading', { name: 'Connect your accounts' })).toBeVisible()
     await cont(page, 'Skip for now').click()
@@ -66,7 +69,7 @@ test('first run: wizard walks every step, seeds a pinned memory, finishes, and n
     await expect(cont(page, 'Skip for now')).toBeVisible()
     await w.getByLabel('About you').fill('I keep zebras at a zoo. Short answers please.')
     await expect(cont(page, 'Continue')).toBeVisible()
-    await expect(w.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '6')
+    await expect(w.getByRole('progressbar')).toHaveAttribute('aria-valuenow', String(await w.getByRole('progressbar').locator('span.on').count()))
     await cont(page).click()
 
     // permissions: optional, skipped

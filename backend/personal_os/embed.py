@@ -13,7 +13,7 @@ from typing import Any, Awaitable, Callable, Sequence
 import httpx
 import numpy as np
 
-from . import llm
+from . import llm, provider_route
 
 log = logging.getLogger("grain.embed")
 
@@ -72,6 +72,7 @@ async def embed_texts(settings: dict[str, Any], texts: list[str], model: str | N
     name = model or str(settings.get("embeddingModel") or "")
     if not name:
         raise EmbedError("no embedding model configured")
+    settings = provider_route.route(settings, name)
     out: list[list[float]] = []
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:

@@ -5,6 +5,7 @@ import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import { useOnboarding } from './onboardingStore'
 import { ABOUT_EXAMPLES, STEPS, initialState, modelOptions, reduce, showsBaseUrl, stepBlocker, type ProviderInfo, type WizardAction, type WizardState } from './steps'
+import { embeddingLocked, embeddingRows, groupByProvider } from '../../lib/pickerModels'
 import { PermissionsPanel } from '../PermissionsPanel'
 import './onboarding.css'
 
@@ -16,6 +17,7 @@ const TITLES: Record<WizardState['step'], string> = {
   provider: 'Choose your AI provider',
   key: 'Connect your account',
   test: 'Testing the connection',
+  search: 'Search model',
   google: 'Connect your accounts',
   about: 'Tell Grain about you',
   permissions: 'Give Grain access',
@@ -32,6 +34,8 @@ export default function Onboarding(): JSX.Element {
   const closeWizard = useOnboarding((s) => s.closeWizard)
   const google = useStore((s) => s.google)
   const { refreshGoogle, connectGoogle } = useStore()
+  const models = useStore((s) => s.models)
+  const settings = useStore((s) => s.settings)
 
   const [state, rawDispatch] = useReducer(
     (s: WizardState, a: WizardAction & { provider_?: ProviderInfo }) => reduce(s, a, a.provider_),
@@ -79,6 +83,7 @@ export default function Onboarding(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.step])
 
+  useEffect(() => { rawDispatch({ type: 'searchLocked', locked: embeddingLocked(settings) }) }, [settings.embeddingModel])
   useEffect(() => { if (state.step === 'google') void refreshGoogle() }, [state.step, refreshGoogle])
 
   const save = useCallback(async (): Promise<void> => {
@@ -88,6 +93,8 @@ export default function Onboarding(): JSX.Element {
       await api.setup.complete({ provider: provider.id, baseUrl: state.baseUrl.trim(), apiKey: state.apiKey.trim() || null, model: state.model.trim() })
       // The backend persisted through the normal settings path; pull it into the store rather than re-PUT it.
       useStore.setState({ settings: await api.settings.get() })
+      // The search model is fixed once set, so it is written only while none is.
+      if (state.embedding && !state.searchLocked) useStore.setState({ settings: await api.settings.set({ embeddingModel: state.embedding }) })
       void useStore.getState().loadModels()
       // A pinned memory, so the assistant knows who it is talking to from the very first message.
       // A failure here is not worth blocking setup on: the user can add it in Memory later.
@@ -97,7 +104,7 @@ export default function Onboarding(): JSX.Element {
     } catch (e) {
       setSaved({ state: 'fail', error: (e as Error).message })
     }
-  }, [provider, state.baseUrl, state.apiKey, state.model, state.about])
+  }, [provider, state.baseUrl, state.apiKey, state.model, state.about, state.embedding, state.searchLocked])
   // Only arriving at `done` saves; `save` itself changes as the user types on the about step.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (state.step === 'done') void save() }, [state.step])
@@ -112,7 +119,7 @@ export default function Onboarding(): JSX.Element {
   const canNext = !blocker && state.step !== 'done'
   // Leaving the Google step unconnected, or the about step empty, is a skip, and the one forward button
   // says so: it steps back to a quiet style so the step's own action stays the main one.
-  const skipping = (state.step === 'google' && !google?.connected) || (state.step === 'about' && !state.about.trim()) || state.step === 'permissions'
+  const skipping = (state.step === 'google' && !google?.connected) || (state.step === 'about' && !state.about.trim()) || state.step === 'permissions' || (state.step === 'search' && !state.embedding)
   const advance = (): void => {
     if (state.step === 'done') { if (saved.state === 'ok') finish(); return }
     if (state.step === 'test' && state.test.state === 'fail') return void runTest()
@@ -216,6 +223,29 @@ export default function Onboarding(): JSX.Element {
               </>
             )}
           </div>
+        )}
+
+        {state.step === 'search' && (
+          <>
+            <p className="muted">Optional. Grain uses this model to index your memories and documents so it can search them. It cannot be changed later, because it would invalidate the search index.</p>
+            {(() => {
+              // Rows from providers that already have a key, plus this setup's own provider (its key is saved at the end).
+              const typed = provider && state.apiKey.trim() ? modelOptions(provider, state.test.models).filter((m) => /embed/i.test(m)) : []
+              const rows = [...embeddingRows(models, settings.providerKeysSet), ...typed.filter((id) => !models.some((m) => m.id === id)).map((id) => ({ id, mode: 'embedding', provider: provider?.id }))]
+              if (!rows.length) return <p className="muted">No provider with a key offers a search model. Add a Fireworks or OpenAI key to enable search, or skip this for now.</p>
+              return groupByProvider(rows, provider?.id).map((g) => (
+                <div key={g.provider} className="ob-cards" role="radiogroup" aria-label={`${g.provider} search models`}>
+                  {g.rows.map((m) => (
+                    <button key={m.id} type="button" role="radio" aria-checked={m.id === state.embedding} className={`ob-card-opt${m.id === state.embedding ? ' on' : ''}`}
+                      onClick={() => dispatch({ type: 'embedding', embedding: m.id === state.embedding ? '' : m.id })}>
+                      <b>{m.id}</b>
+                      <small>{providers?.find((p) => p.id === g.provider)?.name ?? g.provider}</small>
+                    </button>
+                  ))}
+                </div>
+              ))
+            })()}
+          </>
         )}
 
         {state.step === 'google' && (

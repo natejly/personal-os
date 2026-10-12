@@ -20,7 +20,7 @@ from .db import Database, new_id, now
 PRICE_TTL = 600
 
 # Fireworks serverless list prices (Standard tier), USD per 1M tokens: input, cached input, output.
-# Source: https://docs.fireworks.ai/serverless/pricing and https://fireworks.ai/pricing, retrieved 2026-10-07.
+# Source: https://docs.fireworks.ai/serverless/pricing, retrieved 2026-10-11.
 # deepseek-v4p1-flash changed on 2026-10-01 (was 0.22 / 0.007 / 0.66). Keyed by short_model(); add a model only
 # from that page. Embeddings are billed on input tokens only.
 FIREWORKS_PRICES: dict[str, dict[str, float]] = {
@@ -31,6 +31,9 @@ FIREWORKS_PRICES: dict[str, dict[str, float]] = {
     "kimi-k3-fast": {"input": 4.50, "cache_read": 0.45, "output": 22.50},
     "deepseek-v4p1-flash": {"input": 0.30, "cache_read": 0.006, "output": 1.20},
     "qwen3-embedding-8b": {"input": 0.10},
+    "qwen3p8-max": {"input": 2.00, "cache_read": 0.25, "output": 6.00},
+    "gpt-oss-120b": {"input": 0.15, "cache_read": 0.015, "output": 0.60},
+    "minimax-m3": {"input": 0.30, "cache_read": 0.06, "output": 1.20},
 }
 
 # Anthropic list prices, USD per 1M tokens: input, 5-minute cache write, cache read, output.
@@ -101,10 +104,27 @@ class Pricing:
         self._targets: dict[str, str] = {}  # proxy alias -> the model it routes to ('glm-5.3' -> '.../glm-5p3')
         self._fetched = 0.0
         self._base = ""
+        self._routed: dict[str, dict[str, Any]] = {}  # Anthropic caps fetched with its saved key while another provider is active
+        self._routed_at = 0.0
+
+    async def refresh_routed(self, key: str | None) -> None:
+        """Anthropic output caps for routed calls while another provider is active (refresh() covers the active one)."""
+        base = providers.get("anthropic")["baseUrl"].rstrip("/")
+        if not key or self._base == base or time.time() - self._routed_at < PRICE_TTL:
+            return
+        self._routed_at = time.time()
+        try:
+            async with httpx.AsyncClient(timeout=8) as c:
+                r = await c.get(f"{base}/models", params={"limit": 1000}, headers={"x-api-key": key, "anthropic-version": "2023-06-01"})
+            if r.status_code < 400:
+                self._routed = {m["id"]: {k: v for k, v in (("max_input_tokens", m.get("max_input_tokens")), ("max_output_tokens", m.get("max_tokens"))) if v}
+                                for m in r.json().get("data", []) if m.get("id")}
+        except Exception:  # noqa: BLE001 - best effort; output_cap falls back to llm.ANTHROPIC_FALLBACK_CAP
+            pass
 
     def caps(self, model: str) -> dict[str, Any]:
         """{mode?, reasoning?, max_input_tokens?, max_output_tokens?} the proxy (or the Anthropic Models API) reports for a model; {} when unknown."""
-        return dict(self._caps.get(model) or {})
+        return dict(self._caps.get(model) or self._routed.get(model) or {})
 
     async def refresh(self, settings: dict[str, Any], force: bool = False) -> None:
         base = str(settings.get("baseUrl") or "").rstrip("/")

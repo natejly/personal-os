@@ -1,4 +1,4 @@
-import type { Settings } from '@shared/types'
+import type { ModelInfo, Settings } from '@shared/types'
 import type { ProviderInfo } from '../components/onboarding/steps'
 
 /** The last path segment of a model id: `accounts/fireworks/models/ember-1` is `ember-1`. */
@@ -41,11 +41,24 @@ export const MODEL_FIELDS = [
 export type ModelKey = (typeof MODEL_FIELDS)[number]['key']
 
 /** The edits that move every model field to provider `to`, and the labels of fields that had a value and lost it. */
-export function remapSettings(draft: Partial<Pick<Settings, ModelKey>>, to: ProviderInfo, live?: string[]): { patch: Partial<Settings>; cleared: string[] } {
+export function remapSettings(
+  draft: Partial<Pick<Settings, ModelKey>>,
+  to: ProviderInfo,
+  live?: string[],
+  /** When given, a model whose own provider still has a saved key keeps routing there and is left as it is. */
+  routing?: { models: ModelInfo[]; keys?: Record<string, boolean> }
+): { patch: Partial<Settings>; cleared: string[] } {
   const patch: Record<string, string> = {}
   const cleared: string[] = []
+  const owned = (id: string): boolean => {
+    const p = routing?.models.find((m) => m.id === id)?.provider
+    return !!p && !!routing?.keys?.[p]
+  }
   for (const f of MODEL_FIELDS) {
     const before = draft[f.key] ?? ''
+    // The search model is fixed once set (its vectors fill the index), so it is never rewritten.
+    if (f.key === 'embeddingModel' && before) continue
+    if (owned(before)) continue
     const after = remapModel(before, to, live, 'field' in f ? f.field : 'other')
     if (after !== before) patch[f.key] = after
     if (before && !after) cleared.push(f.label)

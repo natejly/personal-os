@@ -115,6 +115,6 @@ def test_models_route_refreshes_caps_first(monkeypatch: Any) -> None:
     client = TestClient(app_module.app, headers={"X-Personal-OS-Token": app_module.AUTH_TOKEN})
     rows = {r["id"]: r for r in client.get("/models").json()}
     assert rows["plain"]["reasoning"] is False and rows["embedder"]["mode"] == "embedding"
-    assert rows["whisper-1"]["mode"] == "audio" and rows["mystery"] == {"id": "mystery"}
+    assert rows["whisper-1"]["mode"] == "audio" and rows["mystery"] == {"id": "mystery", "provider": "custom"}
     # The hook app.py wired is the same object the route just filled.
     assert llm.caps_lookup("thinker") == {"mode": "chat", "reasoning": True, "max_input_tokens": 1000}

@@ -12,6 +12,7 @@ import { DEFAULT_EFFORT, type ContextMeter, type ContextUsed, type ConversationS
 import { fmtCost, usageLine } from '../lib/chatMeta'
 import { compactNow } from '../lib/compact'
 import { humanizeTaintSources } from '../lib/taintSources'
+import { tip } from '../lib/tip'
 
 /** The hint is a tooltip on the row; `fix` is a link to the Settings tab that turns this source on, kept visible beside the label. */
 function Toggle({ label, hint, value, onChange, icon, disabled, fix }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element; disabled?: boolean; fix?: { label: string; open: () => void } }): JSX.Element {
@@ -267,7 +268,7 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
     <Wrap className={embedded ? 'desk-pane scroll context-embedded' : 'context-drawer'}>
       {!embedded && <header>
         <h3>Context</h3>
-        <button className="icon-btn" aria-label="Close context panel" onClick={toggleContext}><X size={16} /></button>
+        <button className="icon-btn" title={tip('Close', 'toggle-context')} aria-label="Close context panel" onClick={toggleContext}><X size={16} /></button>
       </header>}
 
       <section className="ctx-section">

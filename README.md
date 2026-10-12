@@ -517,7 +517,7 @@ and its verdict is kept on the row.
 | ⌃⌘I | Toggle context panel |
 | ⌘⇧C | Toggle Canvases (Canvases menu) |
 | ⌃1 … ⌃9 | Go to canvas 1–9 |
-| ⌘, | Settings: Model, Usage, Permissions, Integrations, Texting, Memory, Appearance, System access, Advanced |
+| ⌘, | Settings: General, Sidebar, Model, Models, Agents, Memory, Integrations, Permissions, System access, Usage, Advanced |
 | ⌘/ or ? | Help: every shortcut, searchable, plus the Using Grain guide (also Help menu) |
 | Enter / Shift+Enter | Send / newline |
 

@@ -42,16 +42,16 @@ import ScopeSelect from './ScopeSelect'
 type Tab = SettingsTab
 
 const TABS: { id: Tab; label: string; icon: Icon }[] = [
-  { id: 'model', label: 'Model', icon: Cpu },
-  { id: 'models', label: 'Models', icon: Layers },
-  { id: 'usage', label: 'Usage', icon: Gauge },
-  { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
-  { id: 'integrations', label: 'Integrations', icon: Plug },
-  { id: 'agents', label: 'Agents', icon: Bot },
-  { id: 'memory', label: 'Memory', icon: Brain },
   { id: 'appearance', label: 'General', icon: Palette },
   { id: 'sidebar', label: 'Sidebar', icon: PanelLeft },
+  { id: 'model', label: 'Model', icon: Cpu },
+  { id: 'models', label: 'Models', icon: Layers },
+  { id: 'agents', label: 'Agents', icon: Bot },
+  { id: 'memory', label: 'Memory', icon: Brain },
+  { id: 'integrations', label: 'Integrations', icon: Plug },
+  { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
   { id: 'system', label: 'System access', icon: KeyRound },
+  { id: 'usage', label: 'Usage', icon: Gauge },
   { id: 'advanced', label: 'Advanced', icon: SlidersHorizontal }
 ]
 
@@ -137,7 +137,7 @@ export default function SettingsModal(): JSX.Element {
   const [askShortcut, setAskShortcut] = useState<ShortcutState | null>(null)
   const storeTab = useStore((s) => s.settingsTab)
   const storeGroup = useStore((s) => s.settingsGroup)
-  const [tab, setTabState] = useState<Tab>(() => (TABS.some((x) => x.id === storeTab) ? storeTab : 'model'))
+  const [tab, setTabState] = useState<Tab>(() => (TABS.some((x) => x.id === storeTab) ? storeTab : 'appearance'))
   // The store keeps the shown tab, so openSettings from a toast or a link switches the open modal too.
   const setTab = (t: Tab): void => { setTabState(t); useStore.setState({ settingsTab: t }) }
   // Advanced groups start collapsed; one opens when Settings was asked for a topic inside it.

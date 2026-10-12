@@ -20,7 +20,7 @@ Mental model:
 - **Spaces** (⌘⇧C): a desktop of live windows (chat, lists, calendar, note, memory, graph, uploads, recap, project, usage, doc, face, crew). See [docs/spaces.md](../../../docs/spaces.md).
 - **Library**: Agents, Automations (workflows and saved commands), Skills, Connectors (MCP), and what Grain made.
 - **Autonomy**: a reply can hand work to subagents (`agent_spawn`). With Settings → Agents → Desks "Start new chats working autonomously" on (the default), a new chat starts as a longer session (Ask as it goes, with a turn limit) with its own plan and workspace: a strip above the composer only while background workers run (the main agent has no status chrome; the composer's Stop is its control). Every chat's header "Documents in this chat" button opens a side panel with Files / Changes, plus Checklist, Workers and (for a desk) Review when they apply; settings are under Settings → Agents. Workflows are approved once and run in waves ([docs/workflows.md](../../../docs/workflows.md), [docs/cowork-design.md](../../../docs/cowork-design.md), which is the original desk spec, partly out of date; the standalone Cowork view was folded into chats on 2026-10-05). Scheduled runs only propose; results land in the Agent inbox on Today.
-- **Settings** (⌘,) tabs: Model, Usage, Permissions, Integrations, Agents, Memory, General, Sidebar, System access, Advanced (`TABS` in `SettingsModal.tsx`).
+- **Settings** (⌘,) tabs: General (opens first), Sidebar, Model, Models, Agents, Memory, Integrations, Permissions, System access, Usage, Advanced (`TABS` in `SettingsModal.tsx`).
 
 ## Using it
 

@@ -41,6 +41,7 @@ from typing import Any, Callable
 from . import approval_log, autoreview, coding_route, compaction, context_map, fsx, limits, llm, mac, permissions, permrules, redact
 from .db import new_id, now
 from .toolcalls import parse_arguments
+from .trace import Tracer, now_ms
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, DISCARDED, ToolSpec, _obj, allows_slug, call_key, denied, summarize_result, tool_error
 from .working import escape_tags, fence_untrusted
@@ -903,6 +904,11 @@ class Subagents:
             kw["effort"] = ch.ctx["effort"]
         buf: list[str] = []
         end: dict[str, Any] = {}
+        tracer = Tracer()
+        lspan = tracer.start("llm", ch.model, {"round": ch.rounds, "effort": str(ch.ctx.get("effort") or "default"), "messages": len(ch.messages),
+                                               "tools": len(schemas), "worker": True, "kind": ch.kind, "role": ch.role.name, **({"final": True} if final else {})})
+        self._emit(ch, "span", {"span": lspan})
+        first_token: int | None = None
         # Siblings of one kind share a system prompt and tool list: one replica, so they reuse each other's cached prefix.
         llm.session_affinity.set(f"{ch.conversation_id or ch.id}:{ch.kind}:{ch.role.name}")
         async for ev in llm.stream_chat(cfg, ch.model, ch.messages, schemas or None, **kw):
@@ -910,9 +916,15 @@ class Subagents:
             if ch.halt_reason:
                 break
             if ev["type"] == "delta":
+                first_token = first_token or now_ms()
                 buf.append(ev["text"])
             elif ev["type"] == "end":
                 end = ev
+        tracer.end(lspan, {"finish_reason": end.get("finish_reason"), "usage": end.get("usage"),
+                           "ttft_ms": (first_token - lspan["start"]) if first_token else None,
+                           "output_chars": sum(map(len, buf)), "tool_calls": [c["name"] for c in end.get("tool_calls") or []]},
+                   error=ch.halt_reason)
+        self._emit(ch, "span", {"span": lspan})
         u = end.get("usage") or end.get("usage_est") or {}
         pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
         cost = self.pricing.cost(cfg, ch.model, pt, ct, int(u.get("cached_tokens") or 0), int(u.get("cache_write_tokens") or 0)) if self.pricing is not None else None
@@ -1053,7 +1065,8 @@ class Subagents:
         sources_before = len(ch.ctx.get("taint_sources") or [])
         t0 = time.time()
         self._set_now(ch, _now_line(name, args))
-        self._emit(ch, "tool_call", {"id": uid, "name": name, "arguments": _short(args)})
+        repaired = {"repaired": True} if parse_arguments(c.get("arguments"))[1] else {}
+        self._emit(ch, "tool_call", {"id": uid, "name": name, "arguments": _short(args), **repaired})
         decision, result, ran = "allow", None, False
         mcp = self.connectors is not None and spec is None and name in (ch.ctx.get("mcp_schemas") or {})
         if mcp and raw_mode != "off" and "_raw" not in args:
@@ -1172,7 +1185,7 @@ class Subagents:
                     ch.stuck_stop = stuck.detail
         preview = summarize_result(result)
         self._emit(ch, "tool_result", {"id": uid, "name": name, "result_preview": preview, "error": err, "approval": decision,
-                                       "duration_ms": int((time.time() - t0) * 1000)})
+                                       "duration_ms": int((time.time() - t0) * 1000), **repaired})
         # The parent loop's fence, per call: a result that read untrusted text (web, a coding agent's log) is wrapped as data
         # with an id the text cannot guess, so it reads as data, not as instructions to this child.
         fence = ch.ctx.setdefault("fence_nonce", secrets.token_hex(8)) \

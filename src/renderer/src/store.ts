@@ -28,7 +28,7 @@ import { chainTo, folderKey, groupShutKey, renameKeys } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
 import type { ShowItem, UploadResult } from '@shared/types'
-import type { Attention, CodingSession, CodingSessionEvent, WorkerInfo, RunInfo, ShipChecklist } from '@shared/types'
+import type { Attention, CodingSession, CodingSessionEvent, Duel, DuelSide, WorkerInfo, RunInfo, ShipChecklist } from '@shared/types'
 import { attention, chatAttention, wantsYou } from './lib/attention'
 import * as panes from './lib/panelPanes'
 import type { PanelState, Pane } from './lib/panelPanes'
@@ -118,6 +118,8 @@ export interface ChatSession {
   pendingSends?: PendingSend[]
   /** Subagents by id (the `subagent` stream event), each tagged with the message that spawned it. Kept across runs. */
   subagents?: Record<string, SubagentInfo & { message_id?: string | null }>
+  /** A developer-mode model duel waiting for its pick (the `ab_*` events). */
+  duel?: Duel | null
 }
 
 /** Where an accepted desk output went, for the toast. */
@@ -247,6 +249,10 @@ export interface State {
   draftEffort: Effort
   /** A model picked on a draft chat. Null follows `settings.defaultModel`; picking one must not rewrite that default. */
   draftModel: string | null
+  /** Developer mode: the next messages also go to `abModel` and the replies are compared (needs Settings > Advanced > Developer tools). */
+  abOn: boolean
+  abModel: string | null
+  setAb: (change: { on?: boolean; model?: string | null }) => void
   draftFast: boolean
   /** Every other per-chat setting picked on a draft (skip permissions, context toggles). `send` applies it. */
   draftChatSettings: Partial<ConversationSettings>
@@ -856,6 +862,18 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
   const mapMsg = (mid: string, fn: (m: Message) => Message): ChatSession =>
     withMsgs(msgs.map((m) => (m.id === mid ? fn(m) : m)))
   switch (ev.event) {
+    case 'ab_start': {
+      const blank = (model: string): DuelSide => ({ model, text: '', ms: null, tokens: null, error: null, done: false, calls: [] })
+      return { ...s, duel: { messageId: ev.data.id, a: blank(ev.data.models.a), b: blank(ev.data.models.b), ready: false } }
+    }
+    case 'ab_delta':
+      return s.duel ? { ...s, duel: { ...s.duel, [ev.data.side]: { ...s.duel[ev.data.side], text: s.duel[ev.data.side].text + ev.data.text } } } : s
+    case 'ab_end':
+      return s.duel ? { ...s, duel: { ...s.duel, [ev.data.side]: { ...s.duel[ev.data.side], ms: ev.data.ms, tokens: ev.data.tokens, error: ev.data.error, calls: ev.data.calls, done: true } } } : s
+    case 'ab_ready':
+      return s.duel ? { ...s, duel: { ...s.duel, ready: true } } : s
+    case 'ab_pick':
+      return { ...s, duel: null }
     case 'subagent':
       return { ...s, subagents: { ...s.subagents, [ev.data.id]: ev.data } }
     case 'user_message':
@@ -919,6 +937,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
     case 'taint':
       return withTaint(s, [ev.data.source])
     case 'done': {
+      s = s.duel ? { ...s, duel: null } : s
       const done = !ev.data.id ? s : mapMsg(ev.data.id, (m) => ({ ...m, ...settleHeld(m), status: null, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace, reasoning: ev.data.reasoning ?? m.reasoning, attachments: ev.data.attachments ?? m.attachments, outcome: ev.data.outcome ?? (ev.data.stopped ? 'stopped' : (ev.data.partial as Message['outcome']) ?? null), error_kind: ev.data.error_kind ?? null }))
       // The reply is whole and persisted here. The stream stays open for the auto-learn tail, so the
       // subscription is left alone and only `answering` drops.
@@ -1640,8 +1659,11 @@ export const useStore = create<State>((set, get) => {
    * `false` means the backend never accepted `body`, so the caller still owns the text it sent.
    * Resolves on that verdict, not at the end of the run: a composer is holding a draft on it.
    */
-  const runStream = async (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string; attachments?: string[] }, pendingKey?: number): Promise<boolean> => {
+  const runStream = async (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string; attachments?: string[]; ab_model?: string }, pendingKey?: number): Promise<boolean> => {
     let run: ChatRunStarted
+    const st = get()
+    // A duel needs the main chat view, where its columns and the pick buttons are drawn.
+    if (st.settings.devTools === true && st.abOn && st.abModel && body.content && !body.replace_from && st.view === 'chat' && st.focusedConversationId === convId) body = { ...body, ab_model: st.abModel }
     try {
       run = await api.chat(convId, body)
     } catch (e) {
@@ -1829,6 +1851,9 @@ export const useStore = create<State>((set, get) => {
     draftProjectId: null,
     draftEffort: DEFAULT_EFFORT,
     draftModel: null,
+    abOn: false,
+    abModel: null,
+    setAb: (change) => set((st) => ({ abOn: change.on ?? st.abOn, abModel: change.model === undefined ? st.abModel : change.model })),
     draftFast: false,
     draftChatSettings: {},
     draftPendingSend: null,

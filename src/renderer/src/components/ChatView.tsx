@@ -8,6 +8,7 @@ import RegenRow from './RegenRow'
 import FindBar from './FindBar'
 import Composer from './Composer'
 import ChatControls from './ChatControls'
+import DuelPanel from './DuelPanel'
 import ContextDrawer from './ContextDrawer'
 import ResizeHandle from './ResizeHandle'
 import WorkersPanel from './WorkersPanel'
@@ -190,6 +191,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {(pending.length > 0 || draftPending || isStreamingHere) && streamingMessageId === null && (
                   <div className="msg assistant"><div className="avatar face-avatar">{(convo?.id ?? conversationId) && <Face {...face} name={face.name || conversationId!} status="streaming" />}</div><div className="bubble"><Thinking /></div></div>
                 )}
+                {!conversationId && <DuelPanel conversationId={convo?.id} />}
                 {desk && <DeskInline desk={desk} events={msgs.flatMap((m) => m.tool_events ?? [])} />}
                 {pending.length === 0 && !draftPending && <RegenRow conversationId={convo?.id ?? conversationId} last={last} streaming={isStreamingHere} />}
               </div>

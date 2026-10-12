@@ -33,7 +33,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from . import auth_breaker, blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
 from . import branch_summary, compaction, followups, otel_export, router, thinking_summary, titles
-from . import chatlink, coding_route, fsx, opencode_usage, request_log
+from . import chatlink, coding_route, duel, fsx, opencode_usage, request_log
 from .fsx import sensitive_reason
 from . import context_map
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
@@ -235,6 +235,9 @@ _active: dict[str, asyncio.Event | Run] = {}
 # Pending tool-call approvals: call_id -> Future[decision]. The durable record is the approvals table; this is
 # only how POST /approvals wakes the run that is waiting in this process.
 _approvals: dict[str, asyncio.Future] = {}
+# Developer-mode model duels waiting for a pick: reply message id -> Future[winner]. POST /conversations/{id}/ab/pick resolves it.
+_ab_waits: dict[str, asyncio.Future] = {}
+model_votes = duel.Votes(db)
 # Tools a search (tool_search / mcp_tool_search) loaded, per conversation, so they stay offered in later replies.
 # Only a cache: on first use after a restart it is re-seeded from the tools the conversation's history called.
 # ponytail: never evicted; a set of names per conversation touched since start, an LRU if that ever matters.
@@ -1498,6 +1501,7 @@ class ChatIn(BaseModel):
     wake: dict[str, Any] | None = None  # set only by the backend: this turn hands finished workers' reports to the assistant (workers.build_wake)
     kind: str | None = None  # set only by the backend: this turn's content is an internal control message (nudge, continue, resume, handoff, report), stored hidden from the user
     chat_link: dict[str, Any] | None = None  # set only by the backend: this turn carries another chat's message or reply (chatlink.ChatLinks.turn)
+    ab_model: str | None = None  # developer mode (devTools): also send the first model call of this turn to this model and let the user pick (duel.py)
 
 
 def _resolve_attachments(conv: dict[str, Any], ids: list[str] | None) -> list[dict[str, Any]]:
@@ -2612,6 +2616,78 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     await stream.aclose()
                 yield {"type": "overflow_recovered", **recovered}
 
+        ab_model = (body.ab_model or "").strip() if (cfg.get("devTools") is True and run is not None and body.content is not None
+                                                      and not internal and not _desk and not _job) else ""
+        ab_chosen: dict[str, Any] | None = None  # the picked candidate (its text and `end` event), consumed by _round_events
+
+        async def _duel() -> AsyncIterator[tuple[str, Any]]:
+            """The turn's first model call, sent to two models at once. Nothing runs: a tool call a candidate asks for is
+            shown in its column and goes no further. The user's pick is awaited here; the picked candidate's reply then
+            takes this round's place, so its tool calls run once, under the usual rules (_round_events)."""
+            nonlocal ab_chosen
+            sides = {"a": model, "b": ab_model}
+            res: dict[str, dict[str, Any]] = {k: {"text": [], "end": None, "ms": None, "error": None} for k in sides}
+            yield "ab_start", {"id": am["id"], "models": sides}
+            _capture("auto")
+            t0 = time.monotonic()
+            streams = {k: llm.stream_chat(cfg, m, messages, tool_schemas or None, effort=str(conv["settings"].get("effort") or "default"),
+                                          fast=bool(conv["settings"].get("fast")), cancel=_stream_cancel(stop, steers, run))
+                       for k, m in sides.items()}
+            async with contextlib.aclosing(duel.merge(streams)) as merged:
+                async for side, ev in merged:
+                    r = res[side]
+                    if ev["type"] == "delta":
+                        r["text"].append(ev["text"])
+                        yield "ab_delta", {"id": am["id"], "side": side, "text": ev["text"]}
+                    elif ev["type"] in ("end", "error"):
+                        r["ms"] = int((time.monotonic() - t0) * 1000)
+                        u = (ev.get("usage") or ev.get("usage_est") or {}) if ev["type"] == "end" else {}
+                        r["tokens"] = int(u.get("completion_tokens") or 0)
+                        if ev["type"] == "error":
+                            r["error"] = ev["message"]
+                        else:
+                            r["end"] = ev
+                        yield "ab_end", {"id": am["id"], "side": side, "ms": r["ms"], "tokens": r["tokens"], "error": r["error"],
+                                         "calls": [duel.call_summary(c) for c in (ev.get("tool_calls") or [])] if ev["type"] == "end" else []}
+                    if stop.is_set():
+                        break
+            for k in streams.values():
+                await k.aclose()
+            if stop.is_set() or not any(r["end"] for r in res.values()):
+                return  # stopped, or both failed: the round carries on as an ordinary one
+            fut: asyncio.Future = asyncio.get_event_loop().create_future()
+            _ab_waits[am["id"]] = fut
+            yield "ab_ready", {"id": am["id"]}
+            run.set_status("awaiting_approval")
+            try:
+                while not fut.done() and not stop.is_set():
+                    with contextlib.suppress(asyncio.TimeoutError):
+                        await asyncio.wait_for(asyncio.shield(fut), timeout=1)
+                winner = fut.result() if fut.done() else None
+            finally:
+                _ab_waits.pop(am["id"], None)
+                run.set_status("running")
+            if winner is None:
+                return
+            side = "b" if winner == "b" and res["b"]["end"] else "a" if res["a"]["end"] else "b"
+            model_votes.add(conversation_id=conv_id, model_a=model, model_b=ab_model, winner=winner, prompt=user_text,
+                            a_ms=res["a"]["ms"], b_ms=res["b"]["ms"], a_tokens=res["a"].get("tokens"), b_tokens=res["b"].get("tokens"))
+            ab_chosen = res[side]
+            ab_chosen["side"] = side
+            yield "ab_pick", {"id": am["id"], "winner": winner, "side": side}
+
+        async def _round_events() -> AsyncIterator[dict[str, Any]]:
+            """This round's model events: the picked duel candidate's reply when there is one, else the live stream."""
+            nonlocal ab_chosen
+            if ab_chosen is not None:
+                picked, ab_chosen = ab_chosen, None
+                if picked["text"]:
+                    yield {"type": "delta", "text": "".join(picked["text"])}
+                yield picked["end"]
+                return
+            async for ev in _stream_round():
+                yield ev
+
         async def _end_jobs() -> None:
             """A chat's background shell jobs end with its reply; a desk's outlive a turn (they wake it). Called at
             the very end of the reply, after its `done`, and on cancellation: no await sits between the last
@@ -2780,7 +2856,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             round_span = lspan  # the tool calls below nest under it
             yield "span", {"message_id": am["id"], "span": lspan}
             first_token: int | None = None
-            async for ev in _stream_round():
+            if ab_model and _round == 1 and not stop.is_set():
+                async for item in _duel():
+                    yield item
+                if ab_chosen is not None and ab_chosen["side"] == "b":
+                    model = ab_model  # the picked model is model A for the rest of the turn
+                    with db.tx() as c:
+                        c.execute("UPDATE messages SET model=? WHERE id=?", (model, am["id"]))
+            async for ev in _round_events():
                 if stop.is_set():
                     break
                 if ev["type"] == "overflow_recovered":
@@ -4089,6 +4172,31 @@ def sandbox_limits() -> dict[str, Any]:
     """What the run_python sandbox blocks and how to ask for an exception, so a caller can plan around the walls before a
     call. The same text rides on the run_python tool description; this route is for clients."""
     return {"host": sandbox.declared_limits(), "shell_available": shell_tool.sandbox_available()}
+
+
+@app.post("/conversations/{id}/ab/pick")
+async def pick_duel(id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Developer mode: settle a model duel the running reply is waiting on. winner: a | b | tie | bad."""
+    mid, winner = str(body.get("message_id") or ""), body.get("winner")
+    fut = _ab_waits.get(mid)
+    if winner not in duel.WINNERS:
+        raise HTTPException(400, "winner must be a, b, tie or bad")
+    if fut is None or fut.done():
+        raise HTTPException(404, "No duel is waiting for a pick")
+    fut.set_result(winner)
+    return {"ok": True}
+
+
+@app.get("/model-votes")
+def get_model_votes() -> dict[str, Any]:
+    """Head-to-head record per model from the duels the user judged: wins, losses, ties, win rate, Elo, mean latency."""
+    return model_votes.standings()
+
+
+@app.delete("/model-votes")
+def reset_model_votes() -> dict[str, Any]:
+    model_votes.reset()
+    return {"ok": True}
 
 
 @app.post("/conversations/{id}/chat")

@@ -223,6 +223,19 @@ def _coding_session_events(c: sqlite3.Connection) -> None:
     c.execute("CREATE INDEX IF NOT EXISTS idx_coding_session_events ON coding_session_events(session_id, seq)")
 
 
+def _model_votes(c: sqlite3.Connection) -> None:
+    """model_votes (duel.py): one row per developer-mode model duel the user judged. winner: a | b | tie | bad."""
+    c.execute("""CREATE TABLE IF NOT EXISTS model_votes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at REAL NOT NULL,
+      conversation_id TEXT,
+      model_a TEXT NOT NULL,
+      model_b TEXT NOT NULL,
+      winner TEXT NOT NULL CHECK (winner IN ('a','b','tie','bad')),
+      prompt_excerpt TEXT NOT NULL DEFAULT '',
+      a_ms INTEGER, b_ms INTEGER, a_tokens INTEGER, b_tokens INTEGER)""")
+
+
 def _sticky_notes_into_docs(c: sqlite3.Connection) -> None:
     """Sticky notes become docs. Each note row turns into a doc with the SAME id (so a space window keeps its
     ref_id), titled from its first line (docs.title_from_body), body, project and timestamps kept, filed at the
@@ -631,6 +644,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (35, "coding_session_base", _coding_session_base),
     (36, "drop_unused_tables_and_settings", _drop_unused_tables_and_settings),
     (37, "coding_session_events", _coding_session_events),
+    (38, "model_votes", _model_votes),
 ]
 
 

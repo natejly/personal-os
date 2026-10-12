@@ -17,7 +17,7 @@ import type {
   RunChanges, RunUndoResult,
   BackupInfo, DataOverview, ShellJobInfo, ShellJobTail, TelegramStatus
 } from '@shared/types'
-import type { CodingSession, CodingSessionDiff, CodingSessionEvent, ShipChecklist } from '@shared/types'
+import type { CodingSession, CodingSessionDiff, CodingSessionEvent, DuelWinner, ModelStanding, ShipChecklist } from '@shared/types'
 import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
 import { ApiError } from './apiError'
 import type { ChatRunChanges } from './deskFiles'
@@ -597,7 +597,11 @@ export const api = {
     exportMd: (id: string) => req<{ filename: string; text: string }>(`/skills/${id}/export`)
   },
   /** Starts the reply as a background task and returns at once; watch it with `chatStream(convId, seq)`. Throws a 409 carrying a `RunConflict` when that conversation already has a live run. */
-  chat: (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string; attachments?: string[] }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }, CONTROL_TIMEOUT_MS),
+  chat: (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string; attachments?: string[]; ab_model?: string }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }, CONTROL_TIMEOUT_MS),
+  /** Developer mode: settle the model duel a running reply waits on. */
+  abPick: (convId: string, messageId: string, winner: DuelWinner) => req<{ ok: boolean }>(`/conversations/${convId}/ab/pick`, { method: 'POST', body: json({ message_id: messageId, winner }) }, CONTROL_TIMEOUT_MS),
+  modelVotes: () => req<{ votes: number; models: ModelStanding[] }>('/model-votes'),
+  resetModelVotes: () => req<{ ok: boolean }>('/model-votes', { method: 'DELETE' }),
   /** Injects a user message into a live run (steering). Throws a 409 when nothing is running. */
   steer: (convId: string, content: string, attachments?: string[]) => req<{ ok: boolean; run_id: string; message: Message }>(`/conversations/${convId}/steer`, { method: 'POST', body: json(attachments?.length ? { content, attachments } : { content }) }, CONTROL_TIMEOUT_MS),
   runs: (conversationId?: string) => req<RunInfo[]>('/runs' + (conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : ''), undefined, CONTROL_TIMEOUT_MS),

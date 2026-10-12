@@ -132,8 +132,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "homeWidgets": {},
     "hiddenViews": [],
     "pickerModels": [],  # model ids the picker lists; [] = every keyed provider's preset models
-    # Rows hidden from the sidebar only (home, docs, spaces, projects, jobs); they stay reachable everywhere else.
-    "sidebarHidden": [],
+    # Rows hidden from the sidebar only; they stay reachable everywhere else. Default: only Files, Lists, Calendar, Library, Jobs, Canvases and Projects show.
+    "sidebarHidden": ["mail", "health"],
     # {view: "sidebar" | "apps"}; missing = the module's own default placement.
     # Bump when the default-off set changes so existing DBs pick up the change once.
     "modulesDefault": 5,

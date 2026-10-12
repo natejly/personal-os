@@ -290,7 +290,7 @@ export default function SettingsModal(): JSX.Element {
   /** A sidebar row on or off: saved at once, and the app is not left parked on a view that just went away. */
   const setRowShown = async (v: View, on: boolean): Promise<void> => {
     try {
-      await saveEarly({ hiddenViews: [...hidden.filter((x) => x !== v), ...(on ? [] : [v])] })
+      await saveEarly({ hiddenViews: [...hidden.filter((x) => x !== v), ...(on ? [] : [v])], ...(on ? { sidebarHidden: (draft.sidebarHidden ?? []).filter((x) => x !== v) } : {}) })
       if (!on && view === v) setView('chat')
     } catch (e) { toast((e as Error).message, 'error') }
   }
@@ -717,7 +717,7 @@ export default function SettingsModal(): JSX.Element {
                 {navEntries().map((e) => (
                   <label key={e.view} className="toggle-row">
                     <span className="toggle-text"><b>{e.label}</b></span>
-                    <input type="checkbox" aria-label={e.label} checked={!hidden.includes(e.view)} onChange={(ev) => void setRowShown(e.view, ev.target.checked)} /><span className="switch" />
+                    <input type="checkbox" aria-label={e.label} checked={!hidden.includes(e.view) && !(draft.sidebarHidden ?? []).includes(e.view)} onChange={(ev) => void setRowShown(e.view, ev.target.checked)} /><span className="switch" />
                   </label>
                 ))}
                 {([['spaces', 'Canvases'], ['projects', 'Projects']] as const).map(([k, label]) => (

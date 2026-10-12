@@ -75,7 +75,7 @@ export async function withGrain(opts, fn) {
   const g = await launchApp(opts)
   try { return await fn(g) } finally { await g.close() }
 }
-export const ALL_VIEWS_ON = { hiddenViews: [], sidebarHidden: [] }
+export const ALL_VIEWS_ON = { hiddenViews: [], sidebarHidden: [] }  // every row visible; the default now hides Mail and Health
 
 import { _electron as electron } from '@playwright/test'
 import { execFileSync } from 'node:child_process'

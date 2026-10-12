@@ -332,7 +332,7 @@ async def card(env: Env, call_id: str = "call-1", **kw: Any) -> tuple[int, dict[
 @case
 async def test_approval_card_has_buttons_and_no_secrets(env: Env) -> None:
     code, p = await card(env, args={"to": "a@b.co", "api_key": "sk-abcdefghijklmnopqrstuvwxyz123456"})
-    assert p["chat_id"] == OWNER and p["text"].startswith(f"Approval needed [{code}]: send_email — external action\n")
+    assert p["chat_id"] == OWNER and p["text"].startswith(f"Approval needed [{code}]: Send email — external action\n")
     assert "to=a@b.co" in p["text"] and "sk-abcdefghijklmnopqrstuvwxyz123456" not in p["text"]
     assert p["reply_markup"] == {"inline_keyboard": [[{"text": "Approve", "callback_data": f"ap:{code}"},
                                                       {"text": "Deny", "callback_data": f"dn:{code}"}]]}
@@ -439,7 +439,7 @@ async def test_cards_nobody_waits_on_and_other_chats_are_not_announced(env: Env)
     env.settings["telegramNotifyLongRuns"] = True  # everything is announced now, but the orphan still is not
     env.bridge.on_run_change(env.run())
     await until(lambda: env.of("sendMessage"))
-    assert len(env.of("sendMessage")) == 1 and "send_email" in env.sent()[0]
+    assert len(env.of("sendMessage")) == 1 and "Send email" in env.sent()[0]
 
 
 @case
@@ -448,7 +448,7 @@ async def test_app_only_tools_point_at_the_app(env: Env) -> None:
     await env.feed()
     env.bridge.on_run_change(env.run())
     await until(lambda: env.sent())
-    assert env.sent() == ["propose_plan is waiting in Grain. Open the app to answer."]
+    assert env.sent() == ["Propose a plan is waiting in Grain. Open the app to answer."]
     assert "reply_markup" not in env.of("sendMessage")[0]
     env.bridge.on_run_change(env.run())
     await asyncio.sleep(0.05)

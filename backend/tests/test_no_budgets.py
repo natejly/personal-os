@@ -275,7 +275,7 @@ async def stream_once(settings: dict[str, Any]) -> None:
     ("http://localhost:4000", {"max_output_tokens": 64000}, None),            # a proxy: never sent, even when known
     ("https://api.openai.com/v1", {"max_output_tokens": 64000}, None),
     ("https://api.anthropic.com/v1/", {"max_output_tokens": 64000}, 64000),   # required there, and the model's own maximum
-    ("https://api.anthropic.com/v1/", {}, None),                              # unknown maximum: nothing of ours is invented
+    ("https://api.anthropic.com/v1/", {}, 64000),                             # unknown maximum: the required field still goes, at llm.ANTHROPIC_FALLBACK_CAP
 ])
 def test_max_tokens_only_where_the_provider_requires_it(monkeypatch: pytest.MonkeyPatch, base: str, caps: dict[str, Any], expect: int | None) -> None:
     monkeypatch.setattr(llm, "caps_lookup", lambda m: caps)

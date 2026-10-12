@@ -9285,6 +9285,8 @@ def get_desk(id: str) -> dict[str, Any]:
     # The approved plan when there is one; otherwise the newest proposal, so a plan still waiting on
     # the user is visible (and answerable) in the Plan tab rather than "No plan yet".
     plan = (plans.get(desk["plan_id"]) if desk.get("plan_id") else None) or plans.for_desk(id) or plans.latest_for_desk(id)
+    if plan and plan.get("status") == "superseded":
+        plan = None  # `/clear` retired it: every view that reads desk.plan shows none; the rows stay as history
     # Every card this desk is waiting on, live or parked: the desk pane answers them in place, so a
     # desk blocked on an approval does not have to be hunted down in its transcript.
     waiting = [{**a, "live": a["call_id"] in _approvals} for a in run_store.approvals("pending", desk_id=id)

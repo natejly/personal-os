@@ -432,6 +432,7 @@ def test_clear_supersedes_the_desk_plan() -> None:
     check(appmod.plans.for_desk(desk["id"]) is not None, "the desk has an approved plan before /clear")
     appmod.clear_context(cid)
     check(appmod.plans.for_desk(desk["id"]) is None, "no active desk plan, so no block is re-injected")
+    check(appmod.get_desk(desk["id"])["plan"] is None, "the desk payload carries no plan")
     check(appmod.plans.get(p["plan_id"])["status"] == "superseded", "the plan row stays as history")
 
 

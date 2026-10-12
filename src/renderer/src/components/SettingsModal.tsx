@@ -483,7 +483,7 @@ export default function SettingsModal(): JSX.Element {
                 <Switch title="Retry blocked pages through a reader service" help="For pages that are blocked or need JavaScript. The reader service sees the page address." checked={draft.readerFallback !== false} onChange={(readerFallback) => patch({ readerFallback })} />
               </Sec>
               <Sec id="texting">
-                <h4>Texting</h4>
+                <h4>Telegram bot</h4>
                 <TelegramSettings draft={draft} patch={patch} />
               </Sec>
             </section>}

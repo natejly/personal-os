@@ -11,13 +11,14 @@ import { citeLabel, openCite } from '../lib/remarkCites'
 import { DEFAULT_EFFORT, type ContextMeter, type ContextUsed, type ConversationSettings, type ConversationUsage } from '@shared/types'
 import { fmtCost, usageLine } from '../lib/chatMeta'
 import { compactNow } from '../lib/compact'
+import { humanizeTaintSources } from '../lib/taintSources'
 
-/** `fix` is a link to the Settings tab that turns this source on, shown under the hint. */
+/** The hint is a tooltip on the row; `fix` is a link to the Settings tab that turns this source on, kept visible beside the label. */
 function Toggle({ label, hint, value, onChange, icon, disabled, fix }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element; disabled?: boolean; fix?: { label: string; open: () => void } }): JSX.Element {
   return (
-    <label className="toggle-row">
+    <label className="toggle-row compact" title={hint}>
       <span className="toggle-icon">{icon}</span>
-      <span className="toggle-text"><b>{label}</b><small>{hint}</small>{fix && <button className="link small" onClick={(e) => { e.preventDefault(); fix.open() }}>{fix.label}</button>}</span>
+      <span className="toggle-text"><b>{label}</b>{fix && <button className="link small" onClick={(e) => { e.preventDefault(); fix.open() }}>{fix.label}</button>}</span>
       <input type="checkbox" aria-label={label} checked={value} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       <span className="switch" />
     </label>
@@ -297,27 +298,28 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
         <Toggle icon={<Wrench size={14} />} label="Tools" hint={settings.permissionMode === 'allow_all' ? 'Allow everything is on: tools run without asking. Deny rules still apply.' : 'Web, files, memory, graph, todos, Python… Risky actions follow the permission mode in Settings.'} value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
         <Toggle icon={<GraduationCap size={14} />} label="Skills" hint="Skills you approved, added to the context as steps to follow. Candidates are never added." value={cs.useSkills !== false} onChange={(v) => void setChatSettings({ useSkills: v }, conversationId)} />
         <Toggle icon={<Share2 size={14} />} label="Workspace map" hint="A short overview of what exists (memory, files, projects) and today's state, so the assistant knows where to look. Sections are chosen in Settings → Memory." value={cs.useMap !== false} onChange={(v) => void setChatSettings({ useMap: v }, conversationId)} fix={{ label: 'Choose sections in Settings → Memory', open: () => openSettings('memory') }} />
-        {convo && (
+        {(convo || cs.useTools) && (
           <div className="ctx-tools">
-            <button className="link small" onClick={() => void induceSkill(convo.id)}>Save this chat as a skill…</button>
-            <span className="muted small"> Waits in Library → Skills until you approve it.</span>
+            {convo && <button className="link small" title="Waits in Library → Skills until you approve it." onClick={() => void induceSkill(convo.id)}>Save this chat as a skill…</button>}
+            {cs.useTools && <button className="link small" aria-expanded={toolsOpen} onClick={() => setToolsOpen((o) => !o)}>{toolsOpen ? 'Hide per-tool overrides' : 'Per-tool overrides…'}</button>}
           </div>
         )}
-        {cs.useTools && (
-          <div className="ctx-tools">
-            <button className="link small" onClick={() => setToolsOpen((o) => !o)}>{toolsOpen ? 'hide per-tool overrides' : 'per-tool overrides…'}</button>
-            {toolsOpen && <ToolOverrides value={cs.tools ?? {}} onChange={(tools) => void setChatSettings({ tools }, conversationId)} effectiveBase={projectBase} compact />}
+        {cs.useTools && toolsOpen && (
+          <div className="ctx-tools-panel">
+            <ToolOverrides value={cs.tools ?? {}} onChange={(tools) => void setChatSettings({ tools }, conversationId)} effectiveBase={projectBase} compact />
           </div>
         )}
-        {convo && cs.tainted && (
-          <div className="muted small" style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 0 4px 24px' }}>
-            <ShieldAlert size={14} style={{ flexShrink: 0, marginTop: 2 }} />
-            <span>
-              This chat has read untrusted content{cs.taint_sources?.length ? ` (${cs.taint_sources.join(', ')})` : ''}. Mail, web fetches, saving memories, and cancelling a queued send ask first. Until you clear this, auto-learn reads only your own messages, never the replies or what they read. Clear also stops document excerpts in this chat until you turn them back on. If a library file was copied into the sandbox, clear resets that sandbox too.
-              <button className="link small" onClick={() => void setChatSettings({ tainted: false, taint_sources: [], useDocuments: false })}>clear</button>
-            </span>
-          </div>
-        )}
+        {convo && cs.tainted && (() => {
+          const names = humanizeTaintSources(cs.taint_sources)
+          const full = `${names.length ? `Sources: ${names.join(', ')}. ` : ''}Mail, web fetches, saving memories, and cancelling a queued send ask first. Until you clear this, auto-learn reads only your own messages, never the replies or what they read. Clear also stops document excerpts in this chat until you turn them back on. If a library file was copied into the sandbox, clear resets that sandbox too.`
+          return (
+            <div className="ctx-taint" title={full}>
+              <ShieldAlert size={14} />
+              <span className="ctx-taint-text">Read untrusted content{names.length ? ` from ${names.join(', ')}` : ''}. Risky actions ask first.</span>
+              <button className="ghost-btn sm" onClick={() => void setChatSettings({ tainted: false, taint_sources: [], useDocuments: false })}>Clear</button>
+            </div>
+          )
+        })()}
       </section>
 
       <div className="ctx-tabs">

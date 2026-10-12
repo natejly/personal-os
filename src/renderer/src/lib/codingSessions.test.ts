@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { CodingSession, CodingSessionEvent } from '@shared/types'
-import { codingNoticeText, codingTransition, eventSummary, formatElapsed, isStepEvent, latestActivity, mergeCodingEvents, pathBase, splitSessions } from './codingSessions'
+import { codingNoticeText, codingTransition, eventSummary, formatElapsed, isStepEvent, latestActivity, mergeCodingEvents, pathBase, plainExcerpt, splitSessions } from './codingSessions'
 
 const sess = (over: Partial<CodingSession> = {}): CodingSession => ({
   id: 's1', agent: 'claude', name: 'Fix tests', status: 'working', attention: 'working', detail: null, repo_path: '/r', worktree: '/r/.wt/fix-tests',
@@ -68,4 +68,9 @@ test('splitSessions puts live (and blocked) first and caps the settled ones', ()
   const { live, recent } = splitSessions(rows, 1)
   assert.deepEqual(live.map((c) => c.id), ['c', 'b'])
   assert.deepEqual(recent.map((c) => c.id), ['d'])
+})
+
+test('plainExcerpt strips markdown noise to one line', () => {
+  assert.equal(plainExcerpt('## Changes\n\n- **Added** `foo` to [bar](http://x)\n- fixed\n```\ncode\n```\n'), 'Changes Added foo to bar fixed')
+  assert.equal(plainExcerpt(null), '')
 })

@@ -295,7 +295,8 @@ export function isFoldable(t: ToolEvent, hasCard: (name: string) => boolean): bo
  * (doc diffs, anything with an Undo button).
  */
 export function staysVisible(t: ToolEvent): boolean {
-  return (!!t.pending && !!t.needs_approval) || !!t.error || !!t.blocked || !!t.breaker || t.name === 'doc_edit'
+  return (!!t.pending && !!t.needs_approval) || !!t.error || !!t.blocked || !!t.breaker || t.name === 'doc_edit' || QUESTION_TOOLS.has(t.name)
+    || !!t.show // its row is how a closed side panel is reopened
     || !!t.undo?.snapshot_id || !!t.undo?.external_id
 }
 

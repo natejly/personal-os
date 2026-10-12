@@ -1,4 +1,5 @@
 import { test } from './fixtures.mjs'
+import { openContextPanel } from './helpers/chat.mjs'
 import { expect, realErrors, newChat } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 120_000 })
 
@@ -30,7 +31,12 @@ test('the Coding sessions list shows a stubbed session; Stop posts to /stop and 
     return route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify({ sessions: [row] }) })
   })
   await newChat(page)
-  await page.getByRole('button', { name: 'Toggle context panel' }).click()
+  // The workspace panel needs a saved chat, so give it a first message.
+  const box = page.getByRole('textbox', { name: 'Message' })
+  await box.fill('!!reply ok')
+  await box.press('Enter')
+  await expect(page.locator('.msg.assistant').last()).toContainText('ok', { timeout: 30_000 })
+  await openContextPanel(page)
   const section = page.locator('.ctx-section', { hasText: 'Coding sessions' })
   await expect(section).toContainText('Fix the flaky test')
   await expect(section).toContainText('Claude Code')
@@ -39,7 +45,7 @@ test('the Coding sessions list shows a stubbed session; Stop posts to /stop and 
   await expect(section.getByRole('log')).toContainText('tests/flaky.py')
   await section.getByRole('button', { name: 'Stop', exact: true }).click()
   await expect.poll(() => posts, { timeout: 30_000 }).toEqual(['/coding-sessions/cs1/stop'])
-  await expect(section).toContainText('stopped')
+  await expect(section.getByRole('img', { name: /stopped/i })).toBeVisible() // the status is the row's dot now
   await expect(section.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0)
   expect(realErrors(grain)).toEqual([])
 })

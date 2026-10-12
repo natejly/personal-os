@@ -24,6 +24,8 @@ const live = (attrs: Record<string, string>) => {
   const a = { ...attrs }
   return {
     a,
+    textContent: '',
+    hasAttribute: (k: string) => k in a,
     getAttribute: (k: string) => a[k] ?? null,
     setAttribute: (k: string, v: string) => void (a[k] = v),
     removeAttribute: (k: string) => void delete a[k],
@@ -33,7 +35,7 @@ const live = (attrs: Record<string, string>) => {
 test('hover then mouseout leaves the original title in place', () => {
   const e = live({ title: 'New chat (⌘N)' })
   lift(e)
-  assert.deepEqual(e.a, { 'data-tip': 'New chat (⌘N)' })
+  assert.deepEqual(e.a, { 'data-tip': 'New chat (⌘N)', 'aria-label': 'New chat (⌘N)', 'data-tip-label': '' }) // the name survives the lift
   restore(e)
   assert.deepEqual(e.a, { title: 'New chat (⌘N)' })
 })

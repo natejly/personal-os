@@ -31,7 +31,7 @@ test('autonomous desk: a tool set to ask shows a card (from the tool mode, not t
   const cards = page.locator('.messages')
   await expect(cards.getByRole('button', { name: /^(Deny|Reject)$/ }).first()).toBeVisible({ timeout: 60_000 })
   expect(await deskFile(grain, desk.id, 'outputs/report.md')).not.toBe(200)
-  await expect(strip(page)).toContainText('Approval needed')
+  await expect(strip(page)).toHaveCount(0)
   await expect(chatRow(page, 'Careful').locator('.attn-dot')).toHaveAttribute('aria-label', /Approval needed/)
   llm.push({ text: 'ok, not writing it' })
   await cards.getByRole('button', { name: /^(Deny|Reject)$/ }).first().click()
@@ -59,12 +59,12 @@ test('autonomous desk: approving a tool-mode card writes the file once', async (
 test('review: accept into a new doc, verified, the desk closes out and the chat stays', async ({ grain }) => {
   const { desk } = await reviewDesk(grain, 'Reviewed')
   const { page } = grain
-  await expect(strip(page)).toContainText('Ready to review')
+  await expect(chatRow(page, 'Reviewed').locator('.attn-dot')).toHaveAttribute('aria-label', /Needs you/)
   await expect(panel(page).locator('.desk-review-head')).toContainText('1 output')
   await panel(page).getByRole('button', { name: /Accept selected/ }).click()
   await expect(panel(page).locator('.desk-output .desk-verified').first()).toBeVisible()
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).toBe('done')
-  await expect(strip(page)).toContainText('Done')
+  await expect(strip(page)).toHaveCount(0)
   await expect(chatRow(page, 'Reviewed')).toBeVisible()
   await expect(chatRow(page, 'Reviewed').locator('.attn-dot')).toHaveCount(0) // done: nothing to flag
   expect(realErrors(grain)).toEqual([])

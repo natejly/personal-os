@@ -313,8 +313,8 @@ test('an assistant email stops at the editable card with its attachment; nothing
   const fd = new FormData()
   fd.append('file', new Blob(['quarterly numbers']), 'numbers.txt')
   const doc = await (await fetch(`${grain.backend.url}/documents`, { method: 'POST', headers: { Authorization: `Bearer ${grain.token}` }, body: fd })).json()
-  // Allow-all mode runs everything else unasked; an email still stops at the card, and no rule or grant lifts it.
-  await grain.api('/settings', { method: 'PUT', body: { toolDeferAbove: 0, permissionMode: 'allow_all' } })
+  // Auto mode runs the rest on its own; an email still stops at the card, and no rule or grant lifts it. (Allow everything lifts every gate.)
+  await grain.api('/settings', { method: 'PUT', body: { toolDeferAbove: 0, permissionMode: 'auto' } })
   await page.reload()
   await newChat(page)
   const args = { to: 'ann@example.com', cc: 'bo@example.com', subject: 'Numbers', body: 'Numbers attached.', attachments: [doc.id] }

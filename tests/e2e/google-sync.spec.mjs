@@ -8,13 +8,13 @@ const toast = (page, text) => page.locator('.toast', { hasText: text })
 
 async function openSettingsTab(page, tab) {
   await page.locator('.settings-btn').click()
-  await page.getByRole('tab', { name: tab, exact: true }).click()
+  await page.locator('#settings-tab-' + tab.toLowerCase()).click()
 }
 // The switch is drawn over a hidden checkbox, and the checkbox only changes once the backend answers.
 async function syncToggleOff(page) {
   const t = page.getByLabel('Sync Todos with Google Tasks')
   await expect(t).toBeChecked() // sync is on by default; also proves the status has loaded
-  await t.click({ force: true })
+  await t.locator('xpath=following-sibling::span[contains(@class,"switch")]').click()
   await expect(t).not.toBeChecked()
 }
 async function sendChat(page, text) {
@@ -51,7 +51,7 @@ test.describe('tasks sync', () => {
     await expect.poll(async () => (await grain.api('/integrations/google/tasks-sync')).config.enabled).toBe(false)
     const p2 = await grain.relaunch()
     await p2.locator('.settings-btn').click()
-    await p2.getByRole('tab', { name: 'Integrations', exact: true }).click()
+    await p2.locator('#settings-tab-integrations').click()
     await expect(p2.getByLabel('Sync Todos with Google Tasks')).not.toBeChecked()
   })
 

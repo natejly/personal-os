@@ -24,6 +24,8 @@ export const lift = (el: Element) => {
   if (t === null) return
   el.setAttribute('data-tip', t)
   el.removeAttribute('title')
+  // an icon-only element named by its title keeps its accessible name while the title is parked
+  if (!el.hasAttribute('aria-label') && !(el.textContent ?? '').trim()) { el.setAttribute('aria-label', t); el.setAttribute('data-tip-label', '') }
 }
 export const restore = (el: Element) => {
   const t = el.getAttribute('data-tip')
@@ -31,6 +33,7 @@ export const restore = (el: Element) => {
   // a title React set in the meantime wins over the parked one
   if (el.getAttribute('title') === null) el.setAttribute('title', t)
   el.removeAttribute('data-tip')
+  if (el.hasAttribute('data-tip-label')) { el.removeAttribute('aria-label'); el.removeAttribute('data-tip-label') }
 }
 
 export function installHoverTips(doc: Document = document): () => void {

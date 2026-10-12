@@ -6,7 +6,7 @@ export const openFiles = async (page) => {
 export const body = (page) => page.locator('textarea.md-input')
 /** Bring the editor up (segmented control, Editor only) unless a doc is already showing it. */
 export const editDoc = async (page) => {
-  if (!(await body(page).count())) await page.locator('.seg button[title="Editor only"]').first().click()
+  if (!(await body(page).count())) await page.getByRole('button', { name: 'Editor only', exact: true }).click()
   await body(page).waitFor()
 }
 export const titleBox = (page) => page.getByLabel('Title', { exact: true })

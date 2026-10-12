@@ -3,117 +3,69 @@ import { actionsBtn, enterCanvas, menuClick, sleep, spaces } from './helpers/spa
 
 test.describe.configure({ timeout: 300_000 })
 
-const rowOf = (page, name) => page.locator('.space-row').filter({ hasText: name })
+// The UI shows one canvas ("Canvas 1", the first). Extra canvases can still exist in the API; the sidebar draws only the
+// first row, and there is no create / rename / switch UI.
+const ROW = '.space-row'
 
-test('create / rename / switch / delete a space from the sidebar', async ({ grain }) => {
+test('the sidebar shows one canvas row; its menu locks and unlocks it', async ({ grain }) => {
   const { page, api } = grain
   page.on('dialog', (d) => void d.accept())
-  await enterCanvas(grain)
-
-  await page.getByRole('button', { name: 'New space', exact: true }).first().click()
-  await expect.poll(async () => (await spaces(grain)).length).toBe(2)
-  const [s1, s2] = await spaces(grain)
-  await expect(page.locator('.space-row')).toHaveCount(2)
-  // the new one is active
-  await expect(page.locator('.space-tab.active')).toContainText(s2.name)
-
-  // rename through the row menu -> Rename -> type -> Enter
-  await actionsBtn(page, s2.name).click()
-  await page.getByRole('menuitem', { name: 'Rename' }).click()
-  const input = page.locator('.space-row input')
-  await input.fill('Research')
-  await input.press('Enter')
-  await expect.poll(async () => (await api('/canvases/' + s2.id)).name).toBe('Research')
-  await expect(page.locator('.space-tab', { hasText: 'Research' })).toBeVisible()
-
-  // Escape cancels a rename, an empty name is ignored
-  await actionsBtn(page, 'Research').click()
-  await page.getByRole('menuitem', { name: 'Rename' }).click()
-  await page.locator('.space-row input').fill('Nope')
-  await page.locator('.space-row input').press('Escape')
-  await expect(rowOf(page, 'Research')).toBeVisible()
-  await actionsBtn(page, 'Research').click()
-  await page.getByRole('menuitem', { name: 'Rename' }).click()
-  await page.locator('.space-row input').fill('   ')
-  await page.locator('.space-row input').press('Enter')
-  expect((await api('/canvases/' + s2.id)).name).toBe('Research')
-
-  // tab double-click rename
-  await page.locator('.space-tab', { hasText: 'Research' }).dblclick()
-  await page.locator('.space-tab input').fill('Deep work')
-  await page.locator('.space-tab input').press('Enter')
-  await expect.poll(async () => (await api('/canvases/' + s2.id)).name).toBe('Deep work')
-
-  // switch by clicking a row, a tab, and ⌃1
-  await rowOf(page, s1.name).click()
-  await expect(page.locator('.space-tab.active')).toContainText(s1.name)
-  await page.locator('.space-tab', { hasText: 'Deep work' }).click()
-  await expect(page.locator('.space-tab.active')).toContainText('Deep work')
-  await menuClick(grain.app, 'Canvas 1')
-  await expect(page.locator('.space-tab.active')).toContainText(s1.name)
-
-  // delete the non-active space
-  await actionsBtn(page, 'Deep work').click()
-  await page.getByRole('menuitem', { name: 'Delete space' }).click()
-  await expect.poll(async () => (await spaces(grain)).length).toBe(1)
-  await expect(page.locator('.space-row')).toHaveCount(1)
-  expect(grain.consoleErrors).toEqual([])
-})
-
-test('deleting the active space falls back, deleting the last one makes a fresh space', async ({ grain }) => {
-  const { page, api } = grain
-  page.on('dialog', (d) => void d.accept())
-  const a = (await spaces(grain))[0]
-  const b = await api('/canvases', { method: 'POST', body: { name: 'B' } })
-  const c = await api('/canvases', { method: 'POST', body: { name: 'C' } })
+  const s = (await spaces(grain))[0]
+  await api('/canvases', { method: 'POST', body: { name: 'Hidden extra' } })
   await page.reload()
   await page.waitForSelector('.sidebar')
   await enterCanvas(grain)
-  await page.locator('.space-tab', { hasText: 'B' }).click()
-  await expect(page.locator('.space-tab.active')).toContainText('B')
-  await actionsBtn(page, 'B').click()
-  await page.getByRole('menuitem', { name: 'Delete space' }).click()
-  await expect.poll(async () => (await spaces(grain)).length).toBe(2)
-  // fell back to a neighbour, canvas still rendered, no blank state
-  await expect(page.locator('.space-tab.active')).toHaveCount(1)
-  await expect(page.locator('.spaces-bar')).toBeVisible()
-
-  for (const n of [a.name, 'C']) {
-    await actionsBtn(page, n).click()
-    await page.getByRole('menuitem', { name: 'Delete space' }).click()
-    await sleep(400)
-  }
-  // never zero spaces: one fresh space appears
-  await expect.poll(async () => (await spaces(grain)).length, { timeout: 10000 }).toBe(1)
+  await expect(page.locator(ROW)).toHaveCount(1)
   await expect(page.locator('.space-tab')).toHaveCount(1)
-  await expect(page.locator('.space-tab.active')).toHaveCount(1)
-  void c
+  await expect(page.locator('.space-tab.active')).toContainText('Canvas 1')
+
+  await actionsBtn(page, 'Canvas 1').click()
+  await page.getByRole('menuitem', { name: 'Lock canvas' }).click()
+  await expect.poll(async () => !!(await api('/canvases/' + s.id)).locked).toBe(true)
+  await actionsBtn(page, 'Canvas 1').click()
+  await page.getByRole('menuitem', { name: 'Unlock canvas' }).click()
+  await expect.poll(async () => !!(await api('/canvases/' + s.id)).locked).toBe(false)
   expect(grain.consoleErrors).toEqual([])
 })
 
-test('two spaces with the same name are both allowed (consistent in UI and API)', async ({ grain }) => {
+test('deleting the canvas falls back to the next one; deleting the last one makes a fresh canvas', async ({ grain }) => {
+  const { page, api } = grain
+  page.on('dialog', (d) => void d.accept())
+  await api('/canvases', { method: 'POST', body: { name: 'B' } })
+  await page.reload()
+  await page.waitForSelector('.sidebar')
+  await enterCanvas(grain)
+  await expect.poll(async () => (await spaces(grain)).length).toBe(2)
+  await actionsBtn(page, 'Canvas 1').click()
+  await page.getByRole('menuitem', { name: 'Delete canvas' }).click()
+  await expect.poll(async () => (await spaces(grain)).length).toBe(1)
+  // fell back to the neighbour, canvas still rendered, no blank state
+  await expect(page.locator('.space-tab.active')).toHaveCount(1)
+  await expect(page.locator('.spaces-bar')).toBeVisible()
+  await expect(page.locator(ROW)).toHaveCount(1)
+
+  await actionsBtn(page, 'Canvas 1').click()
+  await page.getByRole('menuitem', { name: 'Delete canvas' }).click()
+  // never zero canvases: one fresh canvas appears
+  await expect.poll(async () => (await spaces(grain)).length, { timeout: 10000 }).toBe(1)
+  await expect(page.locator('.space-tab')).toHaveCount(1)
+  await expect(page.locator(ROW)).toHaveCount(1)
+  expect(grain.consoleErrors).toEqual([])
+})
+
+test('canvases with the same name are both allowed in the API; the UI still draws one row', async ({ grain }) => {
   const { page, api } = grain
   const a = (await spaces(grain))[0]
   const b = await api('/canvases', { method: 'POST', body: { name: a.name } })
   expect(b.name).toBe(a.name)
+  expect((await spaces(grain)).filter((s) => s.name === a.name)).toHaveLength(2)
   await page.reload()
   await page.waitForSelector('.sidebar')
-  await expect(page.locator('.space-row')).toHaveCount(2)
-  // rename one to the other's name through the UI
-  const c = await api('/canvases', { method: 'POST', body: { name: 'Third' } })
-  await page.reload()
-  await page.waitForSelector('.sidebar')
-  await enterCanvas(grain)
-  await actionsBtn(page, 'Third').click()
-  await page.getByRole('menuitem', { name: 'Rename' }).click()
-  await page.locator('.space-row input').fill(a.name)
-  await page.locator('.space-row input').press('Enter')
-  await expect.poll(async () => (await api('/canvases/' + c.id)).name).toBe(a.name)
-  expect((await spaces(grain)).filter((s) => s.name === a.name)).toHaveLength(3)
+  await expect(page.locator(ROW)).toHaveCount(1)
   expect(grain.consoleErrors).toEqual([])
 })
 
-test('long and odd space names survive the round trip', async ({ grain }) => {
+test('long and odd canvas names survive the round trip in the API and break no layout', async ({ grain }) => {
   const { page, api } = grain
   const odd = ('<b>"x"</b> 😀 ' + 'long '.repeat(60)).trim()
   const c = await api('/canvases', { method: 'POST', body: { name: odd } })
@@ -121,10 +73,9 @@ test('long and odd space names survive the round trip', async ({ grain }) => {
   await page.reload()
   await page.waitForSelector('.sidebar')
   await enterCanvas(grain)
-  await expect(page.locator('.space-row').nth(1)).toBeVisible()
-  // layout still fits: the sidebar row never grows wider than the sidebar
+  await expect(page.locator(ROW).first()).toBeVisible()
   const sb = await page.locator('.sidebar').boundingBox()
-  const rb = await page.locator('.space-row').nth(1).boundingBox()
+  const rb = await page.locator(ROW).first().boundingBox()
   expect(rb.x + rb.width).toBeLessThanOrEqual(sb.x + sb.width + 1)
   expect(await page.locator('.spaces-bar').evaluate((e) => e.scrollWidth <= e.clientWidth + 1)).toBe(true)
 })
@@ -143,7 +94,7 @@ test('relaunch restores spaces, active layout and lock', async ({ grain }) => {
   const win = after.windows.find((x) => x.id === w.id)
   expect([win.x, win.y, win.w, win.h]).toEqual([123, 77, 301, 222])
   await expect(grain.page.locator(`[data-window-id="${w.id}"]`)).toBeVisible()
-  await expect(grain.page.locator('button[title^="Unlock space"]')).toBeVisible()
+  await expect(grain.page.locator('button[title^="Unlock canvas"]')).toBeVisible()
   // plane transform restored
   const tf = await grain.page.locator('.plane, [class*=plane]').first().evaluate((e) => e.style.transform).catch(() => '')
   if (tf) expect(tf).toContain('scale(1.25)')
@@ -159,9 +110,9 @@ test('lock blocks add / close / move; unlock restores them', async ({ grain }) =
   await enterCanvas(grain)
   const win = page.locator(`[data-window-id="${w.id}"]`)
   await expect(win).toBeVisible()
-  await menuClick(app, 'Lock / Unlock Space')
+  await menuClick(app, 'Lock / Unlock Canvas')
   await expect.poll(async () => !!(await api('/canvases/' + s.id)).locked).toBe(true)
-  await expect(page.locator('button[title="Add widget"], button[title^="Space locked"]').first()).toBeDisabled()
+  await expect(page.locator('button[title="Add widget"], button[title^="Canvas locked"]').first()).toBeDisabled()
   await expect(win.locator('.win-close')).toHaveCount(0)
   const grip = win.locator('.win-move')
   const b = await grip.boundingBox()
@@ -180,7 +131,7 @@ test('lock blocks add / close / move; unlock restores them', async ({ grain }) =
   await sleep(900)
   expect((await api('/canvases/' + s.id)).zoom).toBe(1)
   // the API-level "unlock" via shortcut
-  await menuClick(app, 'Lock / Unlock Space')
+  await menuClick(app, 'Lock / Unlock Canvas')
   await expect.poll(async () => !!(await api('/canvases/' + s.id)).locked).toBe(false)
   await expect(win.locator('.win-close')).toHaveCount(1)
   expect(grain.consoleErrors).toEqual([])

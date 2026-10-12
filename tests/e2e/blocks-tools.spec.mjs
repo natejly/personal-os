@@ -123,7 +123,7 @@ test.describe('trace, diff and outcomes', () => {
     const chip = page.getByTitle(/Execution trace/)
     await expect(chip).toBeVisible({ timeout: 20_000 })
     await chip.click()
-    const trace = page.locator('.trace')
+    const trace = page.locator('.trace', { has: page.locator('.trace-summary') })
     await expect(trace).toBeVisible()
     await expect(trace.locator('.trace-row').first()).toBeVisible()
     await expect(trace.locator('.trace-summary')).toContainText(/tool/)

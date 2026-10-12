@@ -9,7 +9,7 @@ const SIMPLE = [
 ]
 
 async function addMenu(page) {
-  await page.locator('button[title="Add widget"]').click()
+  await page.getByRole('button', { name: 'Add widget', exact: true }).click() // not by title: hover tips take the title attribute away
   return page.locator('[role=menu]').first()
 }
 

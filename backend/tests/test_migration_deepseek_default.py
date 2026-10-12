@@ -45,8 +45,7 @@ def test_final_model_mapping() -> None:
     assert {t for k, t in providers.TASK_TIERS.items() if k != "chat"} <= {"high", "medium", "low"}
     assert {k for k, t in providers.TASK_TIERS.items() if t == "high"} == {"planning", "draft_skill", "draft_agent"}
     assert repos.DEFAULT_EFFORT == "high"
-    fw = providers.get("fireworks")
-    assert "accounts/fireworks/models/glm-5p3-flash" in fw["models"] and "glm-5.3-flash" in providers.get("litellm")["models"]
+    assert "glm-5.3-flash" in providers.get("litellm")["models"]  # Fireworks' picker set is only its default; the rest comes from the live listing
     assert usage.FIREWORKS_PRICES["glm-5p3-flash"] == {"input": 0.15, "cache_read": 0.03, "output": 0.50}
     assert usage.price_key("glm-5.3-flash") == usage.price_key("accounts/fireworks/models/glm-5p3-flash") == "glm-5p3-flash"
 

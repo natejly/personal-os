@@ -7,10 +7,13 @@ export const TABS = ['General', 'Sidebar', 'Model', 'Models', 'Agents', 'Memory'
 
 export const dialog = (page) => page.getByRole('dialog', { name: 'Settings' })
 
+/** A Settings tab by label. Tabs carry a hint after the label ("Model" + its current model), so match the tab id, not the name. */
+export const tabBtn = (page, label) => dialog(page).locator(`#settings-tab-${label === 'General' ? 'appearance' : label === 'System access' ? 'system' : label.toLowerCase()}`)
+
 export async function openSettings(page, tab) {
   if (!(await dialog(page).count())) await page.locator('.settings-btn').click()
   await expect(dialog(page)).toBeVisible()
-  if (tab) await dialog(page).getByRole('tab', { name: tab }).click()
+  if (tab) await tabBtn(page, tab === 'Appearance' ? 'General' : tab).click()
   return dialog(page)
 }
 
@@ -60,6 +63,12 @@ export function seedJobRuns(grain, n, { status = 'done' } = {}) {
     rows.push(`INSERT INTO agent_runs(run_id,conversation_id,kind,status,input,started_at,updated_at,ended_at) VALUES('seed-run-${i}',NULL,'job','${status}','${input.replace(/'/g, "''")}',${t},${t},${t + 1});`)
   }
   sql(grain, 'BEGIN;' + rows.join('') + 'COMMIT;')
+}
+
+/** Set a settings switch (its checkbox is a 1px hidden input; the visible control is the .switch beside it). Waits for the new state. */
+export async function setToggle(checkbox, on = true) {
+  if ((await checkbox.isChecked()) !== on) await checkbox.locator('xpath=following-sibling::span[contains(@class,"switch")]').click()
+  await expect(checkbox).toBeChecked({ checked: on })
 }
 
 export function seedUsage(grain, n) {

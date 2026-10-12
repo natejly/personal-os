@@ -24,7 +24,7 @@ test('a lone working agent shows no strip; the composer\'s Stop stops it', async
   expect(realErrors(grain)).toEqual([])
 })
 
-test('the strip shows while a background worker is live', async ({ grain }) => {
+test('the Workers card shows while a background worker is live; there is still no strip', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   // the desk delegates; the worker's run and the desk's next request both hang (the queue serves whichever asks first)
@@ -35,8 +35,7 @@ test('the strip shows while a background worker is live', async ({ grain }) => {
   const { desk, chat } = await deskChat(grain, { brief: 'look things up', title: 'Delegator', autonomy: 'ask' })
   await openChat(page, 'Delegator')
   await expect(page.locator('section.worker-panel')).toContainText('Alpha job', { timeout: 60_000 })
-  await expect(strip(page)).toBeVisible()
-  await expect(strip(page)).toContainText(/Working|Planning/)
+  await expect(strip(page)).toHaveCount(0) // the workers card is the only chrome; the desk strip is gone
   await expect.poll(async () => (await grain.api(`/conversations/${chat.id}/workers`)).workers.map((w) => w.status), { timeout: 30_000 })
     .toContain('running')
   await page.screenshot({ path: `${SHOTS}/workers-active.png` })

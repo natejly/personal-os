@@ -4,15 +4,15 @@ import { dialog, openMemory, openSettings } from './helpers/home.mjs'
 const benign = (e) => /ResizeObserver|favicon/i.test(e)
 const noErrors = (grain) => expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
 const row = (page, name) => page.locator('.sidebar .nav-item', { hasText: new RegExp(`^${name}`) })
-/** The Sidebar switches in Settings → Appearance, by row label. */
-const toggle = (page, name) => dialog(page).locator('h4', { hasText: 'Sidebar' }).locator('xpath=following-sibling::div[1]').getByRole('checkbox', { name, exact: true })
+/** The Sidebar switches in Settings → Sidebar, by row label. */
+const toggle = (page, name) => dialog(page).getByRole('checkbox', { name, exact: true })
 
 test('a sidebar row turns off at once with no Save, stays off after a relaunch, and comes back', async ({ grain }) => {
   const { page, api } = grain
   await expect(row(page, 'Lists')).toHaveCount(1)
-  await openSettings(page, 'Appearance')
+  await openSettings(page, 'Sidebar')
   await expect(toggle(page, 'Lists')).toBeChecked()
-  await toggle(page, 'Lists').click({ force: true })
+  await toggle(page, 'Lists').locator('xpath=following-sibling::span[contains(@class,"switch")]').click()
   await expect(toggle(page, 'Lists')).not.toBeChecked()
   await expect(row(page, 'Lists')).toHaveCount(0)
   await expect.poll(async () => (await api('/settings')).hiddenViews).toEqual(['todos'])
@@ -23,9 +23,9 @@ test('a sidebar row turns off at once with no Save, stays off after a relaunch, 
   const p2 = await grain.relaunch()
   await expect(p2.locator('.sidebar').first()).toBeVisible()
   await expect(row(p2, 'Lists')).toHaveCount(0)
-  await openSettings(p2, 'Appearance')
+  await openSettings(p2, 'Sidebar')
   await expect(toggle(p2, 'Lists')).not.toBeChecked()
-  await toggle(p2, 'Lists').click({ force: true })
+  await toggle(p2, 'Lists').locator('xpath=following-sibling::span[contains(@class,"switch")]').click()
   await expect(toggle(p2, 'Lists')).toBeChecked()
   await expect(row(p2, 'Lists')).toHaveCount(1)
   await expect.poll(async () => (await api('/settings')).hiddenViews).toEqual([])

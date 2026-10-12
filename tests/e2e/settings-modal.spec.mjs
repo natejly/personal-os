@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { TABS, dialog, openAdvanced, openSettings, closeSettings, save, setWindowSize } from './helpers/home.mjs'
+import { TABS, setToggle, dialog, tabBtn, openAdvanced, openSettings, closeSettings, save, setWindowSize } from './helpers/home.mjs'
 
 const benign = (e) => /ResizeObserver|Autofocus|favicon/i.test(e)
 const noErrors = (grain) => expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
@@ -8,20 +8,20 @@ const field = (page, label) => dialog(page).getByLabel(label).first()
 test('every settings tab opens and renders cleanly', async ({ grain }) => {
   const { page } = grain
   const bad = []
-  page.on('response', (r) => { if (r.status() >= 500) bad.push(`${r.status()} ${r.url()}`) })
+  page.on('response', (r) => { if (r.status() >= 500) bad.push(`${r.status()} ${r.url()}`); if (r.status() === 409) console.log('409', r.url()) })
   await openSettings(page)
   for (const tab of TABS) {
-    await dialog(page).getByRole('tab', { name: tab }).click()
-    await expect(dialog(page).getByRole('tab', { name: tab })).toHaveAttribute('aria-selected', 'true')
+    await tabBtn(page, tab).click()
+    await expect(tabBtn(page, tab)).toHaveAttribute('aria-selected', 'true')
     await expect(dialog(page).getByRole('tabpanel')).not.toBeEmpty()
     await page.waitForTimeout(250)
   }
   // Arrow keys walk the rail.
-  await dialog(page).getByRole('tab', { name: 'Advanced' }).focus()
+  await tabBtn(page, 'Advanced').focus()
   await page.keyboard.press('ArrowDown')
-  await expect(dialog(page).getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true')
+  await expect(tabBtn(page, 'General')).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('End')
-  await expect(dialog(page).getByRole('tab', { name: 'Advanced' })).toHaveAttribute('aria-selected', 'true')
+  await expect(tabBtn(page, 'Advanced')).toHaveAttribute('aria-selected', 'true')
   await closeSettings(page)
   expect(bad).toEqual([])
   noErrors(grain)
@@ -31,7 +31,7 @@ test('Voice input settings act at once and persist through /voice/config', async
   const { page, api } = grain
   await openAdvanced(page, 'Voice and shortcuts')
   await dialog(page).getByLabel('Transcription').first().selectOption('local')
-  await field(page, 'Tidy dictation with the model').setChecked(true, { force: true })
+  await setToggle(field(page, 'Tidy dictation with the model'), true)
   await expect.poll(async () => api('/voice/config')).toMatchObject({ sttBackend: 'local', dictationCleanup: true })
   await closeSettings(page)
   noErrors(grain)
@@ -42,39 +42,38 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
   // Advanced groups
   await openAdvanced(page, 'Assistant')
   await dialog(page).getByLabel('Standing instructions').fill('Always answer in haiku.')
-  await field(page, 'Name new chats').setChecked(false, { force: true })
-  await openAdvanced(page, 'Desks and workers')
-  await field(page, 'Notify me when a chat finishes').setChecked(false, { force: true })
-  await field(page, 'Notify me about scheduled jobs').setChecked(false, { force: true })
+  await setToggle(field(page, 'Name new chats'), false)
+  await openSettings(page, 'General')
+  await setToggle(field(page, 'Notify me when a chat finishes'), false)
+  await setToggle(field(page, 'Notify me about scheduled jobs'), false)
   await openAdvanced(page, 'Voice and shortcuts')
   await field(page, 'Dictation key').fill('Control+Alt+K')
   await openAdvanced(page, 'Developer')
-  await field(page, 'Developer tools').setChecked(true, { force: true })
+  await setToggle(field(page, 'Developer tools'), true)
   await openSettings(page, 'Memory')
   await dialog(page).locator('summary', { hasText: 'Learning' }).click()
-  await field(page, 'Learn from chats').setChecked(false, { force: true })
-  await field(page, 'Learn how I write').setChecked(false, { force: true })
+  await setToggle(field(page, 'Learn from chats'), false)
+  await setToggle(field(page, 'Learn how I write'), false)
   await openAdvanced(page, 'Search')
-  await field(page, 'Smarter memory search').setChecked(false, { force: true })
+  await setToggle(field(page, 'Smarter memory search'), false)
   await openAdvanced(page, 'Approvals')
-  await dialog(page).getByRole('button', { name: 'Accept all', exact: true }).click()
-  await field(page, 'Plan first').selectOption('auto')
-  await openAdvanced(page, 'Files and web')
+  await dialog(page).getByRole('button', { name: 'Full agentic editing', exact: true }).click()
+  await openSettings(page, 'Integrations')
   await field(page, 'Your own search server').fill('http://localhost:8080')
   await openSettings(page, 'Integrations')
-  await field(page, 'Hold outgoing email so I can undo').setChecked(false, { force: true })
+  await setToggle(field(page, 'Hold outgoing email so I can undo'), false)
   // Model
-  await dialog(page).getByRole('tab', { name: 'Model' }).click()
+  await tabBtn(page, 'Model').click()
   await field(page, 'Chat model').fill('mock-chat-2')
-  await field(page, 'Helper model').fill('mock-chat-2')
+  await field(page, 'Low tier').fill('mock-chat-2')
   await save(page)
 
   const check = async () => {
     const s = await api('/settings')
     expect(s).toMatchObject({
       chatNotify: false, notifyJobs: false, systemPrompt: 'Always answer in haiku.', dictationChord: 'Control+Alt+K', devTools: true,
-      autoLearn: false, autoTitle: false, learnStyle: false, hybridRetrieval: false, extractionModel: 'mock-chat-2',
-      docEditMode: 'apply', planMode: 'auto', searxngUrl: 'http://localhost:8080', defaultModel: 'mock-chat-2'
+      autoLearn: false, autoTitle: false, learnStyle: false, hybridRetrieval: false, modelLow: 'mock-chat-2',
+      docEditMode: 'apply', searxngUrl: 'http://localhost:8080', defaultModel: 'mock-chat-2'
     })
     expect(s.gmailSendHold.enabled).toBe(false)
   }
@@ -86,8 +85,8 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
   await expect(field(p2, 'Name new chats')).not.toBeChecked()
   await expect(dialog(p2).getByLabel('Standing instructions')).toHaveValue('Always answer in haiku.')
   await openAdvanced(p2, 'Approvals')
-  await expect(dialog(p2).getByRole('button', { name: 'Accept all', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await dialog(p2).getByRole('tab', { name: 'Model' }).click()
+  await expect(dialog(p2).getByRole('button', { name: 'Full agentic editing', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await tabBtn(p2, 'Model').click()
   await expect(field(p2, 'Chat model')).toHaveValue('mock-chat-2')
   await closeSettings(p2)
   noErrors(grain)
@@ -139,7 +138,7 @@ test('invalid values are clamped or rejected without breaking the modal', async 
   // The API refuses what the form cannot produce, and the context window the form no longer offers still has a range.
   for (const body of [
     { contextWindow: 5 }, { contextWindow: 99999999 }, { contextWindow: null }, { compactKeepRecent: 99999 }, { delegationAfterRounds: 'x' },
-    { systemPrompt: null }, { tools: 'x' }, { sandboxRuntime: 'rm -rf' }, { retrievalMode: 'zzz' }, { planMode: 5 }
+    { systemPrompt: null }, { tools: 'x' }, { retrievalMode: 'zzz' }
   ]) {
     const r = await api('/settings', { method: 'PUT', body, raw: true })
     expect(r.status, JSON.stringify(body)).toBeGreaterThanOrEqual(400)
@@ -185,7 +184,7 @@ test('empty model and garbage base URL do not break the modal or the app', async
 test('model list comes from the provider and leaves the embedding model out of chat choices', async ({ grain }) => {
   const { page } = grain
   await openSettings(page, 'Model')
-  await expect(dialog(page).getByRole('tab', { name: 'Model' })).toBeVisible()
+  await expect(tabBtn(page, 'Model')).toBeVisible()
   await expect.poll(async () => page.locator('#model-options option').evaluateAll((os) => os.map((o) => o.value))).toEqual(expect.arrayContaining(['mock-chat', 'mock-chat-2']))
   const values = await page.locator('#model-options option').evaluateAll((os) => os.map((o) => o.value))
   expect(values).not.toContain('mock-embed')
@@ -276,7 +275,7 @@ test('a 200 KB system prompt saves and reloads; junk in view toggles cannot bric
   }
   const p2 = await grain.relaunch()
   await expect(p2.locator('.sidebar').first()).toBeVisible()
-  await openSettings(p2, 'General')
+  await openSettings(p2, 'Sidebar')
   await expect(dialog(p2).getByRole('checkbox', { name: 'Library', exact: true })).toBeVisible()
   await closeSettings(p2)
   noErrors(grain)
@@ -300,7 +299,7 @@ test('modal is usable and scrolls at 820x520', async ({ grain }) => {
   await expect(dialog(page).getByRole('button', { name: 'Cancel' })).toBeInViewport()
   // Every tab fits its footer and close button on screen.
   for (const tab of TABS) {
-    await dialog(page).getByRole('tab', { name: tab }).click()
+    await tabBtn(page, tab).click()
     await expect(dialog(page).getByRole('button', { name: 'Close settings' })).toBeInViewport()
     await expect(dialog(page).locator('footer button').last()).toBeInViewport()
   }

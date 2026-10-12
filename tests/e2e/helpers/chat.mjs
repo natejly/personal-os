@@ -8,6 +8,13 @@ export const stopBtn = (page) => page.getByRole('button', { name: 'Stop', exact:
 /** Stop turns into "Stopping" (still a stop control) until the run's done lands; settled means neither is there. */
 export const anyStop = (page) => page.getByRole('button', { name: /^Stop/ })
 
+/** Open the chat's workspace panel on its Context tab (the context drawer lives there now). */
+export async function openContextPanel(page) {
+  const btn = page.getByRole('button', { name: 'Workspace panel', exact: true })
+  if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click()
+  await page.locator('.desk-tabs button', { hasText: /^Context$/ }).click()
+}
+
 export async function newChat(page) {
   await page.getByRole('button', { name: /New chat/ }).first().click()
 }

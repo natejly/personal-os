@@ -23,7 +23,9 @@ const showTool = (page, args) => say(page, '!!tool show ' + JSON.stringify(args)
 /** A `show` call needs nothing from the user, so its row is folded under the reply's "1 tool call" line. */
 async function openFold(page) {
   const last = page.locator('.msg.assistant').last()
-  await last.getByRole('button', { name: /tool call/ }).click()
+  // A run of plain tool rows folds into a group; open it when it is folded. A row with its own card is shown as is.
+  const folded = last.locator('.tool-group > .tool-head[aria-expanded="false"]')
+  if (await folded.count()) await folded.first().click()
   return last.locator('.tool-event').last()
 }
 

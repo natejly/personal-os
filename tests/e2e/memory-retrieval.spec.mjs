@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures.mjs'
-import { openAdvanced } from './helpers/home.mjs'
+import { openContextPanel } from './helpers/chat.mjs'
+import { openAdvanced, setToggle } from './helpers/home.mjs'
 import { callWith, send, shrink, sleep, systemOf, upload } from './helpers/kb.mjs'
 
 const clean = (g) => expect(g.consoleErrors.filter((e) => !/favicon|ResizeObserver/.test(e))).toEqual([])
@@ -41,9 +42,8 @@ test('uploaded docs reach the prompt as numbered excerpts; each [n] chip opens t
     await page.getByRole('button', { name: 'Close excerpt' }).click()
     await expect(dlg).toBeHidden()
   }
-  // the Sources list repeats them
-  await page.locator('.msg.assistant summary', { hasText: /Sources \(/ }).click()
-  await expect(page.locator('.sources li')).toHaveCount(ex.length)
+  // the Sources footer lists the excerpts the reply cites (always shown, in order of first citation)
+  await expect(page.locator('.sources li')).toHaveCount(3)
   clean(grain)
 })
 
@@ -66,10 +66,10 @@ test('context drawer lists the excerpts that were sent, and opens them', async (
   await newChat(page)
   await send(page, 'Tell me about Marrowbone compost !!reply Compost every autumn [1].')
   await expect(page.locator('.msg.assistant').last()).toContainText('Compost every autumn', { timeout: 30_000 })
-  await page.getByRole('button', { name: 'Toggle context panel' }).click()
+  await openContextPanel(page)
   const drawer = page.locator('aside, .ctx-drawer, [class*=context]').filter({ hasText: /Uploads \(/ }).last()
   await expect(drawer.getByText(/Uploads \(\d+ excerpt/)).toBeVisible()
-  await expect(drawer.getByText('garden.txt').first()).toBeVisible()
+  await expect(drawer.getByRole('button', { name: /garden\.txt/ }).first()).toBeVisible()
   await drawer.getByRole('button', { name: /garden\.txt/ }).first().click()
   await expect(page.locator('.modal.wide h2')).toHaveText('garden.txt')
   await page.getByRole('button', { name: 'Close excerpt' }).click()
@@ -117,7 +117,7 @@ test('Advanced retrieval settings persist across relaunch and clamp out-of-range
   const { page, api } = grain
   await openAdvanced(page, 'Search')
   await page.getByLabel('Search by').selectOption('bm25')
-  await page.getByRole('checkbox', { name: /Re-rank document search/ }).check({ force: true })
+  await setToggle(page.getByRole('checkbox', { name: /Re-rank document search/ }), true)
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect.poll(async () => (await api('/settings')).retrievalMode).toBe('bm25')
   expect(await api('/settings')).toMatchObject({ retrievalMode: 'bm25', retrievalRerank: true })

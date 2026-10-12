@@ -1,13 +1,14 @@
 // Screenshot tool, not an assertion test: seeds a realistic sidebar, jobs and memories, then captures the
 // sidebar, project memory and Settings > Memory. Every step soft-skips what is missing.
-//   SHOTS_DIR (default /home/kyle/.claude/jobs/89becc36/tmp/shots), SHOTS_PREFIX (default "before")
+//   SHOTS_DIR (default <tmp>/grain-e2e-shots), SHOTS_PREFIX (default "before")
 import { test } from './fixtures.mjs'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 test.describe.configure({ timeout: 240_000 })
 
-const DIR = process.env.SHOTS_DIR || '/home/kyle/.claude/jobs/89becc36/tmp/shots'
+const DIR = process.env.SHOTS_DIR || join(tmpdir(), 'grain-e2e-shots')
 const PREFIX = process.env.SHOTS_PREFIX || 'before'
 
 const LONG = [

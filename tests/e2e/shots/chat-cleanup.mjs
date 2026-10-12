@@ -272,7 +272,7 @@ if (want('main')) await session('main', async (g) => {
   })
   // 10. spaces crew
   await attempt('spaces-crew', async () => {
-    await menuClick(g, 'Toggle Spaces'); await sleep(2500)
+    await menuClick(g, 'Toggle Canvases'); await sleep(2500)
     await snap(g, 'spaces-crew')
   })
 }, { settings: { toolDeferAbove: 0 } })

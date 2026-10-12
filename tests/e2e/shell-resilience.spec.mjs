@@ -139,7 +139,7 @@ const VIEWS = [
   ['Mail', async (p) => navItem(p, 'Mail').click()],
   ['Files', async (p) => p.locator('.sidebar .nav-item', { hasText: /^\s*Files/ }).click()],
   ['Library', async (p) => p.locator('.sidebar .nav-item', { hasText: /^\s*Library/ }).click()],
-  ['Space', async (p, g) => { await (await import('./helpers/shell.mjs')).menu(g, 'Toggle Spaces') }]
+  ['Space', async (p, g) => { await (await import('./helpers/shell.mjs')).menu(g, 'Toggle Canvases') }]
 ]
 for (const [name, go] of VIEWS) {
   test(`idle 20 s on ${name}: no console errors`, async () => {

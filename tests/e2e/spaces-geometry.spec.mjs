@@ -181,7 +181,7 @@ test('expand leaves the canvas for the full view; the window stays', async ({ gr
   await expect(page.locator('.spaces-bar')).toHaveCount(0)
   expect((await windowsOf(grain, s.id)).length).toBe(1)
   // and back to the canvas
-  await menuClick(grain.app, 'Toggle Spaces')
+  await menuClick(grain.app, 'Toggle Canvases')
   await expect(page.locator('.spaces-bar')).toBeVisible()
   await expect(win(page, ws[0].id)).toBeVisible()
   expect(grain.consoleErrors).toEqual([])

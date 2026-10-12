@@ -34,7 +34,7 @@ def j(method: str, path: str, body: Any = None, expect: int = 200) -> Any:
 def test_default_seed() -> None:
     first = j("GET", "/canvases")
     check(len(first) == 1, "one seeded canvas")
-    check(first[0]["name"] == "Space 1", "seeded canvas is Space 1")
+    check(first[0]["name"] == "Canvas 1", "seeded canvas is Canvas 1")
     check(first[0]["windows"] == [], "seeded canvas has no windows")
     check(first[0]["snap_mode"] == "both" and first[0]["grid_size"] == 16, "seed defaults")
     check(first[0]["locked"] == 0, "a seeded space starts unlocked")
@@ -62,8 +62,8 @@ def test_canvas_crud() -> None:
     check(len(j("GET", "/canvases")) == 1, "deleted canvas is gone")
     check(j("DELETE", f"/canvases/{made['id']}")["ok"] is True, "delete is idempotent")
     blank = j("POST", "/canvases", {"name": "   "})
-    check(blank["name"] == "Space", "a blank name becomes Space")
-    check(j("PUT", f"/canvases/{blank['id']}", {"name": "  "})["name"] == "Space", "clearing a name becomes Space")
+    check(blank["name"] == "Canvas", "a blank name becomes Canvas")
+    check(j("PUT", f"/canvases/{blank['id']}", {"name": "  "})["name"] == "Canvas", "clearing a name becomes Canvas")
     j("DELETE", f"/canvases/{blank['id']}")
 
 

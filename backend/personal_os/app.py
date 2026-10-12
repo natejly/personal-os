@@ -9743,6 +9743,7 @@ telegram_bridge = telegram.TelegramBridge(telegram.Deps(
     mark_texts_conversation=_telegram_mark_conversation,
     computer_name=telegram.computer_name,
 ))
+toolbox.setup_probes.update(telegram=telegram_bridge.paired, mcp=lambda: bool(mcp_store.servers()))  # setup_request's checks
 
 
 async def _telegram_user_update(ctx: dict[str, Any], text: str, atts: list[dict[str, Any]]) -> bool:

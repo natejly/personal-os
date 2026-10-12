@@ -25,7 +25,7 @@ instructions, files, memories and graph.
 
 Lists, Calendar, Mail and Health are sidebar rows under Files. A new chat shows the daily recap under its greeting.
 Settings → Appearance → Sidebar turns any of them off (it takes effect at once). A **Quick chat** button at the top right of
-every view opens the ⌘I panel. Bars are 40 px and
+every view opens the Quick chat panel. Bars are 40 px and
 sidebar rows 26 px, so more fits on screen.
 
 ## How to use
@@ -56,7 +56,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    trashing files, shortcuts, Python installs and scheduling always ask.
 3. **Files.** ⌘4 opens Files, with three sections: *Notes*, *Uploads* (⌘U) and *Artifacts*.
    ⌘⇧N makes a note, ⌘⇧D opens today's. Paste or drop an image into
-   a note and it shows inline, then gets a description and its text read so search finds it. ⌘I opens the Page agent
+   a note and it shows inline, then gets a description and its text read so search finds it. The Quick chat button opens the Page agent
    panel; a note has its own chat there, and opening another note switches to
    that one's chat. The assistant can edit a note (you accept each diff) and can
    delete one after asking; Settings → Trash restores it.
@@ -107,7 +107,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   one-line composer that starts a new chat with the normal tools and approvals,
   can quote your clipboard, and hands the chat to the main window.
 - **Selection verbs.** Select text in a chat, a file, an email or the page agent
-  (or right-click it) for Explain, Summarize, Verify and Ask. Each opens the ⌘I
+  (or right-click it) for Explain, Summarize, Verify and Ask. Each opens the Quick chat
   panel with the quote fenced as data; Verify checks claims against opened pages
   and cites sources. The floating bubble can be turned off in Settings → Chat.
 - **Provider-agnostic chat.** Streaming replies from any model LiteLLM routes to,
@@ -173,13 +173,13 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
     for its replies to you. Every guideline is editable and every sample
     deletable; editing one stops auto-relearn overwriting it. Projects can have
     their own voice. See [docs/writing-style.md](docs/writing-style.md).
-- **Side chat.** ⌘I opens a chat beside any view, with the same model and effort pickers as the main chat. The pin button keeps it on the page it was opened on while you switch views; Back to this page unpins.
+- **Side chat.** The Quick chat button opens a chat beside any view, with the same model and effort pickers as the main chat. The pin button keeps it on the page it was opened on while you switch views; Back to this page unpins.
 - **Files.** One view with two sections:
   - *Notes* — writing of your own, in an editor rather than an upload box:
     markdown and LaTeX, a line-numbered editor beside a live preview, folders
     per project, and full revision history. The assistant can read and revise
     a note, or delete one after asking (undo from Settings → Trash). Each note
-    has its own chat in the Page agent panel (⌘I). By default its edits are *proposed*: each one arrives as a diff you
+    has its own chat in the Page agent panel (Quick chat). By default its edits are *proposed*: each one arrives as a diff you
     accept or reject, so you can point a model at prose you care about.
     Settings → Permissions → **File edits** → *Accept all* writes them straight
     in instead, still showing the diff and still undoable from the history.
@@ -513,8 +513,9 @@ and its verdict is kept on the row.
 | ⌘⇧[ / ⌘⇧] | Previous / next chat |
 | ⌘F | Find in this chat |
 | ⌘B | Toggle sidebar (bold while typing in a doc) |
-| ⌘I | Page agent panel |
+| ⌘I | Toggle side panel (opens on Context) |
 | ⌃⌘I | Toggle context panel |
+| (none) | Quick chat (View → Page Agent, title-bar button) |
 | ⌘⇧C | Toggle Canvases (Canvases menu) |
 | ⌃1 … ⌃9 | Go to canvas 1–9 |
 | ⌘, | Settings: General, Sidebar, Model, Models, Agents, Memory, Integrations, Permissions, System access, Usage, Advanced |

@@ -75,7 +75,7 @@ one output line, so the two layers cannot drift no matter what is typed.
 
 Keys: `⇧⌘B` bold, `⇧⌘I` italic, `⌘K` link, `⌃⌘M` maths, `⇧⌘E` code, `Tab` /
 `⇧Tab` indent, `⌘S` save now. These avoid the menu's own chords (`⌘B` sidebar,
-`⌘I` page agent), which never reach the page. `Enter` continues
+`⌘I` side panel), which never reach the page. `Enter` continues
 the list you are in and a second `Enter` on an empty item ends it with a blank line.
 
 Editing autosaves 1.2 s after you stop typing. Consecutive saves by the same

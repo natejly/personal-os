@@ -73,7 +73,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const desk = useStore((s) => (!conversationId && deskId && s.activeDesk?.id === deskId ? s.activeDesk : null))
   const openDesk = useStore((s) => s.openDesk)
   const markDeskSeen = useStore((s) => s.markDeskSeen)
-  const [deskPanel, setDeskPanel] = useState(false)
+  const deskPanel = useStore((s) => s.deskPanel)
+  const setDeskPanel = useStore((s) => s.setDeskPanel)
   // openTerminal (a coding session row or card) asks for the side panel's Terminal tab.
   const termRequest = useStore((s) => s.terminalRequest?.n)
   useEffect(() => { if (termRequest && !conversationId) setDeskPanel(true) }, [termRequest, conversationId])

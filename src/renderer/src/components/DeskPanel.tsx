@@ -21,12 +21,12 @@ const freshTermRequest = (): boolean => Date.now() - (useStore.getState().termin
  * The side panel of a chat, beside the transcript: Files and Changes for every chat, and Review once it has a desk (a chat
  * working autonomously), which comes forward when the desk asks for it. Terminal shows when the app can host terminals and a
  * coding session exists; an openTerminal request brings it forward. A running checklist shows as the compact progress card
- * above the composer (ProgressCard) and workers as the worker list above the composer. Without a desk, Files is the chat's
+ * above the composer (ProgressCard) and workers as the worker list above the composer. Context is the default tab. Without a desk, Files is the chat's
  * own list. Context (the store's `contextOpen`) is always there and wins while requested; a draft chat with no id has only that tab.
  */
 export default function DeskPanel({ desk, conversationId, onClose }: { desk?: FullDesk | null; conversationId?: string; onClose: () => void }): JSX.Element {
   const id = conversationId ?? '' // '' only on a draft chat, where just the Context tab shows
-  const [picked, setTab] = useState<Tab>(freshTermRequest() ? 'terminal' : desk?.status === 'review' ? 'review' : 'files')
+  const [picked, setTab] = useState<Tab>(freshTermRequest() ? 'terminal' : desk?.status === 'review' ? 'review' : 'context')
   useEffect(() => { if (desk?.status === 'review') setTab('review') }, [desk?.id, desk?.status])
   const contextOpen = useStore((s) => s.contextOpen)
   const termOk = useTermAvailable()
@@ -36,7 +36,7 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   useEffect(() => { if (termRequest && freshTermRequest()) setTab('terminal') }, [termRequest])
   const shown = (k: Tab): boolean => k === 'context' || (!!conversationId && (k === 'files' || k === 'changes')) || (k === 'review' && !!desk) || (k === 'terminal' && termOk && hasCoding)
   const tabs = TABS.filter((t) => shown(t.key))
-  const tab: Tab = contextOpen ? 'context' : shown(picked) ? picked : conversationId ? 'files' : 'context'
+  const tab: Tab = contextOpen ? 'context' : shown(picked) ? picked : 'context'
   const pick = (k: Tab): void => { useStore.setState({ contextOpen: k === 'context' }); setTab(k) }
   return (
     <aside className="desk-panel" aria-label="Workspace">

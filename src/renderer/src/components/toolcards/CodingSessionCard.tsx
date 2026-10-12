@@ -51,7 +51,7 @@ export function NeedsYou({ c, compact }: { c: CodingSession; compact?: boolean }
     <>
       {termOk && <button type="button" className="ghost-btn sm" onClick={() => openTerminal(c.id, 'attach')}>Open terminal</button>}
       {external && (termOk
-        ? <button type="button" className="link" onClick={open}>Open in external Terminal</button>
+        ? <button type="button" className="ghost-btn xs" onClick={open}>Open in external Terminal</button>
         : <button type="button" className="ghost-btn sm" onClick={open}>Open in Terminal</button>)}
     </>
   )

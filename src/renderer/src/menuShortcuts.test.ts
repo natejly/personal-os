@@ -66,6 +66,17 @@ test('one page-agent action toggles the page agent once', () => {
   assert.equal(useStore.getState().pageAgentOpen, before)
 })
 
+test('toggle-desk (⌘I) opens the side panel, then closes it whichever flag opened it', () => {
+  useStore.setState({ deskPanel: false, contextOpen: false })
+  fire('toggle-desk')
+  assert.equal(useStore.getState().deskPanel, true)
+  fire('toggle-desk')
+  assert.deepEqual([useStore.getState().deskPanel, useStore.getState().contextOpen], [false, false])
+  useStore.setState({ contextOpen: true })
+  fire('toggle-desk')
+  assert.equal(useStore.getState().contextOpen, false)
+})
+
 test('a view action routes, and view:graph opens Settings → Memory on the graph', () => {
   fire('view:todos')
   assert.equal(useStore.getState().view, 'todos')
@@ -242,7 +253,7 @@ test('⌘1…⌘n are contiguous, each used once, each a distinct target', async
   assert.ok(!rows.some(([, a]) => a === 'view:graph' || a === 'view:documents'))
 })
 
-test('the Quick chat button and the ⌘I menu item are the same toggle', () => {
+test('the Quick chat button and the Page Agent menu item are the same toggle', () => {
   const was = useStore.getState().pageAgentOpen
   fire('page-agent')
   assert.equal(useStore.getState().pageAgentOpen, !was)

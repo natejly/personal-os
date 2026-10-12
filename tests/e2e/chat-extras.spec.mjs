@@ -88,6 +88,8 @@ test('every chat has a side panel: Files and Changes, and no Review without a de
   await expect(tabs.getByRole('button', { name: 'Files' })).toBeVisible()
   await expect(tabs.getByRole('button', { name: 'Changes' })).toBeVisible()
   await expect(tabs.getByRole('button', { name: /^Review/ })).toHaveCount(0)
+  await expect(tabs.getByRole('button', { name: 'Context' })).toHaveClass(/active/) // opens on Context
+  await tabs.getByRole('button', { name: 'Files' }).click()
   await expect(panel.getByText('No files in this chat yet.')).toBeVisible()
   await tabs.getByRole('button', { name: 'Changes' }).click()
   await expect(panel.getByText('No files changed in this chat yet.')).toBeVisible()

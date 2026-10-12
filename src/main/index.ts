@@ -172,7 +172,7 @@ const sendWindowMenu = (action: string): void => {
 const item = (id: string): Electron.MenuItemConstructorOptions => {
   const { label, keys, action, scope } = shortcut(id)
   if (!action) return { label, accelerator: keys, registerAccelerator: false }
-  return { label, accelerator: keys, click: () => (scope === 'window' ? sendWindowMenu : sendMenu)(action) }
+  return { label, accelerator: keys || undefined, click: () => (scope === 'window' ? sendWindowMenu : sendMenu)(action) }
 }
 
 const SPACES = SHORTCUTS.filter((s) => s.id.startsWith('space-')).map((s) => item(s.id))
@@ -251,8 +251,8 @@ function buildMenu(): void {
         item('chat-search'),
         { type: 'separator' },
         item('toggle-sidebar'),
-        // ⌘I asks about what is on screen. The chat's context inspector, which used to own it, moves one
-        // modifier over.
+        // ⌘I toggles the chat's side panel (opens on Context); Quick chat has no chord.
+        item('toggle-desk'),
         item('page-agent'),
         item('toggle-context'),
         { type: 'separator' },

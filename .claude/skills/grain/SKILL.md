@@ -31,11 +31,11 @@ First run, as a user:
 3. ⌘N for a chat. Model and effort pickers are under the composer.
 4. Drop or paste a file to attach it; it rides on the message as a chip and its text is inlined for the model up to a size cap.
 5. Set a **Working folder** on the chat if the assistant should touch files. With none set, file and shell tools work in `~/Grain` (`mac.py`).
-6. ⌘4 Files: ⌘⇧N new note, ⌘⇧D today's note, ⌘U upload. ⌘I opens the Page agent, a chat bound to the open note.
+6. ⌘4 Files: ⌘⇧N new note, ⌘⇧D today's note, ⌘U upload. The Quick chat button (title bar) opens the Page agent, a chat bound to the open note.
 7. Sidebar **+** next to Projects makes a project. Lists, Calendar and Mail are sidebar rows (⌘2, ⌘3, ⌘5).
 8. Spaces: ⌘⇧C, then Add widget or right-click the plane. Library for agents and automations.
 
-Shortcuts that matter (full list in reference.md): ⌘N new chat, ⌘K command palette, ⌘I page agent, ⌘⇧C
+Shortcuts that matter (full list in reference.md): ⌘N new chat, ⌘K command palette, ⌘I side panel, ⌘⇧C
 Spaces, ⌘1 to ⌘6 views (Chats, Lists, Calendar, Files, Mail, Memory), ⌘, settings,
 ⌘⇧F search chats.
 
@@ -77,6 +77,7 @@ Groups, by what they do (every tool, danger and default in reference.md):
 | files, mac, shell, opencode, code | local files (home-scoped), shortcuts, shell in a working folder, coding agent, Python |
 | agents, workflows, desk, schedule, skills, spaces | subagents, saved workflows, desks, scheduling, skill authoring, arranging Spaces |
 | plan, utility, context | plans and questions, `show`, `current_time`, paged tool results |
+| setup | `setup_request`: a one-click setup card in the chat (always offered) |
 
 ## Operating it as a developer or agent
 

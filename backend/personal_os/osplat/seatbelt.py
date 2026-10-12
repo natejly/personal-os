@@ -59,7 +59,7 @@ def _credential_denies(home: str) -> str:
 
 
 def shell_profile(writable: list[str], network: bool = False, proxy_port: int | None = None,
-                  allow_hosts: list[str] | None = None, loopback: bool = False) -> str:
+                  allow_hosts: list[str] | None = None, loopback: bool = False, confine: bool = False) -> str:
     """Seatbelt profile for the host shell (shell.py): blanket deny, then what a shell needs, then targeted denies.
 
     Unlike run_python's allowlist, a shell has to run whatever the user's toolchain is, so reads AND writes are open
@@ -70,6 +70,9 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
     that run code later outside the sandbox (rc files, git hooks and config, editor tasks, launch agents, the auth token,
     the database). Network is off unless `network`; with `proxy_port` (and not `network`) the one thing it may connect to
     is the allowlisting proxy on localhost at that port (egress.py).
+
+    `confine` (a model duel's side, duel.py) swaps the blanket write allow for the `writable` folders alone: nothing outside
+    them can be changed, so a side's command cannot touch the user's real files.
     """
     from .. import mac
     home, root, data = _paths()
@@ -108,6 +111,7 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
     inside = list(dict.fromkeys(rp for p in writable if (rp := os.path.realpath(p)).startswith(data_real + os.sep)))
     if inside:
         late += f"(allow file-read* file-write* {' '.join(f'(subpath {_q(p)})' for p in inside)})\n"
+    writes = ("(allow file-write* " + " ".join(f"(subpath {_q(os.path.realpath(p))})" for p in writable) + ")") if confine else "(allow file-write*)"
     return f"""(version 1)
 (deny default)
 {net}
@@ -117,7 +121,7 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
 (allow process-info*)
 (allow signal (target same-sandbox))
 (allow file-read*)
-(allow file-write*)
+{writes}
 (allow file-write-data (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr") (literal "/dev/tty") (literal "/dev/dtracehelper"))
 (allow mach-lookup)
 (allow ipc-posix-shm)

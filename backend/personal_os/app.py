@@ -69,7 +69,7 @@ from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOP
 from .cowork import (AUTO_RESUME_FROM, internal_kind, AUTONOMY, CHAT_HANDOFF, CONTINUE_MESSAGES, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, inputs_line, read_notes,
                      STATUSES as DESK_STATUSES, TERMINAL as DESK_TERMINAL, DeskRuntime, Desks,
                      OUTPUT_KINDS, checklist_items, mail_parts, origin_report, parked_report)
-from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
+from .workspace import MAX_PREVIEW, OVERLAY as WORKSPACE_OVERLAY, Workspace, WorkspaceError
 from .envs import WorkEnv
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
                     normalize_plan, parse_plan_edits, plan_voided_by_taint, taint_expected)
@@ -237,7 +237,36 @@ _active: dict[str, asyncio.Event | Run] = {}
 _approvals: dict[str, asyncio.Future] = {}
 # Developer-mode model duels waiting for a pick: reply message id -> Future[winner]. POST /conversations/{id}/ab/pick resolves it.
 _ab_waits: dict[str, asyncio.Future] = {}
+# The sides of a duel that is running or waiting, by reply message id: GET /conversations/{id}/ab/file reads their temp files.
+_ab_live: dict[str, dict[str, duel.Side]] = {}
 model_votes = duel.Votes(db)
+
+
+def _clone_chat(conv_id: str, upto_id: str) -> str:
+    """A hidden copy of a chat up to and including message `upto_id`, for one side of a full model duel: same project, settings and
+    history, so the side's turn is built exactly like the real one, but nothing it does lands in the real chat. Returns its id."""
+    real = convos.get(conv_id)
+    shadow = convos.create(real["project_id"], real["title"], real["model"])
+    convos.update(shadow["id"], {"settings": {**real["settings"], "ab_shadow": True, "autoLearn": False}})
+    with db.tx() as c:
+        rows = c.execute("SELECT id, role, content, model, created_at, attachments, kind, tool_events FROM messages "
+                         "WHERE conversation_id=? AND superseded_at IS NULL ORDER BY created_at, rowid", (conv_id,)).fetchall()
+        for r in rows:
+            c.execute("INSERT INTO messages(id,conversation_id,role,content,model,created_at,attachments,kind,tool_events) VALUES(?,?,?,?,?,?,?,?,?)",
+                      (new_id(), shadow["id"], r["role"], r["content"], r["model"], r["created_at"], r["attachments"], r["kind"], r["tool_events"]))
+            if r["id"] == upto_id:
+                break
+    return shadow["id"]
+
+
+def _sweep_duels() -> None:
+    """Temp folders and hidden chats a duel left behind (the app closed mid-duel): none is worth keeping."""
+    duel.discard_all(db.data_dir)
+    with db.tx() as c:
+        c.execute("DELETE FROM conversations WHERE json_extract(settings,'$.ab_shadow') = 1")
+
+
+_sweep_duels()
 # Tools a search (tool_search / mcp_tool_search) loaded, per conversation, so they stay offered in later replies.
 # Only a cache: on first use after a restart it is re-seeded from the tools the conversation's history called.
 # ponytail: never evicted; a set of names per conversation touched since start, an LRU if that ever matters.
@@ -711,6 +740,8 @@ def _persona_folder(persona: Any) -> str | None:
 
 async def _mcp_call(slug: str, args: dict[str, Any]) -> dict[str, Any]:
     """One MCP tool call, with its failures turned into results the model can read and retry past."""
+    if (side := duel.SIDE.get()) is not None and not (mcp_store.tool(slug) or {}).get("read_only"):
+        return side.hold(slug, args)  # a model duel's side never contacts a connector that may write
     try:
         out = await mcp.call(slug, args)
     except McpError as e:
@@ -1853,6 +1884,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     cfg = settings()
     is_wake = bool(body.wake)  # a hidden turn that hands finished workers' reports to the assistant: not the user's words
     internal = is_wake or bool(body.kind)  # any turn whose "user" text is the backend's: never titled from, learned from or trusted as the user's
+    in_side = duel.SIDE.get() is not None  # one side of a full model duel (duel.py): a hidden copy of the chat that learns nothing and touches no desk state
     # A chat opened on an agent (Library > Agents > Chat) speaks as that agent: its prompt leads the system prompt and
     # its tool list bounds the chat's. An unapproved definition is inert here as it is for agent_spawn.
     persona = subagent_mgr.role_for(str(conv["settings"].get("agent") or "")) if conv["settings"].get("agent") else None
@@ -2442,6 +2474,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             return head + [dict(n) for n in run_notes]
         messages = _assemble(history)
         base_len = len(messages)  # what follows is this run's own steers, tool turns and notes
+        if in_side:  # the duel reads this side's tool turns once it is picked (Side.transcript)
+            duel.SIDE.get().live = (messages, lambda: base_len, lambda: plan_msg)
         yield "assistant_message", {**am, "context_used": cite_slim(used)}
         yield "span", {"message_id": am["id"], "span": cspan}
         if compact_span:
@@ -2618,82 +2652,158 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 yield {"type": "overflow_recovered", **recovered}
 
         ab_model = (body.ab_model or "").strip() if (cfg.get("devTools") is True and run is not None and body.content is not None
-                                                      and not internal and not _job) else ""
-        ab_chosen: dict[str, Any] | None = None  # the picked candidate (its text and `end` event), consumed by _round_events
+                                                      and not internal and not in_side and not _job) else ""
+        ab_chosen: dict[str, Any] | None = None  # the picked side's finished turn (text, tool events, held actions, transcript), seeded into this reply once
+
+        async def _drop_side(sd: duel.Side) -> None:
+            """A side's temp folders, background shell jobs and hidden chat go; nothing of it is kept."""
+            sd.discard()
+            if sd.shadow_id:
+                with contextlib.suppress(Exception):
+                    await toolbox.shell.kill_conversation(sd.shadow_id)
+                _tool_loaded.pop(sd.shadow_id, None)
+                with contextlib.suppress(Exception):
+                    convos.delete(sd.shadow_id)
+                sd.shadow_id = None
+
+        async def _answer_card(sd: duel.Side, uid: str, name: str, args: dict[str, Any]) -> None:
+            """A side has nobody to answer an approval card: a call the duel lets run is allowed, any other is refused and held."""
+            ok = sd.runs(toolbox, name, sd.to_overlay(args), {"desk_id": _desk, "settings": cfg})
+            if not ok:
+                sd.hold(name, args)
+            for _ in range(250):
+                if (fut := _approvals.get(uid)) is not None:
+                    if not fut.done():
+                        fut.set_result("allow" if ok else "deny")
+                    return
+                await asyncio.sleep(0.02)
+
+        async def _side_stream(sd: duel.Side, side_stop: asyncio.Event) -> AsyncIterator[dict[str, Any]]:
+            """One side's whole turn: this function over the side's hidden copy of the chat, with the duel gate on every tool
+            call (duel.SIDE) and the side's folders mapped to its overlay (WORKSPACE_OVERLAY). Yields what its column shows."""
+            duel.SIDE.set(sd)
+            WORKSPACE_OVERLAY.set(sd.remap)
+            async for event, data in _chat_stream(sd.shadow_id, ChatIn(model=sd.model), side_stop):
+                if event == "delta":
+                    yield {"type": "delta", "text": data["text"]}
+                elif event == "tool_call":
+                    if data.get("needs_approval"):
+                        asyncio.ensure_future(_answer_card(sd, data["id"], data["name"], data["arguments"]))
+                    yield {"type": "tool", "event": {**{k: v for k, v in data.items() if k != "message_id"}, "pending": True,
+                                                     "result_preview": "", "duration_ms": 0, "error": None}}
+                elif event == "tool_result":
+                    yield {"type": "tool", "event": {**{k: v for k, v in data.items() if k != "message_id"}, "pending": False}}
+                elif event == "done":
+                    sd.done = data
+                    yield {"type": "end"}
+                elif event == "error":
+                    yield {"type": "error", "message": data.get("message") or "This side could not run"}
+
+        def _build_side(k: str, side_model: str, box: Path) -> duel.Side:
+            """A side's hidden copy of this chat and its overlay folders: the chat's outbox, and the desk's folder when there is one."""
+            sd = duel.Side(k, side_model, box / k)
+            sd.shadow_id = _clone_chat(conv_id, user_msg_id)
+            if toolbox.chat_outputs is not None:
+                root = toolbox.chat_outputs.root
+                sd.add_mount(root / sd.shadow_id, root / conv_id, "chat",
+                             lambda p: toolbox.chat_outputs.on_save and toolbox.chat_outputs.on_save(conv_id, p))
+            if _desk:
+                sd.add_mount(workspace.root / _desk, workspace.root / _desk, "desk", lambda p: workspace.on_save and workspace.on_save(_desk, p))
+            return sd
 
         async def _duel() -> AsyncIterator[tuple[str, Any]]:
-            """The turn's first model call, sent to two models at once. Nothing runs: a tool call a candidate asks for is
-            shown in its column and goes no further. The user's pick is awaited here; the picked candidate's reply then
-            takes this round's place, so its tool calls run once, under the usual rules (_round_events)."""
+            """The turn, run in full by two models at once (duel.py): each side works in a hidden copy of this chat with its own
+            overlay folders, and a tool runs for real only when it cannot reach beyond them. The user's pick is awaited here;
+            the winner's files are promoted, its transcript seeds this reply (ab_chosen) and its held actions run next, once,
+            under the usual permission rules."""
             nonlocal ab_chosen
             sides = {"a": model, "b": ab_model}
-            res: dict[str, dict[str, Any]] = {k: {"text": [], "end": None, "ms": None, "error": None} for k in sides}
+            box = duel.ab_root(db.data_dir) / am["id"]
+            live: dict[str, duel.Side] = _ab_live.setdefault(am["id"], {})
+            res: dict[str, dict[str, Any]] = {}
             yield "ab_start", {"id": am["id"], "models": sides}
-            _capture("auto")
-            todo = dict(sides)  # the sides still to stream: both at first, then just the one a regenerate asks for
-            while True:
-                t0 = time.monotonic()
-                streams = {k: llm.stream_chat(cfg, m, messages, tool_schemas or None, effort=str(conv["settings"].get("effort") or "default"),
-                                              fast=bool(conv["settings"].get("fast")), cancel=_stream_cancel(stop, steers, run))
-                           for k, m in todo.items()}
-                async with contextlib.aclosing(duel.merge(streams)) as merged:
-                    async for side, ev in merged:
-                        r = res[side]
-                        if ev["type"] == "delta":
-                            r["text"].append(ev["text"])
-                            yield "ab_delta", {"id": am["id"], "side": side, "text": ev["text"]}
-                        elif ev["type"] in ("end", "error"):
-                            r["ms"] = int((time.monotonic() - t0) * 1000)
-                            u = (ev.get("usage") or ev.get("usage_est") or {}) if ev["type"] == "end" else {}
-                            r["tokens"] = int(u.get("completion_tokens") or 0)
-                            if ev["type"] == "error":
-                                r["error"] = ev["message"]
-                            else:
-                                r["end"] = ev
-                            yield "ab_end", {"id": am["id"], "side": side, "ms": r["ms"], "tokens": r["tokens"], "error": r["error"],
-                                             "calls": [duel.call_summary(c) for c in (ev.get("tool_calls") or [])] if ev["type"] == "end" else []}
-                        if stop.is_set():
-                            break
-                for k in streams.values():
-                    await k.aclose()
-                if stop.is_set() or not any(r["end"] for r in res.values()):
-                    return  # stopped, or both failed: the round carries on as an ordinary one
-                fut: asyncio.Future = asyncio.get_event_loop().create_future()
-                _ab_waits[am["id"]] = fut
-                yield "ab_ready", {"id": am["id"]}
-                run.set_status("awaiting_approval")
-                try:
-                    while not fut.done() and not stop.is_set():
-                        with contextlib.suppress(asyncio.TimeoutError):
-                            await asyncio.wait_for(asyncio.shield(fut), timeout=1)
-                    winner = fut.result() if fut.done() else None
-                finally:
-                    _ab_waits.pop(am["id"], None)
-                    run.set_status("running")
-                if winner and winner.startswith("regen:"):  # POST /ab/regenerate: stream that side again, same request and model
-                    k = winner[6:]
-                    res[k] = {"text": [], "end": None, "ms": None, "error": None}
-                    todo = {k: sides[k]}
-                    yield "ab_reset", {"id": am["id"], "side": k}
-                    continue
-                break
-            if winner is None:
-                return
-            side = "b" if winner == "b" and res["b"]["end"] else "a" if res["a"]["end"] else "b"
-            model_votes.add(conversation_id=conv_id, model_a=model, model_b=ab_model, winner=winner, prompt=user_text,
-                            a_ms=res["a"]["ms"], b_ms=res["b"]["ms"], a_tokens=res["a"].get("tokens"), b_tokens=res["b"].get("tokens"))
-            ab_chosen = res[side]
-            ab_chosen["side"] = side
-            yield "ab_pick", {"id": am["id"], "winner": winner, "side": side}
+            todo = list(sides)  # the sides still to run: both at first, then just the one a regenerate asks for
+            try:
+                while True:
+                    for k in todo:
+                        if k in live:
+                            await _drop_side(live[k])
+                        res[k] = {"text": [], "ms": None, "tokens": None, "error": None, "ok": False}
+                        live[k] = _build_side(k, sides[k], box)
+                        await asyncio.to_thread(live[k].seed)
+                    t0 = time.monotonic()
+                    stops = {k: asyncio.Event() for k in todo}
+
+                    async def _link(ev: asyncio.Event) -> None:
+                        await stop.wait()
+                        ev.set()
+                    linkers = [asyncio.ensure_future(_link(ev)) for ev in stops.values()]
+                    try:
+                        async with contextlib.aclosing(duel.merge({k: _side_stream(live[k], stops[k]) for k in todo})) as merged:
+                            async for side, ev in merged:
+                                r, sd = res[side], live[side]
+                                if ev["type"] == "delta":
+                                    r["text"].append(ev["text"])
+                                    yield "ab_delta", {"id": am["id"], "side": side, "text": ev["text"]}
+                                elif ev["type"] == "tool":
+                                    yield "ab_tool", {"id": am["id"], "side": side, "event": ev["event"]}
+                                else:
+                                    r["ms"] = int((time.monotonic() - t0) * 1000)
+                                    spans = sd.done.get("trace") or []
+                                    r["tokens"] = sum(int(((s.get("meta") or {}).get("usage") or {}).get("completion_tokens") or 0) for s in spans if s.get("kind") == "llm")
+                                    r["error"] = ev["message"] if ev["type"] == "error" else sd.done.get("error")
+                                    r["ok"] = ev["type"] == "end" and not r["error"]
+                                    yield "ab_end", {"id": am["id"], "side": side, "ms": r["ms"], "tokens": r["tokens"], "error": r["error"],
+                                                     "files": await asyncio.to_thread(sd.files),
+                                                     "held": [duel.call_summary(h) for h in sd.held]}
+                    finally:
+                        for t in linkers:
+                            t.cancel()
+                    if stop.is_set() or not any(r["ok"] for r in res.values()):
+                        return  # stopped, or both failed: the round carries on as an ordinary one
+                    fut: asyncio.Future = asyncio.get_event_loop().create_future()
+                    _ab_waits[am["id"]] = fut
+                    yield "ab_ready", {"id": am["id"]}
+                    run.set_status("awaiting_approval")
+                    try:
+                        while not fut.done() and not stop.is_set():
+                            with contextlib.suppress(asyncio.TimeoutError):
+                                await asyncio.wait_for(asyncio.shield(fut), timeout=1)
+                        winner = fut.result() if fut.done() else None
+                    finally:
+                        _ab_waits.pop(am["id"], None)
+                        run.set_status("running")
+                    if winner and winner.startswith("regen:"):  # POST /ab/regenerate: that side starts over, in a fresh overlay
+                        todo = [winner[6:]]
+                        yield "ab_reset", {"id": am["id"], "side": todo[0]}
+                        continue
+                    break
+                if winner is None:
+                    return
+                side = "b" if winner == "b" and res["b"]["ok"] else "a" if res["a"]["ok"] else "b"
+                model_votes.add(conversation_id=conv_id, model_a=model, model_b=ab_model, winner=winner, prompt=user_text,
+                                a_ms=res["a"]["ms"], b_ms=res["b"]["ms"], a_tokens=res["a"].get("tokens"), b_tokens=res["b"].get("tokens"))
+                sd = live[side]
+                await asyncio.to_thread(sd.promote)  # the winner's files move into the real folders and are recorded as the chat's
+                ab_chosen = {"side": side, "text": "".join(res[side]["text"]), "events": list(sd.done.get("tool_events") or []),
+                             "held": list(sd.held), "transcript": sd.transcript(), "tainted": bool(sd.done.get("tainted")),
+                             "taint_sources": list(sd.done.get("taint_sources") or [])}
+                yield "ab_pick", {"id": am["id"], "winner": winner, "side": side}
+            finally:
+                _ab_live.pop(am["id"], None)
+                for sd in live.values():
+                    await _drop_side(sd)
+                shutil.rmtree(box, ignore_errors=True)
 
         async def _round_events() -> AsyncIterator[dict[str, Any]]:
-            """This round's model events: the picked duel candidate's reply when there is one, else the live stream."""
+            """This round's model events: after a duel, the picked side's held actions as the calls to make (or no calls: its
+            answer stands); else the live stream."""
             nonlocal ab_chosen
             if ab_chosen is not None:
-                picked, ab_chosen = ab_chosen, None
-                if picked["text"]:
-                    yield {"type": "delta", "text": "".join(picked["text"])}
-                yield picked["end"]
+                held, ab_chosen = ab_chosen["held"], None
+                yield {"type": "end", "finish_reason": "tool_calls" if held else "stop", "usage": None,
+                       "tool_calls": [{"id": f"held_{i}", "name": h["name"], "arguments": json.dumps(h["arguments"], ensure_ascii=False)}
+                                      for i, h in enumerate(held)]}
                 return
             async for ev in _stream_round():
                 yield ev
@@ -2869,10 +2979,29 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if ab_model and _round == 1 and not stop.is_set():
                 async for item in _duel():
                     yield item
-                if ab_chosen is not None and ab_chosen["side"] == "b":
-                    model = ab_model  # the picked model is model A for the rest of the turn
-                    with db.tx() as c:
-                        c.execute("UPDATE messages SET model=? WHERE id=?", (model, am["id"]))
+                if ab_chosen is not None:
+                    pk = ab_chosen
+                    if pk["side"] == "b":
+                        model = ab_model  # the picked model is model A for the rest of the turn
+                        with db.tx() as c:
+                            c.execute("UPDATE messages SET model=? WHERE id=?", (model, am["id"]))
+                    # The winner's whole turn becomes this reply's first part: its text, its tool cards and the model turns behind
+                    # them. Its held actions are what this round calls (_round_events), so they run now, once, under the usual rules.
+                    if pk["text"]:
+                        buf.append(pk["text"])
+                        yield "delta", {"id": am["id"], "text": pk["text"]}
+                    for e in pk["events"]:
+                        if duel.HELD_NOTE[:40] in str(e.get("for_model") or ""):
+                            continue  # a call the side only queued: it runs for real below, and shows then
+                        tool_events.append(e)
+                        yield "tool_call", {"message_id": am["id"], "id": e["id"], "name": e["name"], "arguments": e["arguments"],
+                                            "needs_approval": False, "forced": bool(e.get("forced")), "proposal": None, "permission": None, "plan": None}
+                        yield "tool_result", {"message_id": am["id"], **e}
+                    messages.extend(pk["transcript"])
+                    round_start = len(buf)  # this round's own text starts after the winner's
+                    if pk["tainted"]:  # what the winner read is in this reply's context now
+                        tool_ctx["tainted"] = True
+                        tool_ctx["taint_sources"].extend(s_ for s_ in pk["taint_sources"] if s_ not in tool_ctx["taint_sources"])
             async for ev in _round_events():
                 if stop.is_set():
                     break
@@ -3269,7 +3398,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # Opening one here would park the run forever (and every later fire behind it).
                     pre = tools.denied(c["name"], "not available in a background run: it needs an approval and nobody is watching")
                 asks = mode == "ask" and claimed is None and pre is None
-                if asks and desk_id and c["name"] != PLAN_TOOL and run_store.claim_parked(desk_id, c["name"], args, uid):
+                if asks and desk_id and not in_side and c["name"] != PLAN_TOOL and run_store.claim_parked(desk_id, c["name"], args, uid):
                     # The user already said yes to exactly this call on a card an earlier turn let go
                     # of (see parked_report). Spent here, once; any other arguments still ask.
                     asks = False
@@ -3321,7 +3450,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         run.set_status("awaiting_approval")
                     awaiting = {"id": uid, "name": c["name"], "arguments": args, "result_preview": "", "duration_ms": 0,
                                 "error": None, "pending": True, "needs_approval": True, "forced": forced}
-                    if desk_id:
+                    if desk_id and not in_side:  # a duel side's card is its own: the real desk's status stays as it is
                         # The desk leaves the rail's "working" label and says what it is waiting for.
                         # These are the *live* waiting states: a run is still holding the card open.
                         # desk_ask's card IS the question, so the desk carries it from the moment the
@@ -3333,7 +3462,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # A desk's card may outlive the run that raised it: nobody is at the keyboard, and
                     # holding a run open for hours to wait is how a desk ends up pinned to a dead task.
                     # 0 means never park, which is what an ordinary chat always does.
-                    park_after = float(cfg.get("parkAfterSeconds") or 0) if desk_id else 0.0
+                    park_after = float(cfg.get("parkAfterSeconds") or 0) if desk_id and not in_side else 0.0
                     waited = 0.0
                     try:
                         while not fut.done():
@@ -3442,7 +3571,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         return
                     if run is not None:
                         run.set_status("running")
-                    if desk_id:
+                    if desk_id and not in_side:
                         # Carrying the plan id onto the desk is what makes the plan outlive this turn:
                         # `_should_chain` reads `plans.remaining(desk["plan_id"])`, and claim_run reads
                         # it to tell a desk that has a plan from one that still needs to draft one.
@@ -3785,7 +3914,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # that did nothing — and never leaves a span open for the UI to show as still running.
     # A tainted chat may still bank the user's own prose: only the user's half ever reaches this, and
     # looks_like_prose already rejects pastes and quotes. The voice profile is injected into later chats.
-    if (not error and not gone and not internal and cfg.get("learnStyle", True)
+    if (not error and not gone and not internal and not in_side and cfg.get("learnStyle", True)
             and conv["settings"].get("autoLearn", True) and looks_like_prose(user_text)):
         sspan = tracer.start("style", "Learn writing style")
         yield "span", {"message_id": am["id"], "span": sspan}
@@ -3812,7 +3941,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # asked for, on text the user has not read yet. What it found belongs in its report and the inbox.
     # A tainted reply has read someone else's text, so only the user's own words this run are mined: the
     # reply, its tool calls and the procedures it followed are withheld (they could plant that text in later chats).
-    if (not error and text and not gone and not proposal_only(run) and not internal  # an internal turn's "user" text is the system's, not the user's words
+    if (not error and text and not gone and not proposal_only(run) and not internal and not in_side  # an internal turn's "user" text is the system's, not the user's words
             and (not tool_ctx["tainted"] or any(t.strip() for t in run_user_texts))  # an attachment-only message has no words to mine
             and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True)
             and conv["settings"].get("useMemory", True)):  # memory off: nothing written for other chats to read
@@ -3827,14 +3956,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         ))
 
     # Follow-up chips: after a finished reply only (not an error, a Stop, or an unattended run), off the run.
-    if (not error and text and not gone and not stop.is_set() and not proposal_only(run) and not desk_id and not internal
+    if (not error and text and not gone and not stop.is_set() and not proposal_only(run) and not desk_id and not internal and not in_side
             and cfg.get("followUps", True)):
         followup_jobs.spawn(conv_id, am["id"], conv["project_id"], user_text, text, model, cfg)
 
     # The model title: after the reply, off the run, from the user's typed text only. It replaces the placeholder this
     # turn wrote, or (once, at RETITLE_AT user turns) an earlier auto title; a title the user typed is never touched.
     # No taint or autoLearn gate: nothing but the user's own messages reaches the call.
-    if not error and not gone and not internal and not proposal_only(run) and cfg.get("autoTitle", True):
+    if not error and not gone and not internal and not in_side and not proposal_only(run) and cfg.get("autoTitle", True):
         user_texts = [m["content"] for m in conv["messages"] if _said(m)] + [user_text]
         fresh = convos.get(conv_id, with_messages=False)
         fs = (fresh or {}).get("settings") or {}
@@ -4210,7 +4339,7 @@ async def pick_duel(id: str, body: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/conversations/{id}/ab/regenerate")
 async def regenerate_duel_side(id: str, body: dict[str, Any]) -> dict[str, Any]:
-    """Developer mode: stream one side of the waiting duel again (same request, same model). side: a | b."""
+    """Developer mode: run one side of the waiting duel again from scratch (same request, same model, a fresh overlay). side: a | b."""
     mid, side = str(body.get("message_id") or ""), body.get("side")
     fut = _ab_waits.get(mid)
     if side not in ("a", "b"):
@@ -4219,6 +4348,16 @@ async def regenerate_duel_side(id: str, body: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(404, "No duel is waiting for a pick")
     fut.set_result(f"regen:{side}")
     return {"ok": True}
+
+
+@app.get("/conversations/{id}/ab/file")
+def duel_file(id: str, message_id: str, side: str, path: str) -> dict[str, Any]:
+    """Developer mode: a file one side of the waiting duel produced, as text to look at (it is not real until that side is picked)."""
+    sd = _ab_live.get(message_id, {}).get(side)
+    out = sd.read_file(path) if sd is not None else None
+    if out is None:
+        raise HTTPException(404, "No such file")
+    return out
 
 
 @app.get("/model-votes")

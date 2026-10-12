@@ -33,6 +33,7 @@ import hashlib
 import os
 import re
 import shutil
+from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
@@ -41,6 +42,10 @@ MAX_FILES = 500
 MAX_TOTAL_BYTES = 200_000_000
 MAX_PREVIEW = 200_000
 BLOCKED_SUFFIXES = (".command", ".app", ".scpt", ".applescript", ".workflow", ".terminal", ".shortcut")
+
+# Set inside a model duel's side (duel.py): maps a folder this module would use to the side's private copy, so the side's
+# writes land in a temp overlay. While it is set, saves are not recorded against the chat (on_save): the files are not real yet.
+OVERLAY: ContextVar[Callable[[Path], Path] | None] = ContextVar("workspace_overlay", default=None)
 
 BASELINE_DIR = ".baseline"
 TRASH_DIR = ".trash"
@@ -133,7 +138,9 @@ class Workspace:
     def desk_root(self, desk_id: str) -> Path:
         if not isinstance(desk_id, str) or not DESK_ID_RE.match(desk_id):
             raise WorkspaceError(f"{desk_id!r} is not a desk id")
-        return self.root / desk_id
+        root = self.root / desk_id
+        remap = OVERLAY.get()
+        return remap(root) if remap is not None else root
 
     def rel_root(self, desk_id: str) -> str:
         """What `desks.workspace` stores: relative to the data dir, so the dir can move."""
@@ -396,7 +403,7 @@ class Workspace:
             target.write_bytes(data)
         except OSError as e:
             raise _oserror(rel, "written", e) from e
-        if self.on_save is not None:
+        if self.on_save is not None and OVERLAY.get() is None:
             try:
                 self.on_save(desk_id, target)
             except Exception:  # noqa: BLE001 - recording a save never breaks the write
@@ -586,7 +593,7 @@ class Workspace:
                 os.replace(tmp, p)
         except OSError as e:
             raise _oserror(rel, "written", e, "check that no parent of that path is already a file") from e
-        if not exists and self.on_save is not None:
+        if not exists and self.on_save is not None and OVERLAY.get() is None:
             try:
                 self.on_save(desk_id, p)
             except Exception:  # noqa: BLE001 - recording a save never breaks the write

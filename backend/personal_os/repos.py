@@ -179,6 +179,7 @@ class Conversations:
         with self.db.tx() as c:
             rows = c.execute(f"SELECT * FROM conversations WHERE {where} AND deleted_at IS NULL AND archived_at {arch} ORDER BY updated_at DESC", args).fetchall()
         out = [self._hydrate(r) for r in rows]
+        out = [c for c in out if not c["settings"].get("ab_shadow")]  # a model duel's hidden side-copy of a chat (duel.py)
         if not include_desks:
             out = [c for c in out if not c["settings"].get("deskId")]
         return out if include_jobs else [c for c in out if not c["settings"].get("job_id")]
@@ -207,6 +208,7 @@ class Conversations:
         base = ("FROM {src} JOIN conversations c ON c.id = m.conversation_id "
                 "WHERE {cond} AND c.deleted_at IS NULL AND m.superseded_at IS NULL AND m.kind IS NULL "
                 "AND COALESCE(json_extract(c.settings,'$.deskId'),'')='' AND COALESCE(json_extract(c.settings,'$.job_id'),'')='' "
+                "AND COALESCE(json_extract(c.settings,'$.ab_shadow'),0)=0 "
                 + scope)
         cols = ("m.id, m.conversation_id, m.role, m.created_at, c.title, c.project_id, c.updated_at, "
                 "COALESCE(json_extract(c.settings,'$.tainted'),0) AS tainted, c.archived_at IS NOT NULL AS archived")

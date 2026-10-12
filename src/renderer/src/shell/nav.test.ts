@@ -4,5 +4,5 @@ import assert from 'node:assert/strict'
 import { navEntries } from './nav'
 
 test('the sidebar rows come in a fixed default order', () => {
-  assert.deepEqual(navEntries().map((e) => e.view), ['todos', 'calendar', 'mail', 'health', 'library'])
+  assert.deepEqual(navEntries().map((e) => e.view), ['todos', 'calendar', 'mail', 'health', 'library', 'jobs'])
 })

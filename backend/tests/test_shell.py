@@ -943,3 +943,35 @@ def test_matplotlib_warm_up_runs_the_work_venv_under_seatbelt(tmp_path: Path, mo
     sandbox._warm_mpl(str(py))
     assert seen and seen[0][0] == "sandbox-exec"
     assert any(n.startswith("fontlist-") for n in os.listdir(tmp_path))
+
+
+def test_scrubbed_env_path_includes_a_user_level_node_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from personal_os import envs
+    (tmp_path / ".local" / "node" / "bin").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(envs, "work_bin", lambda: None)
+    dirs = shell.scrubbed_env("/tmp/run1")["PATH"].split(os.pathsep)
+    assert str(tmp_path / ".local" / "node" / "bin") in dirs
+    assert all(d in dirs for d in shell.SAFE_PATH.split(os.pathsep))
+
+
+def test_scrubbed_env_path_is_the_safe_path_without_node_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from personal_os import envs
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(envs, "work_bin", lambda: None)
+    assert shell.scrubbed_env("/tmp/run1")["PATH"] == shell.SAFE_PATH
+
+
+def test_scrubbed_env_path_puts_the_work_env_first(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from personal_os import envs
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(envs, "work_bin", lambda: "/work/bin")
+    assert shell.scrubbed_env("/tmp/run1")["PATH"].split(os.pathsep)[0] == "/work/bin"
+
+
+def test_safe_path_prefers_the_newest_nvm_node(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for v in ("v9.1.0", "v18.20.4", "v18.3.0"):
+        (tmp_path / ".nvm" / "versions" / "node" / v / "bin").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    extra = shell.safe_path().split(os.pathsep)[len(shell.SAFE_PATH.split(os.pathsep)):]
+    assert [Path(d).parent.name for d in extra] == ["v18.20.4", "v18.3.0", "v9.1.0"]

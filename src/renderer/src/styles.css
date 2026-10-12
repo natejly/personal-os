@@ -1169,6 +1169,15 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .settings-pane .setting-row > .toggle-text { flex: 1; }
 .settings-pane .setting-row > :not(.toggle-text) { flex: none; }
 .settings-pane .setting-row > input, .settings-pane .setting-row > select { width: auto; min-width: 160px; }
+.models-tab { display: flex; flex-direction: column; gap: 14px; }
+.models-tab > * { margin: 0; }
+/* Key rows: input, Save and Remove sit in the same columns on every row; a row with no saved key leaves the Remove slot empty. */
+.settings-pane .key-row { padding: 12px; align-items: center; }
+.key-row .input-row { display: grid; grid-template-columns: 220px 64px 84px; gap: 6px; align-items: center; }
+.key-row .input-row > * { min-width: 0; width: 100%; box-sizing: border-box; }
+.settings-pane .setting-row.models-filter > input { flex: 1; min-width: 0; width: auto; }
+.settings-pane .models-filter > input, .settings-pane .models-filter > button,
+.settings-pane .key-row .input-row > * { height: 34px; }
 .settings-pane input[type=number]:not(.modal-free *) { width: 96px; min-width: 0; font-variant-numeric: tabular-nums; }
 .settings-pane .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
 /* Short rows that belong together (the Views switches) sit in one bordered list. */

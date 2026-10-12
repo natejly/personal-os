@@ -657,6 +657,8 @@ export interface ToolEvent {
   /** deep_research's plan, steps and sources considered. */
   research?: ResearchTrail | null
   pending?: boolean
+  /** Client clock (ms) when the call arrived on the stream; drives the elapsed time of a running call. */
+  started_at?: number
   needs_approval?: boolean
   approval?: string | null
   /** This result carried untrusted third-party content. */

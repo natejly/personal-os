@@ -48,7 +48,7 @@ const argText = (args: Record<string, unknown>): string =>
 /** The same arguments on one line, for the collapsed row. */
 const argLine = (args: Record<string, unknown>): string => argText(args).replace(/\s*\n\s*/g, ' · ').replace(/\s+/g, ' ').slice(0, 240)
 /** A run's report as one plain line: enough to tell runs apart without opening them. */
-const oneLine = (text: string): string => text.replace(/[#*_`>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240)
+const oneLine = (text: string): string => text.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[#*_`>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240)
 
 /** The app-wide status vocabulary (`--st-*`), as the dot that leads every row. */
 type Tone = 'needs-you' | 'working' | 'done' | 'failed' | 'idle'
@@ -206,10 +206,10 @@ function ReportBody({ text }: { text: string }): JSX.Element {
   return (
     <>
       {sections.map((x, i) => (
-        <section key={i} className="report-section">
+        <div key={i} className="report-section">
           {x.heading && <h4 className="report-heading">{x.heading}</h4>}
           {x.body && md(x.body)}
-        </section>
+        </div>
       ))}
     </>
   )
@@ -241,7 +241,7 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   const line = r.error ? oneLine(r.error) : r.summary ? oneLine(r.summary) : `It wrote nothing. ${r.tool_calls} tool call${r.tool_calls === 1 ? '' : 's'}.`
 
   return (
-    <li className={`inbox-item mail-row ${r.seen ? 'seen' : 'unread'} ${open ? 'selected' : ''}`}>
+    <li className={`inbox-item inbox-msg ${r.seen ? 'seen' : 'unread'} ${open ? 'selected' : ''}`}>
       <div className="inbox-row">
         <RowOpen open={open} what="the report" onOpen={show}>
           <Face {...(r.conversation_id ? chatFace : { name: r.job })} status={r.status} size={18} />
@@ -958,7 +958,7 @@ export default function AgentInbox(): JSX.Element | null {
           {archivedRuns.length === 0 ? <p className="muted">Nothing archived.</p> : (
             <ul className="inbox-list">
               {archivedRuns.filter((r) => `${r.job} ${r.error ?? ''} ${r.summary ?? ''}`.toLowerCase().includes(archivedQ.trim().toLowerCase())).map((r) => (
-                <li className="inbox-item mail-row seen" key={r.run_id}>
+                <li className="inbox-item inbox-msg seen" key={r.run_id}>
                   <div className="inbox-row">
                     <span className="inbox-job">{r.job}</span>
                     <span className="inbox-line" title={r.error || r.summary}>{r.error ? oneLine(r.error) : r.summary ? oneLine(r.summary) : 'It wrote nothing.'}</span>

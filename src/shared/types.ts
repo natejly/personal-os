@@ -1534,7 +1534,7 @@ export interface Settings {
   homeWidgets?: Record<string, boolean>
   /** Sidebar views the user removed. Missing means every view is shown. */
   hiddenViews?: string[]
-  /** Sidebar rows hidden without turning anything off (home, docs, spaces, projects, jobs). Missing means shown. */
+  /** Sidebar rows hidden without turning anything off (docs, mail, health, spaces, projects, jobs). Missing means shown; the default hides Mail and Health. */
   sidebarHidden?: string[]
   tools: Record<string, ToolMode | boolean>
   /** How assistant edits to docs land. Missing means review: show the diff and wait. */

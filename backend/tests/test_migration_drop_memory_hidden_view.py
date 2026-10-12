@@ -62,7 +62,7 @@ def test_the_version_and_the_default() -> None:
 
 
 def test_sidebar_only_rows_start_shown() -> None:
-    assert llm.DEFAULT_SETTINGS["sidebarHidden"] == []
+    assert llm.DEFAULT_SETTINGS["sidebarHidden"] == ["mail", "health"]
 
 
 if __name__ == "__main__":

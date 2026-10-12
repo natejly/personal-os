@@ -64,3 +64,28 @@ test('A/B duel: both columns stream, picking B keeps only B as the reply and the
   await expect.poll(async () => (await api('/model-votes')).votes).toBe(1)
   expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
 })
+
+for (const mode of ['auto', 'allow_all']) {
+  test(`A/B duel runs on a new chat's first and second message with autonomy on by default (${mode})`, async ({ grain }) => {
+    const { page, api } = grain
+    const perms = (await api('/settings')).permissions
+    await api('/settings', { method: 'PUT', body: { devTools: true, autonomousByDefault: true, permissions: { ...perms, permissionMode: mode } } })
+    await page.reload()
+    await newChat(page)
+    const ab = page.getByRole('button', { name: 'A/B', exact: true })
+    await ab.click()
+    await expect(ab).toHaveAttribute('aria-pressed', 'true')
+    const panel = page.getByRole('group', { name: 'Model duel' })
+    for (const n of [1, 2]) {
+      await say(page, `!!reply duel-${n}`)
+      await expect(panel).toBeVisible({ timeout: 30_000 })
+      await expect(panel.locator('.duel-body')).toHaveCount(2)
+      await expect(panel.getByRole('button', { name: /A is better/ })).toBeEnabled({ timeout: 30_000 })
+      await panel.getByRole('button', { name: /A is better/ }).click()
+      await expect(panel).toHaveCount(0)
+      await expect(anyStop(page)).toHaveCount(0, { timeout: 30_000 })
+      await expect(assistants(page)).toHaveCount(n)
+    }
+    expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
+  })
+}

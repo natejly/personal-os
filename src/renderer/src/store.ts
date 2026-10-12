@@ -1667,11 +1667,14 @@ export const useStore = create<State>((set, get) => {
    * `false` means the backend never accepted `body`, so the caller still owns the text it sent.
    * Resolves on that verdict, not at the end of the run: a composer is holding a draft on it.
    */
+  /** A/B is armed. A desk never duels (the backend skips them), so a new chat starts plain while it is on. */
+  const abActive = (st: ReturnType<typeof get>): boolean => st.settings.devTools === true && st.abOn && !!st.abModel
+
   const runStream = async (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string; attachments?: string[]; ab_model?: string }, pendingKey?: number): Promise<boolean> => {
     let run: ChatRunStarted
     const st = get()
     // A duel needs the main chat view, where its columns and the pick buttons are drawn.
-    if (st.settings.devTools === true && st.abOn && st.abModel && body.content && !body.replace_from && st.view === 'chat' && st.focusedConversationId === convId) body = { ...body, ab_model: st.abModel }
+    if (abActive(st) && body.content && !body.replace_from && st.view === 'chat' && st.focusedConversationId === convId) body = { ...body, ab_model: st.abModel ?? undefined }
     try {
       run = await api.chat(convId, body)
     } catch (e) {
@@ -2551,7 +2554,7 @@ export const useStore = create<State>((set, get) => {
       void get().refreshProjects()
       // A new chat that starts autonomous: its desk is made now, asleep, and the first message wakes it.
       let deskId = ''
-      if (autonomy) {
+      if (autonomy && !abActive(get())) {
         try {
           const { desk } = await api.cowork.desks.create({ conversation_id: c.id, autonomy, brief: text, start: false })
           bindDesk(c.id, desk.id)

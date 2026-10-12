@@ -21,7 +21,7 @@ export function sql(dataDir, stmts) {
 
 /** Show every module (and any install that hid some). Reload the page afterwards so the renderer sees it. */
 export async function enableModules(api) {
-  await api('/settings', { method: 'PUT', body: { hiddenViews: [], homeWidgets: { health: true } } })
+  await api('/settings', { method: 'PUT', body: { hiddenViews: [], sidebarHidden: [], homeWidgets: { health: true } } })
 }
 
 export async function small(app) {

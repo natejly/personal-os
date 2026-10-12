@@ -15,13 +15,13 @@ test('window minimum size is 820x520 and cannot be dragged smaller', async ({ gr
 
 test('Spaces menu: toggle shows the plane and returns; New chat in a space opens a chat window; New Space works', async ({ grain }) => {
   const { page } = grain
-  await menu(grain, 'Toggle Spaces')
+  await menu(grain, 'Toggle Canvases')
   await expect(page.locator('.sidebar .nav-item.active')).toHaveCount(0)
   const before = await page.locator('.win').count()
   await page.getByRole('button', { name: /New chat/ }).first().click()
   await expect.poll(() => page.locator('.win').count()).toBe(before + 1)
   await menu(grain, 'New Space')
-  await menu(grain, 'Toggle Spaces')
+  await menu(grain, 'Toggle Canvases')
   await expect(page.locator('.sidebar .nav-item.active')).toHaveCount(0) // back on a chat, which has no nav row
   expect(grain.consoleErrors).toEqual([])
 })

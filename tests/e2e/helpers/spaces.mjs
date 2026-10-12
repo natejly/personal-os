@@ -28,7 +28,7 @@ export async function enterCanvas(g) {
   await sleep(500)
   // The menu IPC can land before the renderer listens; toggle again only while the bar is still absent.
   for (let i = 0; i < 4 && !(await g.page.locator('.spaces-bar').count()); i++) {
-    await menuClick(g.app, 'Toggle Spaces')
+    await menuClick(g.app, 'Toggle Canvases')
     await g.page.locator('.spaces-bar').waitFor({ timeout: 3000 }).catch(() => {})
   }
   await g.page.locator('.spaces-bar').waitFor()

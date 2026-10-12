@@ -234,7 +234,7 @@ test('pop-out: a space widget pops out to its own window and returns', async ({ 
   const c = await api('/canvases')
   const id = (c.canvases ?? c)[0].id
   await api(`/canvases/${id}/windows`, { method: 'POST', body: { kind: 'todos', x: 40, y: 40, w: 420, h: 360 } })
-  await menu(grain, 'Toggle Spaces')
+  await menu(grain, 'Toggle Canvases')
   const win = page.locator('.win[data-kind="todos"]')
   await expect(win).toBeVisible()
   await win.click({ position: { x: 100, y: 60 } })

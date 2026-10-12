@@ -36,7 +36,7 @@ async function run(use, testInfo, opts) {
 // The machine running these is shared and often loaded, so waits are generous.
 expect.configure({ timeout: 40_000 })
 // toolDeferAbove 0: the tools are offered up front, so a mock `!!tool gmail_draft` is not refused as "not loaded".
-const FAKE_OPTS = { backendEntry: FAKE_ENTRY, settings: { toolDeferAbove: 0 } }
+const FAKE_OPTS = { backendEntry: FAKE_ENTRY, settings: { toolDeferAbove: 0, hiddenViews: [], sidebarHidden: [] } }
 export const test = base.extend({
   grain: async ({}, use, testInfo) => run(use, testInfo, FAKE_OPTS)
 })

@@ -224,7 +224,7 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   expect(acc['Toggle Sidebar']).toMatch(/\+B$/)
   expect(acc['Page Agent']).toMatch(/\+I$/)
   expect(acc['Toggle Context Panel']).toBe('Control+Command+I')
-  expect(acc['Toggle Spaces']).toMatch(/Shift\+C$/)
+  expect(acc['Toggle Canvases']).toMatch(/Shift\+C$/)
   expect(acc['Command Palette…']).toMatch(/\+K$/)
   const digits = ['Chats', 'Lists', 'Calendar', 'Files', 'Mail', 'Memory…']
   digits.forEach((l, i) => expect(acc[l]).toMatch(new RegExp(`\\+${i + 1}$`)))
@@ -341,7 +341,7 @@ test('nothing overflows horizontally at 820x520 on any view', async () => {
     await check('chat + page agent')
     await menu(grain, 'Toggle Sidebar')
     await check('chat, sidebar hidden')
-    await menu(grain, 'Toggle Spaces')
+    await menu(grain, 'Toggle Canvases')
     await check('space')
   })
 })

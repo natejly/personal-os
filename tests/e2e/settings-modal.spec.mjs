@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { TABS, dialog, openAdvanced, openSettings, closeSettings, save, setWindowSize } from './helpers/home.mjs'
+import { TABS, dialog, tabBtn, openAdvanced, openSettings, closeSettings, save, setWindowSize } from './helpers/home.mjs'
 
 const benign = (e) => /ResizeObserver|Autofocus|favicon/i.test(e)
 const noErrors = (grain) => expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
@@ -11,17 +11,17 @@ test('every settings tab opens and renders cleanly', async ({ grain }) => {
   page.on('response', (r) => { if (r.status() >= 500) bad.push(`${r.status()} ${r.url()}`) })
   await openSettings(page)
   for (const tab of TABS) {
-    await dialog(page).getByRole('tab', { name: tab }).click()
-    await expect(dialog(page).getByRole('tab', { name: tab })).toHaveAttribute('aria-selected', 'true')
+    await tabBtn(page, tab).click()
+    await expect(tabBtn(page, tab)).toHaveAttribute('aria-selected', 'true')
     await expect(dialog(page).getByRole('tabpanel')).not.toBeEmpty()
     await page.waitForTimeout(250)
   }
   // Arrow keys walk the rail.
-  await dialog(page).getByRole('tab', { name: 'Advanced' }).focus()
+  await tabBtn(page, 'Advanced').focus()
   await page.keyboard.press('ArrowDown')
-  await expect(dialog(page).getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true')
+  await expect(tabBtn(page, 'General')).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('End')
-  await expect(dialog(page).getByRole('tab', { name: 'Advanced' })).toHaveAttribute('aria-selected', 'true')
+  await expect(tabBtn(page, 'Advanced')).toHaveAttribute('aria-selected', 'true')
   await closeSettings(page)
   expect(bad).toEqual([])
   noErrors(grain)
@@ -64,7 +64,7 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
   await openSettings(page, 'Integrations')
   await field(page, 'Hold outgoing email so I can undo').setChecked(false, { force: true })
   // Model
-  await dialog(page).getByRole('tab', { name: 'Model' }).click()
+  await tabBtn(page, 'Model').click()
   await field(page, 'Chat model').fill('mock-chat-2')
   await field(page, 'Helper model').fill('mock-chat-2')
   await save(page)
@@ -87,7 +87,7 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
   await expect(dialog(p2).getByLabel('Standing instructions')).toHaveValue('Always answer in haiku.')
   await openAdvanced(p2, 'Approvals')
   await expect(dialog(p2).getByRole('button', { name: 'Accept all', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await dialog(p2).getByRole('tab', { name: 'Model' }).click()
+  await tabBtn(p2, 'Model').click()
   await expect(field(p2, 'Chat model')).toHaveValue('mock-chat-2')
   await closeSettings(p2)
   noErrors(grain)
@@ -185,7 +185,7 @@ test('empty model and garbage base URL do not break the modal or the app', async
 test('model list comes from the provider and leaves the embedding model out of chat choices', async ({ grain }) => {
   const { page } = grain
   await openSettings(page, 'Model')
-  await expect(dialog(page).getByRole('tab', { name: 'Model' })).toBeVisible()
+  await expect(tabBtn(page, 'Model')).toBeVisible()
   await expect.poll(async () => page.locator('#model-options option').evaluateAll((os) => os.map((o) => o.value))).toEqual(expect.arrayContaining(['mock-chat', 'mock-chat-2']))
   const values = await page.locator('#model-options option').evaluateAll((os) => os.map((o) => o.value))
   expect(values).not.toContain('mock-embed')
@@ -300,7 +300,7 @@ test('modal is usable and scrolls at 820x520', async ({ grain }) => {
   await expect(dialog(page).getByRole('button', { name: 'Cancel' })).toBeInViewport()
   // Every tab fits its footer and close button on screen.
   for (const tab of TABS) {
-    await dialog(page).getByRole('tab', { name: tab }).click()
+    await tabBtn(page, tab).click()
     await expect(dialog(page).getByRole('button', { name: 'Close settings' })).toBeInViewport()
     await expect(dialog(page).locator('footer button').last()).toBeInViewport()
   }

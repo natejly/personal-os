@@ -47,6 +47,7 @@ class PlannerConfigIn(BaseModel):
     slotStepMin: int | None = None
     lookaheadDays: int | None = None
     calendarName: str | None = None
+    busyCalendarIds: list[str] | None = None
 
 
 def focus_change(b: dict[str, Any], calendar_id: str) -> dict[str, Any]:
@@ -82,7 +83,7 @@ class PlannerModule(Module):
         now = self.clock().replace(second=0, microsecond=0)
         # Read at least the configured lookahead so a Focus block accepted later in the week still locks its todo.
         span = max(cfg["lookaheadDays"], base["lookaheadDays"])
-        events = self.ctx.google.calendar_events(span + 1, "primary", 100, None, ["enabled"])
+        events = self.ctx.google.calendar_events(span + 1, "primary", 100, None, base["busyCalendarIds"] or ["enabled"])
         mirror = self._mirror_ids()
         scope = "__all__" if project_id in (None, "", "all") else self.ctx.sid(project_id)
         todos = self.todos.list(scope, include_done=False)
@@ -189,6 +190,7 @@ class PlannerModule(Module):
         if events is None:  # no snapshot: planning around unknown meetings would be a guess
             return {"planner_blocks": []}
         now = self.clock().replace(second=0, microsecond=0)
+        events = pl.in_busy_calendars(events, base["busyCalendarIds"])
         mirror = self._mirror_ids()
         todos = self.todos.list("__all__", include_done=False)
         return {"planner_blocks": pl.plan(todos, pl.busy_from_events(events, mirror), now, cfg, pl.locked_from_events(events, mirror))["blocks"]}

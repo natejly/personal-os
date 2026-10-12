@@ -138,12 +138,24 @@ class PlanTests(unittest.TestCase):
         self.assertIsNotNone(pl.validate_config({**CFG, "workDays": [0]}))
         self.assertIsNotNone(pl.validate_config({**CFG, "maxBlockMin": 5, "minBlockMin": 15}))
 
+    def test_busy_calendar_ids_validation(self) -> None:
+        self.assertEqual(pl.DEFAULT_CONFIG["busyCalendarIds"], [])
+        self.assertIsNone(pl.validate_config({**CFG, "busyCalendarIds": ["primary", "work@group.calendar.google.com"]}))
+        for bad in ("primary", ["primary", ""], ["primary", 3], [None], {"a": 1}):
+            self.assertIsNotNone(pl.validate_config({**CFG, "busyCalendarIds": bad}), bad)
+
+    def test_in_busy_calendars_filters_only_when_set(self) -> None:
+        ev = [{"calendar_id": "a"}, {"calendar_id": "b"}, {"calendar_id": "c"}]
+        self.assertEqual(pl.in_busy_calendars(ev, []), ev)
+        self.assertEqual(pl.in_busy_calendars(ev, ["a", "c"]), [ev[0], ev[2]])
+
 
 class StubGoogle:
     def __init__(self, events: list[dict[str, Any]], verified: bool = True) -> None:
         self.events, self.created, self.verified = events, [], verified
 
-    def calendar_events(self, *_a: Any, **_k: Any) -> list[dict[str, Any]]:
+    def calendar_events(self, *a: Any, **_k: Any) -> list[dict[str, Any]]:
+        self.event_calls = [*getattr(self, "event_calls", []), a]
         return self.events
 
     def calendar_ensure(self, summary: str) -> dict[str, Any]:
@@ -188,6 +200,16 @@ class ModuleTests(unittest.TestCase):
             self.assertFalse(overlaps((s, e), MEETING[0], pad=10))
             self.assertTrue(dt(5, "09:00").time() <= s.time() and e.time() <= dt(5, "17:30").time())
         self.assertEqual(self.client.post("/planner/suggest", json={}).json(), body)
+
+    def test_suggest_reads_checked_calendars_unless_busy_calendars_are_set(self) -> None:
+        self.client.post("/planner/suggest", json={})
+        self.assertEqual(self.google.event_calls[-1][4], ["enabled"])
+        r = self.client.put("/planner/config", json={"busyCalendarIds": ["primary", "work"]})
+        self.assertEqual(r.json()["busyCalendarIds"], ["primary", "work"])
+        self.client.post("/planner/suggest", json={})
+        self.assertEqual(self.google.event_calls[-1][4], ["primary", "work"])
+        self.assertEqual(self.client.put("/planner/config", json={"busyCalendarIds": []}).json()["busyCalendarIds"], [])
+        self.assertEqual(self.client.put("/planner/config", json={"busyCalendarIds": [""]}).status_code, 422)
 
     def test_apply_creates_exactly_the_given_blocks(self) -> None:
         blocks = [{"todo_id": "a", "title": "Write spec", "start": "2026-10-05T11:10", "end": "2026-10-05T12:40"},

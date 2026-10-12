@@ -177,3 +177,35 @@ def test_migration_38_creates_model_votes() -> None:
     c.execute("INSERT INTO model_votes(created_at, model_a, model_b, winner) VALUES (1, 'a', 'b', 'tie')")
     with pytest.raises(sqlite3.IntegrityError):
         c.execute("INSERT INTO model_votes(created_at, model_a, model_b, winner) VALUES (1, 'a', 'b', 'nope')")
+
+
+def _desk() -> tuple[str, str]:
+    """A fresh asleep desk on its own chat, the way a new autonomous chat makes one."""
+    cid = client.post("/conversations", json={}).json()["id"]
+    appmod.convos.update(cid, {"model": "duel-a"})
+    out = client.post("/cowork/desks", json={"conversation_id": cid, "brief": "do it", "autonomy": "ask", "start": False}).json()
+    return out["desk"]["id"], cid
+
+
+def test_desk_message_with_ab_model_duels_then_the_desk_continues_after_the_pick() -> None:
+    did, cid = _desk()
+    before = len(todos_from_a())
+    assert client.post(f"/cowork/desks/{did}/message", json={"content": "add a todo", "ab_model": "duel-b"}).status_code == 200
+    mid = wait_until(lambda: next(iter(appmod._ab_waits), None), "the desk's duel to wait for a pick")
+    assert sorted(CALLS) == ["duel-a", "duel-b"] and len(todos_from_a()) == before
+    assert appmod.bus.answering(cid).status == "awaiting_approval"  # parked like a pending card: no idle clock may cut it
+    client.post(f"/conversations/{cid}/ab/pick", json={"message_id": mid, "winner": "tie"})
+    wait_until(lambda: not appmod.bus.answering(cid), "the desk turn to finish")
+    assert len(todos_from_a()) == before + 1  # the loop went on with A's call, autonomously
+    assert client.get("/model-votes").json()["votes"] == 1
+
+
+def test_internal_desk_turns_never_duel() -> None:
+    did, cid = _desk()
+    body = appmod.ChatIn(content="go on", kind="continue", ab_model="duel-b")
+    async def _start() -> None:
+        appmod.bus.start(cid, lambda r: appmod._run_desk(r, did, body), kind="desk", desk_id=did, turn=0, input={"content": "go on"})
+
+    asyncio.run_coroutine_threadsafe(_start(), appmod._loop).result(5)
+    wait_until(lambda: not appmod.bus.answering(cid), "the hidden turn to finish")
+    assert "duel-b" not in CALLS and not appmod._ab_waits

@@ -181,7 +181,7 @@
 
 /* ---- panes ---- */
 .doc-panes { flex: 1 1 0; min-height: 220px; display: grid; overflow: hidden; position: relative; }
-.doc-panes.edit, .doc-panes.preview, .doc-panes.read { grid-template-columns: minmax(0, 1fr); }
+.doc-panes.edit, .doc-panes.preview { grid-template-columns: minmax(0, 1fr); }
 .doc-panes.split { grid-template-columns: minmax(0, var(--doc-split, 50%)) minmax(0, 1fr); }
 .resize-handle.doc-split-edge { left: calc(var(--doc-split, 50%) - 3px); }
 /* Stacked panes have no vertical divider to move. */
@@ -195,8 +195,6 @@
 /* The doc's type (typography.ts sets the custom properties on .doc-panes); unset, each view keeps its default. */
 .docs-render.markdown { font-family: var(--doc-font, inherit); font-size: var(--doc-size, inherit); line-height: var(--doc-line, 1.55); }
 .docs-render.reading { padding-top: 28px; padding-bottom: 60px; }
-.doc-edit-toggle { white-space: nowrap; }
-.doc-edit-toggle.on { color: var(--accent); }
 
 /* ---- comments ---- */
 /* The marks are highlight-registry ranges (DocComments.tsx), so the rendered DOM is never wrapped. */

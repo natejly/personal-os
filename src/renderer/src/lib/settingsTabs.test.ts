@@ -27,3 +27,11 @@ test('search matches every typed word against titles and keywords', () => {
   assert.deepEqual(searchSettings('  '), [])
   assert.deepEqual(searchSettings('zzzz'), [])
 })
+
+test('the Telegram bot section is found by "bot" and "texting"', () => {
+  for (const q of ['bot', 'texting']) {
+    const hit = searchSettings(q).find((e) => e.sec === 'texting')
+    assert.ok(hit, q)
+    assert.equal(hit.title, 'Telegram bot')
+  }
+})

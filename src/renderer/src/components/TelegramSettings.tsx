@@ -26,7 +26,7 @@ function expiryLabel(expiresAt: number): string {
 }
 
 /**
- * Settings > Texting: control Grain from a private chat with your own Telegram bot. The token, the on/off switch, pairing, the test
+ * Settings > Telegram bot: control Grain from a private chat with your own Telegram bot. The token, the on/off switch, pairing, the test
  * message and the unpair/remove buttons act at once; the long-run notice goes through the modal's draft and Save.
  */
 export default function TelegramSettings({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
@@ -72,8 +72,7 @@ export default function TelegramSettings({ draft, patch }: { draft: Settings; pa
 
   return (
     <div className="workspace-roots">
-      <h4>Telegram</h4>
-      <p className="muted small">Text Grain from your phone through a private bot that only you can use. Works while your Mac is awake and Grain is running.</p>
+      <p className="muted small">This is a Telegram bot you create yourself with @BotFather. It is how you text Grain from your phone, through a private bot that only you can use. Works while your Mac is awake and Grain is running.</p>
       <p className="muted small">Each Mac needs its own bot: two Macs reading one bot take its messages from each other.</p>
       {st?.status === 'claimed_elsewhere' && (
         <div className="workspace-roots-add">

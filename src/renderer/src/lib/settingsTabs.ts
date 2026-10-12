@@ -38,7 +38,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'integrations', sec: 'accounts', title: 'Mail and Calendar account', keys: 'google gmail calendar sign in oauth client outbox undo send' },
   { tab: 'integrations', sec: 'connectors', title: 'Connectors', keys: 'mcp library tools planner mail' },
   { tab: 'integrations', sec: 'web-search', title: 'Web search', keys: 'firecrawl brave tavily exa searxng github token reader api key' },
-  { tab: 'integrations', sec: 'texting', title: 'Texting', keys: 'telegram bot pairing messages phone' },
+  { tab: 'integrations', sec: 'texting', title: 'Telegram bot', keys: 'texting text telegram bot pairing messages phone sms chat token botfather' },
   { tab: 'agents', sec: 'desks', title: 'Desks', keys: 'cowork desk folder agents workers autonomous' },
   { tab: 'agents', sec: 'workers', title: 'Background workers', keys: 'delegate delegation concurrent queue tool rounds' },
   { tab: 'agents', sec: 'coding', title: 'Coding sessions', keys: 'opencode claude code repo git coding agent' },

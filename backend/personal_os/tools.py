@@ -2214,15 +2214,15 @@ def _register_google(self: Toolbox) -> None:
                   {"changes": [{"op": "update", "event_id": "7abc123def", "start": "2026-10-08T10:00", "end": "2026-10-08T11:00"}, {"op": "delete", "event_id": "9xyz"}]}]))
     _register_approval_validators()
 
-    async def gmail_search(ctx: dict[str, Any], query: str = "is:unread in:inbox newer_than:14d", max_results: int = 15, offset: int = 0) -> Any:
+    async def gmail_search(ctx: dict[str, Any], query: str = "is:unread in:inbox newer_than:14d", max_results: int = 25, offset: int = 0) -> Any:
         off, n = max(0, int(offset)), max(1, min(int(max_results), 100))
         # One past the page, so page() can tell whether more exist.
         rows = _scrub_strings(await run(g.gmail_search, query, off + n + 1))
         return page(rows, offset=off, limit=n, key="messages")
-    R("gmail_search", ToolSpec("gmail_search", "Search Gmail with Gmail query syntax (e.g. 'from:alice newer_than:7d'). Returns headers and snippets.",
-        _obj({"query": {"type": "string", "default": "is:unread in:inbox newer_than:14d"}, "max_results": {"type": "integer", "default": 15}, "offset": {"type": "integer", "default": 0}}, []), gmail_search, "google",
+    R("gmail_search", ToolSpec("gmail_search", "Search Gmail with Gmail query syntax (e.g. 'from:alice newer_than:7d'). One call returns a page of up to 25 messages (headers and snippets), newest first; narrow the query rather than paging. Use offset (with the same query and max_results, from next_offset) only when has_more is true and you need a deeper look.",
+        _obj({"query": {"type": "string", "default": "is:unread in:inbox newer_than:14d"}, "max_results": {"type": "integer", "default": 25}, "offset": {"type": "integer", "default": 0}}, []), gmail_search, "google",
         examples=[{"query": "is:unread in:inbox newer_than:14d"}, {"query": "from:mira@example.com subject:invoice", "max_results": 5},
-                  {"query": "has:attachment newer_than:30d", "max_results": 15, "offset": 15}], taints=True))
+                  {"query": "has:attachment newer_than:30d", "max_results": 25, "offset": 25}], taints=True))
 
     async def gmail_read(ctx: dict[str, Any], message_id: str) -> Any:
         return _scrub_strings(await run(g.gmail_get, message_id))

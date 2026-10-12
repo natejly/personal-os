@@ -4,7 +4,7 @@ import SourcesList from './SourcesList'
 import { citeInfo, openCite, splitSources } from '../lib/remarkCites'
 import { AlertCircle, User, FileText, Activity, ChevronRight, Play, RotateCw, Pencil, GitBranch, Trash2 } from '../icons'
 import type { Attachment, Message, RunChanges, Span, ToolEvent } from '@shared/types'
-import { useStore, useMessageSubagents, useSubagents } from '../store'
+import { useStore, useMessageSubagents, useSubagents, useWorkers, useBusy } from '../store'
 import { api } from '../lib/api'
 import { fetchBlobUrl } from '../features/notes/api'
 import ToolEvents, { agentIds } from './ToolEvents'
@@ -22,7 +22,7 @@ import { describeCall, staysVisible, traceLines } from '../lib/toolDisplay'
 import { quietEvents } from '../lib/orchestration'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
-import { nowText, waitText } from '../lib/runStatus'
+import { busyText, nowText, waitText } from '../lib/runStatus'
 import { clockTime, fullTime } from '../lib/chatMeta'
 import Face from './Face'
 import ResearchTrail from './ResearchTrail'
@@ -198,7 +198,23 @@ function FilesChanged({ messageId }: { messageId: string }): JSX.Element | null 
   )
 }
 
-/** What a silent stretch of a reply is waiting on. The 1s timer lives here, only while a countdown runs, so nothing above re-renders. */
+/**
+ * The named line for a streaming reply that is busy without streaming text (a tool, a retry or compaction wait, a
+ * hand-off, workers, an approval): what it is doing and, for a slow call, for how long. Its 1s timer lives here, so
+ * nothing above re-renders. Renders nothing when `busyText` has nothing to say.
+ */
+function BusyLine({ message }: { message: Message }): JSX.Element | null {
+  const subs = useSubagents(message.conversation_id)
+  const workers = useWorkers(message.conversation_id)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  const text = busyText(message, { nowMs: now, subs, workers })
+  return text ? <div className="thinking run-status busy-line shimmer" role="status">{text}</div> : null
+}
+
 /** A shimmering "Thinking…" for a reply with nothing to show yet; past 5s it gains the elapsed time, so a slow model does not look hung. */
 export function Thinking(): JSX.Element {
   const [start] = useState(() => Date.now())
@@ -245,6 +261,7 @@ export type ChatFace = { name: string; hue?: number; tone?: number }
 
 const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, resendable = editable, showContextChips = false, branchable = false, browserSession, face, plain = false, from }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; /** Edit and resend; defaults to `editable`. A desk or job transcript is edit-proof, but a message in it can still be deleted. */ resendable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string; face?: ChatFace; /** A row not stored as a chat message (a worker's history): no actions under it. */ plain?: boolean; /** A user-role row someone else wrote, labelled with their face and name (the main agent's task to a worker). */ from?: { label: string; face: ChatFace } }): JSX.Element | null {
   const [editing, setEditing] = useState(false)
+  const busy = useBusy(message, streaming && message.role === 'assistant')
   const isUser = message.role === 'user'
   // The NO_REPLY marker is never text the user sees: a reply that is only the marker keeps its tool cards, and one that trails it loses the line.
   const sentinel = !isUser && isNoReply(message.content)
@@ -287,7 +304,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
         ) : (
           <div className="msg-body">
             <BodyBoundary resetKey={message.id}>
-              {(message.reasoning || folded.length > 0) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!content} trace={message.trace} />}
+              {(message.reasoning || folded.length > 0) && !(busy && !content) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!content} trace={message.trace} />}
               {trail && <ResearchTrail trail={trail} />}
               {!isUser && <SubagentThread messageId={message.id} conversationId={message.conversation_id} events={events ?? []} />}
               {shown.length > 0 && <ToolEvents events={shown} conversationId={message.conversation_id} streaming={streaming} browserSession={browserSession} />}
@@ -299,9 +316,11 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
                     <MarkdownPreview source={content} streaming={streaming} cites={cites} onCite={onCite} />
                   </ShowCtx.Provider>
                 </div>
-              ) : streaming && !message.reasoning && !folded.length && !shown.some((t) => t.pending) ? (
+              ) : streaming && !message.reasoning && !folded.length && !shown.some((t) => t.pending) && !busy ? (
                 <Thinking />
               ) : null}
+              {/* The one named live line, below whatever has streamed: it replaces the trace's live step and the bare Thinking. */}
+              {busy && <BusyLine message={message} />}
             </BodyBoundary>
             <ReplyAttachments files={message.attachments} />
             {!streaming && chunks && <SourcesList content={content} chunks={chunks} onOpen={(c) => openCite(c, setCiting)} />}

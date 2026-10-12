@@ -27,6 +27,9 @@ export const canAttach = (c: CodingSession): boolean => c.agent === 'claude' && 
 /** The terminal view a picked session opens straight away; null (nothing until asked) when it cannot attach. */
 export const defaultTermMode = (c: CodingSession): 'attach' | null => (canAttach(c) ? 'attach' : null)
 
+/** The session the Terminal opens on: the first (newest, rows come newest first) that can attach, else the first. */
+export const defaultTermSession = (rows: CodingSession[]): CodingSession | undefined => rows.find(canAttach) ?? rows[0]
+
 /** Events kept per session in the store; older ones are dropped from the front. */
 export const MAX_CODING_EVENTS = 500
 

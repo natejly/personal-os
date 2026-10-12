@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
 import { useStore } from '../store'
-import { AGENT_LABEL, canAttach, codingDot, codingStatusLabel, defaultTermMode } from '../lib/codingSessions'
+import { AGENT_LABEL, canAttach, codingDot, codingStatusLabel, defaultTermMode, defaultTermSession } from '../lib/codingSessions'
 import { endEntry, ensureEntry, getEntry, refit, startEntry, useTermEntries, type TermMode } from '../lib/termRegistry'
 
 // The last openTerminal request this pane acted on, so remounting the pane does not replay it.
 let handled = 0
+// The session and view on screen when the pane last unmounted, so coming back from another tab shows what you left.
+let last: { id: string; mode: TermMode | null } | null = null
 
 /**
- * Terminals for coding sessions: picking a session attaches to it right away when it can (claude with an attach id); a shell in
- * its worktree is an explicit button and the only view for sessions that cannot attach. The xterm views live
+ * Terminals for coding sessions: opening the tab picks the newest attachable session and picking a session attaches to it right
+ * away when it can (claude with an attach id); a shell in its worktree is an explicit button and the only view for sessions that cannot attach. The xterm views live
  * in lib/termRegistry, not in this component, so closing the panel or switching tab only detaches their DOM; the PTYs and
  * their screens are still there when it comes back.
  */
@@ -17,8 +19,10 @@ export default function TerminalPane(): JSX.Element {
   const sessions = useStore((s) => s.codingSessions)
   const request = useStore((s) => s.terminalRequest)
   const rows = Object.values(sessions).sort((a, b) => b.created_at - a.created_at).slice(0, 20)
-  const [sessionId, setSessionId] = useState<string | null>(request?.sessionId ?? rows[0]?.id ?? null)
-  const [mode, setMode] = useState<TermMode | null>(null)
+  const kept = last && rows.some((c) => c.id === last!.id) ? last : null
+  const [sessionId, setSessionId] = useState<string | null>(request?.sessionId ?? kept?.id ?? defaultTermSession(rows)?.id ?? null)
+  const [mode, setMode] = useState<TermMode | null>(kept?.mode ?? null)
+  useEffect(() => { if (sessionId) last = { id: sessionId, mode } }, [sessionId, mode])
   const entries = useTermEntries()
   const viewRef = useRef<HTMLDivElement>(null)
   const selected = rows.find((c) => c.id === sessionId) ?? null
@@ -34,6 +38,18 @@ export default function TerminalPane(): JSX.Element {
     if (c && defaultTermMode(c)) start(id, 'attach')
     else { setSessionId(id); setMode(null) }
   }
+
+  // No fresh request and nothing left open: attach to the default session once, as soon as there is one (sessions can arrive after mount).
+  const auto = useRef(!!kept)
+  useEffect(() => {
+    if (auto.current) return
+    if (request && request.n !== handled) { auto.current = true; return }
+    const d = defaultTermSession(rows)
+    if (!d) return
+    auto.current = true
+    pick(d.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows.length])
 
   useEffect(() => {
     if (!request || request.n === handled) return

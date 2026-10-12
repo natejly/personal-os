@@ -46,8 +46,11 @@ test('Terminal: shell in the worktree echoes typed text, survives a tab switch, 
     await tab.click()
     await expect(p.getByTestId(`term-chip-${SID}`)).toBeVisible()
     await expect(p.getByTestId('term-attach')).toBeVisible()
-    await expect(p.locator('.xterm-rows')).toHaveCount(0)
+    // opening the tab attaches to the newest attachable session with no click; only the shown view's DOM is mounted
+    await expect(p.locator('.xterm-rows')).toHaveCount(1)
+    await expect(p.locator('.xterm-rows').first()).toBeVisible()
     await p.getByTestId('term-shell').click()
+    await expect(p.locator('.xterm-rows')).toHaveCount(1)
     await expect(p.locator('.xterm-rows').first()).toBeVisible()
     await p.locator('.xterm-helper-textarea').first().focus()
     await p.keyboard.type('hello-from-e2e')
@@ -68,6 +71,11 @@ test('Terminal: shell in the worktree echoes typed text, survives a tab switch, 
     await p.keyboard.press('Control+d')
     await expect.poll(() => rowsText(p)).toContain('[shell exited]')
     await p.getByTestId('term-end').click()
+    // the shell is gone; the pane falls back to the session's still-live attached view
+    await expect(p.locator('.xterm-rows')).toHaveCount(1)
+    await expect.poll(() => rowsText(p)).not.toContain('[shell exited]')
+    await expect(p.getByTestId('term-end')).toBeVisible()
+    await p.getByTestId('term-end').click()
     await expect(p.locator('.xterm-rows')).toHaveCount(0)
     await expect(p.getByTestId('term-end')).toHaveCount(0)
     expect(realErrors(grain)).toEqual([])
@@ -84,6 +92,20 @@ test('Terminal: picking an attachable session shows the attached view without pr
     await openPanel(p)
     await p.getByTestId('desk-tab-terminal').click()
     await p.getByTestId(`term-chip-${SID}`).click()
+    await expect(p.locator('.xterm-rows').first()).toBeVisible()
+    expect(realErrors(grain)).toEqual([])
+  } finally {
+    try { rmSync(wt, { recursive: true, force: true }) } catch {}
+  }
+})
+
+test('Terminal: opening the tab attaches to the newest attachable session with no click', async ({ grain }) => {
+  const wt = realpathSync(mkdtempSync(join(tmpdir(), 'grain-e2e-term-')))
+  try {
+    seedSession(grain, wt)
+    const p = await grain.relaunch()
+    await openPanel(p)
+    await p.getByTestId('desk-tab-terminal').click()
     await expect(p.locator('.xterm-rows').first()).toBeVisible()
     expect(realErrors(grain)).toEqual([])
   } finally {

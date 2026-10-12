@@ -1701,8 +1701,8 @@ export interface ModelPrice {
   output?: number
   cache_read?: number
   cache_write?: number
-  /** 'proxy' = read from the LiteLLM price map, 'fireworks' = built-in Fireworks list price, 'override' = set by hand here. */
-  source?: 'proxy' | 'fireworks' | 'override'
+  /** 'proxy' = read from the LiteLLM price map, 'fireworks' | 'anthropic' | 'openai' = built-in vendor list price, 'override' = set by hand here. */
+  source?: 'proxy' | 'fireworks' | 'anthropic' | 'openai' | 'override'
 }
 
 /** Aggregated counters shared by every slice of the usage report. */

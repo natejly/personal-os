@@ -960,7 +960,7 @@ def test_deepseek_is_the_default_model_per_provider_and_a_saved_one_wins() -> No
     assert providers.default_model({"provider": "fireworks", "baseUrl": "https://api.fireworks.ai/inference/v1"}) == "accounts/fireworks/models/deepseek-v4p1-flash"
     assert providers.default_model({"provider": "litellm", "baseUrl": "http://localhost:4000"}) == "deepseek-v4-flash"
     assert providers.default_model({"baseUrl": "http://127.0.0.1:4000"}) == "deepseek-v4-flash", "an inferred proxy too"
-    assert providers.default_model({"provider": "openai", "baseUrl": "https://api.openai.com/v1"}) == "gpt-5-mini", "the preset's own default, not its high tier"
+    assert providers.default_model({"provider": "openai", "baseUrl": "https://api.openai.com/v1"}) == "gpt-6.1-sol", "the preset's own default, not its high tier"
     assert providers.default_model({}) == "", "no provider yet: nothing"
     saved = {k: v for k, v in appmod.db.get_settings().items() if k in ("provider", "baseUrl", "defaultModel")}
     try:

@@ -9,6 +9,7 @@ import { useStore } from '../store'
 /** Settings → Usage: today / week / month totals, tokens and cost per day, model and feature, plus per-model prices.
  *  Information only. Cost is shown only where a price is known; an unpriced call reads as unknown, never $0. */
 
+const LIST_SOURCES: Record<string, string> = { fireworks: 'Fireworks', anthropic: 'Anthropic', openai: 'OpenAI' }
 const RANGES = [7, 30, 90] as const
 const PERIODS: { id: UsagePeriod; label: string }[] = [{ id: 'today', label: 'Today' }, { id: 'week', label: 'This week' }, { id: 'month', label: 'This month' }]
 
@@ -99,7 +100,7 @@ function PriceEditor({ report, onSaved }: { report: UsageReport; onSaved: (price
               <th scope="row" className="mono">{m}</th>
               <td><input type="number" aria-label={`${m} input price, $ per million tokens`} min={0} step="0.01" value={valueOf(m, 'input')} placeholder="—" onChange={(e) => edit(m, 'input', e.target.value)} /></td>
               <td><input type="number" aria-label={`${m} output price, $ per million tokens`} min={0} step="0.01" value={valueOf(m, 'output')} placeholder="—" onChange={(e) => edit(m, 'output', e.target.value)} /></td>
-              <td className="usage-price-src">{draft[m] ? 'edited' : report.prices[m]?.source === 'override' ? 'custom' : report.prices[m]?.source === 'fireworks' ? 'Fireworks list price' : report.prices[m] ? 'from proxy' : 'no price'}</td>
+              <td className="usage-price-src">{draft[m] ? 'edited' : report.prices[m]?.source === 'override' ? 'custom' : LIST_SOURCES[report.prices[m]?.source ?? ''] ? `${LIST_SOURCES[report.prices[m]?.source ?? '']} list price` : report.prices[m] ? 'from proxy' : 'no price'}</td>
             </tr>
           ))}
         </tbody>

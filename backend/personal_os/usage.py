@@ -1,7 +1,7 @@
 """LLM usage accounting: one row per model call (chat rounds and auto-learn), with cost.
 
 Prices, all in USD per 1M tokens, from (later wins): the LiteLLM proxy's /model/info (its bundled price map),
-the Fireworks list prices below, and the user's overrides in settings["modelPrices"] as
+the vendor list prices below (Fireworks, Anthropic, OpenAI), and the user's overrides in settings["modelPrices"] as
 {"model": {"input": ..., "output": ...}}. A model none of them prices stays unpriced (cost NULL, shown as
 unknown, never $0); nothing is guessed.
 """
@@ -32,6 +32,42 @@ FIREWORKS_PRICES: dict[str, dict[str, float]] = {
     "deepseek-v4p1-flash": {"input": 0.30, "cache_read": 0.006, "output": 1.20},
     "qwen3-embedding-8b": {"input": 0.10},
 }
+
+# Anthropic list prices, USD per 1M tokens: input, 5-minute cache write, cache read, output.
+# Source: https://platform.claude.com/docs/en/about-claude/pricing, retrieved 2026-10-11.
+# ponytail: haiku-5-5 is the <=100K-token-prompt rate (0.50/0.625/0.05/2.50 above it), so longer prompts are under-priced; upgrade = a long-context row keyed on prompt size.
+ANTHROPIC_PRICES: dict[str, dict[str, float]] = {
+    "claude-fable-5-1": {"input": 10.00, "cache_write": 12.50, "cache_read": 0.25, "output": 50.00},
+    "claude-opus-5-5": {"input": 4.00, "cache_write": 5.00, "cache_read": 0.20, "output": 20.00},
+    "claude-opus-5": {"input": 5.00, "cache_write": 6.25, "cache_read": 0.50, "output": 25.00},
+    "claude-sonnet-5-5": {"input": 2.00, "cache_write": 2.50, "cache_read": 0.10, "output": 10.00},
+    "claude-sonnet-5": {"input": 2.00, "cache_write": 2.50, "cache_read": 0.20, "output": 10.00},
+    "claude-haiku-5-5": {"input": 0.10, "cache_write": 0.125, "cache_read": 0.01, "output": 0.50},
+    "claude-haiku-4-5": {"input": 1.00, "cache_write": 1.25, "cache_read": 0.10, "output": 5.00},
+}
+
+# OpenAI list prices (Standard tier, <=272K context), USD per 1M tokens: input, cached input, output. No cache write.
+# Source: https://developers.openai.com/api/docs/pricing, retrieved 2026-10-11. Embeddings bill input tokens only.
+OPENAI_PRICES: dict[str, dict[str, float]] = {
+    "gpt-6-astra": {"input": 10.00, "cache_read": 1.00, "output": 50.00},
+    "gpt-6.1-sol": {"input": 2.00, "cache_read": 0.10, "output": 10.00},
+    "gpt-6-sol": {"input": 2.00, "cache_read": 0.20, "output": 10.00},
+    "gpt-6-luna": {"input": 0.10, "cache_read": 0.01, "output": 0.50},
+    "gpt-5.6-sol": {"input": 4.00, "cache_read": 0.40, "output": 20.00},
+    "gpt-5.6-terra": {"input": 2.00, "cache_read": 0.20, "output": 12.00},
+    "gpt-5.6-luna": {"input": 0.20, "cache_read": 0.02, "output": 1.20},
+    "gpt-5.5": {"input": 5.00, "cache_read": 0.50, "output": 30.00},
+    "gpt-5.4-mini": {"input": 0.75, "cache_read": 0.075, "output": 4.50},
+    "gpt-5.4-nano": {"input": 0.20, "cache_read": 0.02, "output": 1.25},
+    "gpt-5-mini": {"input": 0.25, "cache_read": 0.025, "output": 2.00},
+    "gpt-5-nano": {"input": 0.05, "cache_read": 0.005, "output": 0.40},
+    "text-embedding-3-small": {"input": 0.02},
+    "text-embedding-3-large": {"input": 0.13},
+}
+
+# Every list price by short model name -> (source, row). All sources rank alike: below an override, above the proxy.
+LIST_PRICES: dict[str, tuple[str, dict[str, float]]] = {
+    m: (src, row) for src, rows in (("fireworks", FIREWORKS_PRICES), ("anthropic", ANTHROPIC_PRICES), ("openai", OPENAI_PRICES)) for m, row in rows.items()}
 
 
 # Proxy model names (litellm.yaml) that bill as a differently named Fireworks model. A '.' in a name is Fireworks'
@@ -125,15 +161,16 @@ class Pricing:
             pass
 
     def table(self, settings: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        """{model: {input?, output?, cache_read?, cache_write?, source: 'proxy'|'fireworks'|'override'}} in $ per million tokens.
+        """{model: {input?, output?, cache_read?, cache_write?, source: 'proxy'|'fireworks'|'anthropic'|'openai'|'override'}} in $ per million tokens.
 
-        Fireworks list prices replace the proxy's for the same model, under its alias too. An override keeps the
+        List prices replace the proxy's for the same model, under its alias too. An override keeps the
         cached-input price of the row it replaces unless it sets its own."""
         out: dict[str, dict[str, Any]] = {m: {**p, "source": "proxy"} for m, p in self._proxy.items()}
         for alias, target in self._targets.items():
-            if short_model(target) in FIREWORKS_PRICES:
-                out[alias] = {**FIREWORKS_PRICES[short_model(target)], "source": "fireworks"}
-        out.update({m: {**p, "source": "fireworks"} for m, p in FIREWORKS_PRICES.items()})
+            if short_model(target) in LIST_PRICES:
+                src, row = LIST_PRICES[short_model(target)]
+                out[alias] = {**row, "source": src}
+        out.update({m: {**row, "source": src} for m, (src, row) in LIST_PRICES.items()})
         for m, p in (settings.get("modelPrices") or {}).items():
             if isinstance(p, dict) and (p.get("input") is not None or p.get("output") is not None):
                 base = {k: v for k, v in (out.get(m) or {}).items() if k in ("cache_read", "cache_write")}
@@ -146,7 +183,7 @@ class Pricing:
         """Reasoning tokens are already inside completion_tokens, so they cost nothing extra here."""
         # Any row naming this model, by full id or short name; an override beats a list price beats the proxy's,
         # and an exact id beats a short-name match within the same source.
-        short, rank = price_key(model), {"override": 0, "fireworks": 1, "proxy": 2}
+        short, rank = price_key(model), {"override": 0, "fireworks": 1, "anthropic": 1, "openai": 1, "proxy": 2}
         rows = [(rank[v["source"]], k != model, v) for k, v in self.table(settings).items()
                 if model and (k == model or price_key(k) == short)]
         p = min(rows, key=lambda r: r[:2])[2] if rows else None

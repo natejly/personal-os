@@ -45,7 +45,7 @@ SYSTEM = (
 # Model families that read images, matched on the model's last path segment. Deliberately conservative: a miss only
 # means the tool falls back to OCR (or to the `visionModel` setting), a false hit means a failed call.
 _VISION_PREFIX = (
-    "claude", "gpt-4o", "gpt-4.1", "gpt-4.5", "gpt-4-turbo", "gpt-5", "chatgpt-4o", "o4-mini", "gemini", "gemma-3", "gemma3",
+    "claude", "gpt-4o", "gpt-4.1", "gpt-4.5", "gpt-4-turbo", "gpt-5", "gpt-6", "chatgpt-4o", "o4-mini", "gemini", "gemma-3", "gemma3",
     "pixtral", "llava", "llama-3.2-11b-vision", "llama-3.2-90b-vision", "llama3.2-vision", "llama-4", "llama4", "minicpm-v",
     "kimi-k2.5", "kimi-k2p5", "kimi-k3", "qwen-vl", "qwen2-vl", "qwen2.5-vl", "qwen2p5-vl", "qwen3-vl",
     "deepseek-v4p1-flash", "deepseek-v4-flash",   # flash takes image input; deepseek-v4-pro does not

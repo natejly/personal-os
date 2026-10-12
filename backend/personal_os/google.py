@@ -22,6 +22,7 @@ import base64
 import contextlib
 import datetime as dt
 import email.message
+import functools
 from email.utils import formataddr, getaddresses, parsedate_to_datetime
 import json
 import logging
@@ -104,6 +105,17 @@ def _id_token_email(id_token: Any) -> str | None:
         return None
 
 
+def _forgets_gmail_lists(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """A Gmail write: once it succeeds, saved search listings and the history check are no
+    longer trusted, so the next search sees the change instead of a listing from before it."""
+    @functools.wraps(fn)
+    def inner(self: Any, *args: Any, **kwargs: Any) -> Any:
+        out = fn(self, *args, **kwargs)
+        self._gmail_unsure()
+        return out
+    return inner
+
+
 class GoogleNotConnected(Exception):
     pass
 
@@ -117,6 +129,10 @@ class NotSent(Exception):
 _CAL_FULL_AFTER = 6 * 3600
 _CAL_OVERLAP = dt.timedelta(minutes=2)
 _GMAIL_META_CAP = 800
+_GMAIL_LIST_CHUNK = 100   # ids asked of one messages.list; the first few pages of a look cost one call
+_GMAIL_LIST_IDS_KEPT = 500  # most ids saved for one query
+_GMAIL_LISTS_KEPT = 32   # queries whose id listing is saved
+_GMAIL_BATCH_MAX = 100   # Gmail refuses more sub-requests than this in one batch
 # Saved message bodies: plain mail text on disk, and the whole store is rewritten on each
 # save, so keep only the recently opened ones.
 _GMAIL_BODY_CAP = 200
@@ -138,6 +154,8 @@ class Google:
 
     def invalidate(self, *namespaces: str) -> int:
         """Forget cached reads. No arguments forgets everything Google-related."""
+        if not namespaces or any(n.startswith("gmail") for n in namespaces):
+            self._gmail_unsure()
         return self._cache.invalidate(*namespaces)
 
     def cache_stats(self) -> dict[str, Any]:
@@ -806,51 +824,59 @@ class Google:
     # ---------- Gmail ----------
     @cached("gmail", TTL["gmail_list"])
     def gmail_search(self, query: str = "is:unread in:inbox newer_than:14d", max_results: int = 15) -> list[dict[str, Any]]:
-        """Headers for a query. Message ids come from messages.list every time; the
-        metadata get runs only for ids we have never stored, or that history says changed.
+        """Headers for a query. The id listing is saved per query and reused for TTL["gmail_list"],
+        extended with its saved page token when a caller pages deeper, so paging costs one
+        messages.list per _GMAIL_LIST_CHUNK ids. The history check runs at most once per TTL
+        (always on a refresh); the metadata get runs only for ids we have never stored, or
+        that history says changed.
         """
         svc = self._svc("gmail", "v1")
         want = max(1, min(int(max_results), 500))
-        res = svc.users().messages().list(userId="me", q=query, maxResults=want).execute()
-        ids = [m["id"] for m in res.get("messages") or []]
-        more = res
-        while len(ids) < want and more.get("nextPageToken"):  # Gmail may return fewer than asked per page
-            more = svc.users().messages().list(userId="me", q=query, maxResults=want - len(ids),
-                                               pageToken=more["nextPageToken"]).execute()
-            ids += [m["id"] for m in more.get("messages") or []]
-        if not ids:
-            return []
         snap = self._reads.get("gmail", "meta") or {}
         by_id: dict[str, dict[str, Any]] = dict(snap.get("by_id") or {})
+        lists: dict[str, Any] = dict(snap.get("lists") or {})
         cursor = snap.get("history_id") if isinstance(snap.get("history_id"), str) else None
-        listed_history = res.get("historyId") if isinstance(res.get("historyId"), str) else None
+        now = time.time()
+        refresh = bypassing()
+        checked = snap.get("checked") if isinstance(snap.get("checked"), (int, float)) else None
         changed: set[str] = set()
+        reset = history_failed = False
         history_id = cursor
-        if cursor:
+        if cursor and (refresh or checked is None or not 0 <= now - checked < TTL["gmail_list"]):
             try:
                 changed, deleted, latest = _gmail_history(svc, cursor)
             except Exception as e:  # noqa: BLE001
                 if verify.is_missing(e):
                     # The cursor is older than Gmail keeps. The saved headers are no longer a base.
                     by_id.clear()
-                    changed = set(ids)
-                    history_id = listed_history
+                    lists.clear()
+                    reset = True
                 else:
                     log.warning("gmail history skipped: %s", e)
-                    # Keep the cursor so the next read retries this gap. A refresh still
-                    # re-reads the page on screen; an ordinary load does not re-get every row.
-                    changed = set(ids) if bypassing() else set()
+                    # Keep the cursor so the next read retries this gap.
+                    history_failed = True
             else:
+                checked = now
                 for mid in deleted:
                     by_id.pop(mid, None)
-                # A change outside this page must not stay cached under a cursor that has moved past it.
-                for mid in changed:
-                    if mid not in ids:
-                        by_id.pop(mid, None)
                 history_id = latest or cursor
-        else:
-            changed = set(ids)
+                if changed or deleted:
+                    # A new or relabelled message must show up in a fresh search, so saved listings go.
+                    lists.clear()
+        ids, listed_history = self._gmail_ids(svc, lists, query, want, now, refresh)
+        ids = ids[:want]
+        if reset or not cursor:
             history_id = listed_history
+            checked = now
+            changed = set(ids)
+        elif history_failed:
+            # A refresh still re-reads the page on screen; an ordinary load does not re-get every row.
+            changed = set(ids) if refresh else set()
+        else:
+            # A change outside this page must not stay cached under a cursor that has moved past it.
+            for mid in changed:
+                if mid not in ids:
+                    by_id.pop(mid, None)
         need = [i for i in ids if i not in by_id or i in changed]
         if need:
             by_id.update(self._gmail_batch_meta(svc, need))
@@ -858,8 +884,49 @@ class Google:
         extras = [k for k in by_id if k not in protect]
         while len(by_id) > _GMAIL_META_CAP and extras:
             by_id.pop(extras.pop(0))
-        self._reads.put("gmail", "meta", {"history_id": history_id, "by_id": by_id})
+        self._reads.put("gmail", "meta", {"history_id": history_id, "by_id": by_id, "checked": checked, "lists": lists})
         return [by_id[i] for i in ids if i in by_id]
+
+    def _gmail_ids(self, svc: Any, lists: dict[str, Any], query: str, want: int, now: float,
+                   refresh: bool) -> tuple[list[str], str | None]:
+        """Message ids for a query, at least `want` when Gmail has them. Edits `lists` in place.
+
+        A listing younger than TTL["gmail_list"] is reused; when it holds fewer ids than wanted it is
+        continued from its page token. Each messages.list asks for at least _GMAIL_LIST_CHUNK ids, so
+        the next page of a look is usually already in hand.
+        """
+        entry = lists.get(query)
+        fresh = (not refresh and isinstance(entry, dict) and isinstance(entry.get("ids"), list)
+                 and isinstance(entry.get("ts"), (int, float)) and 0 <= now - entry["ts"] < TTL["gmail_list"])
+        listed_history: str | None = None
+        if fresh:
+            ids, token, started = list(entry["ids"]), entry.get("next"), entry["ts"]
+        else:
+            started = now
+            res = svc.users().messages().list(userId="me", q=query, maxResults=max(want, _GMAIL_LIST_CHUNK)).execute()
+            ids = [m["id"] for m in res.get("messages") or []]
+            token = res.get("nextPageToken")
+            if isinstance(res.get("historyId"), str):
+                listed_history = res["historyId"]
+        while len(ids) < want and token:  # Gmail may return fewer than asked per page
+            res = svc.users().messages().list(userId="me", q=query, maxResults=max(want - len(ids), _GMAIL_LIST_CHUNK),
+                                              pageToken=token).execute()
+            ids += [m["id"] for m in res.get("messages") or []]
+            token = res.get("nextPageToken")
+        if len(ids) > _GMAIL_LIST_IDS_KEPT:
+            ids, token = ids[:_GMAIL_LIST_IDS_KEPT], None
+        lists.pop(query, None)  # re-saving moves the query to the young end
+        lists[query] = {"ts": started, "ids": ids, "next": token}
+        while len(lists) > _GMAIL_LISTS_KEPT:
+            del lists[next(iter(lists))]
+        return ids, listed_history
+
+    def _gmail_unsure(self) -> None:
+        """Forget that the saved listings and the history check are current: the next search
+        asks Gmail again. The saved headers and cursor stay, so only changes are fetched."""
+        snap = self._reads.get("gmail", "meta")
+        if isinstance(snap, dict) and (snap.get("lists") or snap.get("checked") is not None):
+            self._reads.put("gmail", "meta", {**snap, "lists": {}, "checked": None})
 
     def _gmail_batch_meta(self, svc: Any, ids: list[str]) -> dict[str, dict[str, Any]]:
         return _gmail_batch(svc, ids, lambda mid: svc.users().messages().get(
@@ -932,6 +999,7 @@ class Google:
         return orig.get("threadId"), headers
 
     @invalidates("gmail")
+    @_forgets_gmail_lists
     def gmail_draft(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None,
                     attachments: list[dict[str, Any]] | None = None, cc: str | None = None,
                     bcc: str | None = None) -> dict[str, Any]:
@@ -949,6 +1017,7 @@ class Google:
         return verify.attach(out, self._verify_draft(d.get("id") or "", subject))
 
     @invalidates("gmail")
+    @_forgets_gmail_lists
     def gmail_send(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None,
                    attachments: list[dict[str, Any]] | None = None, cc: str | None = None,
                    bcc: str | None = None) -> dict[str, Any]:
@@ -1025,6 +1094,7 @@ class Google:
         return verify.check(f"draft {draft_id} in Gmail", read_back, compare=compare, compared=["exists", "subject"])
 
     @invalidates("gmail")
+    @_forgets_gmail_lists
     def gmail_modify(self, message_id: str, mark_read: bool | None = None, archive: bool = False, star: bool | None = None) -> dict[str, Any]:
         add, rem = [], []
         if mark_read is True:
@@ -1481,25 +1551,28 @@ def _gmail_batch(svc: Any, ids: list[str], request: Callable[[str], Any],
     """One batched get per id. Items the batch refused (a per-item 429) are asked for once
     more on their own; anything still missing marks the read incomplete, so it is not cached."""
     out: dict[str, dict[str, Any]] = {}
-    for _ in range(2):
-        failed: list[str] = []
+    for start in range(0, len(ids), _GMAIL_BATCH_MAX):
+        pending = ids[start:start + _GMAIL_BATCH_MAX]
+        for _ in range(2):
+            failed: list[str] = []
 
-        def _cb(request_id: str, response: Any, exception: Exception | None) -> None:
-            if exception or not isinstance(response, dict) or not response.get("id"):
-                if exception:
-                    log.warning("gmail batch get %s failed: %s", request_id, exception)
-                failed.append(request_id)
-                return
-            out[response["id"]] = shape(response)
+            def _cb(request_id: str, response: Any, exception: Exception | None) -> None:
+                if exception or not isinstance(response, dict) or not response.get("id"):
+                    if exception:
+                        log.warning("gmail batch get %s failed: %s", request_id, exception)
+                    failed.append(request_id)
+                    return
+                out[response["id"]] = shape(response)
 
-        batch = svc.new_batch_http_request(callback=_cb)
-        for i in ids:
-            batch.add(request(i), request_id=i)
-        batch.execute()
-        if not failed:
-            return out
-        ids = failed
-    dont_cache()
+            batch = svc.new_batch_http_request(callback=_cb)
+            for i in pending:
+                batch.add(request(i), request_id=i)
+            batch.execute()
+            pending = failed
+            if not pending:
+                break
+        else:
+            dont_cache()
     return out
 
 

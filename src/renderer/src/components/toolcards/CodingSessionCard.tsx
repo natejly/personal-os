@@ -1,3 +1,4 @@
+import { modelLabel } from '../../lib/modelLabel'
 import { useEffect, useState } from 'react'
 import { Bot } from '../../icons'
 import type { CodingSession, CodingSessionDiff } from '@shared/types'
@@ -85,7 +86,7 @@ export function CodingSessionView({ session: c }: { session: CodingSession }): J
       <div className="tc-statusrow">
         <Badge tone={codingTone(c.status)}>{codingStatusLabel(c.status)}</Badge>
         <span className="tc-muted">{AGENT_LABEL[c.agent]}</span>
-        {c.model && <span className="tc-muted mono">{c.model}</span>}
+        {c.model && <span className="tc-muted mono" title={c.model}>{modelLabel(c.model)}</span>}
         {codingStoppable(c.status) && (
           <button type="button" className="ghost-btn sm" disabled={busy} onClick={() => void stop()}>Stop</button>
         )}

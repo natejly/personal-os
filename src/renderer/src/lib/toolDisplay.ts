@@ -48,6 +48,11 @@ const VERBS: Record<string, string> = {
   browser_open: 'Open in browser', browser_snapshot: 'Read browser page', browser_click: 'Click in browser', browser_type: 'Type in browser',
   browser_select: 'Choose in browser', browser_press: 'Press key in browser', browser_scroll: 'Scroll browser', browser_manage: 'Manage browser', browser_handoff: 'Hand browser to you',
   view_image: 'Look at image', convert_document: 'Convert document', render_preview: 'Preview document pages', doc_guide: 'Read format guide',
+  delegate: 'Hand off to a worker', message_worker: 'Message worker', check_worker: 'Check worker', stop_worker: 'Stop worker', resume_worker: 'Resume worker',
+  search_tool_results: 'Search earlier results', skill_view: 'Read skill', skill_from_run: 'Save run as skill', agent_message: 'Message subagent', agent_create: 'Create agent', agents_list: 'List agents',
+  list_chats: 'List chats', read_chat: 'Read chat', message_chat: 'Message chat', context_map: 'Map context', meeting_brief: 'Prepare meeting brief',
+  health_log: 'Log health entry', health_summary: 'Read health summary', health_delete_entry: 'Delete health entry',
+  workflow_list: 'List workflows', workflow_run: 'Run workflow', workflow_resume: 'Resume workflow', desk_start: 'Start desk task', desk_import_sandbox: 'Import sandbox files', deep_research: 'Research',
   browser: 'Browser approval'
 }
 

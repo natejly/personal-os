@@ -322,7 +322,7 @@ def test_an_approval_answered_by_a_button_is_decided_as_telegram() -> None:
                                                ended_at=None, live=True, replied=False, status="awaiting_approval",
                                                message_id=None, error=None))
     ask = wait_until(lambda: next((p for p in fake.of("sendMessage") if p["text"].startswith("Approval needed [")), None), "the approval card")
-    assert "send_email" in ask["text"] and "to=a@b.co" in ask["text"] and not any("gone@b.co" in t for t in fake.sent())
+    assert "Send email" in ask["text"] and "to=a@b.co" in ask["text"] and not any("gone@b.co" in t for t in fake.sent())
     approve = ask["reply_markup"]["inline_keyboard"][0][0]
     assert approve["text"] == "Approve" and approve["callback_data"].startswith("ap:")
     fake.push({"update_id": 7000, "callback_query": {"id": "cq-1", "from": {"id": OWNER}, "data": approve["callback_data"],

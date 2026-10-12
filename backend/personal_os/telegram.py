@@ -274,6 +274,29 @@ def _one_line(v: Any, n: int) -> str:
     return s if len(s) <= n else s[:n - 1] + "…"
 
 
+_TOOL_WORDS = {
+    "shell_run": "Run a command", "run_python": "Run Python", "web_search": "Search the web", "fetch_url": "Read a web page",
+    "write_local_file": "Write a file", "trash_local_file": "Move a file to Trash", "move_local_file": "Move a file",
+    "fs_edit": "Edit a file", "doc_create": "Create a file", "doc_edit": "Edit a file", "doc_delete": "Delete a file",
+    "desk_write_file": "Write a desk file", "desk_deliver": "Deliver a file for review", "gmail_send": "Send an email",
+    "gmail_modify": "Update an email", "calendar_create": "Create a calendar event", "schedule_task": "Schedule a task",
+    "propose_plan": "Propose a plan", "browser_open": "Open a web page", "opencode_run": "Run the coding agent",
+    "coding_session_start": "Start a coding session", "save_memory": "Save to memory", "delegate": "Hand off to a worker",
+}
+
+
+def _tool_words(tool: Any) -> str:
+    """A tool's snake_case name as a phrase: 'shell_run' -> 'Run a command', 'mcp__srv__list_files' -> 'List files (srv)'."""
+    name = str(tool or "a tool")
+    if name in _TOOL_WORDS:
+        return _TOOL_WORDS[name]
+    parts = [p for p in name.split("__") if p]
+    mcp = len(parts) >= 3 and parts[0] == "mcp"
+    base = (parts[-1] if mcp else name).replace("_", " ").replace("-", " ").strip()
+    label = base[:1].upper() + base[1:] if base else name
+    return f"{label} ({parts[1]})" if mcp else label
+
+
 def _args_preview(args: Any, n: int = 200, each: int = 80) -> tuple[str, bool]:
     """(text, shortened). Each pair is scrubbed whole before it is cut, so a cut can never expose half a secret."""
     shortened = False
@@ -1061,7 +1084,7 @@ class TelegramBridge:
                 if not self.deps.is_live(cid) or not (call_id or a.get("conversation_id") == target_conv or notify_all):
                     continue
                 if a.get("tool") in self.deps.app_only_tools:
-                    if await self._send(chat_id, f"{a.get('tool')} is waiting in Grain. Open the app to answer."):
+                    if await self._send(chat_id, f"{_tool_words(a.get('tool'))} is waiting in Grain. Open the app to answer."):
                         self._told.add(cid)
                     continue
                 args = a.get("args")
@@ -1079,7 +1102,7 @@ class TelegramBridge:
                 markup = {"inline_keyboard": [[{"text": "Approve", "callback_data": f"ap:{code}"},
                                                {"text": "Deny", "callback_data": f"dn:{code}"}]]}
                 at = time.time()
-                if await self._send(chat_id, f"Approval needed [{code}]: {a.get('tool')} — {why}\n{preview}{tail}", markup):
+                if await self._send(chat_id, f"Approval needed [{code}]: {_tool_words(a.get('tool'))} — {why}\n{preview}{tail}", markup):
                     self._code_seq = code
                     self._texted.add(cid, _Texted(code, forced or shortened, at))
                     self._codes[code] = cid

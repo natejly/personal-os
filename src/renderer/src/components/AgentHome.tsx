@@ -1,3 +1,4 @@
+import { statusWord } from '../lib/statusWord'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, MessageSquare, Plus } from '../icons'
 import type { AgentDef, AgentHomeData } from '@shared/types'
@@ -91,7 +92,7 @@ export default function AgentHome({ def, onBack }: { def: AgentDef; onBack: () =
               <ul className="agent-home-list">
                 {home.job_history.map((r) => (
                   <li key={r.run_id}>
-                    <span className={`agent-status ${r.status === 'running' ? 'working' : r.status === 'awaiting_approval' ? 'needs-you' : 'idle'}`}>{r.kind === 'job' ? 'routine' : 'worker'} · {r.status}</span>
+                    <span className={`agent-status ${r.status === 'running' ? 'working' : r.status === 'awaiting_approval' ? 'needs-you' : 'idle'}`}>{r.kind === 'job' ? 'routine' : 'worker'} · {statusWord(r.status)}</span>
                     {r.conversation_id
                       ? <button className="link" onClick={() => void selectChat(r.conversation_id as string)}>{r.job_name || r.title || 'Untitled'}</button>
                       : <span>{r.job_name || r.title || 'Untitled'}</span>}
@@ -138,7 +139,7 @@ export default function AgentHome({ def, onBack }: { def: AgentDef; onBack: () =
           <ul className="agent-home-list">
             {home?.runs.map((r) => (
               <li key={r.run_id}>
-                <span className={`agent-status ${r.status === 'running' ? 'working' : r.status === 'awaiting_approval' ? 'needs-you' : 'idle'}`}>{r.kind === 'job' ? 'routine' : 'chat'} · {r.status}</span>
+                <span className={`agent-status ${r.status === 'running' ? 'working' : r.status === 'awaiting_approval' ? 'needs-you' : 'idle'}`}>{r.kind === 'job' ? 'routine' : 'chat'} · {statusWord(r.status)}</span>
                 {r.conversation_id
                   ? <button className="link" onClick={() => void selectChat(r.conversation_id as string)}>{r.title || 'Untitled'}</button>
                   : <span>{r.title || 'Untitled'}</span>}

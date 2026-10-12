@@ -3,7 +3,7 @@ import type { ModelPrice, UsageBucket } from '@shared/types'
 /** Pure formatting for Settings → Usage. Cost is only ever what was priced; an unpriced call is never guessed. */
 
 export const money = (n: number): string =>
-  n === 0 ? '$0' : n < 0.01 ? `$${n.toFixed(4)}` : n < 1 ? `$${n.toFixed(3)}` : `$${n.toFixed(2)}`
+  n === 0 ? '$0' : n < 0.0001 ? '<$0.0001' : n < 0.01 ? `$${n.toFixed(4)}` : n < 1 ? `$${n.toFixed(3)}` : `$${n.toFixed(2)}`
 
 type Priced = Pick<UsageBucket, 'calls' | 'cost' | 'unpriced'>
 

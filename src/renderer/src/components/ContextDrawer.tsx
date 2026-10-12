@@ -1,3 +1,4 @@
+import { modelLabel } from '../lib/modelLabel'
 import { useEffect, useMemo, useState } from 'react'
 import { X, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, Activity, ShieldAlert, MonitorDot, PenLine } from '../icons'
 import { ToolOverrides } from './ToolPermissions'
@@ -44,7 +45,7 @@ function ContextMeterView({ conversationId, refreshKey }: { conversationId: stri
   const spentLine = spent ? usageLine(spent) : null
   const spentTitle = spent ? [
     `${spent.totals.prompt_tokens.toLocaleString()} prompt (${(spent.totals.cached_tokens ?? 0).toLocaleString()} cached), ${spent.totals.completion_tokens.toLocaleString()} completion tokens over ${spent.totals.calls} calls`,
-    ...spent.by_kind.map((k) => `${k.kind}: ${k.calls} calls, ${k.calls > k.unpriced ? fmtCost(k.cost) : 'unpriced'}`),
+    ...spent.by_kind.map((k) => `${k.kind}: ${k.calls} calls, ${k.calls > k.unpriced ? fmtCost(k.cost) : 'no price set'}`),
     spent.estimated ? `${spent.estimated} calls had estimated token counts` : '',
     spent.since ? `Since ${new Date(spent.since * 1000).toLocaleString()} (older records may have been cleaned up)` : ''
   ].filter(Boolean).join('\n') : undefined
@@ -104,7 +105,7 @@ function ExactRequest({ messageId }: { messageId: string }): JSX.Element {
         const json = JSON.stringify({ model: r.model, tool_choice: r.tool_choice, messages: r.messages, tools: r.tools }, null, 2)
         return (
           <div key={r.round + r.tokens} className="ctx-meta">
-            #{r.round} {r.model} · {r.messages.length} messages · {r.tools.length} tools · ~{r.tokens} tokens{' '}
+            #{r.round} {modelLabel(r.model)} · {r.messages.length} messages · {r.tools.length} tools · ~{r.tokens.toLocaleString()} tokens{' '}
             <button className="link" onClick={() => setOpen(open === r.round ? null : r.round)}>{open === r.round ? 'hide' : 'view'}</button>{' '}
             <button className="link" onClick={() => void navigator.clipboard.writeText(json)}>copy</button>{' '}
             <a className="link" href={`data:application/json;charset=utf-8,${encodeURIComponent(json)}`} download={`request-${messageId}-${r.round}.json`}>download</a>

@@ -19,7 +19,7 @@ import type {
 } from '@shared/types'
 import type { CodingSession, CodingSessionDiff, CodingSessionEvent, DuelWinner, ModelStanding, ShipChecklist } from '@shared/types'
 import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
-import { ApiError } from './apiError'
+import { ApiError, detailText } from './apiError'
 import type { ChatRunChanges } from './deskFiles'
 import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
 
@@ -98,10 +98,10 @@ export async function req<T>(path: string, init?: RequestInit, timeoutMs = REQUE
     if (timer) clearTimeout(timer)
   }
   if (!r.ok) {
-    let msg = `${r.status} ${r.statusText}`
+    let msg = detailText(undefined, r.status, r.statusText)
     try {
       const j = await r.json()
-      msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail ?? j)
+      msg = detailText(j.detail, r.status, r.statusText)
     } catch {
       /* ignore */
     }
@@ -611,7 +611,7 @@ export const api = {
   steer: (convId: string, content: string, attachments?: string[]) => req<{ ok: boolean; run_id: string; message: Message }>(`/conversations/${convId}/steer`, { method: 'POST', body: json(attachments?.length ? { content, attachments } : { content }) }, CONTROL_TIMEOUT_MS),
   runs: (conversationId?: string) => req<RunInfo[]>('/runs' + (conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : ''), undefined, CONTROL_TIMEOUT_MS),
   /** A subagent's run row (status while it works) and its recorded tape (calls, results). */
-  agentRun: (id: string) => req<{ run_id: string; status: string; budget?: Record<string, number> | null }>(`/runs/${encodeURIComponent(id)}`),
+  agentRun: (id: string) => req<{ run_id: string; status: string; budget?: Record<string, number> | null; input?: Record<string, unknown> | null }>(`/runs/${encodeURIComponent(id)}`),
   agentTape: (id: string) => req<RunTapeEvent[]>(`/runs/${encodeURIComponent(id)}/events`),
   /** Whether the conversation's newest run can be resumed, and which message it would continue. */
   resumableRun: (convId: string) => req<{ run_id: string | null; resumable: boolean; reason: string; message_id: string | null }>(`/conversations/${encodeURIComponent(convId)}/resumable`),

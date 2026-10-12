@@ -15,7 +15,7 @@ function Row({ m }: { m: Memory }): JSX.Element {
     <div className={`widget-row ${m.pinned ? 'on' : ''}`} {...dragProps({ kind: 'memory', id: m.id, label: m.content, projectId: m.project_id })}>
       <div className="grow">
         <div className="widget-title" title={m.content}>{m.content}</div>
-        <div className="widget-sub">{m.kind} · {m.source} · {new Date(m.updated_at * 1000).toLocaleDateString()}</div>
+        <div className="widget-sub">{m.kind} · {m.source === 'auto' ? 'learned' : 'added by you'} · {new Date(m.updated_at * 1000).toLocaleDateString()}</div>
       </div>
       <button className="icon-btn" title={m.pinned ? 'Unpin' : 'Pin (always in context)'} onClick={() => void updateMemory(m.id, { pinned: !m.pinned })}>
         {m.pinned ? <PinOff size={13} /> : <Pin size={13} />}

@@ -1,3 +1,4 @@
+import { modelLabel } from '../lib/modelLabel'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { RefreshCw, AlertCircle, Check } from '../icons'
 import { api } from '../lib/api'
@@ -97,7 +98,7 @@ function PriceEditor({ report, onSaved }: { report: UsageReport; onSaved: (price
         <tbody>
           {models.map((m) => (
             <tr key={m}>
-              <th scope="row" className="mono">{m}</th>
+              <th scope="row" className="mono" title={m}>{modelLabel(m)}</th>
               <td><input type="number" aria-label={`${m} input price, $ per million tokens`} min={0} step="0.01" value={valueOf(m, 'input')} placeholder="—" onChange={(e) => edit(m, 'input', e.target.value)} /></td>
               <td><input type="number" aria-label={`${m} output price, $ per million tokens`} min={0} step="0.01" value={valueOf(m, 'output')} placeholder="—" onChange={(e) => edit(m, 'output', e.target.value)} /></td>
               <td className="usage-price-src">{draft[m] ? 'edited' : report.prices[m]?.source === 'override' ? 'custom' : LIST_SOURCES[report.prices[m]?.source ?? ''] ? `${LIST_SOURCES[report.prices[m]?.source ?? '']} list price` : report.prices[m] ? 'from proxy' : 'no price'}</td>

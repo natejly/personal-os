@@ -7,6 +7,7 @@ import Composer from './Composer'
 import ResizeHandle from './ResizeHandle'
 import MessageView from './Message'
 import { chatBrowserSession, latestBrowserMessage } from '../lib/browserApproval'
+import { tip } from '../lib/tip'
 
 /**
  * The page agent: ⌘I anywhere. It is an ordinary chat — same model, same tools, same history — that
@@ -64,7 +65,7 @@ export default function PageAgentPanel(): JSX.Element {
               <button className="icon-btn" title="Open in Chats" aria-label="Open in Chats" onClick={() => void selectChat(convo.id)}><SquareArrowOutUpRight size={15} /></button>
             </>
           )}
-          <button className="icon-btn" title="Close (⌘I)" aria-label="Close page agent" onClick={closePageAgent}><X size={15} /></button>
+          <button className="icon-btn" title={tip('Close', 'page-agent')} aria-label="Close page agent" onClick={closePageAgent}><X size={15} /></button>
         </div>
       </div>
 

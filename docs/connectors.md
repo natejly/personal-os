@@ -10,6 +10,14 @@ doing more than you decided.
 
 ---
 
+## Setting things up from chat
+
+When the assistant needs something that is not configured, it shows a small card in the chat instead of failing. The `setup_request(feature, reason)` tool covers `google`, `model_key`, `telegram`, `web_search`, `mcp`, `health` and `macos`. It checks first and answers "already set up" if so. A Google tool that finds no account (or an expired sign-in) shows the connect or reconnect card by itself, from the one tool-call error path in `tools.py`.
+
+The card only acts on a click. Google starts the same sign-in as Settings → Integrations (`connectGoogle`, or Settings when no OAuth client exists yet) and the card turns to "Connected ✓" when the account appears. The other targets open the matching Settings tab or view. Cards are built in `backend/personal_os/setup_cards.py` and drawn by `SetupCard.tsx`.
+
+---
+
 ## How it works
 
 **One supervisor per server.** Each server has its own asyncio task (`mcp_client.py`) that owns its

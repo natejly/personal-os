@@ -13,6 +13,7 @@ import { describeCall, docEditStatus, errorLine, fmtMs, groupSummary, partitionE
 import { AskQuestion } from './DeskApprovalCard'
 import { GenericApproval, GenericBody } from './toolcards/GenericCard'
 import { OutputFiles, StatusDot } from './toolcards/parts'
+import SetupCard, { setupOf } from './toolcards/SetupCard'
 // Importing the index registers every dedicated card (TaskCard, FileCard, and whatever other workstreams add).
 import { TOOL_CARDS } from './toolcards'
 import { quietEvents } from '../lib/orchestration'
@@ -391,6 +392,8 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
         ) : <Row render={() => genericRow(t)} />}
         {reviewLine(t.review) && <div className="tool-review muted small" title={reviewTitle(t.review)}>{reviewLine(t.review)}</div>}
         <OutputFiles event={t} conversationId={conversationId} />
+        {/* The calendar cards carry their own connect notice. */}
+        {!t.name.startsWith('calendar_') && (() => { const su = setupOf(t); return su ? <SetupCard setup={su} /> : null })()}
       </RenderBoundary>
     )
   }

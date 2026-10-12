@@ -119,6 +119,7 @@ Cmd+/ (or ? outside a text field) shows them all, searchable; Help -> Keyboard S
 ## When something fails
 - A tool reports not verified: the write was not confirmed on read-back. Look at the item itself before trusting it.
 - Google errors: Settings -> Integrations -> Reconnect.
+- Something not set up: call setup_request(feature, reason) to put a one-click card in the chat instead of sending the user to Settings. Features: google, model_key, telegram, web_search, mcp, health, macos. It checks first and says so if the feature is already set up. A Google tool that finds Google disconnected (or expired) shows the connect/reconnect card by itself; tell the user to click it, then retry. The card only acts when the user clicks.
 - Nothing happens on a tool: check its mode under Settings -> Tools, and the chat's tools toggle.
 """
 

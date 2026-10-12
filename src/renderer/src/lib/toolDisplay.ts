@@ -20,7 +20,7 @@ const VERBS: Record<string, string> = {
   doc_list: 'List files', doc_search: 'Search file text', doc_read: 'Read file', doc_create: 'Create file', doc_edit: 'Edit file', doc_delete: 'Delete file', doc_comments: 'Read file comments', doc_comment_reply: 'Reply to comment',
   search_memory: 'Search memory', save_memory: 'Save to memory', graph_search: 'Search knowledge graph',
   graph_traverse: 'Explore knowledge graph', graph_add: 'Add to knowledge graph',
-  run_python: 'Run Python', current_time: 'Check the time', show: 'Show in side panel',
+  run_python: 'Run Python', current_time: 'Check the time', setup_request: 'Offer setup', show: 'Show in side panel',
   gmail_search: 'Search Gmail', gmail_read: 'Read email', gmail_draft: 'Draft email', gmail_send: 'Send email',
   gmail_outbox: 'Check send queue', gmail_modify: 'Update email',
   calendar_events: 'List calendar events', calendar_get: 'Read calendar event', calendar_create: 'Create calendar event',

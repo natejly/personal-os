@@ -39,8 +39,8 @@ def test_final_model_mapping() -> None:
     assert providers.default_model(cfg) == DS
     assert [providers.tier_model(cfg, t) for t in providers.TIERS] == ["accounts/fireworks/models/ember-1", DS, DS]
     px = {"provider": "litellm", "baseUrl": "http://localhost:4000"}
-    assert providers.default_model(px) == "deepseek-v4-flash"
-    assert [providers.tier_model(px, t) for t in providers.TIERS] == ["ember-1", "deepseek-v4-flash", "deepseek-v4-flash"]
+    assert providers.default_model(px) == "claude-sonnet-5-5"
+    assert [providers.tier_model(px, t) for t in providers.TIERS] == ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
     assert providers.TASK_TIERS["chat"] == "default"
     assert {t for k, t in providers.TASK_TIERS.items() if k != "chat"} <= {"high", "medium", "low"}
     assert {k for k, t in providers.TASK_TIERS.items() if t == "high"} == {"planning", "draft_skill", "draft_agent"}

@@ -3,6 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 [ -f .env ] && set -a && . ./.env && set +a
+export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-${CLAUDE_KEY:-}}"
 : "${FIREWORKS_API_KEY:?Set FIREWORKS_API_KEY in .env}"
 if [ -x backend/.venv/bin/litellm ]; then LITELLM=backend/.venv/bin/litellm
 elif command -v litellm >/dev/null; then LITELLM=litellm

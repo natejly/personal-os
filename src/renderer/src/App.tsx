@@ -31,7 +31,7 @@ import { BackendBanner } from './components/BackendStatus'
 import BackendFailed from './components/BackendFailed'
 import Onboarding from './components/onboarding/Onboarding'
 import { useOnboarding } from './components/onboarding/onboardingStore'
-import { accentId } from './lib/accents'
+import { applyAppearance } from './lib/appearance'
 import { api } from './lib/api'
 
 /**
@@ -213,6 +213,9 @@ export default function App(): JSX.Element {
   const ModView = moduleForView(view)?.view?.Component
   const theme = useStore((s) => s.settings.theme)
   const accent = useStore((s) => s.settings.accent)
+  const textTone = useStore((s) => s.settings.textTone)
+  const surfaceTone = useStore((s) => s.settings.surfaceTone)
+  const uiFont = useStore((s) => s.settings.uiFont)
   const inCanvas = useStore((s) => s.view === 'canvas')
   const pageAgentOpen = useStore((s) => s.pageAgentOpen)
   const inboxOpen = useStore((s) => s.inboxOpen)
@@ -222,9 +225,8 @@ export default function App(): JSX.Element {
     void init()
   }, [init])
   useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    document.documentElement.dataset.accent = accentId(accent)
-  }, [theme, accent])
+    applyAppearance({ theme, accent, textTone, surfaceTone, uiFont })
+  }, [theme, accent, textTone, surfaceTone, uiFont])
   // A fresh install (no key, never onboarded) opens the first-run wizard once the backend is up.
   useEffect(() => { if (ready && !backendError) void useOnboarding.getState().check() }, [ready, backendError])
   // What the user has highlighted rides along with the next ⌘I question, whatever view they are in.

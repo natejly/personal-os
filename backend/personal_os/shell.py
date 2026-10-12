@@ -55,6 +55,26 @@ SPILL_DAYS = 7
 SAFE_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 
+def _node_bin_dirs() -> list[str]:
+    """Where a user-level Node install keeps `node` and `npm`, existing dirs only; the home folder is read at call time."""
+    home = os.path.expanduser("~")
+    dirs = [f"{home}/.local/node/bin", f"{home}/.local/bin"]
+    versions = f"{home}/.nvm/versions/node"
+    try:
+        found = sorted((n for n in os.listdir(versions)),
+                       key=lambda n: [int(x) if x.isdigit() else 0 for x in n.lstrip("v").split(".")], reverse=True)
+    except OSError:
+        found = []
+    dirs += [f"{versions}/{n}/bin" for n in found]
+    dirs += [f"{home}/.volta/bin", f"{home}/.bun/bin"]
+    return [d for d in dirs if os.path.isdir(d)]
+
+
+def safe_path() -> str:
+    """SAFE_PATH, then whichever user-level Node dirs exist (so `npm` resolves on a machine without Homebrew)."""
+    return os.pathsep.join([SAFE_PATH, *_node_bin_dirs()])
+
+
 class ShellError(Exception):
     pass
 
@@ -206,7 +226,7 @@ def scrubbed_env(tmp: str) -> dict[str, str]:
     from . import envs
     # The shared work environment first, once it exists, so `python` and `pip` in a command are the ones with the
     # document and data libraries rather than the system's.
-    path = f"{work}:{SAFE_PATH}" if (work := envs.work_bin()) else SAFE_PATH
+    path = f"{work}:{safe_path()}" if (work := envs.work_bin()) else safe_path()
     return {"PATH": path, "HOME": os.path.expanduser("~"), "LANG": "en_US.UTF-8", "TERM": "dumb",
             "TMPDIR": tmp, "TMPPREFIX": f"{tmp}/zsh", "NO_COLOR": "1",  # zsh puts here-document temp files at TMPPREFIX, not TMPDIR
             # HOME is the real one (read-only here), so the package tools' default caches are unwritable: pip prints a warning on

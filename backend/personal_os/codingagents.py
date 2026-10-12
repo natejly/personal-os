@@ -145,7 +145,7 @@ def claude_env() -> dict[str, str]:
     path = login_path() if fresh else None
     if not path:
         extra = "".join(os.path.expanduser(d) + ":" for d in CLAUDE_BINS) if fresh else ""
-        path = os.path.expanduser("~/.local/bin") + ":" + (os.environ.get("PATH") or "") + ":" + extra + shell.SAFE_PATH
+        path = os.path.expanduser("~/.local/bin") + ":" + (os.environ.get("PATH") or "") + ":" + extra + shell.safe_path()
     return {"PATH": path, "TMPDIR": os.environ.get("TMPDIR") or tempfile.gettempdir()}
 
 

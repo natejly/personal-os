@@ -412,6 +412,18 @@ def test_skill_draft_tool_only_ever_makes_a_candidate() -> None:
     appmod.skills.delete(ok["skill_id"])
 
 
+def test_clear_empties_the_plan_and_the_context_starts_after_the_marker() -> None:
+    cid = new_conv()
+    appmod.convos.add_message(cid, "user", "old question")
+    appmod.work_plans.set(cid, [{"text": "Read the config", "status": "pending"}])
+    check(appmod.work_plans.block(cid) != "", "a plan exists before /clear")
+    marker = appmod.clear_context(cid)
+    check(marker["kind"] == "clear", "the marker row is returned")
+    check(appmod.work_plans.get(cid) is None and appmod.work_plans.block(cid) == "", "the plan is gone, so nothing is re-injected")
+    check(appmod.convos.history_rows(cid) == [], "the model's context starts after the marker")
+    check(len(appmod.convos.get(cid)["messages"]) == 2, "the transcript keeps every row")
+
+
 def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

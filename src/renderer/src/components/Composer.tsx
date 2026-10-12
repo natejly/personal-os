@@ -153,7 +153,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const runClient = async ({ name, args }: { name: string; args: string }, k0: string): Promise<void> => {
     const s = useStore.getState()
     if (name === 'clear') {
-      // A marker row: the transcript stays, the model's context starts after it (backend history_rows).
+      // A marker row: the model's context starts after it (backend history_rows), the chat shows only what follows, and the task list is emptied.
       if (!activeId || activeId === PAGE_AGENT_DRAFT) return s.toast('Nothing to clear yet: this chat has no history.', 'info')
       if (streaming) return s.toast('Stop the reply before clearing the context.', 'info')
       try {
@@ -161,7 +161,8 @@ export default function Composer({ conversationId, footer, compact = false, onSe
         dropDraft(k0)
         useStore.setState((st) => {
           const se = st.sessions[activeId]
-          return se ? { sessions: { ...st.sessions, [activeId]: { ...se, conversation: { ...se.conversation, messages: [...(se.conversation.messages ?? []), row] } } } } : {}
+          const plans = { ...st.plans, [activeId]: [] } // the backend dropped the checklist with the context
+          return se ? { plans, sessions: { ...st.sessions, [activeId]: { ...se, conversation: { ...se.conversation, messages: [...(se.conversation.messages ?? []), row] } } } } : {}
         })
       } catch (e) {
         s.toast(`Could not clear: ${(e as Error).message}`, 'error')

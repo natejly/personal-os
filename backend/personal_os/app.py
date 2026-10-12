@@ -413,10 +413,11 @@ app.include_router(compaction.router(compactor, convos, lambda: settings(),
 
 @app.post("/conversations/{conv_id}/clear")
 def clear_context(conv_id: str) -> dict[str, Any]:
-    """`/clear`: later turns replay only what follows this marker. The rolling summary covered the old rows, so it goes too."""
+    """`/clear`: later turns replay only what follows this marker. The rolling summary covered the old rows, and the task list belongs to them, so both go."""
     if not convos.get(conv_id, with_messages=False):
         raise HTTPException(404, "No such conversation")
     compactor.clear(conv_id)
+    work_plans.clear(conv_id)  # the live checklist goes with the context; workers keep running and an approved desk plan stays
     return convos.clear_context(conv_id)
 
 

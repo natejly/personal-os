@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
-import { isBranchNote, isClear } from '../../lib/workers'
+import { isBranchNote, isClear, sinceClear } from '../../lib/workers'
 import BranchNote from '../../components/BranchNote'
 import { Check, MessageSquare, MessagesSquare, Pencil, Smile } from '../../icons'
 import type { Attachment, CanvasWindow, DragKind, DragPayload, Rect } from '@shared/types'
@@ -214,7 +214,7 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
     onTitle(t)
   }, [convo?.title, win.title, onTitle])
 
-  const msgs = convo?.messages ?? []
+  const msgs = sinceClear(convo?.messages ?? []).shown
   const lastLen = msgs[msgs.length - 1]?.content.length ?? 0
   useEffect(() => {
     if (stick && live) scroll.current?.scrollTo({ top: scroll.current.scrollHeight })

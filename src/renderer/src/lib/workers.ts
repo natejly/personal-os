@@ -45,6 +45,12 @@ export const isBranchNote = (m: Pick<Message, 'kind'>): boolean => m.kind === 'b
 /** The `/clear` marker row: the model's context starts after it; the transcript shows a divider. */
 export const isClear = (m: Pick<Message, 'kind'>): boolean => m.kind === 'clear'
 
+/** What a chat shows after `/clear`: from the latest marker on. `hidden` counts the rows above it; the same array when there is no marker. */
+export const sinceClear = <T extends Pick<Message, 'kind'>>(messages: T[]): { shown: T[]; hidden: number } => {
+  const i = messages.findLastIndex(isClear)
+  return i <= 0 ? { shown: messages, hidden: 0 } : { shown: messages.slice(i), hidden: i }
+}
+
 /** The same array when nothing is hidden, so memoised callers keep their identity. */
 export const withoutInternal = <T extends Pick<Message, 'kind'>>(messages: T[] | undefined): T[] | undefined =>
   messages?.some(isInternal) ? messages.filter((m) => !isInternal(m)) : messages

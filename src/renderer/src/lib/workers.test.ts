@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Message, WorkerInfo } from '@shared/types'
-import { ENDED_SHOWN, isInternal, listedWorkers, liveWorkerCount, sortWorkers, upsertWorker, withoutInternal, workerActions, workerWord } from './workers'
+import { ENDED_SHOWN, isInternal, listedWorkers, liveWorkerCount, sinceClear, sortWorkers, upsertWorker, withoutInternal, workerActions, workerWord } from './workers'
 
 const w = (id: string, status: WorkerInfo['status'], extra: Partial<WorkerInfo> = {}): WorkerInfo => ({
   id, conversation_id: 'c', title: id, goal: '', status, now: '', queue_position: null, started_at: Number(id.replace(/\D/g, '')) || 0,
@@ -67,4 +67,18 @@ test('finished workers are capped at the newest few when shown', () => {
   assert.equal(ids.length, 1 + ENDED_SHOWN)
   assert.equal(ids[0], 'w1')
   assert.equal(ids[1], `w${ENDED_SHOWN + 12}`)
+})
+
+test('sinceClear keeps the latest clear marker and what follows, and counts the rows above it', () => {
+  const m = (id: string, kind?: string): Message => ({ id, conversation_id: 'c', role: 'user', content: id, model: null, error: null, context_used: null, tool_events: null, trace: null, created_at: 1, kind })
+  const plain = [m('a'), m('b')]
+  assert.equal(sinceClear(plain).shown, plain)
+  assert.equal(sinceClear(plain).hidden, 0)
+  const once = sinceClear([m('a'), m('b'), m('c1', 'clear'), m('d')])
+  assert.deepEqual(once.shown.map((x) => x.id), ['c1', 'd'])
+  assert.equal(once.hidden, 2)
+  const twice = sinceClear([m('a'), m('c1', 'clear'), m('b'), m('c2', 'clear'), m('e')])
+  assert.deepEqual(twice.shown.map((x) => x.id), ['c2', 'e'])
+  assert.equal(twice.hidden, 3)
+  assert.equal(sinceClear([m('c1', 'clear'), m('a')]).hidden, 0)
 })

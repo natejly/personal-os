@@ -100,3 +100,16 @@ export function codingNoticeText(kind: CodingTransition, c: CodingSession): stri
   const where = c.branch || pathBase(c.worktree)
   return where ? `${c.name} finished on ${where}` : `${c.name} finished`
 }
+
+/** Flatten a markdown message to one run of plain text for a short excerpt: no fences, headings, bullets, emphasis or link syntax. */
+export function plainExcerpt(md: string | null | undefined): string {
+  if (!md) return ''
+  return md
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+[.)])\s+/gm, '')
+    .replace(/(\*\*|__|\*|~~)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}

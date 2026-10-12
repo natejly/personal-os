@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AGENT_LABEL, codingDot, codingLive, codingStatusLabel, codingStoppable, eventSummary, formatElapsed, latestActivity, pathBase, splitSessions } from '../lib/codingSessions'
+import { AGENT_LABEL, codingDot, codingLive, codingStatusLabel, codingStoppable, eventSummary, formatElapsed, latestActivity, pathBase, plainExcerpt, splitSessions } from '../lib/codingSessions'
 import { useStore } from '../store'
 import { useTermAvailable } from '../lib/termRegistry'
 import { CodingFollowUp, CodingTimeline } from './CodingTimeline'
@@ -21,17 +21,19 @@ function useNow(on: boolean, ms = 10_000): number {
 function Row({ c, now }: { c: CodingSession; now: number }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [diff, setDiff] = useState(false)
+  const [full, setFull] = useState(false)
   const { stop, busy } = useStop(c.id)
   const openTerminal = useStore((s) => s.openTerminal)
   const termOk = useTermAvailable()
   const events = useStore((s) => s.codingEvents[c.id])
   const live = codingLive(c.status)
   const activity = latestActivity(events)
-  const line = live && activity ? eventSummary(activity) : c.detail
+  const raw = live && activity ? eventSummary(activity) : c.detail
+  const line = plainExcerpt(raw)
   const where = c.branch || pathBase(c.worktree)
   const elapsed = formatElapsed(c.created_at, live ? Math.max(now, c.created_at) : c.ended_at ?? c.updated_at)
   return (
-    <li className="cs-row">
+    <li className={`cs-row${live ? '' : ' done'}`}>
       <div className="cs-head">
         <button className="link" aria-expanded={open} title={c.worktree} onClick={() => setOpen((o) => !o)}>
           <span className={`inbox-dot ${codingDot(c.status)}`} role="img" aria-label={codingStatusLabel(c.status)} title={codingStatusLabel(c.status)} />
@@ -40,10 +42,13 @@ function Row({ c, now }: { c: CodingSession; now: number }): JSX.Element {
         {codingStoppable(c.status) && <button className="link" disabled={busy} onClick={() => void stop()}>Stop</button>}
         {termOk && <button className="link" onClick={() => openTerminal(c.id, null)}>Terminal</button>}
       </div>
-      <small className="muted cs-sub">{AGENT_LABEL[c.agent]} · {codingStatusLabel(c.status)}{where ? ` · ${where}` : ''} · {elapsed}</small>
-      {line && <div className="cs-latest" title={line}>{line}</div>}
+      <small className="muted cs-sub" title={where || undefined}>{AGENT_LABEL[c.agent]}{live ? ` · ${codingStatusLabel(c.status)}` : ''} · {elapsed}{where ? ` · ${where}` : ''}</small>
+      {line && (live
+        ? <div className={`cs-latest${full ? ' full' : ''}`} title={full ? undefined : raw ?? undefined} role="button" tabIndex={0} aria-expanded={full}
+            onClick={() => setFull((f) => !f)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFull((f) => !f) } }}>{line}</div>
+        : <div className="cs-latest" title={raw ?? undefined}>{line}</div>)}
       {c.status === 'needs_you' && !(c.agent === 'claude' && c.external_id) && c.attach_hint && <small className="muted"> run <code>{c.attach_hint}</code></small>}
-      <NeedsYou c={c} />
+      <NeedsYou c={c} compact />
       {open && (
         <>
           <CodingTimeline id={c.id} />

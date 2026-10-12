@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { CodingSession, CodingSessionEvent } from '@shared/types'
-import { canAttach, codingNoticeText, defaultTermMode, defaultTermSession, codingTransition, eventSummary, formatElapsed, isStepEvent, latestActivity, mergeCodingEvents, pathBase, splitSessions } from './codingSessions'
+import { canAttach, codingNoticeText, defaultTermMode, defaultTermSession, codingTransition, eventSummary, formatElapsed, isStepEvent, latestActivity, mergeCodingEvents, pathBase, plainExcerpt, splitSessions } from './codingSessions'
 
 const sess = (over: Partial<CodingSession> = {}): CodingSession => ({
   id: 's1', agent: 'claude', name: 'Fix tests', status: 'working', attention: 'working', detail: null, repo_path: '/r', worktree: '/r/.wt/fix-tests',
@@ -83,4 +83,9 @@ test('defaultTermSession prefers the newest attachable session, else the first',
   assert.equal(defaultTermSession([a, b, c])?.id, 'b')
   assert.equal(defaultTermSession([a, sess({ id: 'd', external_id: null })])?.id, 'a')
   assert.equal(defaultTermSession([]), undefined)
+})
+
+test('plainExcerpt strips markdown noise to one line', () => {
+  assert.equal(plainExcerpt('## Changes\n\n- **Added** `foo` to [bar](http://x)\n- fixed\n```\ncode\n```\n'), 'Changes Added foo to bar fixed')
+  assert.equal(plainExcerpt(null), '')
 })

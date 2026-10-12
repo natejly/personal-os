@@ -1,4 +1,5 @@
 import type { CodingSession, CodingSessionEvent } from '@shared/types'
+import { isAttachId } from '@shared/codingAttach'
 
 type Status = CodingSession['status']
 
@@ -19,6 +20,12 @@ export const codingTone = (s: Status): 'ok' | 'warn' | 'bad' | 'run' | undefined
 export const codingStatusLabel = (s: Status): string => (s === 'needs_you' ? 'needs you' : s)
 
 export const AGENT_LABEL: Record<CodingSession['agent'], string> = { claude: 'Claude Code', opencode: 'OpenCode', pi: 'pi' }
+
+/** Whether `claude attach` can reach this session: a claude session with a valid attach id. */
+export const canAttach = (c: CodingSession): boolean => c.agent === 'claude' && isAttachId(c.external_id)
+
+/** The terminal view a picked session opens straight away; null (nothing until asked) when it cannot attach. */
+export const defaultTermMode = (c: CodingSession): 'attach' | null => (canAttach(c) ? 'attach' : null)
 
 /** Events kept per session in the store; older ones are dropped from the front. */
 export const MAX_CODING_EVENTS = 500

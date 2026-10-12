@@ -11,7 +11,7 @@ import { downloadJson, pickJson } from '../lib/jsonFile'
 import { homeModuleOn } from '../moduleToggles'
 import { navEntries } from '../shell/nav'
 import { useModal } from '../lib/useModal'
-import { ACCENTS, accentId } from '../lib/accents'
+import { ACCENTS, SURFACE_TONES, TEXT_TONES, UI_FONTS, accentId, applyAppearance, isLightTheme, surfaceToneId, textToneId, uiFontId } from '../lib/appearance'
 import { chatModelIds, modelLabel } from '../lib/modelLabel'
 import { RESPONSE_STYLES, RESPONSE_STYLE_TEXT_MAX } from '../lib/responseStyle'
 import type { Settings, ShortcutState } from '@shared/types'
@@ -241,17 +241,11 @@ export default function SettingsModal(): JSX.Element {
 
   // In a narrow window the tabs are a horizontal strip; keep the selected one on screen.
   useEffect(() => { tabRefs.current[tab]?.scrollIntoView({ block: 'nearest', inline: 'nearest' }) }, [tab])
-  // Preview theme/accent on the page while the modal is open; discard restores saved values.
+  // Preview the appearance options on the page while the modal is open; discard restores saved values.
   useEffect(() => {
-    const root = document.documentElement
-    root.dataset.theme = draft.theme
-    root.dataset.accent = accentId(draft.accent)
-  }, [draft.theme, draft.accent])
-  useEffect(() => () => {
-    const saved = useStore.getState().settings
-    document.documentElement.dataset.theme = saved.theme
-    document.documentElement.dataset.accent = accentId(saved.accent)
-  }, [])
+    applyAppearance(draft)
+  }, [draft.theme, draft.accent, draft.textTone, draft.surfaceTone, draft.uiFont])
+  useEffect(() => () => applyAppearance(useStore.getState().settings), [])
 
   const showShortcuts = (): void => { setTab('appearance'); setJump('shortcuts') }
 
@@ -590,6 +584,43 @@ export default function SettingsModal(): JSX.Element {
                       />
                     )
                   })}
+                </div>
+              </div>
+              <div className="setting-row">
+                <span className="toggle-text"><b>Text colour</b><small>{TEXT_TONES.find((t) => t.id === textToneId(draft.textTone))?.label}</small></span>
+                <div className="accent-picks" role="radiogroup" aria-label="Text color">
+                  {TEXT_TONES.map((t) => {
+                    const on = textToneId(draft.textTone) === t.id
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={on}
+                        aria-label={t.label}
+                        title={t.label}
+                        className={`accent-swatch${on ? ' on' : ''}`}
+                        style={{ background: isLightTheme(draft.theme) ? t.light : t.dark }}
+                        onClick={() => patch({ textTone: t.id })}
+                      />
+                    )
+                  })}
+                </div>
+              </div>
+              <div className="setting-row">
+                <span className="toggle-text"><b>Background</b><small>Black is for dark theme only.</small></span>
+                <div className="seg" role="radiogroup" aria-label="Background">
+                  {SURFACE_TONES.map((t) => (
+                    <button key={t.id} type="button" role="radio" aria-checked={surfaceToneId(draft.surfaceTone) === t.id} className={surfaceToneId(draft.surfaceTone) === t.id ? 'on' : ''} onClick={() => patch({ surfaceTone: t.id })}>{t.label}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="setting-row">
+                <span className="toggle-text"><b>Interface font</b><small>The typeface for menus, lists and chat.</small></span>
+                <div className="seg" role="radiogroup" aria-label="Interface font">
+                  {UI_FONTS.map((f) => (
+                    <button key={f.id} type="button" role="radio" aria-checked={uiFontId(draft.uiFont) === f.id} className={uiFontId(draft.uiFont) === f.id ? 'on' : ''} onClick={() => patch({ uiFont: f.id })}>{f.label}</button>
+                  ))}
                 </div>
               </div>
               <div className="setting-row">

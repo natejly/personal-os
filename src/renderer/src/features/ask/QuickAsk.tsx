@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
+import { applyAppearance } from '../../lib/appearance'
 import { isBranchNote, isClear } from '../../lib/workers'
 import BranchNote from '../../components/BranchNote'
 import { Check, Clipboard, Copy, ExternalLink, Plus } from '../../icons'
@@ -21,7 +23,7 @@ export default function QuickAsk(): JSX.Element {
   const root = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
   const scroll = useRef<HTMLDivElement>(null)
-  const theme = useStore((s) => s.settings.theme)
+  const appearance = useStore(useShallow((s) => [s.settings.theme, s.settings.accent, s.settings.textTone, s.settings.surfaceTone, s.settings.uiFont] as const))
   const ready = useStore((s) => s.ready)
   const backendError = useStore((s) => s.backendError)
   const convo = useConversation(convId)
@@ -31,7 +33,7 @@ export default function QuickAsk(): JSX.Element {
   const pending = usePendingSends(convId)
 
   useEffect(() => { void useStore.getState().init() }, [])
-  useEffect(() => { document.documentElement.dataset.theme = theme }, [theme])
+  useEffect(() => { applyAppearance({ theme: appearance[0], accent: appearance[1], textTone: appearance[2], surfaceTone: appearance[3], uiFont: appearance[4] }) }, [appearance])
 
   // The window is as tall as its content: main clamps the height it is told.
   useEffect(() => {

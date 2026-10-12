@@ -335,6 +335,11 @@ def _url(settings: dict[str, Any], path: str, model: str | None = None) -> str:
 def supports_service_tier(settings: dict[str, Any]) -> bool:
     """Only OpenAI-shaped priority routing; elsewhere an unknown field can fail the whole request."""
     return providers.effective(settings) in ("openai", "litellm", "custom")
+
+
+def supports_parallel_tool_calls(settings: dict[str, Any]) -> bool:
+    """Providers known to take `parallel_tool_calls`; elsewhere (and for an unrecognised host) the field is not sent."""
+    return providers.effective(settings) in ("fireworks", "openai", "litellm", "custom", "openrouter")
 # ---------------- retry / timeouts ----------------
 # A transient failure (rate limit, provider 5xx, dropped connection) is retried with exponential backoff and
 # jitter, but ONLY while nothing has been streamed to the caller: after the first token a retry would repeat
@@ -684,6 +689,8 @@ def _rejected_optional(status: int, text: str, body: dict[str, Any]) -> str | No
         return "reasoning_effort"
     if "service_tier" in body and (param == "service_tier" or "service_tier" in msg or "service tier" in msg):
         return "service_tier"
+    if "parallel_tool_calls" in body and (param == "parallel_tool_calls" or "parallel_tool_calls" in msg):
+        return "parallel_tool_calls"
     if "user" in body and param == "user":  # the affinity id is an optimisation, never worth a failed reply
         return "user"
     return None
@@ -1149,6 +1156,8 @@ async def stream_chat(
     if tools:
         body["tools"] = tools
         body["tool_choice"] = tool_choice
+        if supports_parallel_tool_calls(settings):
+            body["parallel_tool_calls"] = True
     _with_affinity(settings, body)
     calls: dict[int, dict[str, Any]] = {}
     by_index: dict[int, int] = {}  # provider `index` -> slot, re-pointed when an index is reused for a new call

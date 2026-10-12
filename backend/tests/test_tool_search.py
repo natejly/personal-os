@@ -23,10 +23,12 @@ ROUNDS: list[list[dict[str, Any]]] = []
 OFFERED: list[list[str]] = []  # tool names sent per model call
 SIZES: list[int] = []
 CALLED: list[str] = []
+TOOL_MSGS: list[str] = []  # tool-role message contents the model saw
 
 
 async def _scripted(settings, model, messages, tools=None, kind="chat", effort="default", tool_choice="auto", fast=False, cancel=None):
     OFFERED.append([t["function"]["name"] for t in tools or []])
+    TOOL_MSGS[:] = [str(m["content"]) for m in messages if m["role"] == "tool"]
     SIZES.append(len(json.dumps(tools or [])))
     calls = ROUNDS.pop(0) if ROUNDS else []
     yield {"type": "delta", "text": "ok" if not calls else ""}
@@ -89,17 +91,38 @@ def test_search_loads_and_persists_per_conversation() -> None:
     ev = reply(cid, [[call("tool_search", {"query": "knowledge graph entities relations"})]])
     assert "graph_search" not in OFFERED[0] and "graph_search" in OFFERED[1]
     ctx = next(e for e in ev if e["event"] == "assistant_message")["context_used"]
-    assert ctx["tools_deferred"] > 0 and "Also available via tool_search:" in ctx["system_prompt"]
+    assert ctx["tools_deferred"] > 0 and "graph_search \u2014 " in ctx["system_prompt"]
     reply(cid, [])
     assert "graph_search" in OFFERED[0]  # the next reply in the same conversation keeps it
     reply(new_conv(), [])
     assert "graph_search" not in OFFERED[0]  # another conversation does not
 
 
-def test_unloaded_tool_is_refused_not_run() -> None:
-    ev = reply(new_conv(), [[call("graph_search", {"query": "x"})]])
+def test_first_use_loads_and_runs_in_the_same_round() -> None:
+    cid = new_conv()
+    ev = reply(cid, [[call("graph_search", {"query": "x"})]])
+    assert CALLED == ["graph_search"] and "graph_search" not in OFFERED[0] and "graph_search" in OFFERED[1]
+    assert "graph_search" in appmod._tool_loaded[cid]
+    assert not any("not loaded" in json.dumps(e) for e in ev)
+
+
+def test_first_use_bad_arguments_return_the_schema() -> None:
+    ev = reply(new_conv(), [[call("graph_traverse", {"nope": 1})]])
     res = [e for e in ev if e["event"] == "tool_result"]
-    assert not CALLED and res and "not loaded; call tool_search first" in json.dumps(res[0])
+    assert not CALLED and res and res[0]["error"]
+    assert "graph_traverse" in OFFERED[1]  # loaded anyway, so the retry is a plain call
+    assert TOOL_MSGS and '"schema"' in TOOL_MSGS[-1] and "required" in TOOL_MSGS[-1]
+
+
+def test_index_is_static_and_lists_every_deferrable_tool() -> None:
+    cid = new_conv()
+    ev = reply(cid, [[call("tool_search", {"query": "knowledge graph entities relations"})]])
+    sys1 = next(e for e in ev if e["event"] == "assistant_message")["context_used"]["system_prompt"]
+    ev = reply(cid, [])
+    sys2 = next(e for e in ev if e["event"] == "assistant_message")["context_used"]["system_prompt"]
+    assert sys1 == sys2 and "More tools, loaded when you first call one:" in sys1
+    assert "graph_search \u2014 " in sys1 and "Call any tool listed above directly by name" in sys1
+    assert "Also available via tool_search" not in sys1
 
 
 def test_plan_bound_call_loads_its_group() -> None:
@@ -152,9 +175,11 @@ def test_zero_threshold_sends_everything() -> None:
     assert "tool_search" not in OFFERED[0] and "graph_search" in OFFERED[0] and len(OFFERED[0]) > 40
 
 
-def test_group_hint() -> None:
-    assert mcp_search.group_hint([("files", 10), ("mac", 1)]) == "Also available via tool_search: files (10 tools), mac (1 tool)."
-    assert mcp_search.group_hint([]) == ""
+def test_gist_and_index() -> None:
+    assert mcp_search.gist("Create a custom agent: a named role with a brief that later chats run as.") == "Create a custom agent"
+    assert mcp_search.gist("Wait for background subagents and return their reports in full detail") == "Wait for background subagents and return"
+    idx = mcp_search.tool_index([("b", "z_tool", "Do z."), ("a", "y_tool", "Do y: more"), ("a", "x_tool", "")])
+    assert idx.splitlines()[1:3] == ["a: x_tool, y_tool \u2014 Do y", "b: z_tool \u2014 Do z"] and mcp_search.tool_index([]) == ""
 
 
 if __name__ == "__main__":

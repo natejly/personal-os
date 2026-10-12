@@ -101,6 +101,25 @@ def test_chat_prefix_stable_across_turns(monkeypatch) -> None:  # type: ignore[n
                       "tools": t1["ntools"], "identical": True}
 
 
+def test_deferred_tool_index_survives_a_load(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Past toolDeferAbove the prompt carries a static index of every deferrable tool; loading one mid-chat leaves it byte-identical."""
+    _setup()
+    appmod.db.set_settings({"toolDeferAbove": 10})
+    monkeypatch.setattr(llm, "stream_chat", _fake)
+    cid = appmod.convos.create(None, "Deferred", "test-model")["id"]
+    t1 = _turn(cid, content="hello there")
+    appmod._tool_loaded.setdefault(cid, set()).add("graph_search")  # what a tool_search or a first-use call does
+    t2 = _turn(cid, content="and again")
+    s1, s2 = t1["messages"][0]["content"], t2["messages"][0]["content"]
+    assert "More tools, loaded when you first call one:" in s1 and "graph_search \u2014 " in s1
+    assert "Call any tool listed above directly by name; its schema loads on first use" in s1
+    assert s1.encode() == s2.encode(), "the tool index changed when a tool loaded"
+    assert t2["ntools"] == t1["ntools"] + 1, "the loaded tool should be offered"
+    assert "Issue independent tool calls together" in s1
+    REPORT["index"] = len(s1)
+    appmod.db.set_settings({"toolDeferAbove": 40})
+
+
 def test_affinity_headers() -> None:
     fw = {"baseUrl": "https://api.fireworks.ai/inference/v1", "provider": "fireworks", "apiKey": "k"}
     other = [{"baseUrl": "https://api.openai.com/v1", "provider": "openai", "apiKey": "k"},

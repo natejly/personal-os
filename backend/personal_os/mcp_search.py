@@ -91,17 +91,45 @@ def should_defer(n_tools: int, threshold: int) -> bool:
     return threshold > 0 and n_tools > threshold
 
 
-def catalog_hint(servers_with_counts: Iterable[tuple[str, int]],
-                 lead: str = "MCP connectors available via mcp_tool_search: ") -> str:
-    parts = [f"{name} ({n} tool{'s' if n != 1 else ''})" for name, n in servers_with_counts]
-    if not parts:
+_CLAUSE = re.compile(r"[.:;(\n]|\s[—-]\s")
+_TRAIL = frozenset("a an the of to in on at by for with and or one this that its your from as is are".split())
+MAX_INDEX_NAMES = 30  # per connector; mcp_tool_search finds the rest
+INDEX_LEAD = ("Call any tool listed above directly by name; its schema loads on first use. "
+              "Use {search} only when nothing listed fits.")
+
+
+def gist(description: str, words: int = 6) -> str:
+    """The first clause of a description, cut to a few words: a deterministic label for the tool index."""
+    first = _CLAUSE.split(" ".join(str(description or "").split()), 1)[0]
+    out = first.split()[:words]
+    while len(out) > 1 and out[-1].lower().strip(",") in _TRAIL:
+        out.pop()
+    return " ".join(out).rstrip(",")
+
+
+def tool_index(rows: Iterable[tuple[str, str, str]]) -> str:
+    """The static table of contents of the built-in tools held back past toolDeferAbove: one line per group,
+    `group: name - gist, ...`. `rows` is (group, name, description) for every tool that could be deferred, not the
+    ones deferred right now, so the text does not change as tools load and the cached prompt prefix holds."""
+    groups: dict[str, list[str]] = {}
+    for g, n, d in sorted(rows):
+        groups.setdefault(g, []).append(f"{n} \u2014 {gist(d)}" if gist(d) else n)
+    if not groups:
         return ""
-    return lead + ", ".join(parts) + "."
+    return ("More tools, loaded when you first call one:\n" + "\n".join(f"{g}: {', '.join(items)}" for g, items in groups.items())
+            + "\n" + INDEX_LEAD.format(search="tool_search"))
 
 
-def group_hint(groups_with_counts: Iterable[tuple[str, int]]) -> str:
-    """The built-in groups held back this reply, so the model knows what tool_search can load."""
-    return catalog_hint(groups_with_counts, "Also available via tool_search: ")
+def mcp_index(servers: Mapping[str, Iterable[str]]) -> str:
+    """Connector tool names per server (capped), so a tool can be called before any search. Static for a given set of tools."""
+    lines = []
+    for name, slugs in sorted(servers.items()):
+        slugs = sorted(slugs)
+        more = f", +{len(slugs) - MAX_INDEX_NAMES} more via mcp_tool_search" if len(slugs) > MAX_INDEX_NAMES else ""
+        lines.append(f"{name}: {', '.join(slugs[:MAX_INDEX_NAMES])}{more}")
+    if not lines:
+        return ""
+    return "MCP connector tools (third-party):\n" + "\n".join(lines) + "\n" + INDEX_LEAD.format(search="mcp_tool_search")
 
 
 def select_schemas(all_schemas: list[dict[str, Any]], loaded: Iterable[str], defer: bool) -> list[dict[str, Any]]:

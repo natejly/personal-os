@@ -27,13 +27,13 @@ import { TOOL_CARDS } from './toolcards'
 import type { ShipChecklist } from '@shared/types'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-const fmtWhen = (ts: number): string => {
+export const fmtWhen = (ts: number): string => {
   const d = new Date(ts * 1000)
   const today = new Date().toDateString() === d.toDateString()
   return today ? fmtClock(ts) : d.toLocaleDateString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
 }
 /** A one-off's instant can be weeks out, so it carries its date where fmtWhen would only say the weekday. */
-const fmtDate = (ts: number): string =>
+export const fmtDate = (ts: number): string =>
   new Date(ts * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const fmtLate = (seconds: number): string => {
   const m = Math.round(seconds / 60)
@@ -197,7 +197,7 @@ function ProposalCard({ p, onOpen }: { p: AgentProposal; onOpen?: () => void }):
 }
 
 /** A run's report: the fixed headings (Verified, Assumptions, Done, ...) as labelled sections when it has them, else plain markdown. */
-function ReportBody({ text }: { text: string }): JSX.Element {
+export function ReportBody({ text }: { text: string }): JSX.Element {
   const md = (t: string): JSX.Element => (
     <div className="markdown inbox-summary"><ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{t}</ReactMarkdown></div>
   )
@@ -293,7 +293,7 @@ const STATUS_CHIP: Record<JobRunRecord['status'], string> = {
 }
 
 /** A job's last 20 runs from rows (the backend keeps no more): a success-rate strip, then one line per run with a link to its transcript. */
-function JobHistory({ job }: { job: Job }): JSX.Element {
+export function JobHistory({ job }: { job: Job }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const [runs, setRuns] = useState<(JobRunRecord | JobSkipRecord)[] | null>(null)
   const previews = runs?.filter((r) => 'dry_run' in r && r.dry_run).length ?? 0
@@ -367,6 +367,15 @@ function JobHistory({ job }: { job: Job }): JSX.Element {
       ))}
     </li>
   )
+}
+
+/** One line on when a job runs, whatever its kind. */
+export function describeJobSchedule(job: Job): string {
+  if (job.kind === 'once') return job.run_at ? fmtDate(job.run_at) : 'no time set'
+  if (job.kind === 'watch') return `watching ${tildePath(job.watch_dir ?? '')}${job.cron ? ` · ${describeCron(job.cron)}` : ''}`
+  if (job.kind === 'mail') return `when mail matches ${job.mail_query ?? ''}`
+  if (job.kind === 'calendar') return `${job.minutes_before ?? 15} min before ${job.calendar_query ?? ''}`
+  return describeCron(job.cron)
 }
 
 /** Checkboxes for the tools a job may use, grouped like Settings. A job can only be narrowed: nothing here turns a tool on. */

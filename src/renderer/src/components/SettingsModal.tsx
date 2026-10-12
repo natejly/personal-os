@@ -649,7 +649,7 @@ export default function SettingsModal(): JSX.Element {
                     <input type="checkbox" aria-label={e.label} checked={!hidden.includes(e.view)} onChange={(ev) => void setRowShown(e.view, ev.target.checked)} /><span className="switch" />
                   </label>
                 ))}
-                {([['spaces', 'Canvases'], ['projects', 'Projects'], ['jobs', 'Jobs']] as const).map(([k, label]) => (
+                {([['spaces', 'Canvases'], ['projects', 'Projects']] as const).map(([k, label]) => (
                   <label key={k} className="toggle-row">
                     <span className="toggle-text"><b>{label}</b></span>
                     <input type="checkbox" aria-label={label} checked={!sbHidden.includes(k)} onChange={(ev) => void setSectionShown(k, ev.target.checked)} /><span className="switch" />

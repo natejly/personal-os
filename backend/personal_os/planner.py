@@ -21,6 +21,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "workStart": "09:00", "workEnd": "17:30", "workDays": [1, 2, 3, 4, 5],  # ISO weekdays, Mon=1
     "bufferMin": 10, "minBlockMin": 15, "maxBlockMin": 120, "slotStepMin": 15, "lookaheadDays": 7,
     "calendarName": "Grain Todos",
+    "busyCalendarIds": [],  # empty = every calendar checked on in Google; else exactly these calendar ids
 }
 WEIGHTS = {"due": 0.40, "priority": 0.25, "energy": 0.20, "time": 0.15}
 PRIORITY_SCORE = {1: 1.0, 2: 0.6, 3: 0.3}
@@ -52,6 +53,9 @@ def validate_config(cfg: dict[str, Any]) -> str | None:
             return f"{k} must be an integer between {lo} and {hi}"
     if cfg["maxBlockMin"] < cfg["minBlockMin"]:
         return "maxBlockMin must be at least minBlockMin"
+    ids = cfg.get("busyCalendarIds", [])
+    if not isinstance(ids, list) or any(not isinstance(i, str) or not i.strip() for i in ids):
+        return "busyCalendarIds must be a list of calendar ids"
     return None
 
 
@@ -86,6 +90,22 @@ def _local_naive(value: str) -> datetime:
     """Event times arrive as ISO strings, naive local or offset-aware; the planner works in naive local."""
     d = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return d.astimezone().replace(tzinfo=None) if d.tzinfo else d
+
+
+def read_calendars(busy_calendar_ids: list[str] | tuple[str, ...], mirror_calendar_ids: list[str] | tuple[str, ...] = ()) -> list[str]:
+    """The calendar list to read events from: the checked ones when no busy calendars are chosen, else the chosen ones
+    plus the planner's own calendar (so accepted Focus blocks still lock their todos)."""
+    return list(dict.fromkeys([*busy_calendar_ids, *mirror_calendar_ids])) if busy_calendar_ids else ["enabled"]
+
+
+def in_busy_calendars(events: list[dict[str, Any]], busy_calendar_ids: list[str] | tuple[str, ...] = (),
+                      mirror_calendar_ids: list[str] | tuple[str, ...] = ()) -> list[dict[str, Any]]:
+    """Events on a calendar that counts as busy: all of them when `busy_calendar_ids` is empty, else only those calendars
+    and the planner's own (kept for locked_from_events; busy_from_events still leaves it out of busy time)."""
+    if not busy_calendar_ids:
+        return list(events)
+    keep = {*busy_calendar_ids, *mirror_calendar_ids}
+    return [e for e in events if e.get("calendar_id") in keep]
 
 
 def busy_from_events(events: list[dict[str, Any]], mirror_calendar_ids: tuple[str, ...] | list[str] = ()) -> list[Busy]:

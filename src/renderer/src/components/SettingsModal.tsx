@@ -81,10 +81,10 @@ function AdvGroup({ id, title, openGroups, toggle, children }: { id: string; tit
 }
 
 /** A labelled on/off row with one line of help. */
-function Switch({ title, help, checked, onChange }: { title: string; help: string; checked: boolean; onChange: (v: boolean) => void }): JSX.Element {
+function Switch({ title, help, checked, onChange }: { title: string; help?: string; checked: boolean; onChange: (v: boolean) => void }): JSX.Element {
   return (
     <label className="toggle-row plain">
-      <span className="toggle-text"><b>{title}</b><small>{help}</small></span>
+      <span className="toggle-text"><b>{title}</b>{help && <small>{help}</small>}</span>
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /><span className="switch" />
     </label>
   )
@@ -369,22 +369,21 @@ export default function SettingsModal(): JSX.Element {
           <div className="settings-pane" id="settings-pane" role="tabpanel" aria-labelledby={`settings-tab-${tab}`}>
             {tab === 'model' && <section>
               <h3>Model</h3>
-              <p className="muted">Grain talks to any OpenAI-compatible endpoint: Fireworks, OpenAI, Anthropic, OpenRouter, a local Ollama, or your own <a href="https://docs.litellm.ai/" target="_blank" rel="noreferrer">LiteLLM</a> proxy.</p>
               <Sec id="provider"><ProviderSettings draft={draft} settings={settings} patch={patch} models={models} /></Sec>
               <label className="toggle-row plain">
-                <span className="toggle-text"><b>Use the fast model for short messages</b><small>New chats start this way. Long, analytical or tool-heavy messages always use the chat model.</small></span>
+                <span className="toggle-text"><b>Use the fast model for short messages</b><small>Long, analytical or tool-heavy messages still use the chat model.</small></span>
                 <input type="checkbox" checked={!!draft.autoRoute} onChange={(e) => patch({ autoRoute: e.target.checked })} /><span className="switch" />
               </label>
               <div className="setting-row">
-                <span className="toggle-text"><b>Run setup again</b><small>Walks through choosing a provider and key from the start, with a connection test.</small></span>
+                <span className="toggle-text"><b>Run setup again</b></span>
                 <button className="ghost-btn" type="button" onClick={() => (dirty ? setPending('setup') : void rerunSetup())}><RotateCcw size={14} /> Run setup</button>
               </div>
               <Sec id="assistant">
                 <h4>Assistant</h4>
-                <label><span className="toggle-text"><b>Standing instructions</b><small>Added to every chat.</small></span>
+                <label><span className="toggle-text"><b>Standing instructions</b></span>
                   <textarea rows={6} value={draft.systemPrompt} onChange={(e) => patch({ systemPrompt: e.target.value })} />
                 </label>
-                <label className="setting-row"><span className="toggle-text"><b>Reply style</b><small>How replies are shaped in new chats.</small></span>
+                <label className="setting-row"><span className="toggle-text"><b>Reply style</b></span>
                   <select value={draft.responseStyle ?? 'default'} onChange={(e) => patch({ responseStyle: e.target.value })}>
                     {RESPONSE_STYLES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
                   </select>
@@ -392,29 +391,26 @@ export default function SettingsModal(): JSX.Element {
                 {draft.responseStyle === 'custom' && <label><span className="toggle-text"><small>Your own instruction for how replies should read.</small></span>
                   <textarea rows={4} maxLength={RESPONSE_STYLE_TEXT_MAX} value={draft.responseStyleText ?? ''} onChange={(e) => patch({ responseStyleText: e.target.value })} />
                 </label>}
-                <Switch title="Name new chats" help="Write a short title after the first reply. A title you typed is never replaced." checked={draft.autoTitle !== false} onChange={(autoTitle) => patch({ autoTitle })} />
-                <Switch title="Suggest next questions" help="Show a few follow-up chips under replies." checked={draft.followUps !== false} onChange={(followUps) => patch({ followUps })} />
-                <Switch title="Selection toolbar" help="Explain, summarize, verify or ask about selected text." checked={draft.selectionToolbar !== false} onChange={(selectionToolbar) => patch({ selectionToolbar })} />
+                <Switch title="Name new chats" checked={draft.autoTitle !== false} onChange={(autoTitle) => patch({ autoTitle })} />
+                <Switch title="Suggest next questions" checked={draft.followUps !== false} onChange={(followUps) => patch({ followUps })} />
+                <Switch title="Selection toolbar" checked={draft.selectionToolbar !== false} onChange={(selectionToolbar) => patch({ selectionToolbar })} />
                 <Switch title="Summarize old messages automatically" help="When a chat gets long. Off: only when you ask (type /compact)." checked={draft.autoCompact !== false} onChange={(autoCompact) => patch({ autoCompact })} />
               </Sec>
             </section>}
 
             {tab === 'models' && <section>
               <h3>Models</h3>
-              <p className="muted">Add a key for each provider you use, then choose which of their models the composer offers.</p>
               <Sec id="keys"><ModelsSettings settings={settings} models={models} savePicker={(pickerModels) => saveEarly({ pickerModels }).catch((e: Error) => toast(e.message, 'error'))} /></Sec>
               {draft.devTools === true && <Sec id="duels"><ModelDuels /></Sec>}
             </section>}
 
             {tab === 'usage' && <section className="usage-tab">
               <h3>Usage</h3>
-              <p className="muted">Every model call is logged on this Mac with its tokens and, when the price is known, its cost. Information only: nothing here limits Grain.</p>
               <Sec id="usage"><UsageView /></Sec>
             </section>}
 
             {tab === 'permissions' && <section className="permissions-tab">
               <h3>Permissions</h3>
-              <p className="muted">How Grain handles actions that could change something: sending, deleting, running, scheduling.</p>
               <Sec id="mode"><PermissionModeCards mode={mode} onPick={(m) => saveEarly({ permissionMode: m })} /></Sec>
               <label className={`toggle-row plain all-connections ${draft.allowAllConnections ? 'danger' : ''}`}>
                 <span className="toggle-text">
@@ -436,7 +432,6 @@ export default function SettingsModal(): JSX.Element {
               )}
               <Sec id="tools">
                 <h4>Per-tool access</h4>
-                <p className="muted small"><b>On</b> runs, <b>Ask</b> pauses for you, <b>Off</b> hides the tool.</p>
                 <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
               </Sec>
               <Sec id="always-ask">
@@ -464,9 +459,8 @@ export default function SettingsModal(): JSX.Element {
 
             {tab === 'integrations' && <section>
               <h3>Integrations</h3>
-              <p className="muted">Accounts the assistant can read from and act on. Signing in and the sync switches take effect at once; the rest is saved with Save.</p>
               <Sec id="accounts">
-              <Switch title="Hold outgoing email so I can undo" help="A held send shows a countdown with an Undo button. Off sends at once." checked={hold.enabled} onChange={(enabled) => patch({ gmailSendHold: { ...hold, enabled } })} />
+              <Switch title="Hold outgoing email so I can undo" checked={hold.enabled} onChange={(enabled) => patch({ gmailSendHold: { ...hold, enabled } })} />
               <GoogleSettings clientId={draft.googleClientId ?? ''} clientSecret={draft.googleClientSecret ?? ''} secretSaved={!!settings.googleClientSecretSet} backupLabel={draft.driveBackupLabel ?? ''} onChange={(p) => patch(p)}
                 onSaveCreds={() => saveEarly({ googleClientId: draft.googleClientId, googleClientSecret: draft.googleClientSecret })} />
               </Sec>
@@ -495,19 +489,18 @@ export default function SettingsModal(): JSX.Element {
 
             {tab === 'agents' && <section>
               <h3>Agents</h3>
-              <p className="muted">How the assistant works on its own: desks, background workers, coding sessions, the browser and the checks it runs.</p>
               <Sec id="desks">
                 <CoworkSettings draft={draft} patch={patch} />
               </Sec>
               <Sec id="workers">
                 <h4>Background workers</h4>
-                <Switch title="Delegate long work" help="Once a reply has used its tool rounds, the assistant hands the rest to a background worker and answers you at once. Nothing is cut off." checked={draft.delegationForce !== false} onChange={(delegationForce) => patch({ delegationForce })} />
+                <Switch title="Delegate long work" help="Once a reply has used its tool rounds, the assistant hands the rest to a background worker and answers you at once." checked={draft.delegationForce !== false} onChange={(delegationForce) => patch({ delegationForce })} />
                 {draft.delegationForce !== false && (
-                  <label className="setting-row"><span className="toggle-text"><b>Delegate after this many tool rounds</b><small>1 to 20. Quick lookups under this stay in the chat.</small></span>
+                  <label className="setting-row"><span className="toggle-text"><b>Delegate after this many tool rounds</b><small>1 to 20.</small></span>
                     <input type="number" min={1} max={20} value={draft.delegationAfterRounds ?? 2} onChange={(e) => patch({ delegationAfterRounds: Math.min(20, Math.max(1, Math.round(Number(e.target.value)) || 2)) })} />
                   </label>
                 )}
-                <label className="setting-row"><span className="toggle-text"><b>Background workers at once</b><small>1 to 16. The rest wait in a queue and start in order.</small></span>
+                <label className="setting-row"><span className="toggle-text"><b>Background workers at once</b><small>1 to 16.</small></span>
                   <input type="number" min={1} max={16} value={draft.workerMaxConcurrent ?? 4} onChange={(e) => patch({ workerMaxConcurrent: Math.min(16, Math.max(1, Math.round(Number(e.target.value)) || 4)) })} />
                 </label>
               </Sec>
@@ -522,7 +515,7 @@ export default function SettingsModal(): JSX.Element {
                     <option value="pi">pi</option>
                   </select>
                 </label>
-                <label className="setting-row"><span className="toggle-text"><b>Coding sessions at once</b><small>Their own limit, separate from background shell jobs.</small></span>
+                <label className="setting-row"><span className="toggle-text"><b>Coding sessions at once</b></span>
                   <input type="number" min={1} max={20} value={draft.codingSessionMaxConcurrent ?? 3} onChange={(e) => patch({ codingSessionMaxConcurrent: Math.min(20, Math.max(1, Math.round(Number(e.target.value)) || 3)) })} />
                 </label>
               </Sec>
@@ -543,7 +536,7 @@ export default function SettingsModal(): JSX.Element {
               </div>
               <div className="knowledge-top">
                 <Sec id="learning"><AdvGroup id="learning" title="Learning" {...gp}>
-                  <Switch title="Learn from chats" help="Save useful facts after replies." checked={draft.autoLearn} onChange={(autoLearn) => patch({ autoLearn })} />
+                  <Switch title="Learn from chats" checked={draft.autoLearn} onChange={(autoLearn) => patch({ autoLearn })} />
                   <Switch title="Learn how I write" help="Keep a profile of your writing so drafts sound like you." checked={draft.learnStyle !== false} onChange={(learnStyle) => patch({ learnStyle })} />
                 </AdvGroup></Sec>
                 <Sec id="search"><AdvGroup id="search" title="Memory search and index" {...gp}>
@@ -584,7 +577,7 @@ export default function SettingsModal(): JSX.Element {
                 })}
               </div>
               <div className="setting-row">
-                <span className="toggle-text"><b>Theme</b><small>System follows your Mac.</small></span>
+                <span className="toggle-text"><b>Theme</b></span>
                 <div className="seg" role="radiogroup" aria-label="Theme">
                   {THEMES.map((t) => (
                     <button key={t.id} type="button" role="radio" aria-checked={draft.theme === t.id} className={draft.theme === t.id ? 'on' : ''} onClick={() => patch({ theme: t.id })}>{t.label}</button>
@@ -648,7 +641,7 @@ export default function SettingsModal(): JSX.Element {
                 </div>
               </div>
               <div className="setting-row stack">
-                <span className="toggle-text"><b>Interface font</b><small>The typeface for menus, lists and chat. Zoom below scales text and everything else.</small></span>
+                <span className="toggle-text"><b>Interface font</b></span>
                 <div className="font-picks" role="radiogroup" aria-label="Interface font">
                   {UI_FONTS.map((f) => (
                     <button key={f.id} type="button" role="radio" aria-checked={uiFontId(draft.uiFont) === f.id} className={uiFontId(draft.uiFont) === f.id ? 'on' : ''} style={{ fontFamily: f.stack }} onClick={() => patch({ uiFont: f.id })}>{f.label}</button>
@@ -656,7 +649,7 @@ export default function SettingsModal(): JSX.Element {
                 </div>
               </div>
               <div className="setting-row stack">
-                <span className="toggle-text"><b>Code font</b><small>Code blocks, editors and tags.</small></span>
+                <span className="toggle-text"><b>Code font</b></span>
                 <div className="font-picks" role="radiogroup" aria-label="Code font">
                   {CODE_FONTS.map((f) => (
                     <button key={f.id} type="button" role="radio" aria-checked={codeFontId(draft.codeFont) === f.id} className={codeFontId(draft.codeFont) === f.id ? 'on' : ''} style={{ fontFamily: f.stack }} onClick={() => patch({ codeFont: f.id })}>{f.label}</button>
@@ -672,7 +665,7 @@ export default function SettingsModal(): JSX.Element {
                   <button type="button" onClick={() => void saveEarly({ uiZoom: DEFAULT_ZOOM })}>Reset</button>
                 </div>
               </div>
-              <Switch title="Daily recap on new chats" help="A short summary of your day under the greeting in a new chat." checked={homeModuleOn(draft, 'recap')} onChange={(on) => patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), recap: on } })} />
+              <Switch title="Daily recap on new chats" checked={homeModuleOn(draft, 'recap')} onChange={(on) => patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), recap: on } })} />
               <Switch title="Start chat windows as blobs" help="A chat added to a canvas starts as just its creature, no frame. Click it to open the chat." checked={!!draft.compactChats} onChange={(compactChats) => patch({ compactChats })} />
               <div className="setting-row">
                 <span className="toggle-text"><b>Default file font</b><small>How files read and edit unless a file has its own choice. Auto keeps the app's own size and line width.</small></span>
@@ -693,13 +686,13 @@ export default function SettingsModal(): JSX.Element {
                   <input value={draft.dictationChord ?? ''} onChange={(e) => patch({ dictationChord: e.target.value })} placeholder="Control+Alt+D" spellCheck={false} />
                 </label>
                 <VoiceInputSettings />
-                <label><span className="toggle-text"><b>Bring widgets to front</b><small>Works anywhere on your Mac: brings every detached widget to the front and back again.</small></span>
+                <label><span className="toggle-text"><b>Bring widgets to front</b><small>Works anywhere on your Mac.</small></span>
                   <input value={draft.gatherShortcut} onChange={(e) => patch({ gatherShortcut: e.target.value })} placeholder={shortcut?.accelerator || 'Control+Alt+Command+Space'} spellCheck={false} />
                 </label>
-                <label><span className="toggle-text"><b>Quick note shortcut</b><small>Works anywhere on your Mac: opens a small window that adds a line to today's note.</small></span>
+                <label><span className="toggle-text"><b>Quick note shortcut</b><small>Works anywhere on your Mac.</small></span>
                   <input value={draft.quickCaptureShortcut ?? ''} onChange={(e) => patch({ quickCaptureShortcut: e.target.value })} placeholder="CommandOrControl+Shift+Space" spellCheck={false} />
                 </label>
-                <label><span className="toggle-text"><b>Quick ask shortcut</b><small>Works anywhere on your Mac: opens a small bar that starts a new chat from one line.</small></span>
+                <label><span className="toggle-text"><b>Quick ask shortcut</b><small>Works anywhere on your Mac.</small></span>
                   <input value={draft.quickAskShortcut ?? ''} onChange={(e) => patch({ quickAskShortcut: e.target.value })} placeholder="Alt+Space" spellCheck={false} />
                 </label>
               </Sec>
@@ -736,7 +729,6 @@ export default function SettingsModal(): JSX.Element {
 
             {tab === 'advanced' && <section>
               <h3>Advanced</h3>
-              <p className="muted">Data, backups and developer tools. Everything else lives under its own section.</p>
 
               <Sec id="data"><AdvGroup id="data" title="Data" {...gp}>
                   <DataSettings />
@@ -749,7 +741,7 @@ export default function SettingsModal(): JSX.Element {
               </AdvGroup></Sec>
 
               <Sec id="developer"><AdvGroup id="developer" title="Developer" {...gp}>
-                  <Switch title="Developer tools" help="Show traces, the context preview and the system prompt. Traces are recorded either way." checked={draft.devTools === true} onChange={(devTools) => patch({ devTools })} />
+                  <Switch title="Developer tools" help="Show traces, the context preview and the system prompt." checked={draft.devTools === true} onChange={(devTools) => patch({ devTools })} />
                   <TraceExportSettings value={draft.otelExport} onChange={(otelExport) => patch({ otelExport })} />
               </AdvGroup></Sec>
             </section>}

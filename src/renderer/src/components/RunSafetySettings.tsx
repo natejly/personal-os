@@ -13,7 +13,7 @@ export default function RunSafetySettings({ draft, patch }: Props): JSX.Element 
   return (
     <>
       <HostList title="Allowed hosts after reading untrusted content"
-        help="Once a reply has read a web page, mail or another outside source, it may only fetch links you or a search gave it, plus these hosts. A name also allows its subdomains. The agent's browser also uses its own Allowed sites list."
+        help="After reading outside content, a reply may only fetch links you or a search gave it, plus these hosts. A name also allows its subdomains."
         value={draft.fetchAllowlist ?? []} onChange={(fetchAllowlist) => patch({ fetchAllowlist })} />
       <TrustExternalToggle draft={draft} patch={patch} />
     </>

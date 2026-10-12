@@ -58,7 +58,7 @@ export default function SupportSettings(): JSX.Element {
     <>
       <h4>Support</h4>
       <p className="muted small">
-        Diagnostics bundle versions, settings with keys masked, the last 300 log lines (secrets redacted) and the backend's restart history. Your messages and files are not included.
+        Includes versions, settings with keys masked, recent logs and restart history. No messages or files.
       </p>
       <div className="button-row">
         <button type="button" className="ghost-btn" onClick={() => useStore.getState().openHelp('guide')}><CircleHelp size={14} /> Help</button>

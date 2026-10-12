@@ -18,7 +18,7 @@ export default function AdvancedRetrieval({ draft, patch }: { draft: Settings; p
       <span className="toggle-text"><b>Search my Docs for context</b><small>Also look in your own Docs, not only uploaded files, when a chat pulls in documents.</small></span>
       <input type="checkbox" checked={draft.useDocsInContext !== false} onChange={(e) => patch({ useDocsInContext: e.target.checked })} /><span className="switch" />
     </label>
-    <label><span className="toggle-text"><b>Search by</b><small>Keywords and meaning, or keywords only.</small></span>
+    <label><span className="toggle-text"><b>Search by</b></span>
       <select value={draft.retrievalMode ?? 'hybrid'} onChange={(e) => patch({ retrievalMode: e.target.value as 'hybrid' | 'bm25' })}>
         <option value="hybrid">Keywords and meaning</option>
         <option value="bm25">Keywords only</option>

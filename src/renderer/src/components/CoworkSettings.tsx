@@ -13,9 +13,9 @@ import { hostError, networkMode, networkPatch, normalizeHost, type NetworkMode }
  * the machine, not settings.
  */
 
-const Toggle = ({ title, help, checked, onChange }: { title: string; help: string; checked: boolean; onChange: (v: boolean) => void }): JSX.Element => (
+const Toggle = ({ title, help, checked, onChange }: { title: string; help?: string; checked: boolean; onChange: (v: boolean) => void }): JSX.Element => (
   <label className="toggle-row plain">
-    <span className="toggle-text"><b>{title}</b><small>{help}</small></span>
+    <span className="toggle-text"><b>{title}</b>{help && <small>{help}</small>}</span>
     <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /><span className="switch" />
   </label>
 )
@@ -39,7 +39,7 @@ function SignIns(): JSX.Element | null {
   return (
     <div className="workspace-roots">
       <span><b>Browser sign-ins</b></span>
-      <p className="muted small">Sites the agent's browser keeps cookies for, mostly from when you took over to sign in. Page reads use the same store, so removing a site signs both out.</p>
+      <p className="muted small">Removing a site signs out both the agent's browser and page reads.</p>
       {rows && rows.length === 0 && <p className="muted small">Nothing saved.</p>}
       {rows && rows.length > 0 && (
         <ul className="plain-list">
@@ -58,7 +58,7 @@ function SignIns(): JSX.Element | null {
 }
 
 /** A list of hostnames, type, Enter or Add, remove with the x. An entry also allows its subdomains. */
-export function HostList({ title, help, value, onChange }: { title: string; help: string; value: string[]; onChange: (next: string[]) => void }): JSX.Element {
+export function HostList({ title, help, value, onChange }: { title: string; help?: string; value: string[]; onChange: (next: string[]) => void }): JSX.Element {
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const add = (): void => {
@@ -72,7 +72,7 @@ export function HostList({ title, help, value, onChange }: { title: string; help
   return (
     <div className="workspace-roots">
       <span><b>{title}</b></span>
-      <p className="muted small">{help}</p>
+      {help && <p className="muted small">{help}</p>}
       {value.length > 0 && (
         <ul className="plain-list">
           {value.map((h) => (
@@ -134,10 +134,7 @@ function WorkEnv({ draft, saved, patch }: { draft: Settings; saved: Settings; pa
           {busy ? 'Working, this can take a few minutes…' : st?.ready ? 'Update' : 'Set up'}
         </button>
       </div>
-      <p className="muted small">
-        One shared Python environment for code a desk runs, so installed packages survive between desks.
-        {unsaved ? ' Save your settings first: the build reads the saved package list.' : ''}
-      </p>
+      {unsaved && <p className="muted small">Save your settings first: the build reads the saved package list.</p>}
       {st && st.packages.length > 0 && (
         <p className="muted small">
           <code>{shown.join(', ')}</code>
@@ -161,7 +158,6 @@ function PackageList({ value, onChange }: { value: string[]; onChange: (next: st
   return (
     <div className="workspace-roots">
       <span><b>Extra packages</b></span>
-      <p className="muted small">Installed on top of the standard set when you set up or update the environment.</p>
       {value.length > 0 && (
         <ul className="plain-list">
           {value.map((p) => (
@@ -198,7 +194,7 @@ export function ShellNetwork({ draft, patch }: { draft: Settings; patch: (p: Par
         {mode === 'open' && <p className="cowork-error">Open network lets a command send files off this Mac, and whatever it downloads is untrusted text. Prefer allowed hosts.</p>}
       </div>
       {mode !== 'off' && (
-        <HostList title="Allowed hosts" help="Hostnames a command may reach, such as pypi.org. A name also allows its subdomains. No scheme, path, wildcard or IP address."
+        <HostList title="Allowed hosts" help="Hostnames only, such as pypi.org. A name also allows its subdomains."
           value={hosts} onChange={(shellAllowedDomains) => patch({ shellAllowedDomains })} />
       )}
     </div>
@@ -209,9 +205,9 @@ export function ShellNetwork({ draft, patch }: { draft: Settings; patch: (p: Par
 export function BrowserAccess({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
   return (
     <div className="cowork-settings">
-      <Toggle title="Let desks use a browser" help="Gives desks a browser they can read and click in. It asks before submitting forms, entering passwords or uploading."
+      <Toggle title="Let desks use a browser" help="Asks before submitting forms, entering passwords or uploading."
         checked={draft.browserEnabled !== false} onChange={(browserEnabled) => patch({ browserEnabled })} />
-      <HostList title="Allowed sites" help="Sites the browser may open even when a link came from something it read, instead of being asked. The fetch allowlist above counts too. A name also allows its subdomains."
+      <HostList title="Allowed sites" help="Opened without asking even when a link came from something it read. A name also allows its subdomains."
         value={draft.browserAllowlist ?? []} onChange={(browserAllowlist) => patch({ browserAllowlist })} />
       <SignIns />
     </div>
@@ -222,11 +218,11 @@ export function BrowserAccess({ draft, patch }: { draft: Settings; patch: (p: Pa
 export function DeskGates({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
   return (
     <div className="cowork-settings">
-      <Toggle title="Run sandboxed commands without asking" help="Run sandboxed commands inside a desk's own folder without asking."
+      <Toggle title="Run sandboxed commands without asking"
         checked={draft.deskShellAuto !== false} onChange={(deskShellAuto) => patch({ deskShellAuto })} />
-      <Toggle title="Check before finishing" help="Don't let a desk finish with open steps or missing files."
+      <Toggle title="Check before finishing"
         checked={draft.deskDoneGate !== false} onChange={(deskDoneGate) => patch({ deskDoneGate })} />
-      <Toggle title="Review against the brief" help="Have a reviewer check the result against the brief before finishing."
+      <Toggle title="Review against the brief"
         checked={draft.deskSelfReview !== false} onChange={(deskSelfReview) => patch({ deskSelfReview })} />
     </div>
   )
@@ -237,11 +233,11 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
   return (
     <div className="cowork-settings">
       <h4>Desks</h4>
-      <Toggle title="Start new chats working autonomously" help="A new chat hands its task to a desk that works on its own at Ask as it goes, until it is done or needs you."
+      <Toggle title="Start new chats working autonomously" help="A new chat hands its task to a desk that works on its own until it is done or needs you."
         checked={draft.autonomousByDefault !== false} onChange={(autonomousByDefault) => patch({ autonomousByDefault })} />
-      <Toggle title="Resume desks after a restart" help="Carry on desks the app was running when it quit. A desk with an action whose outcome is unknown, or one waiting on your approval or plan, still waits for you."
+      <Toggle title="Resume desks after a restart" help="A desk with an unknown outcome, or waiting on your approval or plan, still waits for you."
         checked={draft.deskAutoResume === true} onChange={(deskAutoResume) => patch({ deskAutoResume })} />
-      <Toggle title="Notify me" help="A system notification when a desk needs you or finishes, while the window is not in front."
+      <Toggle title="Notify me" help="When a desk needs you or finishes."
         checked={draft.deskNotify !== false} onChange={(deskNotify) => patch({ deskNotify })} />
 
       <h4>Work environment</h4>

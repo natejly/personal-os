@@ -103,7 +103,7 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
             {google?.connected
               ? <><Check size={11} /> Signed in as {google.email}</>
               : hasClient
-                ? 'Sign in to let the app read your Calendar, Gmail, Tasks, Drive, Docs and Sheets. Signing in turns on two-way Todos ↔ Google Tasks sync, which can be switched off here in Settings → Integrations.'
+                ? 'Signing in turns on two-way Todos ↔ Google Tasks sync, which you can switch off.'
                 : 'Needs a one-time OAuth client (about two minutes) before the first sign-in.'}
           </small>
         </div>
@@ -126,7 +126,7 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
       {google?.connected && (
         <div className="tasks-sync">
           <label className="toggle-row plain">
-            <span className="toggle-text"><b>Sync Todos with Google Tasks</b><small>Two-way: a change on either side shows up on the other.</small></span>
+            <span className="toggle-text"><b>Sync Todos with Google Tasks</b></span>
             <input type="checkbox" checked={syncEnabled} disabled={!tasksSync} onChange={(e) => void setTasksSync({ enabled: e.target.checked })} /><span className="switch" />
           </label>
           {syncEnabled && tasksSync && (
@@ -176,13 +176,6 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
         <details className="setup" open={setupOpen || !hasClient} onToggle={(e) => setSetupOpen((e.target as HTMLDetailsElement).open)}>
           <summary>{hasClient ? (google?.source === 'settings' ? 'Using your own OAuth client' : 'Advanced: use your own OAuth client') : 'One-time setup: create an OAuth client'}</summary>
 
-          {!hasClient && (
-            <p className="muted small">
-              Google will only run a sign-in flow on behalf of a registered app, so Grain needs an OAuth
-              client of its own. There is no way around that, but you do it once and it stays on your account.
-            </p>
-          )}
-
           <ol className="setup-steps muted small">
             <li>
               Create or pick a Google Cloud project.
@@ -225,11 +218,6 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
             <button className="primary-btn" onClick={() => void signIn()}><span className="g-logo g-logo-sm">G</span> Save and sign in</button>
           )}
 
-          <p className="muted small">
-            {google?.source === 'env'
-              ? <>Sign-in uses the client from the app&apos;s <code>.env</code>. Paste your own above to override it; clear both fields to go back.</>
-              : <>Saved in this app&apos;s local database. The same pair can live in <code>.env</code> as <code>GOOGLE_CLIENT_ID</code> / <code>GOOGLE_CLIENT_SECRET</code> instead.</>}
-          </p>
           <p className="muted small">Scopes requested: calendar, gmail.modify, tasks, drive.readonly, drive.file, documents, spreadsheets, email. Tokens stay in the local database. Sending email is a separate tool you can keep off.</p>
         </details>
       )}

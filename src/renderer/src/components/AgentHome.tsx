@@ -71,7 +71,7 @@ export default function AgentHome({ def, onBack }: { def: AgentDef; onBack: () =
 
       {tab === 'chats' && (
         <section>
-          {home && home.chats.length === 0 && <p className="muted small">No chats yet. Start one above, or type @{def.name} in any chat.</p>}
+          {home && home.chats.length === 0 && <p className="muted small">No chats yet.</p>}
           <ul className="agent-home-list">
             {home?.chats.map((c) => (
               <li key={c.id}><button className="link" onClick={() => void selectChat(c.id)}>{c.title || 'Untitled'}</button><span className="muted small">{stamp(c.updated_at)}</span></li>
@@ -82,7 +82,7 @@ export default function AgentHome({ def, onBack }: { def: AgentDef; onBack: () =
 
       {tab === 'routines' && (
         <section>
-          <p className="muted small">Scheduled work this agent does on its own. Each run uses its instructions, skills, boundaries and tool settings, and anything that leaves the app comes back as a proposal.</p>
+          <p className="muted small">Anything that leaves the app comes back as a proposal.</p>
           {routines.length === 0 && !adding && <p className="muted small">No routines yet.</p>}
           {routines.length > 0 && <ul>{routines.map((j) => <JobRow key={j.id} job={j} />)}</ul>}
           {home && home.job_history?.length > 0 && (
@@ -110,7 +110,6 @@ export default function AgentHome({ def, onBack }: { def: AgentDef; onBack: () =
 
       {tab === 'skills' && (
         <section className="agent-editor">
-          <p className="muted small">The approved skills this agent carries into every chat and routine.</p>
           {skills.length === 0 && <p className="muted small">No approved skills yet (Library › Skills).</p>}
           <div className="agent-chips">
             {skills.map((s) => (

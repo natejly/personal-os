@@ -149,7 +149,7 @@ export default function StyleView({ projectId }: { projectId?: string }): JSX.El
           </div>
 
           <section className="style-lines">
-            <h5>Summary <span className="muted small">how you write, in a few sentences</span></h5>
+            <h5>Summary</h5>
             <textarea rows={4} value={summaryDraft ?? profile.summary} aria-label="Style summary"
               onChange={(e) => setSummaryDraft(e.target.value)}
               onBlur={() => {
@@ -160,7 +160,7 @@ export default function StyleView({ projectId }: { projectId?: string }): JSX.El
 
           {Object.keys(profile.traits).length > 0 && (
             <section className="style-lines">
-              <h5>Traits <span className="muted small">measured from your samples</span></h5>
+              <h5>Traits</h5>
               <div className="style-traits">
                 {Object.entries(profile.traits).map(([k, v]) => (
                   <span key={k} className="tag" title={`${k}: ${v}`}><b>{k}</b> {v}</span>
@@ -187,8 +187,7 @@ export default function StyleView({ projectId }: { projectId?: string }): JSX.El
           </span>
         </h5>
         <p className="muted small">
-          Long messages you write and files you save land here automatically; short instructions, code and quoted
-          text are skipped. Delete anything that isn’t your own writing — the profile is only as good as these.
+          Delete anything that isn’t your own writing.
         </p>
         <div className="add-row style-paste">
           <textarea rows={2} placeholder="Paste a piece of your own writing…" value={paste} onChange={(e) => setPaste(e.target.value)} />

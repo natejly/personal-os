@@ -178,7 +178,6 @@ function ProposalCard({ p, onOpen }: { p: AgentProposal; onOpen?: () => void }):
             </label>
           ))}
           <div className="inbox-edit-foot">
-            <p className="muted small">Accept sends exactly what is in these boxes.</p>
             <button className="ghost-btn sm" disabled={busy} onClick={() => setEditing(false)}>Stop editing</button>
           </div>
         </div>

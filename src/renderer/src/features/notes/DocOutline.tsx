@@ -10,7 +10,7 @@ export default function DocOutline({ source, onJump, activeLine }: {
 }): JSX.Element {
   const items = useMemo(() => outline(source), [source])
   const active = activeLine === undefined ? -1 : activeHeading(items, activeLine)
-  if (items.length === 0) return <div className="outline-empty">Headings you write show up here.</div>
+  if (items.length === 0) return <div className="outline-empty">No headings.</div>
   return (
     <nav className="outline" aria-label="Outline">
       {items.map((it, i) => (

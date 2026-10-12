@@ -247,15 +247,13 @@ export default function SkillsPanel(): JSX.Element {
             <button className={`ghost-btn${browsing ? ' on' : ''}`} aria-expanded={browsing} onClick={() => setBrowsing(!browsing)}><Globe size={14} /> Popular skills</button>
             <button className={`ghost-btn${preview ? ' on' : ''}`} aria-pressed={!!preview} onClick={() => void togglePreview()}><Eye size={14} /> What the assistant sees</button>
           </div>
-          <p className="muted small">A skill is a way of doing a task. It stays off until you approve it. In a chat, type <code>/skill</code> to use one on purpose.</p>
+          <p className="muted small">Stays off until you approve it.</p>
         </div>
       )}
       {browsing && (
         <div className="skill-body standalone">
           <p className="muted small">
-            Skills the open-source community publishes in the SKILL.md format. Import fetches the file from its repository and
-            adds it here as a candidate for you to read and approve; bundled scripts and assets are not imported, so a skill
-            that calls them may need editing. Any other skill: Import skill file takes a link to a SKILL.md, its folder, or a page for either.
+            Import adds a candidate for you to read and approve. Bundled scripts and assets are not imported.
           </p>
           {(Object.keys(PRESET_KIND_LABEL) as SkillPreset['kind'][]).map((kind) => (
             <section key={kind} className="preset-group">

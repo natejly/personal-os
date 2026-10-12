@@ -480,9 +480,6 @@ export default function DocsView(): JSX.Element {
             {panel.tab === 'links' && <Backlinks docId={activeDoc.id} onOpen={(id) => void openDoc(id)} />}
             {panel.tab === 'history' && (
               <>
-                <p className="muted small pad">
-                  Every save is a revision. Assistant edits sit at the top until you accept them.
-                </p>
                 {pending.map((r) => (
                   <DiffView key={r.id} revision={r} current={activeDoc.content}
                     onAccept={() => void acceptRevision(r.id)} onReject={() => void rejectRevision(r.id)} />

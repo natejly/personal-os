@@ -30,7 +30,6 @@ export default function DocumentsView({ projectId }: { projectId?: string; embed
       {documents.length > 0 && (
         <div className="add-row">
           <button className="primary-btn" title={tip('Upload file', 'upload')} onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
-          <span className="muted small">Drop more files here.</span>
         </div>
       )}
       {documents.length === 0 && (

@@ -155,15 +155,14 @@ export default function Onboarding(): JSX.Element {
 
         {state.step === 'welcome' && (
           <>
-            <p className="ob-lead">Grain is your personal AI workspace: chat, files, calendar, mail and tasks in one place, with an assistant that can work across all of it. Canvases lay out chats, files, the web and your apps side by side, and any window can pop out on top of other apps.</p>
+            <p className="ob-lead">Chat, files, calendar, mail and tasks in one place, with an assistant that works across all of it.</p>
             <p className="ob-privacy"><Lock size={13} /> Your data is stored on this Mac. Your messages, the context Grain adds to them (memories, files, mail and calendar the assistant reads) and background learning go to the AI provider you choose. Web search and page reading use outside services.</p>
-            <p className="muted">Setup takes about two minutes. You will need an API key from an AI provider (or a local model).</p>
+            <p className="muted">You will need an API key from an AI provider, or a local model.</p>
           </>
         )}
 
         {state.step === 'provider' && (
           <>
-            <p className="muted">Pick where the AI models come from. You can change this later in Settings.</p>
             {loadError && <p className="ob-error" role="alert">Could not load providers: {loadError}</p>}
             {!providers && !loadError && <p className="muted"><Loader2 size={13} className="spin" /> Loading…</p>}
             <div className="ob-cards" role="radiogroup" aria-label="AI provider">
@@ -227,7 +226,7 @@ export default function Onboarding(): JSX.Element {
 
         {state.step === 'search' && (
           <>
-            <p className="muted">Optional. Grain uses this model to index your memories and documents so it can search them. It cannot be changed later, because it would invalidate the search index.</p>
+            <p className="muted">Optional. Indexes your memories and documents for search. It cannot be changed later.</p>
             {(() => {
               // Rows from providers that already have a key, plus this setup's own provider (its key is saved at the end).
               const typed = provider && state.apiKey.trim() ? modelOptions(provider, state.test.models).filter((m) => /embed/i.test(m)) : []
@@ -250,21 +249,21 @@ export default function Onboarding(): JSX.Element {
 
         {state.step === 'google' && (
           <>
-            <p className="muted">Optional. Connecting Google lets the assistant read your Calendar and mail. It also adds Tasks and Drive. You can skip this and do it later in Settings.</p>
-            <p className="muted">With Google, connecting also turns on two-way sync between Todos and Google Tasks, which can be switched off in Settings → Integrations.</p>
+            <p className="muted">Optional. Lets the assistant read your Calendar and mail, and adds Tasks and Drive.</p>
+            <p className="muted">Connecting also turns on two-way sync between Todos and Google Tasks.</p>
             {google?.connected ? (
               <p className="ob-ok"><Check size={15} /> Signed in as {google.email}</p>
             ) : google?.configured ? (
               <button type="button" className="primary-btn" data-autofocus onClick={() => void connectGoogle()}>Sign in with Google</button>
             ) : (
-              <p className="muted">Google sign-in needs a Google Cloud OAuth client today, which takes about two minutes to create. Settings → Integrations walks you through it whenever you are ready.</p>
+              <p className="muted">Google sign-in needs a Google Cloud OAuth client. Settings → Integrations walks you through it.</p>
             )}
           </>
         )}
 
         {state.step === 'about' && (
           <>
-            <p className="muted">Optional. Anything here is saved as a memory the assistant reads in every chat — your role, how you like replies, what it should keep in mind.</p>
+            <p className="muted">Optional. Saved as a memory the assistant reads in every chat.</p>
             <label><span>About you</span>
               <textarea data-autofocus rows={4} value={state.about} onChange={(e) => dispatch({ type: 'about', about: e.target.value })} placeholder="I am a…" />
             </label>
@@ -279,7 +278,7 @@ export default function Onboarding(): JSX.Element {
 
         {state.step === 'permissions' && (
           <>
-            <p className="muted">Optional. Grain can work anywhere on this Mac; Full Disk Access also opens Desktop, Documents, Downloads, Mail and Messages. Grant what you want Grain to use; you can do this later in Settings → System access.</p>
+            <p className="muted">Optional. Full Disk Access also opens Desktop, Documents, Downloads, Mail and Messages.</p>
             <PermissionsPanel compact />
           </>
         )}

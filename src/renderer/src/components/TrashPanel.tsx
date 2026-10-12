@@ -59,8 +59,7 @@ export default function TrashPanel(): JSX.Element {
     <section>
       <h3>Trash</h3>
       <p className="muted">
-        Deleted chats, projects, docs, memories and todos wait here for {list?.retention_days ?? 30} days, then are erased.
-        Deleting a project sends its chats, memories and uploads here too; its files and todos move to Personal.
+        Deleted items are erased after {list?.retention_days ?? 30} days. Deleting a project moves its files and todos to Personal.
       </p>
       {list && list.total === 0 && <p className="empty-row"><Trash2 size={15} /> Nothing in the trash.</p>}
       {list && GROUPS.map(({ key, label }) => list.groups[key].length > 0 && (

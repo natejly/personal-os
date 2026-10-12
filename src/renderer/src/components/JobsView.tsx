@@ -36,7 +36,7 @@ export default function JobsView(): JSX.Element {
         {job ? <JobDetail job={job} onBack={() => openJobs(null)} /> : (
           <>
             {creating && <div className="jobs-new"><NewTask onDone={() => setCreating(false)} /></div>}
-            {jobs.length === 0 && !creating && <p className="muted">No scheduled jobs yet. Use New job to add one.</p>}
+            {jobs.length === 0 && !creating && <p className="muted">No scheduled jobs yet.</p>}
             <div className="jobs-grid">
               {jobs.map((j) => (
                 <button key={j.id} className={`job-card${j.enabled ? '' : ' off'}`} onClick={() => openJobs(j.id)}>

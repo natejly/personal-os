@@ -46,7 +46,7 @@ export default function AgentsPanel(): JSX.Element {
 
   return (
     <div className="library-panel">
-      <p className="muted small">An agent is a role with its own face, instructions, tools and skills. Replies hand work to approved agents whose description fits, and Chat talks to one directly. Editing withdraws the approval.</p>
+      <p className="muted small">Editing an agent withdraws its approval.</p>
       <div className="add-row">
         <input placeholder="Describe an agent to draft, e.g. a travel planner that checks my calendar and keeps a packing list" value={intent}
           onChange={(e) => setIntent(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && intent.trim().length >= 4) void draft() }} />
@@ -56,7 +56,7 @@ export default function AgentsPanel(): JSX.Element {
       {edit && !edit.id && <div className="skill-row"><AgentEditor initial={edit.fields} save={(t, sc) => api.agentDefs.create(t, sc)} onDone={() => { setEdit(null); void refreshAgentDefs() }} /></div>}
       <section className="skill-section">
         <h4>Yours</h4>
-        {custom.length === 0 && <div className="empty-hint"><p className="muted small">None yet. Draft one above.</p></div>}
+        {custom.length === 0 && <div className="empty-hint"><p className="muted small">None yet.</p></div>}
         {custom.map((d) => (
           <div key={d.id} className={`skill-row ${d.approved ? 'approved' : ''}`}>
             <div className="skill-head static">

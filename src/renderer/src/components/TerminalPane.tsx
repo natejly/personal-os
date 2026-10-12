@@ -1,18 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
-import type { CodingSession } from '@shared/types'
-import { isAttachId } from '@shared/codingAttach'
 import { useStore } from '../store'
-import { AGENT_LABEL, codingDot, codingStatusLabel } from '../lib/codingSessions'
+import { AGENT_LABEL, canAttach, codingDot, codingStatusLabel, defaultTermMode } from '../lib/codingSessions'
 import { endEntry, ensureEntry, getEntry, refit, startEntry, useTermEntries, type TermMode } from '../lib/termRegistry'
-
-const canAttach = (c: CodingSession): boolean => c.agent === 'claude' && isAttachId(c.external_id)
 
 // The last openTerminal request this pane acted on, so remounting the pane does not replay it.
 let handled = 0
 
 /**
- * Terminals for coding sessions: pick a session, then attach to it or open a shell in its worktree. The xterm views live
+ * Terminals for coding sessions: picking a session attaches to it right away when it can (claude with an attach id); a shell in
+ * its worktree is an explicit button and the only view for sessions that cannot attach. The xterm views live
  * in lib/termRegistry, not in this component, so closing the panel or switching tab only detaches their DOM; the PTYs and
  * their screens are still there when it comes back.
  */
@@ -31,11 +28,18 @@ export default function TerminalPane(): JSX.Element {
     void startEntry(ensureEntry(id, m))
   }
 
+  // Picking a session shows its attached view at once when it has one; otherwise whichever view already exists.
+  const pick = (id: string): void => {
+    const c = sessions[id]
+    if (c && defaultTermMode(c)) start(id, 'attach')
+    else { setSessionId(id); setMode(null) }
+  }
+
   useEffect(() => {
     if (!request || request.n === handled) return
     handled = request.n
     if (request.mode) start(request.sessionId, request.mode)
-    else setSessionId(request.sessionId)
+    else pick(request.sessionId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request])
 
@@ -62,7 +66,7 @@ export default function TerminalPane(): JSX.Element {
       <div className="term-chips">
         {rows.map((c) => (
           <button key={c.id} type="button" className={`term-chip${c.id === sessionId ? ' on' : ''}`} data-testid={`term-chip-${c.id}`} title={c.worktree}
-            onClick={() => { setSessionId(c.id); setMode(null) }}>
+            onClick={() => pick(c.id)}>
             <span className={`inbox-dot ${codingDot(c.status)}`} role="img" aria-label={codingStatusLabel(c.status)} />
             <span>{AGENT_LABEL[c.agent]}</span>
             <span className="term-chip-branch">{c.branch ?? c.name}</span>
@@ -78,7 +82,7 @@ export default function TerminalPane(): JSX.Element {
         </div>
       )}
       <div className="term-view" data-testid="term-view" ref={viewRef} style={shown ? undefined : { display: 'none' }} />
-      {!shown && <p className="muted small">{selected ? 'Attach to the session or open a shell in its worktree.' : 'Pick a coding session.'}</p>}
+      {!shown && <p className="muted small">{selected ? (canAttach(selected) ? 'Attach to the session or open a shell in its worktree.' : 'Open a shell in its worktree.') : 'Pick a coding session.'}</p>}
     </div>
   )
 }

@@ -91,3 +91,46 @@ for (const mode of ['auto', 'allow_all']) {
     expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
   })
 }
+
+test('full A/B: each side runs its tools in a private copy, held actions are listed, and the pick keeps only the winner', async ({ grain }) => {
+  const { page, api } = grain
+  const perms = (await api('/settings')).permissions
+  await api('/settings', { method: 'PUT', body: { devTools: true, autonomousByDefault: true, permissions: { ...perms, permissionMode: 'allow_all' } } })
+  await page.reload()
+  await newChat(page)
+  const ab = page.getByRole('button', { name: 'A/B', exact: true })
+  await ab.click()
+  await page.locator('.duel-controls .model-menu-trigger').click()
+  const pop = page.getByRole('dialog', { name: 'Models' })
+  await pop.getByRole('textbox', { name: 'Search models' }).fill('chat-2')
+  await pop.getByRole('option').first().click()
+  // The mock steers each model on its own: A writes outputs/a.txt and queues a todo, B does the same with b.
+  const turn = (m, side) => `!!tool[${m}] desk_write_file {"path":"outputs/${side}.txt","content":"from ${side}"} !!tool[${m}] todo_add {"title":"duel-todo-${side}"}`
+  await say(page, `make a file ${turn('mock-chat', 'a')} ${turn('mock-chat-2', 'b')}`)
+  const panel = page.getByRole('group', { name: 'Model duel' })
+  await expect(panel).toBeVisible({ timeout: 30_000 })
+  const cols = panel.locator('.duel-body')
+  await expect(cols.first().locator('.duel-file')).toContainText('outputs/a.txt', { timeout: 30_000 })
+  await expect(cols.nth(1).locator('.duel-file')).toContainText('outputs/b.txt', { timeout: 30_000 })
+  await expect(cols.first().locator('.duel-calls')).toContainText('duel-todo-a')
+  await expect(cols.nth(1).locator('.duel-calls')).toContainText('duel-todo-b')
+  await expect(panel.getByRole('button', { name: 'B is better →' })).toBeEnabled({ timeout: 30_000 })
+  await cols.first().locator('.duel-file summary').click()
+  await expect(cols.first().locator('.duel-file pre')).toHaveText('from a')
+  // Nothing is real yet: the desk folder is untouched and the queued todos were not made.
+  const [desk] = await api('/cowork/desks')
+  const outputs = async () => JSON.stringify(await api(`/cowork/desks/${desk.id}/files?path=outputs`))
+  expect(await outputs()).not.toMatch(/[ab]\.txt/)
+  expect(JSON.stringify(await api('/todos'))).not.toContain('duel-todo-')
+  await panel.getByRole('button', { name: 'B is better →' }).click()
+  await expect(panel).toHaveCount(0)
+  await expect(anyStop(page)).toHaveCount(0, { timeout: 30_000 })
+  // Only the winner's file exists, and only its queued todo was made, once.
+  await expect.poll(outputs).toMatch(/b\.txt/)
+  expect(await outputs()).not.toMatch(/a\.txt/)
+  const made = JSON.stringify(await api('/todos'))
+  expect(made.match(/duel-todo-b/g)).toHaveLength(1)
+  expect(made).not.toContain('duel-todo-a')
+  await expect(assistants(page).first()).toContainText('MOCK: tool done')
+  expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
+})

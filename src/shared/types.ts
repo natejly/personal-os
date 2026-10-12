@@ -1772,8 +1772,8 @@ export interface ModelInfo {
   preset?: boolean
 }
 
-/** One side of a developer-mode model duel (`ab_*` events). */
-export interface DuelSide { model: string; text: string; ms: number | null; tokens: number | null; error: string | null; done: boolean; calls: { name: string; args: string }[] }
+/** One side of a developer-mode model duel (`ab_*` events): a whole turn, its tool cards, the files it made in its private overlay and the actions it only queued. */
+export interface DuelSide { model: string; text: string; ms: number | null; tokens: number | null; error: string | null; done: boolean; tools: ToolEvent[]; files: { path: string; size: number }[]; held: { name: string; args: string }[] }
 /** A duel in progress: both candidates stream side by side until the user picks. */
 export interface Duel { messageId: string; a: DuelSide; b: DuelSide; ready: boolean }
 export interface ModelStanding { model: string; wins: number; losses: number; ties: number; bad: number; duels: number; win_rate: number | null; elo: number; mean_ms: number | null }
@@ -1782,7 +1782,8 @@ export type DuelWinner = 'a' | 'b' | 'tie' | 'bad'
 export type ChatEvent =
   | { event: 'ab_start'; data: { id: string; models: { a: string; b: string } } }
   | { event: 'ab_delta'; data: { id: string; side: 'a' | 'b'; text: string } }
-  | { event: 'ab_end'; data: { id: string; side: 'a' | 'b'; ms: number; tokens: number; error: string | null; calls: { name: string; args: string }[] } }
+  | { event: 'ab_tool'; data: { id: string; side: 'a' | 'b'; event: ToolEvent } }
+  | { event: 'ab_end'; data: { id: string; side: 'a' | 'b'; ms: number; tokens: number; error: string | null; files: { path: string; size: number }[]; held: { name: string; args: string }[] } }
   | { event: 'ab_ready'; data: { id: string } }
   | { event: 'ab_reset'; data: { id: string; side: 'a' | 'b' } }
   | { event: 'ab_pick'; data: { id: string; winner: DuelWinner; side: 'a' | 'b' } }

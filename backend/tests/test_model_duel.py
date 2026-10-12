@@ -1,4 +1,5 @@
-"""Developer-mode model duels: both candidates stream, neither runs a tool, only the picked reply is persisted.
+"""Developer-mode model duels: each side runs its whole turn in a hidden copy of the chat, a call that would change the
+outside world is held, and only the picked side is persisted. Files and the tool gate: test_full_duel.py.
 
 Also the votes route, the Elo math and migration 38. Run: PYTHONPATH=<repo>/backend pytest backend/tests/test_model_duel.py
 """
@@ -95,14 +96,15 @@ def wait_done(cid: str) -> None:
 def test_duel_runs_no_tool_and_picked_b_is_the_only_message() -> None:
     cid, _ = start("add a todo")
     mid = wait_until(lambda: next(iter(appmod._ab_waits), None), "the duel to wait for a pick")
-    assert sorted(CALLS) == ["duel-a", "duel-b"]  # both candidates streamed, once each
-    assert todos_from_a() == []  # A asked for todo_add; the duel did not run it
+    assert sorted(CALLS) == ["duel-a", "duel-a", "duel-b"]  # both sides ran their whole turn: A asked for a tool, then answered
+    assert todos_from_a() == []  # A asked for todo_add; the duel held it, not ran it
     assert [m["content"] for m in assistant_rows(cid)] == [""]  # nothing committed yet
     assert client.post(f"/conversations/{cid}/ab/pick", json={"message_id": mid, "winner": "b"}).status_code == 200
     wait_done(cid)
     rows = assistant_rows(cid)
     assert [m["content"] for m in rows] == ["B answer"] and rows[0]["model"] == "duel-b"
-    assert todos_from_a() == [] and CALLS.count("duel-a") == 1  # A's call never ran, and A was not asked again
+    assert todos_from_a() == [] and CALLS.count("duel-a") == 2  # A's call never ran, and A was not asked again
+    assert not [c for c in client.get("/conversations").json() if c["id"] != cid]  # the hidden side copies are gone
     v = client.get("/model-votes").json()
     assert v["votes"] == 1 and {m["model"]: m["wins"] for m in v["models"]} == {"duel-b": 1, "duel-a": 0}
 
@@ -113,7 +115,7 @@ def test_regenerate_restreams_one_side_then_the_pick_uses_it() -> None:
     assert client.post(f"/conversations/{cid}/ab/regenerate", json={"message_id": mid, "side": "x"}).status_code == 400
     assert client.post(f"/conversations/{cid}/ab/regenerate", json={"message_id": mid, "side": "b"}).status_code == 200
     wait_until(lambda: CALLS.count("duel-b") == 2 and mid in appmod._ab_waits and not appmod._ab_waits[mid].done(), "the duel to wait again")
-    assert sorted(CALLS) == ["duel-a", "duel-b", "duel-b"]  # only B ran again; A was not asked
+    assert sorted(CALLS) == ["duel-a", "duel-a", "duel-b", "duel-b"]  # only B ran again; A was not asked
     client.post(f"/conversations/{cid}/ab/pick", json={"message_id": mid, "winner": "b"})
     wait_done(cid)
     assert [m["content"] for m in assistant_rows(cid)] == ["B again"] and todos_from_a() == []
@@ -124,8 +126,8 @@ def test_picking_a_runs_its_tool_call_once() -> None:
     mid = wait_until(lambda: next(iter(appmod._ab_waits), None), "the duel to wait for a pick")
     client.post(f"/conversations/{cid}/ab/pick", json={"message_id": mid, "winner": "tie"})
     wait_done(cid)
-    assert len(todos_from_a()) == 1  # the loop ran A's call, once
-    assert CALLS == ["duel-a", "duel-b", "duel-a"] or CALLS == ["duel-b", "duel-a", "duel-a"]  # the duel, then one follow-up round on A
+    assert len(todos_from_a()) == 1  # the loop ran A's held call, once, after the pick
+    assert CALLS.count("duel-a") == 3 and CALLS.count("duel-b") == 1  # A's two side rounds, then one follow-up round on the real chat
     assert assistant_rows(cid)[-1]["content"].endswith("A done")
     assert client.get("/model-votes").json()["models"][0]["ties"] == 1
 
@@ -192,7 +194,7 @@ def test_desk_message_with_ab_model_duels_then_the_desk_continues_after_the_pick
     before = len(todos_from_a())
     assert client.post(f"/cowork/desks/{did}/message", json={"content": "add a todo", "ab_model": "duel-b"}).status_code == 200
     mid = wait_until(lambda: next(iter(appmod._ab_waits), None), "the desk's duel to wait for a pick")
-    assert sorted(CALLS) == ["duel-a", "duel-b"] and len(todos_from_a()) == before
+    assert sorted(CALLS) == ["duel-a", "duel-a", "duel-b"] and len(todos_from_a()) == before  # the desk's own state stays put while the sides work
     assert appmod.bus.answering(cid).status == "awaiting_approval"  # parked like a pending card: no idle clock may cut it
     client.post(f"/conversations/{cid}/ab/pick", json={"message_id": mid, "winner": "tie"})
     wait_until(lambda: not appmod.bus.answering(cid), "the desk turn to finish")

@@ -28,7 +28,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from . import egress, mac, osplat, permissions
+from . import duel, egress, mac, osplat, permissions
 from .kinds import is_internal
 from .embed import rrf
 from . import fsx
@@ -1000,6 +1000,15 @@ class Toolbox:
         return None
 
     async def call(self, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> Any:
+        side = duel.SIDE.get()
+        if side is None:
+            return await self._call(name, args, ctx)
+        # A model duel's side (duel.py): a read or a write into its overlay runs, anything else is held, not run.
+        if (held := side.gate(self, name, args, ctx)) is not None:
+            return held
+        return side.to_real(await self._call(name, side.to_overlay(args), ctx))
+
+    async def _call(self, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> Any:
         spec = self.specs.get(name)
         if not spec:
             return tool_error(f"Unknown tool {name}.", alternative="use one of the tools listed in this request")

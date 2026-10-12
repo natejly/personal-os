@@ -3371,6 +3371,10 @@ select:focus-visible {
 .duel-jump:hover { background: var(--hover); }
 .duel-calls { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 12px; }
 .duel-calls code { overflow-wrap: anywhere; color: var(--text-muted); }
+.duel-files { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 12px; }
+.duel-file summary { cursor: pointer; }
+.duel-file summary small { color: var(--text-muted); }
+.duel-file pre { margin: 4px 0 0; padding: 6px 8px; max-height: 200px; overflow: auto; border-radius: 6px; background: var(--hover); font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .duel-pick { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; justify-content: center; }
 .duel-pick .ghost-btn { border: 1px solid var(--border-strong); padding: 6px 16px; }
 .duel-pick .ghost-btn:not(:disabled):hover, .duel-pick .ghost-btn:not(:disabled):focus-visible { border-color: var(--accent); color: var(--accent); }

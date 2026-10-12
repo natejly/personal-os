@@ -35,7 +35,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import egress, mac, osplat, permissions, redact, sandbox
+from . import duel, egress, mac, osplat, permissions, redact, sandbox
 from .db import new_id
 
 log = logging.getLogger(__name__)
@@ -790,7 +790,9 @@ def register(tb: Any) -> None:
             writable = [tmp]  # the profile lets a command write anywhere but the protected places; this is the run's own scratch dir
             if dr:
                 writable.append(str(dr))  # a desk workspace sits inside the protected data folder and is let back in
-            argv = osplat.current().sandbox.wrap(argv, sandbox.shell_profile(writable, network=network, proxy_port=port if proxied else None))
+            # A model duel's side (duel.py) may write only its own overlay folder and this scratch dir, never the user's real files.
+            argv = osplat.current().sandbox.wrap(argv, sandbox.shell_profile(writable, network=network, proxy_port=port if proxied else None,
+                                                                             confine=duel.SIDE.get() is not None))
         if unsandboxed:  # the approval log has the call; this line is for the backend log (no card under Allow everything)
             log.warning("shell_run unsandboxed in %s (conversation %s): %s", _scrub(str(where)), ctx.get("conversation_id"),
                         _scrub(command)[:500])

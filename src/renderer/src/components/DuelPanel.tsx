@@ -5,12 +5,28 @@ import Face from './Face'
 import { compactCount } from '../lib/usageFormat'
 import { ArrowDown, RefreshCw } from '../icons'
 import MarkdownPreview, { CopyButton } from './MarkdownPreview'
+import ToolEvents from './ToolEvents'
 import type { DuelSide } from '@shared/types'
 
 type Side = 'a' | 'b'
 
-/** One blind candidate, dressed like a normal reply: face and live status on top, the markdown, and the reply footer row below. */
-function Column({ side, label, hot, canRegen, onRegen }: { side: DuelSide; label: string; hot: boolean; canRegen: boolean; onRegen: () => void }): JSX.Element {
+/** A file the side made in its private overlay: opens to its text, fetched only then. Nothing is real until the side is picked. */
+function ProducedFile({ conversationId, messageId, side, file }: { conversationId: string; messageId: string; side: 'a' | 'b'; file: { path: string; size: number } }): JSX.Element {
+  const [body, setBody] = useState<string | null>(null)
+  const open = (e: React.SyntheticEvent<HTMLDetailsElement>): void => {
+    if (!(e.currentTarget as HTMLDetailsElement).open || body !== null) return
+    api.abFile(conversationId, messageId, side, file.path).then((f) => setBody(f.binary ? '(binary file)' : f.text || '(empty)'), (err: Error) => setBody(err.message))
+  }
+  return (
+    <details className="duel-file" onToggle={open}>
+      <summary><code>{file.path}</code> <small>{compactCount(file.size)} B</small></summary>
+      {body !== null && <pre>{body}</pre>}
+    </details>
+  )
+}
+
+/** One blind candidate, dressed like a normal reply: face and live status on top, the whole turn (tool cards, text, files it made, actions it only queued) and the reply footer row below. */
+function Column({ conversationId, messageId, sideKey, side, label, hot, canRegen, onRegen }: { conversationId: string; messageId: string; sideKey: 'a' | 'b'; side: DuelSide; label: string; hot: boolean; canRegen: boolean; onRegen: () => void }): JSX.Element {
   const body = useRef<HTMLDivElement>(null)
   const stuck = useRef(true) // follow the stream until the reader scrolls up
   const [atBottom, setAtBottom] = useState(true)
@@ -25,7 +41,7 @@ function Column({ side, label, hot, canRegen, onRegen }: { side: DuelSide; label
     const el = body.current
     if (el && stuck.current) el.scrollTop = el.scrollHeight
     check()
-  }, [side.text, side.calls.length, side.error])
+  }, [side.text, side.tools.length, side.files.length, side.error])
   const speed = side.done && side.tokens && side.ms ? ` · ${(side.tokens / (side.ms / 1000)).toFixed(1)} tok/s` : ''
   const usage = side.done && side.tokens ? `${compactCount(side.tokens)} tok${speed}` : ''
   return (
@@ -34,13 +50,20 @@ function Column({ side, label, hot, canRegen, onRegen }: { side: DuelSide; label
       <div className="bubble">
         <div className="duel-body-wrap">
           <div className="duel-body" ref={body} onScroll={check}>
+            {side.tools.length > 0 && <ToolEvents events={side.tools} conversationId={conversationId} streaming={!side.done} />}
             {side.text ? <div className={side.done ? 'markdown' : 'markdown streaming'}><MarkdownPreview source={side.text} streaming={!side.done} /></div>
               : side.done && !side.error ? <small className="duel-empty">(no text)</small> : null}
             {side.error && <div className="notice error" role="alert">{side.error}</div>}
-            {side.calls.length > 0 && (
+            {side.files.length > 0 && (
+              <div className="duel-files">
+                <small>Made in a temporary copy (kept only if picked):</small>
+                {side.files.map((f) => <ProducedFile key={f.path} conversationId={conversationId} messageId={messageId} side={sideKey} file={f} />)}
+              </div>
+            )}
+            {side.held.length > 0 && (
               <div className="duel-calls">
-                <small>Wants to run (not run during the duel):</small>
-                {side.calls.map((c, i) => <code key={i}>{c.name}({c.args})</code>)}
+                <small>Will do if picked:</small>
+                {side.held.map((c, i) => <code key={i}>{c.name}({c.args})</code>)}
               </div>
             )}
           </div>
@@ -82,7 +105,7 @@ export default function DuelPanel({ conversationId }: { conversationId: string |
     <div className="duel" role="group" aria-label="Model duel" ref={root}>
       <div className="duel-cols">
         {(['a', 'b'] as const).map((s) => (
-          <Column key={s} side={duel[s]} label={s.toUpperCase()} hot={hot === s} canRegen={duel.ready} onRegen={() => regen(s)} />
+          <Column key={s} conversationId={conversationId} messageId={duel.messageId} sideKey={s} side={duel[s]} label={s.toUpperCase()} hot={hot === s} canRegen={duel.ready} onRegen={() => regen(s)} />
         ))}
       </div>
       <div className="duel-pick">

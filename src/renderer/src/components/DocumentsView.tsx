@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Upload, Trash2, FileText, Pin } from '../icons'
 import { useStore, type Scope } from '../store'
 import ProjectChip from './ProjectChip'
+import { tip } from '../lib/tip'
 
 
 /**
@@ -28,7 +29,7 @@ export default function DocumentsView({ projectId }: { projectId?: string; embed
         onChange={(e) => { if (e.target.files?.length) void uploadDocuments(e.target.files, targetProject); e.target.value = '' }} />
       {documents.length > 0 && (
         <div className="add-row">
-          <button className="primary-btn" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
+          <button className="primary-btn" title={tip('Upload file', 'upload')} onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
           <span className="muted small">Drop more files here.</span>
         </div>
       )}
@@ -37,7 +38,7 @@ export default function DocumentsView({ projectId }: { projectId?: string; embed
           <FileText size={28} />
           <h2>No uploads yet</h2>
           <p>Drop files here, or upload them.</p>
-          <button className="primary-btn" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
+          <button className="primary-btn" title={tip('Upload file', 'upload')} onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
         </div>
       )}
       <div className="doc-grid">

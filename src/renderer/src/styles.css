@@ -2572,7 +2572,10 @@ select:focus-visible {
 /* Workers sit above the checklist pill, in the status block over the composer. */
 .worker-panel { padding-top: 4px; }
 .chat-main > .worker-panel { margin: 0 auto; width: min(calc(100% - 48px), var(--chat-col)); box-sizing: border-box; }
-.worker-panel .worker-faces { display: inline-flex; align-items: center; gap: 2px; }
+/* The collapsed strip: .plan-head has no rule of its own, so it was an inline-block button whose faces sat on the text baseline (riding above the label). A flex row centres them. */
+.worker-panel .plan-head { display: inline-flex; align-items: center; gap: 6px; }
+.worker-panel .worker-faces { display: inline-flex; align-items: center; gap: 6px; }
+.worker-panel .worker-faces .face { width: 24px; height: 24px; }
 /* Multi-step progress above the composer (ProgressCard): one row, the step list unfolds beneath. Same column as the workers card. */
 .chat-main > .progress-card { margin: 0 auto; width: min(calc(100% - 48px), var(--chat-col)); box-sizing: border-box; padding-top: 4px; }
 .progress-card .progress-row { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
@@ -2605,6 +2608,9 @@ select:focus-visible {
 .worker-chat { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
 .worker-panel .worker-chat { margin: 4px 0 6px; padding: 8px 0 0; border-top: 1px solid var(--border); }
 .worker-chat-log { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; }
+/* Expanded inline in the main chat, a worker's transcript reads as secondary: muted text, indented behind a rule. */
+.worker-panel .worker-chat-log { --text: var(--text-muted); color: var(--text-muted); margin-left: 8px; padding-left: 10px; border-left: 2px solid var(--border-strong); }
+.agent-run > .tool-body { --text: var(--text-muted); color: var(--text-muted); margin: 0 10px 10px 16px; padding: 0 0 0 10px; border-left: 2px solid var(--border-strong); }
 .subagent-panel .worker-chat { flex: 1; padding: 0 20px 14px; }
 .subagent-panel .worker-chat-log { max-height: none; flex: 1; }
 .worker-composer { margin: 0; }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { applyAppearance } from '../../lib/appearance'
-import { isBranchNote, isClear } from '../../lib/workers'
+import { isBranchNote, isClear, sinceClear } from '../../lib/workers'
 import BranchNote from '../../components/BranchNote'
 import { Check, Clipboard, Copy, ExternalLink, Plus } from '../../icons'
 import MessageView, { PendingUserMessage } from '../../components/Message'
@@ -44,7 +44,7 @@ export default function QuickAsk(): JSX.Element {
     return () => ro.disconnect()
   }, [])
 
-  const msgs = convo?.messages ?? []
+  const msgs = sinceClear(convo?.messages ?? []).shown
   const last = msgs[msgs.length - 1]
   const lastLen = last?.content.length ?? 0
   useEffect(() => { scroll.current?.scrollTo({ top: scroll.current.scrollHeight }) }, [lastLen, msgs.length, pending.length])

@@ -412,6 +412,30 @@ def test_skill_draft_tool_only_ever_makes_a_candidate() -> None:
     appmod.skills.delete(ok["skill_id"])
 
 
+def test_clear_empties_the_plan_and_the_context_starts_after_the_marker() -> None:
+    cid = new_conv()
+    appmod.convos.add_message(cid, "user", "old question")
+    appmod.work_plans.set(cid, [{"text": "Read the config", "status": "pending"}])
+    check(appmod.work_plans.block(cid) != "", "a plan exists before /clear")
+    marker = appmod.clear_context(cid)
+    check(marker["kind"] == "clear", "the marker row is returned")
+    check(appmod.work_plans.get(cid) is None and appmod.work_plans.block(cid) == "", "the plan is gone, so nothing is re-injected")
+    check(appmod.convos.history_rows(cid) == [], "the model's context starts after the marker")
+    check(len(appmod.convos.get(cid)["messages"]) == 2, "the transcript keeps every row")
+
+
+def test_clear_supersedes_the_desk_plan() -> None:
+    cid = new_conv()
+    desk = appmod.desks.create(conversation_id=cid, brief="Send the report.")
+    p = appmod.plans.open("call-clear", {"title": "t", "steps": [{"tool": "gmail_send", "arguments": {"i": 1}}]}, conversation_id=cid, desk_id=desk["id"])
+    appmod.plans.decide("call-clear", "allow")
+    check(appmod.plans.for_desk(desk["id"]) is not None, "the desk has an approved plan before /clear")
+    appmod.clear_context(cid)
+    check(appmod.plans.for_desk(desk["id"]) is None, "no active desk plan, so no block is re-injected")
+    check(appmod.get_desk(desk["id"])["plan"] is None, "the desk payload carries no plan")
+    check(appmod.plans.get(p["plan_id"])["status"] == "superseded", "the plan row stays as history")
+
+
 def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

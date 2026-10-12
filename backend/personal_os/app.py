@@ -413,10 +413,13 @@ app.include_router(compaction.router(compactor, convos, lambda: settings(),
 
 @app.post("/conversations/{conv_id}/clear")
 def clear_context(conv_id: str) -> dict[str, Any]:
-    """`/clear`: later turns replay only what follows this marker. The rolling summary covered the old rows, so it goes too."""
+    """`/clear`: later turns replay only what follows this marker. The rolling summary covered the old rows, and the task list belongs to them, so both go."""
     if not convos.get(conv_id, with_messages=False):
         raise HTTPException(404, "No such conversation")
     compactor.clear(conv_id)
+    work_plans.clear(conv_id)  # the live checklist goes with the context; workers keep running
+    if (desk := desks.by_conversation(conv_id)):
+        plans.supersede_desk(desk["id"])  # a desk's approved plan is no longer live; the rows stay as history
     return convos.clear_context(conv_id)
 
 
@@ -9282,6 +9285,8 @@ def get_desk(id: str) -> dict[str, Any]:
     # The approved plan when there is one; otherwise the newest proposal, so a plan still waiting on
     # the user is visible (and answerable) in the Plan tab rather than "No plan yet".
     plan = (plans.get(desk["plan_id"]) if desk.get("plan_id") else None) or plans.for_desk(id) or plans.latest_for_desk(id)
+    if plan and plan.get("status") == "superseded":
+        plan = None  # `/clear` retired it: every view that reads desk.plan shows none; the rows stay as history
     # Every card this desk is waiting on, live or parked: the desk pane answers them in place, so a
     # desk blocked on an approval does not have to be hunted down in its transcript.
     waiting = [{**a, "live": a["call_id"] in _approvals} for a in run_store.approvals("pending", desk_id=id)

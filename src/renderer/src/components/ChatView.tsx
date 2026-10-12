@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { isBranchNote, isClear } from '../lib/workers'
+import { isBranchNote, isClear, sinceClear } from '../lib/workers'
 import BranchNote from '../components/BranchNote'
 import { Pencil, Sparkles, ArrowDown, SlidersHorizontal } from '../icons'
 import { useStore, useProject, useChatFace, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
@@ -90,7 +90,12 @@ export default function ChatView({ conversationId }: { conversationId?: string }
     void markDeskSeen(desk.id)
   }, [desk, deskUnseen, markDeskSeen])
 
-  const msgs = convo?.messages ?? []
+  // After /clear the chat shows from the latest marker on; "Show earlier" reveals the rest (the rows stay in the DB).
+  const [earlierFor, setEarlierFor] = useState<string | null>(null)
+  const all = convo?.messages ?? []
+  const { shown, hidden } = sinceClear(all)
+  const showEarlier = hidden > 0 && earlierFor === convo?.id
+  const msgs = showEarlier ? all : shown
   const lastLen = msgs[msgs.length - 1]?.content.length ?? 0
 
   const last = msgs[msgs.length - 1]
@@ -103,6 +108,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const chatJump = useStore((s) => s.chatJump)
   useEffect(() => {
     if (conversationId || !chatJump || chatJump.conversationId !== convo?.id || !msgs.length) return
+    if (hidden > 0 && !showEarlier && all.slice(0, hidden).some((m) => m.id === chatJump.messageId)) return setEarlierFor(convo?.id ?? null)
     const raf = requestAnimationFrame(() => {
       const el = scrollRef.current?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(chatJump.messageId)}"]`)
       useStore.setState({ chatJump: null })
@@ -113,7 +119,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
       setTimeout(() => el.classList.remove('msg-flash'), 2000)
     })
     return () => cancelAnimationFrame(raf)
-  }, [chatJump, msgs, conversationId, convo?.id, release])
+  }, [chatJump, msgs, all, hidden, showEarlier, conversationId, convo?.id, release])
 
   // Only the full-window chat is a "page"; a chat window on the canvas is one of many on screen.
   usePageContext(() => (conversationId ? undefined : {
@@ -181,7 +187,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {msgs.map((m, i) => (
                   <Fragment key={m.id}>
                     {m.created_at > 0 && (i === 0 || dayKey(m.created_at) !== dayKey(msgs[i - 1].created_at)) && <div className="day-divider" role="separator">{dayLabel(m.created_at)}</div>}
-                    {isClear(m) ? <div className="day-divider" role="separator">Context cleared</div> : m.id === duelLive ? null : isBranchNote(m) ? <BranchNote content={m.content} /> : <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} resendable={!isStreamingHere && !isDeskOrJob} showContextChips
+                    {isClear(m) ? <div className="day-divider" role="separator">Chat cleared{i === 0 && hidden > 0 && <> · <button className="ghost-btn" onClick={() => setEarlierFor(convo?.id ?? null)}>Show earlier</button></>}</div> : m.id === duelLive ? null : isBranchNote(m) ? <BranchNote content={m.content} /> : <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} resendable={!isStreamingHere && !isDeskOrJob} showContextChips
                       branchable={m.created_at > 0 && !isDeskOrJob}
                       browserSession={m.id === watchId ? (deskId ? deskBrowserSession(deskId) : chatBrowserSession(m.conversation_id)) : undefined} />}
                   </Fragment>

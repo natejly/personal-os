@@ -1283,6 +1283,10 @@ export interface DriveBackupRun {
 export interface DriveBackupStatus {
   last: DriveBackupRun | null
   tracked: number
+  /** This computer's backup folder name in Drive, and the device label it comes from (both live from settings). */
+  folder: string
+  label: string
+  folder_id: string | null
 }
 
 export interface TasksSyncStatus {
@@ -1677,6 +1681,8 @@ export interface Settings {
   responseStyleText?: string
   googleClientId: string
   googleClientSecret: string
+  /** Names this computer in its Drive backup folder, "Grain Backup (<label>)". Blank = the computer's hostname. */
+  driveBackupLabel?: string
   /** Undo window on outgoing mail. `seconds` is clamped to 60-120 by the backend. */
   gmailSendHold?: { enabled: boolean; seconds: number }
 }

@@ -22,7 +22,7 @@ const CONSOLE = {
 /** Opens in the real browser: the main process turns window.open into shell.openExternal. */
 const openExternal = (url: string): void => void window.open(url, '_blank')
 
-export default function GoogleSettings({ clientId, clientSecret, secretSaved = false, onChange, onSaveCreds }: { clientId: string; clientSecret: string; secretSaved?: boolean; onChange: (p: { googleClientId?: string; googleClientSecret?: string }) => void; onSaveCreds: () => Promise<void> }): JSX.Element {
+export default function GoogleSettings({ clientId, clientSecret, secretSaved = false, backupLabel = '', onChange, onSaveCreds }: { clientId: string; clientSecret: string; secretSaved?: boolean; backupLabel?: string; onChange: (p: { googleClientId?: string; googleClientSecret?: string; driveBackupLabel?: string }) => void; onSaveCreds: () => Promise<void> }): JSX.Element {
   const google = useStore((s) => s.google)
   const tasksSync = useStore((s) => s.tasksSync)
   const { refreshGoogle, connectGoogle, disconnectGoogle, setTasksSync, runTasksSync, toast } = useStore()
@@ -38,13 +38,14 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
   }, [google?.connected, syncEnabled])
 
   const [last, setLast] = useState<DriveBackupRun | null>(null)
+  const [folder, setFolder] = useState<{ name: string; label: string } | null>(null)
   const [backingUp, setBackingUp] = useState(false)
   useEffect(() => {
-    if (google?.connected) void api.google.driveBackup().then((s) => setLast(s.last)).catch(() => undefined)
+    if (google?.connected) void api.google.driveBackup().then((s) => { setLast(s.last); setFolder({ name: s.folder, label: s.label }) }).catch(() => undefined)
   }, [google?.connected])
   const backUpNow = async (): Promise<void> => {
     setBackingUp(true)
-    try { setLast(await api.google.driveBackupRun()) } catch (e) { toast(e instanceof Error ? e.message : 'Backup failed', 'error') } finally { setBackingUp(false) }
+    try { setLast(await api.google.driveBackupRun()); void api.google.driveBackup().then((s) => setFolder({ name: s.folder, label: s.label })) } catch (e) { toast(e instanceof Error ? e.message : 'Backup failed', 'error') } finally { setBackingUp(false) }
   }
 
   // Google only runs a sign-in flow on behalf of a registered app, so there has to be an
@@ -152,11 +153,15 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
       {google?.connected && (
         <div className="tasks-sync">
           <div className="tasks-sync-row">
-            <span className="toggle-text"><b>Back up files to Google Drive</b><small>Uploads and documents are copied to a "Grain Backup" folder daily. Chats, memories and settings are not.</small></span>
+            <span className="toggle-text"><b>Back up files to Google Drive</b><small>Uploads and documents are copied daily to a folder in Drive that is specific to this computer{folder ? `: “${folder.name}”` : ''}. Chats, memories and settings are not.</small></span>
             <button className="ghost-btn" onClick={() => void backUpNow()} disabled={backingUp}>
               <Upload size={13} className={backingUp ? 'spin' : ''} /> {backingUp ? 'Backing up…' : 'Back up now'}
             </button>
           </div>
+          <label className="tasks-sync-row">
+            <span className="toggle-text"><b>This computer's name</b><small>Names its backup folder, so another Grain on this Google account keeps its own. Changing it starts a new folder; the old one stays in Drive. Saved with Save.</small></span>
+            <input value={backupLabel} onChange={(e) => onChange({ driveBackupLabel: e.target.value })} placeholder={folder?.label ?? ''} spellCheck={false} />
+          </label>
           {last && (
             <small className={last.ok ? 'muted' : 'integration-warn'}>
               {last.error

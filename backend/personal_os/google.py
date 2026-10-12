@@ -1298,26 +1298,37 @@ class Google:
                 "content": text[:max_chars], "truncated": len(text) > max_chars}
 
     # ---------- Drive backup (drive.file: only what the app creates) ----------
-    def drive_backup_folder(self, name: str) -> str:
+    def drive_backup_folder(self, name: str, props: dict[str, str] | None = None) -> str:
+        """The folder called `name` (found by name, else created with `props` as appProperties)."""
         svc = self._svc("drive", "v3")
-        q = f"name = '{name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+        esc = name.replace("\\", "\\\\").replace("'", "\\'")  # labels come from hostnames and users
+        q = f"name = '{esc}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
         found = svc.files().list(q=q, pageSize=1, fields="files(id)").execute().get("files") or []
         if found:
             return found[0]["id"]
-        return svc.files().create(body={"name": name, "mimeType": "application/vnd.google-apps.folder"}, fields="id").execute()["id"]
+        body: dict[str, Any] = {"name": name, "mimeType": "application/vnd.google-apps.folder"}
+        if props:
+            body["appProperties"] = props
+        return svc.files().create(body=body, fields="id").execute()["id"]
 
-    def drive_backup_folder_alive(self, folder_id: str) -> bool:
-        """False when the folder was deleted (404) or trashed."""
+    def drive_backup_folder_name(self, folder_id: str) -> str | None:
+        """The folder's current name, or None when it was deleted (404) or trashed."""
         from googleapiclient.errors import HttpError
 
         try:
-            return not self._svc("drive", "v3").files().get(fileId=folder_id, fields="id,trashed").execute().get("trashed")
+            meta = self._svc("drive", "v3").files().get(fileId=folder_id, fields="id,name,trashed").execute()
         except HttpError as e:
             if e.resp.status == 404:
-                return False
+                return None
             raise
+        return None if meta.get("trashed") else (meta.get("name") or "")
 
-    def drive_backup_put(self, folder_id: str, name: str, path: Any, data: bytes | None, existing_id: str | None) -> str:
+    def drive_backup_folder_alive(self, folder_id: str) -> bool:
+        """False when the folder was deleted (404) or trashed."""
+        return self.drive_backup_folder_name(folder_id) is not None
+
+    def drive_backup_put(self, folder_id: str, name: str, path: Any, data: bytes | None, existing_id: str | None,
+                         props: dict[str, str] | None = None) -> str:
         """Upload a local file (or bytes) into the folder; update in place when `existing_id` is given."""
         import io
 
@@ -1325,16 +1336,18 @@ class Google:
 
         media = MediaFileUpload(str(path), resumable=True) if path else MediaIoBaseUpload(io.BytesIO(data or b""), mimetype="text/markdown")
         files = self._svc("drive", "v3").files()
+        extra: dict[str, Any] = {"appProperties": props} if props else {}
         if existing_id:
             from googleapiclient.errors import HttpError
 
             try:
-                return files.update(fileId=existing_id, body={"name": name}, media_body=media, fields="id").execute()["id"]
+                # Drive v3 update merges appProperties keys, so properties set by anything else are kept.
+                return files.update(fileId=existing_id, body={"name": name, **extra}, media_body=media, fields="id").execute()["id"]
             except HttpError as e:
                 if e.resp.status != 404:
                     raise
                 # The copy was deleted in Drive: upload a fresh one below.
-        return files.create(body={"name": name, "parents": [folder_id]}, media_body=media, fields="id").execute()["id"]
+        return files.create(body={"name": name, "parents": [folder_id], **extra}, media_body=media, fields="id").execute()["id"]
 
     # ---------- Docs / Sheets ----------
     _MIME = {"doc": "application/vnd.google-apps.document", "sheet": "application/vnd.google-apps.spreadsheet"}

@@ -1,4 +1,4 @@
-import { SlidersHorizontal } from '../icons'
+import { PanelRight } from '../icons'
 import { useStore } from '../store'
 
 /**
@@ -11,7 +11,7 @@ export default function SidebarToggle(): JSX.Element | null {
   if (sidebarOpen) return null
   return (
     <button className="icon-btn no-drag" title="Show sidebar (⌘B)" aria-label="Show sidebar (⌘B)" onClick={toggleSidebar}>
-      <SlidersHorizontal size={16} />
+      <PanelRight size={16} />
     </button>
   )
 }

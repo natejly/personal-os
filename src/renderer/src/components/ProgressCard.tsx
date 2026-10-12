@@ -1,3 +1,4 @@
+import { statusWord } from '../lib/statusWord'
 import { useEffect, useState } from 'react'
 import { CircleCheck } from '../icons'
 import type { FullDesk } from '@shared/types'
@@ -41,7 +42,7 @@ export default function ProgressCard({ conversationId, desk }: { conversationId?
         <ol className="plan-steps progress-plan">
           {desk.plan.steps.filter((s) => s.status !== 'dropped' && s.status !== 'rejected').map((s) => (
             <li key={s.step_id} className={`plan-step ${s.status}`}>
-              <span className="desk-mark" title={s.status} aria-label={s.status}>{s.status === 'done' ? <CircleCheck size={13} weight="fill" /> : MARK[s.status]}</span>
+              <span className="desk-mark" title={statusWord(s.status)} aria-label={statusWord(s.status)}>{s.status === 'done' ? <CircleCheck size={13} weight="fill" /> : MARK[s.status]}</span>
               <span className="plan-text">{s.title || s.tool || 'Think it through'}</span>
             </li>
           ))}

@@ -1,3 +1,4 @@
+import { describeCall } from '../lib/toolDisplay'
 import { useEffect, useState } from 'react'
 import { RotateCcw, Square } from '../icons'
 import type { WorkerInfo } from '@shared/types'
@@ -77,7 +78,7 @@ export default function WorkersPanel({ conversationId: focusId }: { conversation
                 {on && <WorkerChat id={w.id} onStop={() => act(w.id, () => api.workers.stop(w.id))} />}
                 {w.pending_approvals.map((p) => (
                   <div key={p.call_id} className="worker-approval">
-                    <span>Wants to use <code>{p.tool}</code></span>
+                    <span>Wants to: {describeCall(p.tool, p.args).verb.toLowerCase()}</span>
                     <button className="ghost-btn xs" disabled={busy === p.call_id} onClick={() => void act(p.call_id, () => api.approve(p.call_id, 'allow'))}>Approve</button>
                     <button className="ghost-btn xs danger" disabled={busy === p.call_id} onClick={() => void act(p.call_id, () => api.approve(p.call_id, 'deny'))}>Deny</button>
                   </div>

@@ -1,3 +1,4 @@
+import { statusWord } from '../lib/statusWord'
 import { useMemo, useState } from 'react'
 import { Calendar, Plus, X } from '../icons'
 import type { Todo } from '@shared/types'
@@ -60,7 +61,7 @@ function Column({ name, label, cards, groupBy, onAdd, onMove }: ColProps): JSX.E
               </div>
               <div className="kcard-meta">
                 {c.due && <span className={`tag ${!c.done && dueLabel(c.due).overdue ? 'overdue' : ''}`}><Calendar size={10} />{dueLabel(c.due).label}</span>}
-                {groupBy === 'list' && <span className="tag">{c.status}</span>}
+                {groupBy === 'list' && <span className="tag">{statusWord(c.status)}</span>}
                 {(c.tags ?? []).map((l) => <span key={l} className="tag">{l}</span>)}
                 {c.priority === 1 && <span className="tag p1">P1</span>}
                 <span style={{ flex: 1 }} />

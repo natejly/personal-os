@@ -117,7 +117,7 @@ function IndexStatusLine(): JSX.Element | null {
   const done = st.embedded + (st.doc_embedded ?? 0)
   return (
     <div className="setting-row">
-      <span className="toggle-text"><b>Search index</b><small>{done} of {total} passages embedded ({st.mode}{st.model ? `, ${st.model}` : ', no embedding model'}).</small></span>
+      <span className="toggle-text"><b>Search index</b><small>{done} of {total} passages embedded ({st.mode}{st.model ? `, ${modelLabel(st.model)}` : ', no embedding model'}).</small></span>
       <button className="ghost-btn" type="button" disabled={busy} onClick={() => void rebuild()}><RefreshCw size={14} /> {busy ? 'Rebuilding…' : 'Rebuild search index'}</button>
     </div>
   )

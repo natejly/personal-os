@@ -6,7 +6,7 @@ export const fmtTokens = (n: number): string =>
   new Intl.NumberFormat('en-US', { notation: n >= 100000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n)
 
 export const fmtCost = (n: number): string =>
-  n === 0 ? '$0' : n < 0.01 ? `$${n.toFixed(4)}` : n < 1 ? `$${n.toFixed(3)}` : `$${n.toFixed(2)}`
+  n === 0 ? '$0' : n < 0.0001 ? '<$0.0001' : n < 0.01 ? `$${n.toFixed(4)}` : n < 1 ? `$${n.toFixed(3)}` : `$${n.toFixed(2)}`
 
 /** "This chat: 12.4k tokens · $0.042". Null when nothing was recorded. A call with no known price is counted, never costed at $0. */
 export const usageLine = (u: ConversationUsage): string | null => {
@@ -15,7 +15,7 @@ export const usageLine = (u: ConversationUsage): string | null => {
   const parts = [`${fmtTokens(t.tokens)} tokens`]
   const priced = t.calls - t.unpriced
   if (priced > 0) parts.push(fmtCost(t.cost))
-  if (t.unpriced > 0) parts.push(priced > 0 ? `${t.unpriced} unpriced` : 'unpriced')
+  if (t.unpriced > 0) parts.push(priced > 0 ? `${t.unpriced} call${t.unpriced === 1 ? '' : 's'} without a price` : 'no price set')
   return `This chat: ${parts.join(' · ')}`
 }
 

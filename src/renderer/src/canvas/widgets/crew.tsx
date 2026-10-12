@@ -1,3 +1,5 @@
+import { fmtCost } from '../../lib/chatMeta'
+import { statusWord } from '../../lib/statusWord'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ExternalLink, Play, RotateCw, Square, Users } from '../../icons'
 import type { CrewAgent, CrewView, WorkflowPlanStep, WorkflowStepRow } from '@shared/types'
@@ -71,7 +73,7 @@ function AgentCard({ a }: { a: CrewAgent }): JSX.Element {
         {AGENT_LABEL[agentStatus(a)] ?? agentStatus(a)}{a.exit_reason && a.exit_reason !== 'completed' ? ` (${a.exit_reason})` : ''}
         {a.rounds > 0 && ` · ${a.rounds} round${a.rounds === 1 ? '' : 's'}`}
         {a.calls > 0 && ` · ${a.calls} call${a.calls === 1 ? '' : 's'}`}
-        {a.cost > 0 && ` · $${a.cost.toFixed(3)}`}
+        {a.cost > 0 && ` · ${fmtCost(a.cost)}`}
         {elapsed(a) && ` · ${elapsed(a)}`}
       </small>
     </div>
@@ -111,7 +113,7 @@ function StepRow({ plan, row, depth }: { plan: WorkflowPlanStep; row: WorkflowSt
       <span className={`crew-mark ${stepTone}`} aria-hidden>{STEP_MARK[status] ?? '·'}</span>
       <span className="crew-name">{plan.id}</span>
       <span className="crew-what">{what}{items > 0 && plan.kind === 'fan_out' ? ` · ${items} done` : ''}{row?.error ? ` · ${row.error}` : ''}</span>
-      <span className={`crew-state ${stepTone}`}>{status === 'waiting_approval' ? 'needs approval' : status}</span>
+      <span className={`crew-state ${stepTone}`}>{status === 'waiting_approval' ? 'needs approval' : statusWord(status).toLowerCase()}</span>
     </div>
   )
 }

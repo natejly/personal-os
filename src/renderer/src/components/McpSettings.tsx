@@ -1,3 +1,4 @@
+import { statusWord } from '../lib/statusWord'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, ExternalLink, LogOut, Plug, Plus, RefreshCw, ScrollText, ShieldAlert, Trash2, X
@@ -404,7 +405,7 @@ export default function McpSettings(): JSX.Element {
               </span>
               {s.eval && s.eval.status !== 'pass' && (
                 <span className={`tag ${s.eval.status === 'warn' ? 'ask' : 'bad'}`} title={s.eval.summary}>
-                  <AlertTriangle size={11} /> {s.eval.status}
+                  <AlertTriangle size={11} /> {statusWord(s.eval.status)}
                 </span>
               )}
               {signin && (

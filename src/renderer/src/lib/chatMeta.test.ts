@@ -29,9 +29,9 @@ test('dayLabel: Today, Yesterday, a dated label, and the year only when it diffe
 test('usageLine: priced, partly unpriced, all unpriced and empty', () => {
   assert.equal(usageLine(usage({})), null)
   assert.equal(usageLine(usage({ calls: 2, tokens: 1500, cost: 0.042 })), 'This chat: 1,500 tokens · $0.042')
-  assert.equal(usageLine(usage({ calls: 3, tokens: 400, cost: 0.5, unpriced: 1 })), 'This chat: 400 tokens · $0.500 · 1 unpriced')
+  assert.equal(usageLine(usage({ calls: 3, tokens: 400, cost: 0.5, unpriced: 1 })), 'This chat: 400 tokens · $0.500 · 1 call without a price')
   const all = usageLine(usage({ calls: 2, tokens: 400, unpriced: 2 }))
-  assert.equal(all, 'This chat: 400 tokens · unpriced')
+  assert.equal(all, 'This chat: 400 tokens · no price set')
   assert.ok(!all?.includes('$'))
 })
 

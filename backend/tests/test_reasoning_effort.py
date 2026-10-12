@@ -106,7 +106,8 @@ def _ok(_b: dict[str, Any] | None = None) -> httpx.Response:
     return httpx.Response(200, content=SSE)
 
 
-def _stream(monkeypatch: Any, handler: Any, model: str = "m1", effort: str = "medium", fast: bool = False) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _stream(monkeypatch: Any, handler: Any, model: str = "m1", effort: str = "medium", fast: bool = False,
+            tools: list[dict[str, Any]] | None = None, settings: dict[str, Any] | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     bodies: list[dict[str, Any]] = []
     real = _REAL_CLIENT
 
@@ -119,7 +120,7 @@ def _stream(monkeypatch: Any, handler: Any, model: str = "m1", effort: str = "me
     monkeypatch.setattr(llm, "supports_service_tier", lambda _s: True)
 
     async def go() -> list[dict[str, Any]]:
-        return [ev async for ev in llm.stream_chat(SETTINGS, model, [{"role": "user", "content": "x"}], effort=effort, fast=fast)]
+        return [ev async for ev in llm.stream_chat(settings or SETTINGS, model, [{"role": "user", "content": "x"}], tools=tools, effort=effort, fast=fast)]
 
     return asyncio.run(go()), bodies
 
@@ -181,6 +182,26 @@ def test_a_400_that_does_not_name_the_field_is_not_retried(monkeypatch: Any) -> 
     except llm.LLMError:
         pass
     assert len(bodies) == 1 and llm.model_cap("http://p.test/v1", "m1") is None
+
+
+TOOLS = [{"type": "function", "function": {"name": "t", "description": "d", "parameters": {"type": "object", "properties": {}}}}]
+
+
+def test_parallel_tool_calls_only_with_tools_and_a_known_provider(monkeypatch: Any) -> None:
+    fw = {**SETTINGS, "baseUrl": "https://api.fireworks.ai/inference/v1", "provider": "fireworks"}
+    _, bodies = _stream(monkeypatch, _ok, tools=TOOLS, settings=fw)
+    assert bodies[0]["parallel_tool_calls"] is True
+    _, bodies = _stream(monkeypatch, _ok, settings=fw)
+    assert "parallel_tool_calls" not in bodies[0]
+    an = {**SETTINGS, "baseUrl": "https://api.anthropic.com/v1/", "provider": "anthropic"}
+    _, bodies = _stream(monkeypatch, _ok, tools=TOOLS, settings=an)
+    assert "parallel_tool_calls" not in bodies[0]
+
+
+def test_parallel_tool_calls_dropped_when_rejected(monkeypatch: Any) -> None:
+    fw = {**SETTINGS, "baseUrl": "https://api.fireworks.ai/inference/v1", "provider": "fireworks"}
+    _, bodies = _stream(monkeypatch, lambda b: _reject("parallel_tool_calls") if "parallel_tool_calls" in b else _ok(), tools=TOOLS, settings=fw)
+    assert ["parallel_tool_calls" in b for b in bodies] == [True, False]
 
 
 def test_service_tier_is_dropped_for_the_request_only(monkeypatch: Any) -> None:

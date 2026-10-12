@@ -64,9 +64,12 @@ def test_select_schemas() -> None:
     assert [s["function"]["name"] for s in got] == ["mcp__s__t2"]
 
 
-def test_catalog_hint() -> None:
-    assert mcp_search.catalog_hint([("github", 42), ("slack", 1)]) == (
-        "MCP connectors available via mcp_tool_search: github (42 tools), slack (1 tool).")
+def test_mcp_index_caps_names() -> None:
+    idx = mcp_search.mcp_index({"slack": ["mcp__slack__b", "mcp__slack__a"], "big": [f"mcp__big__t{i:02d}" for i in range(35)]})
+    lines = idx.splitlines()
+    assert lines[1].startswith("big: mcp__big__t00") and "+5 more via mcp_tool_search" in lines[1] and "t34" not in lines[1]
+    assert lines[2] == "slack: mcp__slack__a, mcp__slack__b" and "mcp_tool_search only when nothing listed fits" in lines[-1]
+    assert mcp_search.mcp_index({}) == ""
 
 
 def test_tool_loads_matches() -> None:

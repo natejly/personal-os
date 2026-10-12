@@ -35,12 +35,12 @@ function Row({ c, now }: { c: CodingSession; now: number }): JSX.Element {
   return (
     <li className={`cs-row${live ? '' : ' done'}`}>
       <div className="cs-head">
-        <button className="link" aria-expanded={open} title={c.worktree} onClick={() => setOpen((o) => !o)}>
+        <button className="cs-title" aria-expanded={open} title={c.worktree} onClick={() => setOpen((o) => !o)}>
           <span className={`inbox-dot ${codingDot(c.status)}`} role="img" aria-label={codingStatusLabel(c.status)} title={codingStatusLabel(c.status)} />
           <span className="cs-name">{c.name}</span>
         </button>
-        {codingStoppable(c.status) && <button className="link" disabled={busy} onClick={() => void stop()}>Stop</button>}
-        {termOk && <button className="link" onClick={() => openTerminal(c.id, null)}>Terminal</button>}
+        {codingStoppable(c.status) && <button className="ghost-btn xs" disabled={busy} onClick={() => void stop()}>Stop</button>}
+        {termOk && <button className="ghost-btn xs" onClick={() => openTerminal(c.id, null)}>Terminal</button>}
       </div>
       <small className="muted cs-sub" title={where || undefined}>{AGENT_LABEL[c.agent]}{live ? ` · ${codingStatusLabel(c.status)}` : ''} · {elapsed}{where ? ` · ${where}` : ''}</small>
       {line && (live
@@ -53,7 +53,7 @@ function Row({ c, now }: { c: CodingSession; now: number }): JSX.Element {
         <>
           <CodingTimeline id={c.id} />
           <div className="cs-actions">
-            <button className="link" aria-expanded={diff} onClick={() => setDiff((d) => !d)}>{diff ? 'Hide diff' : 'View diff'}</button>
+            <button className="ghost-btn xs" aria-expanded={diff} onClick={() => setDiff((d) => !d)}>{diff ? 'Hide diff' : 'View diff'}</button>
           </div>
           {diff && <CodingDiffView id={c.id} />}
           <CodingFollowUp c={c} />
@@ -87,13 +87,13 @@ export default function CodingSessions(): JSX.Element | null {
   return (
     <section className="ctx-section">
       <h4>Coding sessions{running ? ` (${live.filter((c) => codingLive(c.status)).length})` : ''}</h4>
-      {live.length > 0 && <ul className="plain-list">{live.map((c) => <Row key={c.id} c={c} now={now} />)}</ul>}
+      {live.length > 0 && <ul className="plain-list cs-list">{live.map((c) => <Row key={c.id} c={c} now={now} />)}</ul>}
       {recent.length > 0 && (
         <>
-          <button className="link cs-recent-toggle" aria-expanded={recentOpen} onClick={() => setRecentOpen((o) => !o)}>
+          <button className="ghost-btn xs cs-recent-toggle" aria-expanded={recentOpen} onClick={() => setRecentOpen((o) => !o)}>
             {recentOpen ? 'Hide' : 'Show'} recent ({recent.length})
           </button>
-          {recentOpen && <ul className="plain-list">{recent.map((c) => <Row key={c.id} c={c} now={now} />)}</ul>}
+          {recentOpen && <ul className="plain-list cs-list">{recent.map((c) => <Row key={c.id} c={c} now={now} />)}</ul>}
         </>
       )}
     </section>

@@ -62,7 +62,7 @@ function ContextMeterView({ conversationId, refreshKey }: { conversationId: stri
       </div>
       <div className="ctx-meta">
         <span>~{meter.estimated_tokens.toLocaleString()} of {meter.window.toLocaleString()} tokens</span>
-        {focus === null && <button className="link" disabled={busy} onClick={() => setFocus('')}>{busy ? 'compacting…' : 'Compact now'}</button>}
+        {focus === null && <button className="ghost-btn xs" disabled={busy} onClick={() => setFocus('')}>{busy ? 'compacting…' : 'Compact now'}</button>}
       </div>
       {focus !== null && (
         <form className="ctx-compact-focus" onSubmit={(e) => { e.preventDefault(); const f = focus; void act(async () => {
@@ -72,7 +72,7 @@ function ContextMeterView({ conversationId, refreshKey }: { conversationId: stri
         }) }}>
           <input autoFocus aria-label="Keep focus on" placeholder="Keep focus on… (optional)" value={focus} disabled={busy}
             onChange={(e) => setFocus(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setFocus(null) } }} />
-          <button type="submit" className="link" disabled={busy}>{busy ? 'compacting…' : 'Compact'}</button>
+          <button type="submit" className="ghost-btn xs" disabled={busy}>{busy ? 'compacting…' : 'Compact'}</button>
           <button type="button" className="link" disabled={busy} onClick={() => setFocus(null)}>Cancel</button>
         </form>
       )}

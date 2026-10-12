@@ -270,6 +270,8 @@ export interface State {
 
   sidebarOpen: boolean
   contextOpen: boolean
+  /** The full-window chat's side panel (DeskPanel), apart from `contextOpen`, which opens it on Context. */
+  deskPanel: boolean
   contextTab: ContextTab
   /** The side panel beside each chat (the `show` tool, or "Open in panel" on a fenced block), by conversation id. */
   shows: Record<string, PanelState>
@@ -401,6 +403,9 @@ export interface State {
   openMemory: (m?: MemoryMode) => void
   toggleSidebar: () => void
   toggleContext: () => void
+  setDeskPanel: (open: boolean) => void
+  /** ⌘I: close the side panel if either flag has it open, else open it on its default (Context) tab. */
+  toggleDeskPanel: () => void
   /** ⌘I. Opening focuses the panel's composer; the thread itself waits for the first message. */
   togglePageAgent: () => void
   closePageAgent: () => void
@@ -1023,6 +1028,7 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'chat:prev') s.stepChat(-1)
       else if (action === 'chat:search') s.searchChats()
       else if (action === 'toggle-context') s.toggleContext()
+      else if (action === 'toggle-desk') s.toggleDeskPanel()
       else if (action === 'page-agent') s.togglePageAgent()
       else if (action === 'view:graph') s.openMemory('graph')
       else if (action === 'view:memory') s.openMemory()
@@ -1879,6 +1885,7 @@ export const useStore = create<State>((set, get) => {
     sidebarSearchTick: 0,
     shows: {},
     contextOpen: false,
+    deskPanel: false,
     contextTab: 'last',
     libraryTab: 'skills',
     openAgentId: null,
@@ -2046,6 +2053,8 @@ export const useStore = create<State>((set, get) => {
     },
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
     toggleContext: () => set((s) => ({ contextOpen: !s.contextOpen })),
+    setDeskPanel: (deskPanel) => set({ deskPanel }),
+    toggleDeskPanel: () => set((s) => (s.deskPanel || s.contextOpen ? { deskPanel: false, contextOpen: false } : { deskPanel: true })),
     openShow: (conversationId, item) => set((s) => ({ shows: { ...s.shows, [conversationId]: panes.open(s.shows[conversationId], item, Date.now(), item.pane) } })),
     splitShow: (conversationId) => set((s) => (s.shows[conversationId] ? { shows: { ...s.shows, [conversationId]: panes.split(s.shows[conversationId]) } } : s)),
     pickShow: (conversationId, pane, id) => set((s) => (s.shows[conversationId] ? { shows: { ...s.shows, [conversationId]: panes.pick(s.shows[conversationId], pane, id) } } : s)),

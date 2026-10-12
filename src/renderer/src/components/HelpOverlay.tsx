@@ -45,7 +45,7 @@ export default function HelpOverlay(): JSX.Element {
 
   const keysOf = (s: Shortcut): string => (s.id === 'dictation' ? chord || s.keys : live[s.id] || s.keys)
   const needle = q.trim().toLowerCase()
-  const shown = SHORTCUTS.filter((s) => !needle || `${s.label} ${s.group} ${formatAccelerator(keysOf(s))}`.toLowerCase().includes(needle))
+  const shown = SHORTCUTS.filter((s) => s.keys && (!needle || `${s.label} ${s.group} ${formatAccelerator(keysOf(s))}`.toLowerCase().includes(needle)))
   const groups = [...new Set(shown.map((s) => s.group))]
   const guideShown = guide ? sections(guide).filter((s) => !needle || s.toLowerCase().includes(needle)) : []
 

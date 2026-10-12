@@ -460,7 +460,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           value={text}
           onChange={(v) => { setRecall(null); setText(v) }}
           onPaste={onPaste}
-          placeholder={streaming ? (queueId ? 'Queue a follow-up… ⌘↵ to steer now' : 'Steer the reply…') : placeholder}
+          placeholder={streaming ? (queueId ? '⌘↵ to steer now' : 'Steer the reply…') : placeholder}
           noGhost={!!slash}
           suggestions={suggestions}
           context={chatContext}

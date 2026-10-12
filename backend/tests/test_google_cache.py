@@ -8,13 +8,15 @@ import datetime as dt
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import cache  # noqa: E402
-from personal_os.google import _CAL_FULL_AFTER, Google  # noqa: E402
+from personal_os import google as google_module  # noqa: E402
+from personal_os.google import _CAL_FULL_AFTER, TTL, Google  # noqa: E402
 from personal_os.google_store import ReadStore  # noqa: E402
 
 
@@ -334,8 +336,10 @@ class _MsgReq:
 
 
 class _GmailBatch:
-    def __init__(self, callback: Any, messages: dict[str, dict[str, Any]], throttle: dict[str, int]):
+    def __init__(self, callback: Any, messages: dict[str, dict[str, Any]], throttle: dict[str, int],
+                 counts: dict[str, int] | None = None):
         self._callback = callback
+        self._counts = counts if counts is not None else {}
         self._messages = messages
         self._throttle = throttle  # id -> how many more times that item answers 429
         self._ids: list[tuple[str, str]] = []
@@ -344,6 +348,9 @@ class _GmailBatch:
         self._ids.append((request_id or str(len(self._ids)), req.mid))
 
     def execute(self) -> None:
+        self._counts["batches"] = self._counts.get("batches", 0) + 1
+        self._counts["sub_requests"] = self._counts.get("sub_requests", 0) + len(self._ids)
+        self._counts["largest_batch"] = max(self._counts.get("largest_batch", 0), len(self._ids))
         for rid, mid in self._ids:
             if self._throttle.get(mid, 0) > 0:
                 self._throttle[mid] -= 1
@@ -371,6 +378,8 @@ class _Gmail:
         self.records: list[dict[str, Any]] = []
         self.history_id = "5"
         self.throttle: dict[str, int] = {}
+        self.counts: dict[str, int] = {"messages_list": 0, "history_list": 0, "batches": 0, "sub_requests": 0}
+        self.batch_ids: list[list[str]] = []
 
     def users(self) -> _Gmail:
         return self
@@ -383,15 +392,24 @@ class _Gmail:
 
     def list(self, **kw: Any) -> _Req:
         if "startHistoryId" in kw:
+            self.counts["history_list"] += 1
             return _Req({"historyId": "9", "history": self.records})
-        return _Req({"messages": [{"id": i} for i in self.ids], "historyId": self.history_id})
+        self.counts["messages_list"] += 1
+        at = int(kw.get("pageToken") or 0)
+        nxt = at + int(kw.get("maxResults") or 100)
+        res: dict[str, Any] = {"messages": [{"id": i} for i in self.ids[at:nxt]], "historyId": self.history_id}
+        if nxt < len(self.ids):
+            res["nextPageToken"] = str(nxt)
+        return _Req(res)
 
     def get(self, **kw: Any) -> _MsgReq:
         self.gets.append(kw["id"])
         return _MsgReq(kw["id"])
 
     def new_batch_http_request(self, callback: Any) -> _GmailBatch:
-        return _GmailBatch(callback, self.rows, self.throttle)
+        batch = _GmailBatch(callback, self.rows, self.throttle, self.counts)
+        self.batch_ids.append(batch._ids)
+        return batch
 
 
 class IncrementalTests(unittest.TestCase):
@@ -611,6 +629,137 @@ class IncrementalTests(unittest.TestCase):
         g.invalidate("gmail")
         self.assertEqual(g.gmail_get("a")["subject"], "Hello")
         self.assertEqual(full.full_gets, 1)
+
+
+def _lots(svc: _Gmail, n: int) -> None:
+    """Make the fake hold n messages, newest first."""
+    svc.ids = [f"m{i:03d}" for i in range(n)]
+    svc.rows = {mid: _mail(mid, f"Subject {mid}") for mid in svc.ids}
+
+
+def _look(g: Google, query: str, pages: int, size: int = 25) -> list[int]:
+    """The assistant tool's calls: one past each page, as tools.gmail_search asks."""
+    return [len(g.gmail_search(query, off + size + 1)) for off in range(0, pages * size, size)]
+
+
+class GmailSearchCostTests(unittest.TestCase):
+    def _g(self, svc: _Gmail) -> Google:
+        g = Google(dict, lambda _s: None)
+        g._svc = lambda name, version: svc  # type: ignore[method-assign]
+        return g
+
+    def test_two_pages_of_one_query_list_and_check_history_once(self) -> None:
+        svc = _Gmail()
+        _lots(svc, 60)
+        g = self._g(svc)
+        g.gmail_search("from:ada", 1)  # a saved cursor, as any account that has searched before has
+        g.invalidate("gmail")  # the TTL has run out: the next search must ask Gmail
+        svc.counts.update(messages_list=0, history_list=0, batches=0, sub_requests=0)
+        svc.batch_ids.clear()
+        self.assertEqual(len(g.gmail_search("in:inbox", 26)), 26)
+        self.assertEqual(len(g.gmail_search("in:inbox", 51)), 51)
+        self.assertEqual(svc.counts["messages_list"], 1)
+        self.assertEqual(svc.counts["history_list"], 1)
+        first, second = [[mid for _rid, mid in ids] for ids in svc.batch_ids]
+        self.assertEqual(len(first), 25)  # m000 was saved by the first search
+        self.assertEqual(len(second), 25)  # only the ids the first page did not save
+        self.assertFalse(set(first) & set(second))
+
+    def test_first_ever_look_costs_one_list_and_no_history(self) -> None:
+        svc = _Gmail()
+        _lots(svc, 60)
+        g = self._g(svc)
+        self.assertEqual(_look(g, "in:inbox", 2), [26, 51])
+        self.assertEqual((svc.counts["messages_list"], svc.counts["history_list"]), (1, 0))
+        self.assertEqual((svc.counts["batches"], svc.counts["sub_requests"]), (2, 51))
+
+    def test_a_different_query_still_lists(self) -> None:
+        svc = _Gmail()
+        _lots(svc, 10)
+        g = self._g(svc)
+        g.gmail_search("in:inbox", 5)
+        g.gmail_search("from:ada", 5)
+        self.assertEqual(svc.counts["messages_list"], 2)
+        g.gmail_search("in:inbox", 8)
+        g.gmail_search("from:ada", 8)
+        self.assertEqual(svc.counts["messages_list"], 2)
+
+    def test_a_listing_older_than_the_ttl_is_listed_again(self) -> None:
+        svc = _Gmail()
+        _lots(svc, 10)
+        g = self._g(svc)
+        t = [1000.0]
+        with mock.patch.object(google_module.time, "time", lambda: t[0]):
+            g.gmail_search("in:inbox", 3)
+            t[0] += TTL["gmail_list"] - 1
+            g.gmail_search("in:inbox", 5)
+            self.assertEqual((svc.counts["messages_list"], svc.counts["history_list"]), (1, 0))
+            t[0] += 2
+            g.gmail_search("in:inbox", 6)
+            self.assertEqual((svc.counts["messages_list"], svc.counts["history_list"]), (2, 1))
+
+    def test_a_new_message_shows_in_a_search_after_the_ttl(self) -> None:
+        svc = _Gmail()
+        _lots(svc, 3)
+        g = self._g(svc)
+        t = [1000.0]
+        with mock.patch.object(google_module.time, "time", lambda: t[0]):
+            g.gmail_search("in:inbox", 10)
+            svc.ids = ["new"] + svc.ids
+            svc.rows["new"] = _mail("new", "Fresh")
+            svc.records = [{"id": "8", "messagesAdded": [{"message": {"id": "new"}}]}]
+            t[0] += TTL["gmail_list"] + 1
+            self.assertEqual([m["id"] for m in g.gmail_search("in:inbox", 11)][0], "new")
+
+    def test_a_write_makes_the_next_search_ask_gmail_again(self) -> None:
+        svc = _Gmail()
+        _lots(svc, 3)
+        g = self._g(svc)
+        g.gmail_search("in:inbox", 10)
+        g._gmail_unsure()  # what a send or a label change does
+        g.gmail_search("in:inbox", 9)
+        self.assertEqual((svc.counts["messages_list"], svc.counts["history_list"]), (2, 1))
+
+    def test_more_than_a_hundred_ids_are_fetched_in_batches_of_at_most_a_hundred(self) -> None:
+        svc = _Gmail()
+        _lots(svc, 250)
+        g = self._g(svc)
+        self.assertEqual(len(g.gmail_search("in:inbox", 250)), 250)
+        self.assertEqual([len(b) for b in svc.batch_ids], [100, 100, 50])
+        self.assertEqual(svc.counts["sub_requests"], 250)
+
+    def test_a_throttled_item_in_a_later_chunk_is_retried_and_nothing_is_cached_if_it_stays_missing(self) -> None:
+        svc = _Gmail()
+        _lots(svc, 120)
+        svc.throttle = {"m110": 2}
+        g = self._g(svc)
+        self.assertEqual(len(g.gmail_search("in:inbox", 120)), 119)
+        self.assertEqual(len(g.gmail_search("in:inbox", 120)), 120)  # not served from the TTL cache
+
+    def test_an_explicit_refresh_still_asks_gmail_for_history_and_the_listing(self) -> None:
+        svc = _Gmail()
+        _lots(svc, 5)
+        g = self._g(svc)
+        g.gmail_search("in:inbox", 5)
+        g.invalidate("gmail")
+        g.gmail_search("in:inbox", 5)
+        before = dict(svc.counts)
+        g.gmail_search("in:inbox", 5)  # the TTL cache answers
+        self.assertEqual(svc.counts, before)
+        with cache.bypass():
+            g.gmail_search("in:inbox", 5)
+        self.assertEqual(svc.counts["history_list"], before["history_list"] + 1)
+        self.assertEqual(svc.counts["messages_list"], before["messages_list"] + 1)
+
+    def test_only_a_few_dozen_queries_keep_a_listing(self) -> None:
+        svc = _Gmail()
+        _lots(svc, 3)
+        g = self._g(svc)
+        for i in range(google_module._GMAIL_LISTS_KEPT + 5):
+            g.gmail_search(f"label:l{i}", 3)
+        lists = g._reads.get("gmail", "meta")["lists"]
+        self.assertEqual(len(lists), google_module._GMAIL_LISTS_KEPT)
+        self.assertNotIn("label:l0", lists)
 
 
 if __name__ == "__main__":

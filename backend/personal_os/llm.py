@@ -252,6 +252,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # through /integrations/google/tasks-sync rather than /settings for the same reason.
     # Empty on purpose: anything named here would override that module's defaults.
     "googleTasksSync": {},
+    # Names this computer's Drive backup folder ("Grain Backup (<label>)"); empty = the hostname. See drive_backup.py.
+    "driveBackupLabel": "",
     # Document retrieval (retrieval.py). 'bm25' forces keyword-only; hybrid falls back to it when the
     # embedding route is unavailable. The floor only drops vector-only hits (exact keyword hits survive).
     "retrievalMode": "hybrid",

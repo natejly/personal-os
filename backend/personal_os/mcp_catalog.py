@@ -81,6 +81,8 @@ def validate_entry(e: Any) -> list[str]:
         bad("icon must be a kebab-case icon name")
     if not isinstance(e.get("official"), bool):
         bad("official must be true or false")
+    if "hidden" in e and not isinstance(e["hidden"], bool):
+        bad("hidden must be true or false")
     if not isinstance(e.get("docs"), str) or not e["docs"].startswith("https://"):
         bad("docs must be an https:// link")
     transport, runtime, auth = e.get("transport"), e.get("runtime"), e.get("auth")

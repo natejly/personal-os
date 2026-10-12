@@ -153,12 +153,25 @@ def _app(tmp_path: Path):
     return TestClient(app), store
 
 
+def test_entries_duplicating_built_in_tools_are_hidden_unless_installed(tmp_path: Path) -> None:
+    os.environ.setdefault("GRAIN_SECRETS_BACKEND", "file")
+    doc = mcp_catalog.load()
+    hidden = {"filesystem", "memory", "fetch", "git", "time", "playwright", "google-workspace", "firecrawl"}
+    assert mcp_catalog.validate(doc) == [] and {e["id"] for e in doc["entries"] if e.get("hidden")} == hidden
+    assert mcp_catalog.validate_entry(entry(hidden="yes"))
+    http, store = _app(tmp_path)
+    assert hidden.isdisjoint(e["id"] for e in http.get("/mcp/catalog").json()["entries"])
+    made = store.create_server("fs", command="x", catalog_id="filesystem")
+    rows = {e["id"]: e for e in http.get("/mcp/catalog").json()["entries"]}
+    assert rows["filesystem"]["installed"] == [made["id"]] and "memory" not in rows
+
+
 def test_routes_detected_install_409_and_paste(tmp_path: Path, monkeypatch) -> None:
     os.environ.setdefault("GRAIN_SECRETS_BACKEND", "file")
     http, store = _app(tmp_path)
     monkeypatch.setattr(mcp_catalog, "detect", lambda e: None if "detect" not in e else {"found": False, "path": "", "hint": "Install it"})
     rows = {e["id"]: e for e in http.get("/mcp/catalog").json()["entries"]}
-    assert rows["opencode"]["detected"]["found"] is False and rows["filesystem"]["detected"] is None
+    assert rows["opencode"]["detected"]["found"] is False and rows["sequential-thinking"]["detected"] is None
     r = http.post("/mcp/catalog/opencode/install", json={})
     assert r.status_code == 409 and r.json()["detail"] == "Install it"
     monkeypatch.setattr(mcp_catalog, "detect", lambda e: {"found": True, "path": "/opt/x/claude", "hint": ""})

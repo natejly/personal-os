@@ -49,7 +49,7 @@ test('create / rename / switch / delete a space from the sidebar', async ({ grai
   await expect(page.locator('.space-tab.active')).toContainText(s1.name)
   await page.locator('.space-tab', { hasText: 'Deep work' }).click()
   await expect(page.locator('.space-tab.active')).toContainText('Deep work')
-  await menuClick(grain.app, 'Space 1')
+  await menuClick(grain.app, 'Canvas 1')
   await expect(page.locator('.space-tab.active')).toContainText(s1.name)
 
   // delete the non-active space

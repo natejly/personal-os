@@ -32,8 +32,6 @@ export interface CanvasState {
   enterSpace: (canvasId?: string) => Promise<void>
   /** ⌘⇧C: into the canvas from a classic view, back to `lastClassicView` from the canvas. */
   toggleCanvas: () => Promise<void>
-  /** Put a canvas the caller already created into the store; `navigate` (default) also enters it. */
-  adoptSpace: (c: Canvas, navigate?: boolean) => void
   renameSpace: (canvasId: string, name: string) => Promise<void>
   deleteSpace: (canvasId: string) => Promise<void>
   setActiveCanvas: (canvasId: string) => void
@@ -130,7 +128,7 @@ export const setLiveViewport = (v: { zoom: number; pan_x: number; pan_y: number 
 const SPACES_BAR_H = 34
 
 /**
- * The plane's screen size. While Canvas is unmounted (Send to Space or a sidebar drop from a classic
+ * The plane's screen size. While Canvas is unmounted (a sidebar drop from a classic
  * view) there is no element to measure, so it is derived from the shell instead: the `.app` grid's
  * content column (the window minus the sidebar) and its height minus the SpacesBar. The whole window
  * is only the last resort, when there is no shell to measure.
@@ -473,12 +471,6 @@ export const useCanvas = create<CanvasState>((set, get) => {
       const app = useStore.getState()
       if (app.view === 'canvas') app.leaveCanvas()
       else await get().enterSpace()
-    },
-    adoptSpace: (c, navigate = true) => {
-      putCanvas(c)
-      if (!navigate) return
-      get().setActiveCanvas(c.id)
-      useStore.getState().setView('canvas')
     },
     renameSpace: async (canvasId, name) => {
       patchCanvas(canvasId, { name })

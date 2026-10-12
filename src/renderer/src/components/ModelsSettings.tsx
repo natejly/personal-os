@@ -29,7 +29,7 @@ function KeyRow({ p, saved }: { p: ProviderInfo; saved: boolean }): JSX.Element 
   }
 
   return (
-    <div className="setting-row">
+    <div className="setting-row key-row">
       <span className="toggle-text">
         <b>{p.name}</b>
         <small>{saved ? 'Key saved' : 'No key'}{p.keyUrl && <button type="button" className="link-btn" onClick={() => void window.open(p.keyUrl as string, '_blank')}>Get a key <ExternalLink size={11} /></button>}</small>
@@ -57,12 +57,14 @@ export default function ModelsSettings({ settings, models, savePicker }: { setti
   const groups = groupByProvider(rows, settings.provider)
 
   return (
-    <>
+    <div className="models-tab">
       <h4>API keys</h4>
       <p className="muted small">Every model from a provider with a key can be used. Keys are stored on this Mac.</p>
-      {providers.filter((p) => p.needsKey).map((p) => <KeyRow key={p.id} p={p} saved={!!settings.providerKeysSet?.[p.id]} />)}
+      <div className="setting-list">
+        {providers.filter((p) => p.needsKey).map((p) => <KeyRow key={p.id} p={p} saved={!!settings.providerKeysSet?.[p.id]} />)}
+      </div>
       <h4>Models in the picker</h4>
-      <div className="setting-row">
+      <div className="setting-row models-filter">
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter models" aria-label="Filter models" spellCheck={false} />
         <button className="ghost-btn" type="button" disabled={!settings.pickerModels?.length} onClick={() => void savePicker([])}>Reset to suggested</button>
       </div>
@@ -78,6 +80,6 @@ export default function ModelsSettings({ settings, models, savePicker }: { setti
           ))}
         </div>
       ))}
-    </>
+    </div>
   )
 }

@@ -2629,44 +2629,53 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             res: dict[str, dict[str, Any]] = {k: {"text": [], "end": None, "ms": None, "error": None} for k in sides}
             yield "ab_start", {"id": am["id"], "models": sides}
             _capture("auto")
-            t0 = time.monotonic()
-            streams = {k: llm.stream_chat(cfg, m, messages, tool_schemas or None, effort=str(conv["settings"].get("effort") or "default"),
-                                          fast=bool(conv["settings"].get("fast")), cancel=_stream_cancel(stop, steers, run))
-                       for k, m in sides.items()}
-            async with contextlib.aclosing(duel.merge(streams)) as merged:
-                async for side, ev in merged:
-                    r = res[side]
-                    if ev["type"] == "delta":
-                        r["text"].append(ev["text"])
-                        yield "ab_delta", {"id": am["id"], "side": side, "text": ev["text"]}
-                    elif ev["type"] in ("end", "error"):
-                        r["ms"] = int((time.monotonic() - t0) * 1000)
-                        u = (ev.get("usage") or ev.get("usage_est") or {}) if ev["type"] == "end" else {}
-                        r["tokens"] = int(u.get("completion_tokens") or 0)
-                        if ev["type"] == "error":
-                            r["error"] = ev["message"]
-                        else:
-                            r["end"] = ev
-                        yield "ab_end", {"id": am["id"], "side": side, "ms": r["ms"], "tokens": r["tokens"], "error": r["error"],
-                                         "calls": [duel.call_summary(c) for c in (ev.get("tool_calls") or [])] if ev["type"] == "end" else []}
-                    if stop.is_set():
-                        break
-            for k in streams.values():
-                await k.aclose()
-            if stop.is_set() or not any(r["end"] for r in res.values()):
-                return  # stopped, or both failed: the round carries on as an ordinary one
-            fut: asyncio.Future = asyncio.get_event_loop().create_future()
-            _ab_waits[am["id"]] = fut
-            yield "ab_ready", {"id": am["id"]}
-            run.set_status("awaiting_approval")
-            try:
-                while not fut.done() and not stop.is_set():
-                    with contextlib.suppress(asyncio.TimeoutError):
-                        await asyncio.wait_for(asyncio.shield(fut), timeout=1)
-                winner = fut.result() if fut.done() else None
-            finally:
-                _ab_waits.pop(am["id"], None)
-                run.set_status("running")
+            todo = dict(sides)  # the sides still to stream: both at first, then just the one a regenerate asks for
+            while True:
+                t0 = time.monotonic()
+                streams = {k: llm.stream_chat(cfg, m, messages, tool_schemas or None, effort=str(conv["settings"].get("effort") or "default"),
+                                              fast=bool(conv["settings"].get("fast")), cancel=_stream_cancel(stop, steers, run))
+                           for k, m in todo.items()}
+                async with contextlib.aclosing(duel.merge(streams)) as merged:
+                    async for side, ev in merged:
+                        r = res[side]
+                        if ev["type"] == "delta":
+                            r["text"].append(ev["text"])
+                            yield "ab_delta", {"id": am["id"], "side": side, "text": ev["text"]}
+                        elif ev["type"] in ("end", "error"):
+                            r["ms"] = int((time.monotonic() - t0) * 1000)
+                            u = (ev.get("usage") or ev.get("usage_est") or {}) if ev["type"] == "end" else {}
+                            r["tokens"] = int(u.get("completion_tokens") or 0)
+                            if ev["type"] == "error":
+                                r["error"] = ev["message"]
+                            else:
+                                r["end"] = ev
+                            yield "ab_end", {"id": am["id"], "side": side, "ms": r["ms"], "tokens": r["tokens"], "error": r["error"],
+                                             "calls": [duel.call_summary(c) for c in (ev.get("tool_calls") or [])] if ev["type"] == "end" else []}
+                        if stop.is_set():
+                            break
+                for k in streams.values():
+                    await k.aclose()
+                if stop.is_set() or not any(r["end"] for r in res.values()):
+                    return  # stopped, or both failed: the round carries on as an ordinary one
+                fut: asyncio.Future = asyncio.get_event_loop().create_future()
+                _ab_waits[am["id"]] = fut
+                yield "ab_ready", {"id": am["id"]}
+                run.set_status("awaiting_approval")
+                try:
+                    while not fut.done() and not stop.is_set():
+                        with contextlib.suppress(asyncio.TimeoutError):
+                            await asyncio.wait_for(asyncio.shield(fut), timeout=1)
+                    winner = fut.result() if fut.done() else None
+                finally:
+                    _ab_waits.pop(am["id"], None)
+                    run.set_status("running")
+                if winner and winner.startswith("regen:"):  # POST /ab/regenerate: stream that side again, same request and model
+                    k = winner[6:]
+                    res[k] = {"text": [], "end": None, "ms": None, "error": None}
+                    todo = {k: sides[k]}
+                    yield "ab_reset", {"id": am["id"], "side": k}
+                    continue
+                break
             if winner is None:
                 return
             side = "b" if winner == "b" and res["b"]["end"] else "a" if res["a"]["end"] else "b"
@@ -4184,6 +4193,19 @@ async def pick_duel(id: str, body: dict[str, Any]) -> dict[str, Any]:
     if fut is None or fut.done():
         raise HTTPException(404, "No duel is waiting for a pick")
     fut.set_result(winner)
+    return {"ok": True}
+
+
+@app.post("/conversations/{id}/ab/regenerate")
+async def regenerate_duel_side(id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Developer mode: stream one side of the waiting duel again (same request, same model). side: a | b."""
+    mid, side = str(body.get("message_id") or ""), body.get("side")
+    fut = _ab_waits.get(mid)
+    if side not in ("a", "b"):
+        raise HTTPException(400, "side must be a or b")
+    if fut is None or fut.done():
+        raise HTTPException(404, "No duel is waiting for a pick")
+    fut.set_result(f"regen:{side}")
     return {"ok": True}
 
 

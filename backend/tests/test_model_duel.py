@@ -38,7 +38,7 @@ async def _scripted(settings: dict[str, Any], model: str, messages: list[dict[st
                "tool_calls": [{"id": "call_a", "name": "todo_add", "arguments": json.dumps({"title": "from-a"})}]}
     elif model == "duel-b" and not after_tool:
         await asyncio.sleep(0.05)
-        yield {"type": "delta", "text": "B answer"}
+        yield {"type": "delta", "text": "B answer" if CALLS.count("duel-b") == 1 else "B again"}
         yield {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": {"prompt_tokens": 5, "completion_tokens": 3}}
     else:
         yield {"type": "delta", "text": "A done"}
@@ -105,6 +105,18 @@ def test_duel_runs_no_tool_and_picked_b_is_the_only_message() -> None:
     assert todos_from_a() == [] and CALLS.count("duel-a") == 1  # A's call never ran, and A was not asked again
     v = client.get("/model-votes").json()
     assert v["votes"] == 1 and {m["model"]: m["wins"] for m in v["models"]} == {"duel-b": 1, "duel-a": 0}
+
+
+def test_regenerate_restreams_one_side_then_the_pick_uses_it() -> None:
+    cid, _ = start("add a todo")
+    mid = wait_until(lambda: next(iter(appmod._ab_waits), None), "the duel to wait for a pick")
+    assert client.post(f"/conversations/{cid}/ab/regenerate", json={"message_id": mid, "side": "x"}).status_code == 400
+    assert client.post(f"/conversations/{cid}/ab/regenerate", json={"message_id": mid, "side": "b"}).status_code == 200
+    wait_until(lambda: CALLS.count("duel-b") == 2 and mid in appmod._ab_waits and not appmod._ab_waits[mid].done(), "the duel to wait again")
+    assert sorted(CALLS) == ["duel-a", "duel-b", "duel-b"]  # only B ran again; A was not asked
+    client.post(f"/conversations/{cid}/ab/pick", json={"message_id": mid, "winner": "b"})
+    wait_done(cid)
+    assert [m["content"] for m in assistant_rows(cid)] == ["B again"] and todos_from_a() == []
 
 
 def test_picking_a_runs_its_tool_call_once() -> None:

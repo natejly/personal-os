@@ -877,6 +877,8 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
       return s.duel ? { ...s, duel: { ...s.duel, [ev.data.side]: { ...s.duel[ev.data.side], ms: ev.data.ms, tokens: ev.data.tokens, error: ev.data.error, calls: ev.data.calls, done: true } } } : s
     case 'ab_ready':
       return s.duel ? { ...s, duel: { ...s.duel, ready: true } } : s
+    case 'ab_reset': // one side is streamed again
+      return s.duel ? { ...s, duel: { ...s.duel, ready: false, [ev.data.side]: { model: s.duel[ev.data.side].model, text: '', ms: null, tokens: null, error: null, done: false, calls: [] } } } : s
     case 'ab_pick':
       return { ...s, duel: null }
     case 'subagent':

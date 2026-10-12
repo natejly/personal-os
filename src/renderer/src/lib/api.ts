@@ -598,6 +598,8 @@ export const api = {
   },
   /** Starts the reply as a background task and returns at once; watch it with `chatStream(convId, seq)`. Throws a 409 carrying a `RunConflict` when that conversation already has a live run. */
   chat: (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string; attachments?: string[]; ab_model?: string }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }, CONTROL_TIMEOUT_MS),
+  /** Developer mode: stream one side of the waiting duel again. */
+  abRegenerate: (convId: string, messageId: string, side: 'a' | 'b') => req<{ ok: boolean }>(`/conversations/${convId}/ab/regenerate`, { method: 'POST', body: json({ message_id: messageId, side }) }, CONTROL_TIMEOUT_MS),
   /** Developer mode: settle the model duel a running reply waits on. */
   abPick: (convId: string, messageId: string, winner: DuelWinner) => req<{ ok: boolean }>(`/conversations/${convId}/ab/pick`, { method: 'POST', body: json({ message_id: messageId, winner }) }, CONTROL_TIMEOUT_MS),
   modelVotes: () => req<{ votes: number; models: ModelStanding[] }>('/model-votes'),

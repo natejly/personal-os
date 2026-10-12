@@ -391,7 +391,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     if (!c?.item) submit(false)
   }
 
-  const sendLabel = !streaming ? tip('Send', 'send') : queueId ? 'Queue a follow-up (⌘↵ steers now)' : 'Steer the reply'
+  const sendLabel = !streaming ? tip('Send', 'send') : queueId ? 'Queue a follow-up' : tip('Steer the reply', 'steer')
 
   return (
     <div className={compact ? 'composer-wrap compact' : 'composer-wrap'}>

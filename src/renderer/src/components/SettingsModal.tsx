@@ -39,6 +39,7 @@ import TypographyControls from '../features/notes/TypographyMenu'
 import PlannerMailSettings from './PlannerMailSettings'
 import MemoryPanel from './MemoryPanel'
 import ScopeSelect from './ScopeSelect'
+import { tip } from '../lib/tip'
 
 type Tab = SettingsTab
 
@@ -659,10 +660,10 @@ export default function SettingsModal(): JSX.Element {
               <div className="setting-row">
                 <span className="toggle-text"><b>Zoom</b><small>Scales the whole interface, in every window. ⌘= and ⌘− step it, ⌥⌘0 resets.</small></span>
                 <div className="seg" role="group" aria-label="Zoom">
-                  <button type="button" aria-label="Zoom out" onClick={() => void saveEarly({ uiZoom: stepZoom(settings.uiZoom ?? DEFAULT_ZOOM, -1) })}>−</button>
+                  <button type="button" aria-label="Zoom out" title={tip('Zoom out', 'zoom-out')} onClick={() => void saveEarly({ uiZoom: stepZoom(settings.uiZoom ?? DEFAULT_ZOOM, -1) })}>−</button>
                   <button type="button" disabled>{settings.uiZoom ?? DEFAULT_ZOOM}%</button>
-                  <button type="button" aria-label="Zoom in" onClick={() => void saveEarly({ uiZoom: stepZoom(settings.uiZoom ?? DEFAULT_ZOOM, 1) })}>+</button>
-                  <button type="button" onClick={() => void saveEarly({ uiZoom: DEFAULT_ZOOM })}>Reset</button>
+                  <button type="button" aria-label="Zoom in" title={tip('Zoom in', 'zoom-in')} onClick={() => void saveEarly({ uiZoom: stepZoom(settings.uiZoom ?? DEFAULT_ZOOM, 1) })}>+</button>
+                  <button type="button" title={tip('Actual size', 'zoom-reset')} onClick={() => void saveEarly({ uiZoom: DEFAULT_ZOOM })}>Reset</button>
                 </div>
               </div>
               <Switch title="Daily recap on new chats" checked={homeModuleOn(draft, 'recap')} onChange={(on) => patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), recap: on } })} />
@@ -678,7 +679,7 @@ export default function SettingsModal(): JSX.Element {
                 <Switch title="Notify me about scheduled jobs" help="When a job fails, is paused or leaves something for you while the app is in the background." checked={draft.notifyJobs !== false} onChange={(notifyJobs) => patch({ notifyJobs })} />
               </Sec>
               <Sec id="shortcuts">
-                <h4>Shortcuts <button type="button" className="link-btn" onClick={() => useStore.getState().openHelp('shortcuts')}>Show all shortcuts</button></h4>
+                <h4>Shortcuts <button type="button" className="link-btn" title={tip('Keyboard shortcuts', 'help')} onClick={() => useStore.getState().openHelp('shortcuts')}>Show all shortcuts</button></h4>
                 {shortcut && !shortcut.ok && <p className="test-msg fail">{shortcut.message ?? `${shortcut.accelerator} could not be registered.`}</p>}
                 {capShortcut && !capShortcut.ok && <p className="test-msg fail">{capShortcut.message ?? `${capShortcut.accelerator} could not be registered.`}</p>}
                 {askShortcut && !askShortcut.ok && <p className="test-msg fail">{askShortcut.message ?? `${askShortcut.accelerator} could not be registered.`}</p>}

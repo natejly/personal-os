@@ -10,6 +10,7 @@ import { useCanvas, useIsFocused, useSpaceLocked } from './store'
 import { getDragOverlay, rectStyle, subscribeDragOverlay, useWindowDrag, type DragOverlay } from './useDrag'
 import WindowHost from './WindowHost'
 import type { Handle, Point } from './snapping'
+import { tip } from '../lib/tip'
 
 /** Edges before corners in the DOM so a corner grab never resolves to the edge underneath it. */
 const EDGES: Handle[] = ['s', 'e', 'w']  // no 'n': the top edge moves the window
@@ -163,7 +164,7 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
       >
         <span className="win-grip">{status}</span>
         {!locked && (
-          <button className="win-close" title="Close (⌘W)" aria-label={`Close ${win.title || def?.label || 'window'}`}
+          <button className="win-close" title={tip('Close', 'close-window')} aria-label={`Close ${win.title || def?.label || 'window'}`}
             onPointerDown={(e) => e.stopPropagation()} onClick={() => void closeWindow(win.id)}>×</button>
         )}
       </div>
@@ -172,7 +173,7 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
         {win.state === 'popped' ? (
           <div className="win-ghost">
             <span>Detached to its own window</span>
-            <button className="ghost-btn" onClick={() => void returnToCanvas(win.id)}>Return to canvas</button>
+            <button className="ghost-btn" title={tip('Return to canvas', 'unpopout')} onClick={() => void returnToCanvas(win.id)}>Return to canvas</button>
           </div>
         ) : (
           <WindowHost win={win} focused={focused} live={live} onMove={locked ? undefined : onDragPointerDown} />

@@ -5,6 +5,7 @@ import { AddWidgetButton } from './AddWidgetMenu'
 import AppSwitcher from '../components/AppSwitcher'
 import { useCanvas, useSpaceLocked } from './store'
 import { GRID_SIZES } from './snapping'
+import { tip } from '../lib/tip'
 
 const SNAP_LABEL: Record<SnapMode, string> = { off: 'No snap', grid: 'Grid', guides: 'Guides', both: 'Grid + guides' }
 
@@ -43,17 +44,17 @@ export default function SpacesBar(): JSX.Element {
       <span className="spacer" />
       {/* Deliberately apart from the new-space + beside the tabs: this one adds to the space. */}
       <AddWidgetButton />
-      <button className="icon-btn ghost sm" title="Tidy up (⌃⌘T)" disabled={locked} onClick={() => useCanvas.getState().tidyUp()}><AlignJustify size={14} /></button>
+      <button className="icon-btn ghost sm" title={tip('Tidy up', 'canvas-tidy')} disabled={locked} onClick={() => useCanvas.getState().tidyUp()}><AlignJustify size={14} /></button>
       <SnapSelect canvasId={activeId} />
       <button
         className={`icon-btn ghost sm${locked ? ' on' : ''}`}
-        title={locked ? 'Unlock canvas (⌃⌘L)' : 'Lock canvas (⌃⌘L)'}
+        title={tip(locked ? 'Unlock canvas' : 'Lock canvas', 'canvas-lock')}
         disabled={!activeId}
         onClick={() => useCanvas.getState().toggleLock()}
       >
         {locked ? <Lock size={14} /> : <LockOpen size={14} />}
       </button>
-      <button className={`icon-btn ghost sm${overview ? ' on' : ''}`} title="Canvas overview (⌥⌘↑)" onClick={() => useCanvas.getState().toggleOverview()}><LayoutGrid size={14} /></button>
+      <button className={`icon-btn ghost sm${overview ? ' on' : ''}`} title={tip('Canvas overview', 'canvas-overview')} onClick={() => useCanvas.getState().toggleOverview()}><LayoutGrid size={14} /></button>
       <AppSwitcher />
     </div>
   )

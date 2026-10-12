@@ -10,6 +10,7 @@ import { clampOpacity, MIN_OPACITY, nextOpacity, opacityPercent } from './canvas
 import StatusRing from './canvas/StatusRing'
 // The `.popout*` rules live in canvas.css, which only Canvas.tsx would otherwise pull in.
 import './styles/canvas.css'
+import { tip } from './lib/tip'
 
 /**
  * The renderer of one detached widget. It knows nothing but its canvas window id and resolves the rest
@@ -223,10 +224,10 @@ export default function PopoutSurface({ windowId }: { windowId: string }): JSX.E
         >
           <Blend size={13} />
         </button>
-        <button className="icon-btn" title={pinned ? 'Stop keeping on top (⌃⌘P)' : 'Keep on top (⌃⌘P)'} onClick={() => setPinned(!pinned)}>
+        <button className="icon-btn" title={tip(pinned ? 'Stop keeping on top' : 'Keep on top', 'pin')} onClick={() => setPinned(!pinned)}>
           {pinned ? <PinOff size={13} /> : <Pin size={13} />}
         </button>
-        <button className="icon-btn" title="Close (⌘W)" onClick={() => window.os.closeSelf()}><X size={13} /></button>
+        <button className="icon-btn" title={tip('Close', 'close-window')} onClick={() => window.os.closeSelf()}><X size={13} /></button>
       </div>
       {tuning && (
         <div className="popout-opacity" onPointerDown={(e) => e.stopPropagation()}>

@@ -536,7 +536,7 @@ export interface State {
   pauseDesk: (id: string) => Promise<void>
   stopDesk: (id: string) => Promise<void>
   /** The steer box, awake or asleep. `false` means the text was refused, so the caller keeps it. */
-  messageDesk: (id: string, text: string) => Promise<boolean>
+  messageDesk: (id: string, text: string, abModel?: string) => Promise<boolean>
   patchDesk: (id: string, patch: Parameters<typeof api.cowork.desks.patch>[1]) => Promise<void>
   /** `quiet` is for the live refresh: a failed background reload must not toast every few seconds. */
   loadDeskFiles: (id: string, path?: string, quiet?: boolean) => Promise<void>
@@ -1111,7 +1111,7 @@ export const useStore = create<State>((set, get) => {
       return false
     }
     // The files show as a chip under whatever the user typed, rather than as words put in their mouth.
-    const ok = await get().messageDesk(deskId, [text.trim(), inputChip(added)].filter(Boolean).join('\n\n'))
+    const ok = await get().messageDesk(deskId, [text.trim(), inputChip(added)].filter(Boolean).join('\n\n'), abFor(get(), convId))
     dropPending(convId, key)
     return ok
   }
@@ -1667,14 +1667,15 @@ export const useStore = create<State>((set, get) => {
    * `false` means the backend never accepted `body`, so the caller still owns the text it sent.
    * Resolves on that verdict, not at the end of the run: a composer is holding a draft on it.
    */
-  /** A/B is armed. A desk never duels (the backend skips them), so a new chat starts plain while it is on. */
-  const abActive = (st: ReturnType<typeof get>): boolean => st.settings.devTools === true && st.abOn && !!st.abModel
+  /** The model to duel for a message typed in the main chat view, where the columns and pick buttons are drawn. */
+  const abFor = (st: ReturnType<typeof get>, convId: string): string | undefined =>
+    st.settings.devTools === true && st.abOn && st.abModel && st.view === 'chat' && st.focusedConversationId === convId ? st.abModel : undefined
 
   const runStream = async (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string; attachments?: string[]; ab_model?: string }, pendingKey?: number): Promise<boolean> => {
     let run: ChatRunStarted
     const st = get()
-    // A duel needs the main chat view, where its columns and the pick buttons are drawn.
-    if (abActive(st) && body.content && !body.replace_from && st.view === 'chat' && st.focusedConversationId === convId) body = { ...body, ab_model: st.abModel ?? undefined }
+    const ab = abFor(st, convId)
+    if (ab && body.content && !body.replace_from) body = { ...body, ab_model: ab }
     try {
       run = await api.chat(convId, body)
     } catch (e) {
@@ -2554,7 +2555,7 @@ export const useStore = create<State>((set, get) => {
       void get().refreshProjects()
       // A new chat that starts autonomous: its desk is made now, asleep, and the first message wakes it.
       let deskId = ''
-      if (autonomy && !abActive(get())) {
+      if (autonomy) {
         try {
           const { desk } = await api.cowork.desks.create({ conversation_id: c.id, autonomy, brief: text, start: false })
           bindDesk(c.id, desk.id)
@@ -3164,10 +3165,10 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
       }
     },
-    messageDesk: async (id, text) => {
+    messageDesk: async (id, text, abModel) => {
       if (!text.trim()) return false
       try {
-        const out = await api.cowork.desks.message(id, text.trim())
+        const out = await api.cowork.desks.message(id, text.trim(), abModel)
         if (out.position) get().toast(queuedNote(out.position))
         // Awake it steered the live reply, asleep it woke a new turn — either way the row has moved
         // (the question is answered, the status is live again), and `openDesk` re-attaches.

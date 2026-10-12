@@ -2618,7 +2618,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 yield {"type": "overflow_recovered", **recovered}
 
         ab_model = (body.ab_model or "").strip() if (cfg.get("devTools") is True and run is not None and body.content is not None
-                                                      and not internal and not _desk and not _job) else ""
+                                                      and not internal and not _job) else ""
         ab_chosen: dict[str, Any] | None = None  # the picked candidate (its text and `end` event), consumed by _round_events
 
         async def _duel() -> AsyncIterator[tuple[str, Any]]:
@@ -4076,7 +4076,7 @@ def _over_live_cap() -> bool:
 
 
 def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ...], wake: dict[str, Any] | None = None,
-                 kind: str | None = None, chat_link: dict[str, Any] | None = None) -> Run | dict[str, Any] | None:
+                 kind: str | None = None, chat_link: dict[str, Any] | None = None, ab_model: str | None = None) -> Run | dict[str, Any] | None:
     """Claim the desk, start its first turn now — so the route can hand back a run_id — and give
     the chain to a supervisor task. None means the claim was lost or a run is already live. Over
     deskMaxLive the desk joins the queue instead and the queued row comes back (a dict, status
@@ -4101,7 +4101,7 @@ def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ..
         return None
     text = (content or "").strip() or claimed["brief"]
     # An explicit kind wins; a queued turn lost it when its messages were joined, so the leading backend text names it.
-    body = ChatIn(content=text, wake=wake, kind=None if wake else kind or internal_kind(text), chat_link=chat_link)
+    body = ChatIn(content=text, wake=wake, kind=None if wake else kind or internal_kind(text), chat_link=chat_link, ab_model=ab_model)
     run = bus.start(claimed["conversation_id"], lambda r: _run_desk(r, desk_id, body), kind="desk",
                     desk_id=desk_id, turn=int(claimed["turn"] or 0), input={"content": body.content, **({"wake": wake} if wake else {})})
     _desk_tasks[desk_id] = asyncio.create_task(_desk_supervisor(desk_id, run), name=f"desk:{desk_id}")
@@ -8763,6 +8763,7 @@ class DeskPatch(BaseModel):
 
 class DeskMessageIn(BaseModel):
     content: str
+    ab_model: str | None = None  # developer mode: the turn this message starts duels this model (ChatIn.ab_model)
 
 
 class DeskResumeIn(BaseModel):
@@ -9241,7 +9242,7 @@ async def message_desk(id: str, body: DeskMessageIn) -> dict[str, Any]:
         if not bus.live(conv_id):
             break
         await asyncio.sleep(0.25)
-    started = _launch_desk(id, text, MESSAGE_FROM)
+    started = _launch_desk(id, text, MESSAGE_FROM, ab_model=body.ab_model)
     if isinstance(started, dict):
         return {"ok": True, "steered": False, **_queued_view(id)}
     if started is None:

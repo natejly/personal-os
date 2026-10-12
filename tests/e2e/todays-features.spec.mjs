@@ -80,6 +80,8 @@ for (const mode of ['auto', 'allow_all']) {
       await say(page, `!!reply duel-${n}`)
       await expect(panel).toBeVisible({ timeout: 30_000 })
       await expect(panel.locator('.duel-body')).toHaveCount(2)
+      // The chat stayed autonomous: its own desk holds the duel.
+      expect((await api('/cowork/desks')).length).toBe(1)
       await expect(panel.getByRole('button', { name: /A is better/ })).toBeEnabled({ timeout: 30_000 })
       await panel.getByRole('button', { name: /A is better/ }).click()
       await expect(panel).toHaveCount(0)

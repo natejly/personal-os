@@ -747,7 +747,7 @@ export const api = {
       start: (id: string) => req<({ run_id: string; seq: number } | DeskQueued) & { conversation_id: string }>(`/cowork/desks/${id}/start`, { method: 'POST' }),
       resume: (id: string, reason?: string) => req<{ run_id: string; seq: number } | DeskQueued>(`/cowork/desks/${id}/resume`, { method: 'POST', body: json({ reason }) }),
       /** The same box awake or asleep: live it steers the running reply, otherwise it is the next turn's content. */
-      message: (id: string, content: string) => req<{ ok: boolean; steered: boolean; run_id?: string } & Partial<DeskQueued>>(`/cowork/desks/${id}/message`, { method: 'POST', body: json({ content }) }),
+      message: (id: string, content: string, ab_model?: string) => req<{ ok: boolean; steered: boolean; run_id?: string } & Partial<DeskQueued>>(`/cowork/desks/${id}/message`, { method: 'POST', body: json({ content, ab_model }) }),
       /** Marks every unseen needs-you event of ONE desk read — opening the desk is the acknowledgement. */
       seen: (id: string) => req<Desk>(`/cowork/desks/${id}/seen`, { method: 'POST' }),
       pause: (id: string) => req<Desk>(`/cowork/desks/${id}/pause`, { method: 'POST' }),

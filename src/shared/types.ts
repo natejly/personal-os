@@ -1513,13 +1513,17 @@ export interface Settings {
   docTypography?: DocTypography
   theme: 'dark' | 'light' | 'system'
   /** Pastel highlight colour. Missing on older settings rows means sage. */
-  accent?: 'sage' | 'lilac' | 'sky' | 'rose' | 'mint' | 'fog' | 'amber' | 'peach' | 'clay'
+  accent?: 'sage' | 'lilac' | 'sky' | 'rose' | 'mint' | 'fog' | 'amber' | 'peach' | 'clay' | 'indigo' | 'teal' | 'coral' | 'gold' | 'plum' | 'slate' | 'forest' | 'crimson' | 'custom'
+  /** The #rrggbb behind accent 'custom'. */
+  accentCustom?: string
   /** Text colour family; missing means neutral. */
   textTone?: 'neutral' | 'warm' | 'cream' | 'soft' | 'cool'
   /** Background tint; missing means neutral. */
   surfaceTone?: 'neutral' | 'warm' | 'cool' | 'black'
   /** Interface typeface; missing means system. */
-  uiFont?: 'system' | 'serif' | 'rounded' | 'mono'
+  uiFont?: 'system' | 'serif' | 'rounded' | 'mono' | 'avenir' | 'helvetica' | 'gill' | 'futura' | 'charter' | 'georgia' | 'iowan' | 'palatino' | 'menlo'
+  /** Code and monospace typeface; missing means default. */
+  codeFont?: 'default' | 'sfmono' | 'menlo' | 'monaco' | 'courier'
   /** Legacy, pre-spaces global mode. Read once by init() (→ initial view 'canvas') and reset to 'classic'; nothing else reads it. */
   mode?: 'classic' | 'canvas'
   /** Electron accelerator for the global Gather/Scatter shortcut. */

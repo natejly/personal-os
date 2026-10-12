@@ -173,6 +173,48 @@
   --accent: #d19a82; --accent-hover: #dcaf9b;
   --accent-solid: #a05a40; --accent-solid-hover: #8e4f38; --focus-ring: #d19a82;
 }
+:root[data-accent='indigo'] {
+  --accent: #aab4e8; --accent-hover: #bec6ed;
+  --accent-solid: #5266d0; --accent-solid-hover: #4258cc; --focus-ring: #aab4e8;
+}
+:root[data-accent='teal'] {
+  --accent: #8fcfcb; --accent-hover: #a1d7d3;
+  --accent-solid: #347a75; --accent-solid-hover: #2e6c67; --focus-ring: #8fcfcb;
+}
+:root[data-accent='coral'] {
+  --accent: #eca59a; --accent-hover: #f0b8af;
+  --accent-solid: #ca3c26; --accent-solid-hover: #b93723; --focus-ring: #eca59a;
+}
+:root[data-accent='gold'] {
+  --accent: #e6cf7c; --accent-hover: #ead791;
+  --accent-solid: #846d19; --accent-solid-hover: #735f16; --focus-ring: #e6cf7c;
+}
+:root[data-accent='plum'] {
+  --accent: #c9a0c8; --accent-hover: #d2b0d1;
+  --accent-solid: #9a5798; --accent-solid-hover: #8d508b; --focus-ring: #c9a0c8;
+}
+:root[data-accent='slate'] {
+  --accent: #a3afbd; --accent-hover: #b2bcc8;
+  --accent-solid: #5f7084; --accent-solid-hover: #566678; --focus-ring: #a3afbd;
+}
+:root[data-accent='forest'] {
+  --accent: #9ccaa0; --accent-hover: #add3b0;
+  --accent-solid: #427c47; --accent-solid-hover: #3b6f3f; --focus-ring: #9ccaa0;
+}
+:root[data-accent='crimson'] {
+  --accent: #e29aa4; --accent-hover: #e8aeb6;
+  --accent-solid: #c73b4e; --accent-solid-hover: #b93547; --focus-ring: #e29aa4;
+}
+/* Custom accent: one picked hex (--accent-custom, set on <html>), the rest derived from it. Dark theme lifts it toward
+   white for text and darkens it for fills; --on-accent flips to black when the fill is light. */
+:root[data-accent='custom'] {
+  --accent: color-mix(in srgb, var(--accent-custom, #7c8cf0) 62%, white);
+  --accent-hover: color-mix(in srgb, var(--accent-custom, #7c8cf0) 48%, white);
+  --accent-solid: color-mix(in oklab, var(--accent-custom, #7c8cf0) 60%, black);
+  --accent-solid-hover: color-mix(in oklab, var(--accent-custom, #7c8cf0) 50%, black);
+  --focus-ring: var(--accent);
+  --on-accent: oklch(from var(--accent-solid) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+}
 
 :root[data-theme='light'][data-accent='lilac'] {
   --accent: #6c578b; --accent-hover: #5e4a7a;
@@ -206,6 +248,46 @@
   --accent: #8f4a33; --accent-hover: #7d4029;
   --accent-solid: #8c4932; --accent-solid-hover: #793e29; --focus-ring: #8f4a33;
 }
+:root[data-theme='light'][data-accent='indigo'] {
+  --accent: #3a51ca; --accent-hover: #3247b9;
+  --accent-solid: #485dcd; --accent-solid-hover: #364dc6; --focus-ring: #3a51ca;
+}
+:root[data-theme='light'][data-accent='teal'] {
+  --accent: #2c6663; --accent-hover: #245452;
+  --accent-solid: #30716d; --accent-solid-hover: #285f5c; --focus-ring: #2c6663;
+}
+:root[data-theme='light'][data-accent='coral'] {
+  --accent: #a93220; --accent-hover: #942c1c;
+  --accent-solid: #bd3824; --accent-solid-hover: #a83220; --focus-ring: #a93220;
+}
+:root[data-theme='light'][data-accent='gold'] {
+  --accent: #6f5b15; --accent-hover: #5a4911;
+  --accent-solid: #7a6417; --accent-solid-hover: #655213; --focus-ring: #6f5b15;
+}
+:root[data-theme='light'][data-accent='plum'] {
+  --accent: #814a80; --accent-hover: #714170;
+  --accent-solid: #8e518d; --accent-solid-hover: #7e487d; --focus-ring: #814a80;
+}
+:root[data-theme='light'][data-accent='slate'] {
+  --accent: #505e6f; --accent-hover: #455160;
+  --accent-solid: #58697b; --accent-solid-hover: #4d5c6c; --focus-ring: #505e6f;
+}
+:root[data-theme='light'][data-accent='forest'] {
+  --accent: #37683c; --accent-hover: #2e5732;
+  --accent-solid: #3e7342; --accent-solid-hover: #356238; --focus-ring: #37683c;
+}
+:root[data-theme='light'][data-accent='crimson'] {
+  --accent: #a83041; --accent-hover: #942a39;
+  --accent-solid: #ba3548; --accent-solid-hover: #a62f40; --focus-ring: #a83041;
+}
+
+:root[data-theme='light'][data-accent='custom'] {
+  --accent: color-mix(in srgb, var(--accent-custom, #7c8cf0) 55%, black);
+  --accent-hover: color-mix(in srgb, var(--accent-custom, #7c8cf0) 45%, black);
+  --accent-solid: color-mix(in oklab, var(--accent-custom, #7c8cf0) 62%, black);
+  --accent-solid-hover: color-mix(in oklab, var(--accent-custom, #7c8cf0) 52%, black);
+  --focus-ring: var(--accent);
+}
 @media (prefers-color-scheme: light) {
   :root[data-theme='system'][data-accent='amber'] {
     --accent: #7a5a18; --accent-hover: #6a4d14;
@@ -238,6 +320,45 @@
   :root[data-theme='system'][data-accent='fog'] {
     --accent: #4d5c72; --accent-hover: #424f63;
     --accent-solid: #48566b; --accent-solid-hover: #3d4a5d; --focus-ring: #4d5c72;
+  }
+  :root[data-theme='system'][data-accent='indigo'] {
+    --accent: #3a51ca; --accent-hover: #3247b9;
+    --accent-solid: #485dcd; --accent-solid-hover: #364dc6; --focus-ring: #3a51ca;
+  }
+  :root[data-theme='system'][data-accent='teal'] {
+    --accent: #2c6663; --accent-hover: #245452;
+    --accent-solid: #30716d; --accent-solid-hover: #285f5c; --focus-ring: #2c6663;
+  }
+  :root[data-theme='system'][data-accent='coral'] {
+    --accent: #a93220; --accent-hover: #942c1c;
+    --accent-solid: #bd3824; --accent-solid-hover: #a83220; --focus-ring: #a93220;
+  }
+  :root[data-theme='system'][data-accent='gold'] {
+    --accent: #6f5b15; --accent-hover: #5a4911;
+    --accent-solid: #7a6417; --accent-solid-hover: #655213; --focus-ring: #6f5b15;
+  }
+  :root[data-theme='system'][data-accent='plum'] {
+    --accent: #814a80; --accent-hover: #714170;
+    --accent-solid: #8e518d; --accent-solid-hover: #7e487d; --focus-ring: #814a80;
+  }
+  :root[data-theme='system'][data-accent='slate'] {
+    --accent: #505e6f; --accent-hover: #455160;
+    --accent-solid: #58697b; --accent-solid-hover: #4d5c6c; --focus-ring: #505e6f;
+  }
+  :root[data-theme='system'][data-accent='forest'] {
+    --accent: #37683c; --accent-hover: #2e5732;
+    --accent-solid: #3e7342; --accent-solid-hover: #356238; --focus-ring: #37683c;
+  }
+  :root[data-theme='system'][data-accent='crimson'] {
+    --accent: #a83041; --accent-hover: #942a39;
+    --accent-solid: #ba3548; --accent-solid-hover: #a62f40; --focus-ring: #a83041;
+  }
+  :root[data-theme='system'][data-accent='custom'] {
+    --accent: color-mix(in srgb, var(--accent-custom, #7c8cf0) 55%, black);
+    --accent-hover: color-mix(in srgb, var(--accent-custom, #7c8cf0) 45%, black);
+    --accent-solid: color-mix(in oklab, var(--accent-custom, #7c8cf0) 62%, black);
+    --accent-solid-hover: color-mix(in oklab, var(--accent-custom, #7c8cf0) 52%, black);
+    --focus-ring: var(--accent);
   }
 }
 
@@ -382,6 +503,22 @@
 :root[data-font='serif'] { --font: ui-serif, 'New York', 'Iowan Old Style', Charter, Georgia, 'Times New Roman', serif; }
 :root[data-font='rounded'] { --font: ui-rounded, 'SF Pro Rounded', 'Nunito', 'Varela Round', -apple-system, system-ui, sans-serif; }
 :root[data-font='mono'] { --font: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
+
+:root[data-font='avenir'] { --font: 'Avenir Next', Avenir, -apple-system, system-ui, sans-serif; }
+:root[data-font='helvetica'] { --font: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+:root[data-font='gill'] { --font: 'Gill Sans', 'Gill Sans MT', Calibri, -apple-system, sans-serif; }
+:root[data-font='futura'] { --font: Futura, 'Trebuchet MS', -apple-system, sans-serif; }
+:root[data-font='charter'] { --font: Charter, 'Bitstream Charter', Georgia, serif; }
+:root[data-font='georgia'] { --font: Georgia, 'Times New Roman', serif; }
+:root[data-font='iowan'] { --font: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif; }
+:root[data-font='palatino'] { --font: Palatino, 'Palatino Linotype', 'Book Antiqua', Georgia, serif; }
+:root[data-font='menlo'] { --font: Menlo, Monaco, 'SF Mono', monospace; }
+
+/* Code font: swaps the --mono token (code blocks, editors, tags). Default keeps the stack in :root. */
+:root[data-code='sfmono'] { --mono: 'SF Mono', ui-monospace, Menlo, monospace; }
+:root[data-code='menlo'] { --mono: Menlo, Monaco, monospace; }
+:root[data-code='monaco'] { --mono: Monaco, Menlo, monospace; }
+:root[data-code='courier'] { --mono: 'Courier New', Courier, monospace; }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -3190,3 +3327,22 @@ select:focus-visible {
 .duel-table { width: 100%; font-size: 12px; border-collapse: collapse; }
 .duel-table th, .duel-table td { text-align: right; padding: 3px 6px; border-bottom: 1px solid var(--border); }
 .duel-table th:first-child, .duel-table td:first-child { text-align: left; }
+
+/* Appearance presets */
+.preset-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: 8px; margin: 4px 0 14px; }
+.preset-card {
+  display: flex; flex-direction: column; gap: 6px; padding: 8px; text-align: left;
+  border: 1.5px solid var(--border-strong); border-radius: 10px; background: var(--bg-elev);
+}
+.preset-card:hover { border-color: var(--control-border); }
+.preset-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.preset-card:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.preset-prev { display: flex; align-items: center; justify-content: space-between; height: 38px; padding: 0 9px; border-radius: 6px; border: 1px solid rgba(128, 128, 128, 0.3); font-size: 15px; line-height: 1; }
+.preset-prev i { width: 12px; height: 12px; border-radius: 50%; }
+.preset-card b { font-size: 12px; font-weight: 600; }
+.font-picks { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 2px; }
+.font-picks button { padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: 7px; font-size: 13px; }
+.font-picks button.on { border-color: var(--accent); background: var(--zone-fill); }
+.accent-custom { position: relative; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; font-size: 15px; line-height: 1; color: var(--text-muted); border: 2px dashed var(--control-border); border-radius: 50%; width: 28px; height: 28px; flex-shrink: 0; }
+.accent-custom.on { border-style: solid; border-color: var(--text); }
+.accent-custom input { position: absolute; inset: -6px; width: 44px; height: 44px; opacity: 0; cursor: pointer; }

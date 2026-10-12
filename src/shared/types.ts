@@ -1511,7 +1511,13 @@ export interface Settings {
   docTypography?: DocTypography
   theme: 'dark' | 'light' | 'system'
   /** Pastel highlight colour. Missing on older settings rows means sage. */
-  accent?: 'sage' | 'lilac' | 'sky' | 'rose' | 'mint' | 'fog'
+  accent?: 'sage' | 'lilac' | 'sky' | 'rose' | 'mint' | 'fog' | 'amber' | 'peach' | 'clay'
+  /** Text colour family; missing means neutral. */
+  textTone?: 'neutral' | 'warm' | 'cream' | 'soft' | 'cool'
+  /** Background tint; missing means neutral. */
+  surfaceTone?: 'neutral' | 'warm' | 'cool' | 'black'
+  /** Interface typeface; missing means system. */
+  uiFont?: 'system' | 'serif' | 'rounded' | 'mono'
   /** Legacy, pre-spaces global mode. Read once by init() (→ initial view 'canvas') and reset to 'classic'; nothing else reads it. */
   mode?: 'classic' | 'canvas'
   /** Electron accelerator for the global Gather/Scatter shortcut. */

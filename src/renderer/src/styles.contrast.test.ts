@@ -2,13 +2,17 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { ACCENTS as ACCENT_LIST, SURFACE_TONES, TEXT_TONES } from './lib/appearance'
 
 // WCAG contrast guard for the design tokens. It parses the token blocks out of the real stylesheets (nothing is
 // copied here), resolves var() / color-mix() / rgba alpha, and fails loudly when a value cannot be resolved.
 // Run from the repo root (npm test does).
 
 const SRC = join(process.cwd(), 'src/renderer/src')
-const ACCENTS = ['sage', 'lilac', 'sky', 'rose', 'mint', 'fog']
+// Derived from the app's own option lists, so a new accent or tone is covered the day it is added.
+const ACCENTS: string[] = ACCENT_LIST.map((a) => a.id)
+const TEXTS: string[] = TEXT_TONES.map((t) => t.id)
+const SURFACES: string[] = SURFACE_TONES.map((t) => t.id)
 const THEMES = ['dark', 'light'] as const
 type Theme = (typeof THEMES)[number]
 
@@ -142,25 +146,33 @@ const ratio = (a: RGBA, b: RGBA) => {
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
 }
 
-// ---- the token set a theme + accent resolves to (cascade order: dark root, dark accent, light, light accent) ----
-function tokens(theme: Theme, accent: string): Map<string, string> {
+// ---- the token set a theme + accent + text tone + surface tone resolves to ----
+// Cascade order: dark root, then the dark accent / text / surface rules, then (light only) the light theme block and the
+// light accent / text / surface rules, which win on specificity. 'neutral' and 'sage' are the base and have no rule.
+function tokens(theme: Theme, accent: string, text = 'neutral', surface = 'neutral'): Map<string, string> {
   const vars = new Map<string, string>()
   const layer = (sel: string, media = '') => {
     const r = styles.find((x) => x.sel === sel && x.media === media)
     if (r) for (const [k, v] of r.decls) if (k.startsWith('--')) vars.set(k, v)
     return r
   }
+  const tones = (prefix: string) => {
+    if (accent !== 'sage') assert.ok(layer(`${prefix}[data-accent='${accent}']`), `no ${prefix} accent rule for ${accent}`)
+    if (text !== 'neutral') assert.ok(layer(`${prefix}[data-text='${text}']`), `no ${prefix} text rule for ${text}`)
+    if (surface !== 'neutral') assert.ok(layer(`${prefix}[data-surface='${surface}']`), `no ${prefix} surface rule for ${surface}`)
+  }
   layer(':root')
-  if (accent !== 'sage') assert.ok(layer(`:root[data-accent='${accent}']`), `no dark accent rule for ${accent}`)
+  tones(':root')
   if (theme === 'light') {
     assert.ok(layer(`:root[data-theme='light']`), 'no light theme block')
-    if (accent !== 'sage') assert.ok(layer(`:root[data-theme='light'][data-accent='${accent}']`), `no light accent rule for ${accent}`)
+    tones(`:root[data-theme='light']`)
   }
   return vars
 }
 
 const tok = (vars: Map<string, string>, name: string, trail = ''): RGBA => parseColor(`var(${name})`, vars, trail ? [trail] : [])
 const label = (theme: string, accent: string, what: string) => `${theme}/${accent}: ${what}`
+const GRID = THEMES.flatMap((theme) => SURFACES.map((surface) => ({ theme, surface })))
 
 function expectAtLeast(min: number, fg: RGBA, bg: RGBA, what: string) {
   const r = ratio(fg, bg)
@@ -181,6 +193,24 @@ test('the system-theme light block is identical to the light theme block', () =>
     const dark = ruleFor(`:root[data-accent='${a}']`)
     for (const k of dark.decls.keys()) assert.ok(l.decls.has(k), `light ${a} accent does not set ${k}`)
   }
+  for (const [attr, ids] of [['text', TEXTS], ['surface', SURFACES]] as const) {
+    for (const id of ids.filter((x) => x !== 'neutral')) {
+      const sel = `[data-${attr}='${id}']`
+      const l = ruleFor(`:root[data-theme='light']${sel}`)
+      const s = ruleFor(`:root[data-theme='system']${sel}`, '@media (prefers-color-scheme: light)')
+      assert.equal(norm(s), norm(l), `system ${attr} ${id} drifted from the light one`)
+      // A light tone must replace every token the dark variant sets, or the dark value leaks through.
+      if (id !== 'black') for (const k of ruleFor(`:root${sel}`).decls.keys()) assert.ok(l.decls.has(k), `light ${attr} ${id} does not set ${k}`)
+    }
+  }
+})
+
+test('the default text, background and font options have no rules: they are the base tokens', () => {
+  for (const r of styles) {
+    assert.ok(!/data-text='neutral'|data-surface='neutral'|data-font='system'/.test(r.sel), `${r.sel} would change the default look`)
+  }
+  assert.equal(TEXTS[0], 'neutral')
+  assert.equal(SURFACES[0], 'neutral')
 })
 
 test('--on-accent clears 4.5:1 on every accent solid and its hover, in both themes', () => {
@@ -204,12 +234,38 @@ test('--accent, --text, --text-muted and the status colours read as text on --bg
   }
 })
 
-test('--control-border is a 3:1 edge against the control and its surroundings', () => {
-  for (const theme of THEMES) {
-    const v = tokens(theme, 'sage')
-    for (const surface of ['--bg-input', '--bg-elev', '--bg']) {
-      expectAtLeast(3, tok(v, '--control-border'), tok(v, surface), label(theme, 'sage', `--control-border on ${surface}`))
+test('every text tone reads on every background tone, in both themes', () => {
+  for (const { theme, surface } of GRID) for (const text of TEXTS) {
+    const v = tokens(theme, 'sage', text, surface)
+    const at = (what: string) => `${theme}/${text} text on ${surface}: ${what}`
+    for (const bg of ['--bg', '--bg-elev']) {
+      expectAtLeast(7, tok(v, '--text'), tok(v, bg), at(`--text on ${bg}`))
+      expectAtLeast(4.5, tok(v, '--text-muted'), tok(v, bg), at(`--text-muted on ${bg}`))
+      expectAtLeast(4.5, tok(v, '--text-faint'), tok(v, bg), at(`--text-faint on ${bg}`))
     }
+    expectAtLeast(4.5, tok(v, '--text-muted'), tok(v, '--user-bubble'), at('--text-muted on --user-bubble'))
+    expectAtLeast(7, tok(v, '--text'), tok(v, '--user-bubble'), at('--text on --user-bubble'))
+  }
+})
+
+test('every accent and status colour reads on every background tone, in both themes', () => {
+  for (const { theme, surface } of GRID) for (const accent of ACCENTS) {
+    const v = tokens(theme, accent, 'neutral', surface)
+    for (const bg of ['--bg', '--bg-elev']) {
+      for (const fg of ['--accent', '--accent-hover', '--danger', '--ok', '--warn', '--info']) {
+        expectAtLeast(4.5, tok(v, fg), tok(v, bg), `${theme}/${accent} on ${surface}: ${fg} on ${bg}`)
+      }
+    }
+  }
+})
+
+test('--control-border is a 3:1 edge against the control and its surroundings', () => {
+  for (const { theme, surface: tone } of GRID) {
+    const v = tokens(theme, 'sage', 'neutral', tone)
+    for (const surface of ['--bg-input', '--bg-elev', '--bg']) {
+      expectAtLeast(3, tok(v, '--control-border'), tok(v, surface), label(theme, tone, `--control-border on ${surface}`))
+    }
+    expectAtLeast(3, tok(v, '--control-border'), tok(v, '--user-bubble'), label(theme, tone, '--control-border on --user-bubble'))
   }
 })
 
@@ -226,13 +282,13 @@ test('every tinted status chip keeps its text at 4.5:1 on its own tint', () => {
       if (!m || fg !== `var(${m[1]})`) continue
       found.push(rule.sel)
       const accents = m[1] === '--accent' ? ACCENTS : ['sage']
-      for (const theme of THEMES) for (const accent of accents) {
-        const v = tokens(theme, accent)
+      for (const { theme, surface: tone } of GRID) for (const accent of accents) {
+        const v = tokens(theme, accent, 'neutral', tone)
         const tint = parseColor(bg!, v)
         for (const surface of ['--bg', '--bg-elev']) {
           const under = tok(v, surface)
           const r = ratio(tok(v, m[1]), over(tint, under))
-          if (r < 4.5) failures.push(label(theme, accent, `${rule.sel} (${m[1]} on its tint over ${surface}) is ${r.toFixed(2)}:1`))
+          if (r < 4.5) failures.push(label(theme, `${accent}/${tone}`, `${rule.sel} (${m[1]} on its tint over ${surface}) is ${r.toFixed(2)}:1`))
         }
       }
     }

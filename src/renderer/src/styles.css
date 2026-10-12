@@ -161,6 +161,18 @@
   --accent: #b4becc; --accent-hover: #c5ccd8;
   --accent-solid: #6a7688; --accent-solid-hover: #5b6778; --focus-ring: #b4becc;
 }
+:root[data-accent='amber'] {
+  --accent: #e3c48a; --accent-hover: #ecd2a2;
+  --accent-solid: #86662a; --accent-solid-hover: #775a24; --focus-ring: #e3c48a;
+}
+:root[data-accent='peach'] {
+  --accent: #e8b9a0; --accent-hover: #f0c9b4;
+  --accent-solid: #9b5f46; --accent-solid-hover: #8a5440; --focus-ring: #e8b9a0;
+}
+:root[data-accent='clay'] {
+  --accent: #d19a82; --accent-hover: #dcaf9b;
+  --accent-solid: #a05a40; --accent-solid-hover: #8e4f38; --focus-ring: #d19a82;
+}
 
 :root[data-theme='light'][data-accent='lilac'] {
   --accent: #6c578b; --accent-hover: #5e4a7a;
@@ -182,7 +194,31 @@
   --accent: #4d5c72; --accent-hover: #424f63;
   --accent-solid: #48566b; --accent-solid-hover: #3d4a5d; --focus-ring: #4d5c72;
 }
+:root[data-theme='light'][data-accent='amber'] {
+  --accent: #7a5a18; --accent-hover: #6a4d14;
+  --accent-solid: #7d5e1c; --accent-solid-hover: #6b5018; --focus-ring: #7a5a18;
+}
+:root[data-theme='light'][data-accent='peach'] {
+  --accent: #8a4c34; --accent-hover: #78402b;
+  --accent-solid: #8f5139; --accent-solid-hover: #7c4630; --focus-ring: #8a4c34;
+}
+:root[data-theme='light'][data-accent='clay'] {
+  --accent: #8f4a33; --accent-hover: #7d4029;
+  --accent-solid: #8c4932; --accent-solid-hover: #793e29; --focus-ring: #8f4a33;
+}
 @media (prefers-color-scheme: light) {
+  :root[data-theme='system'][data-accent='amber'] {
+    --accent: #7a5a18; --accent-hover: #6a4d14;
+    --accent-solid: #7d5e1c; --accent-solid-hover: #6b5018; --focus-ring: #7a5a18;
+  }
+  :root[data-theme='system'][data-accent='peach'] {
+    --accent: #8a4c34; --accent-hover: #78402b;
+    --accent-solid: #8f5139; --accent-solid-hover: #7c4630; --focus-ring: #8a4c34;
+  }
+  :root[data-theme='system'][data-accent='clay'] {
+    --accent: #8f4a33; --accent-hover: #7d4029;
+    --accent-solid: #8c4932; --accent-solid-hover: #793e29; --focus-ring: #8f4a33;
+  }
   :root[data-theme='system'][data-accent='lilac'] {
     --accent: #6c578b; --accent-hover: #5e4a7a;
     --accent-solid: #655280; --accent-solid-hover: #564570; --focus-ring: #6c578b;
@@ -204,6 +240,148 @@
     --accent-solid: #48566b; --accent-solid-hover: #3d4a5d; --focus-ring: #4d5c72;
   }
 }
+
+/* Text colour: --text, --text-muted and --text-faint retinted in one hue family. Neutral is the base above.
+   Every tone keeps --text-faint at 4.5:1 or better on --bg and --bg-elev under every background tone
+   (styles.contrast.test.ts walks the whole grid). Light-theme tones are inks, so they come after the dark ones
+   and win on specificity; the system-light mirror must match them exactly. */
+:root[data-text='warm'] {
+  --text: #efe6d8;
+  --text-muted: #aa9f90;
+  --text-faint: #9a8f80;
+}
+:root[data-text='cream'] {
+  --text: #ecdfc8;
+  --text-muted: #ab9e86;
+  --text-faint: #9b8e77;
+}
+:root[data-text='soft'] {
+  --text: #d4d1ca;
+  --text-muted: #9d9a93;
+  --text-faint: #8f8c85;
+}
+:root[data-text='cool'] {
+  --text: #e3e8ee;
+  --text-muted: #9aa2ad;
+  --text-faint: #8b939e;
+}
+
+:root[data-theme='light'][data-text='warm'] {
+  --text: #2b2118;
+  --text-muted: #665848;
+  --text-faint: #6d5f4e;
+}
+:root[data-theme='light'][data-text='cream'] {
+  --text: #3a2c1c;
+  --text-muted: #695740;
+  --text-faint: #705e46;
+}
+:root[data-theme='light'][data-text='soft'] {
+  --text: #3b3a37;
+  --text-muted: #63615c;
+  --text-faint: #6b6963;
+}
+:root[data-theme='light'][data-text='cool'] {
+  --text: #1e2833;
+  --text-muted: #566170;
+  --text-faint: #5f6b7b;
+}
+@media (prefers-color-scheme: light) {
+  :root[data-theme='system'][data-text='warm'] {
+    --text: #2b2118;
+    --text-muted: #665848;
+    --text-faint: #6d5f4e;
+  }
+  :root[data-theme='system'][data-text='cream'] {
+    --text: #3a2c1c;
+    --text-muted: #695740;
+    --text-faint: #705e46;
+  }
+  :root[data-theme='system'][data-text='soft'] {
+    --text: #3b3a37;
+    --text-muted: #63615c;
+    --text-faint: #6b6963;
+  }
+  :root[data-theme='system'][data-text='cool'] {
+    --text: #1e2833;
+    --text-muted: #566170;
+    --text-faint: #5f6b7b;
+  }
+}
+
+/* Background tone: --bg, --bg-elev, --bg-input, --sidebar-bg and --user-bubble tinted together. Black is a
+   dark-theme look (true black behind the elevated surfaces); the light rules put neutral back. */
+:root[data-surface='warm'] {
+  --bg: #1d1916;
+  --bg-elev: #27221e;
+  --bg-input: #2e2924;
+  --sidebar-bg: rgba(34, 29, 25, 0.6);
+  --user-bubble: #352e27;
+}
+:root[data-surface='cool'] {
+  --bg: #171a1e;
+  --bg-elev: #1f2328;
+  --bg-input: #262b31;
+  --sidebar-bg: rgba(25, 29, 34, 0.6);
+  --user-bubble: #292f36;
+}
+:root[data-surface='black'] {
+  --bg: #000000;
+  --bg-elev: #0d0d0d;
+  --bg-input: #171717;
+  --sidebar-bg: rgba(0, 0, 0, 0.6);
+  --user-bubble: #1e1e1e;
+}
+
+:root[data-theme='light'][data-surface='warm'] {
+  --bg: #f9f4ec;
+  --bg-elev: #fffaf2;
+  --bg-input: #fffaf2;
+  --sidebar-bg: rgba(237, 229, 215, 0.6);
+  --user-bubble: #f0e8da;
+}
+:root[data-theme='light'][data-surface='cool'] {
+  --bg: #f4f6f9;
+  --bg-elev: #ffffff;
+  --bg-input: #ffffff;
+  --sidebar-bg: rgba(229, 234, 240, 0.6);
+  --user-bubble: #e1e6ed;
+}
+:root[data-theme='light'][data-surface='black'] {
+  --bg: #f7f6f3;
+  --bg-elev: #ffffff;
+  --bg-input: #ffffff;
+  --sidebar-bg: rgba(240, 238, 233, 0.6);
+  --user-bubble: #ebe8e2;
+}
+@media (prefers-color-scheme: light) {
+  :root[data-theme='system'][data-surface='warm'] {
+    --bg: #f9f4ec;
+    --bg-elev: #fffaf2;
+    --bg-input: #fffaf2;
+    --sidebar-bg: rgba(237, 229, 215, 0.6);
+    --user-bubble: #f0e8da;
+  }
+  :root[data-theme='system'][data-surface='cool'] {
+    --bg: #f4f6f9;
+    --bg-elev: #ffffff;
+    --bg-input: #ffffff;
+    --sidebar-bg: rgba(229, 234, 240, 0.6);
+    --user-bubble: #e1e6ed;
+  }
+  :root[data-theme='system'][data-surface='black'] {
+    --bg: #f7f6f3;
+    --bg-elev: #ffffff;
+    --bg-input: #ffffff;
+    --sidebar-bg: rgba(240, 238, 233, 0.6);
+    --user-bubble: #ebe8e2;
+  }
+}
+
+/* Interface font: swaps the --font token. Code and editors keep --mono. */
+:root[data-font='serif'] { --font: ui-serif, 'New York', 'Iowan Old Style', Charter, Georgia, 'Times New Roman', serif; }
+:root[data-font='rounded'] { --font: ui-rounded, 'SF Pro Rounded', 'Nunito', 'Varela Round', -apple-system, system-ui, sans-serif; }
+:root[data-font='mono'] { --font: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }

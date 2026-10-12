@@ -1,5 +1,6 @@
 import { DEFAULT_EFFORT } from '@shared/types'
 import { PAGE_AGENT_DRAFT, useStore, useConversation } from '../store'
+import DuelControls from './DuelControls'
 import ModelMenu from './ModelMenu'
 
 /**
@@ -24,12 +25,16 @@ export default function ChatControls({ conversationId }: { conversationId?: stri
   const effort = convo?.settings?.effort ?? (draft ? draftEffort : pageDraft ? pageSettings.effort : null) ?? DEFAULT_EFFORT
   const fast = convo?.settings?.fast ?? (draft ? draftFast : pageDraft ? pageSettings.fast : false)
   return (
-    <ModelMenu
-      model={model}
-      effort={effort}
-      fast={!!fast}
-      placement="up"
-      onChange={(c) => void setChatConfig(c, conversationId)}
-    />
+    <>
+      <ModelMenu
+        model={model}
+        effort={effort}
+        fast={!!fast}
+        placement="up"
+        onChange={(c) => void setChatConfig(c, conversationId)}
+      />
+      {/* Only the main chat draws a duel's columns; a quick chat, window or page agent never offers one. */}
+      {!conversationId && <DuelControls />}
+    </>
   )
 }

@@ -3163,3 +3163,21 @@ select:focus-visible {
 .job-detail h4 { margin: 14px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
 .job-report { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
 .job-report-head { display: flex; align-items: center; gap: 8px; }
+
+/* Developer-mode model duels: composer toggle, side-by-side replies, settings table. */
+.duel-controls { display: inline-flex; align-items: center; gap: 4px; }
+.duel-controls .ghost-btn.on { background: var(--zone-fill); color: var(--accent); }
+.duel-vs { font-size: 12px; color: var(--text-muted); }
+.duel { border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px; margin: 8px 0; background: var(--bg-elev); }
+.duel-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.duel-col { min-width: 0; }
+.duel-head { font-size: 12px; margin-bottom: 4px; }
+.duel-head small { color: var(--text-muted); }
+.duel-text { white-space: pre-wrap; word-break: break-word; font: inherit; font-size: 13px; margin: 0; max-height: 360px; overflow: auto; }
+.duel-calls { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: 12px; }
+.duel-calls code { overflow-wrap: anywhere; color: var(--text-muted); }
+.duel-pick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; justify-content: center; }
+.duel-pick .ghost-btn { border: 1px solid var(--border-strong); }
+.duel-table { width: 100%; font-size: 12px; border-collapse: collapse; }
+.duel-table th, .duel-table td { text-align: right; padding: 3px 6px; border-bottom: 1px solid var(--border); }
+.duel-table th:first-child, .duel-table td:first-child { text-align: left; }

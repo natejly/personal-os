@@ -112,9 +112,12 @@ class NotSent(Exception):
     """gmail_send failed before Gmail was asked to send, so the mail certainly did not go out."""
 
 
-# A saved calendar window older than this is listed again in full. Younger than this,
-# events.list is called with updatedMin, so unchanged events stay in the snapshot.
-_CAL_FULL_AFTER = 6 * 3600
+# A saved calendar window whose last full list is older than this is listed again in full.
+# Younger than this, events.list is called with updatedMin, so unchanged events stay in the
+# snapshot. Anything the incremental list cannot report (a cancelled instance of a recurring
+# series, an event moved out of the covered window) is then at most this stale, while the
+# cheap updatedMin reads in between are unchanged.
+_CAL_FULL_AFTER = 15 * 60
 _CAL_OVERLAP = dt.timedelta(minutes=2)
 _GMAIL_META_CAP = 800
 # Saved message bodies: plain mail text on disk, and the whole store is rewritten on each
@@ -521,20 +524,30 @@ class Google:
 
         The first time a window is seen it is listed in full and saved. Later reads of a
         window we already cover ask only for rows changed since that save (updatedMin),
-        and merge them in. A snapshot older than `_CAL_FULL_AFTER` is listed again, so an
-        event moved out of the window cannot linger forever.
+        and merge them in. updatedMin makes Google include deleted entries whether or not
+        showDeleted is set, so a deleted single event is dropped from the snapshot. It does
+        not report everything, though: with singleEvents=True a cancelled instance of a
+        recurring series is not reliably reported, and an event moved out of
+        [timeMin, timeMax] is simply absent from the answer. Both would linger, so the
+        periodic full list is the deliberate safety net: a snapshot whose last full list
+        (`full_at`) is older than `_CAL_FULL_AFTER` is listed again, as is any read the
+        user asked to refresh. `synced_at` is only the updatedMin watermark and is stamped
+        on every read, so it cannot gate that.
         """
         snap = self._reads.get("calendar", cid) or {}
         stored: dict[str, dict[str, Any]] = dict(snap.get("events") or {})
         covered_start, covered_end = _parse_opt(snap.get("start")), _parse_opt(snap.get("end"))
         synced_at = _parse_opt(snap.get("synced_at"))
         slack = dt.timedelta(seconds=2)
-        fresh = synced_at is not None and (dt.datetime.now(dt.timezone.utc) - synced_at).total_seconds() < _CAL_FULL_AFTER
+        full_at = _parse_opt(snap.get("full_at"))  # absent in an older snapshot: not fresh
+        now = dt.datetime.now(dt.timezone.utc)
+        fresh = full_at is not None and (now - full_at).total_seconds() < _CAL_FULL_AFTER
+        # A refresh the user asked for is exactly the moment to re-list the window rather than ask only for changes.
         # A window that starts inside what we saved and does not jump more than a day past it
         # (the agenda's "now" sliding forward) is an incremental read. A week we have never
         # opened still lists in full.
         near = bool(
-            fresh and covered_start and covered_end and synced_at
+            fresh and not bypassing() and covered_start and covered_end and synced_at
             and start >= covered_start - slack and start <= covered_end
             and end <= covered_end + dt.timedelta(days=1)
         )
@@ -563,11 +576,13 @@ class Google:
                 if ev.get("id"):
                     stored[str(ev["id"])] = ev
             window_start, window_end = w0, w1
+            full_at = now
         if len(stored) > 1500:
             stored = {eid: ev for eid, ev in stored.items() if _overlaps(ev, start, end)}
         self._reads.put("calendar", cid, {
             "start": window_start.isoformat(), "end": window_end.isoformat(),
-            "synced_at": dt.datetime.now(dt.timezone.utc).isoformat(), "events": stored,
+            "synced_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "full_at": full_at.isoformat() if full_at else None, "events": stored,
         }, flush=False)
         # A full list of exactly this window is returned as Google sent it. A wider saved
         # window, or an incremental merge, is sliced locally so unchanged rows are not
@@ -1560,8 +1575,11 @@ def _list_events(svc: Any, cid: str, time_min: dt.datetime, time_max: dt.datetim
     if updated_min is None:
         kwargs["orderBy"] = "startTime"
     else:
-        # orderBy is rejected together with updatedMin. showDeleted is what brings
-        # removals back, so a cancelled event can be dropped from the snapshot.
+        # orderBy is rejected together with updatedMin. updatedMin already includes deleted
+        # entries; showDeleted is set as well so a cancelled event can be dropped from the
+        # snapshot. With singleEvents=True a cancelled instance of a recurring series is not
+        # reported (only single events), and an event moved out of [timeMin, timeMax] is not in
+        # the answer: the periodic full list in _sync_calendar is the safety net for both.
         kwargs["updatedMin"] = updated_min.isoformat()
         kwargs["showDeleted"] = True
     items: list[dict[str, Any]] = []

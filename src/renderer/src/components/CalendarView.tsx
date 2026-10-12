@@ -102,7 +102,7 @@ export default function CalendarView(): JSX.Element {
   }, [events, todos, ready, calendars.length, visibleIds])
 
   // The week on screen is the saved copy until this returns. `refresh` is the Refresh
-  // button: it still only asks Google for what changed, and the grid stays up meanwhile.
+  // button: the backend lists the window from Google in full, and the grid stays up meanwhile.
   // Every fetch takes a number and only the newest may paint, so a slow Refresh that lands after
   // "Next week" cannot put the previous week's events over the current one.
   const seq = useRef(0)

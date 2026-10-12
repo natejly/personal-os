@@ -14,7 +14,7 @@ async function openSettingsTab(page, tab) {
 async function syncToggleOff(page) {
   const t = page.getByLabel('Sync Todos with Google Tasks')
   await expect(t).toBeChecked() // sync is on by default; also proves the status has loaded
-  await t.click({ force: true })
+  await t.locator('xpath=following-sibling::span[contains(@class,"switch")]').click()
   await expect(t).not.toBeChecked()
 }
 async function sendChat(page, text) {

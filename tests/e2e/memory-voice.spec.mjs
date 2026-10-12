@@ -150,7 +150,6 @@ test('a project voice replaces the personal one inside that project; without it 
   expect(casual).not.toContain('LEGALGUIDE')
   // the project's Voice tab says drafts use the personal voice
   await page.locator('.sidebar').getByText('Casual', { exact: true }).first().click()
-  await page.getByRole('button', { name: /^Memory \d+$/ }).click() // the project's own Memory tab
   await page.getByRole('button', { name: 'Voice', exact: true }).click()
   await expect(page.getByText(/currently use your personal voice/)).toBeVisible()
   clean(grain)

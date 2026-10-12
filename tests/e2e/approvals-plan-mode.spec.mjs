@@ -2,7 +2,7 @@ import { test } from './fixtures.mjs'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { scriptLLM } from './helpers/scriptllm.mjs'
-import { expect, newChat, say, homeScratch, rmScratch, pending, realErrors, resize } from './helpers/cowork.mjs'
+import { expect, deskChat, openChat, say, homeScratch, rmScratch, pending, realErrors, resize } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 300_000 })
 
 const touch = (ws, name) => ({ name: 'shell_run', args: { command: `touch ${name}`, cwd: ws } })
@@ -13,40 +13,24 @@ const PLAN = (ws, ...names) => ({
 const card = (page) => page.getByRole('group', { name: 'Run command' })
 const planCard = (page) => page.locator('.aplan').first()
 
-async function setup(grain, planMode = 'always') {
+async function setup(grain) {
   const ws = homeScratch()
-  await grain.api('/settings', { method: 'PUT', body: { workspaceRoots: [ws], toolDeferAbove: 0, planMode } })
+  await grain.api('/settings', { method: 'PUT', body: { workspaceRoots: [ws], toolDeferAbove: 0 } })
   const llm = await scriptLLM(grain)
   return { ws, llm }
 }
+// Plan first is a draft desk bound to the chat (there is no composer toggle): its next message plans before anything runs.
+const newChat = async (page, grain, title = 'Plan first chat') => {
+  await deskChat(grain, { title, autonomy: 'plan', start: false })
+  await openChat(page, title)
+}
 
-test('plan toggle: click and ⌘⇧P cycle off → auto → always → off and persist on the chat', async ({ grain }) => {
-  const { page } = grain
-  await newChat(page)
-  const toggle = page.getByRole('button', { name: /^Plan/ })
-  await expect(toggle).toHaveText('Plan')
-  await toggle.click()
-  await expect(toggle).toHaveText('Plan: auto')
-  await toggle.click()
-  await expect(toggle).toHaveText('Plan: always')
-  await page.keyboard.press('Meta+Shift+P')
-  await expect(toggle).toHaveText('Plan')
-  await page.keyboard.press('Meta+Shift+P')
-  await expect(toggle).toHaveText('Plan: auto')
-  // sending creates the chat, and the mode rides along on it
-  await say(page, '!!reply hello')
-  await expect(page.locator('.msg.assistant').last()).toContainText('hello', { timeout: 60_000 })
-  const [c] = await grain.api('/conversations')
-  expect((await grain.api(`/conversations/${c.id}`)).settings.planMode).toBe('auto')
-  expect(realErrors(grain)).toEqual([])
-})
-
-test('plan mode always: a plan card appears, nothing runs before approval, an approved step runs once without a second card', async ({ grain }) => {
+test('plan first: a plan card appears, nothing runs before approval, an approved step runs once without a second card', async ({ grain }) => {
   const { page } = grain
   const { ws, llm } = await setup(grain)
   try {
     llm.push({ calls: [PLAN(ws, 'planned.txt')] })
-    await newChat(page)
+    await newChat(page, grain)
     await say(page, 'please touch planned.txt')
     await expect(planCard(page)).toContainText('touch planned.txt', { timeout: 90_000 })
     await expect.poll(async () => (await pending(grain)).length).toBe(1)
@@ -67,12 +51,12 @@ test('plan mode always: a plan card appears, nothing runs before approval, an ap
   } finally { rmScratch(ws) }
 })
 
-test('plan mode always: a call that is not in the approved plan still asks', async ({ grain }) => {
+test('plan first: a call that is not in the approved plan still asks', async ({ grain }) => {
   const { page } = grain
   const { ws, llm } = await setup(grain)
   try {
     llm.push({ calls: [PLAN(ws, 'in-plan.txt')] })
-    await newChat(page)
+    await newChat(page, grain)
     await say(page, 'touch a file')
     await expect(planCard(page)).toBeVisible({ timeout: 90_000 })
     llm.push({ calls: [touch(ws, 'not-in-plan.txt')] }, { text: 'finished' })
@@ -86,12 +70,12 @@ test('plan mode always: a call that is not in the approved plan still asks', asy
   } finally { rmScratch(ws) }
 })
 
-test('plan mode always: while drafting, a consequential tool is refused, not carded and not run', async ({ grain }) => {
+test('plan first: while drafting, a consequential tool is refused, not carded and not run', async ({ grain }) => {
   const { page } = grain
   const { ws, llm } = await setup(grain)
   try {
     llm.push({ calls: [touch(ws, 'sneaky.txt')] }, { text: 'ok I will plan instead' })
-    await newChat(page)
+    await newChat(page, grain)
     await say(page, 'touch sneaky.txt now')
     await expect(page.locator('.msg.assistant').last()).toContainText('ok I will plan instead', { timeout: 90_000 })
     expect(existsSync(join(ws, 'sneaky.txt'))).toBe(false)
@@ -105,7 +89,7 @@ test('plan card: edited arguments are what the approval binds; the unedited call
   const { ws, llm } = await setup(grain)
   try {
     llm.push({ calls: [PLAN(ws, 'proposed.txt')] })
-    await newChat(page)
+    await newChat(page, grain)
     await say(page, 'touch something')
     await expect(planCard(page)).toBeVisible({ timeout: 90_000 })
     await planCard(page).getByRole('button', { name: /Edit arguments/ }).first().click()
@@ -128,7 +112,7 @@ test('plan card: Reject runs nothing and the model is told the plan was rejected
   const { ws, llm } = await setup(grain)
   try {
     llm.push({ calls: [PLAN(ws, 'never.txt')] })
-    await newChat(page)
+    await newChat(page, grain)
     await say(page, 'touch never')
     await expect(planCard(page)).toBeVisible({ timeout: 90_000 })
     llm.push({ text: 'understood, plan dropped' })
@@ -141,28 +125,13 @@ test('plan card: Reject runs nothing and the model is told the plan was rejected
   } finally { rmScratch(ws) }
 })
 
-test('plan mode auto: a read-only first turn needs no plan; the first change turns planning on', async ({ grain }) => {
-  const { page } = grain
-  const { ws, llm } = await setup(grain, 'auto')
-  try {
-    llm.push({ calls: [touch(ws, 'auto.txt')] }, { calls: [PLAN(ws, 'auto.txt')] })
-    await newChat(page)
-    await say(page, 'touch auto.txt')
-    // the direct change is refused and the model must plan first
-    await expect(planCard(page)).toBeVisible({ timeout: 90_000 })
-    expect(existsSync(join(ws, 'auto.txt'))).toBe(false)
-    await say(page, '!!reply and a plain reply with no tools') // queued behind the waiting plan
-    expect(realErrors(grain)).toEqual([])
-  } finally { rmScratch(ws) }
-})
-
 test('plan card and approval card fit at 820x520', async ({ grain }) => {
   const { page } = grain
   const { ws, llm } = await setup(grain)
   try {
     await resize(grain)
     llm.push({ calls: [PLAN(ws, 'a.txt', 'b.txt', 'c.txt', 'd.txt', 'e.txt')] })
-    await newChat(page)
+    await newChat(page, grain)
     await say(page, 'many files')
     await expect(planCard(page)).toBeVisible({ timeout: 90_000 })
     const approve = page.getByRole('button', { name: 'Approve & run' })

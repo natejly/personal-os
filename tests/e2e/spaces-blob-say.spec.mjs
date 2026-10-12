@@ -14,18 +14,20 @@ test('raw thinking stays off the activity line and the blob bubble', async ({ gr
   await enterCanvas(grain)
   const win = page.locator(`[data-window-id="${w.id}"]`)
   await expect(win).toBeVisible()
+  // the user's own bubble echoes the prompt (which carries the thought text), so look only at the reply side
+  const reply = win.locator('.msg.assistant')
   const box = win.getByRole('textbox', { name: 'Message' })
   await box.fill('!!think The user wants a brief. I should look at the calendar first. Then I !!slow 9000 !!reply All done')
   await box.press('Enter')
 
   await expect(win.locator('.thinking')).toBeVisible({ timeout: 20_000 })
-  await expect(win).not.toContainText('I should look at the calendar first.')
+  await expect(reply).not.toContainText('I should look at the calendar first.')
 
   await win.getByTitle('Shrink to a face').click()
-  await expect(win.locator('.blob-say')).not.toContainText('calendar')
+  await expect(win.locator('.blob-say', { hasText: 'calendar' })).toHaveCount(0) // the bubble may be absent; it must never carry the thought
 
   await win.locator('.chat-blob').click({ timeout: 40_000 })
   await expect(win.locator('.msg.assistant').last()).toContainText('All done', { timeout: 40_000 })
-  await expect(win).not.toContainText('I should look at the calendar first.')
+  await expect(reply).not.toContainText('I should look at the calendar first.')
   expect(grain.consoleErrors).toEqual([])
 })

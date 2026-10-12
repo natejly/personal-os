@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.mjs'
+import { openContextPanel } from './helpers/chat.mjs'
 import { callWith, send, shrink, sleep, sqlite, systemOf } from './helpers/kb.mjs'
 import { openMemory as openMemoryTab } from './helpers/home.mjs'
 
@@ -118,7 +119,7 @@ test('a pinned memory reaches the system prompt of an unrelated chat; a forgotte
   expect(sys).not.toContain('QUOKKAGONE')
   expect(pin.id).toBeTruthy()
   // the context panel shows the memory that was sent
-  await page.getByRole('button', { name: 'Toggle context panel' }).click()
+  await openContextPanel(page)
   await expect(page.locator('.ctx, [class*=context]').getByText(/ZEBRAPIN/).first()).toBeVisible()
   clean(grain)
 })

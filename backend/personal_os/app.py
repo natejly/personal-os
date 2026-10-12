@@ -9107,7 +9107,7 @@ def get_desk(id: str) -> dict[str, Any]:
     waiting = [{**a, "live": a["call_id"] in _approvals} for a in run_store.approvals("pending", desk_id=id)
                if a["tool"] != PLAN_TOOL]
     return {**desk, "plan": plan, "outputs": _outputs_view(id), "events": desks.events(id),
-            "runs": run_store.list(desk_id=id, limit=20), "approvals": waiting}
+            "runs": run_store.list(None, desk_id=id, limit=20), "approvals": waiting}
 
 
 @app.patch("/cowork/desks/{id}")

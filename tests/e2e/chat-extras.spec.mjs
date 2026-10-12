@@ -81,7 +81,7 @@ test('every chat has a side panel: Files and Changes, and no Review without a de
   const { page } = grain
   await newChat(page)
   await sayAndWait(page, '!!tool current_time {}', '')
-  await page.getByRole('button', { name: 'Documents in this chat' }).click()
+  await page.getByRole('button', { name: 'Workspace panel', exact: true }).click()
   const panel = page.locator('.desk-panel')
   await expect(panel).toBeVisible()
   const tabs = panel.locator('.desk-tabs')
@@ -91,20 +91,22 @@ test('every chat has a side panel: Files and Changes, and no Review without a de
   await expect(panel.getByText('No files in this chat yet.')).toBeVisible()
   await tabs.getByRole('button', { name: 'Changes' }).click()
   await expect(panel.getByText('No files changed in this chat yet.')).toBeVisible()
-  await page.getByRole('button', { name: 'Documents in this chat' }).click()
+  await page.getByRole('button', { name: 'Workspace panel', exact: true }).click()
   await expect(panel).toHaveCount(0)
 })
 
-test('the checklist is never above the composer; it is the Checklist tab of the side panel', async ({ grain }) => {
+test('a multi-step checklist is the Progress card above the composer, not a status card or a side-panel tab', async ({ grain }) => {
   const { page } = grain
   await newChat(page)
   const plan = { steps: [{ text: 'first step', status: 'in_progress' }, { text: 'second step', status: 'pending' }] }
   await say(page, '!!tool todo_write ' + JSON.stringify(plan))
   await expect(page.locator('.msg.assistant').last()).toContainText('MOCK: tool done', { timeout: 60_000 })
   await expect(page.getByRole('region', { name: 'Checklist' })).toHaveCount(0) // no status card for the main agent
-  await page.getByRole('button', { name: 'Documents in this chat' }).click()
-  await page.locator('.desk-panel .desk-tabs').getByRole('button', { name: 'Checklist' }).click()
-  const list = page.locator('.desk-panel').getByRole('region', { name: 'Checklist' })
-  await expect(list).toContainText('0/2 done')
-  await expect(list.locator('.plan-steps .plan-step')).toHaveCount(2)
+  const card = page.getByRole('region', { name: 'Progress' })
+  await expect(card).toContainText('Step 1 of 2')
+  await expect(card).toContainText('first step')
+  await card.getByRole('button', { name: 'Show the steps' }).click()
+  await expect(card.locator('.plan-step')).toHaveCount(2)
+  await page.getByRole('button', { name: 'Workspace panel', exact: true }).click()
+  await expect(page.locator('.desk-panel .desk-tabs').getByRole('button', { name: 'Checklist' })).toHaveCount(0)
 })

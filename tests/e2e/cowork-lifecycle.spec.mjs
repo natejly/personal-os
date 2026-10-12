@@ -11,7 +11,7 @@ test('desk_ask: the chat waits on the question and the answer resumes it', async
   const { desk } = await deskChat(grain, { brief: 'compare quarters', title: 'Asker' })
   await openChat(page, 'Asker')
   await expect(page.locator('.desk-ask').first()).toContainText('Which quarter?', { timeout: 90_000 })
-  await expect(strip(page)).toContainText(/Approval needed|Waiting on you/)
+  await expect(chatRow(page, 'Asker').locator('.attn-dot')).toHaveAttribute('aria-label', /Needs you/)
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'done' })
   await page.getByRole('group', { name: 'Suggested answers' }).getByRole('button', { name: 'Q3' }).first().click()
   await waitStatus(grain, desk.id, 'review')
@@ -63,8 +63,8 @@ test('stop a working chat from the composer, then message it to pick it back up'
   await expect(chatRow(page, 'Slowpoke').locator('.attn-dot')).toHaveAttribute('aria-label', /Working|Planning/)
   await page.getByRole('button', { name: 'Stop', exact: true }).click()
   await waitStatus(grain, desk.id, 'stopped', 60_000)
-  await expect(strip(page)).toContainText('Stopped')
-  await expect(strip(page).getByRole('button', { name: /^Stop$/ })).toHaveCount(0)
+  await expect(strip(page)).toHaveCount(0) // stopped or not, the main agent never gets a strip
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0)
   await expect(chatRow(page, 'Slowpoke').locator('.attn-dot')).toHaveCount(0) // a stopped chat carries no mark
   // a stopped desk picks work back up when messaged from the composer
   llm.queue.length = 0
@@ -99,7 +99,7 @@ test('detaching a desk over the API stops the desk and the chat answers as a pla
   expect(realErrors(grain)).toEqual([])
 })
 
-test('pause over the API, resume from the strip', async ({ grain }) => {
+test('pause and resume over the API (the chat has no strip to click)', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE], delay: 120_000 })
@@ -109,10 +109,10 @@ test('pause over the API, resume from the strip', async ({ grain }) => {
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).toMatch(/working|planning/)
   await grain.api(`/cowork/desks/${desk.id}/pause`, { method: 'POST' }) // the strip hides while a lone agent works, so no Pause button to click
   await waitStatus(grain, desk.id, 'paused', 60_000)
-  await expect(strip(page)).toContainText('Paused')
+  await expect(strip(page)).toHaveCount(0)
   llm.queue.length = 0
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'ok' })
-  await strip(page).getByRole('button', { name: /Resume/ }).click()
+  await grain.api(`/cowork/desks/${desk.id}/resume`, { method: 'POST' })
   await waitStatus(grain, desk.id, 'review', 90_000)
   expect(realErrors(grain)).toEqual([])
 })
@@ -159,12 +159,15 @@ test('workspace panel: Files lists the workspace, Changes lists the turns, Revie
   const { desk } = await deskChat(grain, { brief: 'tabs', title: 'Tabby' })
   await waitStatus(grain, desk.id, 'review')
   await openChat(page, 'Tabby')
+  await openPanel(page)
+  await expect(panel(page).getByTestId('desk-tab-review')).toHaveClass(/active/) // a desk in review brings Review forward once it loads
   await openPanel(page, 'Files')
   await expect(panel(page).getByText('report.md').first()).toBeVisible()
-  await panel(page).getByText('report.md').first().click()
-  await expect(panel(page).getByText('Hello from the desk').first()).toBeVisible()
+  // the chat's own file list sits above the workspace tree; the tree is the one that previews
+  await panel(page).locator('.desk-files .desk-file-row', { hasText: 'report.md' }).first().click()
+  await expect(panel(page).locator('.desk-preview').getByText('Hello from the desk').first()).toBeVisible()
   await openPanel(page, 'Changes')
-  await expect(panel(page).getByText(/What each turn changed/)).toBeVisible()
+  await expect(panel(page).locator('.desk-turn').first()).toBeVisible()
   await openPanel(page, 'Review')
   await expect(panel(page).locator('.desk-output')).toContainText('The report')
   await panel(page).getByRole('button', { name: 'Close the workspace panel' }).click()
@@ -180,7 +183,7 @@ test('25 autonomous chats list among chats at 820x520 without overflowing', asyn
   await page.waitForSelector('.sidebar')
   await expect(page.locator('.sidebar .convo-item', { hasText: /^Desk \d\d/ })).toHaveCount(25, { timeout: 30_000 })
   await openChat(page, 'Desk 03')
-  await expect(strip(page)).toContainText('Draft')
+  await expect(strip(page)).toHaveCount(0) // a draft plan-first chat has no strip either
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)
   expect(overflow).toBe(false)
   expect(realErrors(grain)).toEqual([])
@@ -204,7 +207,8 @@ test('a chat with a 100 KB brief and a long title works autonomously and renders
   await page.reload() // made before this window's event stream was up
   await page.waitForSelector('.sidebar')
   await chatRow(page, 'TTTT').click()
-  await expect(strip(page)).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
+  await expect(strip(page)).toHaveCount(0)
   expect((await grain.api(`/cowork/desks/${desk.id}`)).brief.length).toBeGreaterThan(50_000)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
   expect(realErrors(grain)).toEqual([])

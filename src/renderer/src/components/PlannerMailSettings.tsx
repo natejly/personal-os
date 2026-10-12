@@ -12,8 +12,13 @@ export default function PlannerMailSettings(): JSX.Element | null {
   const [plan, setPlan] = useState<PlannerConfig | null>(null)
   const [mail, setMail] = useState<MailWatchConfig | null>(null)
   const [cals, setCals] = useState<GoogleCalendar[] | null | 'failed'>(null)
+  const connected = useStore((s) => s.google?.connected)
+  // Not signed in to Google: the calendar list is a 409, so only ask once there is an account.
   useEffect(() => {
-    api.google.calendars().then(setCals).catch(() => setCals('failed'))
+    if (connected) api.google.calendars().then(setCals).catch(() => setCals('failed'))
+    else if (connected === false) setCals('failed')
+  }, [connected])
+  useEffect(() => {
     api.planner.config().then(setPlan).catch(() => undefined)
     api.mailWatch.config().then(setMail).catch(() => undefined)
   }, [])

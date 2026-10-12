@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures.mjs'
 import { menu } from './helpers/shell.mjs'
+import { spaces, windowsOf } from './helpers/spaces.mjs'
 
 const sidebarItem = (page, name) => page.locator('.sidebar .nav-item', { hasText: new RegExp(`^\\s*${name}`) }).first()
 const heading = (page, re) => expect(page.locator('main h2, .page h2').filter({ hasText: re }).first()).toBeVisible()
@@ -16,11 +17,15 @@ test('window minimum size is 820x520 and cannot be dragged smaller', async ({ gr
 test('Spaces menu: toggle shows the plane and returns; New chat in a space opens a chat window; New Space works', async ({ grain }) => {
   const { page } = grain
   await menu(grain, 'Toggle Canvases')
+  await expect(page.locator('.canvas')).toBeVisible()
   await expect(page.locator('.sidebar .nav-item.active')).toHaveCount(0)
-  const before = await page.locator('.win').count()
-  await page.getByRole('button', { name: /New chat/ }).first().click()
-  await expect.poll(() => page.locator('.win').count()).toBe(before + 1)
-  await menu(grain, 'New Space')
+  // (chats may start as blobs, so count the space's chat windows through the API)
+  const sp = (await spaces(grain))[0]
+  const chats = async () => (await windowsOf(grain, sp.id)).filter((w) => w.kind === 'chat').length
+  const before = await chats()
+  await page.locator('.sidebar .new-chat').click()
+  await expect.poll(chats).toBe(before + 1)
+  await menu(grain, 'New Canvas')
   await menu(grain, 'Toggle Canvases')
   await expect(page.locator('.sidebar .nav-item.active')).toHaveCount(0) // back on a chat, which has no nav row
   expect(grain.consoleErrors).toEqual([])
@@ -56,6 +61,9 @@ test('300 chats: the sidebar stays responsive, scrolls, searches, and nav still 
 test('hammering the nav: 40 rapid clicks end on the last view without errors', async ({ grain }) => {
   const { page } = grain
   const seq = ['Lists', 'Calendar', 'Mail']
+  await grain.api('/settings', { method: 'PUT', body: { hiddenViews: [], sidebarHidden: [] } })
+  await page.reload()
+  await page.waitForSelector('.sidebar')
   for (let i = 0; i < 40; i++) {
     await (i % 4 === 0 ? sidebarItem(page, 'Files') : sidebarItem(page, seq[i % 3])).click()
   }

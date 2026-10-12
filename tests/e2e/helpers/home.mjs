@@ -65,6 +65,12 @@ export function seedJobRuns(grain, n, { status = 'done' } = {}) {
   sql(grain, 'BEGIN;' + rows.join('') + 'COMMIT;')
 }
 
+/** Set a settings switch (its checkbox is a 1px hidden input; the visible control is the .switch beside it). Waits for the new state. */
+export async function setToggle(checkbox, on = true) {
+  if ((await checkbox.isChecked()) !== on) await checkbox.locator('xpath=following-sibling::span[contains(@class,"switch")]').click()
+  await expect(checkbox).toBeChecked({ checked: on })
+}
+
 export function seedUsage(grain, n) {
   const now = Date.now() / 1000
   const rows = []

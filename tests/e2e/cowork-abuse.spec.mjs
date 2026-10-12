@@ -33,14 +33,15 @@ test('backend gone while a card is on screen: the click fails softly, the card s
   } finally { rmScratch(ws) }
 })
 
-test('double-clicking Start on a draft chat makes one run', async ({ grain }) => {
+test('starting a draft chat twice at once makes one run', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'ok' }, { text: 'final' })
   const { page } = grain
   const { desk } = await deskChat(grain, { brief: 'once only', title: 'Once', start: false })
   await openChat(page, 'Once')
-  await strip(page).getByRole('button', { name: /^Start/ }).dblclick()
+  // the UI has no Start button (a draft starts from the API or an agent job): two starts racing must still make one run
+  await Promise.all([1, 2].map(() => grain.api(`/cowork/desks/${desk.id}/start`, { method: 'POST', raw: true })))
   await waitStatus(grain, desk.id, 'review', 120_000)
   const first = llm.requests.filter((r) => r.messages.some((m) => m.role === 'user' && m.content === 'once only')).length
   expect(first).toBeGreaterThan(0)

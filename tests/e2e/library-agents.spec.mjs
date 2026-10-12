@@ -116,7 +116,7 @@ test('a subagent opens from its card, takes a message while it runs, and shows i
   await panel.getByRole('textbox').fill('and also check the weather')
   await panel.getByRole('button', { name: 'Send' }).click()
   await expect(panel.locator('.msg.user').last()).toContainText('and also check the weather', { timeout: 30_000 })
-  await expect(panel.locator('.msg.assistant').last()).toContainText('MOCK: and also check the weather', { timeout: 40_000 })
+  await expect(panel.locator('.msg.assistant').last()).toContainText(/MOCK: \[Message from the user, not the main agent\]\s+and also check the weather/s, { timeout: 40_000 })
   await shot(page, 'subagent-panel')
   const parent = (await api(`/runs?status=all&conversation_id=${c.id}`)).find((r) => r.kind === 'chat')
   const child = (await api(`/runs/${parent.run_id}/children`))[0]
@@ -124,8 +124,8 @@ test('a subagent opens from its card, takes a message while it runs, and shows i
   expect(view.run.status).toBe('done')
   expect(view.messages.filter((m) => m.role === 'user').map((m) => m.content)).toEqual(['!!slow 8000 !!reply first draft', 'and also check the weather'])
 
-  // Finished: the box now routes to the chat that owns the child.
-  await expect(panel.getByRole('textbox')).toHaveAttribute('placeholder', /Finished/)
+  // Finished: the box offers to continue the worker.
+  await expect(panel.getByRole('textbox')).toHaveAttribute('placeholder', /Continue this worker/)
   await panel.getByRole('textbox').fill('!!reply resumed')
   await panel.getByRole('button', { name: 'Send' }).click()
   await expect(panel).toHaveCount(0)

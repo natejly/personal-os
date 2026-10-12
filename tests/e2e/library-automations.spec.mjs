@@ -10,7 +10,7 @@ async function openScheduled(page) {
 }
 
 async function addTask(page, { name, prompt, mode = 'Repeat' }) {
-  await page.getByRole('button', { name: 'Schedule a task' }).click()
+  await page.getByRole('button', { name: 'Schedule a task' }).click({ force: true })
   await page.getByPlaceholder(/^Name, e\.g\./).fill(name)
   await page.getByPlaceholder(/^What should it do/).fill(prompt)
   await page.getByLabel('When it runs').selectOption({ label: mode })
@@ -18,12 +18,13 @@ async function addTask(page, { name, prompt, mode = 'Repeat' }) {
 
 const job = (name, over = {}) => ({ name, prompt: `say hi from ${name}`, kind: 'cron', cron: '0 9 * * *', enabled: false, ...over })
 
-test('fresh install: no jobs enabled by default; scheduled list shows empty state', async ({ grain }) => {
+test('fresh install: only the seeded Reconcile job is on; scheduled list lists it', async ({ grain }) => {
   const { page, api } = grain
   const jobs = await api('/jobs')
-  expect(jobs.filter((j) => j.enabled)).toEqual([])
+  // Reconcile is seeded switched on, once per database; nothing else is.
+  expect(jobs.filter((j) => j.enabled).map((j) => j.name)).toEqual(['Reconcile'])
   await openScheduled(page)
-  if (!jobs.length) await expect(page.getByText('None yet.')).toBeVisible()
+  await expect(page.locator('.job-name', { hasText: 'Reconcile' })).toBeVisible()
   expect(grain.consoleErrors).toEqual([])
 })
 
@@ -42,7 +43,7 @@ test('create a repeating job for every preset the form offers, and read each bac
     await page.getByLabel('How often').selectOption({ label: preset })
     if (day) await page.getByLabel('Day of the week').selectOption({ label: day })
     if (time) await page.getByLabel('At', { exact: true }).fill(time)
-    await page.getByRole('button', { name: 'Schedule', exact: true }).click()
+    await page.getByRole('button', { name: 'Schedule', exact: true }).click({ force: true })
     await expect(page.locator('.job-name', { hasText: name })).toBeVisible()
     const j = (await api('/jobs')).find((x) => x.name === name)
     expect(j.cron).toBe(cron)
@@ -52,7 +53,7 @@ test('create a repeating job for every preset the form offers, and read each bac
   await addTask(page, { name: 'job custom', prompt: 'custom' })
   await page.getByLabel('How often').selectOption({ label: 'Custom cron' })
   await page.getByLabel('Cron expression').fill('*/15 8-17 * * 1-5')
-  await page.getByRole('button', { name: 'Schedule', exact: true }).click()
+  await page.getByRole('button', { name: 'Schedule', exact: true }).click({ force: true })
   await expect(page.locator('.job-name', { hasText: 'job custom' })).toBeVisible()
   expect((await api('/jobs')).find((x) => x.name === 'job custom').cron).toBe('*/15 8-17 * * 1-5')
 
@@ -62,10 +63,10 @@ test('create a repeating job for every preset the form offers, and read each bac
     await addTask(page, { name: 'bad cron', prompt: 'x' })
     await page.getByLabel('How often').selectOption({ label: 'Custom cron' })
     await page.getByLabel('Cron expression').fill(bad)
-    await page.getByRole('button', { name: 'Schedule', exact: true }).click()
+    await page.getByRole('button', { name: 'Schedule', exact: true }).click({ force: true })
     await expect(page.getByText(/Jobs: /).first()).toBeVisible({ timeout: 10_000 })
     expect((await api('/jobs')).length).toBe(before)
-    await page.getByRole('button', { name: 'Schedule a task' }).click() // close the form
+    await page.getByRole('button', { name: 'Schedule a task' }).click({ force: true }) // close the form (a toast may sit over it)
   }
   expect(grain.consoleErrors.filter((e) => !/status of 400/.test(e))).toEqual([])
 })
@@ -143,7 +144,7 @@ test('one-off task created from the UI (datetime-local) schedules and fires', as
   const d = new Date(Date.now() + 60_000)
   const p = (n) => String(n).padStart(2, '0')
   await page.getByLabel('When it should run').fill(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`)
-  await page.getByRole('button', { name: 'Schedule', exact: true }).click()
+  await page.getByRole('button', { name: 'Schedule', exact: true }).click({ force: true })
   await expect(page.locator('.job-name', { hasText: 'UI once' })).toBeVisible()
   const j = (await api('/jobs')).find((x) => x.name === 'UI once')
   expect(j.kind).toBe('once')
@@ -151,7 +152,7 @@ test('one-off task created from the UI (datetime-local) schedules and fires', as
   // a past time through the form is refused
   await addTask(page, { name: 'UI past', prompt: 'x', mode: 'Once' })
   await page.getByLabel('When it should run').fill('2020-01-01T10:00')
-  await page.getByRole('button', { name: 'Schedule', exact: true }).click()
+  await page.getByRole('button', { name: 'Schedule', exact: true }).click({ force: true })
   await expect(page.getByText(/already passed/)).toBeVisible({ timeout: 10_000 })
   expect((await api('/jobs')).find((x) => x.name === 'UI past')).toBeUndefined()
 })

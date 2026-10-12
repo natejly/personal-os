@@ -35,7 +35,7 @@ test('drag a chat from the sidebar onto the canvas opens a chat window; dragging
   await expect.poll(async () => (await windowsOf(grain, s.id)).filter((x) => x.kind === 'chat').length).toBe(2)
 
   // dropping on a locked space is refused
-  await menuClick(grain.app, 'Lock / Unlock Space')
+  await menuClick(grain.app, 'Lock / Unlock Canvas')
   await expect.poll(async () => !!(await api('/canvases/' + s.id)).locked).toBe(true)
   await mkChat(grain, 'Gamma chat')
   await page.reload()
@@ -46,16 +46,14 @@ test('drag a chat from the sidebar onto the canvas opens a chat window; dragging
   expect(grain.consoleErrors).toEqual([])
 })
 
-test('drop a chat on a sidebar space row adds it to that space without switching', async ({ grain }) => {
-  const { page, api } = grain
+test('drop a chat on the sidebar canvas row adds it to the canvas', async ({ grain }) => {
+  const { page } = grain
   const s1 = (await spaces(grain))[0]
-  const s2 = await api('/canvases', { method: 'POST', body: { name: 'Elsewhere' } })
   await mkChat(grain, 'Alpha chat')
   await page.reload()
   await enterCanvas(grain)
-  await chatRow(page, 'Alpha chat').dragTo(page.locator('.space-row', { hasText: 'Elsewhere' }))
-  await expect.poll(async () => (await windowsOf(grain, s2.id)).length).toBe(1)
-  expect((await windowsOf(grain, s1.id))).toHaveLength(0)
+  await chatRow(page, 'Alpha chat').dragTo(page.locator('.space-row'))
+  await expect.poll(async () => (await windowsOf(grain, s1.id)).length).toBe(1)
   await expect(page.locator('.space-tab.active')).toContainText(s1.name)
   expect(grain.consoleErrors).toEqual([])
 })
@@ -96,32 +94,21 @@ test('a chat window sends a message, streams a reply, and the face view toggles 
   expect(grain.consoleErrors).toEqual([])
 })
 
-test('faces: one creature per thread, one shared colour per space, stable across relaunch', async ({ grain }) => {
+test('faces: one creature per thread, stable across relaunch', async ({ grain }) => {
   const { page, api } = grain
   const sA = (await spaces(grain))[0]
-  await api('/canvases', { method: 'POST', body: { name: 'Second' } })
-  await api('/canvases', { method: 'POST', body: { name: 'Third' } })
   await mkChat(grain, 'Thread one')
   await mkChat(grain, 'Thread two')
   await mkChat(grain, 'Thread three')
   await page.reload()
   await enterCanvas(grain)
   const snap = async (p) => ({
-    spaces: await p.locator('.space-row .face').evaluateAll((els) => els.map((e) => e.outerHTML)),
     chats: await p.locator('.convo-item .face').evaluateAll((els) => els.map((e) => e.outerHTML))
   })
   const before = await snap(page)
-  expect(before.spaces).toHaveLength(3)
   expect(before.chats).toHaveLength(3)
   // every thread draws its own creature
   expect(new Set(before.chats).size).toBe(3)
-  // every space draws its own silhouette ...
-  expect(new Set(before.spaces).size).toBe(3)
-  // ... in one shared colour (SPACE_HUE): the fill colours used are identical across spaces
-  const colours = await page.locator('.space-row .face').evaluateAll((els) =>
-    els.map((e) => [...new Set([...e.querySelectorAll('*')].flatMap((n) => [n.getAttribute('fill'), n.getAttribute('stroke'), n.style.fill, n.style.stroke]).filter(Boolean))].sort().join('|')))
-  console.log('space face colours', JSON.stringify(colours))
-  expect(new Set(colours).size).toBe(1)
   await grain.relaunch()
   await enterCanvas(grain)
   const after = await snap(grain.page)
@@ -130,10 +117,9 @@ test('faces: one creature per thread, one shared colour per space, stable across
   expect(grain.consoleErrors).toEqual([])
 })
 
-test('streaming chat window in a space keeps working after a space switch and back', async ({ grain }) => {
+test('streaming chat window in a canvas keeps working after leaving the canvas view and coming back', async ({ grain }) => {
   const { page, api } = grain
   const s = (await spaces(grain))[0]
-  const other = await api('/canvases', { method: 'POST', body: { name: 'Other' } })
   const c = await mkChat(grain, 'Slowpoke')
   const w = await api(`/canvases/${s.id}/windows`, { method: 'POST', body: { kind: 'chat', ref_id: c.id, x: 64, y: 48, w: 520, h: 560 } })
   await page.reload()
@@ -142,11 +128,10 @@ test('streaming chat window in a space keeps working after a space switch and ba
   const box = win.getByRole('textbox', { name: 'Message' })
   await box.fill('!!slow 4000')
   await box.press('Enter')
-  await page.locator('.space-tab', { hasText: 'Other' }).click()
-  await expect(page.locator('.space-tab.active')).toContainText('Other')
-  await page.locator('.space-tab', { hasText: s.name }).click()
+  await menuClick(grain.app, 'Toggle Canvases') // leave the canvas view while the reply streams
+  await expect(page.locator('.spaces-bar')).toHaveCount(0)
+  await enterCanvas(grain)
   await expect(win.locator('.msg.assistant').last()).toBeVisible({ timeout: 40_000 })
   await expect(win.locator('.msg.assistant').last()).not.toBeEmpty()
-  void other
   expect(grain.consoleErrors).toEqual([])
 })

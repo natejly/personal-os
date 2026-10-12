@@ -1,6 +1,6 @@
 import { test } from './fixtures.mjs'
 import { scriptLLM } from './helpers/scriptllm.mjs'
-import { expect, realErrors, deskStatus, waitStatus, deskChat, openChat, strip, DONE, settingsFor } from './helpers/cowork.mjs'
+import { expect, realErrors, deskStatus, waitStatus, deskChat, openChat, chatRow, DONE, settingsFor } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 300_000 })
 
 const PLAN = (content = '# Plan\n\nplanned\n') => ({
@@ -24,7 +24,7 @@ async function planDesk(grain, title, autonomy = 'plan') {
 test('plan-first chat: awaiting plan, approve the plan card in the chat, steps run and tick off', async ({ grain }) => {
   const { page } = grain
   const { llm, desk } = await planDesk(grain, 'Planner')
-  await expect(strip(page)).toContainText('Plan to approve')
+  await expect(chatRow(page, 'Planner').locator('.attn-dot')).toHaveAttribute('aria-label', /Needs you/)
   // one plan card in the chat, not the transcript's and the desk's both
   await expect(page.getByRole('button', { name: /^Approve/ })).toHaveCount(1)
   await expect(page.locator('.aplan')).toContainText('Write plan.md')
@@ -36,7 +36,6 @@ test('plan-first chat: awaiting plan, approve the plan card in the chat, steps r
   const d = await grain.api(`/cowork/desks/${desk.id}`)
   expect(d.plan.status).toBe('approved')
   expect(d.plan.steps[0].status).toMatch(/consumed|done/)
-  await expect(page.locator('.desk-checklist')).toContainText('Write plan.md')
   expect(realErrors(grain)).toEqual([])
 })
 

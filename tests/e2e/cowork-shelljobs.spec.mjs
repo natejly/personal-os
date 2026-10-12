@@ -1,6 +1,6 @@
 import { test } from './fixtures.mjs'
 import { scriptLLM } from './helpers/scriptllm.mjs'
-import { expect, realErrors, waitStatus, newChat, deskChat, settingsFor } from './helpers/cowork.mjs'
+import { expect, realErrors, waitStatus, openChat, deskChat, settingsFor } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 300_000 })
 
 test('a chat working autonomously starts a background command; Running lists it with output; Kill stops it', async ({ grain }) => {
@@ -16,8 +16,9 @@ test('a chat working autonomously starts a background command; Running lists it 
   await expect.poll(async () => (await grain.api(`/shell/jobs/${job.job_id}/tail`)).output ?? '', { timeout: 30_000 }).toContain('job-started')
 
   // the Running section lives in the context panel of the chat view
-  await newChat(page)
-  await page.getByRole('button', { name: 'Toggle context panel' }).click()
+  await openChat(page, 'Jobber') // a draft chat has no id, so its side panel is disabled
+  await page.getByRole('button', { name: 'Workspace panel', exact: true }).click() // Context is a tab of the side panel
+  await page.getByTestId('desk-tab-context').click()
   const running = page.locator('.ctx-section', { hasText: 'Running' })
   await expect(running).toContainText('sleep 300', { timeout: 30_000 })
   await running.getByRole('button', { name: /echo job-started/ }).click()

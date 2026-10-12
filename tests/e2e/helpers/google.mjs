@@ -46,7 +46,7 @@ export const testFailing = (failures) => base.extend({
 })
 /** Same backend without a Google sign-in (the default harness): every view must show a connect prompt. */
 export const testDisconnected = base.extend({
-  grain: async ({}, use, testInfo) => run(use, testInfo, {})
+  grain: async ({}, use, testInfo) => run(use, testInfo, { settings: { hiddenViews: [], sidebarHidden: [] } })
 })
 
 /** Open a view from its sidebar row (Calendar, Mail, Lists...). */

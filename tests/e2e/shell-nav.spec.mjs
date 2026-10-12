@@ -38,10 +38,13 @@ test('Lists, Calendar, Mail and Health are sidebar rows in order, each opens its
 
 test('the title-bar Quick chat button opens and closes the page agent panel', async ({ grain }) => {
   const { page } = grain
-  const btn = page.getByRole('button', { name: 'Quick chat (⌘I)' })
+  const btn = page.getByRole('button', { name: 'Quick chat' })
+  // A chat gives that slot to its own Workspace panel button, so use a list view.
+  await page.locator('.sidebar .nav-item', { hasText: /^\s*Lists/ }).first().click()
   const panel = page.getByRole('complementary', { name: 'Page agent' })
-  // one button per title bar, and it is the only thing in the switcher slot
-  await expect(page.locator('.app-switcher button')).toHaveCount(1)
+  // one Quick chat button per title bar, beside the Agent inbox button in the switcher slot
+  await expect(page.locator('.app-switcher button')).toHaveCount(2)
+  await expect(page.locator('.app-switcher').getByRole('button', { name: 'Quick chat' })).toHaveCount(1)
   await expect(btn).toHaveAttribute('aria-pressed', 'false')
   await expect(panel).toHaveCount(0)
   await btn.click()
@@ -52,13 +55,14 @@ test('the title-bar Quick chat button opens and closes the page agent panel', as
   await expect(panel).toHaveCount(0)
   await expect(page.locator('.app.page-agent-open')).toHaveCount(0)
   await expect(btn).toHaveAttribute('aria-pressed', 'false')
-  // it is present in a chat's title bar too
-  await page.getByRole('button', { name: /New chat/ }).first().click()
-  await expect(btn).toBeVisible()
+  // a chat's title bar shows its Workspace panel button in that slot instead
+  await page.locator('.sidebar .new-chat').click()
+  await expect(page.locator('.app-switcher').getByRole('button', { name: 'Workspace panel' })).toBeVisible()
+  await expect(btn).toHaveCount(0)
   expect(grain.consoleErrors).toEqual([])
 })
 
-test('hidden views are not in the sidebar; More rows opens Settings → Appearance', async ({ grain }) => {
+test('hidden views are not in the sidebar; More rows opens Settings → Sidebar', async ({ grain }) => {
   const { page, api } = grain
   // Library ships on; hiding it takes it out of the sidebar
   await expect(sidebarItem(page, 'Library')).toHaveCount(1)
@@ -68,8 +72,8 @@ test('hidden views are not in the sidebar; More rows opens Settings → Appearan
   await expect(sidebarItem(page, 'Library')).toHaveCount(0)
   await page.getByRole('button', { name: /More rows/ }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
-  await expect(page.getByRole('tab', { name: 'Appearance' })).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByRole('dialog').locator('h4', { hasText: 'Sidebar' })).toBeVisible()
+  await expect(page.locator('#settings-tab-sidebar')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('dialog').getByRole('heading', { name: 'Sidebar', level: 3 })).toBeVisible()
   await expect(page.getByRole('dialog').getByRole('checkbox', { name: 'Library', exact: true })).not.toBeChecked()
 })
 
@@ -255,9 +259,9 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   await menu(grain, 'Chats'); await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
   // Memory… opens Settings on the Memory tab, split: graph and list side by side
   await menu(grain, 'Memory…')
-  await expect(page.getByRole('dialog').getByRole('tab', { name: 'Memory' })).toHaveAttribute('aria-selected', 'true')
-  await expect(page.locator('.knowledge-body .graph-body')).toBeVisible()
-  await expect(page.locator('.knowledge-body .mem-pane')).toBeVisible()
+  await expect(page.locator('#settings-tab-memory')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('dialog').locator('.knowledge-body .graph-body')).toBeVisible()
+  await expect(page.getByRole('dialog').locator('.knowledge-body .mem-pane')).toBeVisible()
   await menu(grain, 'Settings…')
   await expect(page.getByRole('dialog').getByRole('tab').first()).toBeVisible()
   await page.keyboard.press('Escape')

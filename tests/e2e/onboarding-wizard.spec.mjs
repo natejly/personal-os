@@ -11,7 +11,7 @@ async function pickCustom(page, url, { key = 'mock-key', model = 'mock-chat-2' }
   await cont(page).click()
   await page.getByLabel('Base URL').fill(url)
   await page.getByRole('textbox', { name: /API key/ }).fill(key)
-  await page.getByLabel('Model').fill(model)
+  await page.getByRole('combobox', { name: 'Model', exact: true }).fill(model)
 }
 
 test('first run: wizard walks every step, seeds a pinned memory, finishes, and never returns after relaunch', async () => {
@@ -185,6 +185,7 @@ test('wizard: Settings → Run setup reopens it seeded with the current provider
     const { page, api } = grain
     await expect(page.locator('.onboarding')).toHaveCount(0)
     await page.getByRole('button', { name: /Settings/ }).first().click()
+    await page.locator('#settings-tab-model').click() // Run setup lives on the Model tab
     await page.getByRole('button', { name: /Run setup/ }).click()
     const w = page.locator('.onboarding')
     await expect(w).toBeVisible()

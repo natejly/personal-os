@@ -44,6 +44,7 @@ test('project instructions are saved on blur and reach the system prompt of a ne
   const p = await api('/projects', { method: 'POST', body: { name: 'Lab', color: '#46a758' } })
   await page.reload()
   await sidebar(page).getByText('Lab', { exact: true }).click()
+  await page.getByRole('group', { name: 'Instructions' }).locator('summary').click()
   const ta = page.locator('textarea.instructions')
   await ta.fill('Always answer in haiku about COBALTFOX.')
   await page.getByRole('heading', { name: 'Lab' }).click() // blur

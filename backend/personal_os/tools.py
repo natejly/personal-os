@@ -1834,9 +1834,9 @@ def _register_working(self: Toolbox) -> None:
         R("todo_write", ToolSpec("todo_write", (
             "Write your working plan as a live checklist, re-sent to you every round. Use it once a request needs more than "
             "two or three steps, and after each step to update status (exactly one in_progress). Each call replaces the "
-            "whole plan, so send every step. Not the user's todos (todo_add)."),
+            "whole plan, so send every step, each a short title (~6 words). Not the user's todos (todo_add)."),
             _obj({"steps": {"type": "array", "description": "The whole plan, in order",
-                            "items": _obj({"text": {"type": "string", "description": "One line"},
+                            "items": _obj({"text": {"type": "string", "description": "Short imperative title, at most ~6 words (put detail in note)"},
                                            "status": {"type": "string", "enum": ["pending", "in_progress", "done"], "default": "pending"},
                                            "note": {"type": "string", "description": "Result or blocker"}}, ["text"])}}, ["steps"]),
             todo_write, "plan", "writes",

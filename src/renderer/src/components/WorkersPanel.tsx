@@ -19,7 +19,7 @@ function WorkerFace({ w }: { w: WorkerInfo }): JSX.Element {
  * Stop / Resume per row; a row unfolds to the worker's chat (WorkerChat): its history, and a box to steer or stop it.
  * Approval cards the worker is waiting on stay inline. Fed by the app topic's `workers` event (see the store), with a
  * 3 s poll as a fallback while any worker is live. The card shows only while one is live; finished workers are listed
- * (newest few) only after "Show finished".
+ * (newest few) only after "Show finished", a link at the foot of the open list.
  */
 export default function WorkersPanel({ conversationId: focusId }: { conversationId?: string }): JSX.Element | null {
   const conversationId = useConversation(focusId)?.id // the main view passes no id: resolve the focused chat
@@ -57,7 +57,6 @@ export default function WorkersPanel({ conversationId: focusId }: { conversation
             ? <span className="muted">· {live ? `${live} running` : workers.length}</span>
             : <span className="worker-faces">{workers.filter(workerIsLive).map((w) => <WorkerFace key={w.id} w={w} />)}</span>}
         </button>
-        {anyEnded && <button className="ghost-btn xs" aria-expanded={showFinished} aria-label={showFinished ? 'Hide finished workers' : 'Show finished workers'} onClick={() => setShowFinished((v) => !v)}>{showFinished ? 'Hide finished' : 'Show finished'}</button>}
       </header>
       {open && (
         <ul className="plan-steps worker-list">
@@ -88,6 +87,7 @@ export default function WorkersPanel({ conversationId: focusId }: { conversation
           })}
         </ul>
       )}
+      {open && anyEnded && <button className="ghost-btn xs worker-finished" aria-expanded={showFinished} aria-label={showFinished ? 'Hide finished workers' : 'Show finished workers'} onClick={() => setShowFinished((v) => !v)}>{showFinished ? 'Hide finished' : 'Show finished'}</button>}
     </section>
   )
 }

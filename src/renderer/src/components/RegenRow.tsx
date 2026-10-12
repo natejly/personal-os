@@ -1,4 +1,4 @@
-import { RefreshCw } from '../icons'
+import { RefreshCw, X } from '../icons'
 import { useStore } from '../store'
 import VariantSwitcher from './VariantSwitcher'
 import { followupsFor } from '../lib/followups'
@@ -34,6 +34,8 @@ export default function RegenRow({ conversationId, last, streaming }: { conversa
             <button key={t} className="ghost-btn" title="Click to edit, Shift-click to send"
               onClick={(e) => (e.shiftKey ? void send(t, conversationId) : insertIntoComposer(t, { conversationId }))}>{t}</button>
           ))}
+          <button className="icon-btn ghost sm" title="Hide suggestions" aria-label="Hide suggestions"
+            onClick={() => { const st = useStore.getState(); void st.saveSettings({ followUps: false }); st.toast('Suggestions off — turn back on in Settings → Model') }}><X size={12} /></button>
         </div>
       )}
     </>

@@ -16,11 +16,11 @@ Mental model:
 - **Chats** run a tool loop. Tools read and write the app, Google, the Mac and a sandbox.
 - **Memory and graph**: auto-learn saves memories and graph links after replies. **Projects** group chats with their own instructions, files and memories.
 - **Files** (⌘4) holds notes you write, uploads, and Artifacts: what the assistant made in any chat, by chat. A project's **Context** tab is the same for one project (its chats' files, notes and uploads). Settings → Memory (⌘6) reviews memory and the writing Voice profile.
-- **Lists** (todos), **Calendar**, **Mail** and **Health** are sidebar rows under Today and Files (`src/renderer/src/shell/nav.tsx`); Settings → Modules hides any view. The top-right title-bar button opens the ⌘I panel.
+- **Lists** (todos), **Calendar**, **Mail** and **Health** are sidebar rows under Today and Files (`src/renderer/src/shell/nav.tsx`); Settings → Sidebar hides any row or view. The top-right title-bar button opens the ⌘I panel.
 - **Spaces** (⌘⇧C): a desktop of live windows (chat, lists, calendar, note, memory, graph, uploads, recap, project, usage, doc, face, crew). See [docs/spaces.md](../../../docs/spaces.md).
 - **Library**: Agents, Automations (workflows and saved commands), Skills, Connectors (MCP), and what Grain made.
-- **Autonomy**: a reply can hand work to subagents (`agent_spawn`). With Settings → Advanced → Desks "Start new chats working autonomously" on (the default), a new chat starts as a longer session (Ask as it goes, with a turn limit) with its own plan and workspace: a strip above the composer only while background workers run (the main agent has no status chrome; the composer's Stop is its control). Every chat's header "Documents in this chat" button opens a side panel with Files / Changes, plus Checklist, Workers and (for a desk) Review when they apply; settings are under Settings → Autonomy. Workflows are approved once and run in waves ([docs/workflows.md](../../../docs/workflows.md), [docs/cowork-design.md](../../../docs/cowork-design.md), which is the original desk spec, partly out of date; the standalone Cowork view was folded into chats on 2026-10-05). Scheduled runs only propose; results land in the Agent inbox on Today.
-- **Settings** (⌘,) tabs: Provider & cost, Tools, Memory, Behavior, Modules, Integrations, Data.
+- **Autonomy**: a reply can hand work to subagents (`agent_spawn`). With Settings → Agents → Desks "Start new chats working autonomously" on (the default), a new chat starts as a longer session (Ask as it goes, with a turn limit) with its own plan and workspace: a strip above the composer only while background workers run (the main agent has no status chrome; the composer's Stop is its control). Every chat's header "Documents in this chat" button opens a side panel with Files / Changes, plus Checklist, Workers and (for a desk) Review when they apply; settings are under Settings → Agents. Workflows are approved once and run in waves ([docs/workflows.md](../../../docs/workflows.md), [docs/cowork-design.md](../../../docs/cowork-design.md), which is the original desk spec, partly out of date; the standalone Cowork view was folded into chats on 2026-10-05). Scheduled runs only propose; results land in the Agent inbox on Today.
+- **Settings** (⌘,) tabs: Model, Usage, Permissions, Integrations, Agents, Memory, General, Sidebar, System access, Advanced (`TABS` in `SettingsModal.tsx`).
 
 ## Using it
 
@@ -36,7 +36,7 @@ First run, as a user:
 8. Spaces: ⌘⇧C, then Add widget or right-click the plane. Library for agents and automations.
 
 Shortcuts that matter (full list in reference.md): ⌘N new chat, ⌘K command palette, ⌘I page agent, ⌘⇧C
-Spaces, ⌘0 to ⌘6 views (Today, Chats, Lists, Calendar, Files, Mail, Memory), ⌘, settings,
+Spaces, ⌘1 to ⌘6 views (Chats, Lists, Calendar, Files, Mail, Memory), ⌘, settings,
 ⌘⇧F search chats.
 
 Composer features:
@@ -45,11 +45,11 @@ Composer features:
 - **Plan first** is a desk level (set through the desks API or an agent job; there is no composer control): the desk proposes a plan with `propose_plan`, you approve it once, and each step runs bound to its approved arguments.
 - **Approval card**: a tool in `ask` mode stops the reply until you approve or deny. The card offers allow once, always for this chat or globally, or a pattern rule.
 - **Always-ask list** (`alwaysAsk` in `llm.py` `DEFAULT_SETTINGS`): `gmail_send`, `calendar_delete`, `trash_local_file`, `move_local_file`, `run_shortcut`, `python_install`, `schedule_task`. No setting or card turns these fully on.
-- **Allow-host card**: when a reply that read the web wants to fetch another page, approve it or pick **Allow <host> from now on** (Settings → Tools → Allowed hosts, `fetchAllowlist`).
+- **Allow-host card**: when a reply that read the web wants to fetch another page, approve it or pick **Allow <host> from now on** (Settings → Permissions → Allowed hosts, `fetchAllowlist`).
 - **Side panel**: the `show` tool opens HTML, SVG, charts and files beside the chat ([docs/side-panel.md](../../../docs/side-panel.md)).
 - Related docs: [docs/docs-editor.md](../../../docs/docs-editor.md), [docs/health.md](../../../docs/health.md), [docs/writing-style.md](../../../docs/writing-style.md).
 
-Backups: Settings → Data keeps daily backups (newest 7 plus one a week), has **Back up now**, a restore
+Backups: Settings → Advanced → Data keeps daily backups (newest 7 plus one a week), has **Back up now**, a restore
 that applies on next start (`backups.apply_pending_restore`), and **Export all data** as a zip. Deleted
 notes and todos go to the trash for 30 days (Settings → Trash).
 
@@ -100,7 +100,7 @@ PERSONAL_OS_DATA_DIR="$HOME/Library/Application Support/Grain-dev/data" ./script
 PYTHONPATH=. .venv/bin/python -m pytest -q -p no:cacheprovider tests/<file>.py
 ```
 
-  Read the `inner totals:` line (printed by `backend/conftest.py`). A worktree without its own venv can use the main checkout's `backend/.venv/bin/python`.
+  Read the `inner totals:` line (printed by `backend/conftest.py`). A worktree without its own venv can use the main checkout's `backend/.venv/bin/python`. `pytest` on `tests/` runs every file, each in its own interpreter: pytest-style files under an inner pytest, script-style files as `python file`.
 - **End-to-end** (`tests/e2e/`, see its README): Playwright drives the built app against an isolated backend (own data dir and port, file-backed secrets) and a mock provider, so it cannot touch real data or the Keychain.
 
 ```bash
@@ -110,6 +110,23 @@ node tests/e2e/node_modules/.bin/playwright test -c tests/e2e/playwright.config.
 
   `tests/e2e/setup-worktree.sh [source-checkout]` installs or links node_modules and the venv, links Playwright (`PLAYWRIGHT_NODE_MODULES` or the source checkout's) and builds. The harness runs the Electron window in the background by default (`GRAIN_E2E_BACKGROUND`); set `E2E_FOREGROUND=1` to watch or debug. Other knobs: `E2E_LLM=real` (use the LiteLLM proxy, slow and paid), `E2E_KEEP=1`, `E2E_WORKERS=n`, `E2E_RETRIES=n`.
 - **Mock provider directives** (`tests/e2e/mockllm.mjs`), put them in the prompt: `!!reply <text>` answers that text; `!!tool <name> <json args>` makes one tool call then answers "MOCK: tool done"; `!!slow <ms>` delays; `!!fail <status>` fails once. Anything else echoes `MOCK: <message>`.
+
+## Relaunching the packaged app
+
+The packaged app is the daily driver. Build from a clean worktree at pushed main, not the main checkout (it often holds uncommitted work).
+
+1. In your own worktree: `git switch --detach origin/main`; symlink `node_modules` and `backend/.venv` from the main checkout if missing.
+2. If the build adds DB migrations, back up first: `sqlite3 "$HOME/Library/Application Support/personal-os/data/personal-os.db" ".backup <dest>"` (not `-readonly`, which blocks writing the backup).
+3. `npm run package` (about 5 min) gives `dist/mac-arm64/Grain.app` and a dmg.
+4. `osascript -e 'quit app "Grain"'`, then `rm -rf /Applications/Grain.app && cp -R dist/mac-arm64/Grain.app /Applications/` and `open -g /Applications/Grain.app`. Launch the `/Applications` copy: Finder hides builds under `.claude/` and Spotlight never indexes them.
+5. Verify in `~/Library/Logs/Grain/backend.log`, not just `/health`. Read `provider` and `baseUrl` from the settings table first: a direct provider (e.g. Fireworks) needs no LiteLLM; with LiteLLM, `/model/info`, `/v1/models` and `/v1/embeddings` on localhost:4000 must show 200 in that log.
+
+## Merging and cleaning up branches
+
+- Real unmerged work: `git cherry origin/main <branch>`; a `+` line is a patch not on main. Ahead-counts mislead after rebases and merge commits.
+- `sota/*`, `backup/*`, `wip/*` are swarm leftovers or snapshots of uncommitted worktrees; treat them as superseded unless told otherwise. Stale branches and worktrees were removed on 2026-10-11; their patches are in `~/Grain-archive/stale-work-2026-10-11/`.
+- Before a PR: re-fetch and merge `origin/main` (it moves during integration runs), and scan the diff and every commit message landing on main for other product names.
+- Two branches on one feature: keep both behaviours where possible, and check the merge with the full backend suite, not only the files either branch touched: a merge can break tests in files neither branch changed.
 
 ## Driving the app programmatically
 
@@ -125,7 +142,7 @@ Routes (verified in `backend/personal_os/app.py` and `modules/todos.py`):
 | `GET /health` | `{"ok": true}`, no token; poll it for readiness |
 | `GET/PUT /settings` | read or patch settings (PUT a partial object) |
 | `GET /tools` | every tool with group, danger, `default_mode`, `ask_locked`, `available` |
-| `GET/POST /conversations` | list, or create `{title, model, project_id, private}` |
+| `GET/POST /conversations` | list, or create `{title, model, project_id}` |
 | `POST /conversations/{id}/chat` | body `{content, model?, attachments?}`; starts the reply as a background run |
 | `GET /conversations/{id}/stream?since=<seq>` | SSE tail of the run; reattach any time with the last seq |
 | `POST /conversations/{id}/stop`, `/steer` | stop a run, or add a message mid-run |

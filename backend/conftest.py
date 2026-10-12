@@ -123,6 +123,8 @@ class FileItem(pytest.Item):
             tail = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
             for n, kind in _COUNT.findall(tail):
                 _TOTALS[kind] = _TOTALS.get(kind, 0) + int(n)
+        if proc.returncode == 5 and not script and "skipped" in proc.stdout:  # module-level importorskip: nothing ran
+            pytest.skip(proc.stdout.strip().splitlines()[-1])
         if proc.returncode != 0:
             raise FileFailed(proc)
 

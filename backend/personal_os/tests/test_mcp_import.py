@@ -23,6 +23,7 @@ def write(path: Path, doc: Any) -> None:
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)  # OpenCode's config dir would otherwise leave the throwaway HOME
     return tmp_path
 
 
@@ -32,7 +33,7 @@ def by_id(view: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 
 def test_nothing_installed_means_nothing_found(home: Path) -> None:
     view, configs = mcp_import.scan([])
-    assert [s["id"] for s in view] == ["claude_desktop", "claude_code", "cursor"]
+    assert [s["id"] for s in view] == ["claude_desktop", "claude_code", "cursor", "vscode", "windsurf", "codex", "opencode"]
     assert all(not s["found"] and s["servers"] == [] and s["error"] is None for s in view) and configs == {}
 
 

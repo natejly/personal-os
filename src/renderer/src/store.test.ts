@@ -1417,3 +1417,13 @@ test('an off-screen reply raises the in-app completion popup; an on-screen one d
     g.document = realD
   }
 })
+
+test('openAgent opens Library > Agents on that agent; null returns to the list', () => {
+  useStore.getState().openAgent('a1')
+  const s = useStore.getState()
+  assert.equal(s.view, 'library')
+  assert.equal(s.libraryTab, 'agents')
+  assert.equal(s.openAgentId, 'a1')
+  useStore.getState().openAgent(null)
+  assert.equal(useStore.getState().openAgentId, null)
+})

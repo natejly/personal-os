@@ -4761,7 +4761,22 @@ async def agent_home(def_id: str) -> dict[str, Any]:
             f"LEFT JOIN conversations c ON c.id=r.conversation_id WHERE r.kind IN ('chat','job') AND r.conversation_id IN ({marks}) "
             f"ORDER BY r.started_at DESC LIMIT 20", act["conversations"]).fetchall()] if act["conversations"] else []
     return {"agent": row, "chats": chats, "routines": [j for j in jobs.list() if j.get("agent_id") == def_id], "runs": runs,
-            "working": act["working"], "needs_you": act["needs_you"]}
+            "job_history": _agent_job_history(row), "working": act["working"], "needs_you": act["needs_you"]}
+
+
+def _agent_job_history(row: dict[str, Any]) -> list[dict[str, Any]]:
+    """Where this agent did a job, newest first: runs of the jobs bound to it, and workers started with it as their role."""
+    with db.tx() as c:
+        job_runs_ = c.execute(
+            "SELECT r.run_id, r.status, r.started_at, r.ended_at, r.conversation_id, r.error, j.id AS job_id, j.name AS title "
+            "FROM agent_runs r JOIN jobs j ON j.id=json_extract(r.input,'$.job_id') WHERE r.kind='job' AND j.agent_id=? "
+            "ORDER BY r.started_at DESC LIMIT 50", (row["id"],)).fetchall()
+        worker_runs = c.execute(
+            "SELECT run_id, status, started_at, ended_at, conversation_id, error, "
+            "COALESCE(NULLIF(json_extract(input,'$.title'),''), json_extract(input,'$.goal'), '') AS title FROM agent_runs "
+            "WHERE kind='worker' AND json_extract(input,'$.role')=? ORDER BY started_at DESC LIMIT 50", (row["name"],)).fetchall()
+    out = [{"kind": "job", **dict(r)} for r in job_runs_] + [{"kind": "worker", "job_id": None, **dict(r)} for r in worker_runs]
+    return sorted(out, key=lambda r: r["started_at"], reverse=True)[:50]
 
 
 @app.post("/agents/defs/{def_id}/approve")
@@ -5723,6 +5738,18 @@ def job_runs(id: str, limit: int = 50) -> list[dict[str, Any]]:
     """The job's last runs (50 by default, 200 at most): status incl. timed_out, duration, cost, tool and proposal counts."""
     _known_job(id)
     return job_history.merge_skips(_job_run_summaries(run_store.of_job(id, limit)), jobs.skips(id, limit), max(1, min(limit, 200)))
+
+
+@app.get("/jobs/{id}/agent")
+def job_agent(id: str) -> dict[str, Any]:
+    """The agent a job runs as: its own agent_id, else the one its latest run's chat was bound to. {agent_id: null} for plain Grain."""
+    job = _known_job(id)
+    ag = agent_defs.get(job["agent_id"]) if job.get("agent_id") else None
+    if ag is None:
+        last = run_store.of_job(id, 1)
+        name = ((convos.get(last[0]["conversation_id"], with_messages=False) or {}).get("settings") or {}).get("agent") if last and last[0].get("conversation_id") else None
+        ag = agent_defs.get(name) if name else None
+    return {"agent_id": ag["id"], "name": ag["name"]} if ag else {"agent_id": None, "name": None}
 
 
 @app.get("/jobs/{id}/stats")

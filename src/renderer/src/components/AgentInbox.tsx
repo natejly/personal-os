@@ -395,6 +395,15 @@ function ToolPicker({ value, onChange }: { value: string[]; onChange: (next: str
 
 export function JobRow({ job }: { job: Job }): JSX.Element {
   const { setJobEnabled, runJobNow, deleteJob, refreshJobs, selectChat, toast } = useStore()
+  const openAgent = useStore((s) => s.openAgent)
+  const agent = useStore((s) => (job.agent_id ? s.agentDefs.custom.find((d) => d.id === job.agent_id) : undefined))
+  const openJobAgent = async (): Promise<void> => {
+    try {
+      const r = await api.jobs.agent(job.id)
+      if (r.agent_id) openAgent(r.agent_id)
+      else toast('Runs as Grain', 'info')
+    } catch (e) { toast(`Jobs: ${(e as Error).message}`, 'error') }
+  }
   const [history, setHistory] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -460,7 +469,8 @@ export function JobRow({ job }: { job: Job }): JSX.Element {
           <span className="switch" />
         </label>
       )}
-      <span className="job-name ev-title" title={job.name}>{job.name}</span>
+      <button className="link job-name ev-title" title={`${job.name}: open the agent it runs as`} onClick={() => void openJobAgent()}>{job.name}</button>
+      {agent && <span className="tag" title="Runs as this agent">{agent.name}</span>}
       {once
         ? <span className="muted small">{job.run_at ? fmtDate(job.run_at) : 'no time set'}</span>
         : job.kind === 'watch'

@@ -868,17 +868,23 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
     withMsgs(msgs.map((m) => (m.id === mid ? fn(m) : m)))
   switch (ev.event) {
     case 'ab_start': {
-      const blank = (model: string): DuelSide => ({ model, text: '', ms: null, tokens: null, error: null, done: false, calls: [] })
+      const blank = (model: string): DuelSide => ({ model, text: '', ms: null, tokens: null, error: null, done: false, tools: [], files: [], held: [] })
       return { ...s, duel: { messageId: ev.data.id, a: blank(ev.data.models.a), b: blank(ev.data.models.b), ready: false } }
     }
     case 'ab_delta':
       return s.duel ? { ...s, duel: { ...s.duel, [ev.data.side]: { ...s.duel[ev.data.side], text: s.duel[ev.data.side].text + ev.data.text } } } : s
+    case 'ab_tool': { // a tool card of one side: opened pending, then replaced by its result
+      if (!s.duel) return s
+      const d = s.duel[ev.data.side]
+      const tools = d.tools.some((t) => t.id === ev.data.event.id) ? d.tools.map((t) => (t.id === ev.data.event.id ? ev.data.event : t)) : [...d.tools, ev.data.event]
+      return { ...s, duel: { ...s.duel, [ev.data.side]: { ...d, tools } } }
+    }
     case 'ab_end':
-      return s.duel ? { ...s, duel: { ...s.duel, [ev.data.side]: { ...s.duel[ev.data.side], ms: ev.data.ms, tokens: ev.data.tokens, error: ev.data.error, calls: ev.data.calls, done: true } } } : s
+      return s.duel ? { ...s, duel: { ...s.duel, [ev.data.side]: { ...s.duel[ev.data.side], ms: ev.data.ms, tokens: ev.data.tokens, error: ev.data.error, files: ev.data.files ?? [], held: ev.data.held ?? [], done: true } } } : s
     case 'ab_ready':
       return s.duel ? { ...s, duel: { ...s.duel, ready: true } } : s
     case 'ab_reset': // one side is streamed again
-      return s.duel ? { ...s, duel: { ...s.duel, ready: false, [ev.data.side]: { model: s.duel[ev.data.side].model, text: '', ms: null, tokens: null, error: null, done: false, calls: [] } } } : s
+      return s.duel ? { ...s, duel: { ...s.duel, ready: false, [ev.data.side]: { model: s.duel[ev.data.side].model, text: '', ms: null, tokens: null, error: null, done: false, tools: [], files: [], held: [] } } } : s
     case 'ab_pick':
       return { ...s, duel: null }
     case 'subagent':

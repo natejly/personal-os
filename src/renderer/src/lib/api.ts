@@ -602,6 +602,9 @@ export const api = {
   abRegenerate: (convId: string, messageId: string, side: 'a' | 'b') => req<{ ok: boolean }>(`/conversations/${convId}/ab/regenerate`, { method: 'POST', body: json({ message_id: messageId, side }) }, CONTROL_TIMEOUT_MS),
   /** Developer mode: settle the model duel a running reply waits on. */
   abPick: (convId: string, messageId: string, winner: DuelWinner) => req<{ ok: boolean }>(`/conversations/${convId}/ab/pick`, { method: 'POST', body: json({ message_id: messageId, winner }) }, CONTROL_TIMEOUT_MS),
+  /** Developer mode: a file one side of the waiting duel made, as text (it is not real until that side is picked). */
+  abFile: (convId: string, messageId: string, side: 'a' | 'b', path: string) =>
+    req<{ name: string; size: number; binary: boolean; text: string }>(`/conversations/${convId}/ab/file?message_id=${encodeURIComponent(messageId)}&side=${side}&path=${encodeURIComponent(path)}`),
   modelVotes: () => req<{ votes: number; models: ModelStanding[] }>('/model-votes'),
   resetModelVotes: () => req<{ ok: boolean }>('/model-votes', { method: 'DELETE' }),
   /** Injects a user message into a live run (steering). Throws a 409 when nothing is running. */

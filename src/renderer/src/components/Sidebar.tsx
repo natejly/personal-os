@@ -22,6 +22,8 @@ import { rowButton } from '../lib/rowButton'
 import { projectGroupOpen, toggleProjectGroup } from '../lib/projectGroups'
 import { useChatFileCountsSync } from '../lib/useChatFiles'
 import SidebarChatFiles from './SidebarChatFiles'
+import { tip } from '../lib/tip'
+import { formatAccelerator, shortcut } from '@shared/shortcuts'
 
 /** Project groups the user folded shut. Stored as exceptions, so a new project starts open. */
 const COLLAPSED_KEY = 'grain.sidebar.collapsedProjects'
@@ -78,6 +80,10 @@ type NavEntry = { view?: View; label: string; description?: string; icon: JSX.El
 const TOP: NavEntry[] = [
   { view: 'docs', description: 'Your documents, in folders, with the assistant editing alongside you', label: 'Files', icon: <Files size={15} /> }
 ]
+/** Sidebar view to the id of its Go-to shortcut. */
+const NAV_SHORTCUT: Partial<Record<string, string>> = {
+  chat: 'view-chat', todos: 'view-todos', calendar: 'view-calendar', docs: 'view-docs', mail: 'view-mail'
+}
 const NAV_MODULES = MODULES.filter((m) => m.nav && m.view)
 
 export default function Sidebar(): JSX.Element {
@@ -260,9 +266,15 @@ export default function Sidebar(): JSX.Element {
     return null
   }
 
+  /** The nav title, plus the Go-to shortcut where the view has one. */
+  const navTip = (n: NavEntry): string => {
+    const id = n.view ? NAV_SHORTCUT[n.view] : undefined
+    return id ? `${navTitle(n)} (${formatAccelerator(shortcut(id).keys)})` : navTitle(n)
+  }
+
   // A row without a `view` (Web) exists only as a canvas widget: a click opens its window directly.
   const navItem = (n: NavEntry): JSX.Element => (
-    <button key={n.label} title={navTitle(n)} className={`nav-item ${n.view && view === n.view ? 'active' : ''}`} aria-current={n.view && view === n.view ? 'page' : undefined}
+    <button key={n.label} title={navTip(n)} className={`nav-item ${n.view && view === n.view ? 'active' : ''}`} aria-current={n.view && view === n.view ? 'page' : undefined}
       onClick={() => (n.view ? setView(n.view) : void useCanvas.getState().openWindow(n.kind as WidgetKind))}
       {...(n.kind ? dragProps({ kind: 'nav', id: n.kind, label: n.label }) : {})}>
       {n.icon}<span>{n.label}</span>
@@ -277,12 +289,12 @@ export default function Sidebar(): JSX.Element {
     <aside className="sidebar">
       <ResizeHandle id="sidebar-w" defaultSize={260} min={190} max={480} grows="right" onCollapse={toggleSidebar} label="Sidebar width" className="at-right" />
       <div className="sidebar-top drag">
-        <button className="brand no-drag" onClick={() => newChat(null)}><GrainLogo size={15} /><span>Grain</span></button>
-        <button className="icon-btn no-drag" aria-label="Hide sidebar" title="Hide sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftClose size={16} /></button>
+        <button className="brand no-drag" title={tip('New chat', 'new-chat')} onClick={() => newChat(null)}><GrainLogo size={15} /><span>Grain</span></button>
+        <button className="icon-btn no-drag" aria-label="Hide sidebar" title={tip('Hide sidebar', 'toggle-sidebar')} onClick={toggleSidebar}><PanelLeftClose size={16} /></button>
       </div>
 
       {/* Above the scroller, so the one action every session starts with never scrolls away. */}
-      <button className="new-chat" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow() : newChat(null))}>
+      <button className="new-chat" title={tip('New chat', 'new-chat')} onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow() : newChat(null))}>
         <MessageSquarePlus size={15} /><span>New chat</span><kbd>⌘N</kbd>
       </button>
 
@@ -364,7 +376,7 @@ export default function Sidebar(): JSX.Element {
           className={`icon-btn sm${searching ? ' on' : ''}`}
           aria-label="Search chats"
           aria-expanded={searching}
-          title="Search chats"
+          title={tip('Search chats', 'chat-search')}
           onClick={() => {
             setChatsOpen(true)
             setSearching((on) => {
@@ -479,7 +491,7 @@ export default function Sidebar(): JSX.Element {
       </div>
 
       <div className="sidebar-bottom">
-        <button className="settings-btn" onClick={() => setSettingsOpen(true)}><Settings size={16} /><span>Settings</span>
+        <button className="settings-btn" title={tip('Settings', 'settings')} onClick={() => setSettingsOpen(true)}><Settings size={16} /><span>Settings</span>
           {memoryProposals > 0 && <span className="count pending" title={`${memoryProposals} memory tidy-up suggestion${memoryProposals === 1 ? '' : 's'} to review, under Knowledge base`}>{memoryProposals}</span>}
           <kbd>⌘,</kbd></button>
       </div>

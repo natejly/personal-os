@@ -27,6 +27,7 @@ import { enqueue, enterAction, removeQueued, requeueFront, sendNext, updateQueue
 import QueueTray from './QueueTray'
 import { followupsFor } from '../lib/followups'
 import { conversationContext } from '../lib/composerSuggest'
+import { tip } from '../lib/tip'
 
 const NO_MESSAGES: never[] = []
 const NO_SUGGESTIONS: string[] = []
@@ -390,7 +391,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     if (!c?.item) submit(false)
   }
 
-  const sendLabel = !streaming ? 'Send' : queueId ? 'Queue a follow-up (⌘↵ steers now)' : 'Steer the reply'
+  const sendLabel = !streaming ? tip('Send', 'send') : queueId ? 'Queue a follow-up (⌘↵ steers now)' : 'Steer the reply'
 
   return (
     <div className={compact ? 'composer-wrap compact' : 'composer-wrap'}>
@@ -491,11 +492,11 @@ export default function Composer({ conversationId, footer, compact = false, onSe
         <div className="composer-actions">
           <MicButton scope={box} onText={dictate} />
           {streaming && (
-            <button className="send stop" title={stopping ? 'Stopping…' : 'Stop (Esc)'} aria-label={stopping ? 'Stopping' : 'Stop'} aria-busy={stopping} disabled={stopping} onClick={halt}>
+            <button className="send stop" title={stopping ? 'Stopping…' : tip('Stop', 'stop')} aria-label={stopping ? 'Stopping' : 'Stop'} aria-busy={stopping} disabled={stopping} onClick={halt}>
               {stopping ? <Loader2 size={14} className="spin" /> : <Square size={14} />}
             </button>
           )}
-          <button className="send" title={sendLabel} aria-label={sendLabel} disabled={!canSend} onClick={() => submit()}><ArrowUp size={16} /></button>
+          <button className="send" title={sendLabel} aria-label={streaming ? sendLabel : 'Send'} disabled={!canSend} onClick={() => submit()}><ArrowUp size={16} /></button>
         </div>
       </div>
       <div className="composer-footer">

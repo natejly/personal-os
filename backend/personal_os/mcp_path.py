@@ -61,7 +61,7 @@ def _node_bins(home: Path) -> list[str]:
 
 def common_dirs() -> list[str]:
     home = Path.home()
-    return ["/opt/homebrew/bin", "/usr/local/bin", str(home / ".local/bin"), str(home / ".volta/bin"), *_node_bins(home),
+    return ["/opt/homebrew/bin", "/usr/local/bin", str(home / ".local/node/bin"), str(home / ".local/bin"), str(home / ".volta/bin"), *_node_bins(home),
             str(home / ".bun/bin"), str(home / ".cargo/bin"), str(home / ".deno/bin"), DOCKER_DESKTOP_BIN]
 
 

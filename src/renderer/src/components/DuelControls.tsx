@@ -12,7 +12,7 @@ export default function DuelControls(): JSX.Element | null {
   if (!devTools) return null
   return (
     <span className="duel-controls">
-      <button type="button" className={`ghost-btn${on ? ' on' : ''}`} aria-pressed={on} title="Send each message to two models and pick the better reply"
+      <button type="button" className={`ghost-btn${on ? ' on' : ''}`} aria-pressed={on} title="Send each message to two models: each does the whole turn in a temporary copy, and you keep the better one. Doubles the cost."
         onClick={() => setAb({ on: !on, model: model ?? defaultModel })}>A/B</button>
       {on && (
         <>

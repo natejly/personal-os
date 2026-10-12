@@ -1,6 +1,7 @@
 // A tiny OpenAI-compatible provider so chat tests are fast and deterministic. Steer it from the prompt:
 //   "!!reply <text>"            → the assistant answers <text> (streamed in word chunks)
 //   "!!tool <name> <json args>" → the assistant makes one tool call, then answers "MOCK: tool done" on the next turn
+//   "!!tool[<model>] <name> <json args>" → the same, for that model only; several of them make several calls in one round
 //   "!!slow <ms>"               → wait before answering (for Stop / steer / queue tests)
 //   "!!think <text>"            → stream <text> as reasoning first; with !!slow the wait sits between thinking and answer
 //   "!!fail <status>"           → answer with that HTTP status once per request (retry paths)
@@ -37,7 +38,7 @@ export function startMockLLM() {
       const text = typeof lastUser?.content === 'string' ? lastUser.content : (lastUser?.content || []).map((p) => p.text || '').join(' ')
       const fail = text.match(/!!fail (\d+)/)
       const slow = text.match(/!!slow (\d+)/)
-      const tool = text.match(/!!tool (\S+) (\{.*\})/s)
+      const tools = [...text.matchAll(/!!tool(?:\[([^\]]+)\])? (\S+) (\{.*?\})(?= !!tool|$)/gs)].filter((m) => !m[1] || m[1] === body.model)
       const reply = text.match(/!!reply ([\s\S]*)/)
       // "!!think <text>" streams that text as reasoning first; with !!slow the wait then falls between the thinking and the answer.
       const think = text.match(/!!think ((?:(?!!!)[\s\S])*)/)
@@ -51,10 +52,11 @@ export function startMockLLM() {
       const toolAlready = msgs.slice(msgs.lastIndexOf(lastUser) + 1).some((m) => m.role === 'tool')
       let content = reply ? reply[1].trim() : `MOCK: ${text.replace(/!!\w+.*$/s, '').trim() || '(empty)'}`
       if (toolAlready) content = 'MOCK: tool done'
-      const toolCall = tool && !toolAlready ? { id: 'call_mock1', type: 'function', function: { name: tool[1], arguments: tool[2] } } : null
+      const toolCalls = toolAlready ? [] : tools.map((t, i) => ({ id: `call_mock${i + 1}`, type: 'function', function: { name: t[2], arguments: t[3] } }))
+      const toolCall = toolCalls.length > 0
       const usage = { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 }
       if (!body.stream) {
-        const message = toolCall ? { role: 'assistant', content: null, tool_calls: [toolCall] } : { role: 'assistant', content }
+        const message = toolCall ? { role: 'assistant', content: null, tool_calls: toolCalls } : { role: 'assistant', content }
         return res.end(JSON.stringify({ id: 'mock', object: 'chat.completion', model: body.model, choices: [{ index: 0, message, finish_reason: toolCall ? 'tool_calls' : 'stop' }], usage }))
       }
       res.setHeader('Content-Type', 'text/event-stream')
@@ -65,8 +67,10 @@ export function startMockLLM() {
         await wait()
       }
       if (toolCall) {
-        send({ tool_calls: [{ index: 0, id: toolCall.id, type: 'function', function: { name: toolCall.function.name, arguments: '' } }] })
-        send({ tool_calls: [{ index: 0, function: { arguments: toolCall.function.arguments } }] })
+        toolCalls.forEach((tc, index) => {
+          send({ tool_calls: [{ index, id: tc.id, type: 'function', function: { name: tc.function.name, arguments: '' } }] })
+          send({ tool_calls: [{ index, function: { arguments: tc.function.arguments } }] })
+        })
         send({}, 'tool_calls')
       } else {
         for (const w of content.split(/(?<= )/)) send({ content: w })

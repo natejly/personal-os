@@ -34,7 +34,7 @@ export function useStop(id: string): { stop: () => Promise<void>; busy: boolean 
 }
 
 /** A Claude Code session blocked on an answer: it can only be answered in its own session, so offer Terminal on a click. */
-export function NeedsYou({ c }: { c: CodingSession }): JSX.Element | null {
+export function NeedsYou({ c, compact }: { c: CodingSession; compact?: boolean }): JSX.Element | null {
   const toast = useStore((s) => s.toast)
   const openTerminal = useStore((s) => s.openTerminal)
   const termOk = useTermAvailable()
@@ -44,14 +44,31 @@ export function NeedsYou({ c }: { c: CodingSession }): JSX.Element | null {
   }
   // The in-app terminal when this build has one; the system Terminal stays as a quiet second way on macOS.
   const external = !termOk || window.os.platform === 'darwin'
-  return (
-    <div className="tc-hint warn">
-      <strong>This coding session is waiting for you</strong>
-      <div>It needs an answer in its own session.</div>
+  const hint = c.attach_hint ? (
+    <button type="button" className="cs-attach mono" title={`Copy: ${c.attach_hint}`} onClick={() => { void navigator.clipboard?.writeText(c.attach_hint as string).then(() => toast('Copied')).catch(() => undefined) }}>{c.attach_hint}</button>
+  ) : null
+  const buttons = (
+    <>
       {termOk && <button type="button" className="ghost-btn sm" onClick={() => openTerminal(c.id, 'attach')}>Open terminal</button>}
       {external && (termOk
         ? <button type="button" className="link" onClick={open}>Open in external Terminal</button>
         : <button type="button" className="ghost-btn sm" onClick={open}>Open in Terminal</button>)}
+    </>
+  )
+  if (compact) {
+    return (
+      <div className="cs-needs">
+        <span className="cs-needs-text">Waiting for your answer</span>
+        {buttons}
+        {hint}
+      </div>
+    )
+  }
+  return (
+    <div className="tc-hint warn">
+      <strong>This coding session is waiting for you</strong>
+      <div>It needs an answer in its own session.</div>
+      {buttons}
       {c.attach_hint && <div className="tc-muted small">Or run <span className="mono">{c.attach_hint}</span> yourself.</div>}
     </div>
   )

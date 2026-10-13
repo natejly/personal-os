@@ -138,6 +138,7 @@ def test_plan_is_reinjected_last_every_round() -> None:
     events = run_chat(cid)
 
     check(len(SEEN) == 3, f"three rounds were streamed, got {len(SEEN)}")
+    check(appmod._request_extra.get(cid, 0) > 1000, "the turn's tool schemas and hints are measured for the next compaction check")
     check(not plan_messages(SEEN[0]), "round 1 has no plan: none existed yet")
     for r in (1, 2):
         msgs = SEEN[r]

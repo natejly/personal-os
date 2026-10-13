@@ -169,6 +169,9 @@ for i, c in enumerate(contents):
 msgs.append({"role": "system", "content": "## Your current plan\n" + "p" * 500})
 before = [dict(m) for m in msgs]
 check(compaction.microcompact(msgs, 3, 10000, 0.9) == (0, 0), "below threshold no-op")
+n, saved = compaction.microcompact(msgs, 3, 10000, 0.9, fixed_tokens=10000)  # the tool schemas push it over
+check(n == 3, "tool schemas outside the messages count toward the threshold")
+msgs[:] = [dict(m) for m in before]
 n, saved = compaction.microcompact(msgs, 3, 100, 0.5)
 tools = [m for m in msgs if m["role"] == "tool"]
 cleared = [json.loads(m["content"]).get("cleared") for m in tools]

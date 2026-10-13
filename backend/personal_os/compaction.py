@@ -464,8 +464,9 @@ def memory_nudge(n_cleared: int, already_nudged: bool, tool_schemas: list[dict[s
 
 
 def microcompact(messages: list[dict[str, Any]], keep: int, window_tokens: int, at_fraction: float,
-                 at_tokens: int | None = None) -> tuple[int, int]:
+                 at_tokens: int | None = None, fixed_tokens: int = 0) -> tuple[int, int]:
     """Replace old tool-result content in place with a stub once the context passes at_fraction of the window.
+    `fixed_tokens` is what the request carries outside `messages` (the tool schemas), counted toward the threshold.
 
     Skips the tool messages after the last assistant tool-call turn (the round the model has not seen yet),
     the newest `keep` results before that, small results, and anything already cleared. Returns (cleared, tokens_saved).
@@ -473,7 +474,7 @@ def microcompact(messages: list[dict[str, Any]], keep: int, window_tokens: int, 
     threshold = at_fraction * window_tokens
     if at_tokens:
         threshold = min(threshold, at_tokens)
-    if estimate_messages(messages) <= threshold:
+    if estimate_messages(messages) + fixed_tokens <= threshold:
         return 0, 0
     last_call = max((i for i, m in enumerate(messages) if m.get("role") == "assistant" and m.get("tool_calls")), default=-1)
     names = {tc.get("id", ""): (tc.get("function") or {}).get("name", "")

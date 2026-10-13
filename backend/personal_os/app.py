@@ -232,6 +232,10 @@ plans = Plans(db)
 # Active chat streams so they can be aborted from the client. A Run when the reply is on the bus
 # (stop goes through the bus, which also wakes the provider read); a bare Event for a stream with no run.
 _active: dict[str, asyncio.Event | Run] = {}
+# Per conversation: the tokens a request carries beyond build_context's estimate (tool schemas and the hints), as the
+# last turn measured them. History compaction runs before this turn's tools are known, so that figure stands in.
+# ponytail: one int per chat for the process lifetime, 0 after a restart until the chat's next turn.
+_request_extra: dict[str, int] = {}
 # Pending tool-call approvals: call_id -> Future[decision]. The durable record is the approvals table; this is
 # only how POST /approvals wakes the run that is waiting in this process.
 _approvals: dict[str, asyncio.Future] = {}
@@ -1951,14 +1955,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # The summarizer call can take a while. When it is about to run, the reply row is opened first so the transcript
     # can say what is happening (a `status` event); a turn that does not compact is unchanged.
     pre_am: dict[str, Any] | None = None
-    if compaction.needs_compaction(compactor, convos, cfg, conv_id, used["tokens_estimate"], window=win):
+    ctx_tokens = used["tokens_estimate"]
+    req_tokens = ctx_tokens + _request_extra.get(conv_id, 0)  # the whole request, not just system + history
+    if compaction.needs_compaction(compactor, convos, cfg, conv_id, req_tokens, window=win):
         pre_am = regen_am or convos.add_message(conv_id, "assistant", "", model=model, variant_of=carried_root)
         _bind_stop(pre_am["id"], stop, run)
         yield "assistant_message", {**pre_am, "context_used": cite_slim(used)}
         yield "status", {"id": pre_am["id"], "kind": "compacting"}
     try:
         history, cinfo = await compaction.prepare_history(compactor, convos, cfg, providers.tier_model(cfg, "medium"), conv_id,
-                                                          used["tokens_estimate"], window=win, cancel=stop)
+                                                          req_tokens, window=win, cancel=stop)
     except asyncio.CancelledError:
         if pre_am:
             _active.pop(pre_am["id"], None)
@@ -2352,6 +2358,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             system = "\n\n".join(p for p in (system, *hints, inputs_block, map_block, _today_hint()) if p)
         used["system_prompt"] = system
         used["tokens_estimate"] = estimate_tokens(system)
+        _request_extra[conv_id] = used["tokens_estimate"] - ctx_tokens + (estimate_tokens(json.dumps(tool_schemas)) if tool_schemas else 0)
         run_notes: list[dict[str, Any]] = []  # system notes that follow the history, whichever history it is
         if parked_note:
             run_notes.append({"role": "system", "content": parked_note})
@@ -2710,7 +2717,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # past that size the provider's time to first token is what a tool round costs. Handles stay readable.
             n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), win,
                                                          float(cfg.get("microAt", 0.25)),
-                                                         at_tokens=_int_setting(cfg, "microAtTokens", limits.MICRO_AT_TOKENS))
+                                                         at_tokens=_int_setting(cfg, "microAtTokens", limits.MICRO_AT_TOKENS),
+                                                         fixed_tokens=estimate_tokens(json.dumps(tool_schemas)) if tool_schemas else 0)
             if n_cleared:
                 mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
                 tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})

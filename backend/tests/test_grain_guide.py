@@ -20,7 +20,7 @@ from personal_os import app as appmod  # noqa: E402
 from personal_os import guide  # noqa: E402
 from personal_os.commands import expand_skill  # noqa: E402
 from personal_os.context import build_context  # noqa: E402
-from personal_os.learn import MAX_SKILL_PROCEDURE, skills_seen  # noqa: E402
+from personal_os.learn import MAX_SKILL_DESCRIPTION, MAX_SKILL_PROCEDURE, skills_seen  # noqa: E402
 
 passed = 0
 
@@ -38,6 +38,12 @@ row = rows[0]
 check(row["status"] == "approved", "approved from first run")
 check(len(guide.PROCEDURE) < MAX_SKILL_PROCEDURE - 2000, "text fits the cap with room")
 check(row["procedure"] == guide.PROCEDURE.strip(), "stored text is the bundled text")
+
+check("## Teaching someone Grain" in guide.PROCEDURE, "teaching section present")
+check("teach me" in guide.DESCRIPTION.lower() and "teach me" in guide.PROMPT_HINT, "teaching triggers routed")
+check(len(guide.DESCRIPTION) <= MAX_SKILL_DESCRIPTION, "description fits its cap")
+for gone in ("Settings -> Modules", "Settings -> Tools", "Settings -> Behavior", "Settings -> Autonomy", "Cmd+0 Today"):
+    check(gone not in guide.PROCEDURE, f"removed UI not mentioned: {gone}")
 
 # a second startup neither duplicates nor touches the row
 again = guide.ensure(sk)

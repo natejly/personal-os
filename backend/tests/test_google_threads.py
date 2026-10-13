@@ -17,7 +17,7 @@ from personal_os.google import Google  # noqa: E402
 def main() -> None:
     built: list[Any] = []
 
-    def fake_build(name: str, version: str, credentials: Any = None, cache_discovery: bool = False) -> Any:
+    def fake_build(name: str, version: str, credentials: Any = None, http: Any = None, cache_discovery: bool = False) -> Any:
         client = object()
         built.append(client)
         return client

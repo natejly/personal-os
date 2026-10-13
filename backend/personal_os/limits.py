@@ -75,7 +75,7 @@ CODING_SESSION_MAX_CONCURRENT = 3  # live coding sessions at once, their own poo
 LOGIN_SHELL_TIMEOUT_SECONDS = 5    # resolving the user's login-shell PATH for a new claude daemon
 # Workers (workers.py): detached background agents the chat's front agent hands work to. These route and queue work;
 # none of them ends a worker's run.
-DELEGATION_AFTER_ROUNDS = 2        # rounds of tool calls a chat reply makes itself before the rest must go to a worker (routing, not a cap)
+DELEGATION_AFTER_ROUNDS = 4        # rounds of tool calls a chat reply makes itself before the rest must go to a worker (routing, not a cap)
 WORKER_MAX_CONCURRENT = 8          # workers running at once; the rest wait in a queue and start in order
 WORKER_MEMORY_FLOOR = 0.15         # a queued worker is not started while free system memory is below this share
 WORKER_RECHECK_SECONDS = 5.0       # how often a non-empty queue looks again for a free slot or recovered memory
@@ -178,3 +178,6 @@ def context_shares(window: int) -> dict[str, int]:
     """Tokens each injected context block may take in a `window`-token context. A window past CONTEXT_WINDOW_FALLBACK
     does not buy bigger blocks: they are re-sent (mostly uncached) every turn."""
     return {k: int(min(window, CONTEXT_WINDOW_FALLBACK) * r) for k, r in CONTEXT_SHARES.items()}
+
+# Heading of the per-turn retrieval system message (context.layout_messages); llm.py needs it without importing context.
+VOLATILE_HEADER = "## Context for this turn"

@@ -16,7 +16,7 @@ export default function AgentsTab({ draft, patch }: TabProps): JSX.Element {
         <Switch title="Delegate long work" help="Once a reply has used its tool rounds, the assistant hands the rest to a background worker and answers you at once." checked={draft.delegationForce !== false} onChange={(delegationForce) => patch({ delegationForce })} />
         {draft.delegationForce !== false && (
           <label className="setting-row"><span className="toggle-text"><b>Delegate after this many tool rounds</b><small>1 to 20.</small></span>
-            <NumberField name="delegationAfterRounds" value={draft.delegationAfterRounds ?? 2} fallback={2} onChange={(delegationAfterRounds) => patch({ delegationAfterRounds })} />
+            <NumberField name="delegationAfterRounds" value={draft.delegationAfterRounds ?? 4} fallback={4} onChange={(delegationAfterRounds) => patch({ delegationAfterRounds })} />
           </label>
         )}
         <label className="setting-row"><span className="toggle-text"><b>Background workers at once</b><small>1 to 16.</small></span>

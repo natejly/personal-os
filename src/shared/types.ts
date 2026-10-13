@@ -1616,7 +1616,7 @@ export interface Settings {
   codingRoute?: boolean
   /** The default coding agent for a new session. 'any' (or missing) lets Grain pick the first installed one. */
   codingAgent?: 'any' | 'opencode' | 'claude' | 'pi'
-  /** Background workers. Past `delegationAfterRounds` tool rounds in one reply the assistant hands remaining work to a worker (default on, 2, 1-20). */
+  /** Background workers. Past `delegationAfterRounds` tool rounds in one reply the assistant hands remaining work to a worker (default on, 4, 1-20). */
   delegationForce?: boolean
   delegationAfterRounds?: number
   /** Workers running at once (1-16, default 4); the rest queue. */

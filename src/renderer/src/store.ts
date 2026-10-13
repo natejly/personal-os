@@ -207,6 +207,11 @@ export interface State {
   /** The last "open a terminal on this coding session" request; `n` makes a repeat of the same one a new request. DeskPanel shows its Terminal tab and TerminalPane starts `mode`. */
   terminalRequest: { sessionId: string; mode: 'attach' | 'shell' | null; n: number; at: number } | null
   openTerminal: (sessionId: string, mode: 'attach' | 'shell' | null) => void
+  /** Set by the side-panel chord: the Terminal tab shows even with no coding session. */
+  terminalTab: boolean
+  /** A request to bring a side-panel tab forward (Traces from a reply's trace chip). */
+  deskTabRequest: { tab: 'traces'; n: number; at: number } | null
+  togglePanelContext: () => void
   /** "Schedule as routine" on a reply: the Agent inbox opens its task editor with this, switched off until a test run. */
   /** A new chat whose empty state also shows the Agent inbox (a job row, a job notification), even when nothing is waiting. */
   inboxOpen: boolean
@@ -1006,6 +1011,7 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'chat:search') s.searchChats()
       else if (action === 'toggle-context') s.toggleContext()
       else if (action === 'toggle-desk') s.toggleDeskPanel()
+      else if (action === 'panel-context') s.togglePanelContext()
       else if (action === 'page-agent') s.togglePageAgent()
       else if (action === 'view:graph') s.openMemory('graph')
       else if (action === 'view:memory') s.openMemory()
@@ -1823,6 +1829,9 @@ export const useStore = create<State>((set, get) => {
       } catch { /* keep what we have */ }
     },
     terminalRequest: null,
+    terminalTab: false,
+    deskTabRequest: null,
+    togglePanelContext: () => set((s) => (s.contextOpen ? { contextOpen: false, deskPanel: false } : { contextOpen: true, terminalTab: true })),
     openTerminal: (sessionId, mode) => set((st) => ({ terminalRequest: { sessionId, mode, n: (st.terminalRequest?.n ?? 0) + 1, at: Date.now() }, contextOpen: false })),
     inboxOpen: false,
     jobsFocusId: null,
@@ -2069,7 +2078,7 @@ export const useStore = create<State>((set, get) => {
     },
     setPageContext: (pageContext) => set((s) => (s.pageContext === pageContext ? {} : { pageContext })),
     setContextTab: (contextTab) => set({ contextTab }),
-    openTrace: (traceMessageId) => set({ traceMessageId, contextTab: 'trace', contextOpen: true }),
+    openTrace: (traceMessageId) => set((s) => ({ traceMessageId, contextOpen: false, deskPanel: true, deskTabRequest: { tab: 'traces', n: (s.deskTabRequest?.n ?? 0) + 1, at: Date.now() } })),
     // A plain open (⌘, or the sidebar button) starts on Provider, as it always has.
     setSettingsOpen: (settingsOpen) => set(settingsOpen ? { settingsOpen, settingsTab: 'appearance', settingsGroup: null } : { settingsOpen }),
     openHelp: (section) => set(section ? { helpOpen: true, helpSection: section } : { helpOpen: false }),

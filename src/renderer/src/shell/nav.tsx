@@ -15,7 +15,7 @@ export interface NavEntry {
 }
 
 /**
- * The shell's own sidebar views. Today and Files are fixed and come before; Calendar and Mail take 14 and 16,
+ * The shell's own sidebar views. Files is fixed and comes before; Calendar and Mail take 14 and 16,
  * Library 40, and a module slots by its `nav.order` (Lists 12, Health 18).
  */
 const SHELL: NavEntry[] = [

@@ -67,7 +67,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "google_docs_search", "google_docs_read", "google_docs_create", "google_docs_append",
     "google_sheets_read", "google_sheets_write", "google_sheets_create",
     "propose_times_draft",
-    "doc_list", "doc_search", "doc_read", "doc_create", "doc_edit", "doc_delete", "doc_comments", "doc_comment_reply", "show",
+    "doc_list", "doc_search", "doc_read", "doc_create", "doc_edit", "doc_delete", "doc_comments", "doc_comment_reply", "dashboard_save", "dashboard_open", "dashboard_pin", "show",
     "find_files", "read_local_file", "write_local_file", "move_local_file", "trash_local_file",
     "list_shortcuts", "run_shortcut", "open_page",
     "schedule_task", "scheduled_tasks", "cancel_scheduled_task",

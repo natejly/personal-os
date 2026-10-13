@@ -223,6 +223,17 @@ def _coding_session_events(c: sqlite3.Connection) -> None:
     c.execute("CREATE INDEX IF NOT EXISTS idx_coding_session_events ON coding_session_events(session_id, seq)")
 
 
+def _dashboard_binding_cache(c: sqlite3.Connection) -> None:
+    """dashboard_binding_cache (saved_dashboards.py): the last rows each binding of a live saved dashboard read
+    successfully, so a binding that fails later still renders. doc_id is a docs id (text)."""
+    c.execute("""CREATE TABLE IF NOT EXISTS dashboard_binding_cache (
+      doc_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      rows_json TEXT NOT NULL,
+      fetched_at TEXT NOT NULL,
+      PRIMARY KEY (doc_id, name))""")
+
+
 def _sticky_notes_into_docs(c: sqlite3.Connection) -> None:
     """Sticky notes become docs. Each note row turns into a doc with the SAME id (so a space window keeps its
     ref_id), titled from its first line (docs.title_from_body), body, project and timestamps kept, filed at the
@@ -631,6 +642,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (35, "coding_session_base", _coding_session_base),
     (36, "drop_unused_tables_and_settings", _drop_unused_tables_and_settings),
     (37, "coding_session_events", _coding_session_events),
+    (38, "dashboard_binding_cache", _dashboard_binding_cache),
 ]
 
 

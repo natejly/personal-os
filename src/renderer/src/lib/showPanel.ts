@@ -82,7 +82,7 @@ export const itemRawPath = (item: Pick<ShowItem, 'path' | 'documentId' | 'rawPat
   item.documentId ? `/documents/${item.documentId}/raw` : item.rawPath ?? rawPath(item.path ?? '')
 
 /** A fenced block promoted to the panel: the same source, titled by its kind. */
-export function fromFence(kind: Exclude<ShowItem['kind'], 'file'>, source: string, title?: string): ShowItem {
+export function fromFence(kind: Exclude<ShowItem['kind'], 'file' | 'dashboard'>, source: string, title?: string): ShowItem {
   return { kind, title: title || { html: 'HTML', svg: 'SVG', mermaid: 'Diagram', chart: 'Chart', interactive: 'Interactive chart', markdown: 'Markdown' }[kind], source }
 }
 

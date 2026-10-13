@@ -201,7 +201,7 @@ export interface ToolInfo {
  * Something the chat's side panel shows: content the model wrote (the same kinds as the fenced blocks in a reply,
  * plus markdown), or a file on this Mac the panel fetches by path.
  */
-export type ShowKind = 'html' | 'svg' | 'mermaid' | 'chart' | 'interactive' | 'markdown' | 'file'
+export type ShowKind = 'html' | 'svg' | 'mermaid' | 'chart' | 'interactive' | 'markdown' | 'file' | 'dashboard'
 export interface ShowItem {
   kind: ShowKind
   title: string
@@ -652,6 +652,8 @@ export interface ToolEvent {
   error: string | null
   /** Images the tool produced (e.g. matplotlib figures from run_python). */
   images?: ToolImage[] | null
+  /** A saved dashboard a tool saved, opened or pinned; the card renders it. */
+  dashboard?: { id: string; title: string } | null
   /** What the `show` tool put in the chat's side panel; the model only saw a receipt. */
   show?: ShowItem | null
   /** deep_research's plan, steps and sources considered. */
@@ -2981,4 +2983,31 @@ export interface SubagentView {
     /** A user row: 'user' when the person sent it from the app, 'agent' when the main agent did (the task, its steers). */
     from?: 'user' | 'agent'
   }[]
+}
+
+/** A saved dashboard row (GET /saved-dashboards). */
+export interface SavedDashboard {
+  id: string
+  title: string
+  project_id: string | null
+  format: 'spec' | 'html'
+  mode: 'live' | 'snapshot'
+  updated_at: number | string
+}
+
+/** One dashboard view: a chart or interactive-chart spec. */
+export interface DashboardViewSpec { kind: 'chart' | 'interactive'; spec: Record<string, unknown> }
+
+/** GET /saved-dashboards/{id}/render: live dashboards re-read their data on every call. */
+export interface DashboardRender {
+  id: string
+  title: string
+  project_id: string | null
+  format: 'spec' | 'html'
+  mode: 'live' | 'snapshot'
+  views: DashboardViewSpec[] | null
+  html: string | null
+  updatedAt: string
+  failed: { binding: string; error: string; lastGoodAt: string | null }[]
+  bindings: { name: string; source: string; label: string }[]
 }

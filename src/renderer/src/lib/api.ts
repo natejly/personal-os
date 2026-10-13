@@ -17,6 +17,7 @@ import type {
   RunChanges, RunUndoResult,
   BackupInfo, DataOverview, ShellJobInfo, ShellJobTail, TelegramStatus
 } from '@shared/types'
+import type { SavedDashboard, DashboardRender, DashboardViewSpec } from '@shared/types'
 import type { CodingSession, CodingSessionDiff, CodingSessionEvent, ShipChecklist } from '@shared/types'
 import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
 import { ApiError } from './apiError'
@@ -785,6 +786,13 @@ export const api = {
       req<CanvasWindow>(`/windows/${id}`, { method: 'PUT', body: json(patch) }),
     raise: (id: string) => req<CanvasWindow>(`/windows/${id}/raise`, { method: 'POST' }),
     delete: (id: string) => req(`/windows/${id}`, { method: 'DELETE' })
+  },
+  savedDashboards: {
+    list: (projectId?: string) => req<SavedDashboard[]>(`/saved-dashboards${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`),
+    create: (d: { title: string; format?: 'spec' | 'html'; mode?: 'live' | 'snapshot'; views?: DashboardViewSpec[]; html?: string; project_id?: string | null }) =>
+      req<{ id: string; title: string; project_id: string | null; folder: string }>('/saved-dashboards', { method: 'POST', body: json(d) }),
+    render: (id: string) => req<DashboardRender>(`/saved-dashboards/${id}/render`),
+    pin: (id: string, projectId: string | null) => req(`/saved-dashboards/${id}/pin`, { method: 'POST', body: json({ project_id: projectId }) })
   },
   docs: {
     list: (s: Scope = 'all', q = '') => req<Doc[]>(`/docs?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),

@@ -3,7 +3,7 @@ import { Code2, Eye } from '../icons'
 import { clampPreviewHeight, PREVIEW_HEIGHT_MESSAGE, previewUrl } from '../../../shared/htmlPreview'
 import { buildPreviewDoc, PREVIEW_SANDBOX } from '../lib/htmlFence'
 import { CopyButton } from './MarkdownPreview'
-import OpenInPanel from './ShowButton'
+import OpenInPanel, { SaveDashboard } from './ShowButton'
 import '../styles/htmlFence.css'
 
 /**
@@ -45,6 +45,7 @@ export default function HtmlBlock({ source, streaming }: { source: string; strea
             <button role="tab" aria-selected={showing === 'preview'} className={showing === 'preview' ? 'on' : ''} disabled={streaming} onClick={() => setMode('preview')}><Eye size={11} /> Preview</button>
           </span>
           {!streaming && <OpenInPanel kind="html" source={source} />}
+          {!streaming && <SaveDashboard kind="html" source={source} />}
           <CopyButton text={source} />
         </span>
       </div>

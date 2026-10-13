@@ -29,13 +29,13 @@ async def _stream(settings: Any, model: str, messages: list[dict[str, Any]], too
     yield {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None}
 
 
-def _system_text(ready: list[str], notes_on: bool = True) -> str:
+def _system_text(ready: list[str], notes_on: bool = True, status: str = "ready", detail: str = "") -> str:
     for row in appmod.mcp_store.servers():
         appmod.mcp_store.delete_server(row["id"])
     srv = appmod.mcp_store.create_server(name="Notebook", command="/bin/true")
     appmod.mcp_store.sync_tools(srv["id"], [{"name": "read_note", "description": "Read a note.", "parameters": {"type": "object"}}])
     appmod.db.set_settings({"mcpServerNotes": notes_on})
-    live = [{"server_id": srv["id"], "name": "Notebook", "status": "ready", "server_info": {"instructions": NOTE}}]
+    live = [{"server_id": srv["id"], "name": "Notebook", "status": status, "detail": detail, "server_info": {"instructions": NOTE}}]
     cid = appmod.convos.create(None, "t", "m")["id"]
 
     async def go() -> None:
@@ -61,3 +61,10 @@ def test_no_ready_tool_no_notes() -> None:
 
 def test_the_setting_turns_them_off() -> None:
     assert NOTE not in _system_text(["mcp__notebook__read_note"], notes_on=False)
+
+
+def test_a_connector_that_is_not_up_is_named() -> None:
+    assert "Connectors not available" not in _system_text(["mcp__notebook__read_note"])
+    text = _system_text([], status="error", detail="sign-in required")
+    assert "Connectors not available right now: Notebook (needs sign-in)" in text and NOTE not in text
+    assert "Notebook (connecting)" in _system_text([], status="connecting")

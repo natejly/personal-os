@@ -642,6 +642,17 @@ def _mcp_server_notes(slugs: set[str]) -> str:
     return mcp_search.server_notes(live, {s["server_id"]: mcp_store.latest_eval(s["server_id"]) for s in live})
 
 
+def _mcp_down_note() -> str:
+    """One line naming the enabled connectors that are not connected right now, so the model tells the user one is
+    starting or needs a sign-in instead of answering as if it had no such access."""
+    down = [f"{redact.scrub_command_output(i['name'])} ({'needs sign-in' if 'sign-in' in (i.get('detail') or '') else i['status']})"
+            for i in mcp.status() if i.get("status") != "ready"]
+    if not down:
+        return ""
+    return ("Connectors not available right now: " + ", ".join(down) + ". If the user asks for one, say it is still starting, "
+            "or needs a sign-in or a fix under Settings → Connectors.")
+
+
 def _gate(name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None = None) -> str:
     """Effective mode for one call. Untrusted content in the run forces every external tool to ask.
 
@@ -2328,6 +2339,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # What each connected server said about its own tools at initialize, for servers with a tool offered this
             # turn (deferred or not). Kept with tools_hint so it stays in the cacheable prefix.
             tools_hint = "\n\n".join(p for p in (tools_hint, _mcp_server_notes(set(mcp_modes))) if p)
+        if use_tools and (_down := _mcp_down_note()):
+            tools_hint = "\n\n".join(p for p in (tools_hint, _down) if p)
         hints = (NO_EMOJI_HINT, RENDER_HINT, tools_hint,
                  FRONT_AGENT_HINT if front_hint else PROACTIVE_HINT if tool_schemas and not desk and not proposal_only(run) else "",
                  _agents_hint(modes, front=front_hint), _job_hint(run),

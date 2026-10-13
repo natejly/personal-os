@@ -43,7 +43,7 @@ from .db import new_id, now
 from . import toolcore
 from .toolcalls import parse_arguments, resolve_name
 from .trace import Tracer, now_ms
-from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
+from .stuck import POLL_HINT_AFTER, POLL_TOOLS, STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector, result_digest
 from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, DISCARDED, ToolSpec, _obj, allows_slug, call_key, denied, summarize_result, tool_error
 from .working import escape_tags, fence_untrusted
 
@@ -110,6 +110,17 @@ READ_TOOLS = (
     "desk_list_files", "desk_read_file", "view_image", "doc_guide",
 )
 
+# Reads whose repeat, when the answer is byte-identical, is answered with a stub instead of the same text again. Not the
+# ones that fetch from outside or tell the time: a second look there is meant to see something new.
+DEDUPE_TOOLS = frozenset(set(READ_TOOLS) - {"current_time", "web_search", "fetch_url", "read_tool_result", "search_tool_results", "context_map",
+                                            "youtube_search", "youtube_video", "github_search", "github_read", "read_feed"}
+                         | {"gmail_search", "gmail_read", "gmail_outbox"})
+
+
+def dedupable(name: str, args: dict[str, Any]) -> bool:
+    return name in DEDUPE_TOOLS and (name != "gmail_outbox" or args.get("action") in (None, "", "list"))
+
+
 # What a child is always offered once its tool list passes toolDeferAbove (tool_search joins it). The most-called tools of
 # 15 days of worker and subagent runs; every other tool it may call is in a prompt index and loads on first call or via
 # tool_search. Only names the child already has are ever offered, so a restricted role gains nothing from this list.
@@ -117,6 +128,15 @@ READ_TOOLS = (
 WORKER_CORE = ("shell_run", "shell_poll", "run_python", "web_search", "fetch_url", "read_local_file", "fs_grep", "fs_glob",
                "fs_edit", "write_local_file", "desk_list_files", "desk_read_file", "desk_write_file", "read_tool_result",
                "search_tool_results", "read_document", "search_documents", "doc_read", "gmail_search", "gmail_read")
+
+
+WORKER_EFFORTS = ("low", "medium", "high")
+
+
+def worker_effort(cfg: dict[str, Any], chat_effort: Any) -> Any:
+    """Reasoning effort for a worker's rounds: the workerEffort setting, or the chat's own when it says 'chat'."""
+    set_ = str(cfg.get("workerEffort") or "medium")
+    return set_ if set_ in WORKER_EFFORTS else chat_effort
 
 
 def _one_line(text: Any, limit: int = 200) -> str:
@@ -512,6 +532,7 @@ class Child:
     repeats: int = 0
     stuck_hits: int = 0
     stuck_stop: str = ""            # set when a breaker ends tool use: what to tell the model
+    seen: dict[str, tuple[str, int, str]] = field(default_factory=dict)  # call_key -> (result digest, round, result_id) of the last read-only answer
 
     @property
     def label(self) -> str:
@@ -579,6 +600,7 @@ class Subagents:
         self.workspace, self.skills = workspace, skills
         self.approvals = approvals if approvals is not None else {}
         self.children: dict[str, Child] = {}
+        self.waits: dict[str, int] = {}  # call id -> ms spent on its approval card, until _exec reports it
         self.locks = RootLocks()
         self.snaps: Any = None  # folder snapshots (snapshots.py), set by app.py
         self.connectors: Any = None  # MCP connector hooks (call, hints, review_text, mode, denied), set by app.py
@@ -912,12 +934,13 @@ class Subagents:
         kw: dict[str, Any] = {"cancel": ch.cancel}
         if final:
             kw["tool_choice"] = "none"
-        if ch.ctx.get("effort") and ch.ctx["effort"] != "default":
-            kw["effort"] = ch.ctx["effort"]
+        effort = worker_effort(cfg, ch.ctx.get("effort"))
+        if effort and effort != "default":
+            kw["effort"] = effort
         buf: list[str] = []
         end: dict[str, Any] = {}
         tracer = Tracer()
-        lspan = tracer.start("llm", ch.model, {"round": ch.rounds, "effort": str(ch.ctx.get("effort") or "default"), "messages": len(ch.messages),
+        lspan = tracer.start("llm", ch.model, {"round": ch.rounds, "effort": str(effort or "default"), "messages": len(ch.messages),
                                                "tools": len(schemas), "worker": True, "kind": ch.kind, "role": ch.role.name, **({"final": True} if final else {})})
         self._emit(ch, "span", {"span": lspan})
         first_token: int | None = None
@@ -1260,6 +1283,17 @@ class Subagents:
             result.pop("images", None)
             if hint := ch.denials.note():
                 result["permission_note"] = hint
+        if ran and name in POLL_TOOLS and isinstance(result, dict) and not err:
+            polled = ch.detector.poll(call_key(name, {k: v for k, v in args.items() if k not in ("wait_s", "timeout_s")}), result)
+            if polled >= POLL_HINT_AFTER:
+                result["poll_hint"] = f"No new output in {polled} polls; check the job's status or do other work instead of waiting again."
+        stub = None
+        if ran and not err and isinstance(result, dict) and dedupable(name, args):
+            digest, prev = result_digest(result), ch.seen.get(sig)
+            ch.seen[sig] = (digest, ch.rounds, prev[2] if prev and prev[0] == digest else "")
+            if prev and prev[0] == digest:
+                ago = f"{ch.rounds - prev[1]} rounds ago" if ch.rounds > prev[1] else "earlier in this round"
+                stub = {"unchanged": True, "note": f"Same result as your call {ago}{f' (result_id {prev[2]})' if prev[2] else ''}; nothing changed."}
         ch.denials.record(not ran and (spec is not None or mcp) and raw_mode != "off" and "_raw" not in args)
         nudge = ""
         if ran:
@@ -1272,15 +1306,19 @@ class Subagents:
                 else:
                     ch.stuck_stop = stuck.detail
         preview = summarize_result(result)
+        if stub is not None:
+            result = stub
         self._emit(ch, "tool_result", {"id": uid, "name": name, "result_preview": preview, "error": err, "approval": decision,
-                                       "duration_ms": int((time.time() - t0) * 1000), **repaired})
+                                       "duration_ms": int((time.time() - t0) * 1000), "wait_ms": self.waits.pop(uid, 0), **repaired})
         # The parent loop's fence, per call: a result that read untrusted text (web, a coding agent's log) is wrapped as data
         # with an id the text cannot guess, so it reads as data, not as instructions to this child.
         fence = ch.ctx.setdefault("fence_nonce", secrets.token_hex(8)) \
             if len(ch.ctx.get("taint_sources") or []) > sources_before else None
         if self.results is not None and ch.conversation_id:
-            content = self.results.render(ch.conversation_id, ch.message_id, name, result, untrusted=bool(ch.ctx.get("tainted")),
-                                          fence=fence)[0]
+            content, rid = self.results.render(ch.conversation_id, ch.message_id, name, result, untrusted=bool(ch.ctx.get("tainted")),
+                                               fence=fence)
+            if rid and sig in ch.seen and stub is None:
+                ch.seen[sig] = (*ch.seen[sig][:2], rid)  # a long answer lives behind a handle: the stub can point at it
             return content + nudge
         blob = redact.scrub_command_output(json.dumps(result, default=str, ensure_ascii=False))
         blob = blob if len(blob) <= 8000 else blob[:8000] + "...[truncated]"
@@ -1455,6 +1493,7 @@ class Subagents:
         finally:
             self.approvals.pop(uid, None)
         waited = time.time() - t0
+        self.waits[uid] = int(waited * 1000)  # _exec reads it into the tool_result event
         ch.meter.paused += waited
         b = ch.ctx.get("meter_root")
         if b is not None and hasattr(b, "paused"):

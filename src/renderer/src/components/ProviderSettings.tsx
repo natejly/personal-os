@@ -148,6 +148,13 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
             {locked && <small>Set during setup. Changing it would invalidate the search index.</small>}
             {!value && cleared.includes(f.label) && <small className="model-prompt" role="status">Pick a model for {f.label}</small>}
           </label>
+            {f.key === 'workerModel' && (
+              <label><span className="toggle-text"><b>Worker effort</b><small>How hard workers think. Medium is faster and cheaper; Same as chat follows the chat's effort.</small></span>
+                <select value={draft.workerEffort ?? 'medium'} onChange={(e) => patch({ workerEffort: e.target.value as Settings['workerEffort'] })}>
+                  <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="chat">Same as chat</option>
+                </select>
+              </label>
+            )}
           </Fragment>
         )
       })}

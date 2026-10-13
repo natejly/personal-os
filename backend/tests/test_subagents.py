@@ -433,6 +433,42 @@ def test_duplicate_calls_in_a_child_run_once() -> None:
     check(out["state"] == "completed", "ok")
 
 
+def _tool_msgs(name: str, results: list[Any], tool: str, rounds: int) -> list[str]:
+    """Run a child that calls `tool` once a round for `rounds` rounds against a stubbed tool returning `results` in turn."""
+    reset()
+    spec = appmod.toolbox.specs[tool]
+    real, seq = spec.fn, list(results)
+
+    async def fake(ctx: dict[str, Any], **kw: Any) -> Any:
+        return dict(seq.pop(0))
+
+    spec.fn = fake
+    try:
+        # a third identical call in a row raises a doom-loop card, so polls vary wait_s (the hint keys on the job)
+        SCRIPTS[name] = [{"text": "", "calls": [call(f"c{i}", tool, {"job_id": "j1", "wait_s": i + 1} if tool == "shell_poll" else {})]}
+                         for i in range(rounds)] + [{"text": "done"}]
+        run(appmod.toolbox.call("agent_spawn", {"task": name}, mkctx(new_conv())))
+    finally:
+        spec.fn = real
+    return [m["content"] for m in next(c for c in mgr.children.values()).messages if m["role"] == "tool"]
+
+
+def test_an_unchanged_read_is_stubbed_but_a_changed_one_is_not() -> None:
+    same = _tool_msgs("rd-same", [{"docs": ["a"]}] * 2, "doc_list", 2)
+    check("docs" in same[0] and "nothing changed" in same[1], "the repeat of an identical answer is a stub")
+    moved = _tool_msgs("rd-moved", [{"docs": ["a"]}, {"docs": ["a", "b"]}], "doc_list", 2)
+    check("nothing changed" not in moved[0] + moved[1] and '"b"' in moved[1], "a changed answer is shown in full")
+
+
+def test_a_poll_with_nothing_new_gets_a_hint_after_three() -> None:
+    quiet = {"job_id": "j1", "status": "running", "exit_code": None, "output": "", "more": False}
+    got = _tool_msgs("poll-quiet", [quiet] * 4, "shell_poll", 4)
+    check(["poll_hint" in m for m in got] == [False, False, True, True], "the hint appears from the third identical poll")
+    check("No new output in 3 polls" in got[2], "and counts them")
+    mixed = _tool_msgs("poll-mixed", [quiet, quiet, {**quiet, "output": "line"}, quiet], "shell_poll", 4)
+    check(not any("poll_hint" in m for m in mixed), "new output resets the count")
+
+
 # ---- approvals -------------------------------------------------------------------------------------
 
 class FakeRun:

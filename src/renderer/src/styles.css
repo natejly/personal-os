@@ -3015,6 +3015,7 @@ select:focus-visible {
 .worker-line { display: flex; align-items: center; gap: 8px; }
 .worker-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0; text-align: left; cursor: pointer; color: var(--text); font: inherit; }
 .worker-open small { color: var(--text-faint); white-space: nowrap; margin-left: auto; }
+.worker-open small.needs-you { color: var(--warn, var(--accent)); font-weight: 600; }
 .worker-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A worker's chat: its history in the main chat's message rows, and a small composer to steer it. */
 .worker-chat { display: flex; flex-direction: column; gap: 6px; min-height: 0; }

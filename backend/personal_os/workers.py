@@ -460,14 +460,20 @@ class Workers:
         cost = ch.meter.cost if ch is not None else (row.get("budget") or {}).get("cost")
         idle = int(self.sub.idle_seconds(ch)) if ch is not None and st == "running" else 0
         now = ch.now if ch is not None and st == "running" else ""
+        pending = [] if ended else self._approvals(row["run_id"])
+        behind = len(self.live()) + pos - 1 if pos else None  # running workers plus the ones queued ahead
+        if behind:
+            now = f"Queued behind {behind}"
+        if st in ("running", "awaiting_approval") and pending:  # parked on a card (its own, or a sub-worker's): the user is the one being waited on
+            st, now = "awaiting_approval", f"Waiting for your approval: {pending[0]['tool']}"
         if idle >= limits.WORKER_STALL_NOTE_SECONDS:  # said, never acted on: nothing here stops a worker
             now = (f"{now} · " if now else "") + f"no progress for {idle // 60} min"
         return {"id": row["run_id"], "conversation_id": inp.get("conversation_id") or "", "title": str(inp.get("title") or ""),
                 "goal": str(inp.get("goal") or ""), "status": st, "now": now, "idle_s": idle,
-                "queue_position": pos, "started_at": row.get("started_at"), "ended_at": row.get("ended_at"),
+                "queue_position": pos, "queued_behind": behind, "started_at": row.get("started_at"), "ended_at": row.get("ended_at"),
                 "resume_of": inp.get("resume_of") or None,
                 "resumable": ended and bool(self.store.event_counts(row["run_id"]).get("transcript")),
-                "pending_approvals": [] if ended else self._approvals(row["run_id"]),
+                "pending_approvals": pending,
                 "depth": int(inp.get("depth") or 1), "cost": round(float(cost), 6) if cost is not None else None,
                 # the face: a Library agent keeps its name; a resumed worker keeps the id it started as
                 "agent": str(inp.get("role") or ""), "origin": str(inp.get("origin") or row["run_id"]),

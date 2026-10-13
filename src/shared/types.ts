@@ -798,6 +798,8 @@ export interface WorkerInfo {
   /** One-line current action while running, else ''. */
   now: string
   queue_position: number | null
+  /** While queued: workers running plus queued ahead of this one. */
+  queued_behind?: number | null
   started_at: number
   ended_at: number | null
   resume_of: string | null
@@ -1476,6 +1478,8 @@ export interface Settings {
   modelLow?: string
   /** Model for workers the chat starts; empty means the chat model. An agent definition's own model wins. */
   workerModel?: string
+  /** Reasoning effort of workers' rounds; 'chat' follows the chat's own. Default 'medium'. */
+  workerEffort?: 'low' | 'medium' | 'high' | 'chat'
   autoLearn: boolean
   /** New uploads and Rebuild index write a model-made context blurb per chunk (one call each). */
   contextualChunks?: boolean

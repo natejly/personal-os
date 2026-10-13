@@ -470,12 +470,15 @@ def test_fifo_queue_past_the_concurrency_limit(monkeypatch: pytest.MonkeyPatch) 
     got = [info_of(i) for i in ids]
     assert [g["status"] for g in got] == ["running", "running", "queued", "queued", "queued"]
     assert [g["queue_position"] for g in got] == [None, None, 1, 2, 3]
+    assert [g["queued_behind"] for g in got] == [None, None, 2, 3, 4], "running workers plus the ones queued ahead"
+    assert got[2]["now"] == "Queued behind 2" and got[4]["now"] == "Queued behind 4"
     assert [w["id"] for w in workers_of(cid)] == ids[::-1], "newest first"
     assert ("workers", f"{ids[2]}:queued") in seen, "queued workers are announced on the workers topic"
     GATES[goals[0]].set()
     wait(lambda: len(STARTS) == 3, "the next worker to start")
     assert STARTS[2] == goals[2], "first in, first out"
     assert [info_of(i)["queue_position"] for i in ids[3:]] == [1, 2], "positions move up"
+    assert [info_of(i)["now"] for i in ids[3:]] == ["Queued behind 2", "Queued behind 3"], "and the status text follows"
     GATES[goals[1]].set()
     wait(lambda: len(STARTS) == 4, "the fourth worker")
     assert STARTS[3] == goals[3]
@@ -781,6 +784,7 @@ def test_a_workers_external_call_asks_and_is_answered_through_the_approvals_rout
     say(cid, f"please read {url} for me")
     w = wait(lambda: next((x for x in workers_of(cid) if x["status"] == "awaiting_approval"), None), "the worker to ask")
     assert len(w["pending_approvals"]) == 1
+    assert w["now"] == "Waiting for your approval: fetch_url", "the row says what it is waiting on"
     card = w["pending_approvals"][0]
     assert card["tool"] == "fetch_url" and card["args"] == {"url": url} and card["call_id"].endswith(":f1")
     row = store.approval(card["call_id"])
@@ -795,6 +799,8 @@ def test_a_workers_external_call_asks_and_is_answered_through_the_approvals_rout
     assert bool(hits) is (decision == "allow"), "allow lets the call run, deny does not"
     done = workers_of(cid)[0]
     assert done["status"] == "done" and done["pending_approvals"] == []
+    results = [d for _s, k, d in store.events(w["id"]) if k == "tool_result" and d.get("name") == "fetch_url" and d.get("duration_ms") is not None and "wait_ms" in d]
+    assert results and results[-1]["wait_ms"] <= results[-1]["duration_ms"], "tool_result splits the card wait from the run time"
     assert store.approval(card["call_id"])["status"] == ("approved" if decision == "allow" else "denied")
     assert msgs[-1]["content"] == "I read the page."
     seen_tool = [m for m in seat("worker")[-1]["messages"] if m["role"] == "tool"]
@@ -991,14 +997,14 @@ def test_the_new_default_model_does_not_skip_onboarding() -> None:
 
 def test_orchestration_settings_defaults_and_ranges() -> None:
     d = llm.DEFAULT_SETTINGS
-    assert d["delegationForce"] is True and d["delegationAfterRounds"] == 2 and d["workerMaxConcurrent"] == 4 and d["telegramPushWorkerResults"] is False
+    assert d["delegationForce"] is True and d["delegationAfterRounds"] == 2 and d["workerMaxConcurrent"] == 8 and d["telegramPushWorkerResults"] is False
     assert limits.WORKER_MEMORY_FLOOR == 0.15 and limits.RANGES["delegationAfterRounds"] == (1, 20) and limits.RANGES["workerMaxConcurrent"] == (1, 16)
     assert client.put("/settings", json={"workerMaxConcurrent": 99}).status_code == 422, "out-of-range values are refused"
     assert client.put("/settings", json={"delegationAfterRounds": 0}).status_code == 422
     assert client.put("/settings", json={"workerMaxConcurrent": 16, "delegationAfterRounds": 20}).status_code == 200
     s = client.get("/settings").json()
     assert s["workerMaxConcurrent"] == 16 and s["delegationAfterRounds"] == 20
-    assert not {"orchestratorModel", "workerModel"} & set(d), "no separate orchestrator or worker model"
+    assert "orchestratorModel" not in d, "no separate orchestrator model"
 
 
 # ---------------- the hidden message: what it is and is not ----------------

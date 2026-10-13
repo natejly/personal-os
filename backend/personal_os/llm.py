@@ -94,6 +94,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "modelHigh": "",
     "modelMedium": "",
     "modelLow": "",
+    "workerEffort": "medium",  # reasoning effort of workers' rounds: low | medium | high, or "chat" to follow the chat's
     "workerModel": "",  # "" = workers run on the chat model; an agent definition's own model still wins
     "fastModel": "",  # what Auto sends a short, plain message to (router.py); empty means Auto uses the default model
     "autoRoute": False,  # new chats start on Auto: the fast or the default model per message

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useReducer, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent } from 'react'
 import { ArrowLeft, ArrowRight, Check, ExternalLink, Eye, EyeOff, Loader2, Lock, RefreshCw } from '../../icons'
 import GrainLogo from '../GrainLogo'
 import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import { useOnboarding } from './onboardingStore'
-import { ABOUT_EXAMPLES, STEPS, initialState, modelOptions, reduce, showsBaseUrl, stepBlocker, type ProviderInfo, type WizardAction, type WizardState } from './steps'
+import { ABOUT_EXAMPLES, initialState, modelOptions, reduce, showsBaseUrl, stepBlocker, visibleSteps, type ProviderInfo, type WizardAction, type WizardState } from './steps'
 import { PermissionsPanel } from '../PermissionsPanel'
 import './onboarding.css'
 
@@ -31,16 +31,18 @@ export default function Onboarding(): JSX.Element {
   const root = useRef<HTMLDivElement>(null)
   const closeWizard = useOnboarding((s) => s.closeWizard)
   const google = useStore((s) => s.google)
+  const googlePending = useStore((s) => s.googlePending)
   const { refreshGoogle, connectGoogle } = useStore()
+  const steps = useMemo(() => visibleSteps(google?.configured), [google?.configured])
 
   const [state, rawDispatch] = useReducer(
-    (s: WizardState, a: WizardAction & { provider_?: ProviderInfo }) => reduce(s, a, a.provider_),
+    (s: WizardState, a: WizardAction & { provider_?: ProviderInfo; steps_?: WizardState['step'][] }) => reduce(s, a, a.provider_, a.steps_),
     undefined,
-    initialState
+    () => initialState(useStore.getState().settings?.providerKeysSet ?? {})
   )
   const provider = providers?.find((p) => p.id === state.providerId)
-  // The reducer needs the provider for the key-step check; it is looked up here rather than stored twice.
-  const dispatch = useCallback((a: WizardAction) => rawDispatch({ ...a, provider_: provider }), [provider])
+  // The reducer needs the provider for the key-step check and the steps this install walks; both are looked up here rather than stored twice.
+  const dispatch = useCallback((a: WizardAction) => rawDispatch({ ...a, provider_: provider, steps_: steps }), [provider, steps])
 
   useEffect(() => {
     api.setup.providers().then(async (r) => {
@@ -50,7 +52,20 @@ export default function Onboarding(): JSX.Element {
       const p = r.providers.find((x) => x.id === st?.provider)
       if (st && p) rawDispatch({ type: 'seed', provider: p, baseUrl: st.baseUrl || p.baseUrl, model: st.model || p.defaultModel })
     }).catch((e: Error) => setLoadError(e.message))
+    // Early, so the step list knows whether there is a Google step before the user gets there.
+    void useStore.getState().refreshGoogle()
   }, [])
+
+  // The key step's model picker lists what the server itself offers, once there is enough to ask with.
+  const [listed, setListed] = useState<{ id: string; models: string[] }>({ id: '', models: [] })
+  useEffect(() => {
+    if (state.step !== 'key' || !provider) return
+    const t = setTimeout(() => {
+      api.setup.models({ provider: provider.id, baseUrl: state.baseUrl.trim(), apiKey: state.apiKey.trim() || null, model: '' })
+        .then((r) => setListed({ id: provider.id, models: r.models ?? [] })).catch(() => undefined)
+    }, 600)
+    return () => clearTimeout(t)
+  }, [state.step, provider, state.baseUrl, state.apiKey])
 
   // Focus follows the step: the first input if there is one, else the heading.
   useEffect(() => {
@@ -81,23 +96,37 @@ export default function Onboarding(): JSX.Element {
 
   useEffect(() => { if (state.step === 'google') void refreshGoogle() }, [state.step, refreshGoogle])
 
+  // The provider is saved as soon as its test passes, so "Set up later" on any later step keeps the working key.
+  const providerSave = useRef<Promise<void> | null>(null)
+  const saveProvider = useCallback(async (): Promise<void> => {
+    if (!provider) return
+    await api.setup.complete({ provider: provider.id, baseUrl: state.baseUrl.trim(), apiKey: state.apiKey.trim() || null, model: state.model.trim() })
+    // The backend persisted through the normal settings path; pull it into the store rather than re-PUT it.
+    useStore.setState({ settings: await api.settings.get() })
+    void useStore.getState().loadModels()
+  }, [provider, state.baseUrl, state.apiKey, state.model])
+  const startProviderSave = (): void => {
+    const p = saveProvider()
+    providerSave.current = p
+    // A failure is shown at `done`, which waits on this and retries.
+    p.catch(() => { if (providerSave.current === p) providerSave.current = null })
+  }
+
   const save = useCallback(async (): Promise<void> => {
     if (!provider) return
     setSaved({ state: 'saving' })
     try {
-      await api.setup.complete({ provider: provider.id, baseUrl: state.baseUrl.trim(), apiKey: state.apiKey.trim() || null, model: state.model.trim() })
-      // The backend persisted through the normal settings path; pull it into the store rather than re-PUT it.
-      useStore.setState({ settings: await api.settings.get() })
-      void useStore.getState().loadModels()
+      await (providerSave.current ?? saveProvider())
       // A pinned memory, so the assistant knows who it is talking to from the very first message.
       // A failure here is not worth blocking setup on: the user can add it in Memory later.
       const about = state.about.trim()
       if (about) await api.memories.create({ project_id: null, content: about, kind: 'fact', pinned: true }).catch(() => undefined)
       setSaved({ state: 'ok' })
     } catch (e) {
+      providerSave.current = null
       setSaved({ state: 'fail', error: (e as Error).message })
     }
-  }, [provider, state.baseUrl, state.apiKey, state.model, state.about])
+  }, [provider, saveProvider, state.about])
   // Only arriving at `done` saves; `save` itself changes as the user types on the about step.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (state.step === 'done') void save() }, [state.step])
@@ -116,7 +145,9 @@ export default function Onboarding(): JSX.Element {
   const advance = (): void => {
     if (state.step === 'done') { if (saved.state === 'ok') finish(); return }
     if (state.step === 'test' && state.test.state === 'fail') return void runTest()
-    if (canNext) dispatch({ type: 'next' })
+    if (!canNext) return
+    if (state.step === 'test') startProviderSave()
+    dispatch({ type: 'next' })
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
@@ -133,22 +164,22 @@ export default function Onboarding(): JSX.Element {
     }
   }
 
-  const stepIndex = STEPS.indexOf(state.step)
+  const stepIndex = steps.indexOf(state.step)
   const field = (patch: Partial<Pick<WizardState, 'baseUrl' | 'apiKey' | 'model'>>): void => dispatch({ type: 'field', patch })
 
   return (
     <div className="onboarding" ref={root} role="dialog" aria-modal="true" aria-labelledby="ob-title" onKeyDown={onKeyDown}>
       <div className="ob-drag drag" />
       <div className="ob-card">
-        <div className="ob-progress" role="progressbar" aria-label="Setup progress" aria-valuemin={1} aria-valuemax={STEPS.length} aria-valuenow={stepIndex + 1}>
-          {STEPS.map((s, i) => <span key={s} className={i <= stepIndex ? 'on' : ''} />)}
+        <div className="ob-progress" role="progressbar" aria-label="Setup progress" aria-valuemin={1} aria-valuemax={steps.length} aria-valuenow={stepIndex + 1}>
+          {steps.map((s, i) => <span key={s} className={i <= stepIndex ? 'on' : ''} />)}
         </div>
         {state.step === 'welcome' && <GrainLogo size={44} />}
         <h1 id="ob-title" tabIndex={-1}>{TITLES[state.step]}</h1>
 
         {state.step === 'welcome' && (
           <>
-            <p className="ob-lead">Grain is your personal AI workspace: chat, files, calendar, mail and tasks in one place, with an assistant that can work across all of it. Canvases lay out chats, files, the web and your apps side by side, and any window can pop out on top of other apps.</p>
+            <p className="ob-lead">Grain is your personal AI workspace: chat, files, calendar, mail and tasks in one place, with an assistant that can work across all of it. Canvases lay out chats, docs, todos and your calendar side by side, and any window can pop out on top of other apps.</p>
             <p className="ob-privacy"><Lock size={13} /> Your data is stored on this Mac. Your messages, the context Grain adds to them (memories, files, mail and calendar the assistant reads) and background learning go to the AI provider you choose. Web search and page reading use outside services.</p>
             <p className="muted">Setup takes about two minutes. You will need an API key from an AI provider (or a local model).</p>
           </>
@@ -193,13 +224,13 @@ export default function Onboarding(): JSX.Element {
             )}
             <label><span>{provider.needsKey ? 'API key' : 'API key (optional)'}</span>
               <div className="input-row">
-                <input data-autofocus={showsBaseUrl(provider.id) ? undefined : ''} type={showKey ? 'text' : 'password'} value={state.apiKey} onChange={(e) => field({ apiKey: e.target.value })} placeholder={provider.needsKey ? 'Paste your key' : 'Only if your server needs one'} spellCheck={false} autoComplete="off" />
+                <input data-autofocus={showsBaseUrl(provider.id) ? undefined : ''} type={showKey ? 'text' : 'password'} value={state.apiKey} onChange={(e) => field({ apiKey: e.target.value })} placeholder={state.savedKeys[provider.id] ? 'Saved key — leave blank to keep it' : provider.needsKey ? 'Paste your key' : 'Only if your server needs one'} spellCheck={false} autoComplete="off" />
                 <button className="icon-btn" type="button" aria-label={showKey ? 'Hide API key' : 'Show API key'} aria-pressed={showKey} onClick={() => setShowKey((v) => !v)}>{showKey ? <EyeOff size={14} /> : <Eye size={14} />}</button>
               </div>
             </label>
             <label><span>Model</span>
               <input list="ob-models" value={state.model} onChange={(e) => field({ model: e.target.value })} placeholder={provider.defaultModel} spellCheck={false} />
-              <datalist id="ob-models">{modelOptions(provider, state.test.models).map((m) => <option key={m} value={m} />)}</datalist>
+              <datalist id="ob-models">{modelOptions(provider, [...(state.test.models ?? []), ...(listed.id === provider.id ? listed.models : [])]).map((m) => <option key={m} value={m} />)}</datalist>
             </label>
             <p className="muted small"><Lock size={11} /> Your key is stored on this Mac only.</p>
           </>
@@ -222,10 +253,16 @@ export default function Onboarding(): JSX.Element {
           <>
             <p className="muted">Optional. Connecting Google lets the assistant read your Calendar and mail. It also adds Tasks and Drive. You can skip this and do it later in Settings.</p>
             <p className="muted">With Google, connecting also turns on two-way sync between Todos and Google Tasks, which can be switched off in Settings → Integrations.</p>
-            {google?.connected ? (
+            {google?.connected && !google.needs_reauth && !google.missing_scopes.length ? (
               <p className="ob-ok"><Check size={15} /> Signed in as {google.email}</p>
             ) : google?.configured ? (
-              <button type="button" className="primary-btn" data-autofocus onClick={() => void connectGoogle()}>Sign in with Google</button>
+              <>
+                {google.connected && <p className="ob-hint">{google.reauth_reason ?? 'Some permissions were not granted, so parts of Google will not work.'} Sign in again and tick every box.</p>}
+                {google.last_error && !googlePending && <p className="ob-error" role="alert">Google sign-in failed: {google.last_error}</p>}
+                <button type="button" className="primary-btn" data-autofocus disabled={googlePending} onClick={() => void connectGoogle()}>
+                  {googlePending ? <><Loader2 size={13} className="spin" /> Waiting for Google…</> : google.connected ? 'Sign in again' : 'Sign in with Google'}
+                </button>
+              </>
             ) : (
               <p className="muted">Google sign-in needs a Google Cloud OAuth client today, which takes about two minutes to create. Settings → Integrations walks you through it whenever you are ready.</p>
             )}
@@ -258,6 +295,7 @@ export default function Onboarding(): JSX.Element {
           <div role="status" aria-live="polite">
             {saved.state === 'saving' && <p className="muted"><Loader2 size={13} className="spin" /> Saving…</p>}
             {saved.state === 'ok' && <p className="ob-lead">Grain is connected to {provider?.name}. Start a chat and ask it anything.</p>}
+            {saved.state === 'ok' && !google?.connected && <p className="muted">Connect Google later in Settings → Integrations.</p>}
             {saved.state === 'fail' && (
               <>
                 <p className="ob-error" role="alert">Could not save your setup: {saved.error}</p>

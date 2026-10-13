@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { initialState, reduce, stepBlocker, showsBaseUrl, modelOptions, firstPrompts, STEPS, type ProviderInfo, type WizardState } from './steps'
+import { initialState, reduce, stepBlocker, showsBaseUrl, modelOptions, firstPrompts, visibleSteps, STEPS, type ProviderInfo, type WizardState } from './steps'
 
 const fw: ProviderInfo = { id: 'fireworks', name: 'Fireworks', baseUrl: 'https://api.fireworks.ai/inference/v1', needsKey: true, keyUrl: 'https://fireworks.ai/keys', defaultModel: 'm1', models: ['m1', 'm2'], note: null }
 const ol: ProviderInfo = { id: 'ollama', name: 'Ollama', baseUrl: 'http://localhost:11434/v1', needsKey: false, keyUrl: null, defaultModel: 'llama3', models: [], note: null }
@@ -65,6 +65,29 @@ test('back from test clears the verdict', () => {
   assert.equal(s.step, 'key')
   assert.equal(s.test.state, 'idle')
   assert.equal(reduce(initialState(), { type: 'back' }).step, 'welcome')
+})
+
+test('models the test found survive back and field edits, for the key step picker', () => {
+  let s = reduce(at('test', { test: { state: 'fail', error: 'Model foo not found.', models: ['x', 'y'] } }), { type: 'back' })
+  assert.deepEqual([s.step, s.test.state, s.test.models], ['key', 'idle', ['x', 'y']])
+  s = reduce(s, { type: 'field', patch: { model: 'x' } })
+  assert.deepEqual(s.test.models, ['x', 'y'])
+})
+
+test('a saved key lets the key step go on blank', () => {
+  const s = reduce(at('key', { savedKeys: { fireworks: true } }), { type: 'pick', provider: fw })
+  assert.equal(stepBlocker(s, fw), null)
+  assert.match(stepBlocker({ ...s, savedKeys: {} }, fw) ?? '', /API key/)
+})
+
+test('without an OAuth client the Google step is left out', () => {
+  const steps = visibleSteps(false)
+  assert.ok(!steps.includes('google'))
+  assert.deepEqual(visibleSteps(true), STEPS)
+  assert.deepEqual(visibleSteps(undefined), STEPS, 'unknown yet: keep the step')
+  const s = reduce(at('test', { test: { state: 'ok' } }), { type: 'next' }, fw, steps)
+  assert.equal(s.step, 'about')
+  assert.equal(reduce(s, { type: 'back' }, fw, steps).step, 'test')
 })
 
 test('base URL shows only for self-hosted providers', () => {

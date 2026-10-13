@@ -133,7 +133,7 @@ export default function TelegramSettings({ draft, patch }: { draft: Settings; pa
       )}
 
       <label className="toggle-row plain">
-        <span className="toggle-text"><b>Message me when long runs finish or need approval</b><small>Covers chat runs you started in the app, once they take at least this long.</small></span>
+        <span className="toggle-text"><b>Message me when long runs finish or need approval</b><small>Finish notices cover chat runs you started in the app that take at least this long. Approval requests from any chat are texted right away.</small></span>
         <input type="checkbox" checked={!!draft.telegramNotifyLongRuns} onChange={(e) => patch({ telegramNotifyLongRuns: e.target.checked })} /><span className="switch" />
       </label>
       {draft.telegramNotifyLongRuns && (

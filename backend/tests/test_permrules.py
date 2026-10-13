@@ -322,6 +322,11 @@ def test_fork_bombs_are_hardline_and_a_long_command_is_not_slow():
     assert time.time() - t < 5
 
 
+def test_doom_loop_skips_waiting_tools():
+    assert pr.resolve("shell_poll", {"job_id": "j"}, "on", False, rules=None, doom=True).kind != "doom_loop"
+    assert pr.resolve("shell_run", {"command": "ls"}, "on", False, rules=None, doom=True).kind == "doom_loop"
+
+
 def test_malformed_rules_are_skipped():
     rs = pr.load_rules({"allow": ["Bash(ls *)", "((", 5], "deny": "nope"})
     assert [r.text for r in rs.allow] == ["Bash(ls *)"] and not rs.deny

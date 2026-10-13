@@ -3059,7 +3059,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 review = None
                 is_background = run is not None and run.kind in UNATTENDED_KINDS
                 # Permission mode (autoreview.route). Manual leaves the gate above exactly as it settled; auto sends what is not
-                # known safe to the reviewer; allow_all lifts every card except a credential-store access, a tainted write and a runaway repeat. Refusals, proposals and
+                # known safe to the reviewer; allow_all lifts every card (only a question to the user still asks). Refusals, proposals and
                 # approved plan steps are already settled, so they never get here.
                 if pmode != "manual" and claimed is None and pre is None and not proposing and mode != "off":
                     explicit = explicit_modes.get(c["name"]) if not mcp_is(c["name"]) else ("on" if raw_mode == "on" else None)

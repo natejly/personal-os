@@ -1917,7 +1917,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     _ucx = {"conversation_id": conv_id, "project_id": conv["project_id"], "tag": f"desk:{_desk}" if _desk else f"job:{_job}" if _job else "chat"}
     llm.usage_context.set(_ucx)
     llm.session_affinity.set(conv_id)  # every turn of this chat shares one cached prefix: keep it on one replica
-    await pricing.refresh(cfg)
+    await pricing.ensure(cfg)
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
     cspan = tracer.start("context", "Assemble context", {"model": model, **({"routed_from": "auto", "reason": routed[1]} if routed else {})})
     # A follow-up is searched with the turn before it in view; the model still sees user_text as typed.
@@ -1928,13 +1928,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         last_u = max((i for i, m in enumerate(prior) if m["role"] == "user"), default=len(prior))
         prior = prior[:last_u]
     rq = str((body.wake or {}).get("title") or "background work") if is_wake else retrieval_query(prior, user_text)
-    doc_hits = await _doc_hits(conv["project_id"], rq, cfg, conv["settings"])
+    # Each lookup may wait on the embedding route (and memory on the reranker): run them side by side, not one by one.
+    doc_hits, qvec = await asyncio.gather(_doc_hits(conv["project_id"], rq, cfg, conv["settings"]), _query_vec(rq, cfg, conv["settings"]))
     win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))  # every context block is a share of it
-    qvec = await _query_vec(rq, cfg, conv["settings"])
+    memory_hits, graph_hits = await asyncio.gather(_memory_hits(conv["project_id"], rq, cfg, conv["settings"], qvec),
+                                                   _graph_hits(conv["project_id"], rq, cfg, conv["settings"], qvec))
     system, used = build_context(
         memories=memories, graph=graph, documents=documents, doc_hits=doc_hits,
-        memory_hits=await _memory_hits(conv["project_id"], rq, cfg, conv["settings"], qvec),
-        graph_hits=await _graph_hits(conv["project_id"], rq, cfg, conv["settings"], qvec),
+        memory_hits=memory_hits, graph_hits=graph_hits,
         project=project, project_id=conv["project_id"], query=user_text, retrieval_text=rq,
         settings=cfg, conv_settings=conv["settings"],
         global_system_prompt="\n\n".join(p for p in (_persona_text(persona), cfg["systemPrompt"]) if p),
@@ -7093,6 +7094,7 @@ async def _shutdown() -> None:
     await title_jobs.stop()
     await followup_jobs.stop()
     await learner.stop()  # after the runs, so nothing is still queueing work at it
+    await llm.aclose()  # the shared provider connection pool
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)
 
 

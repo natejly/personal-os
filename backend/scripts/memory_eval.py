@@ -8,6 +8,9 @@ sha1(text), float16) with a hashed bag-of-words fallback for any text that has n
 --live: real embeddings (settings read-only from the data dir, never written, never printed).
 --record (with --live): save vectors.npz for every memory, node label and query text. Texts already recorded are kept
 as they are, so re-recording is idempotent; delete the file to re-embed everything.
+--expand: keyword expansion for queries with no query vector (the production fallback), from tests/fixtures/memory_eval/
+expansions.json (query text -> terms); a query with no recording gets none. --record-expand: call the real low-tier model
+for every query text (settings read-only from the data dir) and save that file; it needs no embedding model.
 --config KEY=VALUE (repeatable): extra settings for the run, values parsed as JSON ("memoryRerank=true").
 --limit KEY=VALUE (repeatable): override a personal_os.memory_limits constant for the run ("RERANK_MIN_SCORE=0.05").
 
@@ -36,7 +39,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from personal_os import graph_recall, llm, memory_limits, providers, retrieval_rerank  # noqa: E402
+from personal_os import graph_recall, llm, memory_limits, providers, query_expand, retrieval_rerank  # noqa: E402
 from personal_os.context import retrieval_query  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.embed import Embedder, embed_texts, normalize  # noqa: E402
@@ -48,6 +51,7 @@ from graph_eval import DEFAULT_DATA_DIR, read_settings  # noqa: E402
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "memory_eval"
 VECTORS = FIXTURES / "vectors.npz"
 RERANK_SCORES = FIXTURES / "rerank_scores.json"
+EXPANSIONS = FIXTURES / "expansions.json"
 OFFLINE_MODEL = "eval-embed"
 # A provider so providers.rerank_model resolves; no key, and the network is never reached (rerank_fn is injected).
 OFFLINE_SETTINGS = {**llm.DEFAULT_SETTINGS, "embeddingModel": OFFLINE_MODEL,
@@ -156,6 +160,27 @@ class Rerank:
         xs = sorted(self.ms)
         pct = lambda p: xs[min(len(xs) - 1, int(p * len(xs)))]  # noqa: E731 - nearest rank
         return {"calls": len(xs), "fails": self.fails, "p50_ms": pct(0.5), "p95_ms": pct(0.95)} if xs else {}
+
+
+class Expansions:
+    """MemoryIndex.expand_fn for the harness: recorded keyword variants per query text."""
+
+    def __init__(self, terms: dict[str, list[str]]):
+        self.terms = terms
+
+    async def __call__(self, settings: dict[str, Any], query: str) -> list[str]:
+        return self.terms.get(query, [])
+
+
+async def record_expansions(settings: dict[str, Any], cases: list[dict[str, Any]]) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for q in dict.fromkeys(query_text(c) for c in cases):
+        try:
+            out[q] = await query_expand.expand(settings, q)
+        except Exception as e:  # noqa: BLE001 - the key is never in this text
+            raise SystemExit(f"expansion failed: {type(e).__name__}: {str(e)[:200]}")
+    EXPANSIONS.write_text(json.dumps({"model": providers.tier_model(settings, "low"), "terms": out}, indent=1, sort_keys=True) + "\n")
+    return out
 
 
 async def record_rerank(settings: dict[str, Any], store: dict[str, Any], cases: list[dict[str, Any]]) -> tuple[str, int]:
@@ -339,7 +364,8 @@ def apply_limits(items: list[str]) -> dict[str, Any]:
     return out
 
 
-async def evaluate(settings: dict[str, Any], live: bool = False, record: bool = False, only: str | None = None) -> dict[str, Any]:
+async def evaluate(settings: dict[str, Any], live: bool = False, record: bool = False, only: str | None = None,
+                   expand: bool = False) -> dict[str, Any]:
     """Build the persona database and rank every case. Returns the scores plus the rankings and embedding provenance."""
     store, spec = load_store(), load_cases()
     cases = [c for c in spec["cases"] if not only or c["id"] == only]
@@ -357,6 +383,8 @@ async def evaluate(settings: dict[str, Any], live: bool = False, record: bool = 
         await vectors(settings, texts, settings["embeddingModel"])  # warm: live calls happen here, once
         idx = await build(tmp, store, vectors, settings)
         idx.rerank_fn = rerank
+        if expand:
+            idx.expand_fn = Expansions(json.loads(EXPANSIONS.read_text())["terms"])
         ranked = {c["id"]: await run_case(idx, settings, c, now) for c in cases}
         contents = {m["id"]: m["content"] for m in store["memories"]}
     if record:
@@ -370,6 +398,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--live", action="store_true")
     ap.add_argument("--record", action="store_true")
+    ap.add_argument("--expand", action="store_true", help="keyword expansion from the recorded expansions.json")
+    ap.add_argument("--record-expand", action="store_true", help="record expansions.json with the real low-tier model")
     ap.add_argument("--case")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--verbose", action="store_true", help="print every case's ranking, not just the table")
@@ -382,19 +412,23 @@ def main() -> None:
         ap.error("--record needs --live")
     if a.record and a.case:
         ap.error("--record needs every case, not --case")
-    if a.live:
+    if a.live or a.record_expand:
         settings = read_settings(Path(a.data_dir).expanduser())
         if not settings.get("apiKey"):  # the active key may live only in the per-provider map; read-only, never printed
             from personal_os import provider_keys
             from personal_os.secrets import SecretStore
             settings["apiKey"] = provider_keys.load(SecretStore(Path(a.data_dir).expanduser())).get(providers.effective(settings), "")
-        if not settings.get("embeddingModel"):
+        if not settings.get("embeddingModel") and not a.record_expand:
             raise SystemExit("no embeddingModel in the settings")
     else:
         settings = dict(OFFLINE_SETTINGS)
     settings = {**settings, "retrievalMode": "hybrid", **parse_config(a.config)}
     limits = apply_limits(a.limit)
-    res = asyncio.run(evaluate(settings, a.live, a.record, a.case))
+    if a.record_expand:
+        done = asyncio.run(record_expansions(settings, load_cases()["cases"]))
+        print(f"recorded expansions for {len(done)} queries to {EXPANSIONS}")
+        return
+    res = asyncio.run(evaluate(settings, a.live, a.record, a.case, a.expand))
     if a.json:
         print(json.dumps({"label": a.label, "config": parse_config(a.config), "limits": limits, **res["scores"],
                           "fallbacks": res["fallbacks"], "rerank_misses": res["rerank_misses"], "rerank_timing": res["rerank_timing"],

@@ -3,7 +3,7 @@ import { Plug } from '../icons'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { chatModelIds } from '../lib/modelLabel'
-import { embeddingLocked } from '../lib/pickerModels'
+import { embeddingLocked, embeddingRows } from '../lib/pickerModels'
 import { MODEL_FIELDS, remapSettings, type ModelKey } from '../lib/providerModels'
 import ProviderForm from './ProviderForm'
 import type { ProviderInfo } from './onboarding/steps'
@@ -15,9 +15,7 @@ const HELP: Record<ModelKey, { help: string; placeholder: string }> = {
   modelMedium: { help: 'Auto-review of tool calls, summaries and recaps, memory tidy-ups, and short messages under Auto.', placeholder: 'Provider default' },
   modelLow: { help: 'Titles, memories, follow-ups and other background learning.', placeholder: 'Provider default' },
   workerModel: { help: "Model for workers the chat starts. An agent's own model still wins.", placeholder: 'Same as chat' },
-  fastModel: { help: '', placeholder: '' },
-  extractionModel: { help: '', placeholder: '' },
-  embeddingModel: { help: 'After changing it, Save, then press Rebuild search index under Advanced.', placeholder: 'qwen3-embedding-8b' },
+  embeddingModel: { help: 'Chosen for you from your providers. Once the search index is built it is fixed; before that you can change it.', placeholder: 'None: keyword search' },
   retrievalRerankModel: { help: "Reorders memory and document search results by relevance. Empty uses the provider's default reranker.", placeholder: 'Not available on this provider' },
   visionModel: { help: 'Reads pictures. Empty uses the chat model when it can read images; otherwise pictures are read with OCR only.', placeholder: 'Same as the chat model' },
   imageModel: { help: 'Used when the assistant makes an image. The provider must offer an OpenAI-compatible images endpoint.', placeholder: 'Not set' }
@@ -115,7 +113,7 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
         <button className="ghost-btn" type="button" onClick={() => void runTest()} disabled={test.state === 'testing'}><Plug size={14} /> {test.state === 'testing' ? 'Testing…' : 'Test connection'}</button>
         {test.msg && <span className={`test-msg ${test.state}`} role={test.state === 'fail' ? 'alert' : 'status'}>{test.msg}</span>}
       </div>
-      {MODEL_FIELDS.filter((f) => !('hidden' in f) && f.key !== 'defaultModel').map((f) => {
+      {MODEL_FIELDS.filter((f) => f.key !== 'defaultModel').map((f) => {
         const value = draft[f.key] ?? ''
         const locked = f.key === 'embeddingModel' && embeddingLocked(settings)
         const tier = 'tier' in f ? f.tier : undefined
@@ -123,8 +121,8 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
           <Fragment key={f.key}>
             {tier === 'high' && <p className="muted small"><b>Model tiers</b> trade cost for quality. Leave a tier empty to use the provider's default.</p>}
           <label><span className="toggle-text"><b>{f.label}</b><small>{HELP[f.key].help}</small></span>
-            <input list="provider-model-options" disabled={locked} value={value} onChange={(e) => patch({ [f.key]: e.target.value })} placeholder={tier && preset?.tiers?.[tier] ? preset.tiers[tier] : f.key === 'defaultModel' && preset?.defaultModel ? preset.defaultModel : f.key === 'retrievalRerankModel' && preset?.rerankModel ? preset.rerankModel : HELP[f.key].placeholder} spellCheck={false} />
-            {locked && <small>Set during setup. Changing it would invalidate the search index.</small>}
+            <input list={f.key === 'embeddingModel' ? 'provider-embedding-options' : 'provider-model-options'} disabled={locked} value={value} onChange={(e) => patch({ [f.key]: e.target.value })} placeholder={tier && preset?.tiers?.[tier] ? preset.tiers[tier] : f.key === 'retrievalRerankModel' && preset?.rerankModel ? preset.rerankModel : HELP[f.key].placeholder} spellCheck={false} />
+            {locked && <small>Fixed: the search index is built with it.</small>}
             {!value && cleared.includes(f.label) && <small className="model-prompt" role="status">Pick a model for {f.label}</small>}
           </label>
             {f.key === 'workerModel' && (
@@ -137,6 +135,7 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
           </Fragment>
         )
       })}
+      <datalist id="provider-embedding-options">{embeddingRows(models, settings.providerKeysSet).map((m) => <option key={m.id} value={m.id} />)}</datalist>
       <datalist id="provider-model-options">{options.map((m) => <option key={m} value={m} label={ownerOf.get(m) ? `${m} — ${ownerOf.get(m)}` : undefined} />)}</datalist>
     </>
   )

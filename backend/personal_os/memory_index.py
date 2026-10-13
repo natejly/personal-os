@@ -52,6 +52,8 @@ class MemoryIndex:
         self.recall: Any = None  # GraphRecall, set by app: node vectors for graph-seeded ranking
         self.rerank_fn: Any = None  # tests/eval stub this; None = retrieval_rerank.rerank_scores
         self._rerank_down_until = 0.0
+        self.expand_fn: Any = None  # async (settings, query) -> keyword variants; app sets query_expand.expand, None = off
+        self._expansions: dict[str, list[str]] = {}
         with db.tx() as c:
             c.executescript(SCHEMA)
 
@@ -117,6 +119,22 @@ class MemoryIndex:
         except Exception:  # noqa: BLE001 - timeouts included
             return None
         return vecs[0] if vecs else None
+
+    async def expansion(self, settings: dict[str, Any], query: str) -> list[str]:
+        """Keyword variants of the query, for a recall with no query vector. [] when off, forced to keywords, too slow
+        or failed. Cached per query string (the cache holds the last 256)."""
+        if self.expand_fn is None or not query.strip() or settings.get("retrievalMode", "hybrid") == "bm25":
+            return []
+        if query not in self._expansions:
+            try:
+                terms = list(await asyncio.wait_for(self.expand_fn(settings, query), ml.EXPAND_TIMEOUT))
+            except Exception as e:  # noqa: BLE001 - timeouts and model errors both mean plain keywords
+                log.warning("keyword expansion unavailable: %s", type(e).__name__)
+                return []
+            if len(self._expansions) >= 256:
+                self._expansions.pop(next(iter(self._expansions)))
+            self._expansions[query] = terms
+        return self._expansions[query]
 
     async def near_duplicate(self, settings: dict[str, Any], project_id: str | None, text: str) -> dict[str, Any] | None:
         """The live, unpinned memory in scope whose meaning is closest to `text`, if its cosine reaches
@@ -198,15 +216,20 @@ class MemoryIndex:
         return 1.0 + ml.TEMPORAL_BOOST * (temporal_query.relevance(window, float(m.get("valid_from") or m.get("created_at") or 0.0)) - 0.5)
 
     def search(self, project_id: str | None, query: str, query_vec: np.ndarray | None = None, limit: int = 20,
-               settings: dict[str, Any] | None = None, include_global: bool = True, now: datetime | None = None) -> list[dict[str, Any]]:
+               settings: dict[str, Any] | None = None, include_global: bool = True, now: datetime | None = None,
+               expansion: list[str] | None = None) -> list[dict[str, Any]]:
         """Memories that matched the query (lexical hit, cosine >= MEMORY_MIN_SIMILARITY, graph seed, or in-window and
         on-topic when the query names a date), ranked by RRF over those rankers plus recency among the matches, then
-        nudged by closeness to the date window. No match returns []. Never raises."""
+        nudged by closeness to the date window. `expansion` (keyword variants) adds a second, weaker keyword ranking.
+        No match returns []. Never raises."""
         try:
             window = temporal_query.parse(query, now or temporal_query.local_now())
             where, args = _scope_clause(project_id, include_global)
             model = self.embedder.model(settings) if settings is not None else ""
             lexical = [m["id"] for m in self.memories.matching(project_id, query, ml.RANK_DEPTH, include_global)]
+            if expansion:
+                extra = [m["id"] for m in self.memories.matching(project_id, " ".join(expansion), ml.RANK_DEPTH, include_global)]
+                lexical = [i for i, _ in rrf([lexical, extra], [1.0, ml.W_EXPAND])]
             with self.db.tx() as c:
                 cos = self._cosine(c, where, args, query_vec, model)
                 graph = self._graph_seeded(c, where, args, project_id, query, query_vec, model)
@@ -235,8 +258,9 @@ class MemoryIndex:
         RERANK_MIN_SCORE drops some; the fused order stands when reranking is off, has no model, is not worth a
         call, is backed off, times out or fails. Scored rows carry `rerank_score`. Never raises."""
         now = now or temporal_query.local_now()
+        expansion = await self.expansion(settings, query) if query_vec is None and settings else None  # no embeddings: widen the keywords
         fused = self.search(project_id, query, query_vec, limit=max(limit, ml.RERANK_CANDIDATES), settings=settings,
-                            include_global=include_global, now=now)
+                            include_global=include_global, now=now, expansion=expansion)
         model = providers.rerank_model(settings) if settings else ""
         if (not model or not settings.get("memoryRerank", True) or len(fused) < ml.RERANK_MIN_CANDIDATES
                 or time.monotonic() < self._rerank_down_until):

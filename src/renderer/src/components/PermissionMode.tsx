@@ -3,18 +3,14 @@ import { ShieldAlert, ShieldCheck } from '../icons'
 import { useStore } from '../store'
 import { MODES, modeOf, needsConfirm, pillLabel, pillTitle, type PermissionMode } from '../lib/permissionMode'
 
-/** Three radio cards for the global permission mode. Choosing Allow everything asks first; the choice saves at once. */
-export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; onPick: (m: PermissionMode) => Promise<void> }): JSX.Element {
+/** Three radio cards for the global permission mode. Choosing Allow everything asks first; the choice goes into the Settings draft and applies on Save. */
+export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; onPick: (m: PermissionMode) => void }): JSX.Element {
   const [ask, setAsk] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const apply = async (m: PermissionMode): Promise<void> => {
-    setBusy(true)
-    try { await onPick(m) } finally { setBusy(false); setAsk(false) }
-  }
+  const apply = (m: PermissionMode): void => { onPick(m); setAsk(false) }
   const pick = (m: PermissionMode): void => {
-    if (m === mode || busy) return
+    if (m === mode) return
     if (needsConfirm(mode, m)) setAsk(true)
-    else void apply(m)
+    else apply(m)
   }
   const onKey = (e: KeyboardEvent<HTMLDivElement>): void => {
     const d = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0
@@ -52,7 +48,7 @@ export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; on
             </section>
             <footer>
               <button className="ghost-btn" autoFocus onClick={() => setAsk(false)}>Cancel</button>
-              <button className="ghost-btn danger" disabled={busy} onClick={() => void apply('allow_all')}>Allow everything</button>
+              <button className="ghost-btn danger" onClick={() => apply('allow_all')}>Allow everything</button>
             </footer>
           </div>
         </div>

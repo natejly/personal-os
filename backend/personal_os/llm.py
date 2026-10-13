@@ -89,14 +89,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "You are the assistant inside the user's personal AI OS. Be direct, concise and useful. Context (memories, graph, "
         "file excerpts) may be provided; use it when relevant and don't mention it unless asked."
     ),
-    "extractionModel": "",  # "" = the low tier (app.settings() fills it); a saved value overrides
     # Model tiers (providers.tier_model): "" = the active provider's default for that tier.
     "modelHigh": "",
     "modelMedium": "",
     "modelLow": "",
     "workerEffort": "medium",  # reasoning effort of workers' rounds: low | medium | high, or "chat" to follow the chat's
     "workerModel": "",  # "" = workers run on the chat model; an agent definition's own model still wins
-    "fastModel": "",  # what Auto sends a short, plain message to (router.py); empty means Auto uses the default model
     "autoRoute": False,  # new chats start on Auto: the fast or the default model per message
     "autoLearn": True,
     "followUps": True,  # up to 3 suggested next questions under the latest reply (uses the extraction model)
@@ -226,7 +224,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Document and memory retrieval (retrieval.py, memory_index.py). 'bm25' forces keyword-only; hybrid fuses keywords,
     # embeddings, recency and graph, and falls back to keywords when the embedding route is unavailable. The floor only drops vector-only hits (exact keyword hits survive).
     "retrievalMode": "hybrid",
-    "embeddingModel": "qwen3-embedding-8b",
+    "embeddingModel": "",  # "" = keywords only until a keyed provider serves one (app.ensure_embedding_model picks it)
     "retrievalMinSimilarity": RETRIEVAL_MIN_SIMILARITY,
     "retrievalPerDocCap": RETRIEVAL_PER_DOC_CAP,
     "retrievalCandidates": RETRIEVAL_CANDIDATES,

@@ -571,6 +571,35 @@ def _usage_sources_and_backfill(c: sqlite3.Connection) -> None:
             c.execute("UPDATE usage_log SET cost = ?, cost_source = 'backfill' WHERE id = ?", (cost, rid))
 
 
+def _embedding_model_unset(c: sqlite3.Connection) -> None:
+    """embeddingModel no longer defaults to qwen3-embedding-8b (it is picked from the keyed providers instead). An install
+    that never saved the key and has vectors built with that model keeps it, so the default it relied on stays pinned."""
+    if c.execute("SELECT 1 FROM settings WHERE key = 'embeddingModel'").fetchone():
+        return
+    for table in ("memory_vectors", "chunk_embeddings"):
+        try:
+            if c.execute(f"SELECT 1 FROM {table} WHERE model = 'qwen3-embedding-8b' LIMIT 1").fetchone():
+                c.execute("INSERT INTO settings(key, value) VALUES('embeddingModel', ?)", (json.dumps("qwen3-embedding-8b"),))
+                return
+        except sqlite3.OperationalError:  # the table is created at runtime, so a fresh install has none
+            pass
+
+
+def _tiers_replace_legacy_models(c: sqlite3.Connection) -> None:
+    """extractionModel and fastModel are the low and medium tiers now. A stored value that equals what its tier gives is
+    dropped; one that differs moves into the tier if that is unset. If the tier is set to something else the two
+    disagree, and the legacy key stays (settings() still honours it)."""
+    from . import permissions, providers
+    stored = {k: permissions._json(v) for k, v in c.execute("SELECT key, value FROM settings")}
+    for legacy, tier in (("extractionModel", "low"), ("fastModel", "medium")):
+        value = str(stored.get(legacy) or "").strip()
+        if value and value != providers.tier_model(stored, tier):
+            if stored.get(providers.TIER_KEYS[tier]):
+                continue
+            c.execute("INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)", (providers.TIER_KEYS[tier], json.dumps(value)))
+        c.execute("DELETE FROM settings WHERE key = ?", (legacy,))
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 # Chat-model settings a change of default re-resolves. Embedding, rerank and vision keys are not among them.
 _CHAT_MODEL_KEYS = ("defaultModel", "modelHigh", "modelMedium", "modelLow", "extractionModel", "fastModel")
@@ -689,6 +718,8 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (38, "model_votes", _model_votes),
     (39, "default_sidebar_rows", _default_sidebar_rows),
     (40, "simplify_settings", _simplify_settings),
+    (41, "embedding_model_unset", _embedding_model_unset),
+    (42, "tiers_replace_legacy_models", _tiers_replace_legacy_models),
 ]
 
 

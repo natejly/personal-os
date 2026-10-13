@@ -90,14 +90,16 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
   noErrors(grain)
 })
 
-test('the permission mode saves at once and survives relaunch', async ({ grain }) => {
+test('the permission mode waits for Save and survives relaunch', async ({ grain }) => {
   const { page, api } = grain
   await openSettings(page, 'Permissions')
   const modes = dialog(page).getByRole('radiogroup', { name: 'Permission mode' })
   await expect(modes.getByRole('radio', { name: /^Manual/ })).toHaveAttribute('aria-checked', 'true')
   await modes.getByRole('radio', { name: /^Auto/ }).click()
-  await expect.poll(async () => (await api('/settings')).permissionMode).toBe('auto')
-  await closeSettings(page)
+  await expect(modes.getByRole('radio', { name: /^Auto/ })).toHaveAttribute('aria-checked', 'true')
+  expect((await api('/settings')).permissionMode).toBe('manual') // a draft until Save
+  await save(page)
+  expect((await api('/settings')).permissionMode).toBe('auto')
   const p2 = await grain.relaunch()
   await openSettings(p2, 'Permissions')
   await expect(dialog(p2).getByRole('radiogroup', { name: 'Permission mode' }).getByRole('radio', { name: /^Auto/ })).toHaveAttribute('aria-checked', 'true')
@@ -284,6 +286,7 @@ test('modal is usable and scrolls at 820x520', async ({ grain }) => {
   await setWindowSize(grain, 820, 520)
   await page.waitForTimeout(500)
   await openAdvanced(page, 'Assistant')
+  await dialog(page).getByLabel('Standing instructions').fill('x') // Save only shows once something changed
   const box = await dialog(page).boundingBox()
   const vp = await page.evaluate(() => ({ w: innerWidth, h: innerHeight }))
   expect(box.width).toBeLessThanOrEqual(vp.w + 1)
@@ -293,7 +296,7 @@ test('modal is usable and scrolls at 820x520', async ({ grain }) => {
   const m = await pane.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }))
   expect(m.sh).toBeGreaterThan(m.ch)
   await pane.evaluate((el) => { el.scrollTop = el.scrollHeight })
-  await expect(dialog(page).getByRole('button', { name: 'Save' })).toBeInViewport()
+  await expect(dialog(page).getByRole('button', { name: 'Save' })).toBeInViewport() // the edit above is unsaved
   await expect(dialog(page).getByRole('button', { name: 'Cancel' })).toBeInViewport()
   // Every tab fits its footer and close button on screen.
   for (const tab of TABS) {
@@ -301,6 +304,6 @@ test('modal is usable and scrolls at 820x520', async ({ grain }) => {
     await expect(dialog(page).getByRole('button', { name: 'Close settings' })).toBeInViewport()
     await expect(dialog(page).locator('footer button').last()).toBeInViewport()
   }
-  await closeSettings(page)
+  await closeDirty(page)
   noErrors(grain)
 })

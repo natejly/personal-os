@@ -1478,11 +1478,12 @@ export interface Settings {
   githubTokenSet?: boolean
   googleClientSecretSet?: boolean
   defaultModel: string
-  /** Auto sends short plain messages here; empty means Auto uses the default model. */
-  fastModel: string
+  /** What Auto sends short plain messages to: the medium tier, empty when that is the default model. Read-only. */
+  fastModel?: string
   autoRoute: boolean
   systemPrompt: string
-  extractionModel: string
+  /** The low tier, as resolved by the backend. Read-only. */
+  extractionModel?: string
   /** Model tiers; empty means the active provider's default for the tier. */
   modelHigh?: string
   modelMedium?: string
@@ -1564,6 +1565,10 @@ export interface Settings {
   mcpServerNotes?: boolean
   /** Embedding model id used by memory and document retrieval. Changing it re-embeds both stores. */
   embeddingModel?: string
+  /** Computed by the backend: vectors exist for embeddingModel, so it cannot change. */
+  embeddingLocked?: boolean
+  /** Computed by the backend: no embedding model is available, so memory and file search use keywords only. */
+  embeddingKeywordOnly?: boolean
   /** Argument-pattern rules over the per-tool modes. Deny beats ask beats allow; forced approvals are never lifted. */
   permissionRules?: PermissionRules
   /** 'deny': a background run that would have to ask is refused instead of waiting for someone. */

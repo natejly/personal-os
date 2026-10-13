@@ -42,7 +42,7 @@ from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .kinds import is_internal
 from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_index, has_readable_text, safe_upload_name
 from .consolidate import Consolidator
-from . import learn, memory_limits, provider_keys, provider_route, providers
+from . import learn, memory_limits, provider_keys, provider_route, providers, query_expand
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
 from .graph_backfill import BackfillRunning, GraphBackfill
@@ -313,10 +313,8 @@ provider_keys.migrate(db)
 provider_route.set_key_source(lambda: provider_keys.load(db.secrets))  # keys reach route() here, never via settings
 
 
-def _pin_embedding_model() -> None:
-    """Startup: an index built before the model was saved pins to the model it was built with (see _lock_embedding)."""
-    if db.get_settings().get("embeddingModel"):
-        return
+def _vector_counts() -> dict[str, int]:
+    """Vectors in the memory and document indexes, per embedding model that built them."""
     counts: dict[str, int] = {}
     with db.tx() as c:
         for table in ("memory_vectors", "chunk_embeddings"):
@@ -325,6 +323,14 @@ def _pin_embedding_model() -> None:
                     counts[r["model"]] = counts.get(r["model"], 0) + r["n"]
             except Exception:  # noqa: BLE001 - the table may not exist yet
                 pass
+    return counts
+
+
+def _pin_embedding_model() -> None:
+    """Startup: an index built before the model was saved pins to the model it was built with (see _lock_embedding)."""
+    if db.get_settings().get("embeddingModel"):
+        return
+    counts = _vector_counts()
     if counts:
         db.set_settings({"embeddingModel": max(counts, key=counts.__getitem__)})
 
@@ -332,11 +338,33 @@ def _pin_embedding_model() -> None:
 _pin_embedding_model()
 
 
-def _lock_embedding(patch: dict[str, Any]) -> None:
-    """The vector index is only valid for the model that built it: once saved, embeddingModel cannot change."""
+def _embedding_locked() -> bool:
+    """The vector index is only valid for the model that built it: locked once vectors exist for the current model."""
     cur = db.get_settings().get("embeddingModel")
-    if cur and "embeddingModel" in patch and patch["embeddingModel"] != cur:
-        raise HTTPException(409, "The search model is locked once set; changing it would invalidate the search index.")
+    return bool(cur) and _vector_counts().get(cur, 0) > 0
+
+
+def _lock_embedding(patch: dict[str, Any]) -> None:
+    if "embeddingModel" in patch and patch["embeddingModel"] != db.get_settings().get("embeddingModel") and _embedding_locked():
+        raise HTTPException(409, "The search model is locked once the index is built; changing it would invalidate the search index.")
+
+
+def ensure_embedding_model(local: bool = True) -> None:
+    """No embedding model saved and no vectors yet: save the first one a keyed provider serves (see provider_route).
+    Sync on purpose, called from sync routes; a local server's listing needs a loop of its own, so it is skipped
+    when one is already running. A saved model is never touched."""
+    if db.get_settings().get("embeddingModel") or _vector_counts():
+        return
+    cfg = settings()
+    model = provider_route.first_embedding(cfg)
+    if not model and local:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:  # ponytail: no pick for a local server when called on the event loop
+            model = asyncio.run(provider_route.local_embedding(cfg, llm.list_models))
+    if model:
+        db.set_settings({"embeddingModel": model})
+
 
 _MODULES_DEFAULT = 5
 # Stamp 4 shows these once: agent work waits for review there (desks, skill and workflow approvals), and a hidden row
@@ -365,6 +393,8 @@ _seed_hidden_modules()
 def set_settings_via_provider(patch: dict[str, Any]) -> None:
     """db.set_settings for a patch that may switch provider or change the API key (see provider_keys.apply)."""
     db.set_settings(provider_keys.apply(db, patch))
+    if {"provider", "baseUrl", "apiKey"} & patch.keys():
+        ensure_embedding_model()
 
 
 def settings() -> dict[str, Any]:
@@ -376,7 +406,7 @@ def settings() -> dict[str, Any]:
            **perms, permissions.KEY: {"version": permissions.VERSION, **perms}}
     if not out.get("defaultModel"):  # nothing saved: the provider's chat default (a saved model always wins)
         out["defaultModel"] = providers.default_model(out)
-    # Blank legacy knobs follow the tiers (providers.TASK_TIERS); a saved value still wins.
+    # The legacy helper and fast knobs are the low and medium tiers (providers.TASK_TIERS); a stored value still wins.
     if not out.get("extractionModel"):
         out["extractionModel"] = providers.tier_model(out, "low")
     if not out.get("fastModel"):
@@ -385,6 +415,7 @@ def settings() -> dict[str, Any]:
     return out
 
 
+ensure_embedding_model(local=False)  # a key already saved before any embedding model was
 jobs = Jobs(db)
 proposals = Proposals(db)
 recaps = Recaps(db)
@@ -592,6 +623,7 @@ retriever = Retriever(db, documents, embedder, docs=docs)
 memory_index = MemoryIndex(db, memories, graph, embedder)
 graph_recall = GraphRecall(db, graph, embedder)
 memory_index.recall = graph_recall
+memory_index.expand_fn = query_expand.expand
 graph_backfill = GraphBackfill(db, graph, recall=graph_recall)  # runs only when asked (POST /graph/backfill)
 learner.index = memory_index
 learner.graph_recall = graph_recall  # entity resolution in the extractor
@@ -854,12 +886,12 @@ SETTINGS_READ_ONLY = {"googleTasksSync", "voice"}
 def public_settings() -> dict[str, Any]:
     """What the renderer may see: secret values are blanked and reported as <key>Set booleans instead."""
     out = {k: v for k, v in settings().items() if k not in PRIVATE_SETTINGS}
-    stored = db.get_settings()
-    for k in ("extractionModel", "fastModel"):  # as saved: the resolved tier model must not be frozen in by the next Save
-        out[k] = stored.get(k, "")
     for k in SECRET_SETTINGS:
         out[f"{k}Set"] = bool(out.get(k))
         out[k] = ""
+    out["embeddingLocked"] = _embedding_locked()  # computed, never stored: vectors exist for the saved model
+    # computed, never stored: no embedding model any provider with a key serves, so search is by keywords only
+    out["embeddingKeywordOnly"] = out.get("retrievalMode") != "bm25" and not provider_route.can_embed(settings(), out.get("embeddingModel") or "")
     out["providerKeysSet"] = provider_keys.saved_for(db.secrets)  # which providers have a saved key, never the keys
     out["providerAuthBlocked"] = auth_breaker.blocked(settings()) or ""  # computed, never stored: the active key was rejected
     out["firecrawlEnvKey"] = bool(os.environ.get("FIRECRAWL_API_KEY", "").strip())  # computed, never stored: the key came from the environment
@@ -997,6 +1029,7 @@ def put_provider_key(provider_id: str, body: ProviderKeyIn) -> dict[str, Any]:
         keys = provider_keys.load(db.secrets)
         keys.pop(provider_id, None) if key is None else keys.__setitem__(provider_id, key)
         provider_keys.save(db.secrets, keys)
+        ensure_embedding_model()
     provider_route.invalidate(provider_id)
     for k in (old, key):
         if k:

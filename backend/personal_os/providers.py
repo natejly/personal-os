@@ -16,11 +16,12 @@ PROVIDERS: list[dict[str, Any]] = [
                 "accounts/fireworks/models/deepseek-v4-pro",
                 "accounts/fireworks/models/qwen3p8-max", "accounts/fireworks/models/gpt-oss-120b"],
      "note": None,
-     "rerankModel": "accounts/fireworks/models/qwen3-reranker-8b"},
+     "rerankModel": "accounts/fireworks/models/qwen3-reranker-8b",
+     "embeddingModel": "accounts/fireworks/models/qwen3-embedding-8b"},
     {"id": "openai", "name": "OpenAI", "baseUrl": "https://api.openai.com/v1", "needsKey": True,
      "keyUrl": "https://platform.openai.com/api-keys", "defaultModel": "gpt-5-mini",
      "models": ["gpt-5-mini", "gpt-5", "gpt-5-nano", "gpt-4.1"], "note": None,
-     "rerankModel": ""},
+     "rerankModel": "", "embeddingModel": "text-embedding-3-small"},
     {"id": "anthropic", "name": "Anthropic", "baseUrl": "https://api.anthropic.com/v1/", "needsKey": True,
      "keyUrl": "https://console.anthropic.com/settings/keys", "defaultModel": "claude-sonnet-5-5",
      "models": ["claude-sonnet-5-5", "claude-haiku-4-5-20251001", "claude-opus-5-5"],
@@ -38,11 +39,13 @@ PROVIDERS: list[dict[str, Any]] = [
     {"id": "litellm", "name": "LiteLLM proxy", "baseUrl": "http://localhost:4000", "needsKey": False,
      "keyUrl": None, "defaultModel": "deepseek-v4-flash", "models": ["deepseek-v4-flash", "ember-1", "glm-5.3", "glm-5.3-flash", "kimi-k3"],
      "note": "Your own proxy; model names are whatever its config defines.",
-     "rerankModel": "qwen3-reranker-8b"},
+     "rerankModel": "qwen3-reranker-8b", "embeddingModel": "qwen3-embedding-8b"},
     {"id": "custom", "name": "Custom (OpenAI-compatible)", "baseUrl": "", "needsKey": False,
      "keyUrl": None, "defaultModel": "", "models": [], "note": "Any server that speaks the OpenAI chat API.",
      "rerankModel": ""},
 ]
+for _p in PROVIDERS:  # the embedding model onboarding sets; blank = this endpoint serves none, search stays keyword-only
+    _p.setdefault("embeddingModel", "")
 BY_ID = {p["id"]: p for p in PROVIDERS}
 
 

@@ -593,6 +593,21 @@ def _drop_unused_tables_and_settings(c: sqlite3.Connection) -> None:
         c.execute("UPDATE settings SET value = ? WHERE key = 'hiddenViews'", (json.dumps([v for v in views if v != "dashboards"]),))
 
 
+def _embedding_model_per_provider(c: sqlite3.Connection) -> None:
+    """Onboarding used to keep the shipped embedding id (or the Fireworks one) whatever provider was chosen, so on an
+    endpoint that does not serve it every embed call failed and semantic search was quietly off. On such a provider
+    that id becomes the preset's embedding model ('' where the endpoint has none). An id the user typed stays."""
+    from . import permissions, providers
+    stored = {k: permissions._json(v) for k, v in c.execute("SELECT key, value FROM settings WHERE key IN ('provider', 'baseUrl', 'embeddingModel')")}
+    p = providers.get(providers.effective(stored))
+    if not p or p["id"] in ("fireworks", "litellm", "custom"):
+        return
+    if "qwen3-embedding" not in str(stored.get("embeddingModel") or "qwen3-embedding-8b"):  # unset = the shipped default
+        return
+    c.execute("INSERT INTO settings(key, value) VALUES('embeddingModel', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+              (json.dumps(p["embeddingModel"]),))
+
+
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
     (2, "messages_fts", _messages_fts),
@@ -631,6 +646,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (35, "coding_session_base", _coding_session_base),
     (36, "drop_unused_tables_and_settings", _drop_unused_tables_and_settings),
     (37, "coding_session_events", _coding_session_events),
+    (38, "embedding_model_per_provider", _embedding_model_per_provider),
 ]
 
 

@@ -87,7 +87,7 @@ class StatusTests(unittest.TestCase):
     def test_providers_route(self) -> None:
         ps = client.get("/setup/providers").json()["providers"]
         self.assertEqual(len(ps), 7)
-        self.assertEqual(set(ps[0]), {"id", "name", "baseUrl", "needsKey", "keyUrl", "defaultModel", "models", "note", "rerankModel", "tiers"})
+        self.assertEqual(set(ps[0]), {"id", "name", "baseUrl", "needsKey", "keyUrl", "defaultModel", "models", "note", "rerankModel", "embeddingModel", "tiers"})
 
     def test_requires_token(self) -> None:
         self.assertEqual(TestClient(app).get("/setup/status").status_code, 401)
@@ -186,7 +186,8 @@ class CompleteTests(unittest.TestCase):
         _clear()
 
     def test_complete_persists_and_stamps_then_reset_clears(self) -> None:
-        db.set_settings({"extractionModel": "deepseek-v4-flash"})
+        db.set_settings({"extractionModel": "deepseek-v4-flash", "embeddingModel": "accounts/fireworks/models/qwen3-embedding-8b",
+                         "retrievalRerankModel": "accounts/fireworks/models/qwen3-reranker-8b"})
         r = client.post("/setup/complete", json={"provider": "openai", "baseUrl": "https://api.openai.com/v1", "apiKey": " sk-1 ", "model": "gpt-5-mini"})
         self.assertEqual(r.status_code, 200)
         s = r.json()
@@ -196,9 +197,13 @@ class CompleteTests(unittest.TestCase):
         self.assertTrue(s["onboardedAt"])
         stored = db.get_settings()
         self.assertEqual((stored["apiKey"], stored["extractionModel"]), ("sk-1", ""))
+        # Another provider's embedding id would turn semantic search off: the preset's own replaces it.
+        self.assertEqual((stored["embeddingModel"], stored["retrievalRerankModel"]), ("text-embedding-3-small", ""))
         s = client.post("/setup/reset").json()
         self.assertIsNone(s["onboardedAt"])
         self.assertEqual(s["provider"], "openai")
+        client.post("/setup/complete", json={"provider": "anthropic", "baseUrl": "", "apiKey": "sk-a", "model": "claude-sonnet-5-5"})
+        self.assertEqual(db.get_settings()["embeddingModel"], "")  # the endpoint has no embeddings route
 
     def test_validation(self) -> None:
         for body in ({"provider": "nope", "baseUrl": "x", "model": "m"},

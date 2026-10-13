@@ -672,6 +672,9 @@ class Run:
     def publish(self, event: str, data: Any) -> None:
         self.seq += 1
         self.last_active = time.monotonic()
+        if event == "tool_call" and isinstance(data, dict):
+            # Wall-clock start, so a window that attaches or replays mid-call times it from when it began.
+            data.setdefault("started_at", int(time.time() * 1000))
         if event == "assistant_message":
             self.message_seq = self.seq
         item = (self.seq, event, data)

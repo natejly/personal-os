@@ -6,6 +6,7 @@ by app.py once the store exists, until then the tools are not offered.
 """
 from __future__ import annotations
 
+import itertools
 import math
 import sqlite3
 from typing import Any
@@ -31,6 +32,17 @@ def _rects(n: int, layout: str) -> list[tuple[float, float, float, float]]:
         return [(i * CASCADE_STEP, i * CASCADE_STEP, CELL_W, CELL_H) for i in range(n)]
     cols = min(MAX_COLS, math.ceil(math.sqrt(n))) or 1
     return [(GAP + (i % cols) * (CELL_W + GAP), GAP + (i // cols) * (CELL_H + GAP), CELL_W, CELL_H) for i in range(n)]
+
+
+def _free_cell(windows: list[dict[str, Any]]) -> tuple[float, float, float, float]:
+    """The first cell of a MAX_COLS-wide grid that no window overlaps, wherever the user or a layout put them."""
+    def hits(x: float, y: float, w: dict[str, Any]) -> bool:
+        return x < w["x"] + w["w"] and w["x"] < x + CELL_W and y < w["y"] + w["h"] and w["y"] < y + CELL_H
+    for i in itertools.count():
+        x, y = GAP + (i % MAX_COLS) * (CELL_W + GAP), GAP + (i // MAX_COLS) * (CELL_H + GAP)
+        if not any(hits(x, y, w) for w in windows):
+            return x, y, CELL_W, CELL_H
+    raise AssertionError("unreachable")
 
 
 def register(box: Any) -> None:
@@ -64,8 +76,7 @@ def register(box: Any) -> None:
                 ok = _exists(conn, REF_TABLES[kind], ref_id)
             if not ok:
                 return {"error": f"No {kind} with id {ref_id!r}", "hint": f"a {kind} window needs the id of an existing {kind}"}
-        # lands in the next free grid cell, so it never covers what is already there
-        x, y, w, h = _rects(len(c["windows"]) + 1, "grid")[-1]  # type: ignore[index]
+        x, y, w, h = _free_cell(c["windows"])  # type: ignore[arg-type]
         win = box.canvases.add_window(canvas_id, kind, ref_id or None, None, title, x, y, w, h)
         return {"window_id": win["id"], "canvas_id": canvas_id, "kind": kind, "added": True} if win else {"error": "canvas vanished"}
     box.specs["space_add_widget"] = ToolSpec(

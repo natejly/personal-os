@@ -2083,7 +2083,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                               for e in (r.get("tool_events") or []) if isinstance(e, dict) and e.get("name")}
         # One set for both searches: MCP slugs and built-in names cannot collide (reserved prefix).
         tool_ctx["mcp_loaded"] = tool_ctx["tool_loaded"] = loaded
-        tool_ctx["deferred"] = set()  # built-ins held back this round (_schemas); a call to one is "not loaded"
+        tool_ctx["deferred"] = set()  # built-ins held back this round (_schemas); a call to one by name loads its group
         # What tool_search searches: exactly the held-back tools, tagged with their group so a group name matches.
         tool_ctx["tool_catalog"] = lambda: [{"slug": n, "description": sp.description, "parameters": sp.parameters, "server": sp.group}
                                             for n in sorted(tool_ctx["deferred"]) if (sp := toolbox.specs.get(n))]
@@ -2916,15 +2916,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                      "content": tool_results.for_model(conv_id, am["id"], c["name"], bad, untrusted=False)})
                     continue
                 raw_mode = modes.get(c["name"], "off")
-                not_loaded = False
                 if raw_mode != "off" and c["name"] in tool_ctx["deferred"]:
-                    if proposal_only(run) or active_plan is not None or plan_seen or body.resume_of:
-                        # A plan step, a resumed run or a scheduled run names a tool it already settled on:
-                        # load its group rather than send it searching. Its gate below is unchanged.
-                        _load_groups([c["name"]])
-                        tool_schemas = _schemas()
-                    else:
-                        not_loaded, raw_mode = True, "off"
+                    # An enabled tool called by its exact name: load its group rather than send the model searching
+                    # (a refusal costs two rounds, a search and the same call again). Its gate below is unchanged.
+                    _load_groups([c["name"]])
+                    tool_schemas = _schemas()
                 spec = toolbox.specs.get(c["name"])
                 # Connector tools are not in toolbox.specs but are external by construction; "safe" here would
                 # let them through plan mode, propose-only desks and the unexpected-taint rule.
@@ -3388,7 +3384,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 elif mode == "off":
                     result = tools.denied(c["name"], "not loaded; call mcp_tool_search first"
                                           if mcp_defer and mcp_is(c["name"]) and c["name"] in mcp_modes
-                                          else "not loaded; call tool_search first" if not_loaded
                                           else "turned off for this chat")
                 elif plan is not None:
                     result = plans.model_result(plan)  # the decision, and the arguments the user actually authorised

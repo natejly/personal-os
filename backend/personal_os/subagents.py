@@ -40,7 +40,7 @@ from typing import Any, Callable
 
 from . import approval_log, autoreview, coding_route, compaction, context_map, fsx, limits, llm, mac, permissions, permrules, redact
 from .db import new_id, now
-from .toolcalls import parse_arguments
+from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, DISCARDED, ToolSpec, _obj, allows_slug, call_key, denied, summarize_result, tool_error
 from .working import escape_tags, fence_untrusted
@@ -492,6 +492,7 @@ class Child:
     started: float = field(default_factory=time.time)
     resume_of: str = ""             # the run this one continues: its executed calls are replayed, never run twice
     beat_at: float = 0.0            # when the run row's updated_at was last bumped (wall clock)
+    seen_ids: set[str] = field(default_factory=set)  # every call id this child used: a provider restarts numbering each round
     stalled: bool = False           # past WORKER_STALL_NOTE_SECONDS without progress (status line only; nothing stops it)
     steers: list[str] = field(default_factory=list)   # user messages sent straight to this child, folded in at its next round
     # Stuck detection, the same helpers the main reply loop uses.
@@ -941,6 +942,10 @@ class Subagents:
             if ch.halt_reason:
                 raise _Halt(ch.halt_reason)
             calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
+            ensure_unique_call_ids(calls, ch.seen_ids)  # else a reused id picks up an earlier call's approval
+            advertised = [s["function"]["name"] for s in schemas]
+            for c in calls:  # 'functions.web_search' or 'Web_Search' is the one tool it names; else a did-you-mean
+                c["name"], _, c["_problem"] = resolve_name(c["name"] or "", set(advertised) | set(ch.modes), advertised)
             if text:
                 ch.text = text
             if not calls and ch.steers:
@@ -1058,6 +1063,8 @@ class Subagents:
         mcp = self.connectors is not None and spec is None and name in (ch.ctx.get("mcp_schemas") or {})
         if mcp and raw_mode != "off" and "_raw" not in args:
             decision, result, ran = await self._exec_mcp(ch, uid, name, args, raw_mode)
+        elif c.get("_problem"):
+            result = tool_error(c["_problem"], alternative="call one of the tools listed in this request by its exact name")
         elif spec is None or raw_mode == "off":
             result = denied(name, "not available to this subagent")
         elif "_raw" in args:

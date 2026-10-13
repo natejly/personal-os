@@ -433,6 +433,23 @@ def test_duplicate_calls_in_a_child_run_once() -> None:
     check(out["state"] == "completed", "ok")
 
 
+def test_child_call_ids_stay_unique_and_names_resolve() -> None:
+    reset()
+    # a provider that restarts its numbering every round, and one that prefixes the namespace
+    SCRIPTS["ids"] = [{"text": "", "calls": [call("functions.current_time:0", "current_time", {})]},
+                      {"text": "", "calls": [call("functions.current_time:0", "functions.current_time", {"tz": "UTC"})]},
+                      {"text": "", "calls": [call("x", "Nope_Tool", {})]},
+                      {"text": "done"}]
+    run(appmod.toolbox.call("agent_spawn", {"task": "ids"}, mkctx(new_conv())))
+    msgs = next(c for c in mgr.children.values()).messages
+    ids = [tc["id"] for m in msgs if m["role"] == "assistant" for tc in m.get("tool_calls") or []]
+    check(len(ids) == 3 and len(set(ids)) == 3, "a reused provider id is replaced in a later round")
+    names = [tc["function"]["name"] for m in msgs if m["role"] == "assistant" for tc in m.get("tool_calls") or []]
+    check(names[1] == "current_time", "a namespaced name resolves to the one tool it names")
+    last = [m for m in msgs if m["role"] == "tool"][-1]["content"]
+    check("Did you mean" in last and "Do not retry" not in last, "an unknown name gets a did-you-mean, not a refusal")
+
+
 # ---- approvals -------------------------------------------------------------------------------------
 
 class FakeRun:

@@ -677,6 +677,15 @@ const toastClocks = new Map<number, { left: number; at?: number; timer?: ReturnT
 let toastsHeld = false
 /** The completion popup's snooze timer. Its own, so dismissing a toast never clears a snoozed popup. */
 let completionTimer: ReturnType<typeof setTimeout> | null = null
+/** Set by the Settings modal while its draft is dirty: it asks before discarding instead of closing. */
+let settingsGuard: (() => void) | null = null
+export function setSettingsGuard(fn: (() => void) | null): void { settingsGuard = fn }
+/** The patch a navigation action spreads to close Settings; with a dirty draft it asks and stays open. */
+function closeSettings(): { settingsOpen?: false } {
+  if (!settingsGuard) return { settingsOpen: false }
+  settingsGuard()
+  return {}
+}
 let flushChain: Promise<void> = Promise.resolve()
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
@@ -1809,7 +1818,7 @@ export const useStore = create<State>((set, get) => {
       get().openInbox()
     },
     inboxOpen: false,
-    openInbox: () => set({ inboxOpen: true, settingsOpen: false }),
+    openInbox: () => set({ inboxOpen: true, ...closeSettings() }),
     closeInbox: () => set({ inboxOpen: false, routineDraft: null }),
     clearRoutineDraft: () => set({ routineDraft: null }),
     projects: [],
@@ -2118,7 +2127,7 @@ export const useStore = create<State>((set, get) => {
     },
     // `draftProjectId` is deliberately not set here: opening a project is looking at it, not
     // choosing it for the next chat. Its own "New chat" buttons pass the id to `newChat` instead.
-    openProject: (id) => set({ view: 'project', projectViewId: id, draftProjectId: null, settingsOpen: false }),
+    openProject: (id) => set({ view: 'project', projectViewId: id, draftProjectId: null, ...closeSettings() }),
     createProject: async (p) => {
       const project = await api.projects.create(p)
       await get().refreshProjects()
@@ -2161,7 +2170,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftChatSettings: {}, view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftChatSettings: {}, view: 'chat', ...closeSettings() }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -2182,7 +2191,7 @@ export const useStore = create<State>((set, get) => {
       }
     },
     selectChat: async (id) => {
-      set({ view: 'chat', settingsOpen: false, traceMessageId: null })
+      set({ view: 'chat', ...closeSettings(), traceMessageId: null })
       if (!id) return set({ focusedConversationId: null })
       // Opening the chat the completion popup named settles it: there is nothing left to open.
       if (get().completionPopup?.convId === id) get().dismissCompletion()
@@ -2650,7 +2659,7 @@ export const useStore = create<State>((set, get) => {
       }
       putSession(c)
       // A fresh copy has no run to attach to, so it is focused directly rather than refetched through selectChat.
-      set((s) => ({ conversations: [c, ...s.conversations.filter((x) => x.id !== c.id)], view: 'chat', settingsOpen: false,
+      set((s) => ({ conversations: [c, ...s.conversations.filter((x) => x.id !== c.id)], view: 'chat', ...closeSettings(),
                      traceMessageId: null, focusedConversationId: c.id, draftProjectId: c.project_id }))
       const from = get().sessions[conversationId]?.conversation.title ?? get().conversations.find((x) => x.id === conversationId)?.title
       get().toast(`Branched from ${from || 'the original chat'}`, 'info', { label: 'Open original', run: () => void get().selectChat(conversationId) })

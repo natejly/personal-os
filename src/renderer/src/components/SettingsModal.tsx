@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { X, Search, Download, Upload, Plug, Cpu, Bot, Palette, ShieldCheck, ShieldAlert, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, Gauge, Brain, PanelLeft, type Icon } from '../icons'
-import { useStore, type View } from '../store'
+import { useStore, setSettingsGuard, type View } from '../store'
 import { modeOf } from '../lib/permissionMode'
 import { searchSettings, type SettingsTab } from '../lib/settingsTabs'
 import { MODES } from '../lib/permissionMode'
@@ -218,6 +218,12 @@ export default function SettingsModal(): JSX.Element {
     if (dirty) setPending((p) => p ?? 'close')
     else setSettingsOpen(false)
   }
+  // A link inside Settings (a memory's "from chat", ⌘N) navigates through the store; with a dirty
+  // draft the store asks through here instead of closing the modal.
+  useEffect(() => {
+    setSettingsGuard(dirty ? () => setPending((p) => p ?? 'close') : null)
+    return () => setSettingsGuard(null)
+  }, [dirty])
   const discard = (): void => {
     const then = pending
     setPending(null)

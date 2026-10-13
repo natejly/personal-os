@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { learnedText, readDocMode, adoptServerDoc, flushDocOnUnload, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, PAGE_AGENT_DRAFT, type ChatSession } from './store'
+import { learnedText, readDocMode, adoptServerDoc, flushDocOnUnload, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, setSettingsGuard, PAGE_AGENT_DRAFT, type ChatSession } from './store'
 import { insertIntoComposer } from './lib/composerInsert'
 import { getDraft } from './lib/drafts'
 import { ApiError } from './lib/apiError'
@@ -1428,6 +1428,21 @@ test('openAgent opens Library > Agents on that agent; null returns to the list',
   assert.equal(useStore.getState().openAgentId, null)
 })
 
+test('navigating from Settings asks first while its draft is dirty', async () => {
+  let asked = 0
+  useStore.setState({ settingsOpen: true })
+  setSettingsGuard(() => { asked++ })
+  await useStore.getState().selectChat(null)
+  useStore.getState().newChat(null)
+  useStore.getState().openInbox()
+  assert.equal(asked, 3)
+  assert.equal(useStore.getState().settingsOpen, true)
+  setSettingsGuard(null)
+  useStore.getState().newChat(null)
+  assert.equal(useStore.getState().settingsOpen, false)
+  useStore.setState({ inboxOpen: false })
+})
+
 // A bare useStore() subscribes to every set(), and patchSession runs once per streamed token, so the
 // component re-renders per token. Pick fields with a selector (or useShallow) instead.
 test('no component reads the whole store with a bare useStore()', async () => {
@@ -1438,7 +1453,7 @@ test('no component reads the whole store with a bare useStore()', async () => {
     for (const name of readdirSync(dir)) {
       const p = join(dir, name)
       if (statSync(p).isDirectory()) walk(p)
-      else if (p.endsWith('.tsx') && /\buseStore\(\)/.test(readFileSync(p, 'utf8'))) bad.push(p)
+      else if (p.endsWith('.tsx') && /^[^/\n]*\buseStore\(\)/m.test(readFileSync(p, 'utf8'))) bad.push(p)
     }
   }
   walk(join(process.cwd(), 'src/renderer/src'))

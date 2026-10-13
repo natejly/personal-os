@@ -2,12 +2,11 @@ import { useEffect, useState } from 'react'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 
-export type TermMode = 'attach' | 'shell'
 export type TermState = 'opening' | 'live' | 'exited'
 
 /** One terminal view: its xterm instance, the element it lives in, and the PTY (in the main process) behind it. */
 export interface TermEntry {
-  key: string; sessionId: string; mode: TermMode
+  sessionId: string
   term: Terminal; fit: FitAddon
   /** The xterm DOM. It stays alive when detached, so the panel can close and come back with the screen intact. */
   host: HTMLDivElement
@@ -18,7 +17,6 @@ export interface TermEntry {
 const entries = new Map<string, TermEntry>()
 const listeners = new Set<() => void>()
 const emit = (): void => listeners.forEach((l) => l())
-const keyOf = (sessionId: string, mode: TermMode): string => `${sessionId}:${mode}`
 
 let available: Promise<boolean> | null = null
 /** Whether this build can host terminals; asked once. */
@@ -45,7 +43,7 @@ export function useTermEntries(): TermEntry[] {
   return [...entries.values()]
 }
 
-export const getEntry = (sessionId: string, mode: TermMode): TermEntry | undefined => entries.get(keyOf(sessionId, mode))
+export const getEntry = (sessionId: string): TermEntry | undefined => entries.get(sessionId)
 
 /** Colors and font from the app's CSS tokens as they are right now. */
 function themeFromCss(): { theme: ITheme; fontFamily: string } {
@@ -86,7 +84,7 @@ function subscribeOnce(): void {
     if (!e) return
     e.termId = null
     e.state = 'exited'
-    e.term.write(`\r\n\x1b[2m${e.mode === 'attach' ? '[session detached - press Enter to reattach]' : '[shell exited]'}\x1b[0m\r\n`)
+    e.term.write('\r\n\x1b[2m[session detached - press Enter to reattach]\x1b[0m\r\n')
     emit()
   })
 }
@@ -97,8 +95,8 @@ export async function startEntry(e: TermEntry): Promise<void> {
   e.state = 'opening'
   emit()
   try { e.fit.fit() } catch { /* hidden: keep the default size */ }
-  const res = await window.os.termOpen(e.sessionId, e.mode, e.term.cols, e.term.rows)
-  if (entries.get(e.key) !== e) { if (!('error' in res)) void window.os.termClose(res.termId); return }
+  const res = await window.os.termOpen(e.sessionId, 'attach', e.term.cols, e.term.rows)
+  if (entries.get(e.sessionId) !== e) { if (!('error' in res)) void window.os.termClose(res.termId); return }
   if ('error' in res) {
     e.state = 'exited'
     e.term.write(`\r\n\x1b[2m[${res.error}]\x1b[0m\r\n`)
@@ -116,10 +114,9 @@ export async function startEntry(e: TermEntry): Promise<void> {
   emit()
 }
 
-/** The entry for (session, mode), created on first use. Its PTY is not started until startEntry. */
-export function ensureEntry(sessionId: string, mode: TermMode): TermEntry {
-  const key = keyOf(sessionId, mode)
-  const have = entries.get(key)
+/** The attached view of a session, created on first use. Its PTY is not started until startEntry. */
+export function ensureEntry(sessionId: string): TermEntry {
+  const have = entries.get(sessionId)
   if (have) return have
   subscribeOnce()
   if (!themeWatch) {
@@ -133,23 +130,14 @@ export function ensureEntry(sessionId: string, mode: TermMode): TermEntry {
   const host = document.createElement('div')
   host.className = 'term-host'
   term.open(host)
-  const e: TermEntry = { key, sessionId, mode, term, fit, host, termId: null, state: 'exited' }
+  const e: TermEntry = { sessionId, term, fit, host, termId: null, state: 'exited' }
   term.onData((data) => {
     if (e.termId) void window.os.termWrite(e.termId, data)
-    else if (e.state === 'exited' && e.mode === 'attach' && data === '\r') void startEntry(e)
+    else if (e.state === 'exited' && data === '\r') void startEntry(e)
   })
-  entries.set(key, e)
+  entries.set(sessionId, e)
   emit()
   return e
-}
-
-/** Ends the PTY and drops the view. */
-export function endEntry(e: TermEntry): void {
-  if (e.termId) void window.os.termClose(e.termId)
-  entries.delete(e.key)
-  e.term.dispose()
-  e.host.remove()
-  emit()
 }
 
 /** Refit to the host's current box and tell the PTY. */

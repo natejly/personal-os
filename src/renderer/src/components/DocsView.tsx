@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   FileText, Files, PanelRight, X, Columns2, Eye, Pencil, MessageSquarePlus, Type,
-  Sparkles, FolderTree, SlidersHorizontal
+  Sparkles, FolderTree, SlidersHorizontal, Code2
 } from '../icons'
 import { flushDocOnUnload, restoreDocTabs, useStore, type FilesSection } from '../store'
 import { api, type DocHit } from '../lib/api'
@@ -33,6 +33,8 @@ import { effectiveTypography, typographyStyle } from '../features/notes/typograp
 import '../styles/docs.css'
 import AppSwitcher from './AppSwitcher'
 import DocumentsView from './DocumentsView'
+import DashboardView from './DashboardView'
+import { isDashboardContent } from '../lib/dashboards'
 import ArtifactsView from './ArtifactsView'
 import ScopeSelect from './ScopeSelect'
 import SidebarToggle from './SidebarToggle'
@@ -128,6 +130,10 @@ export default function DocsView(): JSX.Element {
   const showEditor = docMode !== 'preview'
   const showRender = docMode !== 'edit'
   const paneKey = `${activeDoc?.id ?? ''}:${docMode}`
+  // A dashboard envelope reads as the dashboard; the toggle swaps to its source, which edits as usual.
+  const [rawDocId, setRawDocId] = useState<string | null>(null)
+  const isDash = !!activeDoc && isDashboardContent(activeDoc.content ?? '')
+  const showDash = isDash && rawDocId !== activeDoc?.id
   // Read by the scroll handler, so toggling the link does not hand the editor a new callback.
   const linkedRef = useRef(linked)
   linkedRef.current = linked
@@ -386,6 +392,7 @@ export default function DocsView(): JSX.Element {
                   {docMode === 'split' && <button role="menuitemcheckbox" aria-checked={linked} className="notes-menu-row" onClick={() => setLinked((l) => !l)}>{linked ? '✓ ' : ''}Link scrolling</button>}
                 </ViewMenu>
               )}
+              {isDash && <button className={`icon-btn ghost ${showDash ? '' : 'on'}`} title={showDash ? 'Show source' : 'Show dashboard'} aria-label="Toggle dashboard source" aria-pressed={!showDash} onClick={() => setRawDocId(showDash ? activeDoc.id : null)}><Code2 size={14} /></button>}
               <ExportMenu title={title} content={body} projectId={activeDoc.project_id ?? null} />
               {/* One toggle for the whole panel; the tab strip inside picks what it shows. The dot
                   keeps counting assistant edits waiting for review, whatever tab is open. */}
@@ -410,7 +417,7 @@ export default function DocsView(): JSX.Element {
             )}
 
             {showEditor && <FormatBar editor={editor} />}
-            <div className={`doc-panes ${docMode}`} style={typeStyle}>
+            {showDash ? <div className="docs-render reading"><DashboardView id={activeDoc.id} /></div> : <div className={`doc-panes ${docMode}`} style={typeStyle}>
               {docMode === 'split' && (
                 <ResizeHandle id="doc-split" unit="%" defaultSize={50} min={20} max={80} grows="right" label="Editor and preview split" className="doc-split-edge" />
               )}
@@ -453,7 +460,7 @@ export default function DocsView(): JSX.Element {
                     : <p className="muted">{docMode === 'preview' ? 'Empty file. Double-click here to write.' : 'Nothing to preview yet.'}</p>}
                 </div>
               )}
-            </div>
+            </div>}
             <DocCommentFab fab={comments.fab} onComment={() => { if (comments.fab) commentOn(comments.fab.anchor) }} />
           </section>
         )}

@@ -1,6 +1,6 @@
 ---
 name: grain
-description: Using, launching, developing or testing the Grain desktop app: views, shortcuts, tools, data dir, dev vs packaged, e2e
+description: Use, launch, develop or test the Grain Mac app: views, shortcuts, slash commands, tools, data dirs, dev vs packaged, e2e, and teaching a user Grain
 ---
 
 # Grain
@@ -16,11 +16,12 @@ Mental model:
 - **Chats** run a tool loop. Tools read and write the app, Google, the Mac and a sandbox.
 - **Memory and graph**: auto-learn saves memories and graph links after replies. **Projects** group chats with their own instructions, files and memories.
 - **Files** (⌘4) holds notes you write, uploads, and Artifacts: what the assistant made in any chat, by chat. A project's **Context** tab is the same for one project (its chats' files, notes and uploads). Settings → Memory (⌘6) reviews memory and the writing Voice profile.
-- **Lists** (todos), **Calendar**, **Mail** and **Health** are sidebar rows under Today and Files (`src/renderer/src/shell/nav.tsx`); Settings → Sidebar hides any row or view. The top-right title-bar button opens the ⌘I panel.
-- **Spaces** (⌘⇧C): a desktop of live windows (chat, lists, calendar, note, memory, graph, uploads, recap, project, usage, doc, face, crew). See [docs/spaces.md](../../../docs/spaces.md).
-- **Library**: Agents, Automations (workflows and saved commands), Skills, Connectors (MCP), and what Grain made.
-- **Autonomy**: a reply can hand work to subagents (`agent_spawn`). With Settings → Agents → Desks "Start new chats working autonomously" on (the default), a new chat starts as a longer session (Ask as it goes, with a turn limit) with its own plan and workspace: a strip above the composer only while background workers run (the main agent has no status chrome; the composer's Stop is its control). Every chat's header "Documents in this chat" button opens a side panel with Files / Changes, plus Checklist, Workers and (for a desk) Review when they apply; settings are under Settings → Agents. Workflows are approved once and run in waves ([docs/workflows.md](../../../docs/workflows.md), [docs/cowork-design.md](../../../docs/cowork-design.md), which is the original desk spec, partly out of date; the standalone Cowork view was folded into chats on 2026-10-05). Scheduled runs only propose; results land in the Agent inbox on Today.
-- **Settings** (⌘,) tabs: General (opens first), Sidebar, Model, Models, Agents, Memory, Integrations, Permissions, System access, Usage, Advanced (`TABS` in `SettingsModal.tsx`).
+- **Lists** (todos), **Calendar**, **Mail**, **Health**, **Library** and **Jobs** (scheduled jobs and their runs) are sidebar rows under Files (`src/renderer/src/shell/nav.tsx`); Settings → Sidebar hides any row or view. The top-right title-bar button opens the ⌘I panel.
+- **Canvases** (called Spaces in the code and in `docs/spaces.md`; ⌘⇧C): a desktop of live windows (chat, lists, calendar, note, memory, graph, uploads, recap, project, usage, doc, face, crew). See [docs/spaces.md](../../../docs/spaces.md).
+- **Library** tabs: Skills, Agents, Automations (workflows and saved commands), Connectors (MCP).
+- **Reach**: a Telegram bot chats with Grain from a phone (Settings → Integrations, [docs/telegram.md](../../../docs/telegram.md)); coding sessions hand repo work to a coding agent ([docs/coding-agents.md](../../../docs/coding-agents.md)); `deep_research` and `/research` fan out parallel researchers ([docs/research-mode.md](../../../docs/research-mode.md)); chats can read and message each other (`list_chats`, `read_chat`, `message_chat`).
+- **Autonomy**: a reply can hand work to subagents (`agent_spawn`). With Settings → Agents → Desks "Start new chats working autonomously" on (the default), a new chat starts as a longer session (Ask as it goes, with a turn limit) with its own plan and workspace: a strip above the composer only while background workers run (the main agent has no status chrome; the composer's Stop is its control). Every chat's header "Documents in this chat" button opens a side panel with Files / Changes, plus Checklist, Workers and (for a desk) Review when they apply; settings are under Settings → Agents. Workflows are approved once and run in waves ([docs/workflows.md](../../../docs/workflows.md), [docs/cowork-design.md](../../../docs/cowork-design.md), which is the original desk spec, partly out of date; the standalone Cowork view was folded into chats on 2026-10-05). Scheduled runs only propose; results land in the Agent inbox (title-bar button).
+- **Settings** (⌘,) tabs: General (opens first), Models, Agents, Memory, Integrations, Permissions, System access, Sidebar, Usage, Advanced (`TABS` in `SettingsModal.tsx`).
 
 ## Using it
 
@@ -33,7 +34,7 @@ First run, as a user:
 5. Set a **Working folder** on the chat if the assistant should touch files. With none set, file and shell tools work in `~/Grain` (`mac.py`).
 6. ⌘4 Files: ⌘⇧N new note, ⌘⇧D today's note, ⌘U upload. ⌘I (or the title-bar Quick chat button) opens the Page agent, a chat bound to the open note.
 7. Sidebar **+** next to Projects makes a project. Lists, Calendar and Mail are sidebar rows (⌘2, ⌘3, ⌘5).
-8. Spaces: ⌘⇧C, then Add widget or right-click the plane. Library for agents and automations.
+8. Canvases: ⌘⇧C, then Add widget or right-click the plane. Library for agents and automations.
 
 Shortcuts that matter (full list in reference.md): ⌘N new chat, ⌘K command palette, ⌘I quick chat, ⌘⇧C
 Spaces, ⌘1 to ⌘6 views (Chats, Lists, Calendar, Files, Mail, Memory), ⌘, settings,
@@ -41,7 +42,7 @@ Spaces, ⌘1 to ⌘6 views (Chats, Lists, Calendar, Files, Mail, Memory), ⌘, s
 
 Composer features:
 
-- **Slash commands**: `/skill`, `/schedule`, `/loop`, `/compact`, `/skills`, `/commands` (table in reference.md).
+- **Slash commands**: `/clear`, `/skill`, `/schedule`, `/loop`, `/research`, `/compact`, `/skills`, `/commands`, plus your saved commands (table in reference.md; source `slashCommands.ts` and `commands.py`).
 - **Plan first** is a desk level (set through the desks API or an agent job; there is no composer control): the desk proposes a plan with `propose_plan`, you approve it once, and each step runs bound to its approved arguments.
 - **Approval card**: a tool in `ask` mode stops the reply until you approve or deny. The card offers allow once, always for this chat or globally, or a pattern rule.
 - **Always-ask list** (`alwaysAsk` in `llm.py` `DEFAULT_SETTINGS`): `gmail_send`, `calendar_delete`, `trash_local_file`, `move_local_file`, `run_shortcut`, `python_install`, `schedule_task`. No setting or card turns these fully on.
@@ -51,7 +52,7 @@ Composer features:
 
 Backups: Settings → Advanced → Data keeps daily backups (newest 7 plus one a week), has **Back up now**, a restore
 that applies on next start (`backups.apply_pending_restore`), and **Export all data** as a zip. Deleted
-notes and todos go to the trash for 30 days (Settings → Trash).
+notes and todos go to the trash for 30 days (Settings → Advanced → Data → Trash).
 
 ## The assistant's tools
 
@@ -70,14 +71,21 @@ Groups, by what they do (every tool, danger and default in reference.md):
 
 | group | covers |
 |---|---|
-| knowledge, docs, memory, graph | search/read uploads and notes, edit notes (you accept a diff), long-term memory, graph |
-| web, browser, vision | search, fetch, feeds, video and repo reads, a driven browser, image reading |
+| knowledge, docs, memory, graph | search/read uploads and notes, edit notes (you accept a diff), note comments (`doc_comments`), long-term memory, graph |
+| web, browser, vision | search, fetch, feeds, video and repo reads, a driven browser (`browser_handoff` hands it to you for logins), image reading |
 | google | Calendar (events, find time, propose), Gmail (search, draft, send with undo hold), Tasks, Drive, Docs, Sheets |
 | todos, health, style | lists, health data, writing voice |
 | files, mac, shell, opencode, code | local files (home-scoped), shortcuts, shell in a working folder, coding agent, Python |
-| agents, workflows, desk, schedule, skills, spaces | subagents, saved workflows, desks, scheduling, skill authoring, arranging Spaces |
+| agents, workflows, desk, schedule, skills, spaces | subagents and background workers (`delegate`, `check_worker`), Library agents, saved workflows, desks, scheduling, skill authoring, arranging Canvases |
+| chats, research, media | `list_chats`/`read_chat`/`message_chat`, `deep_research`, `generate_image`, `screenshot`, `send_files` |
+| coding (`shell` group) | `coding_session_*` hands a repo task to a coding agent in a worktree; `ship_checklist` runs tests, pushes and opens a PR |
 | plan, utility, context | plans and questions, `show`, `current_time`, paged tool results |
 | setup | `setup_request`: a one-click setup card in the chat (always offered) |
+
+## Teaching a user Grain
+
+- The app ships its own user-facing skill, `grain-guide` (`backend/personal_os/guide.py`). It is approved on first run, refreshed from the bundled text at every start (Library edits do not last), and in-app agents read it with `skill_view` to answer "how do I" questions. For a user asking about the app, point them at the in-app assistant ("teach me Grain") rather than re-explaining here.
+- This repo skill is for people and agents working on Grain. To use it inside Grain, paste `https://github.com/natejly/personal-os/tree/main/.claude/skills/grain` into Library → Skills → import: `skillmd.raw_url` turns a GitHub `blob`/`tree` URL into the raw file and appends `/SKILL.md` for a folder. Imports only ever become a candidate you approve, and only `references/` files are kept.
 
 ## Operating it as a developer or agent
 

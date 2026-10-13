@@ -1,10 +1,7 @@
 import { modelLabel } from '../lib/modelLabel'
 import { useEffect, useMemo, useState } from 'react'
-import { X, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, Activity, ShieldAlert, MonitorDot, PenLine } from '../icons'
+import { X, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, ShieldAlert, MonitorDot, PenLine } from '../icons'
 import { ToolOverrides } from './ToolPermissions'
-import TraceView from './TraceView'
-import ShellJobs from './ShellJobs'
-import CodingSessions from './CodingSessions'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
 import { api } from '../lib/api'
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
@@ -224,11 +221,10 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
   const openProject = useStore((s) => s.openProject)
   const induceSkill = useStore((s) => s.induceSkill)
   const setTab = useStore((s) => s.setContextTab)
-  // Preview and Trace are developer tools; with them off, the drawer only shows Last reply.
+  // Preview is a developer tool; with it off, the drawer only shows Last reply. Everything here is what the model is given; the run's steps live in the Traces tab.
   const devTools = useStore((s) => s.settings.devTools === true)
   const storeTab = useStore((s) => s.contextTab)
-  const tab = devTools || storeTab === 'trace' ? storeTab : 'last'
-  const traceMessageId = useStore((s) => s.traceMessageId)
+  const tab = devTools && storeTab === 'preview' ? 'preview' : 'last'
   const streamingMessageId = useStreamingMessageId(conversationId)
   const [query, setQuery] = useState('')
   const [preview, setPreview] = useState<ContextUsed | null>(null)
@@ -248,13 +244,6 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
     for (let i = ms.length - 1; i >= 0; i--) if (ms[i].context_used) return { ctx: ms[i].context_used!, id: ms[i].id }
     return null
   }, [convo?.messages])
-  const traceMsg = useMemo(() => {
-    const ms = convo?.messages ?? []
-    const picked = traceMessageId ? ms.find((m) => m.id === traceMessageId) : undefined
-    if (picked?.trace?.length) return picked
-    for (let i = ms.length - 1; i >= 0; i--) if (ms[i].trace?.length) return ms[i]
-    return null
-  }, [convo?.messages, traceMessageId])
 
   useEffect(() => {
     if (tab !== 'preview') return
@@ -282,9 +271,6 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
       </section>
 
       {convo && <ContextMeterView conversationId={convo.id} refreshKey={`${convo.messages?.length ?? 0}:${streamingMessageId ?? ''}`} />}
-
-      <ShellJobs />
-      <CodingSessions />
 
       <section className="ctx-section">
         <h4>{convo ? 'This chat uses' : 'New chats use'}</h4>
@@ -327,17 +313,10 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
       <div className="ctx-tabs">
         <button className={tab === 'last' ? 'active' : ''} onClick={() => setTab('last')}>Last reply</button>
         {devTools && <button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')}><Eye size={12} /> Preview</button>}
-        <button className={tab === 'trace' ? 'active' : ''} onClick={() => setTab('trace')}><Activity size={12} /> Trace</button>
       </div>
 
       {tab === 'last' ? (
         lastCtx ? <ContextUsedView ctx={lastCtx.ctx} messageId={lastCtx.id} /> : <p className="muted ctx-empty">Send a message to see its context.</p>
-      ) : tab === 'trace' ? (
-        traceMsg ? (
-          <TraceView spans={traceMsg.trace ?? []} live={streamingMessageId === traceMsg.id} model={traceMsg.model} messageId={traceMsg.id} />
-        ) : (
-          <p className="muted ctx-empty">Send a message to see its trace.</p>
-        )
       ) : (
         <div className="ctx-preview">
           <input placeholder="Draft a message…" value={query} onChange={(e) => setQuery(e.target.value)} />

@@ -59,26 +59,6 @@ def _load_pyobjc() -> dict[str, Any]:
     return _pyobjc
 
 
-_carbon: Any = None
-
-
-def secure_input_active() -> bool:
-    """True while a secure text field is focused anywhere (macOS sets this system-wide for
-    password fields). Keystroke capture stops completely while it is set."""
-    global _carbon
-    if not IS_MAC:
-        return False
-    try:
-        if _carbon is None:
-            import ctypes
-
-            _carbon = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/Carbon.framework/Carbon")
-            _carbon.IsSecureEventInputEnabled.restype = ctypes.c_bool
-        return bool(_carbon.IsSecureEventInputEnabled())
-    except Exception:  # noqa: BLE001
-        return False  # can't tell; the app denylist and redaction still apply
-
-
 def accessibility_trusted() -> bool:
     fn = _load_pyobjc().get("AXIsProcessTrusted")
     try:
@@ -109,46 +89,6 @@ def frontmost_app() -> tuple[str, str, int]:
         except Exception:  # noqa: BLE001
             pass
     return ("", "", 0)
-
-
-def focused_window_title(pid: int) -> str:
-    """Title of the frontmost window. The accessibility API first, since it knows which window is
-    actually focused; the window list second, for the apps that leave AXTitle empty."""
-    p = _load_pyobjc()
-    if not p or not pid:
-        return ""
-    try:
-        el = p["AXCreate"](pid)
-        err, win = p["AXCopy"](el, "AXFocusedWindow", None)
-        if not err and win is not None:
-            err, title = p["AXCopy"](win, "AXTitle", None)
-            if not err and title:
-                return str(title)
-    except Exception:  # noqa: BLE001
-        pass
-    return window_list_title(pid)
-
-
-def window_list_title(pid: int) -> str:
-    """Frontmost on-screen window title for a pid, from the window server. Titles are the only
-    field read and nothing is ever captured as an image - but macOS still gates the name behind
-    Screen Recording, so this returns "" until that is granted."""
-    q = _load_pyobjc().get("Quartz")
-    if not q or not pid or screen_recording_status() != GRANTED:
-        return ""
-    try:
-        opts = q.kCGWindowListOptionOnScreenOnly | q.kCGWindowListExcludeDesktopElements
-        for w in q.CGWindowListCopyWindowInfo(opts, q.kCGNullWindowID) or []:
-            if int(w.get("kCGWindowOwnerPID") or 0) != int(pid):
-                continue
-            if int(w.get("kCGWindowLayer") or 0) != 0:  # skip panels, menus and status items
-                continue
-            name = str(w.get("kCGWindowName") or "")
-            if name:
-                return name  # the list is front-to-back, so the first match is the front window
-    except Exception:  # noqa: BLE001
-        pass
-    return ""
 
 
 BROWSER_SCRIPTS = {

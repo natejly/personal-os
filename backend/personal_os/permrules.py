@@ -20,7 +20,6 @@ from dataclasses import dataclass, field
 from email.utils import getaddresses
 from typing import Any, Iterable
 
-from . import permissions
 from .stuck import POLL_TOOLS, WAITING_TOOLS
 
 # Rule names that are not tool names: the subject kinds `subject_for` emits.

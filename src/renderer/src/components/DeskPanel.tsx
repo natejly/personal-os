@@ -10,17 +10,18 @@ import { useStore } from '../store'
 import ContextDrawer from './ContextDrawer'
 import { useTermAvailable } from '../lib/termRegistry'
 import TerminalPane from './TerminalPane'
+import TracesPane from './TracesPane'
 
-type Tab = 'context' | 'files' | 'changes' | 'review' | 'terminal'
-const TABS: { key: Tab; label: string }[] = [{ key: 'context', label: 'Context' }, { key: 'files', label: 'Files' }, { key: 'changes', label: 'Changes' }, { key: 'review', label: 'Review' }, { key: 'terminal', label: 'Terminal' }]
+type Tab = 'context' | 'files' | 'changes' | 'review' | 'traces' | 'terminal'
+const TABS: { key: Tab; label: string }[] = [{ key: 'context', label: 'Context' }, { key: 'files', label: 'Files' }, { key: 'changes', label: 'Changes' }, { key: 'review', label: 'Review' }, { key: 'traces', label: 'Traces' }, { key: 'terminal', label: 'Terminal' }]
 
 /** An openTerminal request made just now; an old one must not pull a freshly opened panel onto Terminal. */
 const freshTermRequest = (): boolean => Date.now() - (useStore.getState().terminalRequest?.at ?? 0) < 3000
 
 /**
  * The side panel of a chat, beside the transcript: Files and Changes for every chat, and Review once it has a desk (a chat
- * working autonomously), which comes forward when the desk asks for it. Terminal shows when the app can host terminals and a
- * coding session exists; an openTerminal request brings it forward. A running checklist shows as the compact progress card
+ * working autonomously), which comes forward when the desk asks for it. Traces lists the chat's runs. Terminal shows when the app can host terminals and a
+ * coding session exists or ⌘T opened the panel; an openTerminal request brings it forward. A running checklist shows as the compact progress card
  * above the composer (ProgressCard) and workers as the worker list above the composer. Context is the default tab. Without a desk, Files is the chat's
  * own list. Context (the store's `contextOpen`) is always there and wins while requested; a draft chat with no id has only that tab.
  */
@@ -31,10 +32,13 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   const contextOpen = useStore((s) => s.contextOpen)
   const termOk = useTermAvailable()
   const hasCoding = useStore((s) => Object.keys(s.codingSessions).length > 0)
+  const termTab = useStore((s) => s.terminalTab)
+  const tracesRequest = useStore((s) => s.deskTabRequest?.n)
   const termRequest = useStore((s) => s.terminalRequest?.n)
   useEffect(() => { void useStore.getState().refreshCodingSessions() }, [])
   useEffect(() => { if (termRequest && freshTermRequest()) setTab('terminal') }, [termRequest])
-  const shown = (k: Tab): boolean => k === 'context' || (!!conversationId && (k === 'files' || k === 'changes')) || (k === 'review' && !!desk) || (k === 'terminal' && termOk && hasCoding)
+  useEffect(() => { const r = useStore.getState().deskTabRequest; if (r && Date.now() - r.at < 3000) { useStore.setState({ contextOpen: false }); setTab(r.tab) } }, [tracesRequest])
+  const shown = (k: Tab): boolean => k === 'context' || (!!conversationId && (k === 'files' || k === 'changes')) || (k === 'review' && !!desk) || (k === 'traces' && !!conversationId) || (k === 'terminal' && termOk && (hasCoding || termTab))
   const tabs = TABS.filter((t) => shown(t.key))
   const tab: Tab = contextOpen ? 'context' : shown(picked) ? picked : 'context'
   const pick = (k: Tab): void => { useStore.setState({ contextOpen: k === 'context' }); setTab(k) }
@@ -57,6 +61,7 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
         : <ChatFilesList conversationId={id} />)}
       {tab === 'changes' && <div className="desk-pane scroll"><DeskChanges desk={desk ?? undefined} conversationId={id} /></div>}
       {tab === 'terminal' && <TerminalPane />}
+      {tab === 'traces' && <TracesPane conversationId={conversationId} />}
       {tab === 'review' && desk && <div className="desk-pane scroll"><DeskReview desk={desk} /></div>}
     </aside>
   )

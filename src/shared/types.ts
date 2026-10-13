@@ -202,7 +202,7 @@ export interface ToolInfo {
  * Something the chat's side panel shows: content the model wrote (the same kinds as the fenced blocks in a reply,
  * plus markdown), or a file on this Mac the panel fetches by path.
  */
-export type ShowKind = 'html' | 'svg' | 'mermaid' | 'chart' | 'interactive' | 'markdown' | 'file'
+export type ShowKind = 'html' | 'svg' | 'mermaid' | 'chart' | 'interactive' | 'markdown' | 'file' | 'dashboard'
 export interface ShowItem {
   kind: ShowKind
   title: string
@@ -666,6 +666,8 @@ export interface ToolEvent {
   error: string | null
   /** Images the tool produced (e.g. matplotlib figures from run_python). */
   images?: ToolImage[] | null
+  /** A saved dashboard a tool saved, opened or pinned; the card renders it. */
+  dashboard?: { id: string; title: string } | null
   /** What the `show` tool put in the chat's side panel; the model only saw a receipt. */
   show?: ShowItem | null
   /** deep_research's plan, steps and sources considered. */
@@ -1621,7 +1623,7 @@ export interface Settings {
   codingRoute?: boolean
   /** The default coding agent for a new session. 'any' (or missing) lets Grain pick the first installed one. */
   codingAgent?: 'any' | 'opencode' | 'claude' | 'pi'
-  /** Background workers. Past `delegationAfterRounds` tool rounds in one reply the assistant hands remaining work to a worker (default on, 2, 1-20). */
+  /** Background workers. Past `delegationAfterRounds` tool rounds in one reply the assistant hands remaining work to a worker (default on, 4, 1-20). */
   delegationForce?: boolean
   delegationAfterRounds?: number
   /** Workers running at once (1-16, default 4); the rest queue. */
@@ -1975,7 +1977,6 @@ export interface BackendInfo {
 }
 
 export interface GrainApi {
-  backendUrl: () => Promise<string>
   /** `starting`: the first start is still waiting for /health (the window opens before the backend is up). */
   backendStatus: () => Promise<{ running: boolean; url: string; error: string | null; starting?: boolean }>
   backendToken: () => Promise<string>
@@ -2023,8 +2024,6 @@ export interface GrainApi {
     chooseExportPath: () => Promise<string | null>
     /** Native open dialog for files to hand a desk as inputs; [] when cancelled. */
     chooseInputFiles: () => Promise<string[]>
-    /** One folder from the system dialog, or null when cancelled. */
-    chooseFolder: () => Promise<string | null>
     reveal: (path: string) => Promise<boolean>
     /** A file the side panel shows: select it in Finder, or open it in its default app (only types that cannot run). */
     fileAction: (path: string, action: 'reveal' | 'open') => Promise<boolean>
@@ -3028,4 +3027,31 @@ export interface SubagentView {
     /** A user row: 'user' when the person sent it from the app, 'agent' when the main agent did (the task, its steers). */
     from?: 'user' | 'agent'
   }[]
+}
+
+/** A saved dashboard row (GET /saved-dashboards). */
+export interface SavedDashboard {
+  id: string
+  title: string
+  project_id: string | null
+  format: 'spec' | 'html'
+  mode: 'live' | 'snapshot'
+  updated_at: number | string
+}
+
+/** One dashboard view: a chart or interactive-chart spec. */
+export interface DashboardViewSpec { kind: 'chart' | 'interactive'; spec: Record<string, unknown> }
+
+/** GET /saved-dashboards/{id}/render: live dashboards re-read their data on every call. */
+export interface DashboardRender {
+  id: string
+  title: string
+  project_id: string | null
+  format: 'spec' | 'html'
+  mode: 'live' | 'snapshot'
+  views: DashboardViewSpec[] | null
+  html: string | null
+  updatedAt: string
+  failed: { binding: string; error: string; lastGoodAt: string | null }[]
+  bindings: { name: string; source: string; label: string }[]
 }

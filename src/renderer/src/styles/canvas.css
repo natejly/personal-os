@@ -26,7 +26,6 @@
   /* Hairline only: the old blurred drop shadows cast onto adjacent windows, reading as a highlight. */
   --shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.35);
   --shadow-focused: 0 0 0 0.5px rgba(0, 0, 0, 0.5);
-  --tl-off: #565654;
   --spring: cubic-bezier(0.32, 0.72, 0, 1);
   --dur-window: 320ms;
   --dur-snap: 180ms;
@@ -47,7 +46,6 @@
   --win-highlight: rgba(255, 255, 255, 0.9);
   --shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.14);
   --shadow-focused: 0 0 0 0.5px rgba(0, 0, 0, 0.22);
-  --tl-off: #c9c7c2;
   --grid-dot: rgba(0, 0, 0, 0.2);
   --dock-tile: rgba(255, 255, 255, 0.78);
 }
@@ -60,7 +58,6 @@
     --win-highlight: rgba(255, 255, 255, 0.9);
     --shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.14);
     --shadow-focused: 0 0 0 0.5px rgba(0, 0, 0, 0.22);
-    --tl-off: #c9c7c2;
     --grid-dot: rgba(0, 0, 0, 0.2);
     --dock-tile: rgba(255, 255, 255, 0.78);
   }

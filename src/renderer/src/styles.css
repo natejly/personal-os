@@ -1455,7 +1455,6 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .project-menu { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 31; background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 10px; padding: 4px; box-shadow: var(--shadow-float); }
 
 /* ---------- Sidebar spaces ---------- */
-.section-actions { display: flex; gap: 2px; align-items: center; }
 .space-row .space-hint { font-size: 11px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .space-row .ghost { opacity: 0; }
 .space-row:hover .ghost, .space-row:focus-within .ghost { opacity: 1; }
@@ -3422,3 +3421,8 @@ select:focus-visible {
 .destructive-defaults { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
 .destructive-defaults .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
 .tc-change { margin: 6px 0; padding-left: 18px; font-size: 13px; font-weight: 500; }
+.traces-pane { padding: 10px 14px; }
+.traces-round { list-style: none; padding: 4px 6px; border-radius: 6px; background: var(--hover); }
+.traces-tool { margin: 2px 0 2px 14px; font-size: 12px; }
+.traces-tool.error summary { color: var(--danger); }
+.traces-tool pre { max-height: 220px; overflow: auto; white-space: pre-wrap; }

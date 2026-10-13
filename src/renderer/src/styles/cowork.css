@@ -5,23 +5,6 @@
  * diff classes the spec names are scoped under .desk-diff for the same reason.
  */
 
-.desk-badge {
-  flex: none; min-width: 16px; padding: 0 4px; border-radius: 8px;
-  background: var(--border); color: var(--text-muted);
-  font-size: 10px; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums;
-}
-.desk-badge.ask { background: color-mix(in srgb, var(--st-needs-you) 16%, transparent); color: var(--st-needs-you); }
-
-/* ---- autonomy options ---- */
-.desk-autonomy { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
-.desk-autonomy-opt {
-  display: grid; grid-template-columns: auto 1fr; gap: 2px 7px; align-items: start;
-  padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer;
-}
-.desk-autonomy-opt.on { border-color: var(--accent); background: var(--hover); }
-.desk-autonomy-opt b { font-size: 13px; font-weight: 600; }
-.desk-autonomy-opt small { grid-column: 2; color: var(--text-faint); font-size: 11px; line-height: 1.4; }
-
 .desk-tabs { flex: none; padding: 6px 16px 0; border-bottom: 1px solid var(--border); }
 /* .dot-badge (docs.css) is absolutely positioned for icon buttons; in a tab it sits inline. */
 .desk-tabs .dot-badge { position: static; display: inline-block; margin-left: 5px; vertical-align: 1px; }

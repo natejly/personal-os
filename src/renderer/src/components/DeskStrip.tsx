@@ -1,15 +1,10 @@
 import { CircleHelp, ShieldQuestion } from '../icons'
-import type { Desk, DeskStatus, FullDesk, ToolEvent } from '@shared/types'
-import { useStore } from '../store'
+import type { DeskStatus, FullDesk, ToolEvent } from '@shared/types'
 import { inlinePlanShown } from '../lib/statusChrome'
 import DeskPlan from './DeskPlan'
 import DeskApprovalCard from './DeskApprovalCard'
 
 const ENDED: DeskStatus[] = ['done', 'failed', 'stopped']
-
-/** The desk a chat works in: the open (full) row when it is this one, else the list row. */
-export const useChatDesk = (deskId?: string): Desk | FullDesk | null =>
-  useStore((s) => (!deskId ? null : s.activeDesk?.id === deskId ? s.activeDesk : s.desks.find((d) => d.id === deskId) ?? null))
 
 /**
  * What the desk is waiting on you for, at the foot of the transcript: a question (answered from the composer), the cards a

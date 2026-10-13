@@ -67,7 +67,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "google_docs_search", "google_docs_read", "google_docs_create", "google_docs_append",
     "google_sheets_read", "google_sheets_write", "google_sheets_create",
     "propose_times_draft",
-    "doc_list", "doc_search", "doc_read", "doc_create", "doc_edit", "doc_delete", "doc_comments", "doc_comment_reply", "show",
+    "doc_list", "doc_search", "doc_read", "doc_create", "doc_edit", "doc_delete", "doc_comments", "doc_comment_reply", "dashboard_save", "dashboard_open", "dashboard_pin", "show",
     "find_files", "read_local_file", "write_local_file", "move_local_file", "trash_local_file",
     "list_shortcuts", "run_shortcut", "open_page",
     "schedule_task", "scheduled_tasks", "cancel_scheduled_task",
@@ -604,11 +604,6 @@ class McpServers:
         return {"slug": tool["slug"] if tool else tool_slug, "mode": mode, "source": source, "stale": stale,
                 "approved_hash": (grant or {}).get("schema_hash", ""), "schema_hash": (tool or {}).get("schema_hash", ""),
                 "missing": bool(tool and tool["missing_since"]), "known": tool is not None}
-
-    def effective_modes(self, project_id: str | None = None, conversation_id: str | None = None,
-                        include_missing: bool = False) -> dict[str, dict[str, Any]]:
-        return {t["slug"]: self.effective_mode(t["slug"], project_id, conversation_id)
-                for t in self.tools(include_missing=include_missing)}
 
     # ---------- eval reports ----------
     def record_eval(self, server_id: str | None, status: str, summary: str = "", findings: list[Any] | None = None,

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Check, MessageSquare, Pencil, Plus, Sparkles, Trash2 } from '../icons'
+import { Check, MessageSquare, Pencil, Plus, Sparkles } from '../icons'
 import type { AgentFields, AgentScope, ToolMode } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'

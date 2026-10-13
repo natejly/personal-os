@@ -780,3 +780,56 @@ class GmailSearchCostTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GmailModifyBatchTests(unittest.TestCase):
+    class _Msgs:
+        def __init__(self) -> None:
+            self.batches: list[dict[str, Any]] = []
+            self.singles: list[dict[str, Any]] = []
+
+        def _req(self, out: dict[str, Any]) -> Any:
+            return type("R", (), {"execute": lambda _s: out})()
+
+        def batchModify(self, **kw: Any) -> Any:
+            self.batches.append(kw)
+            return self._req({})
+
+        def modify(self, **kw: Any) -> Any:
+            self.singles.append(kw)
+            return self._req({})
+
+        def get(self, **kw: Any) -> Any:
+            return self._req({"id": kw["id"], "labelIds": ["STARRED"]})
+
+    def _google(self) -> tuple[Google, "GmailModifyBatchTests._Msgs"]:
+        msgs = self._Msgs()
+        svc = type("S", (), {"users": lambda _s: type("U", (), {"messages": lambda _u: msgs})()})()
+        g = Google(dict, lambda _s: None)
+        g._svc = lambda name, version: svc  # type: ignore[method-assign]
+        return g, msgs
+
+    def test_many_ids_are_one_batch_request(self) -> None:
+        g, msgs = self._google()
+        out = g.gmail_modify(["a", "b", "a"], mark_read=True, archive=True)
+        self.assertEqual(msgs.singles, [])
+        self.assertEqual(msgs.batches, [{"userId": "me", "body": {"ids": ["a", "b"], "addLabelIds": [], "removeLabelIds": ["UNREAD", "INBOX"]}}])
+        self.assertEqual(out["count"], 2)
+
+    def test_batches_are_chunked_at_the_gmail_limit(self) -> None:
+        g, msgs = self._google()
+        g.gmail_modify([str(i) for i in range(2500)], star=True)
+        self.assertEqual([len(b["body"]["ids"]) for b in msgs.batches], [1000, 1000, 500])
+        self.assertEqual(msgs.batches[0]["body"]["addLabelIds"], ["STARRED"])
+
+    def test_one_id_still_uses_modify(self) -> None:
+        g, msgs = self._google()
+        out = g.gmail_modify("a", star=True)
+        self.assertEqual(msgs.batches, [])
+        self.assertEqual(msgs.singles, [{"userId": "me", "id": "a", "body": {"addLabelIds": ["STARRED"], "removeLabelIds": []}}])
+        self.assertNotIn("count", out)
+
+    def test_http_client_has_a_timeout(self) -> None:
+        import personal_os.google as gmod
+        http = gmod._authorized_http(object())
+        self.assertEqual(http.http.timeout, gmod.HTTP_TIMEOUT)

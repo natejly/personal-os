@@ -195,4 +195,3 @@ export function createTermHub(deps: HubDeps) {
     size: (): number => byId.size
   }
 }
-export type TermHub = ReturnType<typeof createTermHub>

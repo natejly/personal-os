@@ -43,7 +43,7 @@ from .db import new_id, now
 from . import toolcore
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .trace import Tracer, now_ms
-from .stuck import POLL_HINT_AFTER, POLL_TOOLS, STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector, result_digest
+from .stuck import POLL_HINT_AFTER, POLL_TOOLS, STUCK_NUDGE, WAITING_TOOLS, StuckDetector, result_digest
 from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, DISCARDED, ToolSpec, _obj, allows_slug, call_key, denied, summarize_result, tool_error
 from .working import escape_tags, fence_untrusted
 

@@ -13,8 +13,6 @@ import { fmtCost } from '../lib/chatMeta'
 import { fmtMs } from '../lib/toolDisplay'
 import { ENDED_SHOWN, liveWorkerCount, listedWorkers, treeOrder, workerActions, workerElapsedMs, workerIsLive, workerWord } from '../lib/workers'
 
-const TONE: Record<WorkerInfo['status'], string> = { queued: '', running: 'working', awaiting_approval: 'needs-you', done: 'done', error: 'failed', interrupted: 'failed', stopped: '' }
-
 function WorkerFace({ w }: { w: WorkerInfo }): JSX.Element {
   return <Face {...useWorkerFace(w)} status={w.status === 'awaiting_approval' ? 'needs_approval' : w.status} size={16} />
 }

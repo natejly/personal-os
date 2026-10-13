@@ -87,14 +87,18 @@ def fence(kind: str, conv_id: str, title: str, link_id: str, text: str) -> str:
             f"{body}\n</chat_message>")
 
 
-def mention_note(text: str, chats: list[dict[str, Any]], self_id: str) -> str:
-    """A system note for `@slug` mentions in what the user typed: which chat each one is, so message_chat can reach it."""
+def mention_note(text: str, chats: list[dict[str, Any]], self_id: str, dashboards: list[dict[str, Any]] | None = None) -> str:
+    """A system note for `@slug` mentions in what the user typed: which chat each one is, so message_chat can reach it,
+    and which saved dashboard, so dashboard_open can show it."""
     names = {m.lower() for m in re.findall(r"(?:^|(?<=\s))@([a-z0-9][a-z0-9_-]{0,39})", text or "", re.I)}
     hits = [c for c in chats if c["id"] != self_id and slug(c["title"]) in names]
-    if not hits:
-        return ""
-    lines = [f"- @{slug(c['title'])} is the chat “{_attr(c['title'])}” (chat_id {c['id']})" for c in hits]
-    return "The user mentioned other chats. To send one a message, use message_chat with its chat_id:\n" + "\n".join(lines)
+    boards = [d for d in dashboards or [] if slug(d["title"]) in names]
+    notes = []
+    if hits:
+        lines = [f"- @{slug(c['title'])} is the chat “{_attr(c['title'])}” (chat_id {c['id']})" for c in hits]
+        notes.append("The user mentioned other chats. To send one a message, use message_chat with its chat_id:\n" + "\n".join(lines))
+    notes += [f'The user mentioned the saved dashboard "{_attr(d["title"])}" (doc id {d["id"]}). Call dashboard_open to show it.' for d in boards]
+    return "\n".join(notes)
 
 
 class ChatLinks:

@@ -53,10 +53,6 @@ class LocalPathError(Exception):
     pass
 
 
-def has_binary(name: str) -> bool:
-    return shutil.which(name) is not None
-
-
 def home() -> Path:
     return Path(os.path.expanduser("~")).resolve()
 
@@ -194,7 +190,6 @@ def cred_home_dirs() -> tuple[str, ...]:
 CRED_HOME_FILES = tuple(sorted(n for n in SENSITIVE_NAMES if n.startswith("."))) + SENSITIVE_HOME_FILES
 # What the System access panel shows.
 PROTECTED_LABELS = ("Grain's data folder", APP_BUNDLE)
-SENSITIVE_LABELS = ("~/.ssh", "Keychains", "Browser cookies and saved passwords", "~/.aws, ~/.gnupg, ~/.netrc, gh tokens", ".env files")
 
 
 def _holds_protected(p: Path) -> str | None:

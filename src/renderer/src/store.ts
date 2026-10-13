@@ -1,11 +1,10 @@
-import { routineDraftFrom, type RoutineDraft } from './lib/routine'
 import { hexToHue, PROJECT_TONE } from './lib/projectHue'
 import { agentHue, faceSeed, libraryAgent, type FaceLook } from './lib/faces'
 import { create } from 'zustand'
 import { useMemo } from 'react'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
-import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
-  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskEvent, DeskFile, FullDesk, PromotionResult, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job } from '@shared/types'
+import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit, PlanDecision,
+  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskEvent, DeskFile, FullDesk, PromotionResult, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import { markRunsSeen, withoutInboxRuns } from './lib/inboxBadge'
@@ -213,9 +212,12 @@ export interface State {
   /** The last "open a terminal on this coding session" request; `n` makes a repeat of the same one a new request. DeskPanel shows its Terminal tab and TerminalPane starts `mode`. */
   terminalRequest: { sessionId: string; mode: 'attach' | 'shell' | null; n: number; at: number } | null
   openTerminal: (sessionId: string, mode: 'attach' | 'shell' | null) => void
+  /** Set by the side-panel chord: the Terminal tab shows even with no coding session. */
+  terminalTab: boolean
+  /** A request to bring a side-panel tab forward (Traces from a reply's trace chip). */
+  deskTabRequest: { tab: 'traces'; n: number; at: number } | null
+  togglePanelContext: () => void
   /** "Schedule as routine" on a reply: the Agent inbox opens its task editor with this, switched off until a test run. */
-  routineDraft: RoutineDraft | null
-  scheduleAsRoutine: (conversationId: string, messageId: string) => void
   /** A new chat whose empty state also shows the Agent inbox (a job row, a job notification), even when nothing is waiting. */
   inboxOpen: boolean
   closeInbox: () => void
@@ -224,7 +226,6 @@ export interface State {
   jobsFocusId: string | null
   /** Open the Jobs screen, on one job's detail when an id is given. */
   openJobs: (jobId?: string | null) => void
-  clearRoutineDraft: () => void
 
   projects: Project[]
 
@@ -499,15 +500,12 @@ export interface State {
   deleteMemory: (id: string) => Promise<void>
   /** Open Settings → Memory narrowed to these rows. */
   showMemories: (ids: string[]) => void
-  /** Trash one memory a reply learned, and drop it from that reply's chip. */
-  undoLearned: (messageId: string, memoryId: string) => Promise<void>
   /** Remove what the chat taught (memories to the trash, candidate skills, graph relations) and say how many. */
   forgetLearned: (conversationId: string) => Promise<void>
 
   /** The plan of one chat. Cheap, and the `plan` stream event keeps it current after the first read. */
   loadPlan: (conversationId: string) => Promise<void>
   setPlanSteps: (conversationId: string, steps: PlanStep[]) => Promise<void>
-  clearPlan: (conversationId: string) => Promise<void>
 
   libraryTab: LibraryTab
   setLibraryTab: (tab: LibraryTab) => void
@@ -525,14 +523,9 @@ export interface State {
   refreshDeskInbox: () => Promise<void>
   /** Load one desk whole and, when it is live, attach to the run driving it. */
   openDesk: (id: string) => Promise<void>
-  startDesk: (id: string) => Promise<void>
-  resumeDesk: (id: string, reason?: string) => Promise<void>
-  pauseDesk: (id: string) => Promise<void>
-  stopDesk: (id: string) => Promise<void>
   /** The steer box, awake or asleep. `false` means the text was refused, so the caller keeps it. */
   /** Falsy on failure; `position` is set when the desk queued the message behind other desks. */
   messageDesk: (id: string, text: string, abModel?: string) => Promise<false | { position?: number }>
-  patchDesk: (id: string, patch: Parameters<typeof api.cowork.desks.patch>[1]) => Promise<void>
   /** `quiet` is for the live refresh: a failed background reload must not toast every few seconds. */
   loadDeskFiles: (id: string, path?: string, quiet?: boolean) => Promise<void>
   /** The promotion verdicts, so the Output tab can show a verified tick or the write that failed. */
@@ -542,7 +535,6 @@ export interface State {
   decidePlan: (callId: string, decision: PlanDecision, edits?: PlanEdit[], note?: string) => Promise<void>
   /** Allow or deny one card a desk is waiting on (live or parked), from the desk pane. */
   answerDeskCard: (callId: string, allow: boolean, note?: string) => Promise<void>
-  markDeskEventSeen: (eventId: string) => Promise<void>
   /** Every unseen needs-you row of ONE desk at once — opening the desk is the acknowledgement. */
   markDeskSeen: (deskId: string) => Promise<void>
   /** Open the chat a desk works in (every desk is a conversation). */
@@ -997,8 +989,6 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
 
-export { adjacentChatId }
-
 /** The id the ⌘I panel's composer carries before its thread has a row. */
 export const PAGE_AGENT_DRAFT = '\u0000page-agent'
 
@@ -1049,6 +1039,7 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'chat:search') s.searchChats()
       else if (action === 'toggle-context') s.toggleContext()
       else if (action === 'toggle-desk') s.toggleDeskPanel()
+      else if (action === 'panel-context') s.togglePanelContext()
       else if (action === 'page-agent') s.togglePageAgent()
       else if (action === 'view:graph') s.openMemory('graph')
       else if (action === 'view:memory') s.openMemory()
@@ -1878,15 +1869,10 @@ export const useStore = create<State>((set, get) => {
       } catch { /* keep what we have */ }
     },
     terminalRequest: null,
+    terminalTab: false,
+    deskTabRequest: null,
+    togglePanelContext: () => set((s) => (s.contextOpen ? { contextOpen: false, deskPanel: false } : { contextOpen: true, terminalTab: true })),
     openTerminal: (sessionId, mode) => set((st) => ({ terminalRequest: { sessionId, mode, n: (st.terminalRequest?.n ?? 0) + 1, at: Date.now() }, contextOpen: false })),
-    routineDraft: null,
-    scheduleAsRoutine: (conversationId, messageId) => {
-      const msgs = get().sessions[conversationId]?.conversation.messages ?? []
-      const draft = routineDraftFrom(msgs, msgs.findIndex((m) => m.id === messageId))
-      if (!draft) return get().toast('Nothing to schedule from this reply', 'info')
-      set({ routineDraft: draft })
-      get().openInbox()
-    },
     inboxOpen: false,
     jobsFocusId: null,
     openJobs: (jobId) => {
@@ -1894,8 +1880,7 @@ export const useStore = create<State>((set, get) => {
       get().setView('jobs')
     },
     openInbox: () => set({ inboxOpen: true, ...closeSettings() }),
-    closeInbox: () => set({ inboxOpen: false, routineDraft: null }),
-    clearRoutineDraft: () => set({ routineDraft: null }),
+    closeInbox: () => set({ inboxOpen: false }),
     projects: [],
     view: 'chat',
     lastClassicView: 'chat',
@@ -2141,7 +2126,7 @@ export const useStore = create<State>((set, get) => {
     },
     setPageContext: (pageContext) => set((s) => (s.pageContext === pageContext ? {} : { pageContext })),
     setContextTab: (contextTab) => set({ contextTab }),
-    openTrace: (traceMessageId) => set({ traceMessageId, contextTab: 'trace', contextOpen: true }),
+    openTrace: (traceMessageId) => set((s) => ({ traceMessageId, contextOpen: false, deskPanel: true, deskTabRequest: { tab: 'traces', n: (s.deskTabRequest?.n ?? 0) + 1, at: Date.now() } })),
     // A plain open (⌘, or the sidebar button) starts on Provider, as it always has.
     setSettingsOpen: (settingsOpen) => set(settingsOpen ? { settingsOpen, settingsTab: 'appearance', settingsGroup: null } : { settingsOpen }),
     openHelp: (section) => set(section ? { helpOpen: true, helpSection: section } : { helpOpen: false }),
@@ -3113,10 +3098,6 @@ export const useStore = create<State>((set, get) => {
       })
       if (plan) set((s) => ({ plans: { ...s.plans, [conversationId]: plan.steps } }))
     },
-    clearPlan: async (conversationId) => {
-      set((s) => ({ plans: { ...s.plans, [conversationId]: [] } }))
-      await api.plan.clear(conversationId).catch(() => undefined)
-    },
 
     setLibraryTab: (libraryTab) => set({ libraryTab }),
     openAgent: (openAgentId) => {
@@ -3174,41 +3155,6 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
       }
     },
-    startDesk: async (id) => {
-      try {
-        const out = await api.cowork.desks.start(id)
-        await get().openDesk(id)
-        if ('queued' in out) get().toast(queuedNote(out.position))
-        else void watchRun(out.conversation_id, { run_id: out.run_id, seq: out.seq }, { messageId: null, approvals: 0, attached: true })
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    resumeDesk: async (id, reason) => {
-      const convId = deskConv(id)
-      try {
-        const out = await api.cowork.desks.resume(id, reason)
-        await get().openDesk(id)
-        if ('queued' in out) get().toast(queuedNote(out.position))
-        else if (convId) void watchRun(convId, { run_id: out.run_id, seq: out.seq }, { messageId: null, approvals: 0, attached: true })
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    pauseDesk: async (id) => {
-      try {
-        putDesk(await api.cowork.desks.pause(id))
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    stopDesk: async (id) => {
-      try {
-        putDesk(await api.cowork.desks.stop(id))
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
     messageDesk: async (id, text, abModel) => {
       if (!text.trim()) return false
       try {
@@ -3221,13 +3167,6 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         get().toast((e as Error).message, 'error')
         return false
-      }
-    },
-    patchDesk: async (id, patch) => {
-      try {
-        putDesk(await api.cowork.desks.patch(id, patch))
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
       }
     },
     loadDeskFiles: async (id, path = '', quiet = false) => {
@@ -3302,15 +3241,6 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
       } finally {
         set({ deskBusy: false })
-      }
-    },
-    markDeskEventSeen: async (eventId) => {
-      // Optimistic: the badge is the whole point, so it must not wait on a round trip.
-      set((st) => ({ deskInbox: st.deskInbox.filter((e) => e.id !== eventId) }))
-      try {
-        await api.cowork.inbox.seen(eventId)
-      } catch {
-        void get().refreshDeskInbox()
       }
     },
     goToDesk: async (id) => {
@@ -3448,10 +3378,6 @@ export const useStore = create<State>((set, get) => {
     showMemories: (ids) => {
       set({ memoryFocus: ids, memoryMode: 'list' })
       get().openSettings('memory')
-    },
-    undoLearned: async (messageId, memoryId) => {
-      await get().deleteMemory(memoryId)
-      set((s) => ({ learnedByMessage: { ...s.learnedByMessage, [messageId]: (s.learnedByMessage[messageId] ?? []).filter((m) => m.id !== memoryId) } }))
     },
     forgetLearned: async (conversationId) => {
       try {

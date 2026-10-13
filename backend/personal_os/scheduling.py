@@ -402,31 +402,3 @@ def change_fields(c: dict[str, Any]) -> dict[str, Any]:
     if c.get("conference"):
         f["create_meet"] = True
     return f
-
-
-def conflicts(changes: Sequence[dict[str, Any]], events: Sequence[dict[str, Any]], tz: dt.tzinfo = UTC) -> list[dict[str, Any]]:
-    """Which timed creates/updates land on top of existing events (or on each other).
-
-    Returns [{index, with: <event summary or 'change N'>}]. An update never conflicts with the event
-    it is moving. Used by tests and mirrored client-side for the card's warning.
-    """
-    moving = {c.get("event_id") for c in changes if c.get("op") in ("update", "delete")}
-    busy = [(e, event_interval(e, tz)) for e in events if blocks_time(e) and e.get("id") not in moving]
-    spans: list[tuple[int, Interval]] = []
-    out: list[dict[str, Any]] = []
-    for i, c in enumerate(changes):
-        if c.get("op") == "delete" or not c.get("start") or is_date_only(c["start"]):
-            continue
-        try:
-            a = parse_dt(c["start"], tz).astimezone(UTC)
-            b = parse_dt(c["end"], tz).astimezone(UTC) if c.get("end") else a + dt.timedelta(hours=1)
-        except ValueError:
-            continue
-        for e, iv in busy:
-            if iv and a < iv[1] and iv[0] < b and not (e.get("all_day")):
-                out.append({"index": i, "with": e.get("summary") or "an event"})
-        for j, (x, y) in spans:
-            if a < y and x < b:
-                out.append({"index": i, "with": f"change {j + 1}"})
-        spans.append((i, (a, b)))
-    return out

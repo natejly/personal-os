@@ -9,7 +9,6 @@ function listen<T>(channel: string, cb: (payload: T) => void): () => void {
 }
 
 const api: GrainApi = {
-  backendUrl: () => ipcRenderer.invoke('backend:url'),
   backendStatus: () => ipcRenderer.invoke('backend:status'),
   backendToken: () => ipcRenderer.invoke('backend:token'),
   previewPut: (source) => ipcRenderer.invoke('preview:put', source),
@@ -50,7 +49,6 @@ const api: GrainApi = {
   data: {
     chooseExportPath: () => ipcRenderer.invoke('data:choose-export-path'),
     chooseInputFiles: () => ipcRenderer.invoke('data:choose-input-files'),
-    chooseFolder: () => ipcRenderer.invoke('data:choose-folder'),
     reveal: (path: string) => ipcRenderer.invoke('data:reveal', path),
     fileAction: (path: string, action: 'reveal' | 'open') => ipcRenderer.invoke('data:file-action', path, action),
     relaunch: () => ipcRenderer.invoke('data:relaunch')

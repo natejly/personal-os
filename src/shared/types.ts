@@ -1114,6 +1114,8 @@ export interface GoogleStatus {
   /** Connected, but the token is expired, revoked or short on scopes: sign in again. */
   needs_reauth: boolean
   reauth_reason: string | null
+  /** Why the last browser sign-in failed (denied, cancelled); cleared when a new one starts. */
+  last_error?: string | null
 }
 
 /** Verdict of the read-back that every external write goes through (backend verify.py).

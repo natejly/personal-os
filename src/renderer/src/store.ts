@@ -188,6 +188,8 @@ export interface State {
   modelsError: string | null
   tools: ToolInfo[]
   google: GoogleStatus | null
+  /** A Google sign-in is open in the browser and being polled for. */
+  googlePending: boolean
   tasksSync: TasksSyncStatus | null
   /** Mail-watch chip to open expanded on the next Mail visit (Today's "View all"); MailWatchPanel clears it. */
   mailWatchKind: 'to_reply' | 'awaiting_reply' | null
@@ -1757,6 +1759,7 @@ export const useStore = create<State>((set, get) => {
     modelsError: null,
     tools: [],
     google: null,
+    googlePending: false,
     tasksSync: null,
     mailWatchKind: null,
     dashboard: null,
@@ -3668,19 +3671,23 @@ export const useStore = create<State>((set, get) => {
       }
     },
     connectGoogle: async () => {
+      if (get().googlePending) return  // one poller per sign-in
+      set({ googlePending: true })
       try {
         // Re-authing an already-connected account looks identical unless we watch for a new
         // token, so remember which one we had before opening the browser.
         const before = get().google?.connected_at ?? null
         const { url } = await api.google.start()
         window.open(url, '_blank')
-        // poll until the callback lands
+        // poll until the callback lands, or reports that it failed
         const started = Date.now()
         const timer = setInterval(async () => {
           const st = await api.google.status().catch(() => null)
           const fresh = !!st?.connected && st.connected_at !== before
-          if (fresh || Date.now() - started > 180_000) {
+          if (fresh || st?.last_error || Date.now() - started > 180_000) {
             clearInterval(timer)
+            set({ googlePending: false })
+            if (st?.last_error && !fresh) get().toast(`Google sign-in failed: ${st.last_error}`, 'error')
             if (fresh && st) {
               clearViews()
               set({ google: st })
@@ -3691,6 +3698,7 @@ export const useStore = create<State>((set, get) => {
           }
         }, 1500)
       } catch (e) {
+        set({ googlePending: false })
         get().toast((e as Error).message, 'error')
       }
     },

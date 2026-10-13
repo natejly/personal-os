@@ -7097,13 +7097,19 @@ async def _shutdown() -> None:
 
 
 # ---------------- Google integration ----------------
+# Why the last browser sign-in failed, so the app's poll can stop and say so; a new sign-in clears it.
+_google_auth_error: str | None = None
+
+
 @app.get("/integrations/google/status")
 def google_status() -> dict[str, Any]:
-    return google.status()
+    return {**google.status(), "last_error": _google_auth_error}
 
 
 @app.post("/integrations/google/auth/start")
 def google_auth_start(request: Request) -> dict[str, str]:
+    global _google_auth_error
+    _google_auth_error = None
     redirect = str(request.base_url).rstrip("/") + "/integrations/google/callback"
     try:
         return {"url": google.start_auth(redirect)}
@@ -7122,16 +7128,19 @@ def _oauth_page(title: str, body: str, ok: bool = False) -> str:
 
 @app.get("/integrations/google/callback", response_class=HTMLResponse)
 def google_callback(state: str = "", code: str = "", error: str = "", error_description: str = "") -> str:
+    global _google_auth_error
     if error or not code:
         detail = error_description or error or "Google did not send an authorization code."
         if error == "access_denied":
             detail += " If the consent screen is in testing mode, add this account as a test user."
         log.warning("Google OAuth callback error: %s", detail)
+        _google_auth_error = detail
         return _oauth_page("Google sign-in failed", html.escape(detail))
     try:
         st = google.finish_auth(state, code)
     except Exception as e:  # noqa: BLE001
         log.warning("Google OAuth callback could not finish: %s", e)
+        _google_auth_error = str(e)
         return _oauth_page("Could not complete sign-in", html.escape(str(e)))
     return _oauth_page(
         f"Connected {st.get('email') or 'Google account'} ✓",

@@ -5163,7 +5163,12 @@ def evaluate_permission(body: PermissionEvalIn) -> dict[str, Any]:
 async def _recover_runs() -> None:
     """Runs left active by the last process died with it: mark them interrupted and salvage their reply from the tape."""
     recovered = run_store.recover(bus.live_ids())
+    gone = {"pending": False, "needs_approval": False, "interrupted": True,
+            "error": "Not run: the reply was interrupted before this was answered. Ask again to run it."}
     for r in recovered:
+        for a in r["pending_approvals"]:
+            if not a.get("desk_id"):  # recover() denied it: a persisted card stops asking
+                _patch_tool_event(a.get("message_id"), a["call_id"], gone)
         mid = r.get("message_id")
         if not mid:
             continue
@@ -5186,7 +5191,8 @@ async def _recover_runs() -> None:
             for a in r["pending_approvals"]:
                 if a["message_id"] == mid and a["call_id"] not in done:
                     tool_events.append({"id": a["call_id"], "name": a["tool"], "arguments": a["args"], "result_preview": "",
-                                        "duration_ms": 0, "error": None, "pending": True, "needs_approval": True, "forced": a["forced"]})
+                                        "duration_ms": 0, "error": None, "pending": True, "needs_approval": True, "forced": a["forced"],
+                                        **({} if a.get("desk_id") else gone)})
             convos.finish_message(mid, text, r["error"], json.loads(cur["context_used"]) if cur["context_used"] else None, tool_events,
                                   outcome="interrupted")
         except Exception:  # noqa: BLE001 - recovery must never stop the backend from starting

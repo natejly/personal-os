@@ -288,7 +288,7 @@ def test_shutdown_and_salvage_persist_interrupted() -> None:
     check(row["outcome"] == "interrupted", "the salvaged reply is marked interrupted")
     by = {e["id"]: e for e in row["tool_events"]}
     check(by["k1"]["interrupted"] is True and by["k1"]["pending"] is False and "may or may not" in by["k1"]["error"], "the open call is an interrupted event")
-    check(by["k2"].get("pending") is True and not by["k2"].get("interrupted"), "a call waiting on a card stays a pending approval card")
+    check(by["k2"].get("pending") is False and by["k2"].get("interrupted") is True, "a call waiting on a card is settled, not left asking")
 
     # The cancel path: a live run cancelled by shutdown persists the text, the reason and the outcome.
     prev = llm.stream_chat

@@ -1618,11 +1618,20 @@ class Subagents:
             return {"agents": [], "note": "No background subagents to wait for."}
         deadline = time.monotonic() + max(0.0, min(float(timeout_s), 600.0))
         stop = ctx.get("stop")
-        while time.monotonic() < deadline and not all(c.finished.is_set() for c in picked):
-            if stop is not None and stop.is_set():
-                for c in picked:
-                    self.stop_tree(c.id)
-            await asyncio.sleep(0.05)
+        # Sleeps until a child ends or Stop lands; a Stop stops the children and still waits for their partial reports.
+        waits = {asyncio.ensure_future(c.finished.wait()) for c in picked}
+        stopper = asyncio.ensure_future(stop.wait()) if stop is not None else None
+        try:
+            while waits and (left := deadline - time.monotonic()) > 0:
+                done, _ = await asyncio.wait(waits | ({stopper} if stopper else set()), timeout=left, return_when=asyncio.FIRST_COMPLETED)
+                waits -= done
+                if stopper is not None and stopper in done:
+                    stopper = None
+                    for c in picked:
+                        self.stop_tree(c.id)
+        finally:
+            for f in waits | ({stopper} if stopper else set()):
+                f.cancel()
         agents = [self.report(c) if c.finished.is_set() else {"agent_id": c.id, "role": c.role.name, "state": "running"} for c in picked]
         return {"agents": agents, "still_running": [c.id for c in picked if not c.finished.is_set()]}
 

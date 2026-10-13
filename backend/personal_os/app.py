@@ -32,7 +32,7 @@ from pydantic import AfterValidator, BaseModel, Field
 
 from . import auth_breaker, blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
-from . import branch_summary, compaction, followups, otel_export, router, thinking_summary, titles
+from . import branch_summary, compaction, side_question, followups, otel_export, router, thinking_summary, titles
 from . import chatlink, coding_route, duel, fsx, labels, opencode_usage, request_log, toolcore
 from .fsx import sensitive_reason
 from . import context_map
@@ -455,6 +455,25 @@ def clear_context(conv_id: str) -> dict[str, Any]:
     if (desk := desks.by_conversation(conv_id)):
         plans.supersede_desk(desk["id"])  # a desk's approved plan is no longer live; the rows stay as history
     return convos.clear_context(conv_id)
+
+
+class SideQuestionIn(BaseModel):
+    question: str
+
+
+@app.post("/chats/{conv_id}/side-question")
+async def side_question_route(conv_id: str, body: SideQuestionIn) -> dict[str, Any]:
+    """`/btw`: answer from this chat's context beside any live reply, which never sees it. Stored as a hidden-from-the-model note."""
+    q = body.question.strip()
+    if not q:
+        raise HTTPException(400, "Ask a question after /btw")
+    if not convos.get(conv_id, with_messages=False):
+        raise HTTPException(404, "No such conversation")
+    try:
+        a = await side_question.answer(settings(), compactor, convos, run_store, conv_id, q)
+    except llm.LLMError as e:
+        raise HTTPException(502, str(e)) from e
+    return convos.add_message(conv_id, "assistant", json.dumps({"q": q, "a": a or "No answer."}), kind=side_question.KIND)
 
 
 def _int_setting(cfg: dict[str, Any], key: str, default: int) -> int:
@@ -3388,6 +3407,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                                       **{n: MCP_DANGER for n in modes if mcp_is(n)}},
                                                taints={n for n in modes if toolbox.taints(n) or mcp_is(n)})
                     if pre is None:
+                        # A confident plan goes ahead unanswered after the countdown; the wait loop below enforces it.
+                        # Not in manual mode, and not after untrusted content, which may have shaped the plan.
+                        auto_s = float(cfg.get("planAutoApproveSeconds") or 0)
+                        if auto_s > 0 and args["confidence"] == "high" and pmode != "manual" and not tool_ctx["tainted"]:
+                            args["auto_at"] = time.time() + auto_s  # on the args too, so the inline card can count down
                         plan = plans.open(uid, args, run_id=run.run_id if run else None, conversation_id=conv_id,
                                           message_id=am["id"], tainted=bool(tool_ctx["tainted"]),
                                           desk_id=run.desk_id if run else None)
@@ -3406,7 +3430,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # external/schedules taint lock when that taint is one the plan card already showed.
                     if (not forced or taint_only) and (mode == "ask" or (active_plan is not None and mode == "on")):
                         claimed = plans.claim(run.run_id if run else None, c["name"], args, uid,
-                                              desk_id=run.desk_id if run else None)
+                                              desk_id=run.desk_id if run else None, card_locked=lockable)
                         # Progress, for a supervisor deciding whether another turn is worth it: a
                         # turn that consumed no approved step did not advance the plan.
                         if claimed is not None and run is not None:
@@ -3603,11 +3627,19 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                 store.park(uid)
                                 parked = uid
                                 break
+                            auto_at = plans.auto_at(uid) if plan is not None else None
+                            if auto_at is not None and time.time() >= auto_at:
+                                # The countdown ran out with the card untouched: go ahead, recorded as automatic.
+                                fut.set_result("allow")
+                                if store is not None:
+                                    store.decide(uid, "allow", by="auto", note="confident plan went ahead after the countdown")
+                                plans.decide(uid, "allow", by="auto")
+                                break
                             try:
                                 # Short, so an approval-blocked run notices a stop or a shutdown promptly.
-                                await asyncio.wait_for(asyncio.shield(fut), timeout=2)
+                                await asyncio.wait_for(asyncio.shield(fut), timeout=min(2, max(0.05, auto_at - time.time())) if auto_at else 2)
                             except asyncio.TimeoutError:
-                                waited += 2
+                                waited = time.time() - approval_t0
                                 row = store.approval(uid) if store is not None else None
                                 if mine and row and row["status"] != "pending" and not fut.done():  # decided on the row alone
                                     fut.set_result(row["decision"])
@@ -4526,7 +4558,7 @@ def _wake_reports(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for r in rows:
         info, inp = workers_mgr.info(r), r.get("input") or {}
         out.append({"id": r["run_id"], "title": info["title"], "goal": info["goal"], "status": info["status"],
-                    "text": workers_mgr.report_text(r), "tainted": bool(inp.get("tainted")), "attachments": inp.get("attachments") or []})
+                    "text": workers_mgr.report_text(r), "actions": workers_mgr.side_effects(r["run_id"]), "error": info["error"], "tainted": bool(inp.get("tainted")), "attachments": inp.get("attachments") or []})
     return out
 
 
@@ -5556,6 +5588,13 @@ def _save_allow_rules(row: dict[str, Any], texts: list[str] | None) -> list[str]
         return {"permissionRules": cur}
     permissions.update(db, add)
     return rules
+
+
+@app.post("/plans/{call_id}/hold")
+def hold_plan_countdown(call_id: str) -> dict[str, Any]:
+    """The user is editing or reading the card: stop its go-ahead countdown. Approve and reject need no call, they decide it."""
+    plans.hold(call_id)
+    return {"ok": True}
 
 
 class PermissionEvalIn(BaseModel):

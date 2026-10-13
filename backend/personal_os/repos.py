@@ -89,6 +89,9 @@ def cjk_like(col: str, text: str) -> tuple[str, list[str]]:
 AFTER_CLEAR = ("AND rowid > (SELECT COALESCE(MAX(rowid), 0) FROM messages WHERE conversation_id=? AND kind='clear' "
                "AND superseded_at IS NULL)\n")
 
+# A /btw side note is stored in the chat but is never part of what the model replays.
+NOT_SIDE_NOTE = "AND COALESCE(kind, '') != 'side_note'\n"
+
 class Projects:
     def __init__(self, db: Database):
         self.db = db
@@ -567,7 +570,7 @@ class Conversations:
             rows = c.execute(
                 "SELECT role, content, attachments FROM messages WHERE conversation_id=?\n"
                 "AND (content != '' OR (role = 'user' AND attachments IS NOT NULL))\n"  # an assistant row's attachments are files it sent, not text to read
-                "AND superseded_at IS NULL\n" + AFTER_CLEAR +
+                "AND superseded_at IS NULL\n" + NOT_SIDE_NOTE + AFTER_CLEAR +
                 "ORDER BY created_at, rowid",
                 (conv_id, conv_id),
             ).fetchall()
@@ -580,7 +583,7 @@ class Conversations:
             rows = c.execute(
                 "SELECT id, role, content, created_at, tool_events, attachments FROM messages WHERE conversation_id=?\n"
                 "AND (content != '' OR (role = 'user' AND attachments IS NOT NULL) OR (role = 'assistant' AND tool_events IS NOT NULL))\n"
-                "AND superseded_at IS NULL\n" + AFTER_CLEAR +
+                "AND superseded_at IS NULL\n" + NOT_SIDE_NOTE + AFTER_CLEAR +
                 "ORDER BY created_at, rowid",
                 (conv_id, conv_id),
             ).fetchall()

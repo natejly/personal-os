@@ -61,7 +61,8 @@ MARK = {"pending": "[ ]", "in_progress": "[>]", "done": "[x]"}
 PLAN_HEADER = (
     "## Your current plan\n"
     "This is your own working memory, re-sent at the end of every round so a long tool run cannot lose it. "
-    "It is the plan, not the conversation: trust it over your recollection of earlier rounds."
+    "It is the plan, not the conversation: trust it over your recollection of earlier rounds. "
+    "Context is compacted automatically; never cut work short, skip steps or summarize early because the conversation is long."
 )
 PLAN_FOOTER = (
     "Keep it accurate with todo_write: mark a step done as soon as it is done, keep at most one step "

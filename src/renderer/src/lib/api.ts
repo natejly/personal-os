@@ -212,6 +212,8 @@ export const api = {
   // whose digests the backend re-derives), and one line back to the model.
   approve: (callId: string, decision: ApprovalDecision, opts?: { steps?: PlanEdit[] | null; note?: string; rules?: string[]; arguments?: Record<string, unknown> | null }) =>
     req(`/approvals/${callId}`, { method: 'POST', body: json({ decision, ...(opts?.steps ? { steps: opts.steps } : {}), ...(opts?.note ? { note: opts.note } : {}), ...(opts?.rules ? { rules: opts.rules } : {}), ...(opts?.arguments ? { arguments: opts.arguments } : {}) }) }),
+  /** The user touched a plan card: stop its go-ahead countdown. */
+  holdPlan: (callId: string) => req(`/plans/${callId}/hold`, { method: 'POST' }),
   /** What the saved permission rules say about one call (nothing runs). `rule` validates one rule string instead. */
   evaluatePermission: (body: { tool?: string; command?: string; args?: Record<string, unknown>; rule?: string }) =>
     req<PermissionEvaluation & { ok?: boolean; error?: string }>('/permissions/evaluate', { method: 'POST', body: json(body) }),
@@ -646,6 +648,9 @@ export const api = {
     req<{ compacted: boolean }>(`/conversations/${conversationId}/compact`, { method: 'POST', body: json({ focus: focus ?? null }) }, NO_TIMEOUT),
   /** `/clear`: the marker row the model's replay starts after; the rolling summary is dropped with it. */
   clearContext: (conversationId: string) => req<Message>(`/conversations/${conversationId}/clear`, { method: 'POST' }),
+  /** `/btw`: answered from the chat's context beside any live reply; the stored note row comes back. */
+  sideQuestion: (conversationId: string, question: string) =>
+    req<Message>(`/chats/${conversationId}/side-question`, { method: 'POST', body: json({ question }) }, NO_TIMEOUT),
   activateMessage: (conversationId: string, messageId: string) =>
     req<Conversation>(`/conversations/${conversationId}/messages/${messageId}/activate`, { method: 'POST' }),
   discardSummary: (conversationId: string) => req<{ removed: boolean }>(`/conversations/${conversationId}/summary`, { method: 'DELETE' }),

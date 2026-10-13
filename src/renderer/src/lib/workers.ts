@@ -51,7 +51,10 @@ export const workerElapsedMs = (w: Pick<WorkerInfo, 'started_at' | 'ended_at'>, 
 export const upsertWorker = (ws: WorkerInfo[], w: WorkerInfo): WorkerInfo[] => (ws.some((x) => x.id === w.id) ? ws.map((x) => (x.id === w.id ? w : x)) : [w, ...ws])
 
 /** Any non-null kind marks a control message for the model (wake, nudge, continue, ...); it is not the user's words and never shows. Messages from another chat ('chat_in', 'chat_reply') and the `/clear` marker are the exception: they render. */
-export const isInternal = (m: Pick<Message, 'kind'>): boolean => m.kind != null && m.kind !== 'chat_in' && m.kind !== 'chat_reply' && m.kind !== 'clear' && m.kind !== 'branch_summary'
+export const isInternal = (m: Pick<Message, 'kind'>): boolean => m.kind != null && m.kind !== 'chat_in' && m.kind !== 'chat_reply' && m.kind !== 'clear' && m.kind !== 'branch_summary' && m.kind !== 'side_note'
+
+/** A `/btw` question and its answer, stored beside the chat and never replayed to the model. */
+export const isSideNote = (m: Pick<Message, 'kind'>): boolean => m.kind === 'side_note'
 
 /** The note a fork carries about the branch it left; it shows collapsed. */
 export const isBranchNote = (m: Pick<Message, 'kind'>): boolean => m.kind === 'branch_summary'

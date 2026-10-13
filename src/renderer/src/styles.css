@@ -3293,6 +3293,9 @@ select:focus-visible {
 .file-chip.inline svg { color: var(--text-muted); flex: none; }
 .branch-note { margin: 6px 0; font-size: 11px; color: var(--text-faint); }
 .branch-note summary { cursor: pointer; }
+.side-note { margin: 8px 0 8px 12px; padding: 6px 10px; border-left: 2px solid var(--border); font-size: 12px; color: var(--text-faint); }
+.side-note b { color: var(--text-dim, var(--text-faint)); font-weight: 500; }
+.side-note div { white-space: pre-wrap; }
 .branch-note div { margin-top: 4px; white-space: pre-wrap; }
 
 /* Coding agents panel and the inline activity preview in the coding_session card. */

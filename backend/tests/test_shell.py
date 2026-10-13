@@ -326,6 +326,20 @@ def test_secrets_are_unreadable(tmp_path: Path, box: Box, monkeypatch: pytest.Mo
 
 
 @needs_seatbelt
+def test_every_credential_name_is_unreadable_at_any_depth(tmp_path: Path) -> None:
+    import subprocess
+    from personal_os import mac
+    proj = (tmp_path / "proj").resolve()
+    proj.mkdir()
+    for n in mac.SENSITIVE_NAMES:
+        (proj / n).write_text("SECRET")
+    (proj / "notes.txt").write_text("fine")
+    r = subprocess.run(["sandbox-exec", "-p", sandbox.shell_profile([str(tmp_path)]), "/bin/sh", "-c", "cat * .[!.]*"],
+                       cwd=proj, capture_output=True, text=True, timeout=30)
+    assert "fine" in r.stdout and "SECRET" not in r.stdout
+
+
+@needs_seatbelt
 def test_network_is_off(tmp_path: Path, box: Box) -> None:
     box.settings["shellRegistryAccess"] = False  # no registry preset and no allowed domains: the "no network" mode
     assert box.run("shell_run", command="true")["network"] is False

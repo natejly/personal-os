@@ -53,7 +53,9 @@ def _credential_denies(home: str) -> str:
     support = "|".join(_sbpl_re(os.path.join(h, "Library", "Application Support")) for h in homes)
     browsers = "|".join(_sbpl_re(d) for d in mac.BROWSER_DIRS)
     names = "|".join(_sbpl_re(n) for n in mac.BROWSER_FILE_NAMES)
-    rx = [rf'(regex #"^({support})/({browsers})/(.*/)?({names})$")', r'(regex #"/\.env($|\.)")', r'(regex #"/\.auth_token$")',
+    cred_names = "|".join(_sbpl_re(n) for n in sorted(mac.SENSITIVE_NAMES))  # at any depth, as sensitive_reason judges them
+    rx = [rf'(regex #"^({support})/({browsers})/(.*/)?({names})$")', rf'(regex #"/({cred_names})$")',
+          r'(regex #"/\.env($|\.)")', r'(regex #"/\.auth_token$")',
           r'(regex #"/personal-os\.db")', r'(regex #"/id_(rsa|dsa|ecdsa|ed25519)$")']
     return "\n".join(f"(deny file-read* file-write* {t})" for t in [*subs, *lits, *rx])
 

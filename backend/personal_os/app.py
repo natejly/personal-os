@@ -6264,8 +6264,11 @@ async def _jobs_shutdown() -> None:
 @app.on_event("startup")
 async def _opencode_usage_startup() -> None:
     cfg = settings()
-    with contextlib.suppress(Exception):  # usage import is best effort; it must never stop the app from coming up
-        await asyncio.to_thread(opencode_usage.import_usage, db, pricing, cfg)
+
+    async def go() -> None:  # best effort, in the background: it must never hold up /health
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(opencode_usage.import_usage, db, pricing, cfg)
+    app.state.opencode_usage_task = asyncio.create_task(go(), name="opencode-usage-import")
 
 
 @app.get("/usage")
@@ -8235,16 +8238,19 @@ async def _outbox_startup() -> None:
     """Run the hold timer. The loop's first act is resume(), which decides what a restart does with
     sends that were still waiting — see the outbox.py docstring."""
     app.state.outbox_task = asyncio.create_task(outbox.loop())
-    with contextlib.suppress(Exception):
-        await asyncio.to_thread(filesnap.prune)  # snapshots past their age or byte budget
-    with contextlib.suppress(Exception):
-        await asyncio.to_thread(extundo.prune)  # calendar / Tasks undo rows past their 7 days
-    with contextlib.suppress(Exception):
-        await asyncio.to_thread(snaps.prune)  # folder snapshots: gc once a day, evict past the byte budget
-    try:
-        await asyncio.to_thread(chat_files.backfill)  # idempotent: files that predate the chat_files triggers
-    except Exception as e:  # noqa: BLE001
-        log.warning("chat files backfill failed: %s", type(e).__name__)
+
+    async def housekeeping() -> None:  # in the background: /health (and so the first window) must not wait on it
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(filesnap.prune)  # snapshots past their age or byte budget
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(extundo.prune)  # calendar / Tasks undo rows past their 7 days
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(snaps.prune)  # folder snapshots: gc once a day, evict past the byte budget
+        try:
+            await asyncio.to_thread(chat_files.backfill)  # idempotent: files that predate the chat_files triggers
+        except Exception as e:  # noqa: BLE001
+            log.warning("chat files backfill failed: %s", type(e).__name__)
+    app.state.housekeeping_task = asyncio.create_task(housekeeping(), name="startup-housekeeping")
 
 
 @app.on_event("shutdown")

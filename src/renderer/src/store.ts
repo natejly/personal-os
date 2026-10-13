@@ -1910,6 +1910,8 @@ export const useStore = create<State>((set, get) => {
         window.os.onBackendState(onBackendState)
       }
       const status = await window.os.backendStatus()
+      // The window opens while the backend starts: keep the boot logo, and the 'ready' state runs init again.
+      if (status.starting) { inited = false; return }
       // A failed start must stay retryable from the error screen's "Try again".
       if (!status.url) { inited = false; return set({ ready: true, backendError: status.error ?? 'Backend not running' }) }
       setBase(status.url)

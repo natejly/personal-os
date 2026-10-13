@@ -80,8 +80,8 @@ function readTokenFile(): string {
   return ''
 }
 
-export function backendStatus(): { running: boolean; url: string; error: string | null } {
-  return { running: !!url && (!!process.env.PERSONAL_OS_BACKEND_URL || (!!child && child.exitCode === null)), url, error: lastError }
+export function backendStatus(): { running: boolean; url: string; error: string | null; starting: boolean } {
+  return { running: !!url && (!!process.env.PERSONAL_OS_BACKEND_URL || (!!child && child.exitCode === null)), url, error: lastError, starting: state === 'starting' }
 }
 
 function canBind(p: number): Promise<boolean> {

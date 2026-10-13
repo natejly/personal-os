@@ -1933,7 +1933,8 @@ export interface BackendInfo {
 
 export interface GrainApi {
   backendUrl: () => Promise<string>
-  backendStatus: () => Promise<{ running: boolean; url: string; error: string | null }>
+  /** `starting`: the first start is still waiting for /health (the window opens before the backend is up). */
+  backendStatus: () => Promise<{ running: boolean; url: string; error: string | null; starting?: boolean }>
   backendToken: () => Promise<string>
   /** Store an HTML fence's source for the preview scheme; returns the id for `previewUrl`. */
   previewPut: (source: string) => Promise<string>

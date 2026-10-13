@@ -254,6 +254,7 @@ function buildMenu(): void {
         // ⌘I is Quick chat (the page agent); the chat's side panel has a menu item and a title-bar button but no chord.
         item('toggle-desk'),
         item('page-agent'),
+        item('panel-context'),
         item('toggle-context'),
         { type: 'separator' },
         { role: 'reload' },

@@ -3417,3 +3417,8 @@ select:focus-visible {
 .destructive-defaults { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
 .destructive-defaults .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
 .tc-change { margin: 6px 0; padding-left: 18px; font-size: 13px; font-weight: 500; }
+.traces-pane { padding: 10px 14px; }
+.traces-round { list-style: none; padding: 4px 6px; border-radius: 6px; background: var(--hover); }
+.traces-tool { margin: 2px 0 2px 14px; font-size: 12px; }
+.traces-tool.error summary { color: var(--danger); }
+.traces-tool pre { max-height: 220px; overflow: auto; white-space: pre-wrap; }

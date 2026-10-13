@@ -34,6 +34,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'toggle-sidebar', label: 'Toggle Sidebar', keys: 'CmdOrCtrl+B', group: 'General', action: 'toggle-sidebar', scope: 'menu' },
   { id: 'page-agent', label: 'Page Agent', keys: 'CmdOrCtrl+I', group: 'General', action: 'page-agent', scope: 'menu' },
   { id: 'toggle-desk', label: 'Toggle Side Panel', keys: '', group: 'General', action: 'toggle-desk', scope: 'menu' },
+  { id: 'panel-context', label: 'Side Panel: Context and Terminal', keys: 'CmdOrCtrl+T', group: 'General', action: 'panel-context', scope: 'menu' },
   { id: 'toggle-context', label: 'Toggle Context Panel', keys: 'Control+Command+I', group: 'General', action: 'toggle-context', scope: 'menu' },
   { id: 'zoom-reset', label: 'Actual Size', keys: 'CmdOrCtrl+Alt+0', group: 'General', action: 'zoom:reset', scope: 'menu' },
   { id: 'zoom-in', label: 'Zoom In', keys: 'CmdOrCtrl+=', group: 'General', action: 'zoom:in', scope: 'menu' },

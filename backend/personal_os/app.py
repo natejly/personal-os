@@ -3141,6 +3141,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if steers:
                     break
             calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
+            ok_calls: list[str] = []  # names of this round's calls that came back without an error (the count toward delegation)
             ensure_unique_call_ids(calls, seen_call_ids)
             if run is not None:
                 run.tool_calls += len(calls)
@@ -3844,6 +3845,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 research = result.pop("research", None) if isinstance(result, dict) else None  # deep_research's trail, UI only
                 preview = summarize_result(result)
                 err = result.get("error") if isinstance(result, dict) else None
+                if not err:
+                    ok_calls.append(c["name"])
                 tool_errors[c["name"]] = tool_errors.get(c["name"], 0) + 1 if err else 0  # reset on success = consecutive
                 if ran and not err and run is not None:
                     run.tool_ok += 1  # a desk turn's progress, beside steps_consumed (_chain_kind)
@@ -3936,7 +3939,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if stop.is_set():  # no final round for a Stop: the existing stop path persists the reply
                 break
             if _front_active():
-                if workers_mod.counts_as_work(c["name"] for c in calls):
+                if workers_mod.counts_as_work(ok_calls):
                     work_rounds += 1
                 if not delegation_forced and workers_mod.delegation_forced(cfg, work_rounds, (s_["function"]["name"] for s_ in tool_schemas)):
                     # Past the threshold: from the next round only the hand-off tools are offered. A routing rule; nothing stops.

@@ -21,12 +21,11 @@ W_GRAPH = 0.7
 W_RECENT = 0.5
 # A date phrase in the query ("last month", "in March") ranks memories learned in that window: a fifth ranker
 # (W_TEMPORAL) over in-window rows that are also about the query (cosine >= TEMPORAL_MIN_SIMILARITY, below the
-# general floor because the window already narrows the field), then a post-fusion nudge of +-TEMPORAL_BOOST/2 by
-# closeness to the window, also applied to reranker scores. A soft signal, never a filter: a row a whole window
-# away keeps 20% of its score, so a strong match survives a mis-read date phrase while weak ones sink. 1.6 because
-# reranker scores spread over orders of magnitude (0.9 vs 0.001): the eval's temporal MRR with rerank on went
-# 0.66 at 0.6, 0.76 at 1.2, 0.86 at 1.6; the fused path reads the same at 0.6 and 1.6 but leaks fewer
-# out-of-window rows into the top 10 (28 -> 12).
+# general floor because the window already narrows the field). Then a two-tier order, also applied to reranker
+# scores: when at least one candidate falls inside the window, in-window rows come first (by their score), the rest
+# after, ordered by score nudged +-TEMPORAL_BOOST/2 by closeness to the window; with none inside, only the nudge
+# applies. A row a whole window away keeps 20% of its score, so a mis-read date phrase still surfaces strong matches.
+# The nudge alone lost to reranker scores, which spread over orders of magnitude (0.9 vs 0.001).
 W_TEMPORAL = 0.8
 TEMPORAL_BOOST = 1.6
 TEMPORAL_MIN_SIMILARITY = 0.25

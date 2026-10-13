@@ -51,6 +51,12 @@ def test_waiting_tools_are_never_stuck() -> None:
     for _ in range(8):
         d.observe("coding_session_status", {"id": "a"}, {"status": "working"})
     check(d.check() is None and d.repeat_count("coding_session_status", {"id": "a"}) == 0, "polling a coding session is not a loop")
+    for tool, args, res in (("shell_poll", {"job_id": "j", "wait_s": 120}, {"status": "running", "output": ""}),
+                            ("agent_wait", {}, {"still_running": ["c1"]})):
+        d = StuckDetector()
+        for _ in range(8):
+            d.observe(tool, args, res)
+        check(d.check() is None and d.repeat_count(tool, args) == 0, f"waiting with {tool} is not a loop")
 
 
 def test_error_cycle_and_storm() -> None:

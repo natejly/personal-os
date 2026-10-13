@@ -23,7 +23,7 @@ NOT_RUN = 4         # calls in a row that never executed (disabled, not loaded, 
 WINDOW = 24
 
 # Calls whose whole point is to be repeated while something else works: an unchanged answer is not a loop.
-WAITING_TOOLS = frozenset({"coding_session_status", "coding_session_wait"})
+WAITING_TOOLS = frozenset({"coding_session_status", "coding_session_wait", "shell_poll", "agent_wait", "check_worker"})
 
 STUCK_NUDGE = ("You appear to be stuck: {detail}. Change approach: use a different tool or arguments, "
                "or answer with what you have and say what is missing.")

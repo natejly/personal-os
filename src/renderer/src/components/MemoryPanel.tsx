@@ -32,7 +32,10 @@ export default function MemoryPanel({ projectId }: { projectId?: string; embedde
   const samples = style?.stats.samples ?? 0
   const styleCount = `${style?.profile ? 'voice learned' : 'no voice yet'} · ${samples} sample${samples === 1 ? '' : 's'}`
 
-  useEffect(() => { void loadScope(scope) }, [scope, loadScope])
+  // The loaded list is global. Settings' own panel takes it over while open, so a project's panel
+  // behind the modal waits, then loads its scope back when the modal closes.
+  const yielded = useStore((s) => !!projectId && s.settingsOpen)
+  useEffect(() => { if (!yielded) void loadScope(scope) }, [scope, loadScope, yielded])
 
   const entityCount = graph.nodes.filter((n) => !n.properties?.self && !n.properties?.literal).length
   const showStyle = mode === 'style'

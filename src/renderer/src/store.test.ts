@@ -1443,6 +1443,26 @@ test('navigating from Settings asks first while its draft is dirty', async () =>
   useStore.setState({ inboxOpen: false })
 })
 
+test('a slower memories request for the previous scope does not overwrite the newer one', async () => {
+  const real = api.memories.list
+  const waits: Record<string, (v: unknown) => void> = {}
+  api.memories.list = ((scope: string) => new Promise((r) => { waits[scope] = r })) as never
+  try {
+    useStore.setState({ dataScope: 'all' })
+    const first = useStore.getState().refreshMemories()
+    useStore.setState({ dataScope: 'p1' })
+    const second = useStore.getState().refreshMemories()
+    waits.p1([{ id: 'project' }])
+    await second
+    waits.all([{ id: 'everything' }])
+    await first
+    assert.deepEqual(useStore.getState().memories, [{ id: 'project' }])
+  } finally {
+    api.memories.list = real
+    useStore.setState({ dataScope: 'all', memories: [] })
+  }
+})
+
 // A bare useStore() subscribes to every set(), and patchSession runs once per streamed token, so the
 // component re-renders per token. Pick fields with a selector (or useShallow) instead.
 test('no component reads the whole store with a bare useStore()', async () => {

@@ -679,6 +679,7 @@ let toastsHeld = false
 let completionTimer: ReturnType<typeof setTimeout> | null = null
 /** Set by the Settings modal while its draft is dirty: it asks before discarding instead of closing. */
 let settingsGuard: (() => void) | null = null
+let memoriesSeq = 0
 export function setSettingsGuard(fn: (() => void) | null): void { settingsGuard = fn }
 /** The patch a navigation action spreads to close Settings; with a dirty draft it asks and stays open. */
 function closeSettings(): { settingsOpen?: false } {
@@ -3338,7 +3339,13 @@ export const useStore = create<State>((set, get) => {
       if (skillDrafted) void get().refreshSkills()
       refreshAll()
     },
-    refreshMemories: async (q = '') => set({ memories: await api.memories.list(get().dataScope, q) }),
+    refreshMemories: async (q = '') => {
+      // A search and a scope switch can overlap (a child panel's effect runs before its parent's
+      // loadScope), so only the latest request lands.
+      const seq = ++memoriesSeq
+      const memories = await api.memories.list(get().dataScope, q)
+      if (seq === memoriesSeq) set({ memories })
+    },
     addMemory: async (content, kind, projectId) => {
       await api.memories.create({ project_id: projectId, content, kind })
       await Promise.all([get().refreshMemories(), get().refreshProjects()])
@@ -3372,8 +3379,16 @@ export const useStore = create<State>((set, get) => {
       } catch (e) { get().toast(`Could not forget: ${(e as Error).message}`, 'error') }
     },
 
-    refreshGraph: async () => set({ graph: await api.graph.get(get().dataScope) }),
-    refreshDocuments: async () => set({ documents: await api.documents.list(get().dataScope) }),
+    refreshGraph: async () => {
+      const scope = get().dataScope
+      const graph = await api.graph.get(scope)
+      if (get().dataScope === scope) set({ graph })
+    },
+    refreshDocuments: async () => {
+      const scope = get().dataScope
+      const documents = await api.documents.list(scope)
+      if (get().dataScope === scope) set({ documents })
+    },
 
     // ---- writing style ----
     // The scope here is the data scope the Memory panel loaded. 'all' has no voice of its own, so the

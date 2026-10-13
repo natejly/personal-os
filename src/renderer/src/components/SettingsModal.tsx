@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { X, Search, Plug, Cpu, Bot, Palette, ShieldCheck, SlidersHorizontal, KeyRound, Gauge, Brain, PanelLeft, Layers, type Icon } from '../icons'
+import { X, Search, Plug, Cpu, Bot, Palette, ShieldCheck, SlidersHorizontal, KeyRound, Gauge, Brain, PanelLeft, type Icon } from '../icons'
 import { useStore } from '../store'
 import { modeOf, MODES } from '../lib/permissionMode'
-import { searchSettings, type SettingsTab } from '../lib/settingsTabs'
+import { resolveTab, searchSettings, type SettingsTab } from '../lib/settingsTabs'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { api } from '../lib/api'
 import { useModal } from '../lib/useModal'
@@ -11,7 +11,6 @@ import { modelLabel } from '../lib/modelLabel'
 import { chatRows } from '../lib/pickerModels'
 import type { Settings } from '@shared/types'
 import ModelTab from './settings/ModelTab'
-import ModelsTab from './settings/ModelsTab'
 import UsageTab from './settings/UsageTab'
 import PermissionsTab from './settings/PermissionsTab'
 import IntegrationsTab from './settings/IntegrationsTab'
@@ -27,14 +26,13 @@ type Tab = SettingsTab
 
 const TABS: { id: Tab; label: string; icon: Icon }[] = [
   { id: 'appearance', label: 'General', icon: Palette },
-  { id: 'sidebar', label: 'Sidebar', icon: PanelLeft },
-  { id: 'model', label: 'Model', icon: Cpu },
-  { id: 'models', label: 'Models', icon: Layers },
+  { id: 'model', label: 'Models', icon: Cpu },
   { id: 'agents', label: 'Agents', icon: Bot },
   { id: 'memory', label: 'Memory', icon: Brain },
   { id: 'integrations', label: 'Integrations', icon: Plug },
   { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
   { id: 'system', label: 'System access', icon: KeyRound },
+  { id: 'sidebar', label: 'Sidebar', icon: PanelLeft },
   { id: 'usage', label: 'Usage', icon: Gauge },
   { id: 'advanced', label: 'Advanced', icon: SlidersHorizontal }
 ]
@@ -57,7 +55,7 @@ export default function SettingsModal(): JSX.Element {
   const { shortcuts, apply: applyShortcuts } = useShortcuts()
   const storeTab = useStore((s) => s.settingsTab)
   const storeGroup = useStore((s) => s.settingsGroup)
-  const [tab, setTabState] = useState<Tab>(() => (TABS.some((x) => x.id === storeTab) ? storeTab : 'appearance'))
+  const [tab, setTabState] = useState<Tab>(() => { const t = resolveTab(storeTab).tab; return TABS.some((x) => x.id === t) ? t : 'appearance' })
   // The store keeps the shown tab, so openSettings from a toast or a link switches the open modal too.
   const setTab = (t: Tab): void => { setTabState(t); useStore.setState({ settingsTab: t }) }
   // Advanced groups start collapsed; one opens when Settings was asked for a topic inside it.
@@ -250,7 +248,6 @@ export default function SettingsModal(): JSX.Element {
           </div>
           <div className="settings-pane" id="settings-pane" role="tabpanel" aria-labelledby={`settings-tab-${tab}`}>
             {tab === 'model' && <ModelTab {...tabProps} onRunSetup={() => (dirty ? setPending('setup') : void rerunSetup())} />}
-            {tab === 'models' && <ModelsTab {...tabProps} />}
             {tab === 'usage' && <UsageTab />}
             {tab === 'permissions' && <PermissionsTab {...tabProps} />}
             {tab === 'integrations' && <IntegrationsTab {...tabProps} onSaveCreds={saveGoogleCreds} />}

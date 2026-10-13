@@ -60,11 +60,12 @@ export default function ModelsSettings({ settings, models, pickerModels, setPick
   return (
     <div className="models-tab">
       <h4>API keys</h4>
-      <p className="muted small">Keys are stored on this Mac.</p>
+      <p className="muted small">One key per provider. Keys stay on this Mac.</p>
       <div className="setting-list">
         {providers.filter((p) => p.needsKey).map((p) => <KeyRow key={p.id} p={p} saved={!!settings.providerKeysSet?.[p.id]} />)}
       </div>
-      <h4>Models in the picker</h4>
+      <h4 id="sec-picker">Models in the picker</h4>
+      <p className="muted small">Choose which models appear in the chat box menu.</p>
       <div className="setting-row models-filter">
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter models" aria-label="Filter models" spellCheck={false} />
         <button className="ghost-btn" type="button" disabled={!pickerModels?.length} onClick={() => setPickerModels([])}>Reset to suggested</button>

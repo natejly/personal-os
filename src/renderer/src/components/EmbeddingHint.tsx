@@ -21,7 +21,7 @@ export function EmbeddingNotice(): JSX.Element | null {
   return (
     <div className="backend-banner" role="status">
       <span>{TEXT}</span>
-      <button type="button" className="link" onClick={() => openSettings('model')}>Open Model settings</button>
+      <button type="button" className="link" onClick={() => openSettings('model')}>Open Models settings</button>
       <button type="button" className="toast-close" aria-label="Dismiss" onClick={dismiss}><X size={12} /></button>
     </div>
   )

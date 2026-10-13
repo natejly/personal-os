@@ -5,6 +5,7 @@ import { viewHidden } from '../moduleToggles'
 import { useModal } from '../lib/useModal'
 import { plainTitle } from '../lib/chatRows'
 import { SETTINGS_TABS } from './SettingsModal'
+import { useCanvas } from '../canvas/store'
 
 type Entry = { key: string; label: string; hint: string; run: () => void }
 
@@ -26,10 +27,19 @@ export default function CommandPalette(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const conversations = useStore((s) => s.conversations)
   const docs = useStore((s) => s.docs)
+  const projects = useStore((s) => s.projects)
+  const spaceOrder = useCanvas((c) => c.order)
+  const spaceById = useCanvas((c) => c.canvases)
+  const canvases = spaceOrder.map((id) => spaceById[id]).filter(Boolean)
   const s = useStore.getState()
 
   const entries: Entry[] = [
     ...VIEWS.filter((v) => !viewHidden(settings, v.view)).map((v) => ({ key: `view:${v.view}`, label: v.label, hint: 'Go to', run: () => s.setView(v.view) })),
+    // Places with no number key, and the ones a hidden sidebar row leaves reachable only from here.
+    { key: 'inbox', label: 'Agent inbox and jobs', hint: 'Go to', run: () => s.openInbox() },
+    { key: 'memory', label: 'Memory', hint: 'Go to', run: () => s.openMemory() },
+    ...projects.map((p) => ({ key: `project:${p.id}`, label: p.name, hint: 'Project', run: () => s.openProject(p.id) })),
+    ...canvases.map((c) => ({ key: `space:${c.id}`, label: c.name, hint: 'Canvas', run: () => void useCanvas.getState().enterSpace(c.id) })),
     { key: 'new-chat', label: 'New chat', hint: 'Create', run: () => s.newChat(null) },
     { key: 'new-file', label: 'New file', hint: 'Create', run: () => void s.createDoc({}) },
     { key: 'help', label: 'Help and keyboard shortcuts', hint: 'Help', run: () => s.openHelp('shortcuts') },

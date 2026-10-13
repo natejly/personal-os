@@ -933,7 +933,8 @@ class Subagents:
                 end = ev
         tracer.end(lspan, {"finish_reason": end.get("finish_reason"), "usage": end.get("usage"),
                            "ttft_ms": (first_token - lspan["start"]) if first_token else None,
-                           "output_chars": sum(map(len, buf)), "tool_calls": [c["name"] for c in end.get("tool_calls") or []]},
+                           "output_chars": sum(map(len, buf)), "tool_calls": [c["name"] for c in end.get("tool_calls") or []],
+                           **({"leaked_tool_calls": end["leaked_tool_calls"]} if end.get("leaked_tool_calls") else {})},
                    error=ch.halt_reason)
         self._emit(ch, "span", {"span": lspan})
         u = end.get("usage") or end.get("usage_est") or {}

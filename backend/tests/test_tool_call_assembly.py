@@ -150,5 +150,46 @@ class Incomplete(unittest.TestCase):
         self.assertEqual(len(end["tool_calls"]), 1)
 
 
+class LeakedCalls(unittest.TestCase):
+    def run_text(self, text: str) -> tuple[dict[str, Any], str]:
+        frames = "".join(f'data: {json.dumps({"choices": [{"delta": {"content": text[i:i + 7]}}]})}\n\n' for i in range(0, len(text), 7))
+        frames += f'data: {json.dumps({"choices": [{"delta": {}, "finish_reason": "stop"}]})}\n\ndata: [DONE]\n\n'
+        transport = httpx.MockTransport(lambda req: httpx.Response(200, content=frames.encode()))
+        real = llm.httpx.AsyncClient
+
+        class Client(real):  # type: ignore[valid-type, misc]
+            def __init__(self, *a: Any, **k: Any) -> None:
+                super().__init__(*a, transport=transport, **k)
+
+        async def go() -> list[dict[str, Any]]:
+            return [e async for e in llm.stream_chat(SETTINGS, "m", [{"role": "user", "content": "x"}], tools=schema("todo_add"))]
+
+        llm.httpx.AsyncClient = Client  # type: ignore[misc]
+        try:
+            evs = asyncio.run(go())
+        finally:
+            llm.httpx.AsyncClient = real  # type: ignore[misc]
+        return evs[-1], "".join(e["text"] for e in evs if e["type"] == "delta")
+
+    def test_v3_markers_become_a_call(self) -> None:
+        end, text = self.run_text('Sure.<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>todo_add\n```json\n{"title": "x"}\n```<｜tool▁call▁end｜><｜tool▁calls▁end｜>')
+        self.assertEqual(shape(end), [("todo_add", '{"title": "x"}')])
+        self.assertEqual((text, end["leaked_tool_calls"], end["finish_reason"]), ("Sure.", 1, "tool_calls"))
+
+    def test_v4_dsml_becomes_a_call(self) -> None:
+        end, text = self.run_text('Ok <|DSML|tool_calls>\n<|DSML|invoke name="todo_add">\n<|DSML|parameter name="title" string="true">x y</|DSML|parameter>\n'
+                                  '<|DSML|parameter name="n" string="false">3</|DSML|parameter>\n</|DSML|invoke>\n</|DSML|tool_calls>')
+        self.assertEqual(shape(end), [("todo_add", '{"title": "x y", "n": 3}')])
+        self.assertEqual((text, end["leaked_tool_calls"]), ("Ok ", 1))
+
+    def test_unparseable_markers_are_stripped_and_no_call(self) -> None:
+        end, text = self.run_text("hi <｜tool▁calls▁begin｜> garbage")
+        self.assertEqual((end["tool_calls"], text, end.get("leaked_tool_calls")), ([], "hi ", None))
+
+    def test_plain_text_is_untouched(self) -> None:
+        end, text = self.run_text("a < b and <b>bold</b>")
+        self.assertEqual((end["tool_calls"], text), ([], "a < b and <b>bold</b>"))
+
+
 if __name__ == "__main__":
     unittest.main()

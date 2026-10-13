@@ -3064,7 +3064,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 run.budget = meter.snapshot()
             tracer.end(lspan, {"finish_reason": end.get("finish_reason"), "usage": end.get("usage"),
                                "ttft_ms": (first_token - lspan["start"]) if first_token else None,
-                               "output_chars": len("".join(buf[round_start:])), "tool_calls": [c["name"] for c in calls]},
+                               "output_chars": len("".join(buf[round_start:])), "tool_calls": [c["name"] for c in calls],
+                               **({"leaked_tool_calls": end["leaked_tool_calls"]} if end.get("leaked_tool_calls") else {})},
                        error="Stopped by user" if stop.is_set() else None)
             yield "span", {"message_id": am["id"], "span": lspan}
             if stop.is_set():

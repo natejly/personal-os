@@ -192,7 +192,10 @@ def test_relative_paths_resolve_where_the_file_tools_do(tmp_path, monkeypatch):
     assert pr.evaluate("fs_edit", {"path": ".zshrc"}, r).action == "deny"
     assert pr.evaluate("read_local_file", {"path": "secret/a.txt"}, r).action == "deny"
     assert pr.evaluate("fs_grep", {"root": "secret", "pattern": "k"}, r).action == "deny"
-    assert pr.evaluate("read_local_file", {"path": "x/a"}, r, roots=[str(tmp_path / "desk")]).action == "deny"
+    assert pr.evaluate("fs_grep", {"root": "x", "pattern": "k"}, r, roots=[str(tmp_path / "desk")]).action == "deny"
+    # the *_local_file tools start at home even in a desk
+    assert pr.evaluate("read_local_file", {"path": "secret/a.txt"}, r, roots=[str(tmp_path / "desk")]).action == "deny"
+    assert pr.evaluate("read_local_file", {"path": "x/a"}, r, roots=[str(tmp_path / "desk")]).action is None
     assert pr.evaluate("fs_glob", {"pattern": "*"}, r, roots=[str(tmp_path / "desk" / "x")]).action == "deny"
     assert pr.evaluate("read_local_file", {"path": "other.txt"}, rules()).suggestions == [f"Read({os.path.realpath(tmp_path)}/**)"]
 

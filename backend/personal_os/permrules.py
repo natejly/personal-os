@@ -37,6 +37,7 @@ HARD_STOP = ("Three calls in a row were refused. Stop attempting variations of t
 
 READ_TOOLS = {"read_local_file", "fs_glob", "fs_grep"}
 EDIT_TOOLS = {"write_local_file", "fs_edit", "fs_copy", "fs_mkdir", "move_local_file", "trash_local_file"}
+HOME_TOOLS = {"read_local_file", "write_local_file", "move_local_file", "trash_local_file"}  # mac.py resolves from home
 MAIL_TOOLS = {"gmail_send", "gmail_draft"}
 CALENDAR_TOOLS = {"calendar_create", "calendar_update", "calendar_delete", "calendar_propose"}
 PATH_KEYS = ("path", "root", "directory", "dir", "file_path", "folder")
@@ -1175,9 +1176,9 @@ def evaluate(tool: str, args: dict[str, Any], rules: RuleSet | dict[str, Any] | 
         c = args.get("cwd")
         start = _real(c, rl[0] if rl else cwd) if isinstance(c, str) and c else cwd  # an explicit cwd starts from the desk
         return _evaluate_bash(tool, str(args.get("command") or ""), rs, start, desk_folders(rl))
-    # A relative path means what the file tools make of it: from the desk workspace, else home. A search with no
-    # root searches there too.
-    cwd = cwd or os.path.expanduser("~")
+    # A relative path means what the file tools make of it: the *_local_file tools start at home, the fs_* tools at the
+    # desk workspace, else home. A search with no root searches there too.
+    cwd = os.path.expanduser("~") if tool in HOME_TOOLS else cwd or os.path.expanduser("~")
     subs = [Subject("Read", cwd) if tool in ("fs_glob", "fs_grep") and s == Subject("Read", None) else s
             for s in subject_for(tool, args)]
     v = Verdict(subjects=[f"{s.kind}({s.value})" if s.value else s.kind for s in subs])

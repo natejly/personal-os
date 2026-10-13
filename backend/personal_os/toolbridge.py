@@ -187,12 +187,12 @@ class Bridge:
                                  conv=self.ctx.get("conversation_id"))
         if perm.refusal:
             return self._refuse(name, f"{name} was refused: {perm.refusal}")
-        mode = perm.mode
+        gated, mode = mode, perm.mode
         # Auto mode reviews a call the reply loop would review (autoreview.route), not only the outer run_python: the script
         # may have computed these arguments from content the reviewer never saw. The approve callback's auto branch is that review.
         if (mode == "on" and self.approve is not None and not self.ctx.get("proposal_only")
                 and (self.ctx.get("permission_mode") or autoreview.mode_of(cfg)) == "auto"
-                and autoreview.route("auto", mode="on", danger=spec.danger, covered=bool(perm.rule),
+                and autoreview.route("auto", mode="on", danger=spec.danger, covered=bool(perm.rule) or gated == "ask",
                                      explicit_on=(self.ctx.get("explicit_modes") or {}).get(name) == "on") != "run"):
             mode = "ask"
         if mode == "ask":

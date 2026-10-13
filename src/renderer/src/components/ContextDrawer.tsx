@@ -227,7 +227,7 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
   // Preview and Trace are developer tools; with them off, the drawer only shows Last reply.
   const devTools = useStore((s) => s.settings.devTools === true)
   const storeTab = useStore((s) => s.contextTab)
-  const tab = devTools ? storeTab : 'last'
+  const tab = devTools || storeTab === 'trace' ? storeTab : 'last'
   const traceMessageId = useStore((s) => s.traceMessageId)
   const streamingMessageId = useStreamingMessageId(conversationId)
   const [query, setQuery] = useState('')
@@ -327,7 +327,7 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
       <div className="ctx-tabs">
         <button className={tab === 'last' ? 'active' : ''} onClick={() => setTab('last')}>Last reply</button>
         {devTools && <button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')}><Eye size={12} /> Preview</button>}
-        {devTools && <button className={tab === 'trace' ? 'active' : ''} onClick={() => setTab('trace')}><Activity size={12} /> Trace</button>}
+        <button className={tab === 'trace' ? 'active' : ''} onClick={() => setTab('trace')}><Activity size={12} /> Trace</button>
       </div>
 
       {tab === 'last' ? (

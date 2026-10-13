@@ -148,14 +148,14 @@ function DocEditDiff({ preview }: { preview: string }): JSX.Element | null {
   )
 }
 
-/** The subagent ids a spawn / wait / stop result names. The preview may be cut, so this reads ids out of the text. */
+/** The subagent and worker ids a spawn / wait / stop / delegate result names. The preview may be cut, so this reads ids out of the text. */
 export function agentIds(preview: string): string[] {
   const out: string[] = []
-  for (const m of preview.matchAll(/agent_id\\?"\s*:\s*\\?"(sa_[0-9a-f]+)/g)) if (!out.includes(m[1])) out.push(m[1])
+  for (const m of preview.matchAll(/(?:agent|worker)_id\\?"\s*:\s*\\?"(sa_[0-9a-f]+)/g)) if (!out.includes(m[1])) out.push(m[1])
   return out
 }
 
-const AGENT_DONE = ['done', 'error', 'interrupted']
+const AGENT_DONE = ['done', 'error', 'interrupted', 'timed_out']
 
 /** One tape line in words: the verb for the call and what it acts on, or the start of its result. */
 function describeTape(e: RunTapeEvent): string {
@@ -168,7 +168,7 @@ function describeTape(e: RunTapeEvent): string {
 }
 
 /** One child run: live status while it works, then its recorded calls on expand. */
-function AgentRunCard({ id }: { id: string }): JSX.Element {
+export function AgentRunCard({ id }: { id: string }): JSX.Element {
   const [status, setStatus] = useState('running')
   const [cost, setCost] = useState<number | null>(null)
   const [name, setName] = useState('')
@@ -354,7 +354,7 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
           {t.plan ? (
             <span className="tag plan" title={`Approved in the plan "${t.plan.title || 'untitled'}" (step ${t.plan.idx + 1})`}>in plan</span>
           ) : t.approval && t.approval !== 'allow' && <span className="tag">{t.approval === 'deny' ? 'denied' : 'approved'}</span>}
-          {t.pending ? (t.needs_approval ? <span className="tag ask">needs approval</span> : null) : t.error ? <AlertCircle size={12} aria-label="Failed" /> : <span className="tool-ms">{fmtMs(t.duration_ms)}</span>}
+          {t.pending ? (t.needs_approval ? <span className="tag ask">needs approval</span> : null) : t.error ? <AlertCircle size={12} aria-label="Failed" /> : <span className="tool-ms">{fmtMs(t.duration_ms)}{(t.wait_ms ?? 0) > 1000 && ` · waited ${fmtMs(t.wait_ms!)} for approval`}</span>}
         </button>
         {t.error && !open[t.id] && <div className="tool-err">{errorLine(t.error)}</div>}
         {t.images && t.images.length > 0 && (
@@ -382,7 +382,7 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
         {t.name === 'search_memory' && !t.pending && !t.error && recalledChats(t.result_preview).map((c) => (
           <button key={c.id} className="link small" title="Open this chat" onClick={() => void useStore.getState().selectChat(c.id)}>{c.title}</button>
         ))}
-        {t.name.startsWith('agent_') && !t.pending && t.result_preview && agentIds(t.result_preview).map((id) => <AgentRunCard key={id} id={id} />)}
+        {(t.name.startsWith('agent_') || t.name === 'delegate') && !t.pending && t.result_preview && agentIds(t.result_preview).map((id) => <AgentRunCard key={id} id={id} />)}
         {t.pending && t.needs_approval && t.name === 'propose_plan' && !deskPlanShown && <ProposedPlanCard event={t} conversationId={conversationId} />}
         {t.pending && t.needs_approval && t.name !== 'propose_plan' && !QUESTION_TOOLS.has(t.name) && (
           <GenericApproval event={t} conversationId={conversationId} decide={async (ok) => decideFor(t)(ok)}

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, Square } from '../icons'
-import type { SubagentView } from '@shared/types'
+import type { RunTapeEvent, SubagentView } from '@shared/types'
 import { api } from '../lib/api'
-import { workerRows } from '../lib/workerTranscript'
+import { tapeSpans, tapeTimings, workerRows } from '../lib/workerTranscript'
 import { useStore, useChatFaceById, useWorkerFace, useWorkers } from '../store'
 import MessageView from './Message'
+import TraceView from './TraceView'
 import SmartTextarea from './SmartTextarea'
 
 const DONE = ['done', 'error', 'interrupted', 'stopped', 'completed', 'partial']
@@ -18,6 +19,7 @@ const DONE = ['done', 'error', 'interrupted', 'stopped', 'completed', 'partial']
 export default function WorkerChat({ id, onStop }: { id: string; onStop?: () => Promise<unknown> }): JSX.Element {
   const { send, selectChat, openSubagent, toast } = useStore()
   const [view, setView] = useState<SubagentView | null>(null)
+  const [tape, setTape] = useState<RunTapeEvent[]>([])
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [tick, setTick] = useState(0)
@@ -35,16 +37,18 @@ export default function WorkerChat({ id, onStop }: { id: string; onStop?: () => 
     let timer: ReturnType<typeof setTimeout> | undefined
     const poll = async (): Promise<void> => {
       try {
-        const v = await api.subagents.get(id)
+        const [v, t] = await Promise.all([api.subagents.get(id), api.agentTape(id).catch(() => null)])
         if (dead) return
         setView(v)
+        if (t) setTape(t)
         if (!DONE.includes(v.run.status)) timer = setTimeout(() => void poll(), 2000)
       } catch (e) { if (!dead) toast((e as Error).message, 'error') }
     }
     void poll()
     return () => { dead = true; if (timer) clearTimeout(timer) }
   }, [id, toast, tick])
-  const rows = useMemo(() => workerRows(view?.messages ?? [], parentConv, live), [view?.messages, parentConv, live])
+  const rows = useMemo(() => workerRows(view?.messages ?? [], parentConv, live, tapeTimings(tape)), [view?.messages, parentConv, live, tape])
+  const spans = useMemo(() => tapeSpans(tape), [tape])
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'nearest' }) }, [rows.length])
 
   const submit = async (): Promise<void> => {
@@ -79,6 +83,12 @@ export default function WorkerChat({ id, onStop }: { id: string; onStop?: () => 
         ))}
         <div ref={endRef} />
       </div>
+      {spans.length > 0 && (
+        <details className="worker-steps">
+          <summary className="muted small">Steps · {spans.filter((s) => s.kind === 'llm').length} model rounds</summary>
+          <TraceView spans={spans} live={live} model={null} />
+        </details>
+      )}
       <div className="composer worker-composer">
         <SmartTextarea kind="chat" variant="bare" rows={1} autoGrow maxHeight={160} noGhost value={text} onChange={setText}
           ariaLabel="Message the worker" placeholder={!canTalk ? 'Finished' : live ? 'Message this worker…' : 'Continue this worker…'}

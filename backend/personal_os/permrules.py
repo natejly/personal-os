@@ -21,6 +21,7 @@ from email.utils import getaddresses
 from typing import Any, Iterable
 
 from . import permissions
+from .stuck import POLL_TOOLS, WAITING_TOOLS
 
 # Rule names that are not tool names: the subject kinds `subject_for` emits.
 PSEUDO_TOOLS = frozenset({"Bash", "Read", "Edit", "Agent", "external_directory"})
@@ -1300,6 +1301,9 @@ class SessionGrants:
 
 SESSION = SessionGrants()
 
+# Waiting on a job or worker is meant to repeat; stuck.py's poll hint covers the useless ones.
+NO_DOOM_TOOLS = POLL_TOOLS | WAITING_TOOLS | {"agent_wait", "check_worker"}
+
 
 def resolve(tool: str, args: dict[str, Any], mode: str, forced: bool, *, rules: RuleSet | dict[str, Any] | None,
             roots: Iterable[str] = (), cwd: str | None = None, conv: str | None = None,
@@ -1315,7 +1319,7 @@ def resolve(tool: str, args: dict[str, Any], mode: str, forced: bool, *, rules: 
     if v.action == "deny":
         res.refusal, res.hardline, res.rule = v.refusal, v.hardline, v.rule
         return res
-    if doom:
+    if doom and tool not in NO_DOOM_TOOLS:
         res.mode, res.forced, res.kind, res.display = "ask", True, "doom_loop", f"doom_loop({tool})"
         return res
     res.rule, res.suggestions, res.keys = v.rule, v.suggestions, v.pending

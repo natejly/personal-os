@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Message, WorkerInfo } from '@shared/types'
-import { ENDED_SHOWN, isInternal, listedWorkers, liveWorkerCount, sinceClear, sortWorkers, upsertWorker, withoutInternal, workerActions, workerWord } from './workers'
+import { ENDED_SHOWN, isInternal, listedWorkers, liveWorkerCount, sinceClear, sortWorkers, treeOrder, upsertWorker, withoutInternal, workerActions, workerElapsedMs, workerWord } from './workers'
 
 const w = (id: string, status: WorkerInfo['status'], extra: Partial<WorkerInfo> = {}): WorkerInfo => ({
   id, conversation_id: 'c', title: id, goal: '', status, now: '', queue_position: null, started_at: Number(id.replace(/\D/g, '')) || 0,
@@ -81,4 +81,24 @@ test('sinceClear keeps the latest clear marker and what follows, and counts the 
   assert.deepEqual(twice.shown.map((x) => x.id), ['c2', 'e'])
   assert.equal(twice.hidden, 3)
   assert.equal(sinceClear([m('c1', 'clear'), m('a')]).hidden, 0)
+})
+
+test('ended workers say how they stopped', () => {
+  assert.equal(workerWord(w('w1', 'done', { exit_reason: 'completed' })), 'Done')
+  assert.equal(workerWord(w('w1', 'done', { exit_reason: 'stuck' })), 'Ended: stuck')
+  assert.equal(workerWord(w('w1', 'interrupted', { exit_reason: 'shutdown' })), 'Interrupted: app closed')
+  assert.equal(workerWord(w('w1', 'running', { exit_reason: 'stuck' })), 'Working')
+})
+
+test('sub-workers sit under their parent; an orphan stays at the top', () => {
+  const list = [w('w1', 'running'), w('w2', 'running'), w('w3', 'running', { parent_run_id: 'w1', depth: 2 }), w('w4', 'running', { parent_run_id: 'w3', depth: 3 }), w('w5', 'done', { parent_run_id: 'gone' })]
+  assert.deepEqual(treeOrder(list).map((x) => x.id), ['w1', 'w3', 'w4', 'w2', 'w5'])
+})
+
+test('show all lifts the ended cap; elapsed runs to the end or to now', () => {
+  const ws = Array.from({ length: ENDED_SHOWN + 3 }, (_, i) => w(`w${i + 10}`, 'done'))
+  assert.equal(listedWorkers(ws, true).length, ENDED_SHOWN)
+  assert.equal(listedWorkers(ws, true, true).length, ENDED_SHOWN + 3)
+  assert.equal(workerElapsedMs({ started_at: 10, ended_at: 25 }), 15000)
+  assert.equal(workerElapsedMs({ started_at: 10, ended_at: null }, 12000), 2000)
 })

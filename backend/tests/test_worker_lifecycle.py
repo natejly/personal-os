@@ -93,7 +93,9 @@ def test_a_worker_owns_its_jobs_and_says_who_stopped_it(monkeypatch: pytest.Monk
         row = store.get(wid)
         assert killed == [wid]
         assert row["status"] == "interrupted" and row["error"] == "Stopped by the user."
-        assert mgr.info(row)["status"] == "stopped"
+        info = mgr.info(row)
+        assert info["status"] == "stopped" and info["exit_reason"] == "stopped" and info["error"] == "Stopped by the user."
+        assert info["parent_run_id"] == row["parent_run_id"] and "model" in info and "effort" in info
     asyncio.run(go())
 
 

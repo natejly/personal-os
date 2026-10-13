@@ -62,9 +62,9 @@ WORKER_PROMPT = (
 )
 
 # The orchestration stance and the observability rule. TOOLS_HINT (app.py) and the two agent-stance fragments
-# (FRONT_AGENT_HINT here, PROACTIVE_HINT in app.py) carry the same wording, so a chat reads one rule wherever it lands.
+# (FRONT_AGENT_HINT here, PROACTIVE_HINT in app.py) carry the same wording; a prompt gets it from one of them, never two.
 ORCHESTRATION_HINT = (
-    "Own each request end to end: delegate to agents, skills and workers, run and verify the work yourself, so the user "
+    "Own each request end to end: use your tools and whatever agents, skills and workers you have, run and verify the work yourself, so the user "
     "never has to act outside this chat. Never answer with steps for the user to perform in the UI, except a decision "
     "only they can make. Where the app leaves them a manual follow-up (a pending approval card), say what you did and "
     "what you could not. This never weakens an approval gate, permission prompt or hard block."

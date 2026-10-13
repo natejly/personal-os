@@ -1486,9 +1486,12 @@ NO_EMOJI_HINT = "No emoji in replies, documents or messages unless asked."
 # Static, so it sits in the cached prefix: the map itself is built by context_map.py.
 MAP_HINT = "The workspace map lists what exists; open an item with its tool before relying on it."
 
-TOOLS_HINT = ("Use tools when they would make the answer more accurate, current or grounded in the user's data. "
-              "Be direct: when what is already in front of you answers the question, skip them. "
-              + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT + " " + MAP_HINT + " " + FENCE_RULE)
+_TOOLS_USE = ("Use tools when they would make the answer more accurate, current or grounded in the user's data. "
+              "Be direct: when what is already in front of you answers the question, skip them. ")
+TOOLS_HINT = _TOOLS_USE + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT + " " + MAP_HINT + " " + FENCE_RULE
+# Sent instead when an agent-stance hint (FRONT_AGENT_HINT / PROACTIVE_HINT) goes too: those carry the orchestration
+# and observability rules themselves, and a rule said twice is only tokens.
+TOOLS_HINT_WITH_STANCE = _TOOLS_USE + MAP_HINT + " " + FENCE_RULE
 # The agent stance for an ordinary chat (desks and scheduled runs carry their own). Text only: the leash is the
 # alwaysAsk list and the approval cards, so the model is told to act and let the app stop it where a card is due.
 PROACTIVE_HINT = (  # chats that cannot delegate (a persona without the hand-off tools); a delegating chat gets FRONT_AGENT_HINT
@@ -2315,7 +2318,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
         fence_nonce = secrets.token_hex(8)  # per run: untrusted results are fenced with an id the page cannot guess
         front_hint = bool(tool_schemas) and _front() and any(s["function"]["name"] == "delegate" for s in tool_schemas)
-        tools_hint = (TOOLS_HINT + ("\n" + PLAN_HINT if not front_hint and any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
+        stance_hint = FRONT_AGENT_HINT if front_hint else PROACTIVE_HINT if tool_schemas and not desk and not proposal_only(run) else ""
+        tools_hint = ((TOOLS_HINT_WITH_STANCE if stance_hint else TOOLS_HINT)
+                      + ("\n" + PLAN_HINT if not front_hint and any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
         if any(s["function"]["name"] in ("save_memory", "search_memory") for s in tool_schemas):
             tools_hint += "\n" + MEMORY_HINT
         if mcp_defer:
@@ -2337,7 +2342,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # turn (deferred or not). Kept with tools_hint so it stays in the cacheable prefix.
             tools_hint = "\n\n".join(p for p in (tools_hint, _mcp_server_notes(set(mcp_modes))) if p)
         hints = (NO_EMOJI_HINT, RENDER_HINT, tools_hint,
-                 FRONT_AGENT_HINT if front_hint else PROACTIVE_HINT if tool_schemas and not desk and not proposal_only(run) else "",
+                 stance_hint,
                  _agents_hint(modes, front=front_hint), _job_hint(run),
                  job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",

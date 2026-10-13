@@ -1933,6 +1933,7 @@ export interface BackendInfo {
   logDir: string
   appVersion: string
   electron: string
+  packaged: boolean
 }
 
 export interface GrainApi {

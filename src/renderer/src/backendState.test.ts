@@ -12,7 +12,7 @@ let statusCalls = 0
 let statusUrl: string | null = null
 let starting = false
 const info = (state: BackendInfo['state'], error: string | null = null): BackendInfo =>
-  ({ state, url: '', error, restarts: [], logDir: '', appVersion: '0', electron: '0' })
+  ({ state, url: '', error, restarts: [], logDir: '', appVersion: '0', electron: '0', packaged: false })
 
 ;(globalThis as unknown as { window: unknown }).window = {
   os: {

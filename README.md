@@ -377,6 +377,18 @@ copy). If a self-signed "Grain Local Signing" identity is in your keychain, `npm
 with it, so macOS keeps Full Disk Access and other grants across rebuilds; otherwise builds are
 ad-hoc signed. See [docs/releasing.md](docs/releasing.md#signing).
 
+From a release download:
+
+- **Install:** open the .dmg and drag Grain to Applications. Run it from there; a copy started from
+  Downloads or the disk image cannot update itself, and offers to move.
+- **Update:** automatic. Grain downloads new versions in the background and asks to restart; Help →
+  Check for Updates… checks now.
+- **Where things live:** data in `~/Library/Application Support/Grain` (`personal-os` on installs from
+  before the rename), logs in `~/Library/Logs/Grain`, API keys and tokens in the login Keychain under
+  the service "Grain".
+- **Uninstall:** quit Grain, delete `/Applications/Grain.app` and the two folders above, and remove the
+  "Grain" items in Keychain Access.
+
 ## Development
 
 Requirements: Node 20+, Python 3.10+, [uv](https://docs.astral.sh/uv/), and a

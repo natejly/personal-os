@@ -6,6 +6,7 @@
 // electron-builder skips signing and scripts/adhoc-sign.cjs (afterSign) ad-hoc signs, so a local build
 // still launches. Notarization runs only when all three APPLE_* variables are present.
 const { resolveSigning, LOCAL_IDENTITY } = require('./scripts/mac-signing.cjs')
+const { version } = require('./package.json')
 
 const signingMode = resolveSigning()
 const signing = signingMode !== 'adhoc'
@@ -23,7 +24,8 @@ module.exports = {
   // The python-build-standalone + backend bundle made by scripts/bundle-backend.sh.
   extraResources: [{ from: 'build/backend-bundle', to: 'backend' }],
   afterSign: 'scripts/adhoc-sign.cjs',
-  publish: [{ provider: 'github', owner: 'natejly', repo: 'personal-os', releaseType: 'prerelease' }],
+  // electron-updater on a plain version (1.0.0) only looks at GitHub's latest release, which skips prereleases.
+  publish: [{ provider: 'github', owner: 'natejly', repo: 'personal-os', releaseType: /-/.test(version) ? 'prerelease' : 'release' }],
   mac: {
     category: 'public.app-category.productivity',
     target: ['dmg', 'zip'], // electron-updater applies updates from the zip
@@ -33,6 +35,9 @@ module.exports = {
     entitlementsInherit: 'build/entitlements.mac.plist',
     // null skips electron-builder's signing (and its keychain auto-discovery); the hook ad-hoc signs instead.
     ...(signing ? {} : { identity: null }),
+    // Sign only the Mach-O files in the Python bundle (the same set adhoc-sign.cjs signs); its ~12k .py/.pyc and
+    // data files are sealed by the app's CodeResources, and a timestamped signature each would take hours.
+    signIgnore: ['/Contents/Resources/backend/(?!.*(\\.so|\\.dylib|/bin/python3\\.12)$)'],
     // A self-signed identity gets no secure timestamp, and asking Apple's server for one costs seconds
     // per file across thousands of bundled Python files.
     ...(signingMode === 'local' ? { timestamp: 'none' } : {}),

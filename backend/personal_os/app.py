@@ -33,7 +33,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from . import auth_breaker, blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
 from . import branch_summary, compaction, followups, otel_export, router, thinking_summary, titles
-from . import chatlink, coding_route, duel, fsx, labels, opencode_usage, request_log
+from . import chatlink, coding_route, duel, fsx, labels, opencode_usage, request_log, toolcore
 from .fsx import sensitive_reason
 from . import context_map
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
@@ -1282,6 +1282,20 @@ async def _trash_shutdown() -> None:
 
 
 @app.on_event("startup")
+async def _toolcore_startup() -> None:
+    from .subagents import WORKER_CORE
+    app.state.toolcore_task = asyncio.create_task(toolcore.loop(
+        db, toolcore.schema_chars(toolbox.specs), {"chat": tools.CORE_ORDER, "worker": WORKER_CORE}, tools.DESK_CORE), name="tool-core")
+
+
+@app.on_event("shutdown")
+async def _toolcore_shutdown() -> None:
+    t = getattr(app.state, "toolcore_task", None)
+    if t:
+        t.cancel()
+
+
+@app.on_event("startup")
 async def _mcp_startup() -> None:
     """Connect whatever is enabled. A server that will not start becomes a status, not a failed boot."""
     try:
@@ -2164,6 +2178,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # Past mcpDeferAbove ready tools the model gets mcp_tool_search instead of every schema. Only loaded
         # slugs are in `modes`, so a call to an unloaded one is off -> denied, never run.
         mcp_defer = mcp_search.should_defer(len(mcp_schemas), int(cfg.get("mcpDeferAbove", 12) or 0))
+        chat_core = toolcore.CURRENT.get("chat") or tools.CORE_ORDER  # read once: a daily refresh never changes this reply's tools
         loaded = _tool_loaded.get(conv_id)
         if loaded is None:
             loaded = _tool_loaded[conv_id] = {str(e["name"]) for r in convos.history_rows(conv_id)
@@ -2378,12 +2393,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tool_ctx["deferred"] = tool_ctx["deferrable"] = set()
                 return built + offer
             by_name = {s["function"]["name"]: s for s in built}
-            core = [n for n in by_name if tools.is_core(toolbox.specs[n])]
+            core = [n for n in by_name if tools.is_core(toolbox.specs[n], chat_core)]
             # Core in its fixed order, then loaded tools in the order they were first offered: a load only appends,
             # so the bytes before it (and the provider's cached prefix) stay as they were.
             order = _tool_load_order.setdefault(conv_id, [])
             order.extend(sorted((n for n in by_name if n in loaded and n not in order), key=list(toolbox.specs).index))
-            rank = {n: i for i, n in enumerate(tools.CORE_ORDER + tools.DESK_CORE)}
+            rank = {n: i for i, n in enumerate(chat_core + tools.DESK_CORE)}
             keep = ([by_name[n] for n in sorted(core, key=lambda n: rank.get(n, len(rank)))]
                     + [by_name[n] for n in order if n in by_name and n not in core])
             tool_ctx["deferred"] = set(by_name) - {s["function"]["name"] for s in keep}

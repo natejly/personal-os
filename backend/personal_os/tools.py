@@ -3730,7 +3730,7 @@ def _register_mcp_search(self: Toolbox) -> None:
 Toolbox._register_mcp_search = _register_mcp_search  # type: ignore[attr-defined]
 
 
-# Always offered while built-in tools are deferred (app._schemas): 18 tools, chosen from 15 days of real calls by the
+# Default for what is always offered while built-in tools are deferred (app._schemas; toolcore.py re-ranks it daily): 18 tools, chosen from 15 days of real calls by the
 # front agent (chats + desks, by call count) plus what the standing prompt hints name (todo_write, ask_user, memory,
 # show, the hand-off tools). Everything else is in the prompt's tool index and loads on first call or via tool_search.
 # Fixed order: the tools array is core first, then loaded tools, so loading one never shifts earlier bytes.
@@ -3740,11 +3740,11 @@ CORE_ORDER = ("tool_search", "todo_write", "ask_user", "delegate", "message_work
 # A desk's own workspace tools exist only inside a desk, where they are the work.
 DESK_CORE = ("desk_list_files", "desk_read_file", "desk_write_file", "desk_done", "desk_deliver", "desk_ask")
 CORE_GROUPS = frozenset({"mcp"})  # mcp_tool_search
-CORE_TOOLS = frozenset(CORE_ORDER) | frozenset(DESK_CORE)
 
 
-def is_core(spec: ToolSpec) -> bool:
-    return spec.group in CORE_GROUPS or spec.name in CORE_TOOLS
+def is_core(spec: ToolSpec, core: tuple[str, ...] = CORE_ORDER) -> bool:
+    """`core` is the chat core in force (toolcore.CURRENT, usage-ranked); CORE_ORDER is the static default."""
+    return spec.group in CORE_GROUPS or spec.name in core or spec.name in DESK_CORE
 
 
 def _register_tool_search(self: Toolbox) -> None:

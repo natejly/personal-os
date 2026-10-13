@@ -106,7 +106,7 @@ export default function WorkersPanel({ conversationId: focusId }: { conversation
                   {a.resume && <button className="ghost-btn xs" disabled={busy === w.id} onClick={() => void act(w.id, () => api.workers.resume(w.id))}><RotateCcw size={11} /> Resume</button>}
                 </div>
                 {(() => {
-                  const bits = [w.now, w.cost ? fmtCost(w.cost) : '', w.started_at ? fmtMs(workerElapsedMs(w)) : '', [w.model, w.effort].filter(Boolean).join(' · ')].filter(Boolean)
+                  const bits = [w.now, w.cost ? fmtCost(w.cost) : '', w.started_at ? fmtMs(workerElapsedMs(w)) : '', on ? [w.model, w.effort].filter(Boolean).join(' · ') : ''].filter(Boolean)
                   return bits.length ? <div className="worker-meta muted small">{bits.join(' · ')}</div> : null
                 })()}
                 {on && w.error && (w.status === 'error' || w.status === 'interrupted') && <p className="worker-error small">{w.error}</p>}

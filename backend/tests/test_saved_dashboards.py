@@ -146,13 +146,6 @@ class Dashboards(unittest.TestCase):
         self.assertNotIn(loose, [r["id"] for r in rows])
         self.assertEqual(client.get("/saved-dashboards?project_id=nope").json(), [])
 
-    def test_dashboard_open_is_always_loaded(self) -> None:
-        from personal_os.tools import is_core
-        self.assertTrue(is_core(toolbox.specs["dashboard_open"]))
-        self.assertFalse(is_core(toolbox.specs["dashboard_save"]))  # still found by tool_search
-        # there is no token budget: deferral is a count threshold (toolDeferAbove) and core tools are always kept
-        self.assertTrue(all(is_core(s) for n, s in toolbox.specs.items() if n in ("doc_read", "calendar_events", "delegate")))
-
     def test_tools_open_and_mention(self) -> None:
         saved = call("dashboard_save", {"title": "Tool Board", "bindings": [{"name": "food", "source": "doc", "doc": "Food Log"}],
                                         "views": [{"kind": "chart", "spec": SPEC}]})

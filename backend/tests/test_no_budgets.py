@@ -251,12 +251,22 @@ def test_a_desk_has_no_turn_cap_only_the_single_nudge() -> None:
 
 
 # ---------------- max_tokens ----------------
+MSG_SSE = ('data: {"type":"message_start","message":{"usage":{"input_tokens":1}}}\n\n'
+           'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}\n\n'
+           'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}\n\n'
+           'data: {"type":"message_stop"}\n\n')  # the Messages API's own events, as the Anthropic provider streams them
+MSG_JSON = {"content": [{"type": "text", "text": "hi"}], "stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1}}
+
 def capture(monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     bodies: list[dict[str, Any]] = []
     real = httpx.AsyncClient
 
     def handler(request: httpx.Request) -> httpx.Response:
         bodies.append(json.loads(request.content))
+        if "anthropic" in str(request.url):
+            if bodies[-1].get("stream"):
+                return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=MSG_SSE.encode())
+            return httpx.Response(200, json=MSG_JSON)
         if bodies[-1].get("stream"):
             sse = 'data: {"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
             return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=sse.encode())

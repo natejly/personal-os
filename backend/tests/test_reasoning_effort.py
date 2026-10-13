@@ -120,6 +120,12 @@ def _ok(_b: dict[str, Any] | None = None) -> httpx.Response:
     return httpx.Response(200, content=SSE)
 
 
+MSG_SSE = (b'data: {"type":"message_start","message":{"usage":{"input_tokens":1}}}\n\n'
+           b'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}\n\n'
+           b'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}\n\n'
+           b'data: {"type":"message_stop"}\n\n')  # the Messages API's own events, as the Anthropic provider streams them
+
+
 def _stream(monkeypatch: Any, handler: Any, model: str = "m1", effort: str = "medium", fast: bool = False,
             tools: list[dict[str, Any]] | None = None, settings: dict[str, Any] | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     bodies: list[dict[str, Any]] = []
@@ -127,6 +133,8 @@ def _stream(monkeypatch: Any, handler: Any, model: str = "m1", effort: str = "me
 
     def h(req: httpx.Request) -> httpx.Response:
         bodies.append(json.loads(req.content))
+        if "anthropic" in str(req.url):
+            return httpx.Response(200, content=MSG_SSE)
         return handler(bodies[-1])
 
     monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: real(*a, **{**k, "transport": httpx.MockTransport(h)}))

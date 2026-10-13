@@ -113,7 +113,8 @@ def test_migration_41_keeps_the_old_default_only_when_vectors_used_it() -> None:
     con = _con({"embeddingModel": "x"}, "qwen3-embedding-8b")
     migrations._embedding_model_unset(con)
     assert _stored(con)["embeddingModel"] == "x"
-    assert [m[0] for m in migrations.MIGRATIONS][-3:-1] == [41, 42]
+    names = {m[0]: m[1] for m in migrations.MIGRATIONS}
+    assert (names[41], names[42]) == ("embedding_model_unset", "tiers_replace_legacy_models")
 
 
 def test_migration_42_folds_legacy_models_into_tiers() -> None:

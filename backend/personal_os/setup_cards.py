@@ -29,8 +29,8 @@ def _health(tb: Any) -> bool:
 
 
 def _macos() -> bool:
-    from . import macos
-    return macos.IS_MAC and macos.screen_recording_status() == macos.GRANTED
+    from . import macos, osplat
+    return osplat.has("screen_recording") and macos.screen_recording_status() == macos.GRANTED
 
 
 def status(tb: Any) -> dict[str, bool]:

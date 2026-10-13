@@ -76,8 +76,17 @@ def build_path(login: str, extra: list[str], base: str = shell.SAFE_PATH) -> str
 
 @functools.lru_cache(maxsize=1)
 def user_path() -> str:
-    """Resolved once per process: the login-shell probe spawns a shell, so it is not repeated per connection."""
+    """Resolved once, until a connector restart or a catalog look clears it: the login-shell probe spawns a shell, so it
+    is not repeated per connection."""
     return build_path(_login_shell_path(), common_dirs())
+
+
+_user_path_cache = user_path
+
+
+def forget() -> None:
+    """Drop the cached PATH, so the next look finds a runtime installed since (uv, Node)."""
+    _user_path_cache.cache_clear()
 
 
 def resolve(command: str, env: dict[str, str] | None = None) -> str | None:

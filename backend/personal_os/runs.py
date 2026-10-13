@@ -212,8 +212,11 @@ class RunStore:
         r = self._one("SELECT run_id FROM agent_runs WHERE resumed_from=? LIMIT 1", (run_id,))
         return r["run_id"] if r else None
 
-    def latest(self, conversation_id: str) -> dict[str, Any] | None:
-        return self._run_row(self._one("SELECT * FROM agent_runs WHERE conversation_id=? ORDER BY started_at DESC, rowid DESC LIMIT 1",
+    def latest(self, conversation_id: str, replies_only: bool = False) -> dict[str, Any] | None:
+        """The conversation's newest run. `replies_only` skips the turns the backend starts on its own (a worker's wake,
+        another chat's message), so one of those never hides an interrupted reply from Resume."""
+        extra = " AND json_extract(input,'$.wake') IS NULL AND json_extract(input,'$.chat_link') IS NULL" if replies_only else ""
+        return self._run_row(self._one(f"SELECT * FROM agent_runs WHERE conversation_id=?{extra} ORDER BY started_at DESC, rowid DESC LIMIT 1",
                                        (conversation_id,)))
 
     def list(self, statuses: Iterable[str] | None = ACTIVE, conversation_id: str | None = None, limit: int = 50,
@@ -491,10 +494,12 @@ class RunStore:
         return rows
 
     def unsettled_calls(self, desk_id: str) -> list[dict[str, Any]]:
-        """A desk's journal rows, over every run it has had, still `started`: after a restart, calls whose
-        outcome nobody knows. Auto-resume never relaunches a desk that has one."""
+        """A desk's journal rows still `started` from its latest turn (and the children that turn started): after a restart,
+        calls whose outcome nobody knows. Auto-resume never relaunches a desk that has one. An older turn's row was already
+        reported by the resume that followed it, so it never blocks the desk again."""
         return self._all("SELECT e.key, e.run_id, e.tool, e.call_id FROM executed_calls e JOIN agent_runs r ON r.run_id=e.run_id "
-                         "WHERE r.desk_id=? AND e.status IN ('started','unknown')", (desk_id,))
+                         "WHERE r.desk_id=? AND e.status IN ('started','unknown') AND r.started_at >= "
+                         "(SELECT MAX(started_at) FROM agent_runs WHERE desk_id=? AND kind='desk')", (desk_id, desk_id))
 
     # ---- recovery ----
     def transcript(self, run_id: str, message_id: str) -> tuple[str, list[dict[str, Any]]]:

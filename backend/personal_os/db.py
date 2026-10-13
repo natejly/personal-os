@@ -170,6 +170,9 @@ CREATE TABLE IF NOT EXISTS agent_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_runs_conv ON agent_runs(conversation_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON agent_runs(status, started_at DESC);
+-- A worker's chat and a job's id live in `input`: the Workers panel poll and every job fire look runs up by them.
+CREATE INDEX IF NOT EXISTS idx_runs_worker_conv ON agent_runs(kind, json_extract(input,'$.conversation_id'));
+CREATE INDEX IF NOT EXISTS idx_runs_job ON agent_runs(kind, json_extract(input,'$.job_id'));
 
 -- User-authored agent definitions (subagents.py). Inert until approved by hand, like skills; the
 -- built-in researcher / worker / reviewer live in code and are not rows.

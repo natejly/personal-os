@@ -480,6 +480,7 @@ class Child:
     last_activity: float = field(default_factory=time.monotonic)
     tool_since: float | None = None
     task_obj: Any = None
+    writing: int = 0                # write/external calls in flight: Stop gives them STOP_GRACE_SECONDS before cancelling
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     cancel: asyncio.Event = field(default_factory=asyncio.Event)
     background: bool = False
@@ -1259,7 +1260,11 @@ class Subagents:
         async def go() -> Any:
             return await self.toolbox.call(name, args, ch.ctx)
         if spec.danger in ("writes", "external") and self.store is not None:
-            res, replayed = await self.store.call_once(ch.id, ch.rounds, name, args, go, call_id=uid, inherit=ch.resume_of or None)
+            ch.writing += 1
+            try:
+                res, replayed = await self.store.call_once(ch.id, ch.rounds, name, args, go, call_id=uid, inherit=ch.resume_of or None)
+            finally:
+                ch.writing -= 1
             if replayed and isinstance(res, dict):
                 res = {**res, "replayed": True}
             return res
@@ -1472,7 +1477,17 @@ class Subagents:
         ch.halt_reason = ch.halt_reason or reason
         ch.cancel.set()
         if ch.task_obj is not None and not ch.task_obj.done():
-            ch.task_obj.cancel()
+            if ch.writing:  # a write gets the grace the main loop gives it; _exec's _check ends the child once it returns
+                asyncio.get_running_loop().call_later(limits.STOP_GRACE_SECONDS, lambda t=ch.task_obj: t.done() or t.cancel())
+            else:
+                ch.task_obj.cancel()
+
+    async def end_of_run(self, run: Any) -> None:
+        """A reply ended: the background children it never collected stop now, not after their next round.
+        Workers (detached) outlive the reply by design."""
+        for c in list(self.children.values()):
+            if not c.detached and not c.finished.is_set() and c.ctx.get("run") is run:
+                self.stop_tree(c.id)
 
     def stop_tree(self, cid: str, reason: str = "interrupted") -> list[str]:
         """Stop a child and everything below it, leaves first. Every one still returns its partial output."""
@@ -1610,11 +1625,20 @@ class Subagents:
             return {"agents": [], "note": "No background subagents to wait for."}
         deadline = time.monotonic() + max(0.0, min(float(timeout_s), 600.0))
         stop = ctx.get("stop")
-        while time.monotonic() < deadline and not all(c.finished.is_set() for c in picked):
-            if stop is not None and stop.is_set():
-                for c in picked:
-                    self.stop_tree(c.id)
-            await asyncio.sleep(0.05)
+        # Sleeps until a child ends or Stop lands; a Stop stops the children and still waits for their partial reports.
+        waits = {asyncio.ensure_future(c.finished.wait()) for c in picked}
+        stopper = asyncio.ensure_future(stop.wait()) if stop is not None else None
+        try:
+            while waits and (left := deadline - time.monotonic()) > 0:
+                done, _ = await asyncio.wait(waits | ({stopper} if stopper else set()), timeout=left, return_when=asyncio.FIRST_COMPLETED)
+                waits -= done
+                if stopper is not None and stopper in done:
+                    stopper = None
+                    for c in picked:
+                        self.stop_tree(c.id)
+        finally:
+            for f in waits | ({stopper} if stopper else set()):
+                f.cancel()
         agents = [self.report(c) if c.finished.is_set() else {"agent_id": c.id, "role": c.role.name, "state": "running"} for c in picked]
         return {"agents": agents, "still_running": [c.id for c in picked if not c.finished.is_set()]}
 

@@ -450,6 +450,25 @@ def test_child_call_ids_stay_unique_and_names_resolve() -> None:
     check("Did you mean" in last and "Do not retry" not in last, "an unknown name gets a did-you-mean, not a refusal")
 
 
+def test_end_of_run_stops_uncollected_background_children() -> None:
+    reset()
+    SCRIPTS["lingers"] = [{"text": "still going", "delay": 5}]
+    fr = FakeRun()
+    ctx = mkctx(new_conv(), run=fr)
+
+    async def go() -> Any:
+        out = await appmod.toolbox.call("agent_spawn", {"task": "lingers", "background": True}, ctx)
+        ch = mgr.children[out["agent_id"]]
+        await asyncio.sleep(0.05)
+        t0 = time.monotonic()
+        await mgr.end_of_run(fr)
+        await asyncio.wait_for(ch.finished.wait(), 2)
+        return ch, time.monotonic() - t0
+
+    ch, took = run(go())
+    check(ch.state == "partial" and took < 2, f"the reply ending stops its uncollected child at once ({ch.state}, {took:.2f}s)")
+
+
 # ---- approvals -------------------------------------------------------------------------------------
 
 class FakeRun:

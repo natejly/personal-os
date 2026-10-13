@@ -23,7 +23,17 @@ NOT_RUN = 4         # calls in a row that never executed (disabled, not loaded, 
 WINDOW = 24
 
 # Calls whose whole point is to be repeated while something else works: an unchanged answer is not a loop.
-WAITING_TOOLS = frozenset({"coding_session_status", "coding_session_wait"})
+WAITING_TOOLS = frozenset({"coding_session_status", "coding_session_wait", "shell_poll", "agent_wait", "check_worker"})
+
+
+def _still_going(tool: str, result: Any) -> bool:
+    """A wait whose answer says the job or worker is still running. Polling one that ended, or that errored, is a loop."""
+    if tool.startswith("coding_session_"):
+        return True
+    if not isinstance(result, dict) or result.get("error"):
+        return False
+    return (result.get("status") == "running" or bool(result.get("still_running"))
+            or any(isinstance(w, dict) and w.get("status") in ("queued", "running", "awaiting_approval") for w in result.get("workers") or []))
 
 STUCK_NUDGE = ("You appear to be stuck: {detail}. Change approach: use a different tool or arguments, "
                "or answer with what you have and say what is missing.")
@@ -93,7 +103,7 @@ class StuckDetector:
 
     def observe(self, tool: str, args: Any, result: Any) -> None:
         self.not_run = 0
-        if tool in WAITING_TOOLS:
+        if tool in WAITING_TOOLS and _still_going(tool, result):
             return
         err = bool(result.get("error")) if isinstance(result, dict) else False
         self.obs.append(Obs(tool, args_digest(args), result_digest(result), err))

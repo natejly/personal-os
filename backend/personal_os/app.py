@@ -488,6 +488,7 @@ async def _snapshot_after(run: Run) -> None:
 
 
 bus.after_hooks.append(_snapshot_after)
+bus.after_hooks.append(lambda run: subagent_mgr.end_of_run(run))
 app.include_router(backups.router(db.data_dir))
 # Supportability: GET /diagnostics, POST /maintenance/sweep, and the daily retention sweep (retention.py).
 retention = RetentionWorker(db, settings)
@@ -1696,8 +1697,7 @@ async def _call_tool(run: Run | None, step: int, name: str, args: dict[str, Any]
     return result
 
 
-# How long a write that Stop caught mid-call is given to report its real outcome before it is cancelled.
-STOP_GRACE_SECONDS = 3.0
+STOP_GRACE_SECONDS = limits.STOP_GRACE_SECONDS
 
 
 async def _await_tool(coro: Any, stop: asyncio.Event, *, grace: float) -> tuple[Any, bool]:
@@ -2376,7 +2376,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             old_events = run_store.events(body.resume_of)
             run_notes.append({"role": "system", "content": resume.build_resume_note(
                 old, old_events, run_store.executed(body.resume_of), run_store.approvals(None, run_id=body.resume_of),
-                reason=resume.reason_tag(old, _run_message(old)))})
+                reason=resume.reason_tag(old, _run_message(old)),
+                plan_steps=[s for p in plans.for_run(body.resume_of) if p["status"] == "approved" for s in p["steps"] if s["status"] == "approved"])})
             # Taint is only ever added to: a resume cannot launder what the dead run read.
             for src in resume.taint_from_tape(old_events):
                 tool_ctx["tainted"] = True
@@ -3047,7 +3048,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # external/schedules taint lock when that taint is one the plan card already showed.
                     if (not forced or taint_only) and (mode == "ask" or (active_plan is not None and mode == "on")):
                         claimed = plans.claim(run.run_id if run else None, c["name"], args, uid,
-                                              desk_id=run.desk_id if run else None)
+                                              desk_id=run.desk_id if run else None, inherit=body.resume_of)
                         # Progress, for a supervisor deciding whether another turn is worth it: a
                         # turn that consumed no approved step did not advance the plan.
                         if claimed is not None and run is not None:
@@ -3756,6 +3757,7 @@ async def _run_job(run: Run, body: ChatIn) -> None:
                 raise RuntimeError(f"This scheduled run was stopped after {int(JOB_IDLE_SECONDS // 60)} minutes with no model or tool activity.")
     except asyncio.CancelledError:
         task.cancel()
+        await asyncio.gather(task, return_exceptions=True)  # its own cancel handler settles the message and ends its shell jobs
         raise
 
 
@@ -4861,7 +4863,7 @@ def _resumable(row: dict[str, Any]) -> tuple[bool, str]:
     cid = row.get("conversation_id")
     if not cid:
         return False, "no conversation"
-    return resume.resumable(row, run_store.latest(cid), bool(bus.answering(cid)), bool(run_store.resumed_by(row["run_id"])),
+    return resume.resumable(row, run_store.latest(cid, replies_only=True), bool(bus.answering(cid)), bool(run_store.resumed_by(row["run_id"])),
                             message=_run_message(row))
 
 
@@ -4880,7 +4882,7 @@ async def conversation_resumable(id: str) -> dict[str, Any]:
     """Whether the conversation's latest reply stopped short and can be continued, in one query for the UI."""
     if not convos.get(id, with_messages=False):
         raise HTTPException(404, "No such conversation")
-    row = run_store.latest(id)
+    row = run_store.latest(id, replies_only=True)
     if not row:
         return {"run_id": None, "resumable": False, "reason": "no run", "message_id": None}
     ok, reason = _resumable(row)

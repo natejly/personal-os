@@ -257,6 +257,10 @@ def test_resumable_route() -> None:
     check(set(got) == {"run_id", "resumable", "reason", "message_id"}, "shape")
     check(got["run_id"] == rid and got["resumable"] is True and got["reason"] == "interrupted" and got["message_id"], "interrupted run is resumable")
     check(client.get(f"/runs/{rid}").json()["resume_reason"] == "interrupted", "GET /runs/{id} carries resume_reason")
+    time.sleep(0.01)
+    store.create("wake" + str(time.time_ns()), cid, "chat", {"content": "worker done", "wake": {"ids": ["w1"]}})
+    got = client.get(f"/conversations/{cid}/resumable").json()
+    check(got["run_id"] == rid and got["resumable"] is True, f"a worker's wake turn does not hide the interrupted reply, got {got}")
     cid, rid = dead_run(status="done")
     with appmod.db.tx() as c:
         c.execute("UPDATE messages SET outcome='stopped', error=NULL WHERE id=?", (store.get(rid)["message_id"],))

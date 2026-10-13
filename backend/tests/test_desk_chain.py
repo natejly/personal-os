@@ -286,6 +286,13 @@ def test_auto_resume_relaunches_only_what_is_safe() -> None:
         with A.db.tx() as c:
             c.execute("INSERT INTO executed_calls(key, run_id, step, tool, args_digest, call_id, status, created_at) "
                       "VALUES(?,?,0,'gmail_send','d','c1','started',0)", (f"k-{old}", old))
+        later = _desk("working")  # its unknown call is from an older turn that a resume already reported
+        A.run_store.create(older := f"old-{later['id']}", later["conversation_id"], kind="desk", desk_id=later["id"])
+        A.run_store.create(f"new-{later['id']}", later["conversation_id"], kind="desk", desk_id=later["id"])
+        with A.db.tx() as c:
+            c.execute("UPDATE agent_runs SET started_at=0 WHERE run_id=?", (older,))
+            c.execute("INSERT INTO executed_calls(key, run_id, step, tool, args_digest, call_id, status, created_at) "
+                      "VALUES(?,?,0,'gmail_send','d','c2','started',0)", (f"k-{older}", older))
         asking = _desk("needs_approval")
         A.run_store.open_approval(f"c-{asking['id']}", None, "gmail_send", {}, desk_id=asking["id"])
         planned = _desk("awaiting_plan")
@@ -296,12 +303,12 @@ def test_auto_resume_relaunches_only_what_is_safe() -> None:
         check(woken == [], "setting off: nothing is relaunched")
         check(A.desks.get(clean["id"], False)["status"] == "interrupted", "…every live desk is interrupted, as before")
 
-        for did in (clean["id"], unknown["id"], asking["id"]):
+        for did in (clean["id"], later["id"], unknown["id"], asking["id"]):
             A.desks.set_status(did, "working")
         A.desks.set_status(planned["id"], "awaiting_plan")
         A.db.set_settings({"deskAutoResume": True})
         asyncio.run(A._cowork_startup())
-        check(woken == [clean["id"]], f"setting on: only the clean desk is relaunched, got {woken}")
+        check(sorted(woken) == sorted([clean["id"], later["id"]]), f"setting on: only the clean desks are relaunched, got {woken}")
         bodies = [e["body"] for e in A.desks.events(unknown["id"])]
         check(any("outcome is unknown" in b for b in bodies) and A.desks.get(unknown["id"], False)["status"] == "interrupted",
               "a desk with a started call in an earlier run stays interrupted and says why")

@@ -36,7 +36,7 @@ jobs:
           fi
       - run: npm ci
       # bundle-backend.sh -> electron-vite build -> electron-builder, signed with CSC_LINK and notarized
-      # with the APPLE_* variables; --publish always uploads a prerelease to GitHub Releases.
+      # with the APPLE_* variables; --publish always uploads to GitHub Releases (a prerelease when the version has a -suffix).
       - run: npm run package -- --publish always
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}

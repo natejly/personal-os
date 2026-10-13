@@ -169,7 +169,14 @@ export async function startBackend(): Promise<string> {
   if (process.env.PERSONAL_OS_BACKEND_URL) {
     url = process.env.PERSONAL_OS_BACKEND_URL.replace(/\/+$/, '')
     lastError = null
-    await waitHealthy(url, 10_000)
+    try {
+      await waitHealthy(url, 10_000)
+    } catch (e) {
+      // The window is already open on the boot screen, waiting for this announcement.
+      lastError = (e as Error).message
+      setState('failed')
+      throw e
+    }
     setState('ready')
     // Read the token only once the backend is up: it mints <data-dir>/.auth_token on startup.
     token = (process.env.PERSONAL_OS_AUTH_TOKEN ?? '').trim() || readTokenFile()

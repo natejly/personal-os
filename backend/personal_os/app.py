@@ -4847,7 +4847,7 @@ def _resumable(row: dict[str, Any]) -> tuple[bool, str]:
     cid = row.get("conversation_id")
     if not cid:
         return False, "no conversation"
-    return resume.resumable(row, run_store.latest(cid), bool(bus.answering(cid)), bool(run_store.resumed_by(row["run_id"])),
+    return resume.resumable(row, run_store.latest(cid, replies_only=True), bool(bus.answering(cid)), bool(run_store.resumed_by(row["run_id"])),
                             message=_run_message(row))
 
 
@@ -4866,7 +4866,7 @@ async def conversation_resumable(id: str) -> dict[str, Any]:
     """Whether the conversation's latest reply stopped short and can be continued, in one query for the UI."""
     if not convos.get(id, with_messages=False):
         raise HTTPException(404, "No such conversation")
-    row = run_store.latest(id)
+    row = run_store.latest(id, replies_only=True)
     if not row:
         return {"run_id": None, "resumable": False, "reason": "no run", "message_id": None}
     ok, reason = _resumable(row)

@@ -212,8 +212,11 @@ class RunStore:
         r = self._one("SELECT run_id FROM agent_runs WHERE resumed_from=? LIMIT 1", (run_id,))
         return r["run_id"] if r else None
 
-    def latest(self, conversation_id: str) -> dict[str, Any] | None:
-        return self._run_row(self._one("SELECT * FROM agent_runs WHERE conversation_id=? ORDER BY started_at DESC, rowid DESC LIMIT 1",
+    def latest(self, conversation_id: str, replies_only: bool = False) -> dict[str, Any] | None:
+        """The conversation's newest run. `replies_only` skips the turns the backend starts on its own (a worker's wake,
+        another chat's message), so one of those never hides an interrupted reply from Resume."""
+        extra = " AND json_extract(input,'$.wake') IS NULL AND json_extract(input,'$.chat_link') IS NULL" if replies_only else ""
+        return self._run_row(self._one(f"SELECT * FROM agent_runs WHERE conversation_id=?{extra} ORDER BY started_at DESC, rowid DESC LIMIT 1",
                                        (conversation_id,)))
 
     def list(self, statuses: Iterable[str] | None = ACTIVE, conversation_id: str | None = None, limit: int = 50,

@@ -134,10 +134,14 @@ def test_tools_hint_carries_orchestration_and_observability() -> None:
         return "\n".join(m["content"] for m in SEEN[-1] if m["role"] == "system" and isinstance(m.get("content"), str))
     run([])
     text = system()
-    assert appmod.TOOLS_HINT in text
+    assert appmod.TOOLS_HINT_WITH_STANCE in text  # a stance hint is sent too, and carries the two rules
     assert "own each request end to end" in appmod.TOOLS_HINT.lower()
     assert workers.OBSERVABILITY_HINT in appmod.TOOLS_HINT and "name what is running" in appmod.TOOLS_HINT
-    assert workers.ORCHESTRATION_HINT in text and workers.OBSERVABILITY_HINT in text
+    # Each rule is said exactly once in the assembled prompt.
+    assert text.count(workers.ORCHESTRATION_HINT) == 1 and text.count(workers.OBSERVABILITY_HINT) == 1
+    run([], settings={"tools": {"delegate": "off"}})
+    text = system()
+    assert text.count(workers.ORCHESTRATION_HINT) == 1 and text.count(workers.OBSERVABILITY_HINT) == 1
     # The agent-stance fragments carry the same wording, so the rule reads the same wherever it lands.
     for hint in (appmod.FRONT_AGENT_HINT, appmod.PROACTIVE_HINT):
         assert workers.ORCHESTRATION_HINT in hint and workers.OBSERVABILITY_HINT in hint

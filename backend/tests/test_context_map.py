@@ -109,35 +109,33 @@ def test_map_fits_its_share_and_small_cap_trims(big: W) -> None:
 
 def test_cap_tokens() -> None:
     shares = limits.context_shares(128000)
-    pool = shares["memories"] + shares["chunks"] + shares["graph"]
-    assert cm.cap_tokens(shares, {"memories": int(pool * limits.MAP_SHRINK_AT) + 1, "chunks": 0, "graph": 0}) == (limits.MAP_SHRUNK_TOKENS, True)
-    assert cm.cap_tokens(shares, {"memories": shares["memories"], "chunks": shares["chunks"], "graph": 0}) == (limits.MAP_SHRUNK_TOKENS, True)
-    assert cm.cap_tokens(shares, {"memories": 0, "chunks": 0, "graph": 0}) == (shares["map"], False)
-    assert cm.cap_tokens(shares) == (shares["map"], False)
+    assert cm.cap_tokens(shares) == min(shares["map"], limits.MAP_HARD_CEILING_TOKENS)
 
 
-def test_map_shrinks_when_retrieval_fills_its_shares(big: W) -> None:
+def test_map_does_not_follow_retrieval_volume(big: W) -> None:
+    """The map is in the cached prefix: a turn that retrieves a lot must not change it, or the next quiet turn misses the cache."""
     mems = [{"id": str(i), "content": f"note {i} " + "x" * 200, "project_id": None} for i in range(300)]
     hits = [{"chunk_id": f"c{i}", "document_id": f"d{i}", "name": f"f{i}", "idx": 0, "text": "y" * 1000, "source": "file"} for i in range(60)]
-    _, used = big.ctx(memory_hits=mems, doc_hits=hits)
-    assert used["map"]["shrunk"] is True
-    assert 0 < used["map"]["tokens"] <= limits.MAP_SHRUNK_TOKENS
+    _, busy = big.ctx(memory_hits=mems, doc_hits=hits)
     _, calm = big.ctx()
-    assert calm["map"]["shrunk"] is False
+    assert busy["map"]["text"] == calm["map"]["text"]
+    assert busy["stable_system"] == calm["stable_system"]
 
 
 # ---------------------------------------------------------------- (b) ranking
-def test_files_ranked_pinned_then_newest(w: W) -> None:
+def test_files_ranked_pinned_then_newest_created(w: W) -> None:
     old_pin = w.docs.create("Old pinned", "x")
     old_star = w.docs.create("Old starred", "x")
     new = [w.docs.create(f"New {i}", "x") for i in range(3)]
     w.docs.update_meta(old_pin["id"], {"pinned": True})
     w.docs.update_meta(old_star["id"], {"starred": True})
-    w.set("docs", old_pin["id"], updated_at=100.0)
-    w.set("docs", old_star["id"], updated_at=200.0)
+    w.set("docs", old_pin["id"], created_at=100.0)
+    w.set("docs", old_star["id"], created_at=200.0)
     for i, d in enumerate(new):
-        w.set("docs", d["id"], updated_at=10_000.0 + i)
+        w.set("docs", d["id"], created_at=10_000.0 + i)
     text, _ = cm.build_stable(w.db, project_id=None, switches=cm.resolve_switches({}), cap=5000)
+    w.set("docs", new[0]["id"], updated_at=99_999.0)  # an edit does not move a doc or change the text
+    assert cm.build_stable(w.db, project_id=None, switches=cm.resolve_switches({}), cap=5000)[0] == text
     ids = [ln.split(" ")[0] for ln in lines_of(text, "doc:")]
     assert ids[:2] == [f"doc:{old_star['id']}", f"doc:{old_pin['id']}"] or ids[:2] == [f"doc:{old_pin['id']}", f"doc:{old_star['id']}"]
     assert ids[2:] == [f"doc:{d['id']}" for d in reversed(new)]

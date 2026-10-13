@@ -21,7 +21,10 @@ RULES: dict[str, tuple[re.Pattern[str], str]] = {
     "email": (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "[email]"),
     "card": (re.compile(r"\b(?:\d[ -]*?){13,19}\b"), "[card-number]"),
     "ssn": (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[ssn]"),
-    "token": (re.compile(r"\b(?:sk|pk|rk|api|key|tok|ghp|gho|ghu|ghs|ghr|xox[baprs])[-_][A-Za-z0-9_-]{12,}\b", re.I), "[token]"),
+    # After the plain-word prefixes (api, key, tok) the tail must hold a digit: real keys do, and snake_case
+    # names like api_request_handler or KEY_PREFIX_LENGTH do not.
+    "token": (re.compile(r"\b(?:(?:sk|pk|rk|ghp|gho|ghu|ghs|ghr|xox[baprs])[-_]|(?:api|key|tok)[-_](?=[A-Za-z0-9_-]*\d))"
+                         r"[A-Za-z0-9_-]{12,}\b", re.I), "[token]"),
     "aws_key": (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[aws-key]"),
     "github_pat": (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"), "[github-pat]"),
     "google_api": (re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b"), "[google-key]"),

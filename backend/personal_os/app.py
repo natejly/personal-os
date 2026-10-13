@@ -232,6 +232,10 @@ plans = Plans(db)
 # Active chat streams so they can be aborted from the client. A Run when the reply is on the bus
 # (stop goes through the bus, which also wakes the provider read); a bare Event for a stream with no run.
 _active: dict[str, asyncio.Event | Run] = {}
+# Per conversation: the tokens a request carries beyond build_context's estimate (tool schemas and the hints), as the
+# last turn measured them. History compaction runs before this turn's tools are known, so that figure stands in.
+# ponytail: one int per chat for the process lifetime, 0 after a restart until the chat's next turn.
+_request_extra: dict[str, int] = {}
 # Pending tool-call approvals: call_id -> Future[decision]. The durable record is the approvals table; this is
 # only how POST /approvals wakes the run that is waiting in this process.
 _approvals: dict[str, asyncio.Future] = {}
@@ -1482,9 +1486,12 @@ NO_EMOJI_HINT = "No emoji in replies, documents or messages unless asked."
 # Static, so it sits in the cached prefix: the map itself is built by context_map.py.
 MAP_HINT = "The workspace map lists what exists; open an item with its tool before relying on it."
 
-TOOLS_HINT = ("Use tools when they would make the answer more accurate, current or grounded in the user's data. "
-              "Be direct: when what is already in front of you answers the question, skip them. "
-              + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT + " " + MAP_HINT + " " + FENCE_RULE)
+_TOOLS_USE = ("Use tools when they would make the answer more accurate, current or grounded in the user's data. "
+              "Be direct: when what is already in front of you answers the question, skip them. ")
+TOOLS_HINT = _TOOLS_USE + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT + " " + MAP_HINT + " " + FENCE_RULE
+# Sent instead when an agent-stance hint (FRONT_AGENT_HINT / PROACTIVE_HINT) goes too: those carry the orchestration
+# and observability rules themselves, and a rule said twice is only tokens.
+TOOLS_HINT_WITH_STANCE = _TOOLS_USE + MAP_HINT + " " + FENCE_RULE
 # The agent stance for an ordinary chat (desks and scheduled runs carry their own). Text only: the leash is the
 # alwaysAsk list and the approval cards, so the model is told to act and let the app stop it where a card is due.
 PROACTIVE_HINT = (  # chats that cannot delegate (a persona without the hand-off tools); a delegating chat gets FRONT_AGENT_HINT
@@ -1928,11 +1935,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         last_u = max((i for i, m in enumerate(prior) if m["role"] == "user"), default=len(prior))
         prior = prior[:last_u]
     rq = str((body.wake or {}).get("title") or "background work") if is_wake else retrieval_query(prior, user_text)
-    # Each lookup may wait on the embedding route (and memory on the reranker): run them side by side, not one by one.
-    doc_hits, qvec = await asyncio.gather(_doc_hits(conv["project_id"], rq, cfg, conv["settings"]), _query_vec(rq, cfg, conv["settings"]))
     win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))  # every context block is a share of it
-    memory_hits, graph_hits = await asyncio.gather(_memory_hits(conv["project_id"], rq, cfg, conv["settings"], qvec),
-                                                   _graph_hits(conv["project_id"], rq, cfg, conv["settings"], qvec))
+    # One query embedding for all three, then the three lookups side by side: they all sit before the first token.
+    qvec = await _query_vec(rq, cfg, conv["settings"])
+    doc_hits, memory_hits, graph_hits = await asyncio.gather(
+        _doc_hits(conv["project_id"], rq, cfg, conv["settings"], qvec),
+        _memory_hits(conv["project_id"], rq, cfg, conv["settings"], qvec),
+        _graph_hits(conv["project_id"], rq, cfg, conv["settings"], qvec))
     system, used = build_context(
         memories=memories, graph=graph, documents=documents, doc_hits=doc_hits,
         memory_hits=memory_hits, graph_hits=graph_hits,
@@ -1949,14 +1958,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # The summarizer call can take a while. When it is about to run, the reply row is opened first so the transcript
     # can say what is happening (a `status` event); a turn that does not compact is unchanged.
     pre_am: dict[str, Any] | None = None
-    if compaction.needs_compaction(compactor, convos, cfg, conv_id, used["tokens_estimate"], window=win):
+    ctx_tokens = used["tokens_estimate"]
+    req_tokens = ctx_tokens + _request_extra.get(conv_id, 0)  # the whole request, not just system + history
+    if compaction.needs_compaction(compactor, convos, cfg, conv_id, req_tokens, window=win):
         pre_am = regen_am or convos.add_message(conv_id, "assistant", "", model=model, variant_of=carried_root)
         _bind_stop(pre_am["id"], stop, run)
         yield "assistant_message", {**pre_am, "context_used": cite_slim(used)}
         yield "status", {"id": pre_am["id"], "kind": "compacting"}
     try:
         history, cinfo = await compaction.prepare_history(compactor, convos, cfg, providers.tier_model(cfg, "medium"), conv_id,
-                                                          used["tokens_estimate"], window=win, cancel=stop)
+                                                          req_tokens, window=win, cancel=stop)
     except asyncio.CancelledError:
         if pre_am:
             _active.pop(pre_am["id"], None)
@@ -2307,7 +2318,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
         fence_nonce = secrets.token_hex(8)  # per run: untrusted results are fenced with an id the page cannot guess
         front_hint = bool(tool_schemas) and _front() and any(s["function"]["name"] == "delegate" for s in tool_schemas)
-        tools_hint = (TOOLS_HINT + ("\n" + PLAN_HINT if not front_hint and any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
+        stance_hint = FRONT_AGENT_HINT if front_hint else PROACTIVE_HINT if tool_schemas and not desk and not proposal_only(run) else ""
+        tools_hint = ((TOOLS_HINT_WITH_STANCE if stance_hint else TOOLS_HINT)
+                      + ("\n" + PLAN_HINT if not front_hint and any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
         if any(s["function"]["name"] in ("save_memory", "search_memory") for s in tool_schemas):
             tools_hint += "\n" + MEMORY_HINT
         if mcp_defer:
@@ -2329,7 +2342,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # turn (deferred or not). Kept with tools_hint so it stays in the cacheable prefix.
             tools_hint = "\n\n".join(p for p in (tools_hint, _mcp_server_notes(set(mcp_modes))) if p)
         hints = (NO_EMOJI_HINT, RENDER_HINT, tools_hint,
-                 FRONT_AGENT_HINT if front_hint else PROACTIVE_HINT if tool_schemas and not desk and not proposal_only(run) else "",
+                 stance_hint,
                  _agents_hint(modes, front=front_hint), _job_hint(run),
                  job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
@@ -2350,6 +2363,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             system = "\n\n".join(p for p in (system, *hints, inputs_block, map_block, _today_hint()) if p)
         used["system_prompt"] = system
         used["tokens_estimate"] = estimate_tokens(system)
+        _request_extra[conv_id] = used["tokens_estimate"] - ctx_tokens + (estimate_tokens(json.dumps(tool_schemas)) if tool_schemas else 0)
         run_notes: list[dict[str, Any]] = []  # system notes that follow the history, whichever history it is
         if parked_note:
             run_notes.append({"role": "system", "content": parked_note})
@@ -2403,7 +2417,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         stop_text: str | None = None
         blocked: set[str] = set()
         _round = 0
-        seen_call_ids: set[str] = set()  # a provider restarts its call numbering every round; ids stay unique per reply
+        # A provider restarts its call numbering every round (and every turn): ids stay unique against the replayed
+        # history too, since one request must not carry two calls with the same id.
+        seen_call_ids: set[str] = {tc["id"] for m in history for tc in (m.get("tool_calls") or []) if tc.get("id")}
         quiet_retries = 0  # silent retries of an incomplete or empty round: at most one per reply
         cut_recoveries = 0  # rounds whose tool calls were cut off at the output limit
         seen_ids = set(cinfo.get("row_ids") or [])  # rows the context was built from; a steer in it is not sent twice
@@ -2708,7 +2724,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # past that size the provider's time to first token is what a tool round costs. Handles stay readable.
             n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), win,
                                                          float(cfg.get("microAt", 0.25)),
-                                                         at_tokens=_int_setting(cfg, "microAtTokens", limits.MICRO_AT_TOKENS))
+                                                         at_tokens=_int_setting(cfg, "microAtTokens", limits.MICRO_AT_TOKENS),
+                                                         fixed_tokens=estimate_tokens(json.dumps(tool_schemas)) if tool_schemas else 0)
             if n_cleared:
                 mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
                 tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})
@@ -6328,13 +6345,13 @@ class ContextPreviewIn(BaseModel):
     conv_settings: dict[str, Any] = {}
 
 
-async def _doc_hits(project_id: str | None, query: str, cfg: dict[str, Any], conv_settings: dict[str, Any]) -> list[dict[str, Any]] | None:
+async def _doc_hits(project_id: str | None, query: str, cfg: dict[str, Any], conv_settings: dict[str, Any], qvec: Any = None) -> list[dict[str, Any]] | None:
     """Pre-computed excerpts for build_context (which is sync). None = let it fall back to BM25."""
     if not conv_settings.get("useDocuments", True):
         return None
     try:
         srcs = ("files", "docs") if cfg.get("useDocsInContext", True) else ("files",)
-        return await retriever.search(project_id, query, cfg, sources=srcs)
+        return await retriever.search(project_id, query, cfg, sources=srcs, query_vec=qvec, budget=memory_limits.QUERY_TIMEOUT)
     except Exception:  # noqa: BLE001 - retrieval must never break a reply
         log.exception("retrieval failed; falling back to keyword search")
         return None
@@ -6344,8 +6361,8 @@ _UNSET: Any = object()  # "compute the query vector yourself"
 
 
 async def _query_vec(query: str, cfg: dict[str, Any], conv_settings: dict[str, Any]) -> Any:
-    """The turn's query embedding, computed once for memory and graph retrieval. None when neither is on or embeddings are off."""
-    if not (conv_settings.get("useMemory", True) or conv_settings.get("useGraph", True)):
+    """The turn's query embedding, computed once for document, memory and graph retrieval. None when none is on or embeddings are off."""
+    if not any(conv_settings.get(k, True) for k in ("useDocuments", "useMemory", "useGraph")):
         return None
     return await memory_index.query_vec(cfg, query)
 
@@ -6389,7 +6406,7 @@ async def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
     qvec = await _query_vec(body.query, cfg, conv_settings)
     _, used = build_context(
         memories=memories, graph=graph, documents=documents, project=project,
-        doc_hits=await _doc_hits(sid(body.project_id), body.query, cfg, conv_settings), project_id=sid(body.project_id),
+        doc_hits=await _doc_hits(sid(body.project_id), body.query, cfg, conv_settings, qvec), project_id=sid(body.project_id),
         memory_hits=await _memory_hits(sid(body.project_id), body.query, cfg, conv_settings, qvec),
         graph_hits=await _graph_hits(sid(body.project_id), body.query, cfg, conv_settings, qvec),
         query=body.query, settings=cfg, conv_settings=conv_settings,

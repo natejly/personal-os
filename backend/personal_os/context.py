@@ -218,7 +218,7 @@ def page_block(page: dict[str, Any]) -> str:
     return "\n\n".join(lines)
 
 
-VOLATILE_HEADER = "## Context for this turn"
+VOLATILE_HEADER = limits.VOLATILE_HEADER
 
 
 def layout_messages(system_stable: str, volatile: list[str], history: list[dict[str, Any]]) -> list[dict[str, Any]]:

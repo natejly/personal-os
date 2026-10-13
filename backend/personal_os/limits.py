@@ -178,3 +178,6 @@ def context_shares(window: int) -> dict[str, int]:
     """Tokens each injected context block may take in a `window`-token context. A window past CONTEXT_WINDOW_FALLBACK
     does not buy bigger blocks: they are re-sent (mostly uncached) every turn."""
     return {k: int(min(window, CONTEXT_WINDOW_FALLBACK) * r) for k, r in CONTEXT_SHARES.items()}
+
+# Heading of the per-turn retrieval system message (context.layout_messages); llm.py needs it without importing context.
+VOLATILE_HEADER = "## Context for this turn"

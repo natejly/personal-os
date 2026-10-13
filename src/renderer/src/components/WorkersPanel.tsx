@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react'
 import { RotateCcw, Square } from '../icons'
 import type { WorkerInfo } from '@shared/types'
 import { api } from '../lib/api'
-import { useStore, useConversation, useWorkerFace, useWorkers } from '../store'
+import { useStore, useConversation, useWorkerFace, useWorkers, useChatFaceById, useStreamingMessageId } from '../store'
+import TraceView from './TraceView'
 import Face from './Face'
 import WorkerChat from './WorkerChat'
 import { workersCardShown } from '../lib/statusChrome'
@@ -15,6 +16,31 @@ const TONE: Record<WorkerInfo['status'], string> = { queued: '', running: 'worki
 
 function WorkerFace({ w }: { w: WorkerInfo }): JSX.Element {
   return <Face {...useWorkerFace(w)} status={w.status === 'awaiting_approval' ? 'needs_approval' : w.status} size={16} />
+}
+
+/** The main agent's row: unfolds the steps of the chat's latest reply (the streaming one while it runs). */
+function MainAgentRow({ conversationId }: { conversationId: string }): JSX.Element {
+  const [on, setOn] = useState(false)
+  const face = useChatFaceById(conversationId)
+  const streamingId = useStreamingMessageId(conversationId)
+  const msg = useConversation(conversationId)?.messages?.findLast((m) => m.id === streamingId || m.trace?.length)
+  const spans = msg?.trace ?? []
+  return (
+    <li className={`worker-row ${on ? 'on' : ''}`}>
+      <div className="worker-line">
+        <button className="worker-open" aria-expanded={on} title={on ? 'Hide steps' : 'Show steps'} onClick={() => setOn((v) => !v)}>
+          <Face {...face} status={streamingId ? 'streaming' : 'idle'} size={16} />
+          <span className="worker-title">Main agent</span>
+          <small>{streamingId ? 'working' : ''}</small>
+        </button>
+      </div>
+      {on && (
+        <div className="worker-chat">
+          {spans.length ? <div className="worker-steps"><TraceView spans={spans} live={!!streamingId && msg?.id === streamingId} model={msg?.model ?? null} reasoning={msg?.reasoning} /></div> : <p className="muted small">No steps yet.</p>}
+        </div>
+      )}
+    </li>
+  )
 }
 
 /**
@@ -64,6 +90,7 @@ export default function WorkersPanel({ conversationId: focusId }: { conversation
       </header>
       {open && (
         <ul className="plan-steps worker-list">
+          {conversationId && <MainAgentRow conversationId={conversationId} />}
           {shown.map((w) => {
             const a = workerActions(w)
             const on = unfolded === w.id

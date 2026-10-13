@@ -3029,6 +3029,11 @@ select:focus-visible {
 .subagent-panel .worker-chat { flex: 1; padding: 0 20px 14px; }
 .subagent-panel .worker-chat-log { max-height: none; flex: 1; }
 .worker-composer { margin: 0; }
+.worker-panel { max-height: 60vh; overflow-y: auto; }
+.worker-steps { max-height: 40vh; overflow-y: auto; min-height: 0; }
+.subagent-panel .worker-steps { max-height: 30vh; }
+.trace-thinking { margin: 4px 0 8px; }
+.trace-thinking p { margin: 4px 0 0; white-space: pre-wrap; }
 .user-from { display: flex; align-items: center; gap: 6px; }
 .worker-approval { display: flex; align-items: center; gap: 8px; padding-left: 36px; color: var(--text-muted); }
 .worker-approval span { flex: 1; min-width: 0; }

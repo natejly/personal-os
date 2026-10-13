@@ -261,8 +261,9 @@ kbd {
 .app.sidebar-collapsed { grid-template-columns: 0 1fr; }
 /* The page agent is a third column of the shell, not a drawer inside one view: ⌘I opens it over
    Files, Calendar, Todos and the canvas alike. */
-.app.page-agent-open { grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--page-agent-w); }
-.app.page-agent-open.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr) var(--page-agent-w); }
+/* The agent column gives way (down to its 280px minimum) so the view between keeps at least 420px. */
+.app.page-agent-open { grid-template-columns: var(--sidebar-w) minmax(0, 1fr) min(var(--page-agent-w), max(280px, 100vw - var(--sidebar-w) - 420px)); }
+.app.page-agent-open.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr) min(var(--page-agent-w), max(280px, 100vw - 420px)); }
 .app.loading { background: var(--bg); }
 
 /* ---------- Sidebar ---------- */

@@ -9,7 +9,6 @@ import ApprovalHistory from './ApprovalHistory'
 /** The grants listing also carries agent tool maps and chats that skip their cards (newer than the shared type). */
 type Grants = PermissionGrants & {
   agent_overrides?: { agent_id: string; title: string; tool: string; mode: ToolOverride }[]
-  chat_skip?: { conversation_id: string; title: string }[]
 }
 
 const without = <T,>(m: Record<string, T> | undefined, k: string): Record<string, T> =>

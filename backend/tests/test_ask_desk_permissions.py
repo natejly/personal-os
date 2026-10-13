@@ -69,7 +69,7 @@ def _fresh(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
     FRONT.clear()
     REVIEWED.clear()
     monkeypatch.setattr(llm, "stream_chat", _fake)
-    appmod.db.set_settings({"permissionMode": "manual", "workspaceRoots": [], "tools": {}, "permissionRules": {"allow": [], "ask": [], "deny": []}})
+    appmod.db.set_settings({"permissionMode": "manual", "tools": {}, "permissionRules": {"allow": [], "ask": [], "deny": []}})
 
 
 def wait(pred: Callable[[], Any], what: str, timeout: float = 10.0) -> Any:

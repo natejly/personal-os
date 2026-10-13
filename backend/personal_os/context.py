@@ -216,15 +216,15 @@ def page_block(page: dict[str, Any]) -> str:
 VOLATILE_HEADER = "## Context for this turn"
 
 
-def layout_messages(system_stable: str, volatile: list[str], history: list[dict[str, Any]], cache_layout: bool = True) -> list[dict[str, Any]]:
+def layout_messages(system_stable: str, volatile: list[str], history: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The messages sent to the model: a system prefix that never changes between turns, then history,
     then the per-turn retrieval blocks as their own system message just before the newest user message.
 
     Provider prefix caches match from the first token, so anything query-dependent has to come after
-    everything that can be reused. With `cache_layout` off the blocks stay in one system message, as before.
+    everything that can be reused. With no volatile blocks the prefix is the whole system message.
     """
     vol = [v for v in volatile if v]
-    if not cache_layout or not vol:
+    if not vol:
         return [{"role": "system", "content": "\n\n".join([p for p in [system_stable, *vol] if p])}] + list(history)
     msgs: list[dict[str, Any]] = [{"role": "system", "content": system_stable}] + list(history)
     at = len(msgs) - 1 if msgs[-1].get("role") == "user" else len(msgs)

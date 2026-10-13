@@ -42,7 +42,7 @@ DB = Database(tempfile.mkdtemp(prefix="snapdb-"))
 store = RunStore(DB)
 ROOT = Path(tempfile.mkdtemp(prefix="snaproot-")).resolve()
 DESKS = Path(tempfile.mkdtemp(prefix="snapdesk-")).resolve()
-SETTINGS: dict[str, Any] = {"workspaceRoots": [str(ROOT)]}  # a legacy setting: nothing reads it for scope
+SETTINGS: dict[str, Any] = {}
 S = Snapshots(DB, DB.data_dir / "snapshots", lambda: SETTINGS, lambda d: DESKS / d)
 
 check(sn.available(), "git is present")

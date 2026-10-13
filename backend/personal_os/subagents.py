@@ -16,7 +16,7 @@ The rules the rest of the app relies on:
     transcript stays behind a handle. Taint reaches the parent through the tools' `taints` flag.
   - a child's tokens and cost are forwarded up the chain for display only. Nothing caps its rounds: it ends when it stops
     calling tools, a stuck breaker fires (repeated identical calls, repeated refusals, the stuck detector), it hangs
-    (subagentStaleSeconds / subagentToolSeconds), or the user stops it.
+    (SUBAGENT_STALE_SECONDS / SUBAGENT_TOOL_SECONDS), or the user stops it.
   - approval cards a child raises are published on the parent run's stream, labelled with the child.
   - liveness is on the run row: while a child makes progress (model output, a tool call, or output from a shell job its
     run owns) its agent_runs.updated_at is bumped at most every RUN_HEARTBEAT_SECONDS. A child that ends early carries
@@ -672,7 +672,7 @@ class Subagents:
         want = set(role.tools) if role.tools else set(parent_modes)  # no tool list: the parent's whole set
         if narrow:
             want &= set(narrow)
-        max_depth = self._int("subagentMaxDepth")
+        max_depth = limits.SUBAGENT_MAX_DEPTH
         out: dict[str, str] = {}
         for name in want:
             spec = self.toolbox.specs.get(name)
@@ -735,8 +735,8 @@ class Subagents:
         if not task:
             return tool_error("agent_spawn needs a task.", field="task", example={"task": "Summarize what the docs say about X"})
         depth = int(ctx.get("depth") or 0)
-        if kind == "subagent" and depth >= self._int("subagentMaxDepth"):  # a worker is depth 1 whatever the setting; its own children obey it
-            return tool_error(f"Subagents may nest at most {self._int('subagentMaxDepth')} deep; do this task yourself.")
+        if kind == "subagent" and depth >= limits.SUBAGENT_MAX_DEPTH:  # a worker is depth 1 whatever the setting; its own children obey it
+            return tool_error(f"Subagents may nest at most {limits.SUBAGENT_MAX_DEPTH} deep; do this task yourself.")
         parent_id = str(ctx.get("agent_run_id") or "")
         resume = str(a.get("resume_id") or "")
         prior: Child | None = None
@@ -1041,7 +1041,7 @@ class Subagents:
             window = compaction.window_for(cfg, ch.model, known)
             # Once old tool output would free real room, it shrinks to a stub (the full text stays behind its handle).
             compaction.microcompact(ch.messages, int(cfg.get("microKeep") or 3), window, float(cfg.get("microAt") or 0.5),
-                                  at_tokens=int(cfg.get("microAtTokens") or limits.MICRO_AT_TOKENS))
+                                  at_tokens=limits.MICRO_AT_TOKENS)
             text, end = await self._model_round(ch, schemas)
             if ch.halt_reason:
                 raise _Halt(ch.halt_reason)
@@ -1626,7 +1626,7 @@ class Subagents:
 
     async def _watch(self) -> None:
         while True:
-            idle, in_tool = self._float("subagentStaleSeconds"), self._float("subagentToolSeconds")
+            idle, in_tool = float(limits.SUBAGENT_STALE_SECONDS), float(limits.SUBAGENT_TOOL_SECONDS)
             await asyncio.sleep(max(0.05, min(5.0, (idle or 5.0) / 4)))
             t = time.monotonic()
             live = self.running()

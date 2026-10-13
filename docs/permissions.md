@@ -18,14 +18,12 @@ It holds only what the user changed; `permissions.DEFAULTS` fills in the rest on
 | `tools` | Global mode per tool: on, ask or off |
 | `alwaysAsk` | External and scheduling tools that show a card in Auto and Manual, not in Allow everything |
 | `permissionRules` | `{allow, ask, deny}` lists of `Tool(pattern)` rules; deny beats ask beats allow |
-| `skipPermissions` | Chats skip ordinary cards (a chat's own switch wins) |
 | `unattendedApprovals` | A job run that would ask: `deny` (refuse) or `ask` (park a card) |
-| `autoReview`, `autoReviewModel` | Review gate: a second model looks at a call before it runs unasked |
+| `autoReviewModel` | Review gate: a second model looks at a call before it runs unasked |
 | `fetchAllowlist` | Hosts `fetch_url` may read after a reply touched untrusted content |
 | `browserAllowlist` | Hosts the agent's browser may open by typed URL after untrusted content (it also honours `fetchAllowlist`) |
 | `shellAllowedDomains` | Hosts the shell's and sandbox's egress proxy let through, beside package registries |
 | `docEditMode` | `review` (diff to accept) or `apply` |
-| `workspaceRoots` | Folders file tools write in without asking |
 | `shellNetwork`, `shellRegistryAccess` | Network for shell commands |
 | `deskShellAuto`, `deskDoneGate`, `deskSelfReview` | What a desk may do unasked, and what it must pass to finish |
 | `browserEnabled` | Whether desks get a browser |

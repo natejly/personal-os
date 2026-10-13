@@ -11,6 +11,8 @@ VECTOR_CAP = 5000        # rows the brute-force cosine ranker scans, newest firs
 QUERY_TIMEOUT = 2.0      # seconds a chat turn waits for the query embedding before going lexical-only
 INDEX_BATCH = 200        # memories embedded per index() call, so a backfill never holds the route for long
 QUERY_CHARS = 2000       # characters of the query that are embedded; the head of a message carries its topic
+EXPAND_TIMEOUT = 4.0     # seconds a turn waits for keyword variants (query_expand) when there is no query vector; then plain keywords
+W_EXPAND = 0.6           # the variants' keyword ranking against the query's own (1.0): a paraphrase hit counts for less than a literal one
 # RRF weights. A lexical or semantic match is the evidence; graph seeding is weaker (a label hit, not the row's
 # meaning); recency only orders rows that already matched and never brings one in by itself.
 W_BM25 = 1.0

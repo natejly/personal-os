@@ -9,7 +9,7 @@ const touch = (ws, cmd) => `!!tool shell_run ${JSON.stringify({ command: cmd, cw
 const card = (page) => page.getByRole('group', { name: 'Run command' })
 const seed = async (grain, extra = {}) => {
   const ws = homeScratch()
-  await grain.api('/settings', { method: 'PUT', body: { workspaceRoots: [ws], toolDeferAbove: 0, ...extra } })
+  await grain.api('/settings', { method: 'PUT', body: { toolDeferAbove: 0, ...extra } })
   return ws
 }
 
@@ -97,20 +97,6 @@ test('the opaque and the hardline cases: substitutions always ask, rm -rf / is r
     expect(await pending(grain)).toHaveLength(0)
     const ev = await grain.api('/permissions/evaluate', { method: 'POST', body: { command: 'rm -rf /' } })
     expect(ev.hardline).toBe(true)
-  } finally { rmScratch(ws) }
-})
-
-test('skip permissions: ordinary tools run unasked, but a shell command and a forced call still get a card', async ({ grain }) => {
-  const { page } = grain
-  const ws = await seed(grain, { skipPermissions: true })
-  try {
-    await newChat(page)
-    await say(page, touch(ws, 'touch skipped.txt'))
-    await expect(card(page)).toBeVisible({ timeout: 90_000 })
-    expect(existsSync(join(ws, 'skipped.txt'))).toBe(false)
-    await card(page).getByRole('button', { name: 'Deny', exact: true }).click()
-    await expect.poll(async () => (await pending(grain)).length).toBe(0)
-    expect(realErrors(grain)).toEqual([])
   } finally { rmScratch(ws) }
 })
 

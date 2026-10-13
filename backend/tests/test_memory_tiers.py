@@ -24,7 +24,7 @@ from personal_os.embed import Embedder  # noqa: E402
 from personal_os.memory_index import MemoryIndex  # noqa: E402
 from personal_os.repos import Documents, Graph, Memories, Projects  # noqa: E402
 
-CFG = {"embeddingModel": "fake-embed", "hybridRetrieval": True}
+CFG = {"embeddingModel": "fake-embed"}
 VEC: dict[str, list[float]] = {}  # text -> its fixed embedding
 
 
@@ -325,7 +325,7 @@ def test_near_duplicate_threshold_sits_between_reworded_and_different_fact(env) 
     assert dup and dup["id"] == stored["id"]  # the pinned twin is never returned, though its vector is closer
     assert asyncio.run(idx.near_duplicate(CFG, None, "User prefers answers as a table")) is None
     assert asyncio.run(idx.near_duplicate({"embeddingModel": ""}, None, "Keep answers below 100 words")) is None
-    assert asyncio.run(idx.near_duplicate({**CFG, "hybridRetrieval": False}, None, "Keep answers below 100 words")) is None
+    assert asyncio.run(idx.near_duplicate({**CFG, "retrievalMode": "bm25"}, None, "Keep answers below 100 words")) is None
     memories.update(stored["id"], {"expires_at": PAST})
     assert asyncio.run(idx.near_duplicate(CFG, None, "Keep answers below 100 words")) is None  # expired rows do not count
 

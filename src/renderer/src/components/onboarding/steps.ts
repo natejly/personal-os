@@ -1,7 +1,7 @@
 /** Pure logic of the first-run wizard: which step is next, what a step needs, what a provider changes. */
 
-export type StepId = 'welcome' | 'provider' | 'key' | 'test' | 'search' | 'google' | 'about' | 'permissions' | 'done'
-export const STEPS: StepId[] = ['welcome', 'provider', 'key', 'test', 'search', 'google', 'about', 'permissions', 'done']
+export type StepId = 'welcome' | 'provider' | 'key' | 'done'
+export const STEPS: StepId[] = ['welcome', 'provider', 'key', 'done']
 
 /** Mirrors GET /setup/providers. */
 export interface ProviderInfo {
@@ -12,9 +12,9 @@ export interface ProviderInfo {
   keyUrl: string | null
   defaultModel: string
   models: string[]
-  /** The provider's default reranker; absent when it has no rerank route. */
   /** The provider's default model per tier; absent when it has none. */
   tiers?: Partial<Record<'high' | 'medium' | 'low', string>>
+  /** The provider's default reranker; absent when it has no rerank route. */
   rerankModel?: string
   note: string | null
 }
@@ -42,13 +42,8 @@ export interface WizardState {
   baseUrl: string
   apiKey: string
   model: string
-  /** Free text from the about step, saved as one pinned memory. Empty means the user skipped it. */
-  about: string
-  /** The search (embedding) model picked on the search step; empty skips it. */
-  embedding: string
-  /** The search model is already set, so the search step is skipped: it cannot be changed once set. */
-  searchLocked: boolean
-  test: { state: 'idle' | 'testing' | 'ok' | 'fail'; error?: string; latencyMs?: number; models?: string[] }
+  /** The key step's connection test. `models` is whatever the provider listed. */
+  test: { state: 'idle' | 'testing' | 'fail'; error?: string; latencyMs?: number; models?: string[] }
 }
 
 export type WizardAction =
@@ -57,9 +52,6 @@ export type WizardAction =
   | { type: 'pick'; provider: ProviderInfo }
   | { type: 'field'; patch: Partial<Pick<WizardState, 'baseUrl' | 'apiKey' | 'model'>> }
   | { type: 'test'; test: WizardState['test'] }
-  | { type: 'about'; about: string }
-  | { type: 'embedding'; embedding: string }
-  | { type: 'searchLocked'; locked: boolean }
   /** The configured setup, applied only while the user has not picked anything yet. */
   | { type: 'seed'; provider: ProviderInfo; baseUrl: string; model: string }
 
@@ -67,7 +59,7 @@ export type WizardAction =
 const EDITABLE_BASE = new Set(['litellm', 'custom', 'ollama'])
 export const showsBaseUrl = (providerId: string | null): boolean => !!providerId && EDITABLE_BASE.has(providerId)
 
-export const initialState = (): WizardState => ({ step: 'welcome', providerId: null, baseUrl: '', apiKey: '', model: '', about: '', embedding: '', searchLocked: false, test: { state: 'idle' } })
+export const initialState = (): WizardState => ({ step: 'welcome', providerId: null, baseUrl: '', apiKey: '', model: '', test: { state: 'idle' } })
 
 /** What the current step still lacks, or null when the user may go on. */
 export function stepBlocker(s: WizardState, provider: ProviderInfo | undefined): string | null {
@@ -77,7 +69,6 @@ export function stepBlocker(s: WizardState, provider: ProviderInfo | undefined):
     if (showsBaseUrl(s.providerId) && !s.baseUrl.trim()) return 'Enter the base URL to continue.'
     if (!s.model.trim()) return 'Pick or type a model to continue.'
   }
-  if (s.step === 'test' && s.test.state !== 'ok') return s.test.state === 'testing' ? 'Testing…' : 'The connection has to work before you continue.'
   return null
 }
 
@@ -94,24 +85,16 @@ export function reduce(s: WizardState, a: WizardAction, provider?: ProviderInfo)
       return { ...s, ...a.patch, test: { state: 'idle' } }
     case 'test':
       return { ...s, test: a.test }
-    case 'about':
-      return { ...s, about: a.about }
-    case 'embedding':
-      return { ...s, embedding: a.embedding }
-    case 'searchLocked':
-      return { ...s, searchLocked: a.locked }
     case 'next': {
       if (stepBlocker(s, provider)) return s
       const i = STEPS.indexOf(s.step)
-      const to = STEPS[i + 1] === 'search' && s.searchLocked ? i + 2 : i + 1
-      return i < STEPS.length - 1 ? { ...s, step: STEPS[to] } : s
+      return i < STEPS.length - 1 ? { ...s, step: STEPS[i + 1] } : s
     }
     case 'back': {
       const i = STEPS.indexOf(s.step)
       // `done` has already saved; nothing to walk back into.
       if (i <= 0 || s.step === 'done') return s
-      const to = STEPS[i - 1] === 'search' && s.searchLocked ? i - 2 : i - 1
-      return { ...s, step: STEPS[to], test: s.step === 'test' ? { state: 'idle' } : s.test }
+      return { ...s, step: STEPS[i - 1], test: { state: 'idle' } }
     }
   }
 }
@@ -128,15 +111,9 @@ export function modelOptions(provider: ProviderInfo | undefined, discovered?: st
 export function firstPrompts(googleConnected: boolean): string[] {
   return [
     'What can you do? Give me a quick tour.',
+    'Ask me a few questions so you can get to know me.',
     ...(googleConnected
       ? ["What is on my calendar today, and what should I prepare for?", 'Summarize the mail I have not read yet.']
       : ['Put three things on my todo list for today.', 'Search the web and tell me something new in my field.'])
   ]
 }
-
-/** The about step writes one memory; this is its text. */
-export const ABOUT_EXAMPLES = [
-  'I am a software engineer. Keep answers short and show code first.',
-  'I run a small design studio with four people.',
-  'I am a student. Explain things plainly and use metric units.'
-]

@@ -30,7 +30,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def make(home: Path, tmp_path: Path, **settings: Any) -> tuple[Toolbox, dict[str, Any]]:
-    cfg: dict[str, Any] = {"workspaceRoots": [str(home / "proj")], **settings}
+    cfg: dict[str, Any] = {**settings}
     ws = Workspace(tmp_path / "data")
     tb = Toolbox(None, None, None, lambda: cfg, workspace=ws)  # type: ignore[arg-type]
     return tb, cfg
@@ -496,7 +496,7 @@ def test_edit_snapshots_for_undo(home: Path, tmp_path: Path) -> None:
 
 
 def test_desk_workspace_is_always_granted(home: Path, tmp_path: Path) -> None:
-    tb, _ = make(home, tmp_path, workspaceRoots=[])
+    tb, _ = make(home, tmp_path)
     root = tb.workspace.ensure("desk1")
     ctx = {"conversation_id": "c1", "desk_id": "desk1"}
     (root / "work" / "n.txt").write_text("hello")

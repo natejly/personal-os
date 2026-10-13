@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os import learn, memory_limits, migrations  # noqa: E402
+from personal_os import learn, limits, memory_limits, migrations  # noqa: E402
 from personal_os.consolidate import Consolidator  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.docs import Docs  # noqa: E402
@@ -136,10 +136,11 @@ class _Tidy:
 
 def _tidy_job() -> learn.LearnJob:
     return learn.LearnJob(conversation_id="c1", message_id="a1", project_id=None, user_text="", assistant_text="",
-                          model="m", settings={"consolidateEvery": 3}, spans=[])
+                          model="m", settings={}, spans=[])
 
 
-def test_tidy_counter_survives_a_relaunch(db) -> None:
+def test_tidy_counter_survives_a_relaunch(db, monkeypatch) -> None:
+    monkeypatch.setattr(limits, "CONSOLIDATE_EVERY", 3)
     tidy, mem = _Tidy(), Memories(db)
 
     def consolidate_on_new_worker() -> None:  # a fresh worker each time: the app was relaunched

@@ -16,20 +16,16 @@
 .ob-privacy svg { flex: none; margin-top: 3px; color: var(--accent-solid); }
 .onboarding label { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; font-size: 13px; }
 .onboarding label > span { color: var(--text-muted); }
+.onboarding .toggle-text b { font-weight: inherit; }
 .onboarding input { background: var(--bg-input); border: 1px solid var(--control-border); border-radius: 8px; padding: 9px 10px; outline: 0; width: 100%; }
-.onboarding textarea { background: var(--bg-input); border: 1px solid var(--control-border); border-radius: 8px; padding: 9px 10px; outline: 0; width: 100%; resize: vertical; font: inherit; color: inherit; }
-.onboarding input:focus, .onboarding textarea:focus { border-color: var(--accent); }
-.ob-examples { display: flex; flex-direction: column; gap: 6px; margin: -4px 0 12px; }
-.ob-examples .ghost-btn { text-align: left; font-size: 12px; color: var(--text-muted); }
+.onboarding input:focus { border-color: var(--accent); }
 .onboarding .link { display: inline-flex; align-items: center; gap: 3px; }
 .ob-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; margin-top: 4px; }
 .ob-card-opt { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; text-align: left; padding: 10px 12px; border-radius: 10px; background: var(--bg-elev); border: 1px solid var(--border); }
 .ob-card-opt:hover { border-color: var(--border-strong); }
 .ob-card-opt.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg-elev)); }
 .ob-card-opt small { color: var(--text-muted); font-size: 12px; line-height: 1.4; }
-.ob-test { min-height: 64px; display: flex; flex-direction: column; justify-content: center; }
-.ob-test p, .onboarding .ob-ok, .ob-error { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 8px; font-size: 14px; line-height: 1.5; }
-.ob-ok { color: var(--ok); }
+.ob-error { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 8px; font-size: 14px; line-height: 1.5; }
 .ob-error { color: var(--danger); }
 .ob-hint { font-size: 12px; color: var(--text-muted); margin: 4px 0 0; }
 .ob-actions { display: flex; gap: 8px; align-items: center; margin-top: 18px; flex-wrap: wrap; }

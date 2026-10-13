@@ -44,20 +44,13 @@ DEFAULTS: dict[str, Any] = {
     # not known safe; "manual" is the per-tool modes, grants and rules alone; "allow_all" runs everything (unsandboxed
     # shell included) with no card at all; only denied calls (hard-deny paths included) are refused.
     "permissionMode": "auto",
-    # Legacy, kept so stored values load and PUT keeps accepting them. skipPermissions and autoReview are no longer read
-    # by any gate (migrate_mode folds an existing install into "auto"); unattendedApprovals is read only in manual mode.
-    "skipPermissions": False,
     # "deny": a job run that would have to ask is refused with a recorded reason instead of waiting for someone.
     "unattendedApprovals": "deny",
-    "autoReview": "off",
     "autoReviewModel": "",  # "" = the fast model, else the extraction model, else the chat model
     # Hosts fetch_url may still read once a reply has touched untrusted content (registrable-suffix match).
     "fetchAllowlist": [],
     # How doc_edit lands. "review" proposes a diff; "apply" writes it.
     "docEditMode": "review",
-    # Legacy: a list of folders the file tools once needed a grant for. The file tools now reach the whole Mac, so nothing
-    # reads it for scope; it is still stored and returned so an older client keeps working.
-    "workspaceRoots": [],
     # Host shell (shell.py): a networked shell run taints the reply, whatever it prints may be third-party text.
     "shellNetwork": False,
     # While shellNetwork is off, outbound connections go through a local allowlisting proxy (egress.py).
@@ -96,14 +89,12 @@ HOST_LISTS = frozenset({"fetchAllowlist", "shellAllowedDomains", "browserAllowli
 CHOICES: dict[str, tuple[str, ...]] = {
     "permissionMode": ("auto", "manual", "allow_all"),
     "unattendedApprovals": ("ask", "deny"),
-    "autoReview": ("off", "risky", "all-writes"),
     "docEditMode": ("review", "apply"),
     "codingAgent": ("any", "opencode", "claude", "pi"),
 }
 CHOICE_ERRORS = {
     "permissionMode": "permissionMode must be 'auto', 'manual' or 'allow_all'",
     "unattendedApprovals": "unattendedApprovals must be 'ask' or 'deny'",
-    "autoReview": "autoReview must be 'off', 'risky' or 'all-writes'",
     "docEditMode": "docEditMode must be 'review' or 'apply'",
     "codingAgent": "codingAgent must be 'any', 'opencode', 'claude' or 'pi'",
 }
@@ -164,7 +155,7 @@ def migrate(c: sqlite3.Connection) -> None:
 
 def migrate_mode(c: sqlite3.Connection) -> None:
     """One-time, idempotent: a store older than version 2, or without a permissionMode, becomes "auto" whatever
-    skipPermissions / autoReview said. _write keeps every other key (workspaceRoots included) and stamps VERSION."""
+    an older install had stored. _write keeps every other key and stamps VERSION."""
     row = c.execute("SELECT value FROM settings WHERE key = ?", (KEY,)).fetchone()
     cur = _json(row[0]) if row else None
     if isinstance(cur, dict) and (cur.get("version") or 0) >= 2 and cur.get("permissionMode") in CHOICES["permissionMode"]:
@@ -229,7 +220,4 @@ def validate(key: str, v: Any, *, cap_modes: Callable[[dict[str, Any]], dict[str
             if h not in hosts:
                 hosts.append(h)
         return hosts
-    if key == "workspaceRoots":
-        if not all(isinstance(x, str) for x in v):
-            raise ValueError("workspaceRoots must be a list of folders")
     return v

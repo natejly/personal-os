@@ -72,6 +72,20 @@ def test_reasoning_content_only_goes_to_models_that_read_it() -> None:
     assert msgs[0]["reasoning_content"] == "think"  # the caller's list is not mutated
 
 
+def test_thinking_off_then_on_keeps_the_echoed_reasoning() -> None:
+    """think -> no-think -> think: reasoning_content rides on the history whatever effort a turn sends."""
+    m = "accounts/fireworks/models/deepseek-v4p1-flash"
+    hist = [{"role": "user", "content": "a"}, {"role": "assistant", "content": None, "reasoning_content": "t1", "tool_calls": [{"id": "1"}]},
+            {"role": "tool", "tool_call_id": "1", "content": "x"}, {"role": "assistant", "content": "hi"}, {"role": "user", "content": "ok"}]
+    assert effort_param(m, "high") == "high"
+    assert effort_param(m, "none") == "none"  # the short turn: no thinking, nothing new to echo
+    hist += [{"role": "assistant", "content": "k"}, {"role": "user", "content": "b"},
+             {"role": "assistant", "content": None, "reasoning_content": "t3", "tool_calls": [{"id": "2"}]}]
+    assert effort_param(m, "high") == "high"
+    wired = llm.wire_messages(m, hist)
+    assert [x.get("reasoning_content") for x in wired if x["role"] == "assistant"] == ["t1", None, None, "t3"]
+
+
 def test_other_models_keep_medium() -> None:
     assert effort_param("glm-5.3", "medium") == "medium"
     assert effort_param("glm-5.3", "xhigh") == "xhigh"

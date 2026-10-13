@@ -13,28 +13,29 @@ _HEAVY = re.compile(r"\b(plan|analy[sz]e|analysis|compare|why|prove|debug|write 
 
 
 def route(text: str, *, attachments: bool = False, prior_tools: bool = False, effort: str = "default",
-          plan_mode: bool = False, fast_model: str = "", default_model: str = "") -> tuple[str, str]:
-    """(model, reason) for one turn. Falls back to the default model when no fast model is configured."""
-    if not fast_model:
-        return default_model, "no fast model"
+          plan_mode: bool = False, fast_model: str = "", default_model: str = "") -> tuple[str, str, bool]:
+    """(model, reason, no_think) for one turn. A short follow-up goes to the fast model; with none distinct from the
+    default model it stays on the default one with the thinking pass off. Only a raised effort (xhigh, max) blocks it."""
     text = (text or "").strip()
-    if effort in ("high", "xhigh", "max"):
-        return default_model, "high reasoning effort"
+    if effort in ("xhigh", "max"):
+        return default_model, "high reasoning effort", False
     if plan_mode:
-        return default_model, "plan mode"
+        return default_model, "plan mode", False
     if text.startswith("/"):
-        return default_model, "slash command"
+        return default_model, "slash command", False
     if attachments:
-        return default_model, "attachments"
+        return default_model, "attachments", False
     if "```" in text:
-        return default_model, "contains code"
+        return default_model, "contains code", False
     if _HEAVY.search(text):
-        return default_model, "asks for analysis"
+        return default_model, "asks for analysis", False
     if len(text) >= SHORT:
-        return default_model, "long message"
+        return default_model, "long message", False
     if prior_tools:
-        return default_model, "follows tool use"
-    return fast_model, "short follow-up"
+        return default_model, "follows tool use", False
+    if not fast_model or fast_model == default_model:
+        return default_model, "short follow-up, thinking off", True
+    return fast_model, "short follow-up", False
 
 
 def wanted(model: str, explicit: str, cfg: dict[str, Any]) -> bool:

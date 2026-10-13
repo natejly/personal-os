@@ -35,7 +35,7 @@ def _hidden(c: sqlite3.Connection):
 
 def test_memory_leaves_the_hidden_list_and_the_rest_stays() -> None:
     c = _db({"hiddenViews": '["memory","library"]', "theme": '"dark"'})
-    assert migrations.run(c) == list(range(V, migrations.latest() + 1))
+    assert migrations.run(c) == [v for v, _n, _s in migrations.MIGRATIONS if v >= V]
     assert _hidden(c) == ["library"]
     assert c.execute("SELECT value FROM settings WHERE key = 'theme'").fetchone()[0] == '"dark"'
     assert migrations.run(c) == []

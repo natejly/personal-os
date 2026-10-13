@@ -42,6 +42,7 @@ from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .kinds import is_internal
 from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_index, has_readable_text, safe_upload_name
 from .consolidate import Consolidator
+from . import about_you
 from . import learn, memory_limits, provider_keys, providers
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
@@ -245,7 +246,8 @@ consolidator = Consolidator(db, memories, graph)
 title_jobs = titles.TitleJobs(convos.get, convos.update, events.publish)
 followup_jobs = followups.FollowupJobs(convos.set_followups, events.publish)
 learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish, consolidator=consolidator,
-                     alive=lambda cid: (c := convos.get(cid, with_messages=False)) is not None and c["settings"].get("learn") is not False, style=style)
+                     alive=lambda cid: (c := convos.get(cid, with_messages=False)) is not None and c["settings"].get("learn") is not False, style=style,
+                     replay_settings=lambda: settings())
 
 
 def queue_style_relearn(project_id: str | None, model: str | None = None) -> None:
@@ -539,6 +541,7 @@ docs.on_chunks = lambda _did: retriever.schedule_docs(settings)
 @app.on_event("startup")
 async def _start_retrieval() -> None:
     retriever.bind_loop(asyncio.get_running_loop())
+    learner.replay()  # exchanges a quit, crash or full queue left in learn_pending
     learner.bind_loop(asyncio.get_running_loop())  # PUT /docs and POST /style/samples queue relearns from the threadpool
     retriever.schedule(settings)  # embed whatever is still waiting; silent when the route is down
     retriever.schedule_docs(settings)
@@ -6478,6 +6481,32 @@ def apply_memory_proposal(id: str) -> dict[str, Any]:
 @app.post("/memories/proposals/{id}/dismiss")
 def dismiss_memory_proposal(id: str) -> dict[str, Any]:
     p = consolidator.dismiss(id)
+    if not p:
+        raise HTTPException(404)
+    return p
+
+
+@app.get("/memories/about-you")
+def get_about_you() -> dict[str, Any]:
+    """The accepted About-you summary (a pinned memory) and the draft waiting for review, if any."""
+    return {"current": about_you.current(consolidator), "pending": about_you.pending(consolidator)}
+
+
+@app.post("/memories/about-you/draft")
+async def draft_about_you() -> dict[str, Any]:
+    """Manual 'Draft About you': queues a proposal only. Nothing reaches a prompt until it is accepted."""
+    cfg = settings()
+    made, reason = await about_you.draft(consolidator, cfg)
+    return {"proposal": made, "reason": reason}
+
+
+class AboutYouAcceptIn(BaseModel):
+    text: str | None = None
+
+
+@app.post("/memories/about-you/{id}/accept")
+def accept_about_you(id: str, body: AboutYouAcceptIn) -> dict[str, Any]:
+    p = about_you.accept(consolidator, id, body.text)
     if not p:
         raise HTTPException(404)
     return p

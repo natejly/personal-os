@@ -103,7 +103,7 @@ def test_migration_drops_exactly_those_tables() -> None:
     c.executescript(OLD_SCHEMA)
     _seed_old_rows(c)
     assert set(DROPPED) <= _tables(c)
-    assert migrations.run(c) == list(range(DROP_V, migrations.latest() + 1))
+    assert migrations.run(c) == [v for v, _n, _s in migrations.MIGRATIONS if v >= DROP_V]
     left = _tables(c)
     assert not set(DROPPED) & left, set(DROPPED) & left
     assert not {n for n in left if n.startswith(("meetings_fts", "meeting_", "activity_"))}, left  # shadow tables too

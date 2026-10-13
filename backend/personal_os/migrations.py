@@ -593,6 +593,12 @@ def _drop_unused_tables_and_settings(c: sqlite3.Connection) -> None:
         c.execute("UPDATE settings SET value = ? WHERE key = 'hiddenViews'", (json.dumps([v for v in views if v != "dashboards"]),))
 
 
+def _learn_pending(c: sqlite3.Connection) -> None:
+    """Auto-learn jobs not yet finished (learn.LearnWorker): ids only, rebuilt from messages on replay."""
+    c.execute("CREATE TABLE IF NOT EXISTS learn_pending (message_id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, "
+              "project_id TEXT, user_message_id TEXT, user_only INTEGER NOT NULL DEFAULT 0, created_at REAL NOT NULL)")
+
+
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
     (2, "messages_fts", _messages_fts),
@@ -631,6 +637,8 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (35, "coding_session_base", _coding_session_base),
     (36, "drop_unused_tables_and_settings", _drop_unused_tables_and_settings),
     (37, "coding_session_events", _coding_session_events),
+    # 38-42 are taken on origin/main; the runner applies any step above user_version, so the gap is harmless.
+    (43, "learn_pending", _learn_pending),
 ]
 
 

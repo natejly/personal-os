@@ -95,6 +95,54 @@ function ProposalRow({ p, byId, labels, onApply, onDismiss }: { p: MemoryProposa
   )
 }
 
+/** The About-you summary: the accepted text, and a drafted replacement the user edits before accepting. It never reaches a prompt until then. */
+function AboutYou({ proposalCount, onChange }: { proposalCount: number; onChange: () => void }): JSX.Element {
+  const [state, setState] = useState<{ current: Memory | null; pending: MemoryProposal | null }>({ current: null, pending: null })
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
+  const load = (): void => {
+    void api.memories.aboutYou().then((s) => { setState(s); setText(s.pending?.payload.text ?? '') }).catch(() => undefined)
+  }
+  useEffect(load, [proposalCount])
+  const draft = async (): Promise<void> => {
+    setBusy(true); setNote('')
+    try {
+      const r = await api.memories.draftAboutYou()
+      setNote(r.reason === 'ok' ? '' : r.reason === 'too_few' ? 'Not enough memories yet.' : r.reason === 'unchanged' ? 'Nothing new to summarise.' : 'Drafting failed.')
+      load(); onChange()
+    } catch { setNote('Drafting failed.') } finally { setBusy(false) }
+  }
+  const decide = async (accept: boolean): Promise<void> => {
+    const p = state.pending
+    if (!p) return
+    if (accept) await api.memories.acceptAboutYou(p.id, text); else await api.memories.dismissProposal(p.id)
+    load(); onChange()
+  }
+  const { current, pending } = state
+  if (!current && !pending && !note) return (
+    <div className="mem-tools">
+      <span className="muted small">A short summary of you, built from your memories. You review it before it is used.</span>
+      <span className="spacer" />
+      <button className="ghost-btn sm" onClick={() => void draft()} disabled={busy}><Sparkles size={13} /> {busy ? 'Drafting…' : 'Draft About you'}</button>
+    </div>
+  )
+  return (
+    <div className="mem-row proposal">
+      <div className="mem-main">
+        <div className="mem-meta"><span className="tag"><User size={10} />About you</span>{pending && <span className="muted">{pending.rationale}</span>}{note && <span className="muted" role="status">{note}</span>}</div>
+        {current && <p className={pending ? 'mem-before' : ''}>{current.content}</p>}
+        {pending && <textarea aria-label="Drafted About you summary" rows={4} value={text} onChange={(e) => setText(e.target.value)} />}
+      </div>
+      <div className="mem-actions">
+        {pending
+          ? <><button className="primary-btn sm" onClick={() => void decide(true)} disabled={!text.trim()}>Accept</button><button className="ghost-btn sm" onClick={() => void decide(false)}>Dismiss</button></>
+          : <button className="ghost-btn sm" onClick={() => void draft()} disabled={busy}><Sparkles size={13} /> {busy ? 'Drafting…' : 'Redraft'}</button>}
+      </div>
+    </div>
+  )
+}
+
 /** A superseded or forgotten memory: struck through, with what replaced it and a way back. */
 function HistoryRow({ m, byId, onRestore }: { m: Memory; byId: Map<string, Memory>; onRestore: () => void }): JSX.Element {
   const next = m.superseded_by ? byId.get(m.superseded_by) : undefined
@@ -222,7 +270,8 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
         <button className="ghost-btn sm" onClick={() => void importMemories()} title={`Add memories from an exported JSON file${targetProject ? ' to this project' : ' to your personal memories'}`}><Upload size={13} /> Import</button>
       </div>
       {focus && <p className="muted small">Showing the {focus.length} memor{focus.length === 1 ? 'y' : 'ies'} from one reply. <button className="link" onClick={() => useStore.setState({ memoryFocus: null })}>Show all</button></p>}
-      {proposals.map((p) => <ProposalRow key={p.id} p={p} byId={byId} labels={labels} onApply={() => void decide(p, true)} onDismiss={() => void decide(p, false)} />)}
+      <AboutYou proposalCount={proposalCount} onChange={() => { loadProposals(); void refreshMemories(query) }} />
+      {proposals.filter((p) => p.kind !== 'about_you').map((p) => <ProposalRow key={p.id} p={p} byId={byId} labels={labels} onApply={() => void decide(p, true)} onDismiss={() => void decide(p, false)} />)}
       {memories.length === 0 && (query ? <p className="empty-hint big">No memories match.</p> : (
         <div className="empty-hint big">
           <p>No memories yet.</p>

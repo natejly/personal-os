@@ -67,6 +67,8 @@ TAINT_SAVE_MIN_OVERLAP = 0.6
 EXTRACT_USER_CHARS = 4000       # the user's message as the extractor sees it; memories come from the user's words
 EXTRACT_ASSISTANT_CHARS = 3000  # the reply is context for what the user meant, so it gets less room
 EXTRACT_TOOL_CHARS = 2000       # one-line tool call summaries, for friction the prose does not show
+EXTRACT_BACKGROUND = 4          # earlier messages of the chat shown to the extractor as context only, to resolve "it" / "that one" in the exchange
+EXTRACT_BACKGROUND_CHARS = 600  # one background message, truncated
 EXTRACT_EXISTING = 60           # existing memories shown for reconciliation when there are no embeddings
 CANDIDATES = 40                 # existing memories shown when embeddings rank them
 CANDIDATES_TOP = 20             # of those, how many come from the hybrid ranking (the rest: pinned, then recent)
@@ -111,3 +113,13 @@ GRAPH_BACKFILL_DELAY_SECONDS = 1.0  # pause between extraction calls, so a backf
 GRAPH_INDEX_BATCH = 200             # nodes embedded per index() call: one embedding request burst, not one per node
 GRAPH_BACKFILL_PROGRESS_SECONDS = 5  # how often the command-line backfill prints its counts
 GRAPH_BACKFILL_BATCH = 200          # user messages read per database page
+
+# ---- "About you" summary (about_you.py) ----
+# context.py cuts the pinned About-you profile line at this many characters (other profile lines stay at 500).
+ABOUT_YOU_CHARS = 1500
+ABOUT_YOU_EVERY = 25            # draft a new summary after this many new auto memories (0 = on demand only)
+ABOUT_YOU_MIN_MEMORIES = 5      # fewer live memories than this is nothing to summarise
+ABOUT_YOU_INPUT_ROWS = 80       # newest live memories the drafter reads
+ABOUT_YOU_LINE_CHARS = 300      # one memory as the drafter sees it
+ABOUT_YOU_AT_KEY = "memoryAboutAt"     # settings row: epoch seconds of the last draft attempt (counter base)
+ABOUT_YOU_FP_KEY = "memoryAboutFp"     # settings row: fingerprint of the memories the last draft read

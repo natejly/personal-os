@@ -3,6 +3,10 @@
 export type StepId = 'welcome' | 'provider' | 'key' | 'test' | 'google' | 'about' | 'permissions' | 'done'
 export const STEPS: StepId[] = ['welcome', 'provider', 'key', 'test', 'google', 'about', 'permissions', 'done']
 
+/** The steps this install walks: Google is left out when the build has no OAuth client to sign in with. */
+export const visibleSteps = (googleConfigured: boolean | undefined): StepId[] =>
+  googleConfigured === false ? STEPS.filter((s) => s !== 'google') : STEPS
+
 /** Mirrors GET /setup/providers. */
 export interface ProviderInfo {
   id: string
@@ -44,6 +48,8 @@ export interface WizardState {
   model: string
   /** Free text from the about step, saved as one pinned memory. Empty means the user skipped it. */
   about: string
+  /** Providers with a key already saved (Settings' providerKeysSet): a blank key there means "keep it". */
+  savedKeys: Record<string, boolean>
   test: { state: 'idle' | 'testing' | 'ok' | 'fail'; error?: string; latencyMs?: number; models?: string[] }
 }
 
@@ -61,13 +67,13 @@ export type WizardAction =
 const EDITABLE_BASE = new Set(['litellm', 'custom', 'ollama'])
 export const showsBaseUrl = (providerId: string | null): boolean => !!providerId && EDITABLE_BASE.has(providerId)
 
-export const initialState = (): WizardState => ({ step: 'welcome', providerId: null, baseUrl: '', apiKey: '', model: '', about: '', test: { state: 'idle' } })
+export const initialState = (savedKeys: Record<string, boolean> = {}): WizardState => ({ step: 'welcome', providerId: null, baseUrl: '', apiKey: '', model: '', about: '', savedKeys, test: { state: 'idle' } })
 
 /** What the current step still lacks, or null when the user may go on. */
 export function stepBlocker(s: WizardState, provider: ProviderInfo | undefined): string | null {
   if (s.step === 'provider' && !s.providerId) return 'Choose a provider to continue.'
   if (s.step === 'key') {
-    if (provider?.needsKey && !s.apiKey.trim()) return 'Paste your API key to continue.'
+    if (provider?.needsKey && !s.apiKey.trim() && !s.savedKeys[provider.id]) return 'Paste your API key to continue.'
     if (showsBaseUrl(s.providerId) && !s.baseUrl.trim()) return 'Enter the base URL to continue.'
     if (!s.model.trim()) return 'Pick or type a model to continue.'
   }
@@ -75,7 +81,7 @@ export function stepBlocker(s: WizardState, provider: ProviderInfo | undefined):
   return null
 }
 
-export function reduce(s: WizardState, a: WizardAction, provider?: ProviderInfo): WizardState {
+export function reduce(s: WizardState, a: WizardAction, provider?: ProviderInfo, steps: StepId[] = STEPS): WizardState {
   switch (a.type) {
     case 'pick':
       // Switching provider drops the old key and model: they belong to the other service.
@@ -84,22 +90,23 @@ export function reduce(s: WizardState, a: WizardAction, provider?: ProviderInfo)
     case 'seed':
       return s.providerId ? s : { ...s, providerId: a.provider.id, baseUrl: a.baseUrl, model: a.model }
     case 'field':
-      // Any edit invalidates a previous test: it vouched for different inputs.
-      return { ...s, ...a.patch, test: { state: 'idle' } }
+      // Any edit invalidates a previous test: it vouched for different inputs. The models it found still feed the picker.
+      return { ...s, ...a.patch, test: { state: 'idle', models: s.test.models } }
     case 'test':
       return { ...s, test: a.test }
     case 'about':
       return { ...s, about: a.about }
     case 'next': {
       if (stepBlocker(s, provider)) return s
-      const i = STEPS.indexOf(s.step)
-      return i < STEPS.length - 1 ? { ...s, step: STEPS[i + 1] } : s
+      const i = steps.indexOf(s.step)
+      return i < steps.length - 1 ? { ...s, step: steps[i + 1] } : s
     }
     case 'back': {
-      const i = STEPS.indexOf(s.step)
+      const i = steps.indexOf(s.step)
       // `done` has already saved; nothing to walk back into.
       if (i <= 0 || s.step === 'done') return s
-      return { ...s, step: STEPS[i - 1], test: s.step === 'test' ? { state: 'idle' } : s.test }
+      // The verdict goes, the models the test found stay for the picker on the key step.
+      return { ...s, step: steps[i - 1], test: s.step === 'test' ? { state: 'idle', models: s.test.models } : s.test }
     }
   }
 }

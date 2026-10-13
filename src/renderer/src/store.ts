@@ -191,6 +191,8 @@ export interface State {
   modelsError: string | null
   tools: ToolInfo[]
   google: GoogleStatus | null
+  /** A Google sign-in is open in the browser and being polled for. */
+  googlePending: boolean
   tasksSync: TasksSyncStatus | null
   /** Mail-watch chip to open expanded on the next Mail visit (Today's "View all"); MailWatchPanel clears it. */
   mailWatchKind: 'to_reply' | 'awaiting_reply' | null
@@ -1152,6 +1154,8 @@ export const useStore = create<State>((set, get) => {
   /** True once init has loaded the app's data at least once; a recovered backend then needs a refresh, not a re-init. */
   let loadedOnce = false
   let backendSeen: BackendState = 'ready'
+  /** Counts supervisor announcements, so init can tell whether one arrived while it was asking. */
+  let stateEvents = 0
   let watching = false
   let stateWired = false
   // `/events` resume cursor. The topic's seq restarts with the backend process, so a restart zeroes it.
@@ -1165,6 +1169,7 @@ export const useStore = create<State>((set, get) => {
    * data re-fetched. If the first start failed, init never loaded anything, so it runs for real now.
    */
   const onBackendState = (info: BackendInfo): void => {
+    stateEvents++
     const was = backendSeen
     backendSeen = info.state
     set({ backendState: info.state })
@@ -1791,6 +1796,7 @@ export const useStore = create<State>((set, get) => {
     modelsError: null,
     tools: [],
     google: null,
+    googlePending: false,
     tasksSync: null,
     mailWatchKind: null,
     dashboard: null,
@@ -1943,6 +1949,11 @@ export const useStore = create<State>((set, get) => {
         stateWired = true
         window.os.onBackendState(onBackendState)
       }
+      // The window opens while the backend is still starting: stay on the boot screen until the supervisor
+      // announces ready (onBackendState then runs init again) or failed (it shows the error).
+      const seen = stateEvents
+      const info = typeof window.os.backendInfo === 'function' ? await window.os.backendInfo().catch(() => null) : null
+      if (info?.state === 'starting' && seen === stateEvents) { inited = false; backendSeen = 'starting'; return }
       const status = await window.os.backendStatus()
       // The window opens while the backend starts: keep the boot logo, and the 'ready' state runs init again (its
       // 'starting' broadcast went out before this window listened, so record it here or 'ready' looks like no change).
@@ -3728,19 +3739,23 @@ export const useStore = create<State>((set, get) => {
       }
     },
     connectGoogle: async () => {
+      if (get().googlePending) return  // one poller per sign-in
+      set({ googlePending: true })
       try {
         // Re-authing an already-connected account looks identical unless we watch for a new
         // token, so remember which one we had before opening the browser.
         const before = get().google?.connected_at ?? null
         const { url } = await api.google.start()
         window.open(url, '_blank')
-        // poll until the callback lands
+        // poll until the callback lands, or reports that it failed
         const started = Date.now()
         const timer = setInterval(async () => {
           const st = await api.google.status().catch(() => null)
           const fresh = !!st?.connected && st.connected_at !== before
-          if (fresh || Date.now() - started > 180_000) {
+          if (fresh || st?.last_error || Date.now() - started > 180_000) {
             clearInterval(timer)
+            set({ googlePending: false })
+            if (st?.last_error && !fresh) get().toast(`Google sign-in failed: ${st.last_error}`, 'error')
             if (fresh && st) {
               clearViews()
               set({ google: st })
@@ -3751,6 +3766,7 @@ export const useStore = create<State>((set, get) => {
           }
         }, 1500)
       } catch (e) {
+        set({ googlePending: false })
         get().toast((e as Error).message, 'error')
       }
     },

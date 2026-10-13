@@ -66,6 +66,24 @@ test('restartBackend asks the main process and applies its answer', async () => 
   assert.equal(useStore.getState().backendState, 'ready')
 })
 
+test('a window opened while the backend starts waits on the boot screen, then loads on ready', async () => {
+  const os = (globalThis as unknown as { window: { os: Record<string, unknown> } }).window.os
+  os.backendInfo = async () => info('starting')
+  try {
+    useStore.setState({ ready: false, backendError: null })
+    const before = statusCalls
+    await useStore.getState().init()
+    assert.equal(statusCalls, before, 'no status check, no error screen while starting')
+    assert.equal(useStore.getState().ready, false)
+    delete os.backendInfo
+    push!(info('ready'))
+    await new Promise((r) => setTimeout(r, 0))
+    assert.equal(statusCalls, before + 1, 'ready ran init for real')
+  } finally {
+    delete os.backendInfo
+  }
+})
+
 // Last: module-level `inited` / `loadedOnce` are shared across the file.
 test('a data-load failure after a healthy /health shows the error screen and stays retryable', async () => {
   const realFetch = globalThis.fetch

@@ -95,10 +95,17 @@ def _parse_models(r: httpx.Response) -> list[str] | None:
         return None
 
 
-def _unreachable(base: str, e: Exception, local: bool = False) -> str:
+def _unreachable(base: str, e: Exception, provider: str = "", local: bool = False) -> str:
     if isinstance(e, httpx.TimeoutException):
         return f"{base} took too long to answer." + (" The model may still be loading: try again in a minute." if local else "")
+    if provider == "ollama":
+        return f"Couldn't reach {base} — is Ollama running? Get it at https://ollama.com/download."
     return f"Couldn't reach {base} — is it running?"
+
+
+def _denied(key: str | None, code: int) -> str:
+    # A blank key was never "rejected": the server wants one.
+    return f"That key was rejected ({code})." if (key or "").strip() else "This server needs an API key."
 
 
 async def test_connection(body: SetupIn, stored: dict[str, Any] | None = None, secrets: Any = None) -> dict[str, Any]:
@@ -117,8 +124,9 @@ async def test_connection(body: SetupIn, stored: dict[str, Any] | None = None, s
     try:
         async with httpx.AsyncClient(timeout=CHECK_TIMEOUT, transport=_transport) as client:
             r = await client.get(providers.endpoint(base, "/models"), headers=headers)
-            if r.status_code in (401, 403):
-                return fail(f"That key was rejected ({r.status_code}).")
+            # With a model, the chat probe decides: some servers guard the listing differently from chat.
+            if r.status_code in (401, 403) and not model:
+                return fail(_denied(key, r.status_code))
             unlisted = r.status_code in (404, 405)
             if r.status_code < 400:
                 models = _parse_models(r)
@@ -137,13 +145,16 @@ async def test_connection(body: SetupIn, stored: dict[str, Any] | None = None, s
             if r.status_code == 400 and "max_completion_tokens" in r.text:
                 r = await client.post(url, headers=headers, json={**chat, "max_completion_tokens": 16}, timeout=wait)
     except (httpx.TransportError, httpx.InvalidURL, ValueError) as e:
-        return fail(_unreachable(base, e, local))
+        return fail(_unreachable(base, e, body.provider, local))
     if r.status_code in (401, 403):
-        return fail(f"That key was rejected ({r.status_code}).")
+        return fail(_denied(key, r.status_code))
     if r.status_code == 404 and unlisted:
         return fail(f"Nothing answered at {base}: check the address.")
     if r.status_code == 404 or (r.status_code == 400 and any(w in r.text.lower() for w in ("model", "not found"))
                                 and any(w in r.text.lower() for w in ("not found", "does not exist", "invalid", "unknown"))):
+        if body.provider == "ollama":
+            pulled = f" Pulled: {', '.join(models)}." if models else ""
+            return fail(f"Model {model} not found. Run: ollama pull {model}.{pulled}")
         return fail(f"Model {model} not found.")
     if r.status_code >= 400:
         return fail(f"The provider returned {r.status_code}: {_error_text(r)}")
@@ -167,9 +178,9 @@ async def list_models(body: SetupIn, stored: dict[str, Any] | None = None, secre
         async with httpx.AsyncClient(timeout=LIST_TIMEOUT, transport=_transport) as client:
             r = await client.get(providers.endpoint(base, "/models"), headers=_headers(key))
     except (httpx.TransportError, httpx.InvalidURL, ValueError) as e:
-        return {"models": None, "error": _unreachable(base, e)}
+        return {"models": None, "error": _unreachable(base, e, body.provider)}
     if r.status_code in (401, 403):
-        return {"models": None, "error": f"That key was rejected ({r.status_code})."}
+        return {"models": None, "error": _denied(key, r.status_code)}
     if r.status_code in (404, 405):
         return {"models": None, "error": "This server does not list its models."}
     if r.status_code >= 400:
@@ -218,7 +229,9 @@ def router(get_settings: Callable[[], dict[str, Any]], set_settings: Callable[[d
             raise HTTPException(422, "A base URL is required")
         if not model:
             raise HTTPException(422, "A model is required")
-        if preset["needsKey"] and not key:
+        # A blank key keeps the one saved for this provider and endpoint, so "Run setup again" needs no re-paste.
+        saved = None if key else _resolve_key(SetupIn(provider=body.provider, baseUrl=base), get_settings(), secrets)
+        if preset["needsKey"] and not key and not saved:
             raise HTTPException(422, f"{preset['name']} needs an API key")
         # extractionModel is cleared: one left over from another provider (a LiteLLM alias) would fail every
         # background call. Empty means "use the default model". The embedding and rerank models follow the preset
@@ -230,7 +243,8 @@ def router(get_settings: Callable[[], dict[str, Any]], set_settings: Callable[[d
             patch.update({k: "" for k in _SWITCH_RESET})
         # No key for the endpoint the saved key belongs to means "unchanged", as in PUT /settings; an empty
         # value would delete it from the secret store. A different endpoint never inherits the old key.
-        if not key and _same_base(base, get_settings().get("baseUrl")):
+        # A saved per-provider key comes back through the provider switch itself (provider_keys.apply).
+        if not key and (saved or _same_base(base, get_settings().get("baseUrl"))):
             del patch["apiKey"]
         if body.provider == get_settings().get("provider") and _same_base(base, get_settings().get("baseUrl")):
             del patch["embeddingModel"], patch["retrievalRerankModel"]  # same endpoint: keep what the user picked for it

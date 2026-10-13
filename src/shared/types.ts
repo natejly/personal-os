@@ -1115,6 +1115,8 @@ export interface GoogleStatus {
   /** Connected, but the token is expired, revoked or short on scopes: sign in again. */
   needs_reauth: boolean
   reauth_reason: string | null
+  /** Why the last browser sign-in failed (denied, cancelled); cleared when a new one starts. */
+  last_error?: string | null
 }
 
 /** Verdict of the read-back that every external write goes through (backend verify.py).
@@ -1453,6 +1455,8 @@ export interface Settings {
   providerAuthBlocked?: string
   /** The provider preset in use (a /setup/providers id); null or missing means the address was typed by hand. */
   provider?: string | null
+  /** ISO time the setup wizard last finished; null until then. */
+  onboardedAt?: string | null
   /** Which providers have a key saved. Never the keys. Missing on an older backend. */
   providerKeysSet?: Record<string, boolean>
   firecrawlApiKeySet?: boolean

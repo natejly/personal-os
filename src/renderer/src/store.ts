@@ -1890,10 +1890,10 @@ export const useStore = create<State>((set, get) => {
     inboxOpen: false,
     jobsFocusId: null,
     openJobs: (jobId) => {
-      set({ jobsFocusId: jobId ?? null, inboxOpen: false, settingsOpen: false })
+      set({ jobsFocusId: jobId ?? null, inboxOpen: false, ...closeSettings() })
       get().setView('jobs')
     },
-    openInbox: () => set({ inboxOpen: true, settingsOpen: false }),
+    openInbox: () => set({ inboxOpen: true, ...closeSettings() }),
     closeInbox: () => set({ inboxOpen: false, routineDraft: null }),
     clearRoutineDraft: () => set({ routineDraft: null }),
     projects: [],

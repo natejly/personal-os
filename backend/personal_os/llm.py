@@ -1170,6 +1170,7 @@ async def stream_chat(
     reason_buf: list[str] = []  # the whole reasoning, handed back on `end` for the next tool round
     cancelled = timed_out = saw_done = False
     splitter = ThinkSplitter()
+    guard = LeakGuard()
     known = {t.get("function", {}).get("name") for t in tools or []}
     idle = _idle_s(settings)
     deadline_at = stream_deadline.get()
@@ -1187,6 +1188,7 @@ async def stream_chat(
             out_chars = reason_chars = 0
             saw_done = False
             splitter = ThinkSplitter()
+            guard = LeakGuard()
             emitted = False  # the first content, reasoning or tool-call fragment ends the right to retry
             fail: tuple[str, bool, str | None, str] | None = None  # (message, retryable, kind, body)
             try:
@@ -1254,6 +1256,8 @@ async def stream_chat(
                             reason_buf.append(reason)
                             yield {"type": "reasoning", "text": reason}
                         for kind_p, piece in splitter.feed(_content_text(delta)):
+                            if kind_p == "delta" and not (piece := guard.feed(piece)):
+                                continue
                             emitted = emitted or bool(piece)
                             if kind_p == "reasoning":
                                 reason_chars += len(piece)
@@ -1303,6 +1307,10 @@ async def stream_chat(
             message += (f" Retried {attempt} time{'s' if attempt != 1 else ''}." if attempt else "") + (" The reply was cut off." if emitted else "")
             raise _provider_error(message, kind_f, None, body_f)
     for kind_p, piece in splitter.flush():  # a tag-like tail held back at the end of the stream
+        if kind_p == "delta":
+            piece = guard.feed(piece)
+            if not piece:
+                continue
         if kind_p == "reasoning":
             reason_chars += len(piece)
             reason_buf.append(piece)
@@ -1319,7 +1327,16 @@ async def stream_chat(
         finish = "timeout"
     if incomplete:  # the connection died mid-reply: a half-received tool call must not run
         calls = {}
+    if (tail := guard.flush()):
+        out_chars += len(tail)
+        yield {"type": "delta", "text": tail}
     tool_calls = _finish_calls(calls)
+    leaked = 0
+    if not tool_calls and not (cancelled or timed_out or incomplete):
+        tool_calls = guard.calls()
+        leaked = len(tool_calls)
+        if leaked and finish in (None, "stop"):
+            finish = "tool_calls"
     # Reasoning is billed as completion tokens, so it counts toward cost and the run meter. A call Stop or the deadline
     # ended before any response is not billed at all: the estimate would count a prompt nobody answered.
     p_chars, c_chars = (len(json.dumps(messages)) if sent else 0), out_chars + reason_chars + sum(len(c["arguments"]) for c in tool_calls)
@@ -1330,6 +1347,8 @@ async def stream_chat(
                            "usage_est": {"prompt_tokens": p_chars // 4, "completion_tokens": c_chars // 4}, "incomplete": incomplete}
     if dropped:
         end["effort_dropped"] = dropped
+    if leaked:
+        end["leaked_tool_calls"] = leaked
     if reason_buf:
         end["reasoning"] = "".join(reason_buf)
     yield end
@@ -1390,6 +1409,65 @@ def _add_fragment(calls: dict[int, dict[str, Any]], by_index: dict[int, int], tc
     if fn.get("arguments"):
         cur["arguments"] += fn["arguments"]
     return idx
+
+
+_LEAK_MARKERS = ("<｜tool▁calls▁begin｜>", "<｜tool▁call▁begin｜>", "<|DSML|", "<｜DSML｜")
+
+
+class LeakGuard:
+    """Some DeepSeek servers print tool calls into `content` instead of `tool_calls`. Text from the first call marker on
+    is held back from the answer (a marker split across chunks is held until it decides); `calls()` parses it at the end."""
+
+    def __init__(self) -> None:
+        self.raw = ""  # everything fed
+        self.at = -1  # index in raw of the first marker, once seen
+        self.sent = 0
+
+    def feed(self, text: str) -> str:
+        self.raw += text
+        if self.at < 0:
+            self.at = min((i for i in (self.raw.find(m) for m in _LEAK_MARKERS) if i >= 0), default=-1)
+        if self.at >= 0:
+            limit = self.at
+        else:
+            limit, lt = len(self.raw), self.raw.rfind("<")
+            if lt >= 0 and any(m.startswith(self.raw[lt:]) for m in _LEAK_MARKERS):
+                limit = lt
+        out, self.sent = self.raw[self.sent:limit], max(self.sent, limit)
+        return out
+
+    def flush(self) -> str:
+        if self.at >= 0:
+            return ""
+        out, self.sent = self.raw[self.sent:], len(self.raw)
+        return out
+
+    def calls(self) -> list[dict[str, Any]]:
+        """Best-effort parse of the leaked text (V3 `<｜tool▁call▁begin｜>name<｜tool▁sep｜>{json}` and V4 `<|DSML|invoke
+        name=..>` with `<|DSML|parameter name=..>` children); [] when nothing parses."""
+        if self.at < 0:
+            return []
+        tail, out = self.raw[self.at:], []
+        for m in re.finditer(r"<[|｜]DSML[|｜]invoke\s+name=\"([^\"]+)\"\s*>(.*?)(?:</[|｜]DSML[|｜]invoke>|$)", tail, re.S):
+            args: dict[str, Any] = {}
+            for pm in re.finditer(r"<[|｜]DSML[|｜]parameter\s+name=\"([^\"]+)\"([^>]*)>(.*?)</[|｜]DSML[|｜]parameter>", m.group(2), re.S):
+                v = pm.group(3)
+                if 'string="true"' not in pm.group(2):
+                    with contextlib.suppress(ValueError):
+                        v = json.loads(v)
+                args[pm.group(1)] = v
+            out.append((m.group(1), args))
+        if not out:
+            for m in re.finditer(r"<｜tool▁call▁begin｜>(.*?)(?:<｜tool▁call▁end｜>|$)", tail, re.S):
+                body = re.sub(r"^\s*function\s*<｜tool▁sep｜>", "", m.group(1)).strip()
+                name = re.split(r"<｜tool▁sep｜>|\s|`", body, 1)[0]
+                a, b = body.find("{"), body.rfind("}")
+                if name and 0 <= a < b:
+                    with contextlib.suppress(ValueError):
+                        args = json.loads(body[a:b + 1])
+                        if isinstance(args, dict):
+                            out.append((name, args))
+        return [{"id": f"call_{uuid.uuid4().hex[:24]}", "name": n, "arguments": json.dumps(a, ensure_ascii=False)} for n, a in out]
 
 
 def _finish_calls(calls: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:

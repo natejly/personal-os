@@ -271,6 +271,7 @@ _sweep_duels()
 # Only a cache: on first use after a restart it is re-seeded from the tools the conversation's history called.
 # ponytail: never evicted; a set of names per conversation touched since start, an LRU if that ever matters.
 _tool_loaded: dict[str, set[str]] = {}
+_tool_load_order: dict[str, list[str]] = {}  # the same names in the order they were first offered: loaded tools append after the core ones
 # Background work that outlives the run that queued it, and the topic it reports on.
 events = Topic()
 consolidator = Consolidator(db, memories, graph)
@@ -1594,8 +1595,9 @@ PROACTIVE_HINT = (  # chats that cannot delegate (a persona without the hand-off
 # A plain chat turn that can delegate is told this instead of PROACTIVE_HINT and PLAN_HINT (workers.py).
 FRONT_AGENT_HINT = workers_mod.FRONT_AGENT_HINT
 # Only added when todo_write is actually available in this chat (see _chat_stream).
-PLAN_HINT = ("For more than a couple of tool calls, open with todo_write and update it as steps land."
-             " If a decision is genuinely the user's, call ask_user once instead of guessing.")
+PLAN_HINT = ("Open with todo_write only when the request has 3 or more distinct steps, and update it as steps land;"
+             " a one- or two-step request needs no plan, just act. "
+             "If a decision is genuinely the user's, call ask_user once instead of guessing.")
 # Only added when save_memory or search_memory is available in this chat. Static text: it sits in the cached prefix.
 MEMORY_HINT = ("Save corrections, standing instructions and durable facts with save_memory (kind instruction for always/never rules; until for facts that expire).\n"
                "Call search_memory before answering about the user's past or preferences not already in context.")
@@ -1611,10 +1613,10 @@ def _today_hint() -> str:
 
 
 def _map_status_block(used: dict[str, Any], conv_settings: dict[str, Any], cfg: dict[str, Any], project_id: str | None,
-                      nonce: str, tool_schemas: list[dict[str, Any]]) -> str:
+                      nonce: str, tool_schemas: list[dict[str, Any]], held_back: Any = ()) -> str:
     """The workspace map's live half (sources, todos, next events, what waits, workers) for this turn's volatile message, and its
-    size in used["map"]["volatile"]. Empty when the chat has the map or tools off, or context_map is not offered."""
-    if not context_map.map_on(conv_settings) or not any(s["function"]["name"] == "context_map" for s in tool_schemas):
+    size in used["map"]["volatile"]. Empty when the chat has the map or tools off, or context_map is neither offered nor held back for tool_search."""
+    if not context_map.map_on(conv_settings) or not (any(s["function"]["name"] == "context_map" for s in tool_schemas) or "context_map" in held_back):
         return ""
     text, info = context_map.build_volatile(db, project_id=project_id, switches=context_map.resolve_switches(cfg, conv_settings),
                                             google=google, mcp_store=mcp_store, nonce=nonce)
@@ -2375,16 +2377,29 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if not withheld:
                     tool_ctx["deferred"] = tool_ctx["deferrable"] = set()
                 return built + offer
-            keep = [s for s in built if s["function"]["name"] in loaded or tools.is_core(toolbox.specs[s["function"]["name"]])]
-            tool_ctx["deferred"] = {s["function"]["name"] for s in built} - {s["function"]["name"] for s in keep}
-            tool_ctx["deferrable"] = {s["function"]["name"] for s in built if not tools.is_core(toolbox.specs[s["function"]["name"]])}
-            return keep + [toolbox.specs["tool_search"].schema()] + offer
+            by_name = {s["function"]["name"]: s for s in built}
+            core = [n for n in by_name if tools.is_core(toolbox.specs[n])]
+            # Core in its fixed order, then loaded tools in the order they were first offered: a load only appends,
+            # so the bytes before it (and the provider's cached prefix) stay as they were.
+            order = _tool_load_order.setdefault(conv_id, [])
+            order.extend(sorted((n for n in by_name if n in loaded and n not in order), key=list(toolbox.specs).index))
+            rank = {n: i for i, n in enumerate(tools.CORE_ORDER + tools.DESK_CORE)}
+            keep = ([by_name[n] for n in sorted(core, key=lambda n: rank.get(n, len(rank)))]
+                    + [by_name[n] for n in order if n in by_name and n not in core])
+            tool_ctx["deferred"] = set(by_name) - {s["function"]["name"] for s in keep}
+            tool_ctx["deferrable"] = set(by_name) - set(core)
+            return [toolbox.specs["tool_search"].schema()] + keep + offer
 
         def _load_groups(names: Any) -> None:
             groups = {toolbox.specs[n].group for n in names if n in toolbox.specs}
             loaded.update(n for n, sp in toolbox.specs.items() if sp.group in groups)
 
         tool_schemas = _schemas()
+        if tool_ctx["deferred"] and tool_ctx["user_text"] and not body.resume_of:
+            # What the message plainly asks for is loaded before round 1, so it costs no tool_search round.
+            if picks := mcp_search.preselect(mcp_search.build_docs(tool_ctx["tool_catalog"]()), tool_ctx["user_text"]):
+                loaded.update(picks)
+                tool_schemas = _schemas()
 
         def _desk_manual_text() -> str:
             # Only the tools actually sent this turn are described, so the manual never promises one the model lacks.
@@ -2432,7 +2447,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                  TELEGRAM_HINT if tool_schemas and telegram_bridge.is_texts_conversation(conv_id) else "",
                  coding_route.hint(cfg) if tool_schemas else "")
         inputs_block = _desk_inputs_block() if desk else ""
-        map_block = _map_status_block(used, conv["settings"], cfg, conv["project_id"], fence_nonce, tool_schemas)
+        map_block = _map_status_block(used, conv["settings"], cfg, conv["project_id"], fence_nonce, tool_schemas, tool_ctx["deferred"])
         used["volatile_blocks"] = [*used["volatile_blocks"], *([inputs_block] if inputs_block else []), *([map_block] if map_block else []), _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
         if cfg.get("cacheLayout", True):
             # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
@@ -2665,6 +2680,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 with contextlib.suppress(Exception):
                     await toolbox.shell.kill_conversation(sd.shadow_id)
                 _tool_loaded.pop(sd.shadow_id, None)
+                _tool_load_order.pop(sd.shadow_id, None)
                 with contextlib.suppress(Exception):
                     convos.delete(sd.shadow_id)
                 sd.shadow_id = None
@@ -3049,7 +3065,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 run.budget = meter.snapshot()
             tracer.end(lspan, {"finish_reason": end.get("finish_reason"), "usage": end.get("usage"),
                                "ttft_ms": (first_token - lspan["start"]) if first_token else None,
-                               "output_chars": len("".join(buf[round_start:])), "tool_calls": [c["name"] for c in calls]},
+                               "output_chars": len("".join(buf[round_start:])), "tool_calls": [c["name"] for c in calls],
+                               **({"leaked_tool_calls": end["leaked_tool_calls"]} if end.get("leaked_tool_calls") else {})},
                        error="Stopped by user" if stop.is_set() else None)
             yield "span", {"message_id": am["id"], "span": lspan}
             if stop.is_set():

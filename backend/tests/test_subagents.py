@@ -1269,6 +1269,48 @@ def test_now_change_publishes_a_subagent_event() -> None:
     check(len(run.events) == 2 and run.events[-1][1]["now"] == "fetch_url y", "after the throttle window it publishes again")
 
 
+def test_child_tape_has_llm_spans_and_marks_repaired_calls() -> None:
+    reset()
+    store = appmod.run_store
+    store.create("parent_t", None, "chat")
+    ctx = mkctx(new_conv(), agent_run_id="parent_t")
+    broken = {"id": "c", "name": "current_time", "arguments": "{},"}  # trailing comma: repaired, not rejected
+    SCRIPTS["rep"] = [{"text": "", "calls": [broken], "usage": {"prompt_tokens": 5, "completion_tokens": 2}}, {"text": "ok"}]
+    out = run(appmod.toolbox.call("agent_spawn", {"task": "rep"}, ctx))
+    evs = list(store.events(out["agent_id"]))
+    spans = [d["span"] for _s, e, d in evs if e == "span" and d["span"]["end"]]
+    check(len(spans) == 2 and all(sp["kind"] == "llm" and sp["meta"]["worker"] and sp["meta"]["role"] for sp in spans), "each child round records an ended llm span")
+    check(spans[0]["meta"]["tool_calls"] == ["current_time"] and spans[0]["meta"]["usage"], "the span carries finish data")
+    check(any(e == "tool_call" and d.get("repaired") for _s, e, d in evs), "a repaired call is marked on the tape")
+    check(any(e == "tool_result" and d.get("repaired") for _s, e, d in evs), "its result is marked too")
+
+
+def test_worker_defers_tools_and_a_restricted_role_gains_none() -> None:
+    reset(toolDeferAbove=40)
+    SCRIPTS["defer"] = [{"text": "", "calls": [call("c1", "tool_search", {"query": "take a screenshot of my screen"})]},
+                        {"text": "", "calls": [call("c2", " Read_Tool_Result ", {}), call("c4", "current_time", {}),
+                                               call("c3", "no_such_tool", {})]}, {"text": "done"}]
+    out = run(appmod.toolbox.call("agent_spawn", {"task": "defer", "role": "general"}, mkctx(new_conv())))
+    rounds = [s["tools"] for s in SEEN if s["child"]]
+    check(out["state"] == "completed" and rounds[0][0] == "tool_search" and len(rounds[0]) <= len(sa.WORKER_CORE) + 1, "a worker is sent tool_search and its core, not every tool")
+    check("screenshot" not in rounds[0] and "screenshot" in rounds[1] and rounds[1][:len(rounds[0])] == rounds[0], "a search appends to the array")
+    check("current_time" in rounds[2] and rounds[2][:len(rounds[1])] == rounds[1], "a held-back tool called by name loads and runs")
+    tool_msgs = [m["content"] for m in next(s for s in reversed(SEEN) if s["child"])["messages"] if m["role"] == "tool"]
+    check(any("Did you mean" in m and "no_such_tool" in m for m in tool_msgs) and not any("not available" in m for m in tool_msgs),
+          "an unknown name lists the nearest tools")
+    asst = next(s for s in reversed(SEEN) if s["child"])["messages"]
+    check(any(c["function"]["name"] == "read_tool_result" for m in asst if m.get("tool_calls") for c in m["tool_calls"]),
+          "a mis-cased name is replayed as the tool it resolved to")
+    first_prompt = next(s for s in SEEN if s["child"])["messages"][0]["content"]
+    check("More tools, loaded when you first call one:" in first_prompt and "screenshot" in first_prompt, "the prompt carries the tool index")
+    # a role with a short list: nothing it cannot call is ever reachable, however low the threshold
+    reset(toolDeferAbove=5)
+    SCRIPTS["ro"] = [{"text": "", "calls": [call("c1", "tool_search", {"query": "send an email or write a file"})]}, {"text": "done"}]
+    run(appmod.toolbox.call("agent_spawn", {"task": "ro", "role": "researcher"}, mkctx(new_conv())))
+    offered = {n for s in SEEN if s["child"] for n in s["tools"]}
+    check(offered <= set(sa.READ_TOOLS) | {"tool_search"}, f"researcher only ever sees read tools: {sorted(offered - set(sa.READ_TOOLS))}")
+
+
 def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

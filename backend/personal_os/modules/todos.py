@@ -258,7 +258,7 @@ class TodosModule(Module):
                 ctx["tainted"] = True
                 ctx.setdefault("taint_sources", []).append("todo_list")
             return out
-        R("todo_list", ToolSpec("todo_list", "List the user's todos (open by default) in this chat's scope: the project's todos plus personal ones.",
+        R("todo_list", ToolSpec("todo_list", "List the user's todos (not your own plan: todo_write), open by default, project plus personal.",
             _obj({"include_done": {"type": "boolean", "default": False}, "all_projects": {"type": "boolean", "default": False}, "offset": {"type": "integer", "default": 0},
              "sort": {"type": "string", "enum": ["due", "urgency"], "default": "due", "description": "urgency = weighted score (due, priority, age)"},
              "tag": {"type": "string", "description": "Only this tag"},
@@ -276,7 +276,7 @@ class TodosModule(Module):
             except ValueError as e:
                 return tool_error(redact.scrub_command_output(str(e)), field="repeat_unit or parent_id", expected="day, week, month or year; parent_id from todo_list", example={"title": "Water plants", "due": "2026-10-05", "repeat_every": 1, "repeat_unit": "week"})
             return {"id": t["id"], "title": redact.scrub_command_output(str(t["title"] or "")), "due": t["due"]}
-        R("todo_add", ToolSpec("todo_add", "Add a todo for the user. Dates YYYY-MM-DD; priority 1 (high) to 3 (low). Not your own checklist (todo_write).",
+        R("todo_add", ToolSpec("todo_add", "Add a new todo to the user's list (existing: todo_update). Dates YYYY-MM-DD; priority 1 (high) to 3 (low). Not your own checklist (todo_write).",
             _obj({"title": {"type": "string"}, "due": {"type": "string"}, "notes": {"type": "string"}, "priority": {"type": "integer", "default": 2}, "personal": {"type": "boolean", "default": False},
              "repeat_every": {"type": "integer", "description": "default 1"}, "repeat_unit": {"type": "string", "enum": ["day", "week", "month", "year"]},
              "repeat_mode": {"type": "string", "enum": ["from_due", "from_completion"], "default": "from_due"},
@@ -304,7 +304,7 @@ class TodosModule(Module):
                 return tool_error(redact.scrub_command_output(str(e)), field="repeat_unit, parent_id or depends_on", expected="a valid value; ids from todo_list, no cycles", example={"id": "td_8c41a2", "repeat_unit": "week"})
             return _shown_todo(t) if t else tool_error(redact.scrub_command_output(f"No todo with id '{id}'."), field="id", expected="an id from todo_list",
                                    example={"id": "td_8c41a2", "done": True}, alternative="todo_list to get the current ids")
-        R("todo_update", ToolSpec("todo_update", "Update or complete a todo by id (from todo_list).",
+        R("todo_update", ToolSpec("todo_update", "Change or complete an existing todo by id (from todo_list); new: todo_add.",
             _obj({"id": {"type": "string"}, "done": {"type": "boolean"}, "title": {"type": "string"}, "due": {"type": "string"}, "priority": {"type": "integer"}, "notes": {"type": "string"},
              "repeat_every": {"type": "integer"}, "repeat_unit": {"type": "string", "enum": ["day", "week", "month", "year"]},
              "repeat_mode": {"type": "string", "enum": ["from_due", "from_completion"], "default": "from_due"},

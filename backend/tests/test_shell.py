@@ -397,7 +397,8 @@ def test_output_is_redacted_before_the_model_and_the_handle(box: Box) -> None:
 def test_truncate_by_lines_and_bytes() -> None:
     text = "\n".join(str(i) for i in range(5000))
     out, cut = shell.truncate(text)
-    assert cut and out.splitlines()[-1] == "4999" and len(out.splitlines()) <= shell.TRUNC_LINES
+    assert cut and out.splitlines()[0] == "0" and out.splitlines()[-1] == "4999" and len(out.splitlines()) <= shell.TRUNC_LINES + 1
+    assert "3000 lines omitted" in out and "read_tool_result" in out
     wide = "x" * 200 + "\n"
     out, cut = shell.truncate(wide * 1000)  # 1000 lines, 200 KB
     assert cut and len(out.encode()) <= shell.TRUNC_BYTES

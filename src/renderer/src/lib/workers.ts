@@ -12,7 +12,7 @@ export function workerActions(w: Pick<WorkerInfo, 'status' | 'resumable'>): { st
 }
 
 const LABEL: Record<WorkerStatus, string> = {
-  queued: 'Queued', running: 'Working', awaiting_approval: 'Needs approval', done: 'Done', error: 'Failed', interrupted: 'Interrupted', stopped: 'Stopped'
+  queued: 'Queued', running: 'Working', awaiting_approval: 'Waiting for your approval', done: 'Done', error: 'Failed', interrupted: 'Interrupted', stopped: 'Stopped'
 }
 
 /** The short word beside a worker's title: its place in line while queued, else its status. */

@@ -1254,6 +1254,7 @@ export const useStore = create<State>((set, get) => {
    * history; a real flip in that window shows on the sidebar dot without a banner.
    */
   const runNoticed = new Set<string>()
+  const workerCardsSeen = new Set<string>()
   let quietUntil = 0
   const lastRuns = new Map<string, FinishInfo>()
   let jobsTimer: ReturnType<typeof setTimeout> | null = null
@@ -1326,6 +1327,7 @@ export const useStore = create<State>((set, get) => {
           } else if (ev.event === 'workers') {
             const { conversation_id: cid, worker } = ev.data
             set((st) => ({ workers: { ...st.workers, [cid]: upsertWorker(st.workers[cid] ?? [], worker) } }))
+            announceWorkerCards(cid, worker)
           } else if (ev.event === 'desk_status') {
             onDeskChanged(ev.data)
             window.dispatchEvent(new Event('grain-crew'))
@@ -1420,6 +1422,19 @@ export const useStore = create<State>((set, get) => {
     }
     notify(title.length > 60 ? title.slice(0, 57) + '…' : title, CHAT_NOTICE_BODY[kind], { tag: key, onClick })
     return true
+  }
+
+  /** A worker parked on a card: one OS notice per card, only while the window is not in front. */
+  const announceWorkerCards = (convId: string, w: WorkerInfo): void => {
+    for (const p of w.pending_approvals) {
+      if (workerCardsSeen.has(p.call_id)) continue
+      workerCardsSeen.add(p.call_id)
+      if (get().settings.chatNotify === false || (typeof document !== 'undefined' && document.hasFocus())) continue
+      notify(w.title || 'Worker', CHAT_NOTICE_BODY.approval, {
+        tag: `worker-card:${p.call_id}`,
+        onClick: () => { try { window.os.showMain() } catch { /* no bridge */ } void get().selectChat(convId) }
+      })
+    }
   }
 
   /**

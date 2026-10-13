@@ -579,6 +579,7 @@ class Subagents:
         self.workspace, self.skills = workspace, skills
         self.approvals = approvals if approvals is not None else {}
         self.children: dict[str, Child] = {}
+        self.waits: dict[str, int] = {}  # call id -> ms spent on its approval card, until _exec reports it
         self.locks = RootLocks()
         self.snaps: Any = None  # folder snapshots (snapshots.py), set by app.py
         self.connectors: Any = None  # MCP connector hooks (call, hints, review_text, mode, denied), set by app.py
@@ -1273,7 +1274,7 @@ class Subagents:
                     ch.stuck_stop = stuck.detail
         preview = summarize_result(result)
         self._emit(ch, "tool_result", {"id": uid, "name": name, "result_preview": preview, "error": err, "approval": decision,
-                                       "duration_ms": int((time.time() - t0) * 1000), **repaired})
+                                       "duration_ms": int((time.time() - t0) * 1000), "wait_ms": self.waits.pop(uid, 0), **repaired})
         # The parent loop's fence, per call: a result that read untrusted text (web, a coding agent's log) is wrapped as data
         # with an id the text cannot guess, so it reads as data, not as instructions to this child.
         fence = ch.ctx.setdefault("fence_nonce", secrets.token_hex(8)) \
@@ -1455,6 +1456,7 @@ class Subagents:
         finally:
             self.approvals.pop(uid, None)
         waited = time.time() - t0
+        self.waits[uid] = int(waited * 1000)  # _exec reads it into the tool_result event
         ch.meter.paused += waited
         b = ch.ctx.get("meter_root")
         if b is not None and hasattr(b, "paused"):

@@ -70,7 +70,7 @@ export default function WorkersPanel({ conversationId: focusId }: { conversation
                   <button className="worker-open" aria-expanded={on} title={on ? 'Hide chat' : 'Open chat'} onClick={() => setUnfolded(on ? null : w.id)}>
                     <WorkerFace w={w} />
                     <span className="worker-title">{w.title || w.goal}</span>
-                    <small>{workerWord(w)}</small>
+                    <small className={w.status === 'awaiting_approval' ? 'needs-you' : undefined}>{workerWord(w)}</small>
                   </button>
                   {a.stop && !on && <button className="ghost-btn xs" disabled={busy === w.id} onClick={() => void act(w.id, () => api.workers.stop(w.id))}><Square size={11} /> Stop</button>}
                   {a.resume && <button className="ghost-btn xs" disabled={busy === w.id} onClick={() => void act(w.id, () => api.workers.resume(w.id))}><RotateCcw size={11} /> Resume</button>}

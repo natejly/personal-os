@@ -781,6 +781,7 @@ def test_a_workers_external_call_asks_and_is_answered_through_the_approvals_rout
     say(cid, f"please read {url} for me")
     w = wait(lambda: next((x for x in workers_of(cid) if x["status"] == "awaiting_approval"), None), "the worker to ask")
     assert len(w["pending_approvals"]) == 1
+    assert w["now"] == "Waiting for your approval: fetch_url", "the row says what it is waiting on"
     card = w["pending_approvals"][0]
     assert card["tool"] == "fetch_url" and card["args"] == {"url": url} and card["call_id"].endswith(":f1")
     row = store.approval(card["call_id"])
@@ -795,6 +796,8 @@ def test_a_workers_external_call_asks_and_is_answered_through_the_approvals_rout
     assert bool(hits) is (decision == "allow"), "allow lets the call run, deny does not"
     done = workers_of(cid)[0]
     assert done["status"] == "done" and done["pending_approvals"] == []
+    results = [d for _s, k, d in store.events(w["id"]) if k == "tool_result" and d.get("name") == "fetch_url" and d.get("duration_ms") is not None and "wait_ms" in d]
+    assert results and results[-1]["wait_ms"] <= results[-1]["duration_ms"], "tool_result splits the card wait from the run time"
     assert store.approval(card["call_id"])["status"] == ("approved" if decision == "allow" else "denied")
     assert msgs[-1]["content"] == "I read the page."
     seen_tool = [m for m in seat("worker")[-1]["messages"] if m["role"] == "tool"]

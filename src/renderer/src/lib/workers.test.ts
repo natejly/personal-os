@@ -17,7 +17,7 @@ test('buttons follow the status', () => {
 })
 
 test('status word', () => {
-  assert.equal(workerWord(w('w1', 'queued', { queue_position: 2 })), 'Queued #2')
+  assert.equal(workerWord(w('w1', 'queued', { queue_position: 2, queued_behind: 5 })), 'Queued behind 5')
   assert.equal(workerWord(w('w1', 'queued')), 'Queued')
   assert.equal(workerWord(w('w1', 'running', { now: 'Reading the report' })), 'Working')
   assert.equal(workerWord(w('w1', 'awaiting_approval')), 'Waiting for your approval')

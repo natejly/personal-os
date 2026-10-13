@@ -798,6 +798,8 @@ export interface WorkerInfo {
   /** One-line current action while running, else ''. */
   now: string
   queue_position: number | null
+  /** While queued: workers running plus queued ahead of this one. */
+  queued_behind?: number | null
   started_at: number
   ended_at: number | null
   resume_of: string | null

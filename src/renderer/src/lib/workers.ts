@@ -16,8 +16,8 @@ const LABEL: Record<WorkerStatus, string> = {
 }
 
 /** The short word beside a worker's title: its place in line while queued, else its status. */
-export const workerWord = (w: Pick<WorkerInfo, 'status' | 'queue_position'>): string =>
-  w.status === 'queued' && w.queue_position ? `Queued #${w.queue_position}` : LABEL[w.status]
+export const workerWord = (w: Pick<WorkerInfo, 'status' | 'queued_behind'>): string =>
+  w.status === 'queued' && w.queued_behind ? `Queued behind ${w.queued_behind}` : LABEL[w.status]
 
 /** Live workers first (oldest first within them, so the order does not jump), then ended ones newest first. */
 export function sortWorkers(ws: WorkerInfo[]): WorkerInfo[] {

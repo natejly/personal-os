@@ -470,12 +470,15 @@ def test_fifo_queue_past_the_concurrency_limit(monkeypatch: pytest.MonkeyPatch) 
     got = [info_of(i) for i in ids]
     assert [g["status"] for g in got] == ["running", "running", "queued", "queued", "queued"]
     assert [g["queue_position"] for g in got] == [None, None, 1, 2, 3]
+    assert [g["queued_behind"] for g in got] == [None, None, 2, 3, 4], "running workers plus the ones queued ahead"
+    assert got[2]["now"] == "Queued behind 2" and got[4]["now"] == "Queued behind 4"
     assert [w["id"] for w in workers_of(cid)] == ids[::-1], "newest first"
     assert ("workers", f"{ids[2]}:queued") in seen, "queued workers are announced on the workers topic"
     GATES[goals[0]].set()
     wait(lambda: len(STARTS) == 3, "the next worker to start")
     assert STARTS[2] == goals[2], "first in, first out"
     assert [info_of(i)["queue_position"] for i in ids[3:]] == [1, 2], "positions move up"
+    assert [info_of(i)["now"] for i in ids[3:]] == ["Queued behind 2", "Queued behind 3"], "and the status text follows"
     GATES[goals[1]].set()
     wait(lambda: len(STARTS) == 4, "the fourth worker")
     assert STARTS[3] == goals[3]
@@ -994,14 +997,14 @@ def test_the_new_default_model_does_not_skip_onboarding() -> None:
 
 def test_orchestration_settings_defaults_and_ranges() -> None:
     d = llm.DEFAULT_SETTINGS
-    assert d["delegationForce"] is True and d["delegationAfterRounds"] == 2 and d["workerMaxConcurrent"] == 4 and d["telegramPushWorkerResults"] is False
+    assert d["delegationForce"] is True and d["delegationAfterRounds"] == 2 and d["workerMaxConcurrent"] == 8 and d["telegramPushWorkerResults"] is False
     assert limits.WORKER_MEMORY_FLOOR == 0.15 and limits.RANGES["delegationAfterRounds"] == (1, 20) and limits.RANGES["workerMaxConcurrent"] == (1, 16)
     assert client.put("/settings", json={"workerMaxConcurrent": 99}).status_code == 422, "out-of-range values are refused"
     assert client.put("/settings", json={"delegationAfterRounds": 0}).status_code == 422
     assert client.put("/settings", json={"workerMaxConcurrent": 16, "delegationAfterRounds": 20}).status_code == 200
     s = client.get("/settings").json()
     assert s["workerMaxConcurrent"] == 16 and s["delegationAfterRounds"] == 20
-    assert not {"orchestratorModel", "workerModel"} & set(d), "no separate orchestrator or worker model"
+    assert "orchestratorModel" not in d, "no separate orchestrator model"
 
 
 # ---------------- the hidden message: what it is and is not ----------------

@@ -75,7 +75,7 @@ LOGIN_SHELL_TIMEOUT_SECONDS = 5    # resolving the user's login-shell PATH for a
 # Workers (workers.py): detached background agents the chat's front agent hands work to. These route and queue work;
 # none of them ends a worker's run.
 DELEGATION_AFTER_ROUNDS = 2        # rounds of tool calls a chat reply makes itself before the rest must go to a worker (routing, not a cap)
-WORKER_MAX_CONCURRENT = 4          # workers running at once; the rest wait in a queue and start in order
+WORKER_MAX_CONCURRENT = 8          # workers running at once; the rest wait in a queue and start in order
 WORKER_MEMORY_FLOOR = 0.15         # a queued worker is not started while free system memory is below this share
 WORKER_RECHECK_SECONDS = 5.0       # how often a non-empty queue looks again for a free slot or recovered memory
 RUN_HEARTBEAT_SECONDS = 20.0       # a working child's agent_runs.updated_at is bumped at most this often (liveness, never a limit)

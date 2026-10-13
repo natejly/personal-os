@@ -113,7 +113,7 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <span className="skill-name">{skill.name}</span>
         <span className="skill-desc muted">{skill.description}</span>
-        <ProjectChip projectId={skill.project_id} showPersonal />
+        {skill.source !== 'builtin' && <ProjectChip projectId={skill.project_id} showPersonal />}
         <small className="muted">{SOURCE_LABEL[skill.source] ?? skill.source}</small>
         {!!skill.use_count && <small className="muted" title="Times the assistant read this skill">used {skill.use_count}×</small>}
         <div className="skill-actions no-drag" onClick={(e) => e.stopPropagation()}>
@@ -123,7 +123,7 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
               onClick={() => void updateSkill(skill.id, { status: 'approved' })}><Check size={13} /> Approve</button>
           )}
           {skill.status === 'approved' && (
-            <button className="ghost-btn sm" title="Stop injecting this skill"
+            <button className="ghost-btn sm" title={skill.source === 'builtin' ? 'Part of Grain: revoke it to stop using it, it cannot be deleted' : 'Stop injecting this skill'}
               onClick={() => void updateSkill(skill.id, { status: 'candidate' })}><Undo2 size={13} /> Revoke</button>
           )}
           {skill.status === 'candidate' && (
@@ -131,9 +131,7 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
           )}
           <button className="icon-btn ghost" aria-label={`Export ${skill.name} as SKILL.md`} title="Export as SKILL.md"
             onClick={() => void exportSkill()}><Download size={13} /></button>
-          {skill.source === 'builtin'
-            ? <small className="muted" title="Part of Grain: revoke it to stop using it, it cannot be deleted">built in</small>
-            : <ConfirmDelete label={skill.name} onDelete={() => void deleteSkill(skill.id)} />}
+          {skill.source !== 'builtin' && <ConfirmDelete label={skill.name} onDelete={() => void deleteSkill(skill.id)} />}
         </div>
       </div>
       {open && (

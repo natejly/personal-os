@@ -264,7 +264,7 @@ export default function TodosView(): JSX.Element {
           {loaded && shown.length === 0 && !loadError && (
             <div className="empty-state">
               <ListChecks size={28} />
-              <h2>{showDone || board ? `Nothing on ${listLabel}` : 'Nothing open'}</h2>
+              <h2>{showDone || board ? `Nothing on ${listLabel}` : 'All clear'}</h2>
               <p>Type something in the box above and press Enter, or ask the assistant to keep track of it for you.</p>
             </div>
           )}

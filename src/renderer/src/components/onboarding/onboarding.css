@@ -42,4 +42,5 @@
 .backend-error-actions { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
 
 /* The title takes focus on each step for screen readers; it is not an interactive control. */
-#ob-title:focus { outline: none; }
+/* !important: the global [tabindex]:focus-visible ring is !important too. */
+#ob-title:focus, #ob-title:focus-visible { outline: 0 !important; }

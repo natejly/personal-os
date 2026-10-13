@@ -3,6 +3,9 @@ import { ShieldAlert, ShieldCheck } from '../icons'
 import { useStore } from '../store'
 import { MODES, modeOf, needsConfirm, pillLabel, pillTitle, type PermissionMode } from '../lib/permissionMode'
 
+/** The description without its "Label — " lead, as a sentence of its own. */
+const blurb = (d: string): string => { const s = d.replace(/^[^—]*— /, ''); return s.charAt(0).toUpperCase() + s.slice(1) }
+
 /** Three radio cards for the global permission mode. Choosing Allow everything asks first; the choice saves at once. */
 export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; onPick: (m: PermissionMode) => Promise<void> }): JSX.Element {
   const [ask, setAsk] = useState(false)
@@ -32,7 +35,7 @@ export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; on
           <button key={m.id} type="button" role="radio" data-mode={m.id} aria-checked={mode === m.id} tabIndex={mode === m.id ? 0 : -1}
             className={`mode-card ${m.id === 'allow_all' ? 'danger' : ''} ${mode === m.id ? 'on' : ''}`} onClick={() => pick(m.id)}>
             <b>{m.id === 'allow_all' ? <ShieldAlert size={14} /> : <ShieldCheck size={14} />} {m.label}</b>
-            <span>{m.description.replace(/^[^—]*— /, '')}</span>
+            <span>{blurb(m.description)}</span>
           </button>
         ))}
       </div>

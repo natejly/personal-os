@@ -9,9 +9,9 @@ export const PHASE = process.env.SHOTS_PHASE || 'before'
 export const OUT = join(ROOT, 'docs', 'ux-shots', PHASE)
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-/** Launch, size the window to 1280x800, run `fn(g)`, always close. `opts` go to launchApp (settings, beforeApp, backendEntry...). */
+/** Launch, size the window to 1280x800 at 100% zoom (the default zoom crops what page.screenshot saves), run `fn(g)`, always close. `opts` go to launchApp (settings, beforeApp, backendEntry...). */
 export async function session(fn, opts = {}) {
-  const g = await launchApp({ name: 'shots', ...opts, settings: { hiddenViews: [], ...(opts.settings || {}) } })
+  const g = await launchApp({ name: 'shots', ...opts, settings: { hiddenViews: [], uiZoom: 100, ...(opts.settings || {}) } })
   try {
     await g.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1280, 800))
     await g.page.waitForSelector('.sidebar')

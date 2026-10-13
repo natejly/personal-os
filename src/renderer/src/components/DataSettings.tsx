@@ -30,7 +30,7 @@ export default function DataSettings(): JSX.Element {
   }
 
   const restore = async (name: string, when: string): Promise<void> => {
-    if (!window.confirm(`Restore the backup from ${when}?\n\nGrain will replace your current data with it the next time it starts. Your current data is saved as a backup first, so this can be undone. Nothing changes until you restart.`)) return
+    if (!window.confirm(`Restore the backup from ${when}?\n\nGrain will replace your chats, notes, memory and settings with it the next time it starts. Your current data is saved as a backup first, so this can be undone. Uploaded files and chat outputs are not part of a backup: any deleted since then stay deleted. Nothing changes until you restart.`)) return
     try {
       await api.data.restore(name)
       void refresh()

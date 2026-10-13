@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '../store'
 import { pimStatus } from '../lib/pim'
 
@@ -6,7 +7,7 @@ import { pimStatus } from '../lib/pim'
  *  sign-in (still "connected", but refused) shows a Reconnect button right here instead of only in Settings. */
 export function PimErrorBar({ error }: { error: string | null }): JSX.Element | null {
   const google = useStore(pimStatus)
-  const { refreshGoogle, connectGoogle } = useStore()
+  const { refreshGoogle, connectGoogle } = useStore(useShallow((s) => ({ refreshGoogle: s.refreshGoogle, connectGoogle: s.connectGoogle })))
   useEffect(() => { if (error) void refreshGoogle() }, [error, refreshGoogle])
   if (!error) return null
   return (

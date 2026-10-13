@@ -32,7 +32,7 @@ from typing import Any, Callable, Iterable
 
 from . import limits, osplat, redact
 from .osplat.darwin import parse_vm_stat  # noqa: F401  (kept for callers and tests)
-from .subagents import GROUP, MAX_TASK_CHARS, Child, Subagents, _now_line, _one_line
+from .subagents import GROUP, MAX_TASK_CHARS, Child, Subagents, _now_line, _one_line, worker_effort
 from .tools import ToolSpec, _obj, tool_error
 from .working import escape_tags
 
@@ -468,13 +468,16 @@ class Workers:
             st, now = "awaiting_approval", f"Waiting for your approval: {pending[0]['tool']}"
         if idle >= limits.WORKER_STALL_NOTE_SECONDS:  # said, never acted on: nothing here stops a worker
             now = (f"{now} · " if now else "") + f"no progress for {idle // 60} min"
-        return {"id": row["run_id"], "conversation_id": inp.get("conversation_id") or "", "title": str(inp.get("title") or ""),
+        reason = str(inp.get("exit_reason") or (ch.exit_reason if ch is not None else "") or "")
+        eff = worker_effort(ch.ctx.get("settings") or self.sub.settings(), ch.ctx.get("effort")) if ch is not None else None
+        return {"id": row["run_id"], "parent_run_id": row.get("parent_run_id"), "conversation_id": inp.get("conversation_id") or "", "title": str(inp.get("title") or ""),
                 "goal": str(inp.get("goal") or ""), "status": st, "now": now, "idle_s": idle,
                 "queue_position": pos, "queued_behind": behind, "started_at": row.get("started_at"), "ended_at": row.get("ended_at"),
                 "resume_of": inp.get("resume_of") or None,
                 "resumable": ended and bool(self.store.event_counts(row["run_id"]).get("transcript")),
                 "pending_approvals": pending,
-                "depth": int(inp.get("depth") or 1), "cost": round(float(cost), 6) if cost is not None else None,
+                "depth": int(inp.get("depth") or 1), "model": ch.model if ch is not None else "", "effort": str(eff or ""),
+                "exit_reason": reason if ended else "", "error": str(row.get("error") or "") if ended else "", "cost": round(float(cost), 6) if cost is not None else None,
                 # the face: a Library agent keeps its name; a resumed worker keeps the id it started as
                 "agent": str(inp.get("role") or ""), "origin": str(inp.get("origin") or row["run_id"]),
                 # ponytail: capped here, and the list recomputes it per poll; a per-worker report route is the upgrade

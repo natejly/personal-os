@@ -8,7 +8,6 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
 
 from . import seatbelt
 from .base import CommonPaths, Platform, PosixProc, home, run_opener, which

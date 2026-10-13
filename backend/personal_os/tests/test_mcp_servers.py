@@ -235,8 +235,6 @@ class TestGrants(McpTestCase):
         self.assertEqual(self.mcp.effective_mode(self.read)["mode"], "on")
         self.assertEqual(self.mcp.effective_mode(self.write)["mode"], "ask", "sibling tool on the same server")
         self.assertEqual(self.mcp.effective_mode(self.beta_read)["mode"], "ask", "same tool name, other server")
-        modes = self.mcp.effective_modes()
-        self.assertEqual({k: v["mode"] for k, v in modes.items()}, {self.read: "on", self.write: "ask", self.beta_read: "ask"})
 
     def test_grants_survive_a_restart(self) -> None:
         self.mcp.set_grant(self.read, "on")

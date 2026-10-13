@@ -461,7 +461,6 @@ export const registerPopouts = (mainWindow: () => BrowserWindow | null): void =>
   handle('popout:list', () => listPopouts())
   handle('popout:gather', () => gather())
   handle('popout:scatter', () => scatter())
-  handle('popout:front', () => toggleFront())
   app.on('before-quit', () => {
     quitting = true
     for (const [, e] of popouts) if (!e.win.isDestroyed()) e.win.destroy()

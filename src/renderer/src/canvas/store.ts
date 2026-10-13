@@ -32,14 +32,11 @@ export interface CanvasState {
   enterSpace: (canvasId?: string) => Promise<void>
   /** ⌘⇧C: into the canvas from a classic view, back to `lastClassicView` from the canvas. */
   toggleCanvas: () => Promise<void>
-  renameSpace: (canvasId: string, name: string) => Promise<void>
   deleteSpace: (canvasId: string) => Promise<void>
   setActiveCanvas: (canvasId: string) => void
-  gotoSpace: (n: number) => void
   nextSpace: () => void
   prevSpace: () => void
   toggleOverview: () => void
-  bindSpace: (canvasId: string, projectId: string | null) => Promise<void>
   setSnap: (canvasId: string, patch: { snap_mode?: SnapMode; grid_size?: number }) => Promise<void>
   /**
    * Freeze or release the space. A locked space keeps its pan, its zoom and every window's geometry:
@@ -472,10 +469,6 @@ export const useCanvas = create<CanvasState>((set, get) => {
       if (app.view === 'canvas') app.leaveCanvas()
       else await get().enterSpace()
     },
-    renameSpace: async (canvasId, name) => {
-      patchCanvas(canvasId, { name })
-      await api.canvases.update(canvasId, { name }).catch(fail)
-    },
     deleteSpace: async (canvasId) => {
       // A lock that let the whole space be thrown away would not be much of a lock.
       if (blocked(canvasId)) return
@@ -508,7 +501,6 @@ export const useCanvas = create<CanvasState>((set, get) => {
       transition()
       set({ activeCanvasId: canvasId, focusedWindowId: null, overview: false })
     },
-    gotoSpace: (n) => goto(n - 1),
     nextSpace: () => {
       const { order, activeCanvasId } = get()
       if (order.length < 2) return
@@ -522,11 +514,6 @@ export const useCanvas = create<CanvasState>((set, get) => {
     toggleOverview: () => {
       transition()
       set((s) => ({ overview: !s.overview }))
-    },
-    bindSpace: async (canvasId, projectId) => {
-      patchCanvas(canvasId, { project_id: projectId })
-      const patch = projectId ? { project_id: projectId } : { clear_project: true }
-      await api.canvases.update(canvasId, patch).catch(fail)
     },
     setSnap: async (canvasId, patch) => {
       patchCanvas(canvasId, patch)

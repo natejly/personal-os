@@ -29,7 +29,6 @@ import re
 import shlex
 import shutil
 import signal
-import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -352,8 +351,8 @@ class ShellJobs:
         self.notes: dict[str, list[str]] = {}
         self.on_note: Any = None       # called with the conversation id when a completion note is queued (wakes an idle desk)
         self.on_change: Any = None     # called with no arguments when a job starts, ends or is killed (the Running list)
-        self.sandbox_failed = False    # the OS refused to apply the profile once: unsandboxed may now be asked for
         self.egress = egress.Egress()  # the allowlisting proxy; binds its port on first use
+        self.sandbox_failed = False    # the OS refused to apply the profile once: unsandboxed may now be asked for
         self.state_path = state_path
         self._last_sweep = 0.0
         self._load_orphans()

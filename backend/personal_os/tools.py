@@ -17,7 +17,6 @@ import json
 import logging
 import mimetypes
 import os
-import posixpath
 import re
 import socket
 import time

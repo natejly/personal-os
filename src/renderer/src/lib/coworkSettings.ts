@@ -40,7 +40,7 @@ export function networkPatch(mode: NetworkMode, hosts: string[] = []): NetSettin
   return { shellNetwork: false, shellRegistryAccess: true, shellAllowedDomains: hosts }
 }
 
-/** Limits the backend enforces (`NUMERIC_SETTING_RANGES`); keys it leaves out are only non-negative. */
+/** Limits the backend enforces; keys it leaves out are only non-negative. */
 const RANGES: Record<string, [number, number]> = { browserMaxTabs: [1, 12] }
 
 /** Clamp a typed number into its range; blank or NaN falls back to `fallback`. */

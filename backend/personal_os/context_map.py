@@ -289,13 +289,6 @@ _MEMO: "OrderedDict[tuple[Any, ...], tuple[str, dict[str, Any]]]" = OrderedDict(
 MEMO_SIZE = 32
 
 
-def version_stamp(db: Any, project_id: str | None, sw: dict[str, bool]) -> tuple[Any, ...]:
-    """Everything the stable text is a function of, from cheap aggregate and LIMITed reads: the scope, the switches, memory
-    count / newest edit / pins / total size / kinds, the listed notes, uploads and projects with their ranks, and the
-    approved-skill count. Any change to a listed row, or to how many rows there are, changes the stamp."""
-    return _stamp(_collect(db, project_id, sw), sw)
-
-
 def _stamp(data: dict[str, Any], sw: dict[str, bool]) -> tuple[Any, ...]:
     def freeze(v: Any) -> Any:
         if isinstance(v, dict):

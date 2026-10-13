@@ -24,7 +24,6 @@ reply's own tool use is narrowed to delegating (see force_delegation).
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 from collections import deque

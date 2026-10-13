@@ -2,8 +2,8 @@ import { Component, memo, useCallback, useEffect, useMemo, useState, type ReactN
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite, splitSources } from '../lib/remarkCites'
-import { AlertCircle, User, FileText, Activity, ChevronRight, Play, RotateCw, Pencil, GitBranch, Trash2 } from '../icons'
-import type { Attachment, Message, RunChanges, Span, ToolEvent } from '@shared/types'
+import { AlertCircle, User, FileText, Activity, ChevronRight, Play, Pencil, GitBranch, Trash2 } from '../icons'
+import type { Attachment, Message, RunChanges, ToolEvent } from '@shared/types'
 import { useStore, useMessageSubagents, useSubagents, useWorkers, useBusy } from '../store'
 import { api } from '../lib/api'
 import { fetchBlobUrl } from '../features/notes/api'
@@ -18,7 +18,7 @@ import { parseChatMessage } from '../lib/chatLink'
 import { parseQuotedMessage } from '../lib/selectionActions'
 import { modelLabel } from '../lib/modelLabel'
 import { outcomeLabel } from '../lib/outcomeLabel'
-import { describeCall, staysVisible, traceLines } from '../lib/toolDisplay'
+import { staysVisible, traceLines } from '../lib/toolDisplay'
 import { quietEvents } from '../lib/orchestration'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
@@ -50,7 +50,7 @@ class BodyBoundary extends Component<{ resetKey: string; children: ReactNode }, 
  * A reply's trace as one short gray line: the newest step (thinking summary, then each quiet tool call)
  * replaces the one before it, and the live step shimmers.
  */
-function ReplyActivity({ reasoning, events, conversationId, streaming, answering, trace }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; streaming: boolean; answering: boolean; trace?: Span[] | null }): JSX.Element {
+function ReplyActivity({ reasoning, events, conversationId, streaming, answering }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; streaming: boolean; answering: boolean }): JSX.Element {
   const subs = useSubagents(conversationId)
   const live = streaming && !answering
   const lines = traceLines(reasoning, events)
@@ -304,7 +304,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
         ) : (
           <div className="msg-body">
             <BodyBoundary resetKey={message.id}>
-              {(message.reasoning || folded.length > 0) && !(busy && !content) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!content} trace={message.trace} />}
+              {(message.reasoning || folded.length > 0) && !(busy && !content) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!content} />}
               {trail && <ResearchTrail trail={trail} />}
               {!isUser && <SubagentThread messageId={message.id} conversationId={message.conversation_id} events={events ?? []} />}
               {shown.length > 0 && <ToolEvents events={shown} conversationId={message.conversation_id} streaming={streaming} browserSession={browserSession} />}

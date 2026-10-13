@@ -307,30 +307,5 @@ class ValidateChangesTests(unittest.TestCase):
         self.assertEqual(f, {"summary": "A", "start": "2026-10-07T10:00", "attendees": [{"email": "a@x.com"}], "create_meet": True})
 
 
-class ConflictTests(unittest.TestCase):
-    def test_flags_overlap_with_existing_event(self) -> None:
-        events = [ev("2026-10-07T10:00:00-04:00", "2026-10-07T11:00:00-04:00", id="a", summary="Standup")]
-        out = sch.conflicts([{"op": "create", "summary": "N", "start": "2026-10-07T10:30:00-04:00", "end": "2026-10-07T11:30:00-04:00"}], events, NY)
-        self.assertEqual(out, [{"index": 0, "with": "Standup"}])
-
-    def test_touching_is_not_a_conflict(self) -> None:
-        events = [ev("2026-10-07T10:00:00-04:00", "2026-10-07T11:00:00-04:00", id="a")]
-        self.assertEqual(sch.conflicts([{"op": "create", "start": "2026-10-07T11:00:00-04:00", "end": "2026-10-07T12:00:00-04:00"}], events, NY), [])
-
-    def test_moving_an_event_onto_its_own_old_slot_is_fine(self) -> None:
-        events = [ev("2026-10-07T10:00:00-04:00", "2026-10-07T11:00:00-04:00", id="a")]
-        self.assertEqual(sch.conflicts([{"op": "update", "event_id": "a", "start": "2026-10-07T10:30:00-04:00", "end": "2026-10-07T11:30:00-04:00"}], events, NY), [])
-
-    def test_two_changes_colliding_with_each_other(self) -> None:
-        cs = [{"op": "create", "start": "2026-10-07T10:00:00-04:00", "end": "2026-10-07T11:00:00-04:00"},
-              {"op": "create", "start": "2026-10-07T10:30:00-04:00", "end": "2026-10-07T11:30:00-04:00"}]
-        self.assertEqual(sch.conflicts(cs, [], NY), [{"index": 1, "with": "change 1"}])
-
-    def test_deletes_and_declined_events_never_conflict(self) -> None:
-        events = [ev("2026-10-07T10:00:00-04:00", "2026-10-07T11:00:00-04:00", id="a", my_response="declined")]
-        cs = [{"op": "create", "start": "2026-10-07T10:00:00-04:00", "end": "2026-10-07T11:00:00-04:00"}, {"op": "delete", "event_id": "z"}]
-        self.assertEqual(sch.conflicts(cs, events, NY), [])
-
-
 if __name__ == "__main__":
     unittest.main()

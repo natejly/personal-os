@@ -1,5 +1,4 @@
 import type { CanvasWindow, DragPayload, WidgetKind } from '@shared/types'
-import { api } from '../lib/api'
 import { useStore } from '../store'
 import type { Point } from './snapping'
 import { useCanvas } from './store'

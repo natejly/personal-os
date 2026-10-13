@@ -1,5 +1,5 @@
 import { FilePlus, FileOutput } from '../../icons'
-import { num, str } from '../../lib/toolResult'
+import { str } from '../../lib/toolResult'
 import { useStore } from '../../store'
 import CardShell from './CardShell'
 import { ErrorLine, Meta, unreadable, useParsed } from './blocks'

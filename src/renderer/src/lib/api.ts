@@ -5,8 +5,8 @@ import type {
   Memory, MemoryProposal, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasWindow, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
-  Desk, DeskAutonomy, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
-  DeskQueued, DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
+  Desk, DeskAutonomy, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskRichPreview,
+  DeskQueued, DeskStatus, FullDesk, PromotionKind, PromotionResult,
   AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobSkipRecord, JobStats,
   Doc, DocFolder, FullDoc, DocRevision, DocComment, DocTypography,
   HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
@@ -521,8 +521,7 @@ export const api = {
   /** The chat's plan artifact: the model writes it with `todo_write`, the user ticks steps off here. */
   plan: {
     get: (convId: string) => req<Plan>(`/conversations/${convId}/plan`),
-    set: (convId: string, steps: PlanStep[]) => req<Plan>(`/conversations/${convId}/plan`, { method: 'PUT', body: json({ steps }) }),
-    clear: (convId: string) => req<{ ok: boolean }>(`/conversations/${convId}/plan`, { method: 'DELETE' })
+    set: (convId: string, steps: PlanStep[]) => req<Plan>(`/conversations/${convId}/plan`, { method: 'PUT', body: json({ steps }) })
   },
   /** Large tool results that were stored instead of inlined into the model's context. */
   toolResults: {
@@ -742,20 +741,12 @@ export const api = {
       /** Snapshot copies into the desk's read-only inputs/ folder; the desk's next turn is told about them. */
       addInputs: (id: string, inputs: DeskInputRef[]) =>
         req<{ added: { path: string; bytes: number; source: string }[] }>(`/cowork/desks/${id}/inputs`, { method: 'POST', body: json({ inputs }) }),
-      patch: (id: string, patch: { title?: string; autonomy?: DeskAutonomy; project_id?: string | null; archived?: boolean; clear_project?: boolean }) =>
-        req<Desk>(`/cowork/desks/${id}`, { method: 'PATCH', body: json(patch) }),
       /** The workspace is kept unless `purge`: a deleted desk's files are the one thing the user cannot regenerate. */
       delete: (id: string, purge = false) => req<{ ok: boolean }>(`/cowork/desks/${id}?purge=${purge}`, { method: 'DELETE' }),
-      /** Over `deskMaxLive` these queue the desk and answer `DeskQueued` instead of a run. */
-      start: (id: string) => req<({ run_id: string; seq: number } | DeskQueued) & { conversation_id: string }>(`/cowork/desks/${id}/start`, { method: 'POST' }),
-      resume: (id: string, reason?: string) => req<{ run_id: string; seq: number } | DeskQueued>(`/cowork/desks/${id}/resume`, { method: 'POST', body: json({ reason }) }),
       /** The same box awake or asleep: live it steers the running reply, otherwise it is the next turn's content. */
       message: (id: string, content: string, ab_model?: string) => req<{ ok: boolean; steered: boolean; run_id?: string } & Partial<DeskQueued>>(`/cowork/desks/${id}/message`, { method: 'POST', body: json({ content, ab_model }) }),
       /** Marks every unseen needs-you event of ONE desk read — opening the desk is the acknowledgement. */
       seen: (id: string) => req<Desk>(`/cowork/desks/${id}/seen`, { method: 'POST' }),
-      pause: (id: string) => req<Desk>(`/cowork/desks/${id}/pause`, { method: 'POST' }),
-      /** `detach` is a chat turning autonomy off: stopped if it can be, and the chat answers as a plain chat again. */
-      stop: (id: string, detach = false) => req<Desk>(`/cowork/desks/${id}/stop?detach=${detach}`, { method: 'POST' }),
       files: (id: string, path = '') => req<DeskFileTree>(`/cowork/desks/${id}/files?path=${encodeURIComponent(path)}`),
       file: (id: string, path: string, offset = 0, length = 6000) =>
         req<DeskFilePreview>(`/cowork/desks/${id}/file?path=${encodeURIComponent(path)}&offset=${offset}&length=${length}`),
@@ -775,8 +766,7 @@ export const api = {
       setup: () => req<{ ready: boolean; python: string | null; packages: string[]; installer: string; error: string | null }>('/cowork/env/setup', { method: 'POST' }, NO_TIMEOUT)
     },
     inbox: {
-      list: (limit = 40) => req<DeskEvent[]>(`/cowork/inbox?limit=${limit}`),
-      seen: (eventId: string) => req<{ ok: boolean }>(`/cowork/inbox/${eventId}/seen`, { method: 'POST' })
+      list: (limit = 40) => req<DeskEvent[]>(`/cowork/inbox?limit=${limit}`)
     }
   },
   canvases: {

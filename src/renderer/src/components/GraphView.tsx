@@ -3,7 +3,7 @@ import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, f
 import { Plus, Trash2, Globe, X, Link2, Maximize2, History } from '../icons'
 import { useStore, type Scope } from '../store'
 import { api } from '../lib/api'
-import type { GraphBackfillStatus, GraphData, GraphEdge, GraphNode } from '@shared/types'
+import type { GraphBackfillStatus, GraphData, GraphNode } from '@shared/types'
 
 interface SimNode extends SimulationNodeDatum { id: string; label: string; type: string; global: boolean; degree: number; literal: boolean }
 interface SimLink extends SimulationLinkDatum<SimNode> { id: string; relation: string; ended?: boolean }

@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .base import CommonPaths, FileSecrets, NoSandbox, Platform, PosixProc, home, run_opener, which
+from .base import CommonPaths, NoSandbox, Platform, PosixProc, home, run_opener, which
 
 
 # Credential stores and browser profiles on Linux, relative to home. Whole folders: opening any file in one needs approval.

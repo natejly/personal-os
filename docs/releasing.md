@@ -47,7 +47,9 @@ To bump Python, change `PBS_TAG`, `PBS_PY` and the two checksums in `bundle-back
   Developer ID for builds you hand to other people. `GRAIN_ADHOC_SIGN=1` forces ad-hoc.
 - Neither: electron-builder skips signing and `scripts/adhoc-sign.cjs` ad-hoc signs the
   bundled Python binaries and the app (hardened runtime, same entitlements). This is what CI and
-  other Macs get. On another Mac, Gatekeeper needs right-click, Open the first time. Auto-update
+  other Macs get. On another Mac, Gatekeeper blocks the first open: try to open Grain once, then
+  System Settings → Privacy & Security → **Open Anyway** (current macOS no longer lets Control-click → Open
+  bypass it). From a terminal, `xattr -dr com.apple.quarantine /Applications/Grain.app` does the same. Auto-update
   cannot install an ad-hoc build, and every rebuild drops privacy grants.
 
 Creating the local identity (once per Mac; Keychain Access → Certificate Assistant → Create a

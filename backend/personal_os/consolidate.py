@@ -294,6 +294,9 @@ class Consolidator:
         p = self.get(id)
         if not p or p["status"] != "pending":
             return p
+        if p["kind"] == "about_you":  # the user's accept route passes an edited text; a plain apply takes the draft as is
+            from . import about_you
+            return about_you.accept(self, id)
         pl = p["payload"]
         try:
             if p["kind"] == "merge_entities":

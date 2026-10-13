@@ -1004,9 +1004,9 @@ class Engine:
             over = list(over.values()) if len(over) == 1 and isinstance(next(iter(over.values())), list) else list(over.items())
         if not isinstance(over, list):
             raise _StepFailed("fan_out `over` did not render to a list")
-        cap = int(self.settings().get("workflowMaxFanOut") or 50)
+        cap = limits.WORKFLOW_MAX_FAN_OUT
         if len(over) > cap:
-            raise _StepFailed(f"fan_out over {len(over)} items; the limit is {cap} (setting workflowMaxFanOut)")
+            raise _StepFailed(f"fan_out over {len(over)} items; the limit is {cap} (WORKFLOW_MAX_FAN_OUT)")
         conc = max(1, min(int(f.get("max_parallel") or 4), limits.slots(self.settings(), "subagentMaxConcurrent")))
         prior = (next((s for s in run["steps"] if s["step_id"] == step["id"]), {}).get("items")) or {}
         items: dict[str, Any] = {k: v for k, v in prior.items() if int(k) < len(over)}

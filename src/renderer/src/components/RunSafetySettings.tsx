@@ -1,5 +1,6 @@
 import type { Settings } from '@shared/types'
 import { HostList } from './CoworkSettings'
+import Switch from './settings/Switch'
 
 type Props = { draft: Settings; patch: (p: Partial<Settings>) => void }
 
@@ -24,25 +25,18 @@ export default function RunSafetySettings({ draft, patch }: Props): JSX.Element 
  *  then run networked commands and write outside its desk without a card, while the hard blocks still ask. */
 export function TrustExternalToggle({ draft, patch }: Props): JSX.Element {
   return (
-    <label className={`toggle-row plain ${draft.trustExternalContent ? 'danger' : ''}`}>
-      <span className="toggle-text"><b>Trust content from outside Grain</b>
-        <small>Off by default. Lets a reply that has read content from outside Grain run commands and touch files without asking each time. Credential stores, Grain&apos;s own files and destructive commands still ask.</small></span>
-      <input type="checkbox" aria-label="Trust content from outside Grain" checked={!!draft.trustExternalContent}
-        onChange={(e) => patch({ trustExternalContent: e.target.checked })} /><span className="switch" />
-    </label>
+    <Switch danger={!!draft.trustExternalContent} title="Trust content from outside Grain" label="Trust content from outside Grain"
+      help="Off by default. Lets a reply that has read content from outside Grain run commands and touch files without asking each time. Credential stores, Grain's own files and destructive commands still ask."
+      checked={!!draft.trustExternalContent} onChange={(trustExternalContent) => patch({ trustExternalContent })} />
   )
 }
 
 export function SnapshotToggle({ draft, patch }: Props): JSX.Element {
   const snapOk = draft.snapshotsAvailable !== false
   return (
-    <label className="toggle-row plain">
-      <span className="toggle-text"><b>Snapshot folders before changes</b>
-        <small>{snapOk
-          ? 'Lets Undo reverse shell effects too. Keeps a copy before a reply first changes a folder.'
-          : 'Unavailable on this Mac: folder snapshots need git installed (xcode-select --install).'}</small></span>
-      <input type="checkbox" disabled={!snapOk} checked={snapOk && draft.snapshotsEnabled !== false}
-        onChange={(e) => patch({ snapshotsEnabled: e.target.checked })} /><span className="switch" />
-    </label>
+    <Switch title="Snapshot folders before changes" disabled={!snapOk} checked={snapOk && draft.snapshotsEnabled !== false} onChange={(snapshotsEnabled) => patch({ snapshotsEnabled })}
+      help={snapOk
+        ? 'Lets Undo reverse shell effects too. Keeps a copy before a reply first changes a folder.'
+        : 'Unavailable on this Mac: folder snapshots need git installed (xcode-select --install).'} />
   )
 }

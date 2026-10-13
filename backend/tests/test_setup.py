@@ -186,7 +186,6 @@ class CompleteTests(unittest.TestCase):
         _clear()
 
     def test_complete_persists_and_stamps_then_reset_clears(self) -> None:
-        db.set_settings({"extractionModel": "deepseek-v4-flash"})
         r = client.post("/setup/complete", json={"provider": "openai", "baseUrl": "https://api.openai.com/v1", "apiKey": " sk-1 ", "model": "gpt-5-mini"})
         self.assertEqual(r.status_code, 200)
         s = r.json()
@@ -195,7 +194,8 @@ class CompleteTests(unittest.TestCase):
         self.assertEqual((s["provider"], s["model"]), ("openai", "gpt-5-mini"))
         self.assertTrue(s["onboardedAt"])
         stored = db.get_settings()
-        self.assertEqual((stored["apiKey"], stored["extractionModel"]), ("sk-1", ""))
+        self.assertEqual(stored["apiKey"], "sk-1")
+        self.assertEqual(stored["embeddingModel"], "text-embedding-3-small")  # picked from the new key
         s = client.post("/setup/reset").json()
         self.assertIsNone(s["onboardedAt"])
         self.assertEqual(s["provider"], "openai")

@@ -13,23 +13,12 @@ test('walks the steps in order and stops at done', () => {
   assert.equal(s.step, 'provider')
   s = reduce(s, { type: 'pick', provider: fw })
   s = reduce(s, { type: 'next' })
+  assert.equal(s.step, 'key')
+  assert.equal(reduce(s, { type: 'next' }, fw).step, 'key', 'a key is required')
   s = reduce(s, { type: 'field', patch: { apiKey: 'k' } }, fw)
   s = reduce(s, { type: 'next' }, fw)
-  assert.equal(s.step, 'test')
-  assert.equal(reduce(s, { type: 'next' }, fw).step, 'test', 'an untested connection blocks')
-  s = reduce(s, { type: 'test', test: { state: 'ok', latencyMs: 12 } })
-  s = reduce(s, { type: 'next' }, fw)
-  assert.equal(s.step, 'search')
-  assert.equal(stepBlocker(s, fw), null, 'the search model is optional')
-  s = reduce(s, { type: 'next' }, fw)
-  assert.equal(s.step, 'google')
-  s = reduce(s, { type: 'next' }, fw)
-  assert.equal(s.step, 'about', 'google and about are both skippable, never blocking')
-  s = reduce(s, { type: 'next' }, fw)
-  assert.equal(s.step, 'permissions')
-  assert.equal(stepBlocker(s, fw), null, 'permissions never blocks')
-  s = reduce(s, { type: 'next' }, fw)
   assert.equal(s.step, STEPS[STEPS.length - 1])
+  assert.equal(s.step, 'done')
   assert.equal(reduce(s, { type: 'next' }, fw).step, 'done')
   assert.equal(reduce(s, { type: 'back' }, fw).step, 'done', 'no walking back out of a saved setup')
 })
@@ -53,7 +42,7 @@ test('key step validates key, base URL and model per provider', () => {
 test('picking resets key/model; editing invalidates the test', () => {
   let s = reduce(initialState(), { type: 'pick', provider: fw })
   s = reduce(s, { type: 'field', patch: { apiKey: 'secret' } })
-  s = reduce(s, { type: 'test', test: { state: 'ok' } })
+  s = reduce(s, { type: 'test', test: { state: 'fail', error: 'x' } })
   s = reduce(s, { type: 'field', patch: { model: 'm2' } })
   assert.equal(s.test.state, 'idle')
   assert.equal(reduce(s, { type: 'pick', provider: fw }), s, 're-picking the same provider keeps what was typed')
@@ -63,9 +52,9 @@ test('picking resets key/model; editing invalidates the test', () => {
   assert.equal(s.baseUrl, ol.baseUrl)
 })
 
-test('back from test clears the verdict', () => {
-  const s = reduce(at('test', { test: { state: 'fail', error: 'nope' } }), { type: 'back' })
-  assert.equal(s.step, 'key')
+test('back from the key step clears a failed test', () => {
+  const s = reduce(at('key', { test: { state: 'fail', error: 'nope' } }), { type: 'back' })
+  assert.equal(s.step, 'provider')
   assert.equal(s.test.state, 'idle')
   assert.equal(reduce(initialState(), { type: 'back' }).step, 'welcome')
 })
@@ -79,15 +68,6 @@ test('model options merge without duplicates', () => {
   assert.deepEqual(modelOptions(undefined, ['a']), ['a'])
 })
 
-test('about text survives, and never blocks', () => {
-  const s = reduce(at('about'), { type: 'about', about: ' I am an engineer ' })
-  assert.equal(s.about, ' I am an engineer ')
-  assert.equal(stepBlocker(s, fw), null)
-  // Unlike a field edit, typing about yourself does not invalidate a passing connection test.
-  const tested = reduce(at('about', { test: { state: 'ok' } }), { type: 'about', about: 'x' })
-  assert.equal(tested.test.state, 'ok')
-})
-
 test('first prompts only name Google surfaces once Google is connected', () => {
   const off = firstPrompts(false).join(' ')
   assert.ok(!/calendar|mail/i.test(off), off)
@@ -99,11 +79,4 @@ test('seed fills a re-run from the configured setup, but never overrides a pick'
   assert.deepEqual([s.providerId, s.baseUrl, s.model], ['ollama', 'http://box:11434/v1', 'qwen3'])
   const picked = reduce(at('provider'), { type: 'pick', provider: fw })
   assert.equal(reduce(picked, { type: 'seed', provider: ol, baseUrl: 'x', model: 'y' }), picked)
-})
-
-test('the search step is skipped both ways once the search model is set', () => {
-  const s = at('test', { searchLocked: true, test: { state: 'ok' } })
-  const g = reduce(s, { type: 'next' }, fw)
-  assert.equal(g.step, 'google')
-  assert.equal(reduce(g, { type: 'back' }, fw).step, 'test')
 })

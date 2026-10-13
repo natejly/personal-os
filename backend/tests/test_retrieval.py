@@ -60,6 +60,7 @@ async def boom(settings_: dict[str, Any], texts: list[str], model: str | None) -
 
 
 embedder.fn = stub
+db.set_settings({"embeddingModel": "qwen3-embedding-8b"})  # no default any more; a keyed provider would pick it
 S = settings()
 check(S["retrievalMode"] == "hybrid" and S["embeddingModel"] and S["retrievalPerDocCap"] == 3, "defaults present")
 

@@ -12,7 +12,7 @@ def _unattended(cid: str, kind: str = "job") -> Run:
 
 
 def _fresh_cfg(**kw):  # type: ignore[no-untyped-def]
-    cid = setup(**{"skipPermissions": False, **kw})
+    cid = setup(**kw)
     appmod.db.set_settings({"unattendedApprovals": llm.DEFAULT_SETTINGS["unattendedApprovals"]})
     return cid
 
@@ -21,22 +21,15 @@ def test_default_is_deny() -> None:
     assert llm.DEFAULT_SETTINGS["unattendedApprovals"] == "deny"
 
 
-def test_ask_is_denied_and_recorded_even_with_skip_on() -> None:
+def test_ask_is_denied_and_recorded() -> None:
     for kind in ("job", "scheduled"):
-        cid = _fresh_cfg(skipPermissions=True)
+        cid = _fresh_cfg()
         run = _unattended(cid, kind)
         ev = drive(cid, [[sh(0, "make deploy")], []], run=run)
         assert not cards(ev) and not RAN
         assert any("unattendedApprovals" in m for m in tool_messages())
         rows = appmod.run_store.approvals(status="denied", run_id=run.run_id)
         assert len(rows) == 1 and rows[0]["decided_by"] == "unattended"
-
-
-def test_conversation_skip_is_also_ignored() -> None:
-    cid = _fresh_cfg()
-    appmod.convos.update(cid, {"settings": {"tools": {"shell_run": "ask"}, "skipPermissions": True}})
-    drive(cid, [[sh(0, "make deploy")], []], run=_unattended(cid))
-    assert not RAN
 
 
 def test_allow_rule_still_runs() -> None:

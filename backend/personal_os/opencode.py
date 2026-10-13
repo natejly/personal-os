@@ -44,7 +44,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import mac, osplat, sandbox, shell
+from . import limits, mac, osplat, sandbox, shell
 
 # Where the binary usually lands: Homebrew, the official installer (~/.opencode/bin), npm -g, ~/.local/bin.
 BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "~/.opencode/bin", "~/.local/bin", "~/.bun/bin")
@@ -195,8 +195,8 @@ def _desk_root(tb: Any, ctx: dict[str, Any]) -> Path | None:
     return None
 
 
-def default_timeout(settings: dict[str, Any], timeout_s: Any, background: bool) -> int:
-    default_t = shell.BACKGROUND_TIMEOUT if background else max(int(settings.get("shellTimeoutSec") or shell.DEFAULT_TIMEOUT), 300)
+def default_timeout(timeout_s: Any, background: bool) -> int:
+    default_t = shell.BACKGROUND_TIMEOUT if background else max(shell.DEFAULT_TIMEOUT, 300)
     try:
         return max(1, min(int(timeout_s or default_t), shell.MAX_TIMEOUT))
     except (TypeError, ValueError):
@@ -211,7 +211,6 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
     """Start `opencode run` under the OS sandbox as a tracked job and return (job, {cwd, model, sandboxed}).
     Raises Refused (a ShellError) when it cannot start. The caller owns waiting for the job and reading its output.
     `conversation_id` defaults to the chat's; a caller that must outlive the chat's reply passes its own."""
-    s = ctx.get("settings") or tb.settings()
     exe = binary()
     if not exe:
         raise Refused(INSTALL_HINT, "shell_run and fs_edit for the change yourself")
@@ -221,7 +220,7 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
     use_model = str(model or "").strip()  # empty: opencode picks its own default
     dr = _desk_root(tb, ctx)
     where = shell.resolve_cwd(cwd, dr or mac.home(), dr)
-    timeout = None if no_timeout else timeout or default_timeout(s, None, background)
+    timeout = None if no_timeout else timeout or default_timeout(None, background)
     tmp = os.path.realpath(tempfile.mkdtemp(prefix="pos-opencode-"))
     env = shell.scrubbed_env(tmp)
     env["PATH"] = f"{os.path.dirname(exe)}:{env['PATH']}"
@@ -250,7 +249,7 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
                                    conversation_id=conversation_id if conversation_id is not None else ctx.get("conversation_id"),
                                    run_id=run_id if run_id is not None else ctx.get("run_id"),
                                    background=bool(background), timeout=timeout, notify=notify,
-                                   max_background=max_background or int(s.get("shellMaxBackground") or 4), pool=pool,
+                                   max_background=max_background or limits.SHELL_MAX_BACKGROUND, pool=pool,
                                    on_timeout=on_timeout or ("background" if ctx.get("desk_id") else "kill"))
     except shell.ShellError:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -270,7 +269,6 @@ def register(tb: Any) -> None:
     async def opencode_run(ctx: dict[str, Any], prompt: str, cwd: str | None = None, timeout_s: int | None = None,
                            background: bool = False, continue_session: bool = False, model: str | None = None,
                            in_place: bool = False) -> Any:
-        s = cfg(ctx)
         prompt = str(prompt or "").strip()
         if ctx.get("proposal_only"):
             return tool_error("opencode_run edits files and runs commands on this Mac and this is an unattended background "
@@ -279,7 +277,7 @@ def register(tb: Any) -> None:
             return tool_error("opencode_run needs a prompt.", field="prompt", example={"prompt": "add a --dry-run flag to cli.py"})
         if len(prompt) > MAX_PROMPT:
             return tool_error(f"The prompt is over {MAX_PROMPT} characters; point opencode at a file instead.", field="prompt")
-        timeout = default_timeout(s, timeout_s, bool(background))
+        timeout = default_timeout(timeout_s, bool(background))
         wt: dict[str, Any] | None = None
         base: str | None = None
         if binary() and shell.sandbox_available():  # launch() names what is missing otherwise

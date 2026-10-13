@@ -121,7 +121,7 @@ def _fresh(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
     GATES.clear()
     monkeypatch.setattr(llm, "stream_chat", _fake)
     monkeypatch.setattr(mgr, "memory", lambda: None)
-    appmod.db.set_settings({"permissionMode": "manual", "workspaceRoots": [], "delegationForce": True, "delegationAfterRounds": 2,
+    appmod.db.set_settings({"permissionMode": "manual", "delegationForce": True, "delegationAfterRounds": 2,
                             "workerMaxConcurrent": 4, "telegramPushWorkerResults": False, "permissionRules": {"allow": [], "ask": [], "deny": []}})
     yield
     for g in GATES.values():

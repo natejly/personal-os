@@ -9,7 +9,7 @@ const openInbox = async (page) => {
   await expect(page.locator('.agent-inbox')).toBeVisible()
 }
 
-test('Settings → Sidebar turns each sidebar row on and off at once', async ({ grain }) => {
+test('Settings → Sidebar turns each sidebar row on and off on Save', async ({ grain }) => {
   const { page, api } = grain
   const shown = async (name) => (await page.locator('.sidebar .nav-item', { hasText: new RegExp(`^${name}`) }).count()) > 0
   await openSettings(page, 'Sidebar')
@@ -25,21 +25,23 @@ test('Settings → Sidebar turns each sidebar row on and off at once', async ({ 
     if ((await sw(n).isChecked()) !== on) await sw(n).locator('xpath=following-sibling::span[@class="switch"]').click()
     await expect(sw(n)).toBeChecked({ checked: on })
   }
-  for (const n of views) await set(n, true) // Mail and Health only left the sidebar; turning them on first makes the off below a real view-off
-  for (const n of views) await set(n, false)
+  // Changes are a draft: Save applies them and closes, so each step reopens the tab.
+  const apply = async (fn) => { await openSettings(page, 'Sidebar'); await fn(); await save(page) }
+  await apply(async () => { for (const n of views) await set(n, true) }) // Mail and Health only left the sidebar; turning them on first makes the off below a real view-off
+  await apply(async () => { for (const n of views) await set(n, false) })
   await expect.poll(async () => (await api('/settings')).hiddenViews.sort()).toEqual(['calendar', 'health', 'library', 'mail', 'todos'])
   for (const n of views) await expect.poll(() => shown(n), { message: `${n} hidden` }).toBe(false)
-  for (const n of views) await set(n, true)
+  await apply(async () => { for (const n of views) await set(n, true) })
   await expect.poll(async () => (await api('/settings')).hiddenViews).toEqual([])
   for (const n of views) await expect.poll(() => shown(n), { message: `${n} shown` }).toBe(true)
   // The title bar holds no per-view icons: nothing but the Agent inbox and Quick chat buttons.
   await expect(page.locator('.app-switcher button')).toHaveCount(2)
   // One at a time: hide it, then bring it back to the sidebar.
   for (const n of ['Library', 'Mail']) {
-    await set(n, false)
+    await apply(() => set(n, false))
     await expect.poll(() => shown(n), { message: `${n} off` }).toBe(false)
     for (const o of views.filter((x) => x !== n)) expect(await shown(o), `${o} untouched`).toBe(true)
-    await set(n, true)
+    await apply(() => set(n, true))
     await expect.poll(() => shown(n), { message: `${n} on` }).toBe(true)
   }
   // One switch for the recap on new chats (General tab).
@@ -53,6 +55,7 @@ test('hiding the view you are on sends you to a new chat', async ({ grain }) => 
   await page.locator('.sidebar .nav-item', { hasText: 'Library' }).first().click()
   await openSettings(page, 'Sidebar')
   await dialog(page).getByRole('checkbox', { name: 'Library', exact: true }).locator('xpath=following-sibling::span[@class="switch"]').click()
+  await save(page)
   await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
   noErrors(grain)
 })

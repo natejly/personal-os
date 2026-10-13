@@ -38,8 +38,6 @@ check(m[0]["content"] == "STABLE" and m[4]["content"] == "u2", "stable first, ne
 check("v1" in m[3]["content"] and "v3" in m[3]["content"], "volatile in its own message")
 m2 = layout_messages("STABLE", ["other"], hist)
 check(m[0]["content"].encode() == m2[0]["content"].encode(), "stable prefix byte-identical")
-legacy = layout_messages("STABLE", ["v1"], hist, cache_layout=False)
-check(len(legacy) == 4 and legacy[0]["content"] == "STABLE\n\nv1", "legacy single system message")
 check(len(layout_messages("S", [], hist)) == 4, "no volatile -> no extra message")
 
 # ---- 2. build_context pieces
@@ -75,7 +73,6 @@ llm._emit_usage("m", "chat", o, 5, 0, 0)
 check(seen[-1]["cached_tokens"] == 800 and seen[-1]["reasoning_tokens"] == 300, "emit carries buckets")
 llm._emit_usage("m", "chat", None, 5, 40, 8)
 check(seen[-1]["cached_tokens"] == 0 and seen[-1]["estimated"], "estimated rows keep zeros")
-check(llm.DEFAULT_SETTINGS["cacheLayout"] is True, "cacheLayout default on")
 
 # ---- 4. pricing
 p = Pricing()

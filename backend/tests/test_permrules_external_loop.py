@@ -64,7 +64,7 @@ def sh(i: int, command: str) -> dict[str, Any]:
 
 def setup(rules: dict[str, list[str]] | None = None, mode: str | None = "ask", **settings: Any) -> str:
     """mode=None leaves gmail_send on its default (no explicit choice of the user's)."""
-    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "stuckDetection": True, "delegationForce": False, "workspaceRoots": [],
+    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "delegationForce": False,
                             "permissionMode": "manual", "unattendedApprovals": "ask", "permissionRules": {"allow": [], "ask": [], "deny": [], **(rules or {})}, **settings})
     cid = appmod.convos.create(None, "t", "m")["id"]
     if mode is not None:
@@ -129,7 +129,7 @@ def test_deny_survives_skip_permissions() -> None:
 
 def test_external_card_has_danger_and_no_whole_tool_grant() -> None:
     for dec in ("always_chat", "always_global"):
-        cid = setup(mode="ask", skipPermissions=False)
+        cid = setup(mode="ask")
         ev = drive(cid, [[sh(0, "a@x.com")], []], [dec])
         check(cards(ev)[0]["permission"]["danger"] == "external", "the card payload carries danger")
         check(RAN == ["a@x.com"], f"{dec} still sends this one call")

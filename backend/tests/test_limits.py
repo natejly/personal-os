@@ -84,11 +84,10 @@ class StoredValueTests(unittest.TestCase):
 
     def test_put_accepts_every_old_value_and_zero(self) -> None:
         for k, v in (("contextWindow", 128000), ("subagentMaxConcurrent", 4), ("deskMaxLive", 4),
-                     ("parallelReads", 4), ("stuckDetection", False)):
+                     ("parallelReads", 4)):
             self.assertEqual(client.put("/settings", json={k: v}).status_code, 200, k)
         for k in limits.AUTOMATIC:
             client.put("/settings", json={k: 0})
-        client.put("/settings", json={"stuckDetection": True})
 
     def test_every_default_has_a_range_or_is_not_numeric_limit(self) -> None:
         for k in limits.RANGES:

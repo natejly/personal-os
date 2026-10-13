@@ -523,7 +523,7 @@ class Conversations:
         return [{"id": r["id"], "created_at": r["created_at"], "role": r["role"], "tool_events": r.get("tool_events") or []} for r in hidden]
 
     # Settings a branch carries over. The rest stays behind on purpose: standing tool grants (the `tools` map's
-    # "on" entries), skipPermissions, titles, and the desk/job markers.
+    # "on" entries), titles, and the desk/job markers.
     FORK_KEYS = (*[k for k in DEFAULT_CONV_SETTINGS if k != "tools"], "useSkills", "tainted", "taint_sources")
 
     def fork(self, conv_id: str, upto_mid: str) -> dict[str, Any]:

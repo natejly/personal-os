@@ -40,9 +40,9 @@ test('groups put the active provider first', () => {
 })
 
 test('the search model is locked once set', () => {
-  assert.equal(embeddingLocked({ embeddingModel: '' }), false)
+  assert.equal(embeddingLocked({ embeddingLocked: false }), false)
   assert.equal(embeddingLocked({}), false)
-  assert.equal(embeddingLocked({ embeddingModel: 'embed' }), true)
+  assert.equal(embeddingLocked({ embeddingLocked: true }), true)
 })
 
 test('embedding rows come only from keyed providers, suggested first', () => {

@@ -4,7 +4,7 @@ import { api, req } from './api'
 import { useStore } from '../store'
 import { uploadShowItem } from './showPanel'
 import { isMacPath } from './pathLinks'
-import { artifactShowItem, artifactsQuery, filesQuery, rowAction, uploadTarget, type ChatFile, type ChatFilesPage, type FilesScope } from './chatFiles'
+import { artifactShowItem, artifactsQuery, filesQuery, rowAction, soleOutput, uploadTarget, type ChatFile, type ChatFilesPage, type FilesScope } from './chatFiles'
 
 /** Network and store side of chat files; the grouping and click routing are pure, in chatFiles.ts. */
 export const chatFilesApi = {
@@ -99,7 +99,11 @@ export async function openPathLink(path: string, chat: string): Promise<void> {
     const f = files.find((x) => x.kind === 'output' && x.rel === path)
       ?? (path.startsWith('uploads/') ? files.find((x) => x.kind === 'upload' && x.name === base) : undefined)
       ?? files.find((x) => x.kind === 'note' && (x.name === base || x.name === stem))
-    if (!f) return s.toast(`${path} is not among this chat's files.`, 'error')
+    if (!f) {
+      const other = soleOutput((await chatFilesApi.artifacts(null, 200)).files, path)
+      if (other) return s.openShow(chat, artifactShowItem(other))
+      return s.toast(`${path} is not among this chat's files.`, 'error')
+    }
     if (f.missing) return s.toast(`${path} is no longer there.`, 'error')
     await openChatFile(f, null)
   } catch (e) {

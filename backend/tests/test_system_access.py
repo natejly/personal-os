@@ -84,7 +84,7 @@ class AccessTests(_Base):
         self.assertEqual(self.run_mock.call_count, 1)
 
     def test_workspace_roots_are_not_reported(self) -> None:
-        self.cfg = {"workspaceRoots": ["/x"]}
+        self.cfg = {}
         self.assertNotIn("roots", self.c.get("/system/access").json())
 
 

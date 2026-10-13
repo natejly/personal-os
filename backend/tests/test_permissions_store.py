@@ -20,7 +20,7 @@ from personal_os.db import Database  # noqa: E402
 LEGACY = {
     "tools": {"web_search": "off", "calendar_delete": "on"},
     "alwaysAsk": ["gmail_send"],
-    "skipPermissions": True,
+    "shellNetwork": True,
     "permissionRules": {"allow": [], "ask": [], "deny": ["web_search"]},
     "fetchAllowlist": ["example.com"],
     "docEditMode": "apply",

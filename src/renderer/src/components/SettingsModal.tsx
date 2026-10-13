@@ -1,144 +1,61 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { X, Search, Plug, Cpu, Bot, Palette, ShieldCheck, ShieldAlert, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, Gauge, Brain, PanelLeft, Layers, type Icon } from '../icons'
-import { useStore, type View } from '../store'
-import { modeOf } from '../lib/permissionMode'
-import { searchSettings, type SettingsTab } from '../lib/settingsTabs'
-import { MODES } from '../lib/permissionMode'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { X, Search, Plug, Cpu, Bot, Palette, ShieldCheck, SlidersHorizontal, KeyRound, Gauge, Brain, PanelLeft, type Icon } from '../icons'
+import { useStore } from '../store'
+import { modeOf, MODES } from '../lib/permissionMode'
+import { resolveTab, searchSettings, type SettingsTab } from '../lib/settingsTabs'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { api } from '../lib/api'
-import { DEFAULT_ZOOM, stepZoom } from '../lib/zoom'
-import { homeModuleOn } from '../moduleToggles'
-import { navEntries } from '../shell/nav'
 import { useModal } from '../lib/useModal'
-import { ACCENTS, CODE_FONTS, CUSTOM_ACCENT, PRESETS, SURFACE_TONES, TEXT_TONES, UI_FONTS, accentId, activePreset, applyAppearance, codeFontId, hexColor, isLightTheme, surfaceToneId, textToneId, uiFontId } from '../lib/appearance'
+import { applyAppearance } from '../lib/appearance'
 import { modelLabel } from '../lib/modelLabel'
 import { chatRows } from '../lib/pickerModels'
-import { RESPONSE_STYLES, RESPONSE_STYLE_TEXT_MAX } from '../lib/responseStyle'
-import type { Settings, ShortcutState } from '@shared/types'
-import { AlwaysAsk, ToolGlobalToggles } from './ToolPermissions'
-import ProviderSettings from './ProviderSettings'
-import ModelDuels from './ModelDuels'
-import ModelsSettings from './ModelsSettings'
-import PermissionRules from './PermissionRules'
-import GrantsPanel from './GrantsPanel'
-import { PermissionsPanel } from './PermissionsPanel'
-import CoworkSettings, { BrowserAccess, DeskGates, ShellNetwork } from './CoworkSettings'
-import RunSafetySettings, { SnapshotToggle } from './RunSafetySettings'
-import { PermissionModeCards } from './PermissionMode'
-import TelegramSettings from './TelegramSettings'
-import GoogleSettings from './GoogleSettings'
-import VoiceInputSettings from './VoiceInputSettings'
-import SupportSettings from './SupportSettings'
-import UsageView from './UsageView'
-import TraceExportSettings from './TraceExportSettings'
-import DataSettings from './DataSettings'
-import TrashPanel from './TrashPanel'
-import AdvancedRetrieval, { rebuildIndex } from './AdvancedRetrieval'
-import TypographyControls from '../features/notes/TypographyMenu'
-import PlannerMailSettings from './PlannerMailSettings'
-import MemoryPanel from './MemoryPanel'
-import ScopeSelect from './ScopeSelect'
-import { tip } from '../lib/tip'
+import type { Settings } from '@shared/types'
+import ModelTab from './settings/ModelTab'
+import UsageTab from './settings/UsageTab'
+import PermissionsTab from './settings/PermissionsTab'
+import IntegrationsTab from './settings/IntegrationsTab'
+import AgentsTab from './settings/AgentsTab'
+import MemoryTab from './settings/MemoryTab'
+import GeneralTab, { THEMES } from './settings/GeneralTab'
+import SidebarTab from './settings/SidebarTab'
+import SystemTab from './settings/SystemTab'
+import AdvancedTab from './settings/AdvancedTab'
+import { useShortcuts } from './settings/useShortcuts'
 
 type Tab = SettingsTab
 
 const TABS: { id: Tab; label: string; icon: Icon }[] = [
   { id: 'appearance', label: 'General', icon: Palette },
-  { id: 'sidebar', label: 'Sidebar', icon: PanelLeft },
-  { id: 'model', label: 'Model', icon: Cpu },
-  { id: 'models', label: 'Models', icon: Layers },
+  { id: 'model', label: 'Models', icon: Cpu },
   { id: 'agents', label: 'Agents', icon: Bot },
   { id: 'memory', label: 'Memory', icon: Brain },
   { id: 'integrations', label: 'Integrations', icon: Plug },
   { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
   { id: 'system', label: 'System access', icon: KeyRound },
+  { id: 'sidebar', label: 'Sidebar', icon: PanelLeft },
   { id: 'usage', label: 'Usage', icon: Gauge },
   { id: 'advanced', label: 'Advanced', icon: SlidersHorizontal }
 ]
 
-/** Tabs where every control acts at once. They hold no draft, so their footer is a single Done. */
-/** A block of a tab the search can jump to (`sec-<id>` in SETTINGS_INDEX). */
-function Sec({ id, children }: { id: string; children: ReactNode }): JSX.Element {
-  return <div className="set-sec" id={`sec-${id}`}>{children}</div>
-}
-
-const IMMEDIATE: ReadonlySet<Tab> = new Set<Tab>(['system', 'usage', 'sidebar', 'models'])
-
-const THEMES: { id: Settings['theme']; label: string }[] = [
-  { id: 'light', label: 'Light' },
-  { id: 'dark', label: 'Dark' },
-  { id: 'system', label: 'System' }
-]
-
-/** One collapsed group of the Advanced tab. */
-function AdvGroup({ id, title, openGroups, toggle, children }: { id: string; title: string; openGroups: ReadonlySet<string>; toggle: (id: string, open: boolean) => void; children: ReactNode }): JSX.Element {
-  return (
-    <details className="adv-group" open={openGroups.has(id)} onToggle={(e) => toggle(id, (e.currentTarget as HTMLDetailsElement).open)}>
-      <summary>{title}</summary>
-      {openGroups.has(id) && children}
-    </details>
-  )
-}
-
-/** A labelled on/off row with one line of help. */
-function Switch({ title, help, checked, onChange }: { title: string; help?: string; checked: boolean; onChange: (v: boolean) => void }): JSX.Element {
-  return (
-    <label className="toggle-row plain">
-      <span className="toggle-text"><b>{title}</b>{help && <small>{help}</small>}</span>
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /><span className="switch" />
-    </label>
-  )
-}
-
-/** How much of the library has vectors for the current embedding model, and the button that rebuilds it. */
-function IndexStatusLine(): JSX.Element | null {
-  const toast = useStore((s) => s.toast)
-  const [st, setSt] = useState<Awaited<ReturnType<typeof api.documents.indexStatus>> | null>(null)
-  const [busy, setBusy] = useState(false)
-  const load = (): void => { api.documents.indexStatus().then(setSt).catch(() => undefined) }
-  useEffect(load, [])
-  // Re-chunk with the current chunker, then embed; what is left shows in the status line, and another press continues.
-  const rebuild = async (): Promise<void> => {
-    setBusy(true)
-    try {
-      const r = await rebuildIndex()
-      if (r.error) toast(r.error, 'error')
-      else toast(`Embedded ${r.embedded} passage${r.embedded === 1 ? '' : 's'}${r.remaining ? `, ${r.remaining} left. Press again to continue.` : '.'}`)
-    } catch (e) {
-      toast((e as Error).message, 'error')
-    } finally {
-      setBusy(false)
-      load()
-    }
-  }
-  if (!st) return null
-  const total = st.chunks + (st.doc_chunks ?? 0)
-  const done = st.embedded + (st.doc_embedded ?? 0)
-  return (
-    <div className="setting-row">
-      <span className="toggle-text"><b>Search index</b><small>{done} of {total} passages embedded ({st.mode}{st.model ? `, ${modelLabel(st.model)}` : ', no embedding model'}).</small></span>
-      <button className="ghost-btn" type="button" disabled={busy} onClick={() => void rebuild()}><RefreshCw size={14} /> {busy ? 'Rebuilding…' : 'Rebuild search index'}</button>
-    </div>
-  )
-}
-
+/**
+ * One save model: every control that writes /settings edits `draft`, and Save writes what changed and closes.
+ * Closing with changes asks first. What stays immediate is an action rather than a preference: the Google client
+ * credentials (the sign-in opens the browser and needs them stored), and the panels that call their own endpoints
+ * (key rows, pairing, voice, planner, grants, System access, Usage prices).
+ */
 export default function SettingsModal(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const models = useStore((s) => s.models)
   const view = useStore((s) => s.view)
   const { saveSettings, setSettingsOpen, setView, toast } = useStore()
-  const libraryScope = useStore((s) => s.libraryScope)
-  const setLibraryScope = useStore((s) => s.setLibraryScope)
   const [draft, setDraft] = useState<Settings>(settings)
   const [saving, setSaving] = useState(false)
   // Set while the footer asks whether to throw the draft away; it remembers what the answer leads to.
   const [pending, setPending] = useState<'close' | 'setup' | null>(null)
-  const [shortcut, setShortcut] = useState<ShortcutState | null>(null)
-  const [capShortcut, setCapShortcut] = useState<ShortcutState | null>(null)
-  const [askShortcut, setAskShortcut] = useState<ShortcutState | null>(null)
+  const { shortcuts, apply: applyShortcuts } = useShortcuts()
   const storeTab = useStore((s) => s.settingsTab)
   const storeGroup = useStore((s) => s.settingsGroup)
-  const [tab, setTabState] = useState<Tab>(() => (TABS.some((x) => x.id === storeTab) ? storeTab : 'appearance'))
+  const [tab, setTabState] = useState<Tab>(() => { const t = resolveTab(storeTab).tab; return TABS.some((x) => x.id === t) ? t : 'appearance' })
   // The store keeps the shown tab, so openSettings from a toast or a link switches the open modal too.
   const setTab = (t: Tab): void => { setTabState(t); useStore.setState({ settingsTab: t }) }
   // Advanced groups start collapsed; one opens when Settings was asked for a topic inside it.
@@ -173,7 +90,6 @@ export default function SettingsModal(): JSX.Element {
   const mode = modeOf(settings)
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({})
   const patch = (p: Partial<Settings>): void => setDraft((d) => ({ ...d, ...p }))
-  const hold = draft.gmailSendHold ?? { enabled: true, seconds: 90 }
 
   // The backend changes settings on its own (an "always allow" writes a permission rule, a tool toggle),
   // so the store's copy can be stale. Re-read it, and seed the draft from it unless editing has begun.
@@ -183,7 +99,6 @@ export default function SettingsModal(): JSX.Element {
   useEffect(() => {
     const initial = base.current
     api.settings.get().then((fresh) => {
-      delete fresh.mode
       useStore.setState({ settings: fresh })
       setDraft((d) => {
         if (d !== initial) return d
@@ -199,8 +114,9 @@ export default function SettingsModal(): JSX.Element {
   }
   const dirty = Object.keys(changedFields(draft)).length > 0
 
-  /** Save part of the draft ahead of the Save button, and stop counting it as unsaved. */
-  const saveEarly = async (p: Partial<Settings>): Promise<void> => {
+  /** The Google client id and secret, written ahead of Save: the sign-in opens the browser and reads them from storage. */
+  const saveGoogleCreds = async (): Promise<void> => {
+    const p = { googleClientId: draft.googleClientId, googleClientSecret: draft.googleClientSecret }
     await saveSettings(p)
     base.current = { ...base.current, ...p }
     setDraft((d) => ({ ...d, ...p }))
@@ -234,15 +150,6 @@ export default function SettingsModal(): JSX.Element {
     modal.ref.current?.focus()
   }
 
-  // A shortcut that another app owns fails at startup, long before this modal mounts, so the current
-  // state is pulled as well as watched.
-  useEffect(() => {
-    void window.os.shortcuts.gather().then(setShortcut).catch(() => undefined)
-    void window.os.shortcuts.capture().then(setCapShortcut).catch(() => undefined)
-    void window.os.shortcuts.ask().then(setAskShortcut).catch(() => undefined)
-    return window.os.shortcuts.onFailure((s) => (s.which === 'ask' ? setAskShortcut : s.which === 'capture' ? setCapShortcut : setShortcut)(s))
-  }, [])
-
   // In a narrow window the tabs are a horizontal strip; keep the selected one on screen.
   useEffect(() => { tabRefs.current[tab]?.scrollIntoView({ block: 'nearest', inline: 'nearest' }) }, [tab])
   // Preview the appearance options on the page while the modal is open; discard restores saved values.
@@ -251,28 +158,14 @@ export default function SettingsModal(): JSX.Element {
   }, [draft.theme, draft.accent, draft.textTone, draft.surfaceTone, draft.uiFont, draft.codeFont, draft.accentCustom])
   useEffect(() => () => applyAppearance(useStore.getState().settings), [])
 
-  const showShortcuts = (): void => { setTab('appearance'); setJump('shortcuts') }
-
   /** A rejected accelerator keeps the modal open: it is the only place the reason is readable. */
   const save = async (): Promise<void> => {
     setSaving(true)
     try {
-      const accel = draft.gatherShortcut.trim()
-      const applied = accel === settings.gatherShortcut.trim() ? null : await window.os.shortcuts.setGather(accel)
-      if (applied) setShortcut(applied)
-      // A rejected accelerator is never saved; the old one stays bound and the reason shows under the field.
-      if (applied && !applied.ok) return showShortcuts()
-      const capAccel = (draft.quickCaptureShortcut ?? '').trim()
-      const capApplied = capAccel === (settings.quickCaptureShortcut ?? '').trim() ? null : await window.os.shortcuts.setCapture(capAccel)
-      if (capApplied) setCapShortcut(capApplied)
-      if (capApplied && !capApplied.ok) return showShortcuts()
-      const askAccel = (draft.quickAskShortcut ?? '').trim()
-      const askApplied = askAccel === (settings.quickAskShortcut ?? '').trim() ? null : await window.os.shortcuts.setAsk(askAccel)
-      if (askApplied) setAskShortcut(askApplied)
-      if (askApplied && !askApplied.ok) return showShortcuts()
-      const next: Settings = { ...draft, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut, quickCaptureShortcut: capApplied?.accelerator ?? draft.quickCaptureShortcut, quickAskShortcut: askApplied?.accelerator ?? draft.quickAskShortcut }
+      const bound = await applyShortcuts(draft, settings)
+      if (!bound) { setTab('appearance'); setJump('shortcuts'); return }
       // Only what was edited here: a whole-draft PUT would put back anything the backend changed since it was taken.
-      const changed = changedFields(next)
+      const changed = changedFields({ ...draft, ...bound })
       try {
         if (Object.keys(changed).length) await saveSettings(changed)
       } catch (e) {
@@ -280,24 +173,12 @@ export default function SettingsModal(): JSX.Element {
         return toast((e as Error).message, 'error')
       }
       base.current = { ...base.current, ...changed }
+      // The app is not left parked on a view that just went away.
+      if ((changed.hiddenViews as string[] | undefined)?.includes(view)) setView('chat')
       setSettingsOpen(false)
     } finally {
       setSaving(false)
     }
-  }
-
-  const hidden = draft.hiddenViews ?? []
-  /** A sidebar row on or off: saved at once, and the app is not left parked on a view that just went away. */
-  const setRowShown = async (v: View, on: boolean): Promise<void> => {
-    try {
-      await saveEarly({ hiddenViews: [...hidden.filter((x) => x !== v), ...(on ? [] : [v])], ...(on ? { sidebarHidden: (draft.sidebarHidden ?? []).filter((x) => x !== v) } : {}) })
-      if (!on && view === v) setView('chat')
-    } catch (e) { toast((e as Error).message, 'error') }
-  }
-  const sbHidden = draft.sidebarHidden ?? []
-  /** A row that only leaves the sidebar (still reachable by ⌘K and shortcuts): saved at once. */
-  const setSectionShown = async (k: string, on: boolean): Promise<void> => {
-    try { await saveEarly({ sidebarHidden: [...sbHidden.filter((x) => x !== k), ...(on ? [] : [k])] }) } catch (e) { toast((e as Error).message, 'error') }
   }
 
   /** One line under a tab's name, from what the store already holds. */
@@ -328,8 +209,7 @@ export default function SettingsModal(): JSX.Element {
     keepEditing()
   }
 
-  // A draft from another tab is still unsaved here, so Save stays in reach wherever the user is.
-  const draftFooter = dirty || !IMMEDIATE.has(tab)
+  const tabProps = { draft, patch }
 
   return (
     <div className="modal-backdrop" {...backdrop}>
@@ -367,384 +247,16 @@ export default function SettingsModal(): JSX.Element {
             )}
           </div>
           <div className="settings-pane" id="settings-pane" role="tabpanel" aria-labelledby={`settings-tab-${tab}`}>
-            {tab === 'model' && <section>
-              <h3>Model</h3>
-              <Sec id="provider"><ProviderSettings draft={draft} settings={settings} patch={patch} models={models} /></Sec>
-              <label className="toggle-row plain">
-                <span className="toggle-text"><b>Use the fast model for short messages</b><small>Short, simple messages answer without the thinking pass (or on the fast model if one is set). Long, analytical or tool-heavy messages use the chat model as usual.</small></span>
-                <input type="checkbox" checked={!!draft.autoRoute} onChange={(e) => patch({ autoRoute: e.target.checked })} /><span className="switch" />
-              </label>
-              <div className="setting-row">
-                <span className="toggle-text"><b>Run setup again</b></span>
-                <button className="ghost-btn" type="button" onClick={() => (dirty ? setPending('setup') : void rerunSetup())}><RotateCcw size={14} /> Run setup</button>
-              </div>
-              <Sec id="assistant">
-                <h4>Assistant</h4>
-                <label><span className="toggle-text"><b>Standing instructions</b></span>
-                  <textarea rows={6} value={draft.systemPrompt} onChange={(e) => patch({ systemPrompt: e.target.value })} />
-                </label>
-                <label className="setting-row"><span className="toggle-text"><b>Reply style</b></span>
-                  <select value={draft.responseStyle ?? 'default'} onChange={(e) => patch({ responseStyle: e.target.value })}>
-                    {RESPONSE_STYLES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-                  </select>
-                </label>
-                {draft.responseStyle === 'custom' && <label><span className="toggle-text"><small>Your own instruction for how replies should read.</small></span>
-                  <textarea rows={4} maxLength={RESPONSE_STYLE_TEXT_MAX} value={draft.responseStyleText ?? ''} onChange={(e) => patch({ responseStyleText: e.target.value })} />
-                </label>}
-                <Switch title="Name new chats" checked={draft.autoTitle !== false} onChange={(autoTitle) => patch({ autoTitle })} />
-                <Switch title="Suggest next questions" checked={draft.followUps !== false} onChange={(followUps) => patch({ followUps })} />
-                <Switch title="Selection toolbar" checked={draft.selectionToolbar !== false} onChange={(selectionToolbar) => patch({ selectionToolbar })} />
-                <Switch title="Summarize old messages automatically" help="When a chat gets long. Off: only when you ask (type /compact)." checked={draft.autoCompact !== false} onChange={(autoCompact) => patch({ autoCompact })} />
-              </Sec>
-            </section>}
-
-            {tab === 'models' && <section>
-              <h3>Models</h3>
-              <Sec id="keys"><ModelsSettings settings={settings} models={models} savePicker={(pickerModels) => saveEarly({ pickerModels }).catch((e: Error) => toast(e.message, 'error'))} /></Sec>
-              {draft.devTools === true && <Sec id="duels"><ModelDuels /></Sec>}
-            </section>}
-
-            {tab === 'usage' && <section className="usage-tab">
-              <h3>Usage</h3>
-              <Sec id="usage"><UsageView /></Sec>
-            </section>}
-
-            {tab === 'permissions' && <section className="permissions-tab">
-              <h3>Permissions</h3>
-              <Sec id="mode"><PermissionModeCards mode={mode} onPick={(m) => saveEarly({ permissionMode: m })} /></Sec>
-              <label className={`toggle-row plain all-connections ${draft.allowAllConnections ? 'danger' : ''}`}>
-                <span className="toggle-text">
-                  <b>{draft.allowAllConnections && <ShieldAlert size={13} aria-hidden />} Allow all domains and MCP servers</b>
-                  <small>Lifts the host allow-lists for fetching, browsing and shell network, and lets every connector tool run without a per-tool approval. Grain&apos;s own data, app, credential stores and the untrusted-content checks stay protected.</small>
-                </span>
-                <input type="checkbox" aria-label="Allow all domains and MCP servers" checked={!!draft.allowAllConnections}
-                  onChange={(e) => void saveEarly({ allowAllConnections: e.target.checked }).catch((err: Error) => toast(err.message, 'error'))} /><span className="switch" />
-              </label>
-              <Sec id="safety"><RunSafetySettings draft={draft} patch={patch} /></Sec>
-              <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits. Allow everything never asks, not even before permanent deletes, disk wipes, force-pushes, credential access or sending email; Auto and Manual still do.</p>
-              {mode === 'auto' && (
-                <details className="modal-free">
-                  <summary>Reviewer model: {draft.autoReviewModel ? draft.autoReviewModel : 'automatic'}</summary>
-                  <label><span className="toggle-text"><b>Reviewer model</b><small>Empty means automatic: the fast model, else the helper model, else the chat model.</small></span>
-                    <input list="model-options" value={draft.autoReviewModel ?? ''} onChange={(e) => patch({ autoReviewModel: e.target.value })} placeholder="Automatic" spellCheck={false} />
-                  </label>
-                </details>
-              )}
-              <Sec id="tools">
-                <h4>Per-tool access</h4>
-                <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
-              </Sec>
-              <Sec id="always-ask">
-                <h4>Always ask first</h4>
-                <p className="muted small">Cards that appear every time, in every mode except Allow everything. Sending email asks in every mode. Keep what you cannot take back here.</p>
-                <AlwaysAsk value={draft.alwaysAsk ?? []} onChange={(alwaysAsk) => patch({ alwaysAsk })} />
-                <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />
-                <GrantsPanel draft={draft} patch={patch} />
-              </Sec>
-              <Sec id="file-edits">
-                <div className="setting-row">
-                  <span className="toggle-text"><b>File edits</b><small>Diff review: each edit lands as a diff and waits for you to accept or reject it. Full agentic editing: edits are written without waiting; the diff is still shown and you can undo it from the file&rsquo;s history. Full agentic editing reduces protection.</small></span>
-                  <div className="seg" role="group" aria-label="File edits">
-                    <button type="button" className={(draft.docEditMode ?? 'review') === 'review' ? 'on' : ''} aria-pressed={(draft.docEditMode ?? 'review') === 'review'} onClick={() => patch({ docEditMode: 'review' })}>Diff review</button>
-                    <button type="button" className={draft.docEditMode === 'apply' ? 'on' : ''} aria-pressed={draft.docEditMode === 'apply'} onClick={() => patch({ docEditMode: 'apply' })}>Full agentic editing</button>
-                  </div>
-                </div>
-              </Sec>
-              <Sec id="network">
-                <SnapshotToggle draft={draft} patch={patch} />
-                <h4>Network for commands</h4>
-                <ShellNetwork draft={draft} patch={patch} />
-              </Sec>
-            </section>}
-
-            {tab === 'integrations' && <section>
-              <h3>Integrations</h3>
-              <Sec id="accounts">
-              <Switch title="Hold outgoing email so I can undo" checked={hold.enabled} onChange={(enabled) => patch({ gmailSendHold: { ...hold, enabled } })} />
-              <GoogleSettings clientId={draft.googleClientId ?? ''} clientSecret={draft.googleClientSecret ?? ''} secretSaved={!!settings.googleClientSecretSet} backupLabel={draft.driveBackupLabel ?? ''} onChange={(p) => patch(p)}
-                onSaveCreds={() => saveEarly({ googleClientId: draft.googleClientId, googleClientSecret: draft.googleClientSecret })} />
-              </Sec>
-              <Sec id="connectors"><h4>Connectors</h4>
-              <div className="setting-row">
-                <span className="toggle-text"><b>Connectors</b><small>Tools from other services, added and managed in the Library.</small></span>
-                <button className="ghost-btn" type="button" onClick={() => { useStore.getState().setLibraryTab('connectors'); setView('library'); setSettingsOpen(false) }}>Open Library</button>
-              </div>
-              <PlannerMailSettings /></Sec>
-              <Sec id="web-search">
-                <h4>Web search</h4>
-                <p className="muted small">All optional. A Firecrawl key makes it the first engine for web search and page reads. Without one, web search uses Exa, then DuckDuckGo.</p>
-                <label><span className="toggle-text"><b>Firecrawl key</b><small>Searches and reads pages first when set. Firecrawl sees the page address. {settings.firecrawlEnvKey && !settings.firecrawlApiKeySet ? 'Using FIRECRAWL_API_KEY from the environment.' : 'Empty uses FIRECRAWL_API_KEY from the environment, if set.'}</small></span><input type="password" value={draft.firecrawlApiKey ?? ''} onChange={(e) => patch({ firecrawlApiKey: e.target.value })} placeholder={settings.firecrawlApiKeySet ? 'Saved. Type to replace' : 'fc-…'} spellCheck={false} /></label>
-                <label><span className="toggle-text"><b>Brave Search key</b></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder={settings.braveApiKeySet ? 'Saved. Type to replace' : 'BSA…'} spellCheck={false} /></label>
-                <label><span className="toggle-text"><b>Tavily key</b><small>An alternative to Brave.</small></span><input type="password" value={draft.tavilyApiKey} onChange={(e) => patch({ tavilyApiKey: e.target.value })} placeholder={settings.tavilyApiKeySet ? 'Saved. Type to replace' : 'tvly-…'} spellCheck={false} /></label>
-                <label><span className="toggle-text"><b>Exa key</b><small>Optional; lifts the rate limit.</small></span><input type="password" value={draft.exaApiKey ?? ''} onChange={(e) => patch({ exaApiKey: e.target.value })} placeholder={settings.exaApiKeySet ? 'Saved. Type to replace' : 'exa key'} spellCheck={false} /></label>
-                <label><span className="toggle-text"><b>Your own search server</b><small>A SearXNG address, searched beside Exa. Needs <code>json</code> under search.formats.</small></span><input value={draft.searxngUrl ?? ''} onChange={(e) => patch({ searxngUrl: e.target.value })} placeholder="http://localhost:8080" spellCheck={false} /></label>
-                <label><span className="toggle-text"><b>GitHub token</b><small>Optional. Empty uses your <code>gh</code> login.</small></span><input type="password" value={draft.githubToken ?? ''} onChange={(e) => patch({ githubToken: e.target.value })} placeholder={settings.githubTokenSet ? 'Saved. Type to replace' : 'ghp_…'} spellCheck={false} /></label>
-                <Switch title="Retry blocked pages through a reader service" help="For pages that are blocked or need JavaScript. The reader service sees the page address." checked={draft.readerFallback !== false} onChange={(readerFallback) => patch({ readerFallback })} />
-              </Sec>
-              <Sec id="texting">
-                <h4>Telegram bot</h4>
-                <TelegramSettings draft={draft} patch={patch} />
-              </Sec>
-            </section>}
-
-            {tab === 'agents' && <section>
-              <h3>Agents</h3>
-              <Sec id="desks">
-                <CoworkSettings draft={draft} patch={patch} />
-              </Sec>
-              <Sec id="workers">
-                <h4>Background workers</h4>
-                <Switch title="Delegate long work" help="Once a reply has used its tool rounds, the assistant hands the rest to a background worker and answers you at once." checked={draft.delegationForce !== false} onChange={(delegationForce) => patch({ delegationForce })} />
-                {draft.delegationForce !== false && (
-                  <label className="setting-row"><span className="toggle-text"><b>Delegate after this many tool rounds</b><small>1 to 20.</small></span>
-                    <input type="number" min={1} max={20} value={draft.delegationAfterRounds ?? 2} onChange={(e) => patch({ delegationAfterRounds: Math.min(20, Math.max(1, Math.round(Number(e.target.value)) || 2)) })} />
-                  </label>
-                )}
-                <label className="setting-row"><span className="toggle-text"><b>Background workers at once</b><small>1 to 16.</small></span>
-                  <input type="number" min={1} max={16} value={draft.workerMaxConcurrent ?? 4} onChange={(e) => patch({ workerMaxConcurrent: Math.min(16, Math.max(1, Math.round(Number(e.target.value)) || 4)) })} />
-                </label>
-              </Sec>
-              <Sec id="coding">
-                <h4>Coding sessions</h4>
-                <Switch title="Route coding to OpenCode / Claude Code" help="Grain's own agents plan, hand code changes to a coding session and check the result. They can't edit files or run file-changing commands inside a git repository themselves." checked={draft.codingRoute !== false} onChange={(codingRoute) => patch({ codingRoute })} />
-                <label className="setting-row"><span className="toggle-text"><b>Default coding agent</b><small>The one Grain starts for a coding task unless you ask for another. Let Grain choose uses the first one installed.</small></span>
-                  <select value={draft.codingAgent ?? 'any'} onChange={(e) => patch({ codingAgent: e.target.value as Settings['codingAgent'] })}>
-                    <option value="any">Let Grain choose</option>
-                    <option value="claude">Claude Code</option>
-                    <option value="opencode">OpenCode</option>
-                    <option value="pi">pi</option>
-                  </select>
-                </label>
-                <label className="setting-row"><span className="toggle-text"><b>Coding sessions at once</b></span>
-                  <input type="number" min={1} max={20} value={draft.codingSessionMaxConcurrent ?? 3} onChange={(e) => patch({ codingSessionMaxConcurrent: Math.min(20, Math.max(1, Math.round(Number(e.target.value)) || 3)) })} />
-                </label>
-              </Sec>
-              <Sec id="browser">
-                <h4>Browser</h4>
-                <BrowserAccess draft={draft} patch={patch} />
-              </Sec>
-              <Sec id="checks">
-                <h4>Checks and commands</h4>
-                <DeskGates draft={draft} patch={patch} />
-              </Sec>
-            </section>}
-
-            {tab === 'memory' && <section className="knowledge-section">
-              <div className="knowledge-head">
-                <h3>Memory</h3>
-                <div className="knowledge-controls modal-free"><ScopeSelect value={libraryScope} onChange={(sc) => void setLibraryScope(sc)} /></div>
-              </div>
-              <div className="knowledge-top">
-                <Sec id="learning"><AdvGroup id="learning" title="Learning" {...gp}>
-                  <Switch title="Learn from chats" checked={draft.autoLearn} onChange={(autoLearn) => patch({ autoLearn })} />
-                  <Switch title="Learn how I write" help="Keep a profile of your writing so drafts sound like you." checked={draft.learnStyle !== false} onChange={(learnStyle) => patch({ learnStyle })} />
-                </AdvGroup></Sec>
-                <Sec id="search"><AdvGroup id="search" title="Memory search and index" {...gp}>
-                  <IndexStatusLine />
-                  <Switch title="Smarter memory search" help="Combine keywords, meaning, recency and links. Off means keywords only." checked={draft.hybridRetrieval !== false} onChange={(hybridRetrieval) => patch({ hybridRetrieval })} />
-                  <AdvancedRetrieval draft={draft} patch={patch} />
-                  <Switch title="Describe each file passage when indexing" help="One extra model call per passage. Off by default." checked={draft.contextualChunks === true} onChange={(contextualChunks) => patch({ contextualChunks })} />
-              </AdvGroup></Sec>
-              <Sec id="map"><AdvGroup id="map" title="Workspace map" {...gp}>
-                  <Switch title="Memory counts and topics" help="How many memories there are and what they cover." checked={draft.mapMemory !== false} onChange={(mapMemory) => patch({ mapMemory })} />
-                  <Switch title="Files and notes" help="What is in your Files, so the assistant knows what to open." checked={draft.mapFiles !== false} onChange={(mapFiles) => patch({ mapFiles })} />
-                  <Switch title="Uploads" help="The uploaded files that can be searched." checked={draft.mapUploads !== false} onChange={(mapUploads) => patch({ mapUploads })} />
-                  <Switch title="Projects" help="Your projects and what each holds." checked={draft.mapProjects !== false} onChange={(mapProjects) => patch({ mapProjects })} />
-                  <Switch title="Skills pointer" help="A note that approved skills exist and where to find them." checked={draft.mapSkills !== false} onChange={(mapSkills) => patch({ mapSkills })} />
-                  <Switch title="Source status" help="Which connected sources are signed in and up to date. Changes each turn." checked={draft.mapSources !== false} onChange={(mapSources) => patch({ mapSources })} />
-                  <Switch title="Today (todos, next events, inbox)" help="Open todos, upcoming events and unread mail. Changes each turn." checked={draft.mapToday !== false} onChange={(mapToday) => patch({ mapToday })} />
-                  <Switch title="Also give background workers the map" help="Scheduled jobs and other background runs get it too. Off by default." checked={draft.mapWorkers === true} onChange={(mapWorkers) => patch({ mapWorkers })} />
-              </AdvGroup></Sec>
-              </div>
-              <div className="knowledge-body modal-free"><MemoryPanel /></div>
-            </section>}
-
-            {tab === 'appearance' && <section>
-              <h3>General</h3>
-              <Sec id="look">
-              <div className="preset-row" role="radiogroup" aria-label="Appearance presets">
-                {PRESETS.map((p) => {
-                  const on = activePreset(draft) === p.id
-                  return (
-                    <button key={p.id} type="button" role="radio" aria-checked={on} className={`preset-card${on ? ' on' : ''}`}
-                      onClick={() => patch({ theme: p.theme, accent: p.accent, uiFont: p.uiFont, codeFont: p.codeFont })}>
-                      <span className="preset-prev" style={{ background: p.bg, color: p.fg, fontFamily: UI_FONTS.find((f) => f.id === p.uiFont)?.stack }}>
-                        Aa<i style={{ background: p.dot }} />
-                      </span>
-                      <b>{p.label}</b>
-                    </button>
-                  )
-                })}
-              </div>
-              <div className="setting-row">
-                <span className="toggle-text"><b>Theme</b></span>
-                <div className="seg" role="radiogroup" aria-label="Theme">
-                  {THEMES.map((t) => (
-                    <button key={t.id} type="button" role="radio" aria-checked={draft.theme === t.id} className={draft.theme === t.id ? 'on' : ''} onClick={() => patch({ theme: t.id })}>{t.label}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="setting-row stack">
-                <span className="toggle-text"><b>Accent colour</b><small>{accentId(draft.accent) === CUSTOM_ACCENT ? hexColor(draft.accentCustom) : ACCENTS.find((a) => a.id === accentId(draft.accent))?.label}</small></span>
-                <div className="accent-picks" role="radiogroup" aria-label="Accent color">
-                  {ACCENTS.map((a) => {
-                    const on = accentId(draft.accent) === a.id
-                    return (
-                      <button
-                        key={a.id}
-                        type="button"
-                        role="radio"
-                        aria-checked={on}
-                        aria-label={a.label}
-                        title={a.label}
-                        className={`accent-swatch${on ? ' on' : ''}`}
-                        style={{ background: a.swatch }}
-                        onClick={() => patch({ accent: a.id })}
-                      />
-                    )
-                  })}
-                  <label className={`accent-custom${accentId(draft.accent) === CUSTOM_ACCENT ? ' on' : ''}`} title="Custom colour"
-                    style={{ background: accentId(draft.accent) === CUSTOM_ACCENT ? hexColor(draft.accentCustom) : undefined }}>
-                    {accentId(draft.accent) === CUSTOM_ACCENT ? null : '+'}
-                    <input type="color" aria-label="Custom accent colour" value={hexColor(draft.accentCustom)}
-                      onChange={(e) => patch({ accent: CUSTOM_ACCENT, accentCustom: e.target.value })} />
-                  </label>
-                </div>
-              </div>
-              <div className="setting-row">
-                <span className="toggle-text"><b>Text colour</b><small>{TEXT_TONES.find((t) => t.id === textToneId(draft.textTone))?.label}</small></span>
-                <div className="accent-picks" role="radiogroup" aria-label="Text color">
-                  {TEXT_TONES.map((t) => {
-                    const on = textToneId(draft.textTone) === t.id
-                    return (
-                      <button
-                        key={t.id}
-                        type="button"
-                        role="radio"
-                        aria-checked={on}
-                        aria-label={t.label}
-                        title={t.label}
-                        className={`accent-swatch${on ? ' on' : ''}`}
-                        style={{ background: isLightTheme(draft.theme) ? t.light : t.dark }}
-                        onClick={() => patch({ textTone: t.id })}
-                      />
-                    )
-                  })}
-                </div>
-              </div>
-              <div className="setting-row">
-                <span className="toggle-text"><b>Background</b><small>Black is for dark theme only.</small></span>
-                <div className="seg" role="radiogroup" aria-label="Background">
-                  {SURFACE_TONES.map((t) => (
-                    <button key={t.id} type="button" role="radio" aria-checked={surfaceToneId(draft.surfaceTone) === t.id} className={surfaceToneId(draft.surfaceTone) === t.id ? 'on' : ''} onClick={() => patch({ surfaceTone: t.id })}>{t.label}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="setting-row stack">
-                <span className="toggle-text"><b>Interface font</b></span>
-                <div className="font-picks" role="radiogroup" aria-label="Interface font">
-                  {UI_FONTS.map((f) => (
-                    <button key={f.id} type="button" role="radio" aria-checked={uiFontId(draft.uiFont) === f.id} className={uiFontId(draft.uiFont) === f.id ? 'on' : ''} style={{ fontFamily: f.stack }} onClick={() => patch({ uiFont: f.id })}>{f.label}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="setting-row stack">
-                <span className="toggle-text"><b>Code font</b></span>
-                <div className="font-picks" role="radiogroup" aria-label="Code font">
-                  {CODE_FONTS.map((f) => (
-                    <button key={f.id} type="button" role="radio" aria-checked={codeFontId(draft.codeFont) === f.id} className={codeFontId(draft.codeFont) === f.id ? 'on' : ''} style={{ fontFamily: f.stack }} onClick={() => patch({ codeFont: f.id })}>{f.label}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="setting-row">
-                <span className="toggle-text"><b>Zoom</b><small>Scales the whole interface, in every window. ⌘= and ⌘− step it, ⌥⌘0 resets.</small></span>
-                <div className="seg" role="group" aria-label="Zoom">
-                  <button type="button" aria-label="Zoom out" title={tip('Zoom out', 'zoom-out')} onClick={() => void saveEarly({ uiZoom: stepZoom(settings.uiZoom ?? DEFAULT_ZOOM, -1) })}>−</button>
-                  <button type="button" disabled>{settings.uiZoom ?? DEFAULT_ZOOM}%</button>
-                  <button type="button" aria-label="Zoom in" title={tip('Zoom in', 'zoom-in')} onClick={() => void saveEarly({ uiZoom: stepZoom(settings.uiZoom ?? DEFAULT_ZOOM, 1) })}>+</button>
-                  <button type="button" title={tip('Actual size', 'zoom-reset')} onClick={() => void saveEarly({ uiZoom: DEFAULT_ZOOM })}>Reset</button>
-                </div>
-              </div>
-              <Switch title="Daily recap on new chats" checked={homeModuleOn(draft, 'recap')} onChange={(on) => patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), recap: on } })} />
-              <Switch title="Start chat windows as blobs" help="A chat added to a canvas starts as just its creature, no frame. Click it to open the chat." checked={!!draft.compactChats} onChange={(compactChats) => patch({ compactChats })} />
-              <div className="setting-row">
-                <span className="toggle-text"><b>Default file font</b><small>How files read and edit unless a file has its own choice. Auto keeps the app's own size and line width.</small></span>
-                <TypographyControls value={draft.docTypography ?? {}} onChange={(t) => patch({ docTypography: { ...(draft.docTypography ?? {}), ...t } })}
-                  onReset={draft.docTypography && Object.keys(draft.docTypography).length ? () => patch({ docTypography: {} }) : undefined} />
-              </div></Sec>
-              <Sec id="notifications">
-                <h4>Notifications</h4>
-                <Switch title="Notify me when a chat finishes" help="An unread dot on the chat, and a system notification when a reply or autonomous run finishes, fails or needs your approval while you are not looking at that chat." checked={draft.chatNotify !== false} onChange={(chatNotify) => patch({ chatNotify })} />
-                <Switch title="Notify me about scheduled jobs" help="When a job fails, is paused or leaves something for you while the app is in the background." checked={draft.notifyJobs !== false} onChange={(notifyJobs) => patch({ notifyJobs })} />
-              </Sec>
-              <Sec id="shortcuts">
-                <h4>Shortcuts <button type="button" className="link-btn" title={tip('Keyboard shortcuts', 'help')} onClick={() => useStore.getState().openHelp('shortcuts')}>Show all shortcuts</button></h4>
-                {shortcut && !shortcut.ok && <p className="test-msg fail">{shortcut.message ?? `${shortcut.accelerator} could not be registered.`}</p>}
-                {capShortcut && !capShortcut.ok && <p className="test-msg fail">{capShortcut.message ?? `${capShortcut.accelerator} could not be registered.`}</p>}
-                {askShortcut && !askShortcut.ok && <p className="test-msg fail">{askShortcut.message ?? `${askShortcut.accelerator} could not be registered.`}</p>}
-                <label><span className="toggle-text"><b>Dictation key</b><small>In the chat box: hold to dictate, tap to keep it on.</small></span>
-                  <input value={draft.dictationChord ?? ''} onChange={(e) => patch({ dictationChord: e.target.value })} placeholder="Control+Alt+D" spellCheck={false} />
-                </label>
-                <VoiceInputSettings />
-                <label><span className="toggle-text"><b>Bring widgets to front</b><small>Works anywhere on your Mac.</small></span>
-                  <input value={draft.gatherShortcut} onChange={(e) => patch({ gatherShortcut: e.target.value })} placeholder={shortcut?.accelerator || 'Control+Alt+Command+Space'} spellCheck={false} />
-                </label>
-                <label><span className="toggle-text"><b>Quick note shortcut</b><small>Works anywhere on your Mac.</small></span>
-                  <input value={draft.quickCaptureShortcut ?? ''} onChange={(e) => patch({ quickCaptureShortcut: e.target.value })} placeholder="CommandOrControl+Shift+Space" spellCheck={false} />
-                </label>
-                <label><span className="toggle-text"><b>Quick ask shortcut</b><small>Works anywhere on your Mac.</small></span>
-                  <input value={draft.quickAskShortcut ?? ''} onChange={(e) => patch({ quickAskShortcut: e.target.value })} placeholder="Alt+Space" spellCheck={false} />
-                </label>
-              </Sec>
-            </section>}
-            {tab === 'sidebar' && <section>
-              <h3>Sidebar</h3>
-              <p className="muted small">New chat, your chats and Settings always show. Hiding Files, Canvases, Projects or Jobs only removes the row: ⌘K and shortcuts still open them. Hiding Lists, Calendar, Mail, Health or Library turns that view off.</p>
-              <Sec id="sidebar"><div className="setting-list">
-                {([['docs', 'Files']] as const).map(([k, label]) => (
-                  <label key={k} className="toggle-row">
-                    <span className="toggle-text"><b>{label}</b></span>
-                    <input type="checkbox" aria-label={label} checked={!sbHidden.includes(k)} onChange={(ev) => void setSectionShown(k, ev.target.checked)} /><span className="switch" />
-                  </label>
-                ))}
-                {navEntries().map((e) => (
-                  <label key={e.view} className="toggle-row">
-                    <span className="toggle-text"><b>{e.label}</b></span>
-                    <input type="checkbox" aria-label={e.label} checked={!hidden.includes(e.view) && !(draft.sidebarHidden ?? []).includes(e.view)} onChange={(ev) => void setRowShown(e.view, ev.target.checked)} /><span className="switch" />
-                  </label>
-                ))}
-                {([['spaces', 'Canvases'], ['projects', 'Projects']] as const).map(([k, label]) => (
-                  <label key={k} className="toggle-row">
-                    <span className="toggle-text"><b>{label}</b></span>
-                    <input type="checkbox" aria-label={label} checked={!sbHidden.includes(k)} onChange={(ev) => void setSectionShown(k, ev.target.checked)} /><span className="switch" />
-                  </label>
-                ))}
-              </div></Sec>
-            </section>}
-
-            {tab === 'system' && <section className="system-tab">
-              <h3>System access</h3>
-              <Sec id="system"><PermissionsPanel /></Sec>
-            </section>}
-
-            {tab === 'advanced' && <section>
-              <h3>Advanced</h3>
-
-              <Sec id="data"><AdvGroup id="data" title="Data" {...gp}>
-                  <DataSettings />
-                  <label><span className="toggle-text"><b>Auto-archive after (days)</b><small>Chats and inbox messages with no activity for this long move to Archived. They stay searchable and can be restored. 0 turns it off.</small></span>
-                    <input type="number" min={0} max={3650} value={draft.autoArchiveDays ?? 0} onChange={(e) => patch({ autoArchiveDays: Math.min(3650, Math.max(0, Math.round(Number(e.target.value)) || 0)) })} />
-                  </label>
-                  <TrashPanel />
-                  <h4>Diagnostics</h4>
-                  <SupportSettings />
-              </AdvGroup></Sec>
-
-              <Sec id="developer"><AdvGroup id="developer" title="Developer" {...gp}>
-                  <Switch title="Developer tools" help="Show traces, the context preview and the system prompt." checked={draft.devTools === true} onChange={(devTools) => patch({ devTools })} />
-                  <TraceExportSettings value={draft.otelExport} onChange={(otelExport) => patch({ otelExport })} />
-              </AdvGroup></Sec>
-            </section>}
+            {tab === 'model' && <ModelTab {...tabProps} onRunSetup={() => (dirty ? setPending('setup') : void rerunSetup())} />}
+            {tab === 'usage' && <UsageTab />}
+            {tab === 'permissions' && <PermissionsTab {...tabProps} />}
+            {tab === 'integrations' && <IntegrationsTab {...tabProps} onSaveCreds={saveGoogleCreds} />}
+            {tab === 'agents' && <AgentsTab {...tabProps} />}
+            {tab === 'memory' && <MemoryTab {...tabProps} {...gp} />}
+            {tab === 'appearance' && <GeneralTab {...tabProps} shortcuts={shortcuts} />}
+            {tab === 'sidebar' && <SidebarTab {...tabProps} />}
+            {tab === 'system' && <SystemTab />}
+            {tab === 'advanced' && <AdvancedTab {...tabProps} {...gp} />}
 
             {/* Outside the tabs: the model fields of several sections list from it. */}
             <datalist id="model-options">{chatRows(models).map((m) => <option key={m.id} value={m.id} label={m.provider ? `${m.id} — ${m.provider}` : undefined} />)}</datalist>
@@ -758,11 +270,11 @@ export default function SettingsModal(): JSX.Element {
               <button className="ghost-btn" autoFocus onClick={keepEditing}>Keep editing</button>
               <button className="ghost-btn danger" onClick={discard}>Discard</button>
             </>
-          ) : draftFooter ? (
+          ) : dirty ? (
             <>
-              {dirty && <span className="footer-note">Unsaved changes</span>}
+              <span className="footer-note">Unsaved changes</span>
               <button className="ghost-btn" onClick={requestClose}>Cancel</button>
-              <button className="primary-btn" disabled={!dirty || saving} onClick={() => void save()}>Save</button>
+              <button className="primary-btn" disabled={saving} onClick={() => void save()}>Save</button>
             </>
           ) : (
             <button className="primary-btn" onClick={requestClose}>Done</button>

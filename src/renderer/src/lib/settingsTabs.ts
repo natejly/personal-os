@@ -1,10 +1,11 @@
 /** The Settings sections, and where the ids older code still passes to openSettings now live. Pure: no store import. */
-export type SettingsTab = 'model' | 'models' | 'usage' | 'permissions' | 'integrations' | 'agents' | 'memory' | 'appearance' | 'sidebar' | 'system' | 'advanced'
+export type SettingsTab = 'model' | 'usage' | 'permissions' | 'integrations' | 'agents' | 'memory' | 'appearance' | 'sidebar' | 'system' | 'advanced'
 /** Collapsed groups left on the Advanced tab. */
-export type AdvancedGroup = 'data' | 'developer'
-export type LegacySettingsTab = 'workspace' | 'provider' | 'memory' | 'cowork' | 'modules' | 'behavior' | 'data' | 'spending' | 'texting'
+export type AdvancedGroup = 'data' | 'developer' | 'learning' | 'search' | 'map'
+export type LegacySettingsTab = 'models' | 'workspace' | 'provider' | 'memory' | 'cowork' | 'modules' | 'behavior' | 'data' | 'spending' | 'texting'
 
 const LEGACY: Record<LegacySettingsTab, { tab: SettingsTab; group?: AdvancedGroup }> = {
+  models: { tab: 'model' },
   workspace: { tab: 'permissions' },
   provider: { tab: 'model' },
   memory: { tab: 'memory' },
@@ -15,7 +16,7 @@ const LEGACY: Record<LegacySettingsTab, { tab: SettingsTab; group?: AdvancedGrou
   data: { tab: 'advanced', group: 'data' },
   spending: { tab: 'usage' }
 }
-const CURRENT: readonly string[] = ['model', 'models', 'usage', 'permissions', 'integrations', 'agents', 'memory', 'appearance', 'sidebar', 'system', 'advanced']
+const CURRENT: readonly string[] = ['model', 'usage', 'permissions', 'integrations', 'agents', 'memory', 'appearance', 'sidebar', 'system', 'advanced']
 
 /** Any id, current or old, to a section (and the Advanced group to open). An unknown id lands on Model. */
 export function resolveTab(id: string): { tab: SettingsTab; group?: AdvancedGroup } {
@@ -28,8 +29,8 @@ export interface SettingsEntry { tab: SettingsTab; sec: string; title: string; k
 export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'model', sec: 'provider', title: 'Provider and model', keys: 'api key base url openai fireworks ollama litellm default model fast model setup' },
   { tab: 'model', sec: 'assistant', title: 'Assistant behaviour', keys: 'standing instructions system prompt reply style tone titles follow-up suggestions selection toolbar compact summarize' },
-  { tab: 'models', sec: 'keys', title: 'API keys', keys: 'provider key openai anthropic fireworks openrouter remove saved' },
-  { tab: 'models', sec: 'picker', title: 'Models in the picker', keys: 'composer model menu choose show hide checkbox reset suggested' },
+  { tab: 'model', sec: 'keys', title: 'API keys', keys: 'provider key openai anthropic fireworks openrouter remove saved' },
+  { tab: 'model', sec: 'picker', title: 'Models in the picker', keys: 'composer model menu choose show hide checkbox reset suggested' },
   { tab: 'usage', sec: 'usage', title: 'Usage and cost', keys: 'tokens spend price billing calls' },
   { tab: 'permissions', sec: 'mode', title: 'Permission mode', keys: 'auto manual allow everything approvals ask risky reviewer' },
   { tab: 'permissions', sec: 'safety', title: 'Run safety', keys: 'snapshot undo checkpoint safety' },

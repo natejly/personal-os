@@ -64,7 +64,7 @@ for _s in SLUGS.values():
 
 def child_run(calls: list[str], *, role: str = "general", tainted: bool = False, rules: dict | None = None,
               pmode: str = "manual", decision: str | None = None, card: str = "c0") -> tuple[dict, FakeRun]:
-    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "workspaceRoots": [], "permissionMode": pmode,
+    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "permissionMode": pmode,
                             "permissionRules": rules or {"allow": [], "ask": [], "deny": []}})
     CALLED.clear()
     OFFERED.clear()

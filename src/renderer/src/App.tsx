@@ -28,6 +28,7 @@ import { moduleForView } from './shell/registry'
 import Canvas from './canvas/Canvas'
 import { useCanvas } from './canvas/store'
 import { BackendBanner } from './components/BackendStatus'
+import { EmbeddingNotice } from './components/EmbeddingHint'
 import BackendFailed from './components/BackendFailed'
 import Onboarding from './components/onboarding/Onboarding'
 import { useOnboarding } from './components/onboarding/onboardingStore'
@@ -306,6 +307,7 @@ export default function App(): JSX.Element {
       {uploadPreview && <UploadPreview id={uploadPreview} />}
       {openSubagentId && <SubagentPanel id={openSubagentId} />}
       <BackendBanner />
+      {ready && !wizardOpen && <EmbeddingNotice />}
       {wizardOpen && <Onboarding />}
       <DeskNotifier />
       <JobNotifier />

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api } from '../lib/api'
 import type { OtelExportConfig } from '@shared/types'
+import Switch from './settings/Switch'
 
 const DEFAULTS: OtelExportConfig = { enabled: false, endpoint: '', headers: {}, includeContent: false, allowRemote: false, timeoutSeconds: 5 }
 
@@ -21,21 +22,12 @@ export default function TraceExportSettings({ value, onChange }: { value?: OtelE
   return (
     <>
       <h4>Trace export</h4>
-      <label className="toggle-row plain">
-        <span className="toggle-text"><b>Export traces as OpenTelemetry</b><small>Sends each reply's trace to a collector. Save settings before testing.</small></span>
-        <input type="checkbox" checked={cfg.enabled} onChange={(e) => set({ enabled: e.target.checked })} /><span className="switch" />
-      </label>
+      <Switch title="Export traces as OpenTelemetry" help="Sends each reply's trace to a collector. Save settings before testing." checked={cfg.enabled} onChange={(v) => set({ enabled: v })} />
       {cfg.enabled && (
         <>
           <label><span className="toggle-text"><b>Endpoint</b></span><input value={cfg.endpoint} onChange={(e) => set({ endpoint: e.target.value })} placeholder="http://localhost:6006" spellCheck={false} /></label>
-          <label className="toggle-row plain">
-            <span className="toggle-text"><b>Include message content</b><small>Tool arguments and the reply text. Never the system prompt or memories.</small></span>
-            <input type="checkbox" checked={cfg.includeContent} onChange={(e) => set({ includeContent: e.target.checked })} /><span className="switch" />
-          </label>
-          <label className="toggle-row plain">
-            <span className="toggle-text"><b>Send traces off this machine</b><small>Required for any endpoint that is not localhost.</small></span>
-            <input type="checkbox" checked={cfg.allowRemote} onChange={(e) => set({ allowRemote: e.target.checked })} /><span className="switch" />
-          </label>
+          <Switch title="Include message content" help="Tool arguments and the reply text. Never the system prompt or memories." checked={cfg.includeContent} onChange={(v) => set({ includeContent: v })} />
+          <Switch title="Send traces off this machine" help="Required for any endpoint that is not localhost." checked={cfg.allowRemote} onChange={(v) => set({ allowRemote: v })} />
           <div className="test-row">
             <button type="button" className="ghost-btn" onClick={() => void test()}>Send test span</button>
             {result && <span className="test-msg" role="status">{result}</span>}

@@ -32,7 +32,7 @@ from pydantic import AfterValidator, BaseModel, Field
 
 from . import auth_breaker, blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
-from . import branch_summary, compaction, followups, otel_export, router, thinking_summary, titles
+from . import branch_summary, compaction, side_question, followups, otel_export, router, thinking_summary, titles
 from . import chatlink, coding_route, duel, fsx, labels, opencode_usage, request_log, toolcore
 from .fsx import sensitive_reason
 from . import context_map
@@ -42,7 +42,8 @@ from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .kinds import is_internal
 from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_index, has_readable_text, safe_upload_name
 from .consolidate import Consolidator
-from . import learn, memory_limits, provider_keys, provider_route, providers
+from . import about_you
+from . import learn, memory_limits, provider_keys, provider_route, providers, query_expand
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
 from .graph_backfill import BackfillRunning, GraphBackfill
@@ -82,7 +83,7 @@ from .setup import router as setup_router
 from .reliability import router as reliability_router, secret_values
 from .retention import RetentionWorker
 from . import limits, resume
-from . import permissions, permrules
+from . import permission_tool, permissions, permrules
 from . import egress
 from . import sandbox
 from . import shell as shell_tool
@@ -278,7 +279,8 @@ consolidator = Consolidator(db, memories, graph)
 title_jobs = titles.TitleJobs(convos.get, convos.update, events.publish)
 followup_jobs = followups.FollowupJobs(convos.set_followups, events.publish)
 learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish, consolidator=consolidator,
-                     alive=lambda cid: (c := convos.get(cid, with_messages=False)) is not None and c["settings"].get("learn") is not False, style=style)
+                     alive=lambda cid: (c := convos.get(cid, with_messages=False)) is not None and c["settings"].get("learn") is not False, style=style,
+                     replay_settings=lambda: settings())
 
 
 def queue_style_relearn(project_id: str | None, model: str | None = None) -> None:
@@ -313,10 +315,8 @@ provider_keys.migrate(db)
 provider_route.set_key_source(lambda: provider_keys.load(db.secrets))  # keys reach route() here, never via settings
 
 
-def _pin_embedding_model() -> None:
-    """Startup: an index built before the model was saved pins to the model it was built with (see _lock_embedding)."""
-    if db.get_settings().get("embeddingModel"):
-        return
+def _vector_counts() -> dict[str, int]:
+    """Vectors in the memory and document indexes, per embedding model that built them."""
     counts: dict[str, int] = {}
     with db.tx() as c:
         for table in ("memory_vectors", "chunk_embeddings"):
@@ -325,6 +325,14 @@ def _pin_embedding_model() -> None:
                     counts[r["model"]] = counts.get(r["model"], 0) + r["n"]
             except Exception:  # noqa: BLE001 - the table may not exist yet
                 pass
+    return counts
+
+
+def _pin_embedding_model() -> None:
+    """Startup: an index built before the model was saved pins to the model it was built with (see _lock_embedding)."""
+    if db.get_settings().get("embeddingModel"):
+        return
+    counts = _vector_counts()
     if counts:
         db.set_settings({"embeddingModel": max(counts, key=counts.__getitem__)})
 
@@ -332,11 +340,33 @@ def _pin_embedding_model() -> None:
 _pin_embedding_model()
 
 
-def _lock_embedding(patch: dict[str, Any]) -> None:
-    """The vector index is only valid for the model that built it: once saved, embeddingModel cannot change."""
+def _embedding_locked() -> bool:
+    """The vector index is only valid for the model that built it: locked once vectors exist for the current model."""
     cur = db.get_settings().get("embeddingModel")
-    if cur and "embeddingModel" in patch and patch["embeddingModel"] != cur:
-        raise HTTPException(409, "The search model is locked once set; changing it would invalidate the search index.")
+    return bool(cur) and _vector_counts().get(cur, 0) > 0
+
+
+def _lock_embedding(patch: dict[str, Any]) -> None:
+    if "embeddingModel" in patch and patch["embeddingModel"] != db.get_settings().get("embeddingModel") and _embedding_locked():
+        raise HTTPException(409, "The search model is locked once the index is built; changing it would invalidate the search index.")
+
+
+def ensure_embedding_model(local: bool = True) -> None:
+    """No embedding model saved and no vectors yet: save the first one a keyed provider serves (see provider_route).
+    Sync on purpose, called from sync routes; a local server's listing needs a loop of its own, so it is skipped
+    when one is already running. A saved model is never touched."""
+    if db.get_settings().get("embeddingModel") or _vector_counts():
+        return
+    cfg = settings()
+    model = provider_route.first_embedding(cfg)
+    if not model and local:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:  # ponytail: no pick for a local server when called on the event loop
+            model = asyncio.run(provider_route.local_embedding(cfg, llm.list_models))
+    if model:
+        db.set_settings({"embeddingModel": model})
+
 
 _MODULES_DEFAULT = 5
 # Stamp 4 shows these once: agent work waits for review there (desks, skill and workflow approvals), and a hidden row
@@ -365,6 +395,8 @@ _seed_hidden_modules()
 def set_settings_via_provider(patch: dict[str, Any]) -> None:
     """db.set_settings for a patch that may switch provider or change the API key (see provider_keys.apply)."""
     db.set_settings(provider_keys.apply(db, patch))
+    if {"provider", "baseUrl", "apiKey"} & patch.keys():
+        ensure_embedding_model()
 
 
 def settings() -> dict[str, Any]:
@@ -376,7 +408,7 @@ def settings() -> dict[str, Any]:
            **perms, permissions.KEY: {"version": permissions.VERSION, **perms}}
     if not out.get("defaultModel"):  # nothing saved: the provider's chat default (a saved model always wins)
         out["defaultModel"] = providers.default_model(out)
-    # Blank legacy knobs follow the tiers (providers.TASK_TIERS); a saved value still wins.
+    # The legacy helper and fast knobs are the low and medium tiers (providers.TASK_TIERS); a stored value still wins.
     if not out.get("extractionModel"):
         out["extractionModel"] = providers.tier_model(out, "low")
     if not out.get("fastModel"):
@@ -385,6 +417,7 @@ def settings() -> dict[str, Any]:
     return out
 
 
+ensure_embedding_model(local=False)  # a key already saved before any embedding model was
 jobs = Jobs(db)
 proposals = Proposals(db)
 recaps = Recaps(db)
@@ -422,6 +455,25 @@ def clear_context(conv_id: str) -> dict[str, Any]:
     if (desk := desks.by_conversation(conv_id)):
         plans.supersede_desk(desk["id"])  # a desk's approved plan is no longer live; the rows stay as history
     return convos.clear_context(conv_id)
+
+
+class SideQuestionIn(BaseModel):
+    question: str
+
+
+@app.post("/chats/{conv_id}/side-question")
+async def side_question_route(conv_id: str, body: SideQuestionIn) -> dict[str, Any]:
+    """`/btw`: answer from this chat's context beside any live reply, which never sees it. Stored as a hidden-from-the-model note."""
+    q = body.question.strip()
+    if not q:
+        raise HTTPException(400, "Ask a question after /btw")
+    if not convos.get(conv_id, with_messages=False):
+        raise HTTPException(404, "No such conversation")
+    try:
+        a = await side_question.answer(settings(), compactor, convos, run_store, conv_id, q)
+    except llm.LLMError as e:
+        raise HTTPException(502, str(e)) from e
+    return convos.add_message(conv_id, "assistant", json.dumps({"q": q, "a": a or "No answer."}), kind=side_question.KIND)
 
 
 def _int_setting(cfg: dict[str, Any], key: str, default: int) -> int:
@@ -592,6 +644,7 @@ retriever = Retriever(db, documents, embedder, docs=docs)
 memory_index = MemoryIndex(db, memories, graph, embedder)
 graph_recall = GraphRecall(db, graph, embedder)
 memory_index.recall = graph_recall
+memory_index.expand_fn = query_expand.expand
 graph_backfill = GraphBackfill(db, graph, recall=graph_recall)  # runs only when asked (POST /graph/backfill)
 learner.index = memory_index
 learner.graph_recall = graph_recall  # entity resolution in the extractor
@@ -602,6 +655,7 @@ docs.on_chunks = lambda _did: retriever.schedule_docs(settings)
 @app.on_event("startup")
 async def _start_retrieval() -> None:
     retriever.bind_loop(asyncio.get_running_loop())
+    learner.replay()  # exchanges a quit, crash or full queue left in learn_pending
     learner.bind_loop(asyncio.get_running_loop())  # PUT /docs and POST /style/samples queue relearns from the threadpool
     retriever.schedule(settings)  # embed whatever is still waiting; silent when the route is down
     retriever.schedule_docs(settings)
@@ -764,6 +818,14 @@ def _mcp_review_text(name: str) -> str:
     return mcp_review_text(tool) if tool else ""
 
 
+def _permission_card(perm: permrules.Resolution, danger: str, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+    """The tool_call event's `permission`: the rule context, plus the before -> after lines of a settings change."""
+    card = {**perm.card(), "danger": danger} if perm.card() else None
+    if name == permission_tool.NAME and (change := permission_tool.preview(toolbox, args)):
+        return {"kind": None, "subject": None, "rule": None, "suggestions": [], "session": False, **(card or {"danger": danger}), "change": change}
+    return card
+
+
 def _mcp_event(name: str) -> dict[str, Any] | None:
     """The `mcp` field of a tool_call event, so a card can say which connector asks and what it claims to do."""
     tool = mcp_store.tool(name) if mcp_is(name) else None
@@ -854,12 +916,12 @@ SETTINGS_READ_ONLY = {"googleTasksSync", "voice"}
 def public_settings() -> dict[str, Any]:
     """What the renderer may see: secret values are blanked and reported as <key>Set booleans instead."""
     out = {k: v for k, v in settings().items() if k not in PRIVATE_SETTINGS}
-    stored = db.get_settings()
-    for k in ("extractionModel", "fastModel"):  # as saved: the resolved tier model must not be frozen in by the next Save
-        out[k] = stored.get(k, "")
     for k in SECRET_SETTINGS:
         out[f"{k}Set"] = bool(out.get(k))
         out[k] = ""
+    out["embeddingLocked"] = _embedding_locked()  # computed, never stored: vectors exist for the saved model
+    # computed, never stored: no embedding model any provider with a key serves, so search is by keywords only
+    out["embeddingKeywordOnly"] = out.get("retrievalMode") != "bm25" and not provider_route.can_embed(settings(), out.get("embeddingModel") or "")
     out["providerKeysSet"] = provider_keys.saved_for(db.secrets)  # which providers have a saved key, never the keys
     out["providerAuthBlocked"] = auth_breaker.blocked(settings()) or ""  # computed, never stored: the active key was rejected
     out["firecrawlEnvKey"] = bool(os.environ.get("FIRECRAWL_API_KEY", "").strip())  # computed, never stored: the key came from the environment
@@ -899,6 +961,13 @@ def _check_permissions(patch: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(422, str(e)) from e
 
 
+def _store_permissions(fn: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:
+    """permissions_update's write: the same read-modify-write and validation as PUT /settings; a ValueError reaches the tool."""
+    return permissions.update(db, lambda cur: {k: permissions.validate(k, v, cap_modes=toolbox.cap_modes, rule_check=_rule_tool_known)
+                                               for k, v in fn(cur).items()})
+
+
+toolbox.permission_store = _store_permissions
 HOST_LIST_SETTINGS = set(permissions.HOST_LISTS)
 
 
@@ -992,6 +1061,7 @@ def put_provider_key(provider_id: str, body: ProviderKeyIn) -> dict[str, Any]:
         keys = provider_keys.load(db.secrets)
         keys.pop(provider_id, None) if key is None else keys.__setitem__(provider_id, key)
         provider_keys.save(db.secrets, keys)
+        ensure_embedding_model()
     provider_route.invalidate(provider_id)
     for k in (old, key):
         if k:
@@ -2172,9 +2242,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         if chat_off and mcp_modes:
             mcp_modes = {k: v for k, v in mcp_modes.items() if k not in chat_off}
             mcp_schemas = [s for s in mcp_schemas if s["function"]["name"] not in chat_off]
-        # Past mcpDeferAbove ready tools the model gets mcp_tool_search instead of every schema. Only loaded
+        # Past MCP_DEFER_ABOVE ready tools the model gets mcp_tool_search instead of every schema. Only loaded
         # slugs are in `modes`, so a call to an unloaded one is off -> denied, never run.
-        mcp_defer = mcp_search.should_defer(len(mcp_schemas), int(cfg.get("mcpDeferAbove", 12) or 0))
+        mcp_defer = mcp_search.should_defer(len(mcp_schemas), limits.MCP_DEFER_ABOVE)
         chat_core = toolcore.CURRENT.get("chat") or tools.CORE_ORDER  # read once: a daily refresh never changes this reply's tools
         loaded = _tool_loaded.get(conv_id)
         if loaded is None:
@@ -2215,14 +2285,19 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             danger = spec.danger if spec else "external"
             fenced = bool(toolbox.fs_needs_ask(name, args, tool_ctx))
             blog = f"{am['id']}:bridgelog{bridge_n + 1}"
-            if pmode == "allow_all":
+            floor = toolbox.floor_action(name, args, tool_ctx)
+            if floor == "block":
+                _log_mode(name, args, blog, "deny", "destructive", "blocked by destructiveDefaults")
+                return False
+            if pmode == "allow_all" and not floor:
                 if danger != "safe":
                     _log_mode(name, args, blog, "auto", "allow-all", "allowed (allow-all mode)")
                 return True
             if pmode == "auto":
                 locked = bool(spec and (toolbox.ask_locked(spec) or toolbox.forces_ask(name, args, tool_ctx)))
                 hard = forced and (toolbox.tainted_for(name, args, tool_ctx) or toolbox.forces_card(name, args, tool_ctx) or not locked)
-                rt = autoreview.route("auto", mode="ask", danger=danger, hard_forced=hard, soft_forced=locked and not hard, fenced=fenced)
+                rt = autoreview.route("auto", mode="ask", danger=danger, hard_forced=hard, soft_forced=locked and not hard, fenced=fenced,
+                                     floor=floor)
                 if rt in ("review", "review_strict"):
                     rv = await _review_call(name, args, danger, "ask")
                     out = autoreview.apply(rt, rv["verdict"], rv["confidence"], toolbox.tainted_for(name, args, tool_ctx))
@@ -2461,15 +2536,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         inputs_block = _desk_inputs_block() if desk else ""
         map_block = _map_status_block(used, conv["settings"], cfg, conv["project_id"], fence_nonce, tool_schemas, tool_ctx["deferred"])
         used["volatile_blocks"] = [*used["volatile_blocks"], *([inputs_block] if inputs_block else []), *([map_block] if map_block else []), _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
-        if cfg.get("cacheLayout", True):
-            # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
-            stable = "\n\n".join(p for p in (used["stable_system"], *hints) if p)
-            system = "\n\n".join(p for p in (stable, *used["volatile_blocks"]) if p)
-            used["stable_hash"] = hashlib.sha256(stable.encode()).hexdigest()[:12]
-            cspan["meta"]["stable_hash"] = used["stable_hash"]
-        else:
-            stable = None
-            system = "\n\n".join(p for p in (system, *hints, inputs_block, map_block, _today_hint()) if p)
+        # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
+        stable = "\n\n".join(p for p in (used["stable_system"], *hints) if p)
+        system = "\n\n".join(p for p in (stable, *used["volatile_blocks"]) if p)
+        used["stable_hash"] = hashlib.sha256(stable.encode()).hexdigest()[:12]
+        cspan["meta"]["stable_hash"] = used["stable_hash"]
         used["system_prompt"] = system
         used["tokens_estimate"] = estimate_tokens(system)
         run_notes: list[dict[str, Any]] = []  # system notes that follow the history, whichever history it is
@@ -2497,8 +2568,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         def _assemble(hist: list[dict[str, str]]) -> list[dict[str, Any]]:
             """Everything before this run's own messages: the layout around `hist`, then the parked / resume notes."""
             hist = expand_commands(hist, command_store, skills, _mentionable(), front=front_hint)  # `/name args` turns carry their filled command (commands.py)
-            head = layout_messages(stable, used["volatile_blocks"], hist) if stable is not None \
-                else [{"role": "system", "content": system}] + hist
+            head = layout_messages(stable, used["volatile_blocks"], hist)
             if turn_images and (i := max((i for i, m in enumerate(head) if m["role"] == "user"), default=-1)) >= 0:
                 head[i] = {**head[i], "content": [{"type": "text", "text": head[i]["content"]}, *turn_images]}
             return head + [dict(n) for n in run_notes]
@@ -2520,7 +2590,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         repeats = 0
         tool_errors: dict[str, int] = {}
         warm_tasks: list[asyncio.Task] = []  # read-only calls started ahead of their turn in the round; cancelled at the end
-        detector = StuckDetector()  # loop shapes REPEAT_LIMIT cannot see; always on (the stuckDetection key is legacy)
+        detector = StuckDetector()  # loop shapes REPEAT_LIMIT cannot see
         perm_rules = permrules.load_rules(permissions.get(cfg, "permissionRules"))
         denials = permrules.DenialStreak()  # refused calls in a row; at three the next result says to stop varying them
         stuck_hits = 0
@@ -2647,9 +2717,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
         def _capture(tool_choice: str) -> None:
             """Snapshot exactly what goes to llm.stream_chat this round (messages are mutated afterwards, so copy now)."""
-            if cfg.get("captureRequests", True):
-                with contextlib.suppress(Exception):
-                    request_log.record(db.data_dir, am["id"], _round, model, messages, tool_schemas, tool_choice)
+            with contextlib.suppress(Exception):
+                request_log.record(db.data_dir, am["id"], _round, model, messages, tool_schemas, tool_choice)
 
         async def _stream_round() -> AsyncIterator[dict[str, Any]]:
             """The round's model stream. A provider overflow before anything streamed is recovered once per reply:
@@ -2990,7 +3059,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # past that size the provider's time to first token is what a tool round costs. Handles stay readable.
             n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), win,
                                                          float(cfg.get("microAt", 0.25)),
-                                                         at_tokens=_int_setting(cfg, "microAtTokens", limits.MICRO_AT_TOKENS))
+                                                         at_tokens=limits.MICRO_AT_TOKENS)
             if n_cleared:
                 mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
                 tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})
@@ -3333,6 +3402,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                                       **{n: MCP_DANGER for n in modes if mcp_is(n)}},
                                                taints={n for n in modes if toolbox.taints(n) or mcp_is(n)})
                     if pre is None:
+                        # A confident plan goes ahead unanswered after the countdown; the wait loop below enforces it.
+                        # Not in manual mode, and not after untrusted content, which may have shaped the plan.
+                        auto_s = float(cfg.get("planAutoApproveSeconds") or 0)
+                        if auto_s > 0 and args["confidence"] == "high" and pmode != "manual" and not tool_ctx["tainted"]:
+                            args["auto_at"] = time.time() + auto_s  # on the args too, so the inline card can count down
                         plan = plans.open(uid, args, run_id=run.run_id if run else None, conversation_id=conv_id,
                                           message_id=am["id"], tainted=bool(tool_ctx["tainted"]),
                                           desk_id=run.desk_id if run else None)
@@ -3351,7 +3425,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # external/schedules taint lock when that taint is one the plan card already showed.
                     if (not forced or taint_only) and (mode == "ask" or (active_plan is not None and mode == "on")):
                         claimed = plans.claim(run.run_id if run else None, c["name"], args, uid,
-                                              desk_id=run.desk_id if run else None)
+                                              desk_id=run.desk_id if run else None, card_locked=lockable)
                         # Progress, for a supervisor deciding whether another turn is worth it: a
                         # turn that consumed no approved step did not advance the plan.
                         if claimed is not None and run is not None:
@@ -3370,9 +3444,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 review = None
                 is_background = run is not None and run.kind in UNATTENDED_KINDS
                 # Permission mode (autoreview.route). Manual leaves the gate above exactly as it settled; auto sends what is not
-                # known safe to the reviewer; allow_all lifts every card except a credential-store access, a tainted write and a runaway repeat. Refusals, proposals and
-                # approved plan steps are already settled, so they never get here.
-                if pmode != "manual" and claimed is None and pre is None and not proposing and mode != "off":
+                # known safe to the reviewer; allow_all lifts every card except the floor (a destructive shell command, a settings change)
+                # and the user's own questions. In manual the floor alone is routed: destructiveDefaults blocks or asks. Refusals, proposals
+                # and approved plan steps are already settled, so they never get here.
+                floor = toolbox.floor_action(c["name"], args, tool_ctx, kind="items" if mcp_is(c["name"]) and (_mcp_event(c["name"]) or {}).get("destructive") else None)
+                if (pmode != "manual" or floor) and claimed is None and pre is None and not proposing and mode != "off":
                     explicit = explicit_modes.get(c["name"]) if not mcp_is(c["name"]) else ("on" if raw_mode == "on" else None)
                     locked_spec = bool(spec and toolbox.ask_locked(spec))
                     hints = _mcp_event(c["name"]) or {}
@@ -3381,7 +3457,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     rt = autoreview.connector_route(
                         pmode, mode=mode, raw_mode=raw_mode, hints=hints, hard_forced=hard_forced, tainted=bool(tool_ctx["tainted"]),
                         covered=desk_cleared or (pre_mode == "ask" and perm.mode == "on") or bool(perm.rule and perm.mode == "on"),
-                        question=c["name"] in permrules.STILL_ASK) if mcp_is(c["name"]) else autoreview.route(
+                        question=c["name"] in permrules.STILL_ASK, floor=floor) if mcp_is(c["name"]) else autoreview.route(
                         # handing work to a worker needs no review of its own: each call the worker makes is reviewed in its turn
                         pmode, mode=mode, danger="safe" if c["name"] in workers_mod.FRONT_TOOLS else danger, explicit_on=explicit == "on",
                         # an alwaysAsk tool's stored "ask" is only the cap on "on", not a choice, so it is not an explicit ask
@@ -3389,13 +3465,19 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         covered=desk_cleared or (pre_mode == "ask" and perm.mode == "on") or bool(perm.rule and perm.mode == "on"),
                         # a connector that calls its own tool destructive is reviewed strictly (a confident, untainted allow)
                         hard_forced=hard_forced, soft_forced=(lockable or bool(hints.get("destructive"))) and not hard_forced,
-                        # a sensitive-path read/write, a tainted write or a runaway repeat stays a card (not in allow-all)
+                        # a sensitive-path read/write, a tainted write or a runaway repeat stays a card in auto (allow-all runs it)
                         fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop") or mcp_tainted,
-                        question=c["name"] in permrules.STILL_ASK or c["name"] == PLAN_TOOL)
-                    if rt == "run":
+                        question=c["name"] in permrules.STILL_ASK or c["name"] == PLAN_TOOL,
+                        floor=floor)
+                    if rt == "block":
+                        pre = tools.denied(c["name"], permissions.blocked_reason(toolbox.floor_kind(c["name"], args, tool_ctx) or "items"))
+                        _log_mode(c["name"], args, uid, "deny", "destructive", "blocked by destructiveDefaults")
+                    elif rt == "run":
                         if mode == "ask":
                             mode, forced = "on", False
                         lifted_all = pmode == "allow_all" and danger != "safe"
+                    elif rt == "card" and floor:
+                        mode, forced, hard_forced = "ask", True, True  # a connector tool the floor cards (a native one is already forced)
                     elif rt in ("review", "review_strict"):
                         review = await _review_call(c["name"], args, danger, raw_mode)
                         outcome = autoreview.apply(rt, review["verdict"], review["confidence"], toolbox.tainted_for(c["name"], args, tool_ctx))
@@ -3449,7 +3531,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                             review=None if claimed or granted_by else review)
                 yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
                                     "needs_approval": asks, "forced": forced, "proposal": proposing or None,
-                                    "permission": ({**perm.card(), "danger": danger} if perm.card() else None) if asks else None,
+                                    "permission": _permission_card(perm, danger, c["name"], args) if asks else None,
                                     "review": review, "mcp": _mcp_event(c["name"]),
                                     "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None}
                 tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced,
@@ -3540,11 +3622,19 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                 store.park(uid)
                                 parked = uid
                                 break
+                            auto_at = plans.auto_at(uid) if plan is not None else None
+                            if auto_at is not None and time.time() >= auto_at:
+                                # The countdown ran out with the card untouched: go ahead, recorded as automatic.
+                                fut.set_result("allow")
+                                if store is not None:
+                                    store.decide(uid, "allow", by="auto", note="confident plan went ahead after the countdown")
+                                plans.decide(uid, "allow", by="auto")
+                                break
                             try:
                                 # Short, so an approval-blocked run notices a stop or a shutdown promptly.
-                                await asyncio.wait_for(asyncio.shield(fut), timeout=2)
+                                await asyncio.wait_for(asyncio.shield(fut), timeout=min(2, max(0.05, auto_at - time.time())) if auto_at else 2)
                             except asyncio.TimeoutError:
-                                waited += 2
+                                waited = time.time() - approval_t0
                                 row = store.approval(uid) if store is not None else None
                                 if mine and row and row["status"] != "pending" and not fut.done():  # decided on the row alone
                                     fut.set_result(row["decision"])
@@ -4463,7 +4553,7 @@ def _wake_reports(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for r in rows:
         info, inp = workers_mgr.info(r), r.get("input") or {}
         out.append({"id": r["run_id"], "title": info["title"], "goal": info["goal"], "status": info["status"],
-                    "text": workers_mgr.report_text(r), "tainted": bool(inp.get("tainted")), "attachments": inp.get("attachments") or []})
+                    "text": workers_mgr.report_text(r), "actions": workers_mgr.side_effects(r["run_id"]), "error": info["error"], "tainted": bool(inp.get("tainted")), "attachments": inp.get("attachments") or []})
     return out
 
 
@@ -5371,7 +5461,6 @@ def permission_grants() -> dict[str, Any]:
         "global": permissions.get(cfg, "tools") or {},
         "agent_overrides": [{"agent_id": r["id"], "title": r["name"], "tool": t, "mode": m}
                             for r in agents for t, m in (json.loads(r["tool_modes"] or "{}") or {}).items()],
-        "chat_skip": [],  # legacy: a chat's own skipPermissions is no longer honoured; the global permissionMode decides
         "mcp": mcp_store.grants(),
         "rules": permissions.get(cfg, "permissionRules") or {"allow": [], "ask": [], "deny": []},
     }
@@ -5494,6 +5583,13 @@ def _save_allow_rules(row: dict[str, Any], texts: list[str] | None) -> list[str]
         return {"permissionRules": cur}
     permissions.update(db, add)
     return rules
+
+
+@app.post("/plans/{call_id}/hold")
+def hold_plan_countdown(call_id: str) -> dict[str, Any]:
+    """The user is editing or reading the card: stop its go-ahead countdown. Approve and reject need no call, they decide it."""
+    plans.hold(call_id)
+    return {"ok": True}
 
 
 class PermissionEvalIn(BaseModel):
@@ -6847,6 +6943,32 @@ def apply_memory_proposal(id: str) -> dict[str, Any]:
 @app.post("/memories/proposals/{id}/dismiss")
 def dismiss_memory_proposal(id: str) -> dict[str, Any]:
     p = consolidator.dismiss(id)
+    if not p:
+        raise HTTPException(404)
+    return p
+
+
+@app.get("/memories/about-you")
+def get_about_you() -> dict[str, Any]:
+    """The accepted About-you summary (a pinned memory) and the draft waiting for review, if any."""
+    return {"current": about_you.current(consolidator), "pending": about_you.pending(consolidator)}
+
+
+@app.post("/memories/about-you/draft")
+async def draft_about_you() -> dict[str, Any]:
+    """Manual 'Draft About you': queues a proposal only. Nothing reaches a prompt until it is accepted."""
+    cfg = settings()
+    made, reason = await about_you.draft(consolidator, cfg)
+    return {"proposal": made, "reason": reason}
+
+
+class AboutYouAcceptIn(BaseModel):
+    text: str | None = None
+
+
+@app.post("/memories/about-you/{id}/accept")
+def accept_about_you(id: str, body: AboutYouAcceptIn) -> dict[str, Any]:
+    p = about_you.accept(consolidator, id, body.text)
     if not p:
         raise HTTPException(404)
     return p

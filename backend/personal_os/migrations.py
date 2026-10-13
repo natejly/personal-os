@@ -571,6 +571,35 @@ def _usage_sources_and_backfill(c: sqlite3.Connection) -> None:
             c.execute("UPDATE usage_log SET cost = ?, cost_source = 'backfill' WHERE id = ?", (cost, rid))
 
 
+def _embedding_model_unset(c: sqlite3.Connection) -> None:
+    """embeddingModel no longer defaults to qwen3-embedding-8b (it is picked from the keyed providers instead). An install
+    that never saved the key and has vectors built with that model keeps it, so the default it relied on stays pinned."""
+    if c.execute("SELECT 1 FROM settings WHERE key = 'embeddingModel'").fetchone():
+        return
+    for table in ("memory_vectors", "chunk_embeddings"):
+        try:
+            if c.execute(f"SELECT 1 FROM {table} WHERE model = 'qwen3-embedding-8b' LIMIT 1").fetchone():
+                c.execute("INSERT INTO settings(key, value) VALUES('embeddingModel', ?)", (json.dumps("qwen3-embedding-8b"),))
+                return
+        except sqlite3.OperationalError:  # the table is created at runtime, so a fresh install has none
+            pass
+
+
+def _tiers_replace_legacy_models(c: sqlite3.Connection) -> None:
+    """extractionModel and fastModel are the low and medium tiers now. A stored value that equals what its tier gives is
+    dropped; one that differs moves into the tier if that is unset. If the tier is set to something else the two
+    disagree, and the legacy key stays (settings() still honours it)."""
+    from . import permissions, providers
+    stored = {k: permissions._json(v) for k, v in c.execute("SELECT key, value FROM settings")}
+    for legacy, tier in (("extractionModel", "low"), ("fastModel", "medium")):
+        value = str(stored.get(legacy) or "").strip()
+        if value and value != providers.tier_model(stored, tier):
+            if stored.get(providers.TIER_KEYS[tier]):
+                continue
+            c.execute("INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)", (providers.TIER_KEYS[tier], json.dumps(value)))
+        c.execute("DELETE FROM settings WHERE key = ?", (legacy,))
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 # Chat-model settings a change of default re-resolves. Embedding, rerank and vision keys are not among them.
 _CHAT_MODEL_KEYS = ("defaultModel", "modelHigh", "modelMedium", "modelLow", "extractionModel", "fastModel")
@@ -618,6 +647,42 @@ def _drop_unused_tables_and_settings(c: sqlite3.Connection) -> None:
         c.execute("UPDATE settings SET value = ? WHERE key = 'hiddenViews'", (json.dumps([v for v in views if v != "dashboards"]),))
 
 
+_CONSTANT_SETTINGS = ("microAtTokens", "mcpDeferAbove", "retainUsageDays", "retainTraceDays", "retainToolResultDays",
+                      "retainApprovalDays", "fileSnapshotMaxBytes", "fileSnapshotRetainDays", "fileSnapshotBudgetMB",
+                      "workflowMaxFanOut", "jobRetryBackoffS", "jobFailureStreakLimit", "proposalExpireDays", "jobExpireDays",
+                      "shellTimeoutSec", "shellMaxBackground", "browserMaxTabs", "browserIdleSeconds", "consolidateEvery",
+                      "cacheLayout", "captureRequests", "fetchCacheSeconds", "toolReadRetries", "subagentMaxDepth",
+                      "subagentStaleSeconds", "subagentToolSeconds", "telegramBotName")
+_LEGACY_SETTINGS = ("stuckDetection", "mode", "skipPermissions", "autoReview", "workspaceRoots")
+
+
+def _simplify_settings(c: sqlite3.Connection) -> None:
+    """Settings that did nothing or that nobody tunes. Legacy keys (the old chat mode, stuckDetection, and the permission
+    store's skipPermissions, autoReview and workspaceRoots) and the numbers that now live only in limits.py are deleted;
+    hybridRetrieval folded into retrievalMode (false becomes 'bm25' unless retrievalMode was already chosen)."""
+    c.executemany("DELETE FROM settings WHERE key = ?", [(k,) for k in (*_CONSTANT_SETTINGS, *_LEGACY_SETTINGS)])
+    row = c.execute("SELECT value FROM settings WHERE key = 'permissions'").fetchone()
+    try:
+        perm = json.loads(row[0]) if row else None
+    except ValueError:
+        perm = None
+    if isinstance(perm, dict) and any(k in perm for k in _LEGACY_SETTINGS):
+        c.execute("UPDATE settings SET value = ? WHERE key = 'permissions'",
+                  (json.dumps({k: v for k, v in perm.items() if k not in _LEGACY_SETTINGS}),))
+    row = c.execute("SELECT value FROM settings WHERE key = 'hybridRetrieval'").fetchone()
+    if row:
+        c.execute("DELETE FROM settings WHERE key = 'hybridRetrieval'")
+        mode = c.execute("SELECT value FROM settings WHERE key = 'retrievalMode'").fetchone()
+        if row[0].strip() == "false" and (not mode or mode[0] == '"hybrid"'):
+            c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('retrievalMode', ?)", (json.dumps("bm25"),))
+
+
+def _learn_pending(c: sqlite3.Connection) -> None:
+    """Auto-learn jobs not yet finished (learn.LearnWorker): ids only, rebuilt from messages on replay."""
+    c.execute("CREATE TABLE IF NOT EXISTS learn_pending (message_id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, "
+              "project_id TEXT, user_message_id TEXT, user_only INTEGER NOT NULL DEFAULT 0, created_at REAL NOT NULL)")
+
+
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
     (2, "messages_fts", _messages_fts),
@@ -658,6 +723,10 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (37, "coding_session_events", _coding_session_events),
     (38, "model_votes", _model_votes),
     (39, "default_sidebar_rows", _default_sidebar_rows),
+    (40, "simplify_settings", _simplify_settings),
+    (41, "embedding_model_unset", _embedding_model_unset),
+    (42, "tiers_replace_legacy_models", _tiers_replace_legacy_models),
+    (43, "learn_pending", _learn_pending),
 ]
 
 

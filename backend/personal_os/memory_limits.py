@@ -11,6 +11,8 @@ VECTOR_CAP = 5000        # rows the brute-force cosine ranker scans, newest firs
 QUERY_TIMEOUT = 2.0      # seconds a chat turn waits for the query embedding before going lexical-only
 INDEX_BATCH = 200        # memories embedded per index() call, so a backfill never holds the route for long
 QUERY_CHARS = 2000       # characters of the query that are embedded; the head of a message carries its topic
+EXPAND_TIMEOUT = 4.0     # seconds a turn waits for keyword variants (query_expand) when there is no query vector; then plain keywords
+W_EXPAND = 0.6           # the variants' keyword ranking against the query's own (1.0): a paraphrase hit counts for less than a literal one
 # RRF weights. A lexical or semantic match is the evidence; graph seeding is weaker (a label hit, not the row's
 # meaning); recency only orders rows that already matched and never brings one in by itself.
 W_BM25 = 1.0
@@ -19,12 +21,11 @@ W_GRAPH = 0.7
 W_RECENT = 0.5
 # A date phrase in the query ("last month", "in March") ranks memories learned in that window: a fifth ranker
 # (W_TEMPORAL) over in-window rows that are also about the query (cosine >= TEMPORAL_MIN_SIMILARITY, below the
-# general floor because the window already narrows the field), then a post-fusion nudge of +-TEMPORAL_BOOST/2 by
-# closeness to the window, also applied to reranker scores. A soft signal, never a filter: a row a whole window
-# away keeps 20% of its score, so a strong match survives a mis-read date phrase while weak ones sink. 1.6 because
-# reranker scores spread over orders of magnitude (0.9 vs 0.001): the eval's temporal MRR with rerank on went
-# 0.66 at 0.6, 0.76 at 1.2, 0.86 at 1.6; the fused path reads the same at 0.6 and 1.6 but leaks fewer
-# out-of-window rows into the top 10 (28 -> 12).
+# general floor because the window already narrows the field). Then a two-tier order, also applied to reranker
+# scores: when at least one candidate falls inside the window, in-window rows come first (by their score), the rest
+# after, ordered by score nudged +-TEMPORAL_BOOST/2 by closeness to the window; with none inside, only the nudge
+# applies. A row a whole window away keeps 20% of its score, so a mis-read date phrase still surfaces strong matches.
+# The nudge alone lost to reranker scores, which spread over orders of magnitude (0.9 vs 0.001).
 W_TEMPORAL = 0.8
 TEMPORAL_BOOST = 1.6
 TEMPORAL_MIN_SIMILARITY = 0.25
@@ -50,6 +51,14 @@ RERANK_BACKOFF = 300.0   # seconds after a failed call before trying again, like
 # to supersede: newer wins.
 NEAR_DUP_SIMILARITY = 0.92
 
+# Merge judge: a new memory whose nearest live unpinned rows score at or above JUDGE_MIN_SIMILARITY (loose: the same
+# fact reworded lands ~0.75-0.9, below the near-duplicate guard) is shown to one batched model call that says whether
+# to store, skip, update or merge it. Pairs at NEAR_DUP_SIMILARITY or above never reach it: the guard already decides.
+JUDGE_MIN_SIMILARITY = 0.6
+JUDGE_CANDIDATES = 5     # live rows shown per new memory
+JUDGE_TIMEOUT = 20.0     # seconds; a slow judge costs a duplicate row, not a stalled learn job
+JUDGE_MIN_OVERLAP = 0.8  # share of a merged text's content words that must appear in the new memory or its targets
+
 # ---- Tainted-chat save_memory ----
 # In a chat that read untrusted text, save_memory skips its card only when at least this share of the memory's
 # content words appear in one message the user typed in this chat. The rest is the third-person rewrite ("User", a date).
@@ -59,6 +68,8 @@ TAINT_SAVE_MIN_OVERLAP = 0.6
 EXTRACT_USER_CHARS = 4000       # the user's message as the extractor sees it; memories come from the user's words
 EXTRACT_ASSISTANT_CHARS = 3000  # the reply is context for what the user meant, so it gets less room
 EXTRACT_TOOL_CHARS = 2000       # one-line tool call summaries, for friction the prose does not show
+EXTRACT_BACKGROUND = 4          # earlier messages of the chat shown to the extractor as context only, to resolve "it" / "that one" in the exchange
+EXTRACT_BACKGROUND_CHARS = 600  # one background message, truncated
 EXTRACT_EXISTING = 60           # existing memories shown for reconciliation when there are no embeddings
 CANDIDATES = 40                 # existing memories shown when embeddings rank them
 CANDIDATES_TOP = 20             # of those, how many come from the hybrid ranking (the rest: pinned, then recent)
@@ -103,3 +114,13 @@ GRAPH_BACKFILL_DELAY_SECONDS = 1.0  # pause between extraction calls, so a backf
 GRAPH_INDEX_BATCH = 200             # nodes embedded per index() call: one embedding request burst, not one per node
 GRAPH_BACKFILL_PROGRESS_SECONDS = 5  # how often the command-line backfill prints its counts
 GRAPH_BACKFILL_BATCH = 200          # user messages read per database page
+
+# ---- "About you" summary (about_you.py) ----
+# context.py cuts the pinned About-you profile line at this many characters (other profile lines stay at 500).
+ABOUT_YOU_CHARS = 1500
+ABOUT_YOU_EVERY = 25            # draft a new summary after this many new auto memories (0 = on demand only)
+ABOUT_YOU_MIN_MEMORIES = 5      # fewer live memories than this is nothing to summarise
+ABOUT_YOU_INPUT_ROWS = 80       # newest live memories the drafter reads
+ABOUT_YOU_LINE_CHARS = 300      # one memory as the drafter sees it
+ABOUT_YOU_AT_KEY = "memoryAboutAt"     # settings row: epoch seconds of the last draft attempt (counter base)
+ABOUT_YOU_FP_KEY = "memoryAboutFp"     # settings row: fingerprint of the memories the last draft read

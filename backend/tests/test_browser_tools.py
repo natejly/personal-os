@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PIL import Image  # noqa: E402
 
-from personal_os import mac, tools  # noqa: E402
+from personal_os import limits, mac, tools  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.repos import Documents  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
@@ -75,8 +75,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     async def no_dns(host: str) -> list[str]:
         return ["93.184.216.34"]
     monkeypatch.setattr(tools, "_resolve", no_dns)
-    settings: dict[str, Any] = {"browserEnabled": True, "browserMaxTabs": 3, "browserIdleSeconds": 120, "browserAllowlist": [],
-                                "fetchAllowlist": [], "workspaceRoots": []}
+    settings: dict[str, Any] = {"browserEnabled": True, "browserAllowlist": [], "fetchAllowlist": []}
     ws = Workspace(tmp_path / "data")
     tb = Toolbox(None, None, Documents(Database(tmp_path / "db")), lambda: settings, workspace=ws)  # type: ignore[arg-type]
     cards: list[dict[str, Any]] = []
@@ -120,7 +119,7 @@ def test_groups_and_dangers(env) -> None:
 def test_session_id_and_open_payload(env) -> None:
     out = env.run("browser_open", url="https://example.com/a")
     route, body = env.fake.calls[0]
-    assert route == "open" and body["session"] == "desk:d1" and body["maxTabs"] == 3 and body["idleSeconds"] == 120
+    assert route == "open" and body["session"] == "desk:d1" and body["maxTabs"] == limits.BROWSER_MAX_TABS and body["idleSeconds"] == limits.BROWSER_IDLE_SECONDS
     assert body["downloadDir"] == str(env.ws.desk_root("d1") / "work" / "downloads") and body["newTab"] is False
     assert env.fake.auth[0] == f"Bearer {TOKEN}"
     assert set(out) == {"url", "title", "tab", "tabs", "snapshot", "notes"} and "snapshotId" not in out

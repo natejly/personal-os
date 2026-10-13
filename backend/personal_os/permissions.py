@@ -41,23 +41,21 @@ DEFAULTS: dict[str, Any] = {
     # (permrules.py). Deny beats ask beats allow; a forced approval is never lifted by one.
     "permissionRules": {"allow": [], "ask": [], "deny": []},
     # How calls that would run or ask are decided (autoreview.route): "auto" has a reviewer model read every call that is
-    # not known safe; "manual" is the per-tool modes, grants and rules alone; "allow_all" runs everything (unsandboxed
-    # shell included) with no card at all; only denied calls (hard-deny paths included) are refused.
+    # not known safe; "manual" is the per-tool modes, grants and rules alone, with destructive actions refused by default
+    # (destructiveDefaults); "allow_all" runs everything (unsandboxed shell and mail sends included) with no card, except a
+    # destructive shell command and the user's own questions; denied calls (hard-deny paths included) are always refused.
     "permissionMode": "auto",
-    # Legacy, kept so stored values load and PUT keeps accepting them. skipPermissions and autoReview are no longer read
-    # by any gate (migrate_mode folds an existing install into "auto"); unattendedApprovals is read only in manual mode.
-    "skipPermissions": False,
+    # Manual mode only: what happens to a destructive call, by category (DESTRUCTIVE_KINDS). "block" refuses it, "ask" is a
+    # card, "allow" leaves it to manual mode's usual gate. Auto and Allow everything ignore it, except that a destructive
+    # shell command is a card in both.
+    "destructiveDefaults": {"shell": "block", "files": "block", "items": "block", "send": "block"},
     # "deny": a job run that would have to ask is refused with a recorded reason instead of waiting for someone.
     "unattendedApprovals": "deny",
-    "autoReview": "off",
     "autoReviewModel": "",  # "" = the fast model, else the extraction model, else the chat model
     # Hosts fetch_url may still read once a reply has touched untrusted content (registrable-suffix match).
     "fetchAllowlist": [],
     # How doc_edit lands. "review" proposes a diff; "apply" writes it.
     "docEditMode": "review",
-    # Legacy: a list of folders the file tools once needed a grant for. The file tools now reach the whole Mac, so nothing
-    # reads it for scope; it is still stored and returned so an older client keeps working.
-    "workspaceRoots": [],
     # Host shell (shell.py): a networked shell run taints the reply, whatever it prints may be third-party text.
     "shellNetwork": False,
     # While shellNetwork is off, outbound connections go through a local allowlisting proxy (egress.py).
@@ -93,17 +91,43 @@ DEFAULTS: dict[str, Any] = {
 }
 KEYS = frozenset(DEFAULTS)
 HOST_LISTS = frozenset({"fetchAllowlist", "shellAllowedDomains", "browserAllowlist"})
+DESTRUCTIVE_KINDS = ("shell", "files", "items", "send")
+DESTRUCTIVE_ACTIONS = ("block", "ask", "allow")
+SETTINGS_KIND = "settings"  # a floor kind that is a card in every mode (permissions_update)
+KIND_WORDS = {"shell": "destructive shell commands", "files": "deleting or overwriting files", "items": "deleting mail, events and tasks",
+              "send": "sending email and messages"}
+
+
+def blocked_reason(kind: str | None) -> str:
+    """The reason a destructive call of `kind` is refused in Manual mode; callers hand it to tools.denied."""
+    return (f"blocked by the user's settings, which refuse {KIND_WORDS.get(kind or '', 'this destructive action')} while permissions are "
+            "on Manual. Do not work around it with another tool or a shell command; tell the user what you wanted to do so they can "
+            "do it themselves or change the setting")
+
+
+def floor_action(pmode: str, kind: str | None, defaults: Any = None) -> str | None:
+    """card | block | None for a call of destructive `kind` (Toolbox.floor_kind); None leaves it to the usual gate.
+    A destructive shell command is a card in auto and Allow everything and follows destructiveDefaults in manual; the other
+    kinds follow destructiveDefaults in manual only; SETTINGS_KIND is a card in every mode."""
+    if kind == SETTINGS_KIND:
+        return "card"
+    if kind is None:
+        return None
+    if pmode != "manual":
+        return "card" if kind == "shell" else None
+    act = {**DEFAULTS["destructiveDefaults"], **(defaults if isinstance(defaults, dict) else {})}.get(kind)
+    return {"block": "block", "ask": "card"}.get(act)
+
+
 CHOICES: dict[str, tuple[str, ...]] = {
     "permissionMode": ("auto", "manual", "allow_all"),
     "unattendedApprovals": ("ask", "deny"),
-    "autoReview": ("off", "risky", "all-writes"),
     "docEditMode": ("review", "apply"),
     "codingAgent": ("any", "opencode", "claude", "pi"),
 }
 CHOICE_ERRORS = {
     "permissionMode": "permissionMode must be 'auto', 'manual' or 'allow_all'",
     "unattendedApprovals": "unattendedApprovals must be 'ask' or 'deny'",
-    "autoReview": "autoReview must be 'off', 'risky' or 'all-writes'",
     "docEditMode": "docEditMode must be 'review' or 'apply'",
     "codingAgent": "codingAgent must be 'any', 'opencode', 'claude' or 'pi'",
 }
@@ -164,7 +188,7 @@ def migrate(c: sqlite3.Connection) -> None:
 
 def migrate_mode(c: sqlite3.Connection) -> None:
     """One-time, idempotent: a store older than version 2, or without a permissionMode, becomes "auto" whatever
-    skipPermissions / autoReview said. _write keeps every other key (workspaceRoots included) and stamps VERSION."""
+    an older install had stored. _write keeps every other key and stamps VERSION."""
     row = c.execute("SELECT value FROM settings WHERE key = ?", (KEY,)).fetchone()
     cur = _json(row[0]) if row else None
     if isinstance(cur, dict) and (cur.get("version") or 0) >= 2 and cur.get("permissionMode") in CHOICES["permissionMode"]:
@@ -197,6 +221,12 @@ def validate(key: str, v: Any, *, cap_modes: Callable[[dict[str, Any]], dict[str
         raise ValueError(f"{key} must be a {type(d).__name__}")
     if key in CHOICES and v not in CHOICES[key]:
         raise ValueError(CHOICE_ERRORS[key])
+    if key == "destructiveDefaults":
+        if bad := [k for k in v if k not in DESTRUCTIVE_KINDS]:
+            raise ValueError(f"destructiveDefaults has no category {bad[0]!r}; use {', '.join(DESTRUCTIVE_KINDS)}")
+        if bad := [k for k, a in v.items() if a not in DESTRUCTIVE_ACTIONS]:
+            raise ValueError(f"destructiveDefaults.{bad[0]} must be 'block', 'ask' or 'allow'")
+        return {**DEFAULTS[key], **v}
     if key == "permissionRules":
         from . import permrules
         out: dict[str, list[str]] = {}
@@ -229,7 +259,4 @@ def validate(key: str, v: Any, *, cap_modes: Callable[[dict[str, Any]], dict[str
             if h not in hosts:
                 hosts.append(h)
         return hosts
-    if key == "workspaceRoots":
-        if not all(isinstance(x, str) for x in v):
-            raise ValueError("workspaceRoots must be a list of folders")
     return v

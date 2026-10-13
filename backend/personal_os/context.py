@@ -46,19 +46,23 @@ def retrieval_query(prior: list[dict[str, Any]], text: str) -> str:
     return "\n".join(p for p in (text, prev_user.strip()[:300], reply.strip()[:300]) if p)
 
 
-def _fit(items: list[str], share: int, header: str = "", sep: str = "\n") -> tuple[list[str], int]:
+def _fit(items: list[str], share: int, header: str = "", sep: str = "\n", note: str = "") -> tuple[list[str], int]:
     """Keep the leading items (already relevance-ordered) whose joined block fits `share` tokens of the window.
     Returns (kept, omitted)."""
     if estimate_tokens(header + sep.join(items)) <= share:
         return items, 0
     kept = list(items)
-    while kept and estimate_tokens(header + sep.join(kept)) > share:
-        kept.pop()
+    for pay in (note, ""):  # the omitted-lines note joins the block only when something is cut, so it is paid for here
+        kept = list(items)  # (unless paying for it leaves nothing: one line plus a slightly over-share note beats none)
+        while kept and estimate_tokens(header + pay + sep.join(kept)) > share:
+            kept.pop()
+        if kept:
+            break
     return kept, len(items) - len(kept)
 
 
-def _omitted(n: int) -> str:
-    return f"({n} more omitted)"
+def _omitted(n: int, memory: bool = False) -> str:
+    return f"({n} more omitted; search_memory finds them)" if memory else f"({n} more omitted)"
 
 
 def _day(ts: float) -> str:
@@ -95,7 +99,8 @@ CITE_RULE = "When a sentence relies on an excerpt, end it with that excerpt's nu
 DIRECTNESS_RULES = (
     "## Working style\n"
     "- Be direct: answer what was asked, with no preamble and without restating the question. When what is in front of "
-    "you already answers, answer in plain text without tool calls."
+    "you already answers, answer in plain text without tool calls.\n"
+    "- Context is compacted automatically; never cut work short, skip steps or summarize early because the conversation is long."
 )
 
 def cite_ref(h: dict[str, Any], n: int) -> dict[str, Any]:
@@ -216,15 +221,15 @@ def page_block(page: dict[str, Any]) -> str:
 VOLATILE_HEADER = "## Context for this turn"
 
 
-def layout_messages(system_stable: str, volatile: list[str], history: list[dict[str, Any]], cache_layout: bool = True) -> list[dict[str, Any]]:
+def layout_messages(system_stable: str, volatile: list[str], history: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The messages sent to the model: a system prefix that never changes between turns, then history,
     then the per-turn retrieval blocks as their own system message just before the newest user message.
 
     Provider prefix caches match from the first token, so anything query-dependent has to come after
-    everything that can be reused. With `cache_layout` off the blocks stay in one system message, as before.
+    everything that can be reused. With no volatile blocks the prefix is the whole system message.
     """
     vol = [v for v in volatile if v]
-    if not cache_layout or not vol:
+    if not vol:
         return [{"role": "system", "content": "\n\n".join([p for p in [system_stable, *vol] if p])}] + list(history)
     msgs: list[dict[str, Any]] = [{"role": "system", "content": system_stable}] + list(history)
     at = len(msgs) - 1 if msgs[-1].get("role") == "user" else len(msgs)
@@ -291,14 +296,14 @@ def build_context(
         prof = memories.profile(project_id)
         if prof:
             head = "## Your standing preferences (from the user)\n"
-            rows = [(m, _one_line(_public(str(m.get("content") or "")), 500)) for m in prof]
+            rows = [(m, _one_line(_public(str(m.get("content") or "")), memory_limits.ABOUT_YOU_CHARS if m.get("source") == "about_you" else 500)) for m in prof]
             rows = [(m, _note(m, t)) for m, t in rows if t]
-            lines, n = _fit([ln for _, ln in rows], shares["profile"], head)
+            lines, n = _fit([ln for _, ln in rows], shares["profile"], head, note=_omitted(len(rows), True) + "\n")
             if n:
                 trimmed["profile"] = n
             if lines:
                 if n:
-                    lines.append(_omitted(n))
+                    lines.append(_omitted(n, True))
                 parts.append(head + "\n".join(lines))
                 used["profile"] = [{"id": m["id"], "content": m["content"], "project_id": m["project_id"], "pinned": bool(m["pinned"])}
                                    for m, _ in rows[:len(rows) - n]]
@@ -323,10 +328,10 @@ def build_context(
             rows = [(m, _one_line(_public(str(m.get("content") or "")), 500)) for m in mems]
             mems = [m for m, t in rows if t]
             items = [_note(m, t) + (f" (until {_day(m['expires_at'] - 1)})" if m.get("expires_at") else "") for m, t in rows if t]
-            lines, n = _fit(items, shares["memories"], head)
+            lines, n = _fit(items, shares["memories"], head, note=_omitted(len(items), True) + "\n")
             mems = mems[:len(lines)]
             if n:
-                lines.append(_omitted(n))
+                lines.append(_omitted(n, True))
                 trimmed["memories"] = n
             volatile.append(head + "\n".join(lines))
             retrieved["memories"] = estimate_tokens(volatile[-1])

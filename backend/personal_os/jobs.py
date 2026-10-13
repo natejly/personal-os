@@ -49,6 +49,7 @@ from croniter import CroniterBadCronError, CroniterBadDateError, croniter
 
 from .approval_edits import EDITABLE_TOOLS
 from .db import Database, new_id, now, row_to_dict
+from . import limits
 from .google import GoogleNotConnected
 from .runs import args_digest
 
@@ -836,14 +837,6 @@ class Proposals:
         return self.get(id)
 
 
-def _expire_days(policy: Any, key: str = "jobExpireDays") -> float:
-    """`jobExpireDays` / `proposalExpireDays` (0 = never)."""
-    try:
-        return max(0.0, float(policy.settings().get(key) or 0)) if policy is not None else 0.0
-    except (TypeError, ValueError):
-        return 0.0
-
-
 class Scheduler:
     """Fires due jobs. One pass per wake; one launch per job per pass, whatever the gap.
 
@@ -933,12 +926,12 @@ class Scheduler:
         self.last_tick = at
         fired: list[dict[str, Any]] = []
         self.jobs.arm(at)
-        days = _expire_days(self.policy)
+        days = limits.JOB_EXPIRE_DAYS
         if days > 0:  # start the clock for recurring jobs that have none yet
             with self.jobs.db.tx() as c:
                 c.execute("UPDATE jobs SET expires_at=? WHERE enabled=1 AND kind!='once' AND expires_at IS NULL",
                           (at + days * 86400,))
-        if (pdays := _expire_days(self.policy, "proposalExpireDays")) > 0:
+        if (pdays := limits.PROPOSAL_EXPIRE_DAYS) > 0:
             Proposals(self.jobs.db).expire(at - pdays * 86400, at)
         due = self.jobs.due(at)
         mail_due = [j for j in due if j["kind"] == "mail"]

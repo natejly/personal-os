@@ -140,12 +140,12 @@ function ErrorAction({ conversationId, kind }: { conversationId: string; kind: s
   const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
   const go = (): void => {
     if (act.action === 'retry') void st().regenerate(conversationId)
-    else if (act.action === 'settings') st().openSettings('provider')
+    else if (act.action === 'settings') st().openSettings('model')
     else if (act.action === 'models') {
       // The model menu lives under the composer; settings is the fallback when no menu is mounted.
       const trigger = document.querySelector<HTMLButtonElement>('.model-menu-trigger')
       if (trigger) trigger.click()
-      else st().openSettings('provider')
+      else st().openSettings('model')
     } else {
       setBusy(true)
       api.compactConversation(conversationId)

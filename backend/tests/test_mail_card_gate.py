@@ -32,8 +32,9 @@ GOOD = {"to": "mira@example.com", "subject": "Hello", "body": "Original text"}
 SERVER = FakeServer()
 
 
-def setup(mode: str = "allow_all", rules: dict[str, list[str]] | None = None, hold: bool = False) -> str:
-    cid = T.setup(rules, mode=None, permissionMode=mode, alwaysAsk=[], toolDeferAbove=0, gmailSendHold={"enabled": hold, "seconds": 60})
+def setup(mode: str = "allow_all", rules: dict[str, list[str]] | None = None, hold: bool = False, send: str = "ask") -> str:
+    cid = T.setup(rules, mode=None, permissionMode=mode, alwaysAsk=[], toolDeferAbove=0, gmailSendHold={"enabled": hold, "seconds": 60},
+                  destructiveDefaults={"send": send})
     SERVER.messages.clear()
     SERVER.drafts.clear()
     return cid
@@ -99,6 +100,13 @@ def test_manual_raises_the_email_card_and_a_discard_sends_nothing() -> None:
     check(len(cs) == 1 and cs[0]["forced"] is True, "manual raised one forced card for the email")
     check(not SERVER.messages and not SERVER.drafts, "a discard sent nothing and saved no draft")
     check("discarded by the user on the email card" in last_tool_message(), "the model was told it was discarded")
+
+
+def test_manual_refuses_the_send_by_default_and_tells_the_model() -> None:
+    cid = setup("manual", send="block")
+    ev = drive(cid, [[send(0)], []], [])
+    check(not T.cards(ev) and not SERVER.messages and not SERVER.drafts, "no card, nothing sent")
+    check("blocked by the user's settings" in last_tool_message() and "work around" in last_tool_message(), "the model is told not to work around it")
 
 
 def test_an_allow_rule_or_grant_never_stands_in_for_the_click() -> None:

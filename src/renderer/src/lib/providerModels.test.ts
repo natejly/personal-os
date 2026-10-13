@@ -49,7 +49,6 @@ test('the rerank model is a picker and a blank value stays blank', () => {
 test('remapSettings reports the labels of fields that lost their value', () => {
   const r = remapSettings({
     defaultModel: 'accounts/fireworks/models/ember-1',
-    fastModel: '',
     modelLow: 'accounts/fireworks/models/gpt-5-mini',
     embeddingModel: 'accounts/fireworks/models/qwen3-embedding-8b',
     visionModel: undefined

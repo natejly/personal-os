@@ -15,7 +15,7 @@ const planCard = (page) => page.locator('.aplan').first()
 
 async function setup(grain) {
   const ws = homeScratch()
-  await grain.api('/settings', { method: 'PUT', body: { workspaceRoots: [ws], toolDeferAbove: 0 } })
+  await grain.api('/settings', { method: 'PUT', body: { toolDeferAbove: 0 } })
   const llm = await scriptLLM(grain)
   return { ws, llm }
 }

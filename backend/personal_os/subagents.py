@@ -16,7 +16,7 @@ The rules the rest of the app relies on:
     transcript stays behind a handle. Taint reaches the parent through the tools' `taints` flag.
   - a child's tokens and cost are forwarded up the chain for display only. Nothing caps its rounds: it ends when it stops
     calling tools, a stuck breaker fires (repeated identical calls, repeated refusals, the stuck detector), it hangs
-    (subagentStaleSeconds / subagentToolSeconds), or the user stops it.
+    (SUBAGENT_STALE_SECONDS / SUBAGENT_TOOL_SECONDS), or the user stops it.
   - approval cards a child raises are published on the parent run's stream, labelled with the child.
   - liveness is on the run row: while a child makes progress (model output, a tool call, or output from a shell job its
     run owns) its agent_runs.updated_at is bumped at most every RUN_HEARTBEAT_SECONDS. A child that ends early carries
@@ -66,6 +66,7 @@ CHILD_BLOCK = frozenset({
     # the front agent's hand-off tools (workers.py): a worker reports back, it never delegates sideways
     "delegate", "message_worker", "check_worker", "stop_worker", "resume_worker",
     "agent_create", "agent_message",
+    "permissions_update",  # a settings change is the user's card on the front chat; a worker has no one to show it to
 })
 # Danger tiers a child never gets. External tools stay: a call that would ask raises the usual card on the parent's
 # stream, and the always-ask list is gated the same way as for the parent.
@@ -523,7 +524,8 @@ class Child:
     started: float = field(default_factory=time.time)
     resume_of: str = ""             # the run this one continues: its executed calls are replayed, never run twice
     beat_at: float = 0.0            # when the run row's updated_at was last bumped (wall clock)
-    stalled: bool = False           # past WORKER_STALL_NOTE_SECONDS without progress (status line only; nothing stops it)
+    stalled: bool = False           # past WORKER_STALL_NOTE_SECONDS without progress (status line)
+    nudged_at: float = 0.0          # wall clock of the automatic stall nudge; 0 until sent, and again once the worker shows progress
     steers: list[str] = field(default_factory=list)   # user messages sent straight to this child, folded in at its next round
     # Stuck detection, the same helpers the main reply loop uses.
     detector: StuckDetector = field(default_factory=StuckDetector)
@@ -602,6 +604,7 @@ class Subagents:
         self.children: dict[str, Child] = {}
         self.waits: dict[str, int] = {}  # call id -> ms spent on its approval card, until _exec reports it
         self.locks = RootLocks()
+        self.on_stall: Callable[[Child, float], None] | None = None  # (worker, idle seconds): set by Workers, called once past WORKER_STALL_STOP_SECONDS
         self.snaps: Any = None  # folder snapshots (snapshots.py), set by app.py
         self.connectors: Any = None  # MCP connector hooks (call, hints, review_text, mode, denied), set by app.py
         self.peak = 0
@@ -672,7 +675,7 @@ class Subagents:
         want = set(role.tools) if role.tools else set(parent_modes)  # no tool list: the parent's whole set
         if narrow:
             want &= set(narrow)
-        max_depth = self._int("subagentMaxDepth")
+        max_depth = limits.SUBAGENT_MAX_DEPTH
         out: dict[str, str] = {}
         for name in want:
             spec = self.toolbox.specs.get(name)
@@ -735,8 +738,8 @@ class Subagents:
         if not task:
             return tool_error("agent_spawn needs a task.", field="task", example={"task": "Summarize what the docs say about X"})
         depth = int(ctx.get("depth") or 0)
-        if kind == "subagent" and depth >= self._int("subagentMaxDepth"):  # a worker is depth 1 whatever the setting; its own children obey it
-            return tool_error(f"Subagents may nest at most {self._int('subagentMaxDepth')} deep; do this task yourself.")
+        if kind == "subagent" and depth >= limits.SUBAGENT_MAX_DEPTH:  # a worker is depth 1 whatever the setting; its own children obey it
+            return tool_error(f"Subagents may nest at most {limits.SUBAGENT_MAX_DEPTH} deep; do this task yourself.")
         parent_id = str(ctx.get("agent_run_id") or "")
         resume = str(a.get("resume_id") or "")
         prior: Child | None = None
@@ -1041,7 +1044,7 @@ class Subagents:
             window = compaction.window_for(cfg, ch.model, known)
             # Once old tool output would free real room, it shrinks to a stub (the full text stays behind its handle).
             compaction.microcompact(ch.messages, int(cfg.get("microKeep") or 3), window, float(cfg.get("microAt") or 0.5),
-                                  at_tokens=int(cfg.get("microAtTokens") or limits.MICRO_AT_TOKENS))
+                                  at_tokens=limits.MICRO_AT_TOKENS)
             text, end = await self._model_round(ch, schemas)
             if ch.halt_reason:
                 raise _Halt(ch.halt_reason)
@@ -1216,7 +1219,8 @@ class Subagents:
                                      doom=ch.detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
             mode, forced = perm.mode, perm.forced
             bad = perm.refusal or self._confine(ch, name, args) or coding_route.check(self.toolbox, name, args, ch.ctx)
-            if not bad and pmode != "manual" and mode != "off":
+            floor = self.toolbox.floor_action(name, args, ch.ctx)
+            if not bad and (pmode != "manual" or floor) and mode != "off":
                 # The parent's permission mode (autoreview.route), with the child's own task as the reviewer's intent.
                 explicit = (ch.ctx.get("explicit_modes") or {}).get(name)
                 rt = autoreview.route(
@@ -1225,10 +1229,12 @@ class Subagents:
                         mode == "ask" and perm.kind in ("rule", "external_directory")),
                     covered=(pre_mode == "ask" and mode == "on") or bool(perm.rule and mode == "on"),
                     hard_forced=hard_forced, soft_forced=lockable and not hard_forced,
-                    # a sensitive-path read/write, a tainted write or a runaway repeat stays a card (not in allow-all)
+                    # a sensitive-path read/write, a tainted write or a runaway repeat stays a card in auto (allow-all runs it)
                     fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop"),
-                    question=name in permrules.STILL_ASK)
-                if rt == "run":
+                    question=name in permrules.STILL_ASK, floor=floor)
+                if rt == "block":
+                    bad = permissions.blocked_reason(self.toolbox.floor_kind(name, args, ch.ctx))
+                elif rt == "run":
                     if mode == "ask":
                         mode, forced = "on", False
                     if pmode == "allow_all" and spec.danger != "safe":
@@ -1342,8 +1348,14 @@ class Subagents:
         hard_forced = mode != raw_mode
         hints = con.hints(name)
         decision = "allow"
-        if pmode != "manual":
-            rt = autoreview.connector_route(pmode, mode=mode, raw_mode=raw_mode, hints=hints, hard_forced=hard_forced, tainted=tainted)
+        floor = self.toolbox.floor_action(name, args, ch.ctx, kind="items" if hints.get("destructive") else None)
+        if pmode != "manual" or floor:
+            rt = autoreview.connector_route(pmode, mode=mode, raw_mode=raw_mode, hints=hints, hard_forced=hard_forced, tainted=tainted,
+                                            floor=floor)
+            if rt == "block":
+                return "deny", denied(name, permissions.blocked_reason("items")), False
+            if rt == "card":
+                mode, hard_forced = "ask", hard_forced or bool(floor)
             if rt == "run":
                 mode = "on"
                 if pmode == "allow_all":
@@ -1626,7 +1638,7 @@ class Subagents:
 
     async def _watch(self) -> None:
         while True:
-            idle, in_tool = self._float("subagentStaleSeconds"), self._float("subagentToolSeconds")
+            idle, in_tool = float(limits.SUBAGENT_STALE_SECONDS), float(limits.SUBAGENT_TOOL_SECONDS)
             await asyncio.sleep(max(0.05, min(5.0, (idle or 5.0) / 4)))
             t = time.monotonic()
             live = self.running()
@@ -1653,6 +1665,8 @@ class Subagents:
         """How long a running child has shown no progress; 0 while it waits on the user or on a child of its own."""
         if ch.finished.is_set() or ch.state != "running" or any(_waiting(self, ch)):
             return 0.0
+        if ch.tool_since is not None and ch.now.split(" ")[0] in POLL_TOOLS:  # sitting in a waiting tool is not idle
+            return 0.0
         return max(0.0, time.time() - self.progress_at(ch))
 
     def _beat(self, ch: Child) -> None:
@@ -1666,6 +1680,16 @@ class Subagents:
         if ch.detached and stalled != ch.stalled:
             ch.stalled = stalled
             self._publish(ch)
+        if ch.kind != "worker" or not ch.detached:
+            return
+        idle = self.idle_seconds(ch)
+        if ch.nudged_at and self.progress_at(ch) > ch.nudged_at + 1:
+            ch.nudged_at = 0.0  # it answered the nudge
+        if not ch.nudged_at and idle >= limits.WORKER_STALL_NUDGE_SECONDS:
+            self.steer(ch, f"No progress for {int(idle // 60)} minutes. Report what you are blocked on, or finish with what you have.")
+            ch.nudged_at = time.time()
+        elif ch.nudged_at and idle >= limits.WORKER_STALL_STOP_SECONDS - limits.WORKER_STALL_NUDGE_SECONDS and self.on_stall is not None:  # the nudge restarted the clock
+            self.on_stall(ch, idle + limits.WORKER_STALL_NUDGE_SECONDS)
 
     # ---- the tool-facing API ---------------------------------------------------------------------
     def prestart(self, calls: list[dict[str, Any]], ctx: dict[str, Any], start: bool = True) -> None:

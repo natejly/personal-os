@@ -89,7 +89,7 @@ def _turn(text: str, model: str = "auto") -> dict[str, Any]:
 
 
 def _setup(fast: str) -> None:
-    j("PUT", "/settings", {"defaultModel": BIG, "fastModel": fast})
+    j("PUT", "/settings", {"defaultModel": BIG, "modelMedium": fast})  # fastModel is the medium tier
 
 
 def test_auto_turn_streams_with_the_fast_model_and_records_why() -> None:

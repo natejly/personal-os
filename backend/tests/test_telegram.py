@@ -915,11 +915,6 @@ async def test_connect_names_and_claims_the_bot_once(env: Env) -> None:
     e.bridge._claim_ok = False
     await one_loop(e)  # same name, same marker: nothing is written
     assert "setMyName" not in api.calls and "setMyShortDescription" not in api.calls
-    e.settings["telegramBotName"] = "x" * 100
-    api.calls.clear()
-    e.bridge._claim_ok = False
-    await one_loop(e)
-    assert api.name == "x" * 64
 
 
 @case

@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { dialog, openSettings, closeSettings } from './helpers/home.mjs'
+import { dialog, openSettings, save } from './helpers/home.mjs'
 import { newChat, msgBox } from './helpers/chat.mjs'
 import { openLibrary, PY, STUB } from './helpers/library.mjs'
 
@@ -14,13 +14,14 @@ test('Allow all domains and MCP servers: lives in Settings > Permissions with th
   const toggle = dialog(page).getByLabel('Allow all domains and MCP servers')
   await expect(toggle).not.toBeChecked()
   await toggle.evaluate((el) => el.click()) // the real input is visually hidden behind the switch
-  await expect.poll(async () => (await api('/settings')).allowAllConnections).toBe(true)
-  await closeSettings(page)
+  expect((await api('/settings')).allowAllConnections).toBeFalsy() // a draft until Save
+  await save(page)
+  expect((await api('/settings')).allowAllConnections).toBe(true)
   await expect(page.locator('.composer-footer')).not.toContainText('All domains')
   await openSettings(page, 'Permissions')
   await dialog(page).getByLabel('Allow all domains and MCP servers').evaluate((el) => el.click())
-  await expect.poll(async () => (await api('/settings')).allowAllConnections).toBe(false)
-  await closeSettings(page)
+  await save(page)
+  expect((await api('/settings')).allowAllConnections).toBe(false)
   expect(grain.consoleErrors).toEqual([])
 })
 

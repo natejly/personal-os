@@ -24,7 +24,7 @@ from personal_os.embed import Embedder  # noqa: E402
 from personal_os.memory_index import MemoryIndex  # noqa: E402
 from personal_os.repos import Documents, Graph, Memories, Projects  # noqa: E402
 
-CFG = {"embeddingModel": "fake-embed", "hybridRetrieval": True}
+CFG = {"embeddingModel": "fake-embed"}
 VEC: dict[str, list[float]] = {}  # text -> its fixed embedding
 
 
@@ -132,7 +132,7 @@ def test_profile_trims_to_its_window_share(env) -> None:
     s, u = ctx(db, memories, graph)
     n = u["trimmed"]["profile"]
     cap = limits.context_shares(limits.CONTEXT_WINDOW_FALLBACK)["profile"]
-    assert n > 0 and len(u["profile"]) + n == 30 and f"({n} more omitted)" in u["stable_system"]
+    assert n > 0 and len(u["profile"]) + n == 30 and f"({n} more omitted; search_memory finds them)" in u["stable_system"]
     block = u["stable_system"].split("## Your standing preferences (from the user)\n")[1].split(f"\n({n} more")[0]
     assert estimate_tokens("## Your standing preferences (from the user)\n" + block) <= cap
     assert [m["content"][:20] for m in u["profile"]] == [m["content"][:20] for m in memories.profile(None)[:len(u["profile"])]]
@@ -325,7 +325,7 @@ def test_near_duplicate_threshold_sits_between_reworded_and_different_fact(env) 
     assert dup and dup["id"] == stored["id"]  # the pinned twin is never returned, though its vector is closer
     assert asyncio.run(idx.near_duplicate(CFG, None, "User prefers answers as a table")) is None
     assert asyncio.run(idx.near_duplicate({"embeddingModel": ""}, None, "Keep answers below 100 words")) is None
-    assert asyncio.run(idx.near_duplicate({**CFG, "hybridRetrieval": False}, None, "Keep answers below 100 words")) is None
+    assert asyncio.run(idx.near_duplicate({**CFG, "retrievalMode": "bm25"}, None, "Keep answers below 100 words")) is None
     memories.update(stored["id"], {"expires_at": PAST})
     assert asyncio.run(idx.near_duplicate(CFG, None, "Keep answers below 100 words")) is None  # expired rows do not count
 

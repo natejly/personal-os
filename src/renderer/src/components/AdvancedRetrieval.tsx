@@ -1,5 +1,6 @@
 import type { Settings } from '@shared/types'
 import { api } from '../lib/api'
+import Switch from './settings/Switch'
 
 type Docs = Pick<typeof api.documents, 'reindexAll' | 'embedBackfill'>
 
@@ -14,23 +15,14 @@ export async function rebuildIndex(docs: Docs = api.documents): Promise<Awaited<
  *  stays a plain function of draft + patch. */
 export default function AdvancedRetrieval({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
   return <>
-    <label className="toggle-row plain">
-      <span className="toggle-text"><b>Search my Docs for context</b><small>Also look in your own Docs, not only uploaded files, when a chat pulls in documents.</small></span>
-      <input type="checkbox" checked={draft.useDocsInContext !== false} onChange={(e) => patch({ useDocsInContext: e.target.checked })} /><span className="switch" />
-    </label>
-    <label><span className="toggle-text"><b>Search by</b></span>
+    <Switch title="Search my Docs for context" help="Also look in your own Docs, not only uploaded files, when a chat pulls in documents." checked={draft.useDocsInContext !== false} onChange={(v) => patch({ useDocsInContext: v })} />
+    <label><span className="toggle-text"><b>Search by</b><small>Documents and memories. Meaning also weighs recency and links for memories.</small></span>
       <select value={draft.retrievalMode ?? 'hybrid'} onChange={(e) => patch({ retrievalMode: e.target.value as 'hybrid' | 'bm25' })}>
         <option value="hybrid">Keywords and meaning</option>
         <option value="bm25">Keywords only</option>
       </select>
     </label>
-    <label className="toggle-row plain">
-      <span className="toggle-text"><b>Re-rank document search</b><small>One extra model call per search, with the rerank model from the Model tab.</small></span>
-      <input type="checkbox" checked={draft.retrievalRerank === true} onChange={(e) => patch({ retrievalRerank: e.target.checked })} /><span className="switch" />
-    </label>
-    <label className="toggle-row plain">
-      <span className="toggle-text"><b>Re-rank memory recall</b><small>Reorders recalled memories by relevance before they reach the assistant. Falls back to the fused order if the reranker is slow or unavailable.</small></span>
-      <input type="checkbox" checked={draft.memoryRerank !== false} onChange={(e) => patch({ memoryRerank: e.target.checked })} /><span className="switch" />
-    </label>
+    <Switch title="Re-rank document search" help="One extra model call per search, with the rerank model from the Model tab." checked={draft.retrievalRerank === true} onChange={(v) => patch({ retrievalRerank: v })} />
+    <Switch title="Re-rank memory recall" help="Reorders recalled memories by relevance before they reach the assistant. Falls back to the fused order if the reranker is slow or unavailable." checked={draft.memoryRerank !== false} onChange={(v) => patch({ memoryRerank: v })} />
   </>
 }

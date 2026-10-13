@@ -35,7 +35,7 @@ test('the allow_all description names what still asks', () => {
 test('the pill title names Dangerously allow all when it is on', () => {
   assert.match(pillTitle('allow_all'), /^Dangerously allow all is on/)
   assert.match(pillTitle('allow_all'), /permanent/)
-  assert.match(pillTitle('allow_all'), /email/)
+  assert.match(pillTitle('allow_all'), /force-pushes/)
   assert.match(pillTitle('allow_all'), /Click to change it in Settings\.$/)
   assert.equal(pillTitle('auto'), 'Permission mode: Auto. Click to change it in Settings.')
   assert.doesNotMatch(pillTitle('manual'), /Dangerously/)

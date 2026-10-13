@@ -175,7 +175,7 @@ MAX_STORED_CHARS = 2_000_000
 READ_CHARS = 12000
 SEARCH_WINDOW = 600   # chars per search hit
 SEARCH_TOTAL = 3800   # serialized size of all hits, under INLINE_CHARS
-MAX_READ_CHARS = 20000
+MAX_READ_CHARS = INLINE_CHARS  # a page never outgrows what an inline result may be
 
 HANDLE_NOTE = ("Large result: it is stored outside this conversation's context, not truncated. `preview` is its head. "
                "Call read_tool_result(result_id, offset, limit) to page through the rest; `shape` says what is in there.")

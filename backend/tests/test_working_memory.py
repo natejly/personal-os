@@ -197,7 +197,7 @@ def test_large_result_becomes_a_handle() -> None:
     second = appmod.tool_results.read(cid, rid, first["next_offset"], 100)
     check(second["text"] == blob[100:200], "the next window continues exactly where the first stopped")
     whole = appmod.tool_results.read(cid, rid, 0, 10_000_000)
-    check(whole["text"] == blob[:20000] and whole["chars"] == 20000, "limit is capped, not unbounded")
+    check(whole["text"] == blob[:INLINE_CHARS] and whole["chars"] == INLINE_CHARS, "a page is capped at INLINE_CHARS, not unbounded")
     past = appmod.tool_results.read(cid, rid, len(blob) + 500, 100)
     check(past["text"] == "" and past["has_more"] is False, "an offset past the end reads empty, not an error")
     check("past the end" in past["note"], "and says so")

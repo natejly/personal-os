@@ -1964,9 +1964,9 @@ def _register_working(self: Toolbox) -> None:
             "Read a stored large tool result by result_id, not a file (the tool answered {result_id, total_chars, shape, preview}). "
             "Start at offset 0 and follow next_offset; `shape` says what is in it."),
             _obj({"result_id": {"type": "string"}, "offset": {"type": "integer", "default": 0, "description": "character offset"},
-                  "limit": {"type": "integer", "default": 12000, "description": "max 20000"}}, ["result_id"]),
+                  "limit": {"type": "integer", "default": 12000, "description": "max 12000"}}, ["result_id"]),
             read_tool_result, "context",
-            examples=[{"result_id": "tr_9f1c2a84"}, {"result_id": "tr_9f1c2a84", "offset": 12000}, {"result_id": "tr_9f1c2a84", "offset": 0, "limit": 20000}]))
+            examples=[{"result_id": "tr_9f1c2a84"}, {"result_id": "tr_9f1c2a84", "offset": 12000}, {"result_id": "tr_9f1c2a84", "offset": 0, "limit": 12000}]))
 
         async def search_tool_results(ctx: dict[str, Any], query: str, limit: int = 3) -> Any:
             out = self.results.search(ctx["conversation_id"], query, limit)

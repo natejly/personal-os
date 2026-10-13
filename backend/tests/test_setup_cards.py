@@ -24,6 +24,8 @@ class StubGoogle:
         return self.st
 
     def __getattr__(self, name: str) -> Any:  # any Google read: no account
+        if name == "classify_error":
+            raise AttributeError(name)
         def fail(*a: Any, **k: Any) -> Any:
             raise GoogleNotConnected("Google account not connected")
         return fail

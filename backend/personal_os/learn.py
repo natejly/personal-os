@@ -464,7 +464,7 @@ async def learn_from_exchange(
                                   valid_from=it["when"])
         except Exception:  # noqa: BLE001
             continue
-        if mem["created_at"] >= t0:  # create() hands back the existing row for the same words
+        if mem["id"] not in before:
             added_memories.append(mem)
 
     if index is not None:

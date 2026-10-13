@@ -468,7 +468,7 @@ async def test_browser_handoff_points_at_the_app(env: Env) -> None:
     await env.feed()
     env.bridge.on_run_change(env.run())
     await until(lambda: env.sent())
-    assert env.sent() == ["browser_handoff is waiting in Grain. Open the app to answer."]
+    assert env.sent() == ["Browser handoff is waiting in Grain. Open the app to answer."]
     assert "reply_markup" not in env.of("sendMessage")[0]
 
 

@@ -110,7 +110,7 @@ def test_search_loads_and_persists_per_conversation() -> None:
     ev = reply(cid, [[call("tool_search", {"query": "knowledge graph entities relations"})]])
     assert "graph_search" not in OFFERED[0] and "graph_search" in OFFERED[1]
     am = next(e for e in ev if e["event"] == "assistant_message")
-    sent = json.dumps(appmod.request_log.read(appmod.db.data_dir, am["id"])[0]["messages"])  # the event keeps no prompt
+    sent = json.dumps(appmod.request_log.read(appmod.db.data_dir, am["id"])[0]["messages"], ensure_ascii=False)  # the event keeps no prompt
     assert am["context_used"]["tools_deferred"] > 0 and "graph_search \u2014 " in sent
     reply(cid, [])
     assert "graph_search" in OFFERED[0]  # the next reply in the same conversation keeps it
@@ -137,9 +137,13 @@ def test_first_use_bad_arguments_return_the_schema() -> None:
 def test_index_is_static_and_lists_every_deferrable_tool() -> None:
     cid = new_conv()
     ev = reply(cid, [[call("tool_search", {"query": "knowledge graph entities relations"})]])
-    sys1 = next(e for e in ev if e["event"] == "assistant_message")["context_used"]["system_prompt"]
+    def system_of(events: list[dict[str, Any]]) -> str:  # the event keeps no prompt: the request log does
+        am = next(e for e in events if e["event"] == "assistant_message")
+        return appmod.request_log.read(appmod.db.data_dir, am["id"])[0]["messages"][0]["content"]
+
+    sys1 = system_of(ev)
     ev = reply(cid, [])
-    sys2 = next(e for e in ev if e["event"] == "assistant_message")["context_used"]["system_prompt"]
+    sys2 = system_of(ev)
     assert sys1 == sys2 and "More tools, loaded when you first call one:" in sys1
     assert "graph_search \u2014 " in sys1 and "Call any tool listed above directly by name" in sys1
     assert "Also available via tool_search" not in sys1

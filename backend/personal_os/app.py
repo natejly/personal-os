@@ -647,6 +647,17 @@ def _mcp_server_notes(slugs: set[str]) -> str:
     return mcp_search.server_notes(live, {s["server_id"]: mcp_store.latest_eval(s["server_id"]) for s in live})
 
 
+def _mcp_down_note() -> str:
+    """One line naming the enabled connectors that are not connected right now, so the model tells the user one is
+    starting or needs a sign-in instead of answering as if it had no such access."""
+    down = [f"{redact.scrub_command_output(i['name'])} ({'needs sign-in' if 'sign-in' in (i.get('detail') or '') else i['status']})"
+            for i in mcp.status() if i.get("status") != "ready"]
+    if not down:
+        return ""
+    return ("Connectors not available right now: " + ", ".join(down) + ". If the user asks for one, say it is still starting, "
+            "or needs a sign-in or a fix under Settings → Connectors.")
+
+
 def _gate(name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None = None) -> str:
     """Effective mode for one call. Untrusted content in the run forces every external tool to ask.
 
@@ -2107,19 +2118,20 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                 desk_id=desk_id or None, agent=run.kind if run else None, decision=decision, scope=scope,
                                 note=note, review=review)
 
-        async def _bridge_approve(name: str, args: dict[str, Any], forced: bool) -> bool:
+        async def _bridge_approve(name: str, args: dict[str, Any], forced: bool, wait: bool = False) -> bool:
             """A card for one call a run_python script made through the tool bridge. The script waits; the reply does not
-            end. One-shot only: an 'always' answer is treated as 'allow' here, never as a standing grant."""
+            end. One-shot only: an 'always' answer is treated as 'allow' here, never as a standing grant. `wait` marks a
+            card that hands the user something to do (a browser handoff): no permission mode answers it for them."""
             nonlocal bridge_n
             spec = toolbox.specs.get(name)
             danger = spec.danger if spec else "external"
             fenced = bool(toolbox.fs_needs_ask(name, args, tool_ctx))
             blog = f"{am['id']}:bridgelog{bridge_n + 1}"
-            if pmode == "allow_all":
+            if pmode == "allow_all" and not wait:
                 if danger != "safe":
                     _log_mode(name, args, blog, "auto", "allow-all", "allowed (allow-all mode)")
                 return True
-            if pmode == "auto":
+            if pmode == "auto" and not wait:
                 locked = bool(spec and (toolbox.ask_locked(spec) or toolbox.forces_ask(name, args, tool_ctx)))
                 hard = forced and (toolbox.tainted_for(name, args, tool_ctx) or toolbox.forces_card(name, args, tool_ctx) or not locked)
                 rt = autoreview.route("auto", mode="ask", danger=danger, hard_forced=hard, soft_forced=locked and not hard, fenced=fenced)
@@ -2341,6 +2353,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # What each connected server said about its own tools at initialize, for servers with a tool offered this
             # turn (deferred or not). Kept with tools_hint so it stays in the cacheable prefix.
             tools_hint = "\n\n".join(p for p in (tools_hint, _mcp_server_notes(set(mcp_modes))) if p)
+        if use_tools and (_down := _mcp_down_note()):
+            tools_hint = "\n\n".join(p for p in (tools_hint, _down) if p)
         hints = (NO_EMOJI_HINT, RENDER_HINT, tools_hint,
                  stance_hint,
                  _agents_hint(modes, front=front_hint), _job_hint(run),
@@ -5936,10 +5950,10 @@ async def _coding_do(fn: Any, *args: Any) -> Any:
         raise HTTPException(409, shell_tool._scrub(str(e))) from e
 
 
-# These read handlers are `async` on purpose: a refresh publishes an event, and the topic is not thread-safe.
 @app.get("/coding-sessions")
 async def list_coding_sessions() -> dict[str, Any]:
-    return {"sessions": [codingagents.summary(coding.refresh(r), None) for r in coding.list(50)]}
+    # Off the loop: each refresh reads files (the topic hands a publish from a worker thread to the loop).
+    return {"sessions": await asyncio.to_thread(lambda: [codingagents.summary(coding.refresh(r), None) for r in coding.list(50)])}
 
 
 @app.get("/coding-sessions/{id}")

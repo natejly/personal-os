@@ -124,6 +124,7 @@ def router(store: McpServers, client: McpClient, server_view: Callable[[dict[str
 
     @r.get("/mcp/catalog")
     async def catalog() -> dict[str, Any]:
+        mcp_path.forget()  # a runtime installed since the last look shows as found; re-probed off the loop below
         servers = store.servers()
         entries = [{**e, "installed": [s["id"] for s in servers if s.get("catalog_id") == e["id"]],
                     "detected": await asyncio.to_thread(mcp_catalog.detect, e)} for e in mcp_catalog.load()["entries"]]

@@ -456,6 +456,16 @@ async def test_app_only_tools_point_at_the_app(env: Env) -> None:
 
 
 @case
+async def test_browser_handoff_points_at_the_app(env: Env) -> None:
+    env.approval("ho-1", tool="browser", args={"action": "handoff", "reason": "sign in"})
+    await env.feed()
+    env.bridge.on_run_change(env.run())
+    await until(lambda: env.sent())
+    assert env.sent() == ["browser_handoff is waiting in Grain. Open the app to answer."]
+    assert "reply_markup" not in env.of("sendMessage")[0]
+
+
+@case
 async def test_a_process_without_the_poll_lock_sends_nothing(env: Env) -> None:
     env.approval("call-1")
     env.bridge.on_run_change(env.run())  # no poll yet: this process holds no lock

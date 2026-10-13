@@ -82,8 +82,9 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     cards: list[dict[str, Any]] = []
     answers: list[bool] = []
 
-    async def approve(name: str, args: dict[str, Any], forced: bool) -> bool:
+    async def approve(name: str, args: dict[str, Any], forced: bool, wait: bool = False) -> bool:
         assert name == "browser" and forced is True
+        assert wait == (args.get("action") == "handoff")  # a handoff is a wait no permission mode may answer
         cards.append(args)
         return answers.pop(0) if answers else True
 

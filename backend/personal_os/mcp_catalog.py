@@ -119,6 +119,10 @@ def validate_entry(e: Any) -> list[str]:
         if f.get("secret") and f.get("multiple"):
             bad(f"field {fid} is secret and cannot be multiple")
 
+    ct = e.get("call_timeout")
+    if ct is not None and not (isinstance(ct, (int, float)) and not isinstance(ct, bool) and 0 < ct <= 3600):
+        bad("call_timeout must be a number of seconds, at most 3600")
+
     detect = e.get("detect")
     if detect is not None and not (isinstance(detect, dict) and isinstance(detect.get("binary"), str) and detect["binary"]
                                    and isinstance(detect.get("dirs", []), list) and isinstance(detect.get("hint", ""), str)):

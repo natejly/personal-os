@@ -1059,8 +1059,10 @@ class TelegramBridge:
                     continue
                 if not self.deps.is_live(cid) or not (call_id or a.get("conversation_id") == target_conv or notify_all):
                     continue
-                if a.get("tool") in self.deps.app_only_tools:
-                    if await self._send(chat_id, f"{a.get('tool')} is waiting in Grain. Open the app to answer."):
+                handoff = a.get("tool") == "browser" and isinstance(a.get("args"), dict) and a["args"].get("action") == "handoff"
+                if a.get("tool") in self.deps.app_only_tools or handoff:  # a handoff is done at the Mac's browser window
+                    tool = "browser_handoff" if handoff else a.get("tool")
+                    if await self._send(chat_id, f"{tool} is waiting in Grain. Open the app to answer."):
                         self._told.add(cid)
                     continue
                 preview, shortened = _args_preview(a.get("args"))

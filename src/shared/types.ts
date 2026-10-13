@@ -1452,6 +1452,8 @@ export interface Settings {
   providerAuthBlocked?: string
   /** The provider preset in use (a /setup/providers id); null or missing means the address was typed by hand. */
   provider?: string | null
+  /** ISO time the setup wizard last finished; null until then. */
+  onboardedAt?: string | null
   /** Which providers have a key saved. Never the keys. Missing on an older backend. */
   providerKeysSet?: Record<string, boolean>
   firecrawlApiKeySet?: boolean

@@ -45,7 +45,7 @@ export function showsEffort(models: ModelCaps[], id: string): boolean {
   return models.find((m) => m.id === id)?.reasoning !== false
 }
 
-/** A key is set, or the endpoint is local (Ollama, a local proxy), which needs none. */
-export function hasModelKey(s: { apiKeySet?: boolean; baseUrl?: string }): boolean {
-  return !!s.apiKeySet || /^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(s.baseUrl ?? '')
+/** A key is set, the endpoint is local (Ollama, a local proxy), or setup finished: a keyless server on the network passed its test. */
+export function hasModelKey(s: { apiKeySet?: boolean; baseUrl?: string; onboardedAt?: string | null }): boolean {
+  return !!s.apiKeySet || !!s.onboardedAt || /^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(s.baseUrl ?? '')
 }

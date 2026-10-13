@@ -25,7 +25,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import limits, llm, providers, redact
+from . import limits, llm, providers, redact, replay_trace
 from .context import estimate_tokens
 from .db import Database, now
 
@@ -303,6 +303,7 @@ class Compactor:
         after = estimate_messages(self.build_history(rows, {**row, "upto_message_id": rows[cut - 1]["id"], "upto_created": rows[cut - 1]["created_at"]}, include_untrusted))
         total = (prev["summarized_messages"] if prev else 0) + len(aged)
         self._save(conv_id, rows[cut - 1], text, total, before, after)
+        replay_trace.boundary(getattr(self.db, "data_dir", None), conv_id, "compact", before, after)
         return {"compacted": True, "tokens_before": before, "tokens_after": after, "summarized": total}
 
 

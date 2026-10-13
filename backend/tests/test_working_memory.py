@@ -106,6 +106,8 @@ def test_plan_persists_and_normalizes() -> None:
     check(appmod.work_plans.get(cid)["steps"] == plan["steps"], "the plan survives a reread (it is in SQLite)")
     block = appmod.work_plans.block(cid)
     check("[x] 1. Read the config" in block and "it was yaml" in block, "the block renders status, order and notes")
+    appmod.work_plans.set(cid, [{"text": "Read the config", "status": "done"}, {"text": "Patch it", "status": "done"}])
+    check(appmod.work_plans.block(cid) == "", "a finished plan is not re-sent: it would tell later turns to stop calling tools")
     appmod.work_plans.clear(cid)
     check(appmod.work_plans.get(cid) is None and appmod.work_plans.block(cid) == "", "clearing removes the plan and its block")
 
@@ -155,7 +157,7 @@ def test_plan_is_reinjected_last_every_round() -> None:
 def test_user_edit_of_the_plan_reaches_the_next_round() -> None:
     cid = new_conv()
     appmod.work_plans.set(cid, [{"text": "Step one", "status": "pending"}])
-    appmod.work_plans.set(cid, [{"text": "Step one", "status": "done", "note": "user ticked it"}])
+    appmod.work_plans.set(cid, [{"text": "Step one", "status": "done", "note": "user ticked it"}, {"text": "Step two", "status": "pending"}])
     SEEN.clear()
     ROUNDS[:] = [{"text": "ok", "calls": []}]
     run_chat(cid, "carry on")

@@ -4,13 +4,14 @@ A run's lifetime belongs to its task alone: nothing here consults the subscriber
 subscribers is a normal state — publish writes to the ring and to no queues, the reply completes
 and is persisted, and it waits in the ring for the next window to attach.
 
-A run is also a row. Every published event is written through to SQLite (agent_runs + run_events, see
-RunStore) before it reaches the ring, so the table is the source of truth and the ring is the hot cache:
-a client that reconnects after a backend restart replays its tail from the table with ?since=.
+A run is also a row. Every published event is queued for SQLite (agent_runs + run_events, see RunStore)
+before it reaches the ring, so the table is the source of truth and the ring is the hot cache: a client that
+reconnects after a backend restart replays its tail from the table with ?since=.
 """
 from __future__ import annotations
 
 import asyncio
+import atexit
 import hashlib
 import json
 import logging
@@ -40,6 +41,9 @@ RETAIN_S = 300.0
 JOB_RUNS_KEEP = 20
 # How long a finished run keeps its event tape. The agent_runs row, approvals and executed_calls stay.
 EVENTS_RETAIN_S = 14 * 86400
+# How long appended events wait for the writer thread, so a burst of deltas lands as one commit.
+FLUSH_S = 0.1
+_INSERT_EVENT = "INSERT INTO run_events(run_id, seq, type, data, ts) VALUES(?,?,?,?,?)"
 
 ACTIVE = ("running", "awaiting_approval")
 STATUSES = ("running", "awaiting_approval", "done", "error", "interrupted")
@@ -102,9 +106,12 @@ def unknown_outcome(tool: str, key: str) -> dict[str, Any]:
 class RunStore:
     """The durable side of runs: agent_runs, run_events, approvals and executed_calls.
 
-    One long-lived connection behind a lock: publish() appends one row per event, on the event loop, so a
-    connect per write would be the expensive part. synchronous=NORMAL is safe in WAL mode against an app
-    crash; only a power loss can drop the last few events.
+    One long-lived connection behind a lock. append() (one row per event, every streamed token) only queues the
+    row; a writer thread commits the queue every FLUSH_S. Written on the event loop, each token waited out any other
+    connection's write lock (up to the 30 s busy timeout), freezing every stream and route meanwhile. Every other
+    statement here drains the queue first, under the same lock, so reads see every appended event and writes
+    keep their order. synchronous=NORMAL is safe in WAL mode against an app crash; a crash or power loss can drop
+    the last FLUSH_S of events.
     """
 
     def __init__(self, db: Database) -> None:
@@ -112,9 +119,47 @@ class RunStore:
         self._c = db.connect()
         self._c.execute("PRAGMA synchronous=NORMAL")
         self._lock = threading.Lock()
+        self._buf: list[tuple[Any, ...]] = []
+        self._buf_lock = threading.Lock()  # never held across I/O: append() takes it on the event loop
+        self._wake = threading.Event()
+        threading.Thread(target=self._writer, name="run-events-writer", daemon=True).start()
+        atexit.register(self.flush)
+
+    def _writer(self) -> None:
+        while True:
+            self._wake.wait()
+            time.sleep(FLUSH_S)
+            self._wake.clear()
+            self.flush()
+
+    def flush(self) -> None:
+        with self._lock:
+            self._drain()
+
+    def _drain(self) -> None:
+        """Commit the queued events (caller holds _lock). A row that fails (its run was deleted mid-run) is logged
+        and dropped on its own, so it cannot take the rest of the batch with it."""
+        with self._buf_lock:
+            rows, self._buf = self._buf, []
+        if not rows:
+            return
+        try:
+            self._c.executemany(_INSERT_EVENT, rows)
+            self._c.commit()
+            return
+        except sqlite3.Error:
+            self._c.rollback()
+        for r in rows:
+            try:
+                self._c.execute(_INSERT_EVENT, r)
+                self._c.commit()
+            except sqlite3.Error:
+                self._c.rollback()
+                log.warning("could not persist event %s#%s of run %s", r[2], r[1], r[0], exc_info=True)
 
     def _exec(self, sql: str, params: Iterable[Any] = ()) -> int:
         with self._lock:
+            self._drain()
             try:
                 cur = self._c.execute(sql, tuple(params))
                 self._c.commit()
@@ -125,6 +170,7 @@ class RunStore:
 
     def _all(self, sql: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:
         with self._lock:
+            self._drain()
             return [dict(r) for r in self._c.execute(sql, tuple(params)).fetchall()]
 
     def _one(self, sql: str, params: Iterable[Any] = ()) -> dict[str, Any] | None:
@@ -254,6 +300,7 @@ class RunStore:
     def mark_seen(self, run_ids: Iterable[str]) -> None:
         t = time.time()
         with self._lock:
+            self._drain()
             try:
                 self._c.executemany("INSERT OR IGNORE INTO inbox_seen(run_id, seen_at) VALUES(?,?)", [(r, t) for r in run_ids])
                 self._c.commit()
@@ -263,12 +310,19 @@ class RunStore:
 
     # ---- events ----
     def append(self, run_id: str, seq: int, event: str, data: Any) -> bool:
+        """Queue one event; the writer thread commits it. Serialized now: the caller may mutate `data` afterwards."""
         try:
-            self._exec("INSERT INTO run_events(run_id, seq, type, data, ts) VALUES(?,?,?,?,?)", (run_id, seq, event, _dumps(data), time.time()))
-            return True
-        except sqlite3.Error:  # e.g. the conversation (and so the run row) was deleted mid-run
-            log.warning("could not persist event %s#%s of run %s", event, seq, run_id, exc_info=True)
+            row = (run_id, seq, event, _dumps(data), time.time())
+        except (TypeError, ValueError):
+            log.warning("could not serialize event %s#%s of run %s", event, seq, run_id, exc_info=True)
             return False
+        with self._buf_lock:
+            self._buf.append(row)
+        if event in ("done", "error"):  # once a reply: other connections (snapshots' settle) read the tape for it
+            self.flush()
+        else:
+            self._wake.set()
+        return True
 
     def append_transcript(self, run_id: str, seq: int, data: Any) -> bool:
         """A subagent's whole history as one `transcript` event. Only the newest is kept: a worker writes one every round."""

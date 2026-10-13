@@ -64,8 +64,8 @@ def sh(i: int, command: str) -> dict[str, Any]:
 
 def setup(rules: dict[str, list[str]] | None = None, mode: str | None = "ask", **settings: Any) -> str:
     """mode=None leaves gmail_send on its default (no explicit choice of the user's)."""
-    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "delegationForce": False,
-                            "permissionMode": "manual", "unattendedApprovals": "ask", "permissionRules": {"allow": [], "ask": [], "deny": [], **(rules or {})}, **settings})
+    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "delegationForce": False, "workspaceRoots": [],
+                            "permissionMode": "manual", "destructiveDefaults": {"send": "ask"}, "unattendedApprovals": "ask", "permissionRules": {"allow": [], "ask": [], "deny": [], **(rules or {})}, **settings})
     cid = appmod.convos.create(None, "t", "m")["id"]
     if mode is not None:
         appmod.convos.update(cid, {"settings": {"tools": {"gmail_send": mode}}})

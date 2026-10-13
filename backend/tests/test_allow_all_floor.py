@@ -1,5 +1,6 @@
-"""Allow everything never asks: deletes, force-pushes, credential and data-folder shell commands, unsandboxed runs, the
-email card, doc edits. Auto and Manual are unchanged (they still card the destructive detector's cases).
+"""Allow everything asks for one thing only: a destructive shell command (and the user's own questions). Credential and
+data-folder shell commands, unsandboxed runs, the email card and doc edits all run. Auto cards the destructive detector's
+cases too; Manual refuses or asks per destructiveDefaults (test_destructive_defaults.py).
 
 Pure detector cases, then the real chat loop (app._chat_stream) with a scripted model and stand-in tools.
 Run: python -m pytest -q backend/tests/test_allow_all_floor.py
@@ -74,15 +75,29 @@ async def _tool(ctx: dict[str, Any], x: str = "") -> Any:
     return {"ok": True}
 
 
+def _real_shell_floor(args: dict[str, Any], ctx: dict[str, Any]) -> bool:
+    from types import SimpleNamespace
+    from personal_os import shell
+    tb = SimpleNamespace(specs={})
+    shell.register(tb)
+    return tb.specs["shell_run"].floor(args, ctx)
+
+
 shell_spec = ToolSpec("shell_run", "fake shell", _obj({"command": {"type": "string"}, "unsandboxed": {"type": "boolean"},
                                                        "cwd": {"type": "string"}}, ["command"]), _shell, "shell", "executes")
 shell_spec.default = "ask"
 shell_spec.force_ask = lambda args, ctx: bool(args.get("unsandboxed"))  # the real shell_run's forced card
+shell_spec.floor = _real_shell_floor  # and its destructive-command floor
 appmod.toolbox.specs["shell_run"] = shell_spec
 LOCKED = {"trash_local_file": "external", "move_local_file": "external", "run_shortcut": "external",
           "python_install": "external", "calendar_delete": "external", "schedule_task": "schedules"}
 for n, d in LOCKED.items():
     appmod.toolbox.specs[n] = ToolSpec(n, n, _obj({"x": {"type": "string"}}, []), _tool, "misc", d)
+# gmail_send keeps its real gates around a stand-in that records instead of mailing
+_real_mail = appmod.toolbox.specs["gmail_send"]
+appmod.toolbox.specs["gmail_send"] = ToolSpec("gmail_send", "mail", _obj({"x": {"type": "string"}}, []), _tool, _real_mail.group, _real_mail.danger)
+appmod.toolbox.specs["gmail_send"].force_ask = _real_mail.force_ask
+appmod.toolbox.specs["gmail_send"].force_card = _real_mail.force_card
 
 
 async def _coding(ctx: dict[str, Any], x: str = "", permission_mode: str | None = None) -> Any:
@@ -99,8 +114,8 @@ for n in CODING:
 
 
 def go(pmode: str, call: dict[str, Any], rules: dict | None = None, shell_mode: str | None = None,
-       tainted: bool = False) -> list[dict[str, Any]]:
-    cid = T.setup(rules, permissionMode=pmode, alwaysAsk=permissions.DEFAULTS["alwaysAsk"])
+       tainted: bool = False, **settings: Any) -> list[dict[str, Any]]:
+    cid = T.setup(rules, permissionMode=pmode, alwaysAsk=permissions.DEFAULTS["alwaysAsk"], **settings)
     appmod.convos.update(cid, {"settings": {"tools": {"shell_run": shell_mode} if shell_mode else {},
                                             **({"tainted": True, "taint_sources": ["fetch_url"]} if tainted else {})}})
     CALLS.clear()
@@ -129,7 +144,7 @@ def test_allow_all_skips_the_routine_always_ask_tools(name: str) -> None:
 @pytest.mark.parametrize("pmode", ["manual", "auto"])
 @pytest.mark.parametrize("name", sorted(LOCKED))
 def test_auto_and_manual_still_card_them(pmode: str, name: str) -> None:
-    assert len(go(pmode, tool(name))) == 1 and not CALLS, (pmode, name)
+    assert len(go(pmode, tool(name), destructiveDefaults={k: "ask" for k in permissions.DESTRUCTIVE_KINDS})) == 1 and not CALLS, (pmode, name)
 
 
 @pytest.mark.parametrize("pmode", ["manual", "auto"])
@@ -139,11 +154,19 @@ def test_auto_and_manual_still_card_unsandboxed_shell(pmode: str) -> None:
     assert (c[0].get("permission") or {}).get("kind") != "destructive", "the floor is Allow everything's alone"
 
 
-@pytest.mark.parametrize("cmd", ["rm -rf ~/Documents/x", "git push --force", "find ~ -name x -delete", "ls | xargs rm",
-                                 "diskutil apfs deleteVolume disk3s1", "shred ~/a"])
-@pytest.mark.parametrize("unsandboxed", [False, True])
-def test_allow_all_runs_destructive_commands_without_a_card(cmd: str, unsandboxed: bool) -> None:
-    assert not go("allow_all", sh(cmd, unsandboxed=unsandboxed)) and T.RAN == [cmd], cmd
+DESTRUCTIVE = ["rm -rf ~/Documents/x", "git push --force", "find ~ -name x -delete", "ls | xargs rm",
+               "diskutil apfs deleteVolume disk3s1", "shred ~/a"]
+
+
+@pytest.mark.parametrize("pmode", ["manual", "auto", "allow_all"])
+@pytest.mark.parametrize("cmd", DESTRUCTIVE)
+def test_destructive_commands_card_unless_manual_blocks(pmode: str, cmd: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The permrules header: Allow everything still shows a card for deletes that skip the Trash, wipes and force-pushes.
+    async def no_review(*a: Any, **k: Any) -> Any:
+        raise AssertionError("the reviewer must not see a destructive command")
+    monkeypatch.setattr(appmod.autoreview, "review", no_review)
+    c = go(pmode, sh(cmd), destructiveDefaults={"shell": "ask"})
+    assert len(c) == 1 and c[0]["forced"] and not T.RAN, (pmode, cmd)
 
 
 def test_deny_rule_still_refuses_under_allow_all() -> None:
@@ -183,17 +206,35 @@ def test_auto_and_manual_still_card_a_bypass_session(pmode: str) -> None:
     assert len(go(pmode, call)) == 1 and not CALLS
 
 
-def test_allow_all_runs_a_delete_in_a_tainted_reply() -> None:
-    assert not go("allow_all", sh("rm -rf ~/Documents/x"), tainted=True) and len(T.RAN) == 1
+def test_allow_all_cards_a_delete_in_a_tainted_reply() -> None:
+    assert len(go("allow_all", sh("rm -rf ~/Documents/x"), tainted=True)) == 1 and not T.RAN
 
 
-@pytest.mark.parametrize("name", ["gmail_send", "calendar_propose"])
-def test_allow_all_never_cards_mail_or_calendar_cards(name: str) -> None:
+def test_allow_all_lifts_forced_cards_but_not_the_floor() -> None:
     from personal_os import autoreview
     for pmode in ("manual", "auto"):
         assert autoreview.route(pmode, mode="ask", danger="external", hard_forced=True) == "card"
     assert autoreview.route("allow_all", mode="ask", danger="external", hard_forced=True) == "run"
-    assert name not in permrules.STILL_ASK
+    for pmode in autoreview.MODES:  # a floor card or block holds in every mode
+        assert autoreview.route(pmode, mode="ask", danger="external", floor="card") == "card"
+        assert autoreview.route(pmode, mode="on", danger="safe", floor="block") == "block"
+    assert autoreview.route("allow_all", mode="off", danger="external", floor="card") == "off"
+
+
+def test_allow_all_sends_mail_with_no_card_and_nothing_else_is_floored() -> None:
+    assert not go("allow_all", tool("gmail_send")) and CALLS == ["a"]
+    for name in ("calendar_delete", "trash_local_file"):
+        assert not go("allow_all", tool(name)) and CALLS == ["a"], name
+
+
+@pytest.mark.parametrize("pmode", ["manual", "auto"])
+def test_no_grant_or_rule_lifts_the_mail_card(pmode: str) -> None:
+    assert len(go(pmode, tool("gmail_send"), {"allow": ["gmail_send"]}, destructiveDefaults={"send": "ask"})) == 1 and not CALLS, "allow rule"
+    cid = T.setup(None, permissionMode=pmode, destructiveDefaults={"send": "ask"})
+    permrules.SESSION.add(cid, ["gmail_send"])
+    appmod.convos.update(cid, {"settings": {"tools": {"gmail_send": "on"}}})  # an explicit per-tool "on"
+    CALLS.clear()
+    assert len(T.cards(T.drive(cid, [[tool("gmail_send")], []], ["deny"] * 3))) == 1 and not CALLS, "session grant + on"
 
 
 def test_allow_all_applies_doc_edits_directly() -> None:
@@ -328,3 +369,10 @@ def test_hook_main_prints_a_decision_and_fails_safe(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(sys, "stdin", io.StringIO("not json"))
     claude_hook.main([])
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("cmd", ["ls; touch x", "ls && touch x", "ls | tee x", "ls\ntouch x", "ls `touch x`"])
+def test_an_allow_rule_covers_a_command_only_when_it_covers_every_segment(cmd: str) -> None:
+    rules = {"allow": ["Bash(ls*)"]}
+    assert permrules.resolve("shell_run", {"command": "ls -la"}, "ask", False, rules=rules, cwd="/tmp").mode == "on"
+    assert permrules.resolve("shell_run", {"command": cmd}, "ask", False, rules=rules, cwd="/tmp").mode == "ask", cmd

@@ -6,6 +6,7 @@ import GrantsPanel from '../GrantsPanel'
 import { ShellNetwork } from '../CoworkSettings'
 import RunSafetySettings, { SnapshotToggle } from '../RunSafetySettings'
 import { PermissionModeCards } from '../PermissionMode'
+import { DestructiveDefaults } from '../DestructiveDefaults'
 import Switch from './Switch'
 import { Sec, type TabProps } from './shared'
 
@@ -15,12 +16,13 @@ export default function PermissionsTab({ draft, patch }: TabProps): JSX.Element 
     <section className="permissions-tab">
       <h3>Permissions</h3>
       <Sec id="mode"><PermissionModeCards mode={mode} onPick={(permissionMode) => patch({ permissionMode })} /></Sec>
+      {mode === 'manual' && <DestructiveDefaults value={draft.destructiveDefaults} onChange={(destructiveDefaults) => patch({ destructiveDefaults })} />}
       <Switch className="all-connections" danger={!!draft.allowAllConnections} label="Allow all domains and MCP servers"
         title={<>{draft.allowAllConnections && <ShieldAlert size={13} aria-hidden />} Allow all domains and MCP servers</>}
         help="Lifts the host allow-lists for fetching, browsing and shell network, and lets every connector tool run without a per-tool approval. Grain's own data, app, credential stores and the untrusted-content checks stay protected."
         checked={!!draft.allowAllConnections} onChange={(allowAllConnections) => patch({ allowAllConnections })} />
       <Sec id="safety"><RunSafetySettings draft={draft} patch={patch} /></Sec>
-      <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits. Allow everything never asks, not even before permanent deletes, disk wipes, force-pushes, credential access or sending email; Auto and Manual still do.</p>
+      <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits. Allow everything asks only before destructive shell commands (permanent deletes, disk wipes, force-pushes); Auto and Manual ask more, including for credential access and email.</p>
       {mode === 'auto' && (
         <details className="modal-free">
           <summary>Reviewer model: {draft.autoReviewModel ? draft.autoReviewModel : 'automatic'}</summary>

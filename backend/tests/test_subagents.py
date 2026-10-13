@@ -671,8 +671,8 @@ def test_child_allow_all_lifts_asks() -> None:
         check(out["state"] == "completed", f"{rules}: the child carried on")
 
 
-def test_child_allow_all_has_no_floor() -> None:
-    """Allow everything has no floor for a child either: a force-push from a worker runs with no card, logged under the child's run with its kind."""
+def test_child_allow_all_keeps_the_destructive_floor() -> None:
+    """Allow everything runs a worker's routine call with no card (logged under the child's run with its kind), but a force-push from a worker is still a forced card."""
     root = tempfile.mkdtemp()
     reset(permissionMode="allow_all")
     spec = appmod.toolbox.specs["shell_run"]
@@ -706,12 +706,39 @@ def test_child_allow_all_has_no_floor() -> None:
     finally:
         spec.fn = real
     cards = [d for e, d in fr.events if e == "tool_call" and d.get("needs_approval")]
-    check(hits == ["ls", "git push --force origin main"] and not cards, f"both ran, no card: {hits} {cards}")
+    check(hits == ["ls"] and len(cards) == 1 and cards[0]["id"].endswith(":p2") and cards[0]["forced"], f"ls ran, the force-push was carded and denied: {hits} {cards}")
     with appmod.db.tx() as c:
         rows = [dict(r) for r in c.execute("SELECT agent, run_id, decision FROM approval_log WHERE call_id LIKE ? ORDER BY id",
-                                           (f"%{out['agent_id']}:p%",)).fetchall()]
-    check([r["decision"] for r in rows] == ["auto", "auto"] and all(r["run_id"] == out["agent_id"] and r["agent"] == "subagent" for r in rows),
-          f"both calls are in the approval history under the child's run: {rows}")
+                                           (f"%{out['agent_id']}:p1",)).fetchall()]
+    check([r["decision"] for r in rows] == ["auto"] and all(r["run_id"] == out["agent_id"] and r["agent"] == "subagent" for r in rows),
+          f"the routine call is in the approval history under the child's run: {rows}")
+
+
+def test_child_manual_blocks_a_destructive_command_by_default() -> None:
+    """Manual refuses a worker's force-push outright (destructiveDefaults.shell = block): no card, the model is told not to work around it."""
+    root = tempfile.mkdtemp()
+    reset(permissionMode="manual", workspaceRoots=[root])
+    spec = appmod.toolbox.specs["shell_run"]
+    real, hits = spec.fn, []
+
+    async def fake(ctx: dict[str, Any], **kw: Any) -> Any:
+        hits.append(kw["command"])
+        return {"exit_code": 0, "output": "ok"}
+
+    spec.fn = fake
+    try:
+        SCRIPTS["pushman"] = [{"text": "", "calls": [call("p1", "shell_run", {"command": "ls"}),
+                                                     call("p2", "shell_run", {"command": "git push --force origin main"})]},
+                              {"text": "done"}]
+        fr = FakeRun()
+        modes = {**appmod.toolbox.effective({}, None, None), "shell_run": "on"}
+        ctx = mkctx(new_conv(), modes=modes, run=fr, message_id=None, permission_mode="manual")
+        run(appmod.toolbox.call("agent_spawn", {"task": "pushman", "role": "worker", "root": root}, ctx))
+    finally:
+        spec.fn = real
+    cards = [d for e, d in fr.events if e == "tool_call" and d.get("needs_approval")]
+    check(hits == ["ls"] and not cards, f"ls ran, the force-push was refused with no card: {hits} {cards}")
+    check("blocked by the user's settings" in json.dumps(SEEN[-1], default=str), "the child was told why")
 
 
 def test_child_untrusted_result_is_fenced() -> None:

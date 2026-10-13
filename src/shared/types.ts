@@ -310,6 +310,10 @@ export interface PlanEdit { idx: number; arguments?: Record<string, unknown> }
 
 export type ApprovalDecision = 'allow' | 'deny' | 'always_chat' | 'always_global' | 'always_session' | 'always_rule' | 'allow_host'
 
+export type DestructiveKind = 'shell' | 'files' | 'items' | 'send'
+export type DestructiveAction = 'block' | 'ask' | 'allow'
+export type DestructiveDefaults = Record<DestructiveKind, DestructiveAction>
+
 /** What an approval card adds beyond the tool name: the rule that put it there and the rules it can save. */
 export interface PermissionCard {
   kind: 'rule' | 'opaque' | 'external_directory' | 'doom_loop' | 'destructive' | null
@@ -322,6 +326,8 @@ export interface PermissionCard {
   session: boolean
   /** The tool's danger tier; an 'external' or 'schedules' call offers no whole-tool standing grant. */
   danger?: string
+  /** permissions_update: what the settings change does, as plain before -> after lines. */
+  change?: string[]
 }
 
 /** Allow / ask / deny lists of `Tool(pattern)` rules (permrules.py). */
@@ -1579,6 +1585,8 @@ export interface Settings {
   alwaysAsk?: string[]
   /** auto: a second model checks risky actions; manual: ask before each; allow_all: no checks, no cards. Default auto. */
   permissionMode?: 'auto' | 'manual' | 'allow_all'
+  /** Manual mode only: what happens to a destructive action of each kind. Auto and Allow everything card only a destructive shell command. */
+  destructiveDefaults?: DestructiveDefaults
   /** Lifts the host allow-lists (fetch, browse, shell network) and the per-tool approval for connector tools. Independent of permissionMode. */
   allowAllConnections?: boolean
   /** Off by default. Lifts the two taint-forced cards (networked shell, writes outside the desk after untrusted content). Hard blocks still ask. */

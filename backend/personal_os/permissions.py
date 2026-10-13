@@ -41,9 +41,14 @@ DEFAULTS: dict[str, Any] = {
     # (permrules.py). Deny beats ask beats allow; a forced approval is never lifted by one.
     "permissionRules": {"allow": [], "ask": [], "deny": []},
     # How calls that would run or ask are decided (autoreview.route): "auto" has a reviewer model read every call that is
-    # not known safe; "manual" is the per-tool modes, grants and rules alone; "allow_all" runs everything (unsandboxed
-    # shell included) with no card at all; only denied calls (hard-deny paths included) are refused.
+    # not known safe; "manual" is the per-tool modes, grants and rules alone, with destructive actions refused by default
+    # (destructiveDefaults); "allow_all" runs everything (unsandboxed shell and mail sends included) with no card, except a
+    # destructive shell command and the user's own questions; denied calls (hard-deny paths included) are always refused.
     "permissionMode": "auto",
+    # Manual mode only: what happens to a destructive call, by category (DESTRUCTIVE_KINDS). "block" refuses it, "ask" is a
+    # card, "allow" leaves it to manual mode's usual gate. Auto and Allow everything ignore it, except that a destructive
+    # shell command is a card in both.
+    "destructiveDefaults": {"shell": "block", "files": "block", "items": "block", "send": "block"},
     # "deny": a job run that would have to ask is refused with a recorded reason instead of waiting for someone.
     "unattendedApprovals": "deny",
     "autoReviewModel": "",  # "" = the fast model, else the extraction model, else the chat model
@@ -86,6 +91,34 @@ DEFAULTS: dict[str, Any] = {
 }
 KEYS = frozenset(DEFAULTS)
 HOST_LISTS = frozenset({"fetchAllowlist", "shellAllowedDomains", "browserAllowlist"})
+DESTRUCTIVE_KINDS = ("shell", "files", "items", "send")
+DESTRUCTIVE_ACTIONS = ("block", "ask", "allow")
+SETTINGS_KIND = "settings"  # a floor kind that is a card in every mode (permissions_update)
+KIND_WORDS = {"shell": "destructive shell commands", "files": "deleting or overwriting files", "items": "deleting mail, events and tasks",
+              "send": "sending email and messages"}
+
+
+def blocked_reason(kind: str | None) -> str:
+    """The reason a destructive call of `kind` is refused in Manual mode; callers hand it to tools.denied."""
+    return (f"blocked by the user's settings, which refuse {KIND_WORDS.get(kind or '', 'this destructive action')} while permissions are "
+            "on Manual. Do not work around it with another tool or a shell command; tell the user what you wanted to do so they can "
+            "do it themselves or change the setting")
+
+
+def floor_action(pmode: str, kind: str | None, defaults: Any = None) -> str | None:
+    """card | block | None for a call of destructive `kind` (Toolbox.floor_kind); None leaves it to the usual gate.
+    A destructive shell command is a card in auto and Allow everything and follows destructiveDefaults in manual; the other
+    kinds follow destructiveDefaults in manual only; SETTINGS_KIND is a card in every mode."""
+    if kind == SETTINGS_KIND:
+        return "card"
+    if kind is None:
+        return None
+    if pmode != "manual":
+        return "card" if kind == "shell" else None
+    act = {**DEFAULTS["destructiveDefaults"], **(defaults if isinstance(defaults, dict) else {})}.get(kind)
+    return {"block": "block", "ask": "card"}.get(act)
+
+
 CHOICES: dict[str, tuple[str, ...]] = {
     "permissionMode": ("auto", "manual", "allow_all"),
     "unattendedApprovals": ("ask", "deny"),
@@ -188,6 +221,12 @@ def validate(key: str, v: Any, *, cap_modes: Callable[[dict[str, Any]], dict[str
         raise ValueError(f"{key} must be a {type(d).__name__}")
     if key in CHOICES and v not in CHOICES[key]:
         raise ValueError(CHOICE_ERRORS[key])
+    if key == "destructiveDefaults":
+        if bad := [k for k in v if k not in DESTRUCTIVE_KINDS]:
+            raise ValueError(f"destructiveDefaults has no category {bad[0]!r}; use {', '.join(DESTRUCTIVE_KINDS)}")
+        if bad := [k for k, a in v.items() if a not in DESTRUCTIVE_ACTIONS]:
+            raise ValueError(f"destructiveDefaults.{bad[0]} must be 'block', 'ask' or 'allow'")
+        return {**DEFAULTS[key], **v}
     if key == "permissionRules":
         from . import permrules
         out: dict[str, list[str]] = {}

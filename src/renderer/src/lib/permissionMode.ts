@@ -3,8 +3,8 @@ export type PermissionMode = 'auto' | 'manual' | 'allow_all'
 
 export const MODES: { id: PermissionMode; label: string; pill: string; description: string }[] = [
   { id: 'auto', label: 'Auto', pill: 'Auto', description: 'Auto — a second AI checks each risky action and you are asked only when it is unsure (recommended)' },
-  { id: 'manual', label: 'Manual', pill: 'Manual', description: 'Manual — you are asked before every risky action' },
-  { id: 'allow_all', label: 'Allow everything', pill: 'Allow everything', description: 'Allow everything — runs without checks or questions. Still asks only for Grain\'s own data and app, passwords and keys, permanent deletes, disk wipes, force-pushes, and sending email (dangerous)' }
+  { id: 'manual', label: 'Manual', pill: 'Manual', description: 'Manual — you are asked before every risky action, and destructive actions are refused unless you allow or ask for them below' },
+  { id: 'allow_all', label: 'Allow everything', pill: 'Allow everything', description: 'Allow everything — runs without checks or questions, including sending email. Still asks only before a destructive shell command (permanent deletes, disk wipes, force-pushes) and when it needs your answer (dangerous)' }
 ]
 
 /** The mode in effect; a missing or unknown value is Auto. */
@@ -21,5 +21,5 @@ export const pillLabel = (m: PermissionMode): string => MODES.find((x) => x.id =
 /** Hover text and accessible name for the composer pill. Under Allow everything its red text is the only cue, so it says so. */
 export const pillTitle = (m: PermissionMode): string =>
   m === 'allow_all'
-    ? 'Dangerously allow all is on: Grain acts without asking. It still asks before permanent deletes, disk wipes, force-pushes and sending email. Click to change it in Settings.'
+    ? 'Dangerously allow all is on: Grain acts without asking. It still asks before destructive shell commands: permanent deletes, disk wipes and force-pushes. Click to change it in Settings.'
     : `Permission mode: ${pillLabel(m)}. Click to change it in Settings.`

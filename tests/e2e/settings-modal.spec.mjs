@@ -128,7 +128,7 @@ test('invalid values are clamped or rejected without breaking the modal', async 
   // A number field clamps in the form: 0 and blank fall back to the default, negative and huge values stop at the ends.
   // (Each value differs from the one saved before it, or Save stays disabled.)
   const rounds = 'Delegate after this many tool rounds'
-  for (const [v, want] of [['999', 20], ['-5', 1], ['0', 2], ['2.6', 3], ['', 2]]) {
+  for (const [v, want] of [['999', 20], ['-5', 1], ['0', 4], ['2.6', 3], ['', 4]]) {
     await openAdvanced(page, 'Desks and workers')
     await field(page, rounds).fill(v)
     await dialog(page).getByRole('button', { name: 'Save', exact: true }).click()
@@ -145,7 +145,7 @@ test('invalid values are clamped or rejected without breaking the modal', async 
     expect(r.status).toBeLessThan(500)
   }
   expect((await api('/settings')).contextWindow).toBe(before.contextWindow)
-  expect((await api('/settings')).delegationAfterRounds).toBe(2)
+  expect((await api('/settings')).delegationAfterRounds).toBe(4)
   // Unknown keys are ignored.
   await api('/settings', { method: 'PUT', body: { nonsense: 1 } })
   expect((await api('/settings')).nonsense).toBeUndefined()

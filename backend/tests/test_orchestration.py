@@ -336,14 +336,29 @@ def test_tool_arrangement_by_lane() -> None:
     assert W.lane_refusal("todo_write", True, True) is None and W.lane_refusal("ask_user", True, True) is None
 
 
+def test_errored_rounds_do_not_count_toward_delegation() -> None:
+    appmod.db.set_settings({"delegationAfterRounds": 2})
+    cid = new_conv()
+    bad = lambda i: call(f"e{i}", "no_such_tool", {"i": i})
+    FRONT[:] = [{"text": "", "calls": [bad(1)]}, {"text": "", "calls": [bad(2)]},  # all-error rounds: not work
+                {"text": "", "calls": [bad(3), search(4)]},  # mixed: one succeeded, counts as 1
+                {"text": "", "calls": [search(5)]},  # 2nd real round: forces
+                {"text": "Done."}]
+    stream(cid, "go")
+    front = seat("front")
+    assert len(front) == 5
+    assert all("search_memory" in s["tools"] for s in front[:4]), "still unrestricted through the mixed round"
+    assert "search_memory" not in front[4]["tools"], "narrowed only after two rounds with a successful call"
+
+
 def test_forced_delegation_rule() -> None:
     offered = ["delegate", "search_memory"]
     on = {"delegationForce": True, "delegationAfterRounds": 2}
     assert not W.delegation_forced(on, 1, offered) and W.delegation_forced(on, 2, offered) and W.delegation_forced(on, 9, offered)
     assert not W.delegation_forced({**on, "delegationForce": False}, 9, offered)
     assert not W.delegation_forced(on, 9, ["search_memory"]), "no delegate offered, nothing to route to"
-    assert W.delegation_forced({}, limits.DELEGATION_AFTER_ROUNDS, offered), "defaults: on, after 2 rounds"
-    assert W.delegation_forced({"delegationAfterRounds": "junk"}, 2, offered) and not W.delegation_forced({"delegationAfterRounds": "junk"}, 1, offered)
+    assert W.delegation_forced({}, limits.DELEGATION_AFTER_ROUNDS, offered), "defaults: on, after 4 rounds"
+    assert W.delegation_forced({"delegationAfterRounds": "junk"}, 4, offered) and not W.delegation_forced({"delegationAfterRounds": "junk"}, 3, offered)
     assert W.delegation_forced({"delegationAfterRounds": -3}, 1, offered), "never below one round"
     assert not W.counts_as_work(["delegate", "todo_write", "check_worker", "propose_plan", "ask_user"])
     assert W.counts_as_work(["todo_write", "search_memory"])
@@ -997,7 +1012,7 @@ def test_the_new_default_model_does_not_skip_onboarding() -> None:
 
 def test_orchestration_settings_defaults_and_ranges() -> None:
     d = llm.DEFAULT_SETTINGS
-    assert d["delegationForce"] is True and d["delegationAfterRounds"] == 2 and d["workerMaxConcurrent"] == 8 and d["telegramPushWorkerResults"] is False
+    assert d["delegationForce"] is True and d["delegationAfterRounds"] == 4 and d["workerMaxConcurrent"] == 8 and d["telegramPushWorkerResults"] is False
     assert limits.WORKER_MEMORY_FLOOR == 0.15 and limits.RANGES["delegationAfterRounds"] == (1, 20) and limits.RANGES["workerMaxConcurrent"] == (1, 16)
     assert client.put("/settings", json={"workerMaxConcurrent": 99}).status_code == 422, "out-of-range values are refused"
     assert client.put("/settings", json={"delegationAfterRounds": 0}).status_code == 422

@@ -113,16 +113,19 @@ def estimate_messages(msgs: list[dict[str, Any]]) -> int:
 
 
 def _with_tools(r: dict[str, Any], include_untrusted: bool = False) -> list[dict[str, Any]]:
-    """An assistant row, preceded by the tool calls and results it stored (the text for_model produced). A row
-    without stored results (older rows, calls that never ran) carries the compact tool record in its text."""
+    """An assistant row, preceded by the tool calls and results it stored (the text for_model produced). Calls with
+    no stored result (older rows, calls that never ran: bad arguments, a Stop, a loop stop) go in the compact tool
+    record in the row's text, also when the same reply has stored ones."""
     out: list[dict[str, Any]] = []
-    evs = [e for e in (r.get("tool_events") or []) if isinstance(e, dict) and e.get("call_id") and isinstance(e.get("for_model"), str)]
+    events = [e for e in (r.get("tool_events") or []) if isinstance(e, dict)]
+    evs = [e for e in events if e.get("call_id") and isinstance(e.get("for_model"), str)]
     if r["role"] == "assistant" and evs:
         out.append({"role": "assistant", "content": None, "tool_calls": [
             {"id": e["call_id"], "type": "function", "function": {"name": e.get("name") or "", "arguments": json.dumps(e.get("arguments") or {}, default=str)}}
             for e in evs]})
         out += [{"role": "tool", "tool_call_id": e["call_id"], "content": e["for_model"]} for e in evs]
-        return out + [{"role": r["role"], "content": r["content"]}]
+        rest = [e for e in events if not (e.get("call_id") and isinstance(e.get("for_model"), str))]
+        return out + [{"role": r["role"], "content": _row_content({**r, "tool_events": rest}, include_untrusted)}]
     return [{"role": r["role"], "content": _row_content(r, include_untrusted)}]
 
 

@@ -1,6 +1,6 @@
 # Grain reference
 
-Generated from `GET /tools` on a fresh backend (142 tools). `default` is the mode before any Settings, project or chat override; `locked` marks a tool in the `alwaysAsk` setting (external/schedules danger only), whose mode tops out at `ask`. A tool also needs its backing service (Google connected, desktop bridge) to be offered at all.
+Generated from `GET /tools` on a fresh backend (142 tools at the time); tools added since are in "Added since" below. `GET /tools` on a running backend is the source of truth. `default` is the mode before any Settings, project or chat override; `locked` marks a tool in the `alwaysAsk` setting (external/schedules danger only), whose mode tops out at `ask`. A tool also needs its backing service (Google connected, desktop bridge) to be offered at all.
 
 Danger tiers (`backend/personal_os/tools.py`): `safe` read-only in-app, `writes` in-app write, `network` reads the internet, `executes` sandboxed code, `external` writes to systems outside the app, `plan` the call is itself an approval card, `schedules` books future unattended work. Default mode is `on` for every tier except `plan` (`ask`); a few tools override it (shown below).
 
@@ -268,6 +268,24 @@ Always forced to ask in a reply that has read untrusted content (tainted): netwo
 | `command_list` | safe | on | List the user's saved commands (prompt templates they run by name). |
 | `command_run` | executes | on | Run one of the user's saved commands by name (see command_list). |
 
+### Added since
+
+| tool | group | danger | default | what it does |
+|---|---|---|---|---|
+| `delegate` | agents | executes | on | Hand work to a background worker while the main agent keeps talking; code changes go on a new branch in a separate worktree. |
+| `check_worker` / `message_worker` / `stop_worker` / `resume_worker` | agents | safe (`resume_worker` executes) | on | Status of, note to, stop, or continue a worker. |
+| `agent_create` / `agents_list` / `agent_message` | agents | see tool | card | Create (always a card), list, and message the user's Library agents. |
+| `list_chats` / `read_chat` / `message_chat` | chats | safe | on | Find, read and message the user's other chats; `read_chat` taints the reply. |
+| `deep_research` | research | network | on | Parallel read-only researchers, one cited answer (also `/research`). |
+| `generate_image` | media | network | ask | Make pictures into Uploads. |
+| `screenshot` | mac | safe | on | Capture screen, window or region (needs Screen Recording). |
+| `send_files` | utility | safe | on | Show or send files and screenshots on the reply (and to Telegram). |
+| `browser_handoff` | browser | safe | on | Hand the browser window to the user for a login, CAPTCHA or payment step. |
+| `doc_comments` / `doc_comment_reply` | docs | safe / writes | on | Read and answer the comment threads on a note. |
+| `coding_session_start` / `_wait` / `_status` / `_send` / `_stop` / `_list` / `_diff` | shell | external (start) | on | Run a coding agent (Claude Code, OpenCode, pi) on a repo in the background, usually in its own worktree. |
+| `ship_checklist` / `ship_status` | shell | see tool | on | Test, push and open a PR; the merge is never automatic. |
+| `setup_request` | setup | safe | on | One-click setup card when an integration is missing. |
+
 ## Keyboard shortcuts
 
 From the app menu (`src/main/index.ts`); ⌘ is Cmd, ⌃ Control, ⌥ Option.
@@ -280,6 +298,11 @@ From the app menu (`src/main/index.ts`); ⌘ is Cmd, ⌃ Control, ⌥ Option.
 | ⌘U | Upload file |
 | ⌘1 ... ⌘6 | Chats, Lists, Calendar, Files, Mail, Memory |
 | ⌘K | Command palette |
+| ⌘/ (or ? outside a text field) | Keyboard shortcuts |
+| ⌘E, ⌘S | Edit or read, save a file (Files editor) |
+| Enter / ⌘Enter / Esc | Send (queues while a reply runs) / steer the running reply / stop it |
+| ⌃⌥D | Dictate (hold) or latch (tap) |
+| ⌘= / ⌘- / ⌥⌘0 | Zoom in / out / actual size |
 | ⌘⇧F | Search chats |
 | ⌘⇧[ / ⌘⇧] | Previous / next chat |
 | ⌘F, ⌘G, ⌘⇧G | Find in chat, next, previous |
@@ -294,24 +317,28 @@ From the app menu (`src/main/index.ts`); ⌘ is Cmd, ⌃ Control, ⌥ Option.
 | ⌥⌘← / ⌥⌘→ | Previous / next space |
 | ⌥⌘↑ | Space overview |
 | ⌃⌘T | Tidy up |
-| ⌃⌘L | Lock / unlock space |
+| ⌃⌘L | Lock / unlock canvas |
 | ⌃⌘O / ⌃⌘⇧O | Pop a window out of its space / return it |
 | ⌃⌘P | Pin window on top |
 | ⌃⌘[ / ⌃⌘] | Window more / less transparent |
 | ⌥⌘G | Gather widgets |
+| ⌥⌘F | Bring pop-outs to front |
 | ⌘W, ⌘M | Close, minimize window |
+| ⌃⌥⌘Space, ⇧⌘Space, ⌥Space | Anywhere on the Mac: gather widgets, quick capture, quick ask (global; configurable in Settings) |
 
 A view hidden in Settings → Sidebar keeps its shortcut, which offers to turn the view back on.
 
 ## Slash commands
 
-From `src/renderer/src/lib/slashCommands.ts`:
+From `src/renderer/src/lib/slashCommands.ts` (the backend side is `commands.py`); saved commands from Library → Automations also appear as `/name`:
 
 | command | does |
 |---|---|
+| `/clear` | start over: earlier messages leave the context (UI only, a marker is stored) |
 | `/skill <name> <message>` | use one approved skill for this message |
 | `/schedule <when>, <what>` | run it later, unattended |
 | `/loop <every ...> <what>` | repeat on an interval |
+| `/research <question>` | plan, search in parallel, answer with sources (`deep_research`) |
 | `/compact [focus]` | summarize the earlier messages |
 | `/skills` | open Library → Skills |
 | `/commands` | open Library → Automations |

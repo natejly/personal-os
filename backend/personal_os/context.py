@@ -378,8 +378,8 @@ def build_context(
             if n:
                 items.append(_omitted(n))
                 trimmed["pinned"] = n
-            if shown:
-                volatile.append(head + "\n\n".join(items))
+            if shown:  # the same every turn, whatever the query: cached prefix, not the per-turn block
+                parts.append(head + "\n\n".join(items))
                 used["pinned"] = [{"document_id": d["document_id"], "name": d["name"]} for d in shown]
                 used["chunks"] = [{**r, "n": i} for i, r in enumerate(shown, 1)]
             hits = [h for h in hits if h["document_id"] not in {d["id"] for d in pins}]

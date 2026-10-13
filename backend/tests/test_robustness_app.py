@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -304,8 +305,22 @@ def test_recap_runs_without_a_key_and_marks_google_unknown(monkeypatch: pytest.M
     monkeypatch.setattr(appmod, "generate_recap", fake)
     monkeypatch.setattr(appmod.google, "status", lambda: {"connected": False})
     appmod.db.set_settings({"apiKey": "", "defaultModel": "m"})
+    new_conv()  # something to recap: an empty day skips the model
     assert client.get("/recap?force=true").json()["content"] == "recap"
     assert "not connected" in seen[0]["calendar_next_3_days"] and "not connected" in seen[0]["unread_mail"]
+
+
+def test_recap_skips_the_model_when_there_is_nothing_to_recap(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake(*a: Any) -> str:
+        raise AssertionError("no model call for an empty day")
+
+    monkeypatch.setattr(appmod, "generate_recap", fake)
+    monkeypatch.setattr(appmod.google, "status", lambda: {"connected": False})
+    for store, name in ((appmod.convos, "list"), (appmod.memories, "list"), (appmod.todos, "list"), (appmod.projects, "list")):
+        monkeypatch.setattr(store, name, lambda *a, **k: [])
+    appmod.db.set_settings({"apiKey": "", "defaultModel": "m"})
+    day = time.strftime("%Y-%m-%d")
+    assert client.get("/recap?force=true").json() == {"day": day, "content": "", "cached": False}
 
 
 def test_recap_reads_every_visible_calendar_not_only_primary(monkeypatch: pytest.MonkeyPatch) -> None:

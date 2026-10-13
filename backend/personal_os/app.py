@@ -7619,6 +7619,10 @@ async def recap(force: bool = False) -> dict[str, Any]:
         "projects": [{"name": p["name"], **projects.stats(p["id"])} for p in projects.list()],
     }
     internal = await _internal_data()
+    # A fresh install with Google off has nothing to recap: no model call, and nothing cached, so the
+    # first chat, todo or Google sign-in today gets a real recap instead of this empty one.
+    if not internal["google_connected"] and not any(facts[k] for k in ("recent_chats", "recent_memories", "open_todos", "projects")):
+        return {"day": day, "content": "", "cached": False}
     # An empty list reads as "nothing on" to the model; a source Grain cannot see must say so instead.
     unseen = "not connected (unknown; Google is not connected in Settings)"
     facts["calendar_next_3_days"] = (unseen if not internal["google_connected"] else

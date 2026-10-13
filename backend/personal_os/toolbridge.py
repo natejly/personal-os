@@ -22,7 +22,7 @@ import tempfile
 import time
 from typing import Any, Awaitable, Callable
 
-from . import permrules
+from . import autoreview, permrules
 
 ALLOWED = frozenset({"fs_glob", "fs_grep", "read_local_file", "fs_edit", "search_documents", "web_search", "fetch_url"})
 MAX_SECONDS = 300
@@ -188,6 +188,13 @@ class Bridge:
         if perm.refusal:
             return self._refuse(name, f"{name} was refused: {perm.refusal}")
         mode = perm.mode
+        # Auto mode reviews a call the reply loop would review (autoreview.route), not only the outer run_python: the script
+        # may have computed these arguments from content the reviewer never saw. The approve callback's auto branch is that review.
+        if (mode == "on" and self.approve is not None and not self.ctx.get("proposal_only")
+                and (self.ctx.get("permission_mode") or autoreview.mode_of(cfg)) == "auto"
+                and autoreview.route("auto", mode="on", danger=spec.danger, covered=bool(perm.rule),
+                                     explicit_on=(self.ctx.get("explicit_modes") or {}).get(name) == "on") != "run"):
+            mode = "ask"
         if mode == "ask":
             if self.approve is None or self.ctx.get("proposal_only"):
                 return self._refuse(name, f"{name} needs the user's approval and there is nobody to ask in this run.")

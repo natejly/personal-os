@@ -327,6 +327,25 @@ def test_profile_with_a_socket_allows_exactly_that_path(tmp_path: Path) -> None:
     assert "unix-socket" not in sandbox._mac_profile(str(tmp_path), sys.executable)
 
 
+def test_auto_mode_reviews_a_bridged_write_that_is_on(tmp_path: Path) -> None:
+    """The script's own calls get Auto's review, as the same calls would in the reply loop; Manual runs an `on` call."""
+    r = Rig(tmp_path)
+    asked: list[str] = []
+
+    async def approve(name: str, args: dict[str, Any], forced: bool) -> bool:
+        asked.append(name)
+        return False
+    b = toolbridge.Bridge(r.tb, r.ctx, ["fs_edit", "fs_glob"], {"fs_edit": "on", "fs_glob": "on"}, approve)
+    r.ctx["permission_mode"] = "auto"
+    res = asyncio.run(b.handle("fs_edit", {"path": str(r.root / "a.py"), "old": "1", "new": "9"}))
+    assert res["ok"] is False and asked == ["fs_edit"] and not r.seen
+    asyncio.run(b.handle("fs_glob", {"pattern": "*.py", "root": str(r.root)}))
+    assert asked == ["fs_edit"], "a safe read needs no review"
+    r.ctx["permission_mode"] = "manual"
+    assert asyncio.run(b.handle("fs_edit", {"path": str(r.root / "a.py"), "old": "1", "new": "9"}))["ok"] is True
+    assert asked == ["fs_edit"]
+
+
 def test_permission_rules_apply_to_bridged_calls(tmp_path: Path) -> None:
     """A deny rule refuses a bridged call, and an ask rule cards an `on` tool, as they would a direct call."""
     r = Rig(tmp_path)

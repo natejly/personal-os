@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
 import { AGENT_LABEL, codingDot, codingLive, codingStatusLabel, codingStoppable, eventSummary, formatElapsed, latestActivity, pathBase, plainExcerpt, splitSessions } from '../lib/codingSessions'
 import { useStore } from '../store'
-import { useTermAvailable } from '../lib/termRegistry'
 import { CodingFollowUp, CodingTimeline } from './CodingTimeline'
-import { CodingDiffView, NeedsYou, useStop } from './toolcards/CodingSessionCard'
+import { CodingDiffView, NeedsYou, ShowSession, useStop } from './toolcards/CodingSessionCard'
 import type { CodingSession } from '@shared/types'
 
 /** Re-render every `ms` while `on`, so a running session's elapsed time moves. */
@@ -23,8 +22,6 @@ function Row({ c, now }: { c: CodingSession; now: number }): JSX.Element {
   const [diff, setDiff] = useState(false)
   const [full, setFull] = useState(false)
   const { stop, busy } = useStop(c.id)
-  const openTerminal = useStore((s) => s.openTerminal)
-  const termOk = useTermAvailable()
   const events = useStore((s) => s.codingEvents[c.id])
   const live = codingLive(c.status)
   const activity = latestActivity(events)
@@ -40,7 +37,7 @@ function Row({ c, now }: { c: CodingSession; now: number }): JSX.Element {
           <span className="cs-name">{c.name}</span>
         </button>
         {codingStoppable(c.status) && <button className="ghost-btn xs" disabled={busy} onClick={() => void stop()}>Stop</button>}
-        {termOk && <button className="ghost-btn xs" onClick={() => openTerminal(c.id, null)}>Terminal</button>}
+        <ShowSession id={c.id} cls="xs" />
       </div>
       <small className="muted cs-sub" title={where || undefined}>{AGENT_LABEL[c.agent]}{live ? ` · ${codingStatusLabel(c.status)}` : ''} · {elapsed}{where ? ` · ${where}` : ''}</small>
       {line && (live

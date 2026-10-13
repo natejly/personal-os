@@ -206,8 +206,8 @@ export interface State {
   loadCodingEvents: (id: string) => Promise<void>
   refreshCodingSessions: () => Promise<void>
   /** The last "open a terminal on this coding session" request; `n` makes a repeat of the same one a new request. DeskPanel shows its Terminal tab and TerminalPane starts `mode`. */
-  terminalRequest: { sessionId: string; mode: 'attach' | 'shell' | null; n: number; at: number } | null
-  openTerminal: (sessionId: string, mode: 'attach' | 'shell' | null) => void
+  terminalRequest: { sessionId: string; n: number; at: number } | null
+  openTerminal: (sessionId: string) => void
   /** "Schedule as routine" on a reply: the Agent inbox opens its task editor with this, switched off until a test run. */
   routineDraft: RoutineDraft | null
   scheduleAsRoutine: (conversationId: string, messageId: string) => void
@@ -1838,7 +1838,7 @@ export const useStore = create<State>((set, get) => {
       } catch { /* keep what we have */ }
     },
     terminalRequest: null,
-    openTerminal: (sessionId, mode) => set((st) => ({ terminalRequest: { sessionId, mode, n: (st.terminalRequest?.n ?? 0) + 1, at: Date.now() }, contextOpen: false })),
+    openTerminal: (sessionId) => set((st) => ({ terminalRequest: { sessionId, n: (st.terminalRequest?.n ?? 0) + 1, at: Date.now() }, contextOpen: false })),
     routineDraft: null,
     scheduleAsRoutine: (conversationId, messageId) => {
       const msgs = get().sessions[conversationId]?.conversation.messages ?? []

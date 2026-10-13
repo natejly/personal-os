@@ -1,45 +1,40 @@
 import { useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
 import { useStore } from '../store'
-import { AGENT_LABEL, canAttach, codingDot, codingStatusLabel, defaultTermMode, defaultTermSession } from '../lib/codingSessions'
-import { endEntry, ensureEntry, getEntry, refit, startEntry, useTermEntries, type TermMode } from '../lib/termRegistry'
+import { AGENT_LABEL, canAttach, codingDot, codingStatusLabel, defaultTermSession, termSessions } from '../lib/codingSessions'
+import { ensureEntry, getEntry, refit, startEntry, useTermEntries } from '../lib/termRegistry'
+import { CodingTimeline } from './CodingTimeline'
 
 // The last openTerminal request this pane acted on, so remounting the pane does not replay it.
 let handled = 0
-// The session and view on screen when the pane last unmounted, so coming back from another tab shows what you left.
-let last: { id: string; mode: TermMode | null } | null = null
+// The session on screen when the pane last unmounted, so coming back from another tab shows what you left.
+let last: string | null = null
 
 /**
- * Terminals for coding sessions: opening the tab picks the newest attachable session and picking a session attaches to it right
- * away when it can (claude with an attach id); a shell in its worktree is an explicit button and the only view for sessions that cannot attach. The xterm views live
- * in lib/termRegistry, not in this component, so closing the panel or switching tab only detaches their DOM; the PTYs and
- * their screens are still there when it comes back.
+ * Terminals for coding sessions: picking a session shows it at once. One that can attach (claude with an attach id) opens its
+ * attached terminal; any other (OpenCode, pi) shows its live activity timeline, read-only. The chips list the chat's own
+ * sessions and only appear when there is more than one. The xterm views live in lib/termRegistry, not in this component, so
+ * closing the panel or switching tab only detaches their DOM; the PTYs and their screens are still there when it comes back.
  */
-export default function TerminalPane(): JSX.Element {
+export default function TerminalPane({ conversationId }: { conversationId?: string }): JSX.Element {
   const sessions = useStore((s) => s.codingSessions)
   const request = useStore((s) => s.terminalRequest)
-  const rows = Object.values(sessions).sort((a, b) => b.created_at - a.created_at).slice(0, 20)
-  const kept = last && rows.some((c) => c.id === last!.id) ? last : null
-  const [sessionId, setSessionId] = useState<string | null>(request?.sessionId ?? kept?.id ?? defaultTermSession(rows)?.id ?? null)
-  const [mode, setMode] = useState<TermMode | null>(kept?.mode ?? null)
-  useEffect(() => { if (sessionId) last = { id: sessionId, mode } }, [sessionId, mode])
-  const entries = useTermEntries()
+  const rows = termSessions(Object.values(sessions), conversationId, request?.sessionId)
+  const kept = last && rows.some((c) => c.id === last) ? last : null
+  const [sessionId, setSessionId] = useState<string | null>(request?.sessionId ?? kept ?? defaultTermSession(rows)?.id ?? null)
+  useEffect(() => { if (sessionId) last = sessionId }, [sessionId])
+  useTermEntries()
   const viewRef = useRef<HTMLDivElement>(null)
   const selected = rows.find((c) => c.id === sessionId) ?? null
 
-  const start = (id: string, m: TermMode): void => {
-    setSessionId(id); setMode(m)
-    void startEntry(ensureEntry(id, m))
-  }
-
-  // Picking a session shows its attached view at once when it has one; otherwise whichever view already exists.
+  // Picking a session shows it at once: attached when it can be, else its timeline (below).
   const pick = (id: string): void => {
+    setSessionId(id)
     const c = sessions[id]
-    if (c && defaultTermMode(c)) start(id, 'attach')
-    else { setSessionId(id); setMode(null) }
+    if (c && canAttach(c)) void startEntry(ensureEntry(id))
   }
 
-  // No fresh request and nothing left open: attach to the default session once, as soon as there is one (sessions can arrive after mount).
+  // No fresh request and nothing left open: show the default session once, as soon as there is one (sessions can arrive after mount).
   const auto = useRef(!!kept)
   useEffect(() => {
     if (auto.current) return
@@ -54,15 +49,14 @@ export default function TerminalPane(): JSX.Element {
   useEffect(() => {
     if (!request || request.n === handled) return
     handled = request.n
-    if (request.mode) start(request.sessionId, request.mode)
-    else pick(request.sessionId)
+    pick(request.sessionId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request])
 
-  // The mode on screen: the one picked, else whichever view of this session already exists.
-  const have = (m: TermMode): boolean => !!sessionId && entries.some((e) => e.sessionId === sessionId && e.mode === m)
-  const shownMode: TermMode | null = mode && have(mode) ? mode : have('attach') ? 'attach' : have('shell') ? 'shell' : null
-  const shown = sessionId && shownMode ? getEntry(sessionId, shownMode) ?? null : null
+  const attachable = !!selected && canAttach(selected)
+  // A session gets its attach id a moment after it starts: attach as soon as it can.
+  useEffect(() => { if (attachable && sessionId && !getEntry(sessionId)) void startEntry(ensureEntry(sessionId)) }, [attachable, sessionId])
+  const shown = attachable && sessionId ? getEntry(sessionId) ?? null : null
 
   // Mount the shown view's DOM; every other one stays detached but alive in the registry.
   useEffect(() => {
@@ -79,26 +73,21 @@ export default function TerminalPane(): JSX.Element {
 
   return (
     <div className="desk-pane term-pane" data-testid="term-pane">
-      <div className="term-chips">
-        {rows.map((c) => (
-          <button key={c.id} type="button" className={`term-chip${c.id === sessionId ? ' on' : ''}`} data-testid={`term-chip-${c.id}`} title={c.worktree}
-            onClick={() => pick(c.id)}>
-            <span className={`inbox-dot ${codingDot(c.status)}`} role="img" aria-label={codingStatusLabel(c.status)} />
-            <span>{AGENT_LABEL[c.agent]}</span>
-            <span className="term-chip-branch">{c.branch ?? c.name}</span>
-          </button>
-        ))}
-      </div>
-      {selected && (
-        <div className="term-actions">
-          {canAttach(selected) && <button type="button" className="ghost-btn sm" data-testid="term-attach" onClick={() => start(selected.id, 'attach')}>Attach</button>}
-          <button type="button" className="ghost-btn sm" data-testid="term-shell" onClick={() => start(selected.id, 'shell')}>Shell in worktree</button>
-          <span className="spacer" />
-          {shown && <button type="button" className="ghost-btn sm" data-testid="term-end" disabled={shown.state === 'opening'} onClick={() => { endEntry(shown); setMode(null) }}>End</button>}
+      {rows.length > 1 && (
+        <div className="term-chips">
+          {rows.map((c) => (
+            <button key={c.id} type="button" className={`term-chip${c.id === sessionId ? ' on' : ''}`} data-testid={`term-chip-${c.id}`} title={c.worktree}
+              onClick={() => pick(c.id)}>
+              <span className={`inbox-dot ${codingDot(c.status)}`} role="img" aria-label={codingStatusLabel(c.status)} />
+              <span>{AGENT_LABEL[c.agent]}</span>
+              <span className="term-chip-branch">{c.branch ?? c.name}</span>
+            </button>
+          ))}
         </div>
       )}
       <div className="term-view" data-testid="term-view" ref={viewRef} style={shown ? undefined : { display: 'none' }} />
-      {!shown && <p className="muted small">{selected ? (canAttach(selected) ? 'Attach to the session or open a shell in its worktree.' : 'Open a shell in its worktree.') : 'Pick a coding session.'}</p>}
+      {selected && !shown && <CodingTimeline id={selected.id} />}
+      {!selected && <p className="muted small">Pick a coding session.</p>}
     </div>
   )
 }

@@ -1882,6 +1882,8 @@ export interface CodingSession {
   id: string; agent: 'claude' | 'opencode' | 'pi'; name: string
   status: 'starting' | 'working' | 'needs_you' | 'blocked' | 'done' | 'stopped' | 'failed'
   attention: Attention; detail: string | null; repo_path: string; worktree: string; branch: string | null
+  /** The chat that started the session; null for one started outside a chat. */
+  conversation_id: string | null
   external_id: string | null; model: string | null; permission_mode: string | null; log_tail: string
   /** `claude attach <id>`, set while a Claude Code session waits on a permission prompt. */
   attach_hint?: string | null

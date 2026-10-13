@@ -524,7 +524,8 @@ class Child:
     started: float = field(default_factory=time.time)
     resume_of: str = ""             # the run this one continues: its executed calls are replayed, never run twice
     beat_at: float = 0.0            # when the run row's updated_at was last bumped (wall clock)
-    stalled: bool = False           # past WORKER_STALL_NOTE_SECONDS without progress (status line only; nothing stops it)
+    stalled: bool = False           # past WORKER_STALL_NOTE_SECONDS without progress (status line)
+    nudged_at: float = 0.0          # wall clock of the automatic stall nudge; 0 until sent, and again once the worker shows progress
     steers: list[str] = field(default_factory=list)   # user messages sent straight to this child, folded in at its next round
     # Stuck detection, the same helpers the main reply loop uses.
     detector: StuckDetector = field(default_factory=StuckDetector)
@@ -603,6 +604,7 @@ class Subagents:
         self.children: dict[str, Child] = {}
         self.waits: dict[str, int] = {}  # call id -> ms spent on its approval card, until _exec reports it
         self.locks = RootLocks()
+        self.on_stall: Callable[[Child, float], None] | None = None  # (worker, idle seconds): set by Workers, called once past WORKER_STALL_STOP_SECONDS
         self.snaps: Any = None  # folder snapshots (snapshots.py), set by app.py
         self.connectors: Any = None  # MCP connector hooks (call, hints, review_text, mode, denied), set by app.py
         self.peak = 0
@@ -1663,6 +1665,8 @@ class Subagents:
         """How long a running child has shown no progress; 0 while it waits on the user or on a child of its own."""
         if ch.finished.is_set() or ch.state != "running" or any(_waiting(self, ch)):
             return 0.0
+        if ch.tool_since is not None and ch.now.split(" ")[0] in POLL_TOOLS:  # sitting in a waiting tool is not idle
+            return 0.0
         return max(0.0, time.time() - self.progress_at(ch))
 
     def _beat(self, ch: Child) -> None:
@@ -1676,6 +1680,16 @@ class Subagents:
         if ch.detached and stalled != ch.stalled:
             ch.stalled = stalled
             self._publish(ch)
+        if ch.kind != "worker" or not ch.detached:
+            return
+        idle = self.idle_seconds(ch)
+        if ch.nudged_at and self.progress_at(ch) > ch.nudged_at + 1:
+            ch.nudged_at = 0.0  # it answered the nudge
+        if not ch.nudged_at and idle >= limits.WORKER_STALL_NUDGE_SECONDS:
+            self.steer(ch, f"No progress for {int(idle // 60)} minutes. Report what you are blocked on, or finish with what you have.")
+            ch.nudged_at = time.time()
+        elif ch.nudged_at and idle >= limits.WORKER_STALL_STOP_SECONDS - limits.WORKER_STALL_NUDGE_SECONDS and self.on_stall is not None:  # the nudge restarted the clock
+            self.on_stall(ch, idle + limits.WORKER_STALL_NUDGE_SECONDS)
 
     # ---- the tool-facing API ---------------------------------------------------------------------
     def prestart(self, calls: list[dict[str, Any]], ctx: dict[str, Any], start: bool = True) -> None:

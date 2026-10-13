@@ -4523,7 +4523,7 @@ def _wake_reports(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for r in rows:
         info, inp = workers_mgr.info(r), r.get("input") or {}
         out.append({"id": r["run_id"], "title": info["title"], "goal": info["goal"], "status": info["status"],
-                    "text": workers_mgr.report_text(r), "tainted": bool(inp.get("tainted")), "attachments": inp.get("attachments") or []})
+                    "text": workers_mgr.report_text(r), "actions": workers_mgr.side_effects(r["run_id"]), "error": info["error"], "tainted": bool(inp.get("tainted")), "attachments": inp.get("attachments") or []})
     return out
 
 

@@ -268,12 +268,11 @@ class ClaudeDriver(CodingTestCase):
         (self.home / "abcd1234").symlink_to(outside)
         self.assertEqual(ca.read_claude(self.home, "abcd1234"), (None, []))
 
-    async def test_send_is_refused_unless_done_or_stopped(self) -> None:
+    async def test_send_is_refused_while_working(self) -> None:
         row = await self.started()
-        for state in ("working", "blocked"):
-            self.job_files("deadbeef", state)
-            with self.assertRaises(ca.CodingError, msg=state):
-                await self.cs.send(row["id"], "more")
+        self.job_files("deadbeef", "working")
+        with self.assertRaises(ca.CodingError):
+            await self.cs.send(row["id"], "more")
         self.assertFalse(any("--resume" in a for a in self.fake.calls))
         self.job_files("deadbeef", "done")
         row = await self.cs.send(row["id"], "more")
@@ -326,13 +325,13 @@ class Ownership(CodingTestCase):
 
     async def owned(self, owner: str, **ctx: Any) -> dict[str, Any]:
         self.job_files("deadbeef", "working", "reading files")
-        return await self.cs.start("claude", str(self.repo), "fix the bug", ctx={"agent_run_id": owner, **ctx})
+        return await self.cs.start("claude", str(self.repo), "fix the bug", new_worktree=True, ctx={"agent_run_id": owner, **ctx})
 
     async def test_the_calling_worker_owns_the_session_else_the_reply(self) -> None:
         row = await self.owned("worker-1", run_id="reply-1")
         self.assertEqual(row["run_id"], "worker-1")
         self.job_files("deadbeef", "working")
-        row = await self.cs.start("claude", str(self.repo), "x", ctx={"run_id": "reply-2"})
+        row = await self.cs.start("claude", str(self.repo), "x", new_worktree=True, ctx={"run_id": "reply-2"})
         self.assertEqual(row["run_id"], "reply-2")
 
     async def test_stopping_the_owner_stops_its_live_sessions_with_the_reason(self) -> None:
@@ -532,6 +531,186 @@ class Diff(CodingTestCase):
         self.assertEqual(len(ca.summary(row, None)["log_tail"]), 3000)
         self.assertNotIn("attach_hint", s)  # only claude has a window to attach to
 
+class Control(CodingTestCase):
+    """Answering a waiting session, the cheap summary, lookup by any id, one live session per worktree, actionable errors."""
 
-if __name__ == "__main__":
-    unittest.main()
+    async def asyncSetUp(self) -> None:
+        inner = self.fake.__call__
+
+        async def run(argv: list[str], cwd: str, timeout: float, env: Any = None) -> tuple[bool, str]:
+            out = await inner(argv, cwd, timeout, env)
+            if argv[1:2] == ["stop"]:  # a stopped session's state.json reads stopped
+                self.job_files(argv[2], "stopped")
+            return out
+        self.cs.run = run
+        p = unittest.mock.patch.object(ca, "STOP_WAIT", 0.3)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def resumes(self) -> list[list[str]]:
+        return [a for a in self.fake.calls if "--resume" in a]
+
+    async def waiting(self, needs: str) -> dict[str, Any]:
+        row = await self.started()
+        self.job_files("deadbeef", "blocked", needs=needs)
+        return self.cs.refresh(row)
+
+    async def test_answering_a_question_stops_then_resumes_the_same_id(self) -> None:
+        row = await self.waiting("Which database should I use?")
+        self.assertEqual(row["status"], "needs_you")
+        self.fake.out["postgres"] = (True, WOKE_OUT.replace("45622d2f", "deadbeef"))
+        out = await self.cs.send(row["id"], "postgres")
+        self.assertEqual((out["status"], out["external_id"], out["detail"]), ("working", "deadbeef", "reply sent"))
+        self.assertNotIn("note", out)
+        stop = self.fake.calls.index(["/bin/claude", "stop", "deadbeef"])
+        self.assertLess(stop, self.fake.calls.index(self.resumes()[0]))
+        self.assertEqual(self.resumes()[0][self.resumes()[0].index("--resume") + 1], SID)
+        self.assertIn("--settings", self.resumes()[0])
+        self.assertNotIn("--permission-mode", self.resumes()[0])
+        self.assertIn(("user", "postgres"), [(e["kind"], e["text"]) for e in ca.recent_events(self.cs.db, row["id"], 10)])
+        self.assertIn(row["id"], self.cs.resumed)
+
+    async def test_a_reply_to_a_permission_prompt_does_not_grant_it(self) -> None:
+        row = await self.waiting("Allow Bash(rm -rf build)? Needs permission")
+        out = await self.cs.send(row["id"], "yes, approve it")
+        self.assertIn("NOT granted", out["note"])
+        self.assertIn("claude attach deadbeef", out["note"])
+        self.assertEqual(out["status"], "working")
+        self.assertFalse(any("--allowedTools" in a or "--permission-mode" in a for a in self.resumes()))
+
+    async def test_the_tool_returns_the_note(self) -> None:
+        row = await self.waiting("Allow Edit(/x)?")
+        tb = SimpleNamespace(specs={})
+        ca.register(tb, self.cs)
+        out = await tb.specs["coding_session_send"].fn({}, row["id"], "ok")
+        self.assertIn("NOT granted", out["note"])
+        self.assertEqual(out["status"], "working")
+
+    def test_summary_when_waiting(self) -> None:
+        t = 1_700_000_000.0
+        row = {"id": "a", "agent": "claude", "name": "n", "status": "needs_you", "detail": "Allow Bash(ls)?", "repo_path": "/r",
+               "worktree": "/w", "updated_at": t, "log_tail": "x"}
+        out = ca.brief(row, t + 90)
+        self.assertEqual(out["waiting_on"], {"kind": "permission", "text": "Allow Bash(ls)?"})
+        self.assertEqual((out["idle_s"], out["attention"]), (90, "needs_you"))
+        self.assertRegex(out["last_activity"], r"^(1[0-2]|[1-9]):[0-5]\d (AM|PM)$")
+        self.assertNotIn("last_log", out)
+        out = ca.brief({**row, "detail": "Which database?"}, t)
+        self.assertEqual(out["waiting_on"]["kind"], "question")
+
+    async def test_summary_tool_when_not_waiting(self) -> None:
+        row = await self.started()
+        self.cs.refresh(row)
+        with self.cs.db.tx() as c:
+            c.execute("UPDATE coding_sessions SET log_tail=? WHERE id=?", ("first\n" + "z" * 500 + "\n", row["id"]))
+        tb = SimpleNamespace(specs={})
+        ca.register(tb, self.cs)
+        ctx: dict[str, Any] = {}
+        out = await tb.specs["coding_session_summary"].fn(ctx, "deadbeef")  # by external id
+        self.assertEqual((out["id"], out["status"], out["detail"], len(out["last_log"])), (row["id"], "working", "reading files", 300))
+        self.assertNotIn("waiting_on", out)
+        self.assertNotIn("log_tail", out)
+        self.assertEqual(tb.specs["coding_session_summary"].danger, "safe")
+        self.assertTrue(ctx.get("tainted") or ctx.get("taint_sources"))
+
+    async def test_resume_of_a_stopped_session_keeps_the_id(self) -> None:
+        row = await self.started()
+        row = await self.cs.stop(row["id"])
+        self.fake.out["again"] = (True, WOKE_OUT.replace("45622d2f", "deadbeef"))
+        out = await self.cs.send(row["id"], "again")
+        self.assertEqual((out["status"], out["external_id"], out["detail"]), ("working", "deadbeef", "follow-up sent"))
+        self.assertEqual(len(self.resumes()), 1)
+
+    async def test_resume_of_a_done_session_stops_it_first_and_keeps_the_id(self) -> None:
+        row = await self.started()
+        self.job_files("deadbeef", "done")
+        self.fake.out["more"] = (True, WOKE_OUT.replace("45622d2f", "deadbeef"))
+        out = await self.cs.send(row["id"], "more")
+        self.assertLess(self.fake.calls.index(["/bin/claude", "stop", "deadbeef"]), self.fake.calls.index(self.resumes()[0]))
+        self.assertEqual((out["external_id"], out["detail"]), ("deadbeef", "follow-up sent"))
+
+    async def test_own_session_taint_exemption_holds_for_external_ids(self) -> None:
+        row = await self.started()
+        tb = SimpleNamespace(specs={})
+        ca.register(tb, self.cs)
+        ctx: dict[str, Any] = {}
+        await tb.specs["coding_session_summary"].fn(ctx, "deadbeef")
+        spec = tb.specs["coding_session_send"]
+        self.assertTrue(spec.taint_ok({"id": "deadbeef"}, ctx))
+        self.assertTrue(spec.taint_ok({"id": row["id"]}, ctx))
+        ctx["taint_sources"] = [*ctx["taint_sources"], "web:x"]
+        self.assertFalse(spec.taint_ok({"id": "deadbeef"}, ctx))
+        self.assertFalse(spec.taint_ok({"id": "nope"}, {"taint_sources": []}))
+
+    async def test_failed_resume_after_stop_records_that_the_reply_was_not_delivered(self) -> None:
+        row = await self.waiting("Which database should I use?")
+        self.fake.out["postgres"] = (False, "boom")
+        tb = SimpleNamespace(specs={})
+        ca.register(tb, self.cs)
+        out = await tb.specs["coding_session_send"].fn({}, row["id"], "postgres")
+        self.assertIn("did not resume", str(out))
+        self.assertIn("coding_session_send can retry", str(out))
+        now = self.cs.get(row["id"])
+        self.assertEqual(now["status"], "stopped")
+        self.assertIn("reply not delivered", now["detail"])
+
+    def test_permission_re_tool_call_is_case_sensitive(self) -> None:
+        base = {"id": "a", "agent": "claude", "name": "n", "status": "needs_you", "repo_path": "/r", "worktree": "/w", "updated_at": 1.0, "log_tail": ""}
+        self.assertEqual(ca.brief({**base, "detail": "Should I use option (a)?"}, 1.0)["waiting_on"]["kind"], "question")
+        self.assertEqual(ca.brief({**base, "detail": "Bash(rm -rf build)"}, 1.0)["waiting_on"]["kind"], "permission")
+
+    async def test_a_failed_session_can_be_resumed(self) -> None:
+        row = await self.started()
+        self.cs._apply(row, status="failed", detail="boom")
+        out = await self.cs.send(row["id"], "retry")
+        self.assertEqual(out["status"], "working")
+
+    async def test_lookup_by_external_id_and_session_id(self) -> None:
+        row = await self.started()
+        for key in (row["id"], "deadbeef", SID):
+            self.assertEqual(self.cs.get(key)["id"], row["id"])
+        self.assertEqual((await self.cs.wait(["deadbeef"], timeout_s=1))["settled"], [])
+        self.assertIsNone(self.cs.get("nope"))
+        self.job_files("deadbeef", "done")
+        self.assertEqual((await self.cs.diff(SID))["worktree"], row["worktree"])
+
+    async def test_a_second_session_in_an_occupied_worktree_is_refused(self) -> None:
+        first = await self.started()
+        with self.assertRaises(ca.CodingError) as cm:
+            await self.cs.start("claude", str(self.repo), "other", new_worktree=False)
+        msg = str(cm.exception)
+        for part in (first["id"], "claude", "working"):
+            self.assertIn(part, msg)
+        self.assertIn("new_worktree=true", cm.exception.alt)
+        self.job_files("deadbeef", "done")  # once it settles the worktree is free again
+        self.job_files("cafe0001", "working")
+        self.fake.out["other"] = (True, "backgrounded · cafe0001\n")
+        await self.cs.start("claude", str(self.repo), "other", new_worktree=False)
+
+    async def test_a_resume_is_refused_while_a_different_session_holds_the_worktree(self) -> None:
+        first = await self.started()
+        self.job_files("deadbeef", "done")
+        self.cs.refresh(first)
+        self.job_files("cafe0001", "working")
+        self.fake.out["second"] = (True, "backgrounded · cafe0001\n")
+        second = await self.cs.start("claude", str(self.repo), "second", new_worktree=False)
+        with self.assertRaises(ca.CodingError) as cm:
+            await self.cs.send(first["id"], "more")
+        self.assertIn(second["id"], str(cm.exception))
+        self.assertEqual(self.resumes(), [])
+
+    async def test_a_failed_delivery_says_what_to_do(self) -> None:
+        row = await self.waiting("Which one?")
+        self.fake.out["answer"] = (False, "daemon not running")
+        tb = SimpleNamespace(specs={})
+        ca.register(tb, self.cs)
+        out = await tb.specs["coding_session_send"].fn({}, row["id"], "answer")
+        self.assertIn("did not resume", out["error"])
+        self.assertIn("claude attach deadbeef", out["try_instead"])
+
+    async def test_a_session_that_cannot_be_stopped_says_so(self) -> None:
+        row = await self.waiting("Which one?")
+        self.fake.out["/bin/claude stop deadbeef"] = (False, "no daemon")
+        with self.assertRaises(ca.CodingError) as cm:
+            await self.cs.send(row["id"], "answer")
+        self.assertIn("claude attach", cm.exception.alt)

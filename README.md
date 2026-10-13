@@ -658,7 +658,10 @@ and every change is published as a `coding_session` event, which the "Coding ses
 | OpenCode | the `opencode` you installed, run under the OS sandbox as a background job in the shell registry, with its own model and sign-in; writes stay in the workspace folder that holds the repo | the job's event stream; a follow-up continues the same OpenCode session |
 
 **Permissions.** Claude Code keeps its normal prompting: Grain passes no permission flag. A permission prompt shows as
-`needs_you` (attention: needs you) and you answer it in a terminal with `claude attach <id>`; the card says so.
+`needs_you` (attention: needs you). `coding_session_send` answers a question there: Grain stops the session and resumes
+it under the same id with your reply as the next message. A chat reply never approves a permission prompt (stopping
+cancels the pending call; nothing is granted), so the result says so: the agent asks again and you approve it in the
+session itself with `claude attach <id>`, or restart it with a `permission_mode` you choose.
 `permission_mode` (`acceptEdits` or `bypassPermissions`, Claude Code only) relaxes the prompting for that one session
 only; a call that sets it is always a card, whatever the tool's mode or any standing grant, and the card spells out
 what the mode allows. OpenCode has nobody at its prompt, so it runs under whatever its own config permits inside the
@@ -671,10 +674,16 @@ the same way as `opencode_run`.
 | `coding_session_start` | external | ask |
 | `coding_session_send(id, message)` | external | ask |
 | `coding_session_stop(id)` | executes | on |
-| `coding_session_list`, `coding_session_status(id, lines?)`, `coding_session_diff(id, full?)` | safe | on |
+| `coding_session_list`, `coding_session_status(id, lines?)`, `coding_session_summary(id)`, `coding_session_diff(id, full?)` | safe | on |
 
-`send` only reaches a session that is `done` or `stopped`: continuing one that is still running would start a copy
-of it, so it is refused until the session finishes or is stopped. `diff` runs `git status`, `git diff --stat` and the
+Every tool that takes an `id` accepts the Grain id, the harness's own `external_id` (Claude Code's short id) or its
+`session_id` (UUID). `send` continues a session that is `done`, `failed` or `stopped` (a `done` Claude Code session is stopped
+first so the resume wakes the same id) and, for Claude Code, answers one that is `needs_you`; OpenCode and pi run in the
+sandbox with no prompts, never wait for an answer, and are refused while working. A working session cannot take a message:
+wait for it or stop it. There is one live session per worktree: `start` (with `new_worktree: false`) and `send` are refused
+while another session is starting, working or `needs_you` there, and the error names it and the ways out. A failed delivery
+says why and what to do (`claude attach <id>`, stop then send, start a new session). `coding_session_summary` is the cheap
+look: status, ids, last activity and, when waiting, what it waits on (`waiting_on`: permission or question). `diff` runs `git status`, `git diff --stat` and the
 commits ahead of `origin/main` in the session's worktree (the full patch with `full: true`, cut at 60 KB). Nothing here
 removes a session (`claude rm` is never run), force-pushes or pushes at all; shipping the branch is `ship_checklist`.
 OpenCode jobs end at the shell registry's 600 second cap; a follow-up carries on.

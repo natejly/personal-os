@@ -6,6 +6,7 @@ down, the model is not routed). None is a normal answer: every caller falls back
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any, Awaitable, Callable, Sequence
@@ -104,6 +105,8 @@ class Embedder:
     # After a failed call the route is treated as down for this long, so a broken or missing embedding
     # route costs one request per window instead of one per chat turn and per upload.
     BACKOFF_SECONDS = 300.0
+    # A route too slow for a chat turn's `timeout` is skipped for this long: a stalled upstream costs one wait per window.
+    SLOW_BACKOFF_SECONDS = 60.0
 
     def __init__(self, fn: EmbedFn | None = None, clock: Callable[[], float] = time.monotonic):
         self.fn: EmbedFn = fn or embed_texts
@@ -122,15 +125,19 @@ class Embedder:
         model = self.model(settings)
         return bool(model) and self.clock() >= self._down.get(model, 0.0)
 
-    async def embed(self, settings: dict[str, Any], texts: list[str]) -> list[np.ndarray] | None:
-        """Unit vectors, one per text, or None when embeddings are unavailable."""
+    async def embed(self, settings: dict[str, Any], texts: list[str], timeout: float | None = None) -> list[np.ndarray] | None:
+        """Unit vectors, one per text, or None when embeddings are unavailable or slower than `timeout` seconds."""
         if not texts:
             return []
         if not self.available(settings):
             return None
         model = self.model(settings)
         try:
-            vecs = await self.fn(settings, texts, model)
+            vecs = await asyncio.wait_for(self.fn(settings, texts, model), timeout)
+        except asyncio.TimeoutError:
+            self._down[model] = self.clock() + self.SLOW_BACKOFF_SECONDS
+            log.warning("embeddings slower than %.1fs, skipping for %ds", timeout or 0.0, int(self.SLOW_BACKOFF_SECONDS))
+            return None
         except EmbedError as e:
             self._down[model] = self.clock() + self.BACKOFF_SECONDS
             log.warning("embeddings unavailable, retrying in %ds: %s", int(self.BACKOFF_SECONDS), e)

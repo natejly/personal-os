@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 
 from . import llm, providers
+from . import memory_limits as ml
 from .chunker import contextualize
 from .db import Database
 from .embed import Embedder, pack, rrf, unpack  # noqa: F401 - rrf re-exported for callers
@@ -277,9 +278,9 @@ class Retriever:
         return out
 
     async def search(self, project_id: str | None, query: str, settings: dict[str, Any], limit: int = 6,
-                     sources: tuple[str, ...] = ("files",)) -> list[dict[str, Any]]:
+                     sources: tuple[str, ...] = ("files",), query_vec: np.ndarray | None = None) -> list[dict[str, Any]]:
         """Top `limit` chunks across the requested stores ('files', 'docs'), each tagged `source` ('file'|'doc')
-        and `sources` (which rankers found it: 'bm25', 'vector')."""
+        and `sources` (which rankers found it: 'bm25', 'vector'). `query_vec` is the query's embedding if already made."""
         stores = [s for s in ALL_SOURCES if s in sources and (s == "files" or self.docs is not None)]
         cand = max(limit, int(settings.get("retrievalCandidates") or 20))
         by_key: dict[str, dict[str, Any]] = {}
@@ -295,7 +296,10 @@ class Retriever:
             bm25_lists.append(keys)
         hybrid = (settings.get("retrievalMode", "hybrid") == "hybrid" and self.embedder.available(settings)
                   and bool(query.strip()) and self._has_vectors(stores, self.embedder.model(settings)))
-        qv = await self.embedder.embed(settings, [query[:2000]]) if hybrid else None  # a long paste would 400 the embed route
+        # The turn's query vector when the caller already made it (memory retrieval embeds the same text); a long paste
+        # is cut, it would 400 the embed route.
+        qv = None if not hybrid else [query_vec] if query_vec is not None else \
+            await self.embedder.embed(settings, [query[:ml.QUERY_CHARS]], timeout=ml.QUERY_TIMEOUT)
         vec_lists: list[list[str]] = []
         sims: dict[str, float] = {}
         if qv:

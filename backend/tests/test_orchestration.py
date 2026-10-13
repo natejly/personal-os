@@ -909,7 +909,7 @@ def test_bridge_texts_a_workers_card_with_buttons_whatever_chat_it_came_from(tmp
         await until(lambda: env.of("sendMessage"))
         card = env.of("sendMessage")[0]
         code = re.search(r"\[(\d+)\]", card["text"]).group(1)  # type: ignore[union-attr]
-        assert card["chat_id"] == OWNER and "fetch_url" in card["text"]
+        assert card["chat_id"] == OWNER and "Read a web page" in card["text"]
         assert card["reply_markup"] == {"inline_keyboard": [[{"text": "Approve", "callback_data": f"ap:{code}"}, {"text": "Deny", "callback_data": f"dn:{code}"}]]}
         env.bridge.notify_worker_approval("sa_w1:f1")
         await asyncio.sleep(0.05)

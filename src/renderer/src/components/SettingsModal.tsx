@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { X, Search, Download, Upload, Plug, Cpu, Bot, Palette, ShieldCheck, ShieldAlert, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, Gauge, Brain, PanelLeft, Layers, type Icon } from '../icons'
 import { useStore, type View } from '../store'
 import { modeOf } from '../lib/permissionMode'
+import { DestructiveDefaults } from './DestructiveDefaults'
 import { searchSettings, type SettingsTab } from '../lib/settingsTabs'
 import { MODES } from '../lib/permissionMode'
 import { useOnboarding } from './onboarding/onboardingStore'
@@ -413,6 +414,7 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'permissions' && <section className="permissions-tab">
               <h3>Permissions</h3>
               <Sec id="mode"><PermissionModeCards mode={mode} onPick={(m) => saveEarly({ permissionMode: m })} /></Sec>
+              {mode === 'manual' && <DestructiveDefaults value={draft.destructiveDefaults} onChange={(d) => saveEarly({ destructiveDefaults: d }).catch((e: Error) => toast(e.message, 'error'))} />}
               <label className={`toggle-row plain all-connections ${draft.allowAllConnections ? 'danger' : ''}`}>
                 <span className="toggle-text">
                   <b>{draft.allowAllConnections && <ShieldAlert size={13} aria-hidden />} Allow all domains and MCP servers</b>
@@ -422,7 +424,7 @@ export default function SettingsModal(): JSX.Element {
                   onChange={(e) => void saveEarly({ allowAllConnections: e.target.checked }).catch((err: Error) => toast(err.message, 'error'))} /><span className="switch" />
               </label>
               <Sec id="safety"><RunSafetySettings draft={draft} patch={patch} /></Sec>
-              <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits. Allow everything asks only before permanent deletes, disk wipes, force-pushes and sending email; Auto and Manual ask more, including for credential access.</p>
+              <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits. Allow everything asks only before destructive shell commands (permanent deletes, disk wipes, force-pushes); Auto and Manual ask more, including for credential access and email.</p>
               {mode === 'auto' && (
                 <details className="modal-free">
                   <summary>Reviewer model: {draft.autoReviewModel ? draft.autoReviewModel : 'automatic'}</summary>

@@ -711,6 +711,33 @@ def test_child_allow_all_keeps_the_destructive_floor() -> None:
           f"the routine call is in the approval history under the child's run: {rows}")
 
 
+def test_child_manual_blocks_a_destructive_command_by_default() -> None:
+    """Manual refuses a worker's force-push outright (destructiveDefaults.shell = block): no card, the model is told not to work around it."""
+    root = tempfile.mkdtemp()
+    reset(permissionMode="manual", workspaceRoots=[root])
+    spec = appmod.toolbox.specs["shell_run"]
+    real, hits = spec.fn, []
+
+    async def fake(ctx: dict[str, Any], **kw: Any) -> Any:
+        hits.append(kw["command"])
+        return {"exit_code": 0, "output": "ok"}
+
+    spec.fn = fake
+    try:
+        SCRIPTS["pushman"] = [{"text": "", "calls": [call("p1", "shell_run", {"command": "ls"}),
+                                                     call("p2", "shell_run", {"command": "git push --force origin main"})]},
+                              {"text": "done"}]
+        fr = FakeRun()
+        modes = {**appmod.toolbox.effective({}, None, None), "shell_run": "on"}
+        ctx = mkctx(new_conv(), modes=modes, run=fr, message_id=None, permission_mode="manual")
+        run(appmod.toolbox.call("agent_spawn", {"task": "pushman", "role": "worker", "root": root}, ctx))
+    finally:
+        spec.fn = real
+    cards = [d for e, d in fr.events if e == "tool_call" and d.get("needs_approval")]
+    check(hits == ["ls"] and not cards, f"ls ran, the force-push was refused with no card: {hits} {cards}")
+    check("blocked by the user's settings" in json.dumps(SEEN[-1], default=str), "the child was told why")
+
+
 def test_child_untrusted_result_is_fenced() -> None:
     """A child's tool result that read untrusted text (a web page here) comes back fenced, as in the front chat; a result
     from a call that read nothing untrusted is not."""

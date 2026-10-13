@@ -110,6 +110,11 @@ def run_python_intro() -> str:
 # Locked whatever the setting says: the call is itself the user's review card.
 # gmail_send: an agent never sends mail on its own. Its card is the user's own editable email: Send, Save as draft or Discard.
 ALWAYS_CARD = frozenset({"calendar_propose", "gmail_send", "agent_create"})
+# Tools whose every call is destructive, by category (permissions.DESTRUCTIVE_KINDS): Manual mode refuses or asks per the user's
+# destructiveDefaults, Auto and Allow everything run them as usual. Calls that are only sometimes destructive set ToolSpec.floor.
+# Connectors count only when the server marks the tool destructive (items). gmail_outbox cancel is not here: it unsends, it
+# deletes nothing the user kept.
+STATIC_FLOOR = {"gmail_send": "send", "calendar_delete": "items", "todo_delete": "items", "trash_local_file": "files"}
 # Lasting text, and destructive edits to the user's lists. Untrusted content must not plant or
 # erase those unnoticed.
 PROMPT_WRITES = frozenset({
@@ -155,9 +160,10 @@ class ToolSpec:
         self.force_ask: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
         # (args, ctx) -> True when the forced card is HARD: auto mode's reviewer may not lift it (counts as force_ask too)
         self.force_card: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
-        # (args, ctx) -> True when this call is a card in EVERY permission mode, Allow everything included: no mode,
-        # grant, rule or reviewer lifts it (implies force_ask and force_card)
-        self.floor: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
+        # (args, ctx) -> the destructive category of this call (permissions.DESTRUCTIVE_KINDS or SETTINGS_KIND), else None.
+        # Toolbox.floor_action turns it into a card or a refusal that no grant, rule or reviewer lifts (STATIC_FLOOR tags
+        # the tools whose every call has one category)
+        self.floor: Callable[[dict[str, Any], dict[str, Any]], str | None] | None = None
         # (args, ctx) -> True when the run's taint comes only from this call's own subject, so it does not count as tainted here
         self.taint_ok: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
         # () -> False while the thing this tool needs is missing (a binary, the desktop bridge); it is then not offered
@@ -767,6 +773,7 @@ class Toolbox:
         self.chat_outputs = Workspace(Path(root).parent, sub="chats") if isinstance(root, (str, Path)) else None
         self.user_update: Callable[[dict[str, Any], str, list[dict[str, Any]]], Awaitable[bool]] | None = None  # send_files' live delivery: (ctx, text, attachments) -> accepted; set by app.py
         self.setup_probes: dict[str, Callable[[], bool]] = {}  # setup_request's "is it set up" checks for stores app.py owns (telegram, mcp)
+        self.permission_store: Callable[[Callable[[dict[str, Any]], dict[str, Any]]], Any] | None = None  # permissions_update's write: fn(current) -> keys to store; set by app.py
         self.chat_files: Any = None  # chat_files.ChatFiles: which chat each file belongs to; set by app.py
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
         self.trash: Any = None  # soft delete (trash.py); set by app.py
@@ -805,6 +812,8 @@ class Toolbox:
         workers.register(self)  # delegate / message_worker / check_worker / stop_worker / resume_worker
         from . import chatlink
         chatlink.register(self)  # list_chats / read_chat / message_chat
+        from . import permission_tool
+        permission_tool.register(self)  # permissions_update: a settings change that is always a card
         from . import agent_tools
         agent_tools.register(self)  # agent_create / agents_list / agent_message
         from . import research
@@ -932,17 +941,31 @@ class Toolbox:
     def forces_ask(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> bool:
         """True when this call, with these arguments in this run, may never run without a card (and no standing grant buys it off)."""
         spec = self.specs.get(name)
-        return bool(spec and ((spec.force_ask and spec.force_ask(args, ctx or {})) or self.floor_card(name, args, ctx)))
+        return bool(spec and ((spec.force_ask and spec.force_ask(args, ctx or {})) or self.floor_action(name, args, ctx) == "card"))
 
-    def floor_card(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> bool:
-        """A card that Allow everything keeps too (a mail send, a destructive shell command): autoreview.route's `floor`."""
+    def floor_kind(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> str | None:
+        """The destructive category of this call (permissions.DESTRUCTIVE_KINDS), SETTINGS_KIND, or None."""
         spec = self.specs.get(name)
-        return bool(spec and spec.floor and spec.floor(args, ctx or {}))
+        if spec is None:
+            return None
+        return spec.floor(args, ctx or {}) if spec.floor else STATIC_FLOOR.get(name)
+
+    def floor_action(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None, kind: str | None = None) -> str | None:
+        """card | block | None: autoreview.route's `floor`. The one place a destructive call meets the permission mode and the
+        user's destructiveDefaults; the chat loop, workers, the run_python bridge and connectors all ask it. `kind` is for a
+        call that is not in `specs` (a connector tool the server marks destructive)."""
+        ctx = ctx or {}
+        kind = kind or self.floor_kind(name, args, ctx)
+        if kind is None:
+            return None
+        cfg = self.settings()
+        pmode = ctx.get("permission_mode") or permissions.get(cfg, "permissionMode")
+        return permissions.floor_action(pmode, kind, permissions.get(cfg, "destructiveDefaults"))
 
     def forces_card(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> bool:
         """A forced ask that auto mode's reviewer may not lift either."""
         spec = self.specs.get(name)
-        return bool(spec and ((spec.force_card and spec.force_card(args, ctx or {})) or self.floor_card(name, args, ctx)))
+        return bool(spec and ((spec.force_card and spec.force_card(args, ctx or {})) or self.floor_action(name, args, ctx) == "card"))
 
     def tainted_for(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> bool:
         """ctx's taint as it counts for this call: a tool may exempt taint that only its own subject caused."""
@@ -2409,14 +2432,15 @@ def _register_google(self: Toolbox) -> None:
             return _mail_shown(await run(lambda: g.gmail_send(to, subject, body, reply_to_message_id, **outbox_mod.extras(items, cc, bcc))))
         row = await run(self.outbox.queue, to, subject, body, reply_to_message_id, "assistant", ctx.get("conversation_id"), ids, cc, bcc)
         return outbox_mod.queued_result(row)
-    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it. Pass reply_to_message_id to answer an existing message in its thread. Files can be attached (25 MB in total), with optional cc and bcc. The user reviews and edits the email on a card first, and only their Send click sends it, so an approved send may differ from what you wrote: the result says what was finally sent, or that it was discarded or saved as a draft. Leave as_draft unset: the user sets it on the card.",
+    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it. Pass reply_to_message_id to answer an existing message in its thread. Files can be attached (25 MB in total), with optional cc and bcc. Unless Allow everything is on, the user reviews and edits the email on a card first, and only their Send click sends it, so an approved send may differ from what you wrote: the result says what was finally sent, or that it was discarded or saved as a draft. Leave as_draft unset: the user sets it on the card.",
         _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "reply_to_message_id": {"type": "string"},
               "as_draft": {"type": "boolean", "default": False}, "attachments": _ATTACH_PARAM, "cc": _ADDR_PARAM, "bcc": _ADDR_PARAM}, ["to", "subject", "body"]), gmail_send, "google", "external",
         examples=[{"to": "mira@example.com", "subject": "Running late", "body": "I will be 10 minutes late."},
                   {"to": "mira@example.com", "subject": "Invoice 42", "body": "Attached.", "attachments": ["~/Documents/invoice-42.pdf"]}]))
-    # Never sent unasked, in any permission mode (Allow everything included): no allow rule, grant, plan step or reviewer
-    # stands in for the user's click.
-    self.specs["gmail_send"].floor = lambda args, ctx: True
+
+    # Never sent unasked in Auto or Manual: no allow rule, grant, plan step or reviewer stands in for the user's click. Allow
+    # everything sends without it (autoreview.route runs a forced card there); Manual also refuses it by default (STATIC_FLOOR).
+    self.specs["gmail_send"].force_ask = self.specs["gmail_send"].force_card = lambda args, ctx: True
 
     async def gmail_outbox(ctx: dict[str, Any], action: str = "list", id: str | None = None) -> Any:
         if self.outbox is None:
@@ -2939,6 +2963,8 @@ def _register_mac(self: Toolbox) -> None:
               "mode": {"type": "string", "enum": list(mac.WRITE_MODES), "default": "create"}}, ["path", "content"]), write_local_file, "files", "external",
         examples=[{"path": "~/Desktop/packing list.md", "content": "- passport\n- charger\n"},
                   {"path": "~/Documents/log.md", "content": "\n2026-09-30: shipped\n", "mode": "append"}]))
+    # Replacing a file is destructive (create refuses it, append only adds). These tools never target a desk workspace.
+    self.specs["write_local_file"].floor = lambda args, ctx: "files" if args.get("mode") == "overwrite" else None
 
     async def move_local_file(ctx: dict[str, Any], path: str, to: str) -> Any:
         snap: dict[str, Any] | None = None

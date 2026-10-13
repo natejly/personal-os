@@ -66,6 +66,7 @@ CHILD_BLOCK = frozenset({
     # the front agent's hand-off tools (workers.py): a worker reports back, it never delegates sideways
     "delegate", "message_worker", "check_worker", "stop_worker", "resume_worker",
     "agent_create", "agent_message",
+    "permissions_update",  # a settings change is the user's card on the front chat; a worker has no one to show it to
 })
 # Danger tiers a child never gets. External tools stay: a call that would ask raises the usual card on the parent's
 # stream, and the always-ask list is gated the same way as for the parent.
@@ -1216,7 +1217,8 @@ class Subagents:
                                      doom=ch.detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
             mode, forced = perm.mode, perm.forced
             bad = perm.refusal or self._confine(ch, name, args) or coding_route.check(self.toolbox, name, args, ch.ctx)
-            if not bad and pmode != "manual" and mode != "off":
+            floor = self.toolbox.floor_action(name, args, ch.ctx)
+            if not bad and (pmode != "manual" or floor) and mode != "off":
                 # The parent's permission mode (autoreview.route), with the child's own task as the reviewer's intent.
                 explicit = (ch.ctx.get("explicit_modes") or {}).get(name)
                 rt = autoreview.route(
@@ -1227,8 +1229,10 @@ class Subagents:
                     hard_forced=hard_forced, soft_forced=lockable and not hard_forced,
                     # a sensitive-path read/write, a tainted write or a runaway repeat stays a card in auto (allow-all runs it)
                     fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop"),
-                    question=name in permrules.STILL_ASK, floor=self.toolbox.floor_card(name, args, ch.ctx))
-                if rt == "run":
+                    question=name in permrules.STILL_ASK, floor=floor)
+                if rt == "block":
+                    bad = permissions.blocked_reason(self.toolbox.floor_kind(name, args, ch.ctx))
+                elif rt == "run":
                     if mode == "ask":
                         mode, forced = "on", False
                     if pmode == "allow_all" and spec.danger != "safe":
@@ -1342,8 +1346,14 @@ class Subagents:
         hard_forced = mode != raw_mode
         hints = con.hints(name)
         decision = "allow"
-        if pmode != "manual":
-            rt = autoreview.connector_route(pmode, mode=mode, raw_mode=raw_mode, hints=hints, hard_forced=hard_forced, tainted=tainted)
+        floor = self.toolbox.floor_action(name, args, ch.ctx, kind="items" if hints.get("destructive") else None)
+        if pmode != "manual" or floor:
+            rt = autoreview.connector_route(pmode, mode=mode, raw_mode=raw_mode, hints=hints, hard_forced=hard_forced, tainted=tainted,
+                                            floor=floor)
+            if rt == "block":
+                return "deny", denied(name, permissions.blocked_reason("items")), False
+            if rt == "card":
+                mode, hard_forced = "ask", hard_forced or bool(floor)
             if rt == "run":
                 mode = "on"
                 if pmode == "allow_all":

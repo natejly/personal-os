@@ -82,7 +82,7 @@ from .setup import router as setup_router
 from .reliability import router as reliability_router, secret_values
 from .retention import RetentionWorker
 from . import limits, resume
-from . import permissions, permrules
+from . import permission_tool, permissions, permrules
 from . import egress
 from . import sandbox
 from . import shell as shell_tool
@@ -764,6 +764,14 @@ def _mcp_review_text(name: str) -> str:
     return mcp_review_text(tool) if tool else ""
 
 
+def _permission_card(perm: permrules.Resolution, danger: str, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+    """The tool_call event's `permission`: the rule context, plus the before -> after lines of a settings change."""
+    card = {**perm.card(), "danger": danger} if perm.card() else None
+    if name == permission_tool.NAME and (change := permission_tool.preview(toolbox, args)):
+        return {"kind": None, "subject": None, "rule": None, "suggestions": [], "session": False, **(card or {"danger": danger}), "change": change}
+    return card
+
+
 def _mcp_event(name: str) -> dict[str, Any] | None:
     """The `mcp` field of a tool_call event, so a card can say which connector asks and what it claims to do."""
     tool = mcp_store.tool(name) if mcp_is(name) else None
@@ -904,6 +912,13 @@ def _check_permissions(patch: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(422, str(e)) from e
 
 
+def _store_permissions(fn: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:
+    """permissions_update's write: the same read-modify-write and validation as PUT /settings; a ValueError reaches the tool."""
+    return permissions.update(db, lambda cur: {k: permissions.validate(k, v, cap_modes=toolbox.cap_modes, rule_check=_rule_tool_known)
+                                               for k, v in fn(cur).items()})
+
+
+toolbox.permission_store = _store_permissions
 HOST_LIST_SETTINGS = set(permissions.HOST_LISTS)
 
 
@@ -2220,7 +2235,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             danger = spec.danger if spec else "external"
             fenced = bool(toolbox.fs_needs_ask(name, args, tool_ctx))
             blog = f"{am['id']}:bridgelog{bridge_n + 1}"
-            floor = toolbox.floor_card(name, args, tool_ctx)
+            floor = toolbox.floor_action(name, args, tool_ctx)
+            if floor == "block":
+                _log_mode(name, args, blog, "deny", "destructive", "blocked by destructiveDefaults")
+                return False
             if pmode == "allow_all" and not floor:
                 if danger != "safe":
                     _log_mode(name, args, blog, "auto", "allow-all", "allowed (allow-all mode)")
@@ -3377,9 +3395,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 review = None
                 is_background = run is not None and run.kind in UNATTENDED_KINDS
                 # Permission mode (autoreview.route). Manual leaves the gate above exactly as it settled; auto sends what is not
-                # known safe to the reviewer; allow_all lifts every card except the floor (a mail send, a destructive shell command) and the user's own questions. Refusals, proposals and
-                # approved plan steps are already settled, so they never get here.
-                if pmode != "manual" and claimed is None and pre is None and not proposing and mode != "off":
+                # known safe to the reviewer; allow_all lifts every card except the floor (a destructive shell command, a settings change)
+                # and the user's own questions. In manual the floor alone is routed: destructiveDefaults blocks or asks. Refusals, proposals
+                # and approved plan steps are already settled, so they never get here.
+                floor = toolbox.floor_action(c["name"], args, tool_ctx, kind="items" if mcp_is(c["name"]) and (_mcp_event(c["name"]) or {}).get("destructive") else None)
+                if (pmode != "manual" or floor) and claimed is None and pre is None and not proposing and mode != "off":
                     explicit = explicit_modes.get(c["name"]) if not mcp_is(c["name"]) else ("on" if raw_mode == "on" else None)
                     locked_spec = bool(spec and toolbox.ask_locked(spec))
                     hints = _mcp_event(c["name"]) or {}
@@ -3388,7 +3408,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     rt = autoreview.connector_route(
                         pmode, mode=mode, raw_mode=raw_mode, hints=hints, hard_forced=hard_forced, tainted=bool(tool_ctx["tainted"]),
                         covered=desk_cleared or (pre_mode == "ask" and perm.mode == "on") or bool(perm.rule and perm.mode == "on"),
-                        question=c["name"] in permrules.STILL_ASK) if mcp_is(c["name"]) else autoreview.route(
+                        question=c["name"] in permrules.STILL_ASK, floor=floor) if mcp_is(c["name"]) else autoreview.route(
                         # handing work to a worker needs no review of its own: each call the worker makes is reviewed in its turn
                         pmode, mode=mode, danger="safe" if c["name"] in workers_mod.FRONT_TOOLS else danger, explicit_on=explicit == "on",
                         # an alwaysAsk tool's stored "ask" is only the cap on "on", not a choice, so it is not an explicit ask
@@ -3399,11 +3419,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # a sensitive-path read/write, a tainted write or a runaway repeat stays a card in auto (allow-all runs it)
                         fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop") or mcp_tainted,
                         question=c["name"] in permrules.STILL_ASK or c["name"] == PLAN_TOOL,
-                        floor=toolbox.floor_card(c["name"], args, tool_ctx))
-                    if rt == "run":
+                        floor=floor)
+                    if rt == "block":
+                        pre = tools.denied(c["name"], permissions.blocked_reason(toolbox.floor_kind(c["name"], args, tool_ctx) or "items"))
+                        _log_mode(c["name"], args, uid, "deny", "destructive", "blocked by destructiveDefaults")
+                    elif rt == "run":
                         if mode == "ask":
                             mode, forced = "on", False
                         lifted_all = pmode == "allow_all" and danger != "safe"
+                    elif rt == "card" and floor:
+                        mode, forced, hard_forced = "ask", True, True  # a connector tool the floor cards (a native one is already forced)
                     elif rt in ("review", "review_strict"):
                         review = await _review_call(c["name"], args, danger, raw_mode)
                         outcome = autoreview.apply(rt, review["verdict"], review["confidence"], toolbox.tainted_for(c["name"], args, tool_ctx))
@@ -3457,7 +3482,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                             review=None if claimed or granted_by else review)
                 yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
                                     "needs_approval": asks, "forced": forced, "proposal": proposing or None,
-                                    "permission": ({**perm.card(), "danger": danger} if perm.card() else None) if asks else None,
+                                    "permission": _permission_card(perm, danger, c["name"], args) if asks else None,
                                     "review": review, "mcp": _mcp_event(c["name"]),
                                     "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None}
                 tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced,

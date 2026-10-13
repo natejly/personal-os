@@ -32,8 +32,9 @@ GOOD = {"to": "mira@example.com", "subject": "Hello", "body": "Original text"}
 SERVER = FakeServer()
 
 
-def setup(mode: str = "allow_all", rules: dict[str, list[str]] | None = None, hold: bool = False) -> str:
-    cid = T.setup(rules, mode=None, permissionMode=mode, alwaysAsk=[], toolDeferAbove=0, gmailSendHold={"enabled": hold, "seconds": 60})
+def setup(mode: str = "allow_all", rules: dict[str, list[str]] | None = None, hold: bool = False, send: str = "ask") -> str:
+    cid = T.setup(rules, mode=None, permissionMode=mode, alwaysAsk=[], toolDeferAbove=0, gmailSendHold={"enabled": hold, "seconds": 60},
+                  destructiveDefaults={"send": send})
     SERVER.messages.clear()
     SERVER.drafts.clear()
     return cid
@@ -82,12 +83,14 @@ def last_tool_message() -> str:
     return next((m["content"] for m in reversed(T.SEEN[-1]) if m["role"] == "tool"), "")
 
 
-def test_allow_all_still_raises_the_email_card() -> None:
+def test_allow_all_sends_with_no_card() -> None:
     cid = setup("allow_all")
-    ev = drive(cid, [[send(0)], []], ["deny"])
-    cs = T.cards(ev)
-    check(len(cs) == 1 and cs[0]["forced"] is True, "allow-all raised one forced card for the email")
-    check(not SERVER.messages and not SERVER.drafts, "a discard sent nothing and saved no draft")
+    ev = drive(cid, [[send(0)], []], [])
+    check(not T.cards(ev), "allow-all raised no card for the email")
+    check(len(SERVER.messages) == 1 or [r for r in appmod.outbox.list() if r["to"] == GOOD["to"]], "the email went out or is queued")
+    SERVER.messages.clear()
+    for r in appmod.outbox.list():
+        appmod.outbox.cancel(r["id"])
 
 
 def test_manual_raises_the_email_card_and_a_discard_sends_nothing() -> None:
@@ -99,8 +102,15 @@ def test_manual_raises_the_email_card_and_a_discard_sends_nothing() -> None:
     check("discarded by the user on the email card" in last_tool_message(), "the model was told it was discarded")
 
 
+def test_manual_refuses_the_send_by_default_and_tells_the_model() -> None:
+    cid = setup("manual", send="block")
+    ev = drive(cid, [[send(0)], []], [])
+    check(not T.cards(ev) and not SERVER.messages and not SERVER.drafts, "no card, nothing sent")
+    check("blocked by the user's settings" in last_tool_message() and "work around" in last_tool_message(), "the model is told not to work around it")
+
+
 def test_an_allow_rule_or_grant_never_stands_in_for_the_click() -> None:
-    for mode in ("manual", "auto", "allow_all"):
+    for mode in ("manual", "auto"):
         cid = setup(mode, {"allow": ["gmail_send(mira@example.com)", "gmail_send(*)"], "ask": [], "deny": []})
         for decision in ("always_chat", "always_global"):
             ev = drive(cid, [[send(0)], []], [decision])

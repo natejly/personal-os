@@ -1544,6 +1544,7 @@ export const useStore = create<State>((set, get) => {
             const open = get().activeDoc
             get().refreshDocs().then(() => { if (open && !get().docs.some((d) => d.id === open.id)) { set({ docDraft: null, docTitleDraft: null }); void get().closeDocTab(open.id) } }).catch(() => undefined)
           }
+          if (ev.data.name === 'permissions_update' && !ev.data.error) void api.settings.get().then((st) => set({ settings: withoutLegacyMode(st) })).catch(() => undefined) // the approved change is live: refresh the pill and Settings
           if (ev.data.name === 'doc_create' || ev.data.name === 'doc_edit') { get().refreshDocs().catch(() => undefined); void get().refreshDocsPending() }
           break
       }

@@ -2465,6 +2465,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                          doom=detector is not None and detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
                 if perm.mode != "on" or perm.refusal or perm.kind == "doom_loop":
                     break
+                # A call Auto mode would hand the reviewer must not have gone out before the review.
+                if autoreview.route(pmode, mode="on", danger=spec.danger, explicit_on=explicit_modes.get(name) == "on",
+                                    covered=bool(perm.rule)) != "run":
+                    break
                 seg.append((c, args))
                 if spec.taints:
                     sim["tainted"] = True

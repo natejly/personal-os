@@ -1268,22 +1268,30 @@ class Google:
     def tasks_get(self, task_id: str, tasklist: str = "@default") -> dict[str, Any]:
         return _task_row(self._svc("tasks", "v1").tasks().get(tasklist=tasklist, task=task_id).execute())
 
+    # `check=False` skips the read-back: the two-way sync's own writes, which its next listing confirms
+    # anyway. Read-backs there cost an extra call (and retry sleeps) per todo on a first sync.
     @invalidates("tasks")
-    def tasks_insert(self, body: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
+    def tasks_insert(self, body: dict[str, Any], tasklist: str = "@default", check: bool = True) -> dict[str, Any]:
         t = self._svc("tasks", "v1").tasks().insert(tasklist=tasklist, body=_task_body(body)).execute()
         row = _task_row(t)
+        if not check:
+            return row
         return verify.attach(row, self._verify_task(tasklist, t["id"], row, ("title", "notes", "due", "status")))
 
     @invalidates("tasks")
-    def tasks_update(self, task_id: str, patch: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
+    def tasks_update(self, task_id: str, patch: dict[str, Any], tasklist: str = "@default", check: bool = True) -> dict[str, Any]:
         t = self._svc("tasks", "v1").tasks().patch(tasklist=tasklist, task=task_id, body=_task_body(patch)).execute()
         row = _task_row(t)
+        if not check:
+            return row
         fields = tuple(k for k in ("title", "notes", "due", "status") if k in patch) or ("title",)
         return verify.attach(row, self._verify_task(tasklist, task_id, row, fields))
 
     @invalidates("tasks")
-    def tasks_delete(self, task_id: str, tasklist: str = "@default") -> dict[str, Any]:
+    def tasks_delete(self, task_id: str, tasklist: str = "@default", check: bool = True) -> dict[str, Any]:
         self._svc("tasks", "v1").tasks().delete(tasklist=tasklist, task=task_id).execute()
+        if not check:
+            return {"deleted": task_id, "tasklist": tasklist}
         return verify.attach({"deleted": task_id, "tasklist": tasklist},
                              verify.check(f"task {task_id} in {tasklist}", self._task_reader(tasklist, task_id),
                                           absent=True, gone_if=lambda t: bool(t.get("deleted")), compared=["absent"]))

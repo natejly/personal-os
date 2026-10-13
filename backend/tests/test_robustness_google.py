@@ -45,7 +45,7 @@ class _Tasks:
         rows = self.lists.setdefault(tasklist, {}).values()
         return [dict(t) for t in rows if not updated_min or t["updated"] >= updated_min]
 
-    def tasks_insert(self, body: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
+    def tasks_insert(self, body: dict[str, Any], tasklist: str = "@default", check: bool = True) -> dict[str, Any]:
         if body.get("title") == self.refuse_title:
             raise RuntimeError("400 Bad Request")
         self.n += 1
@@ -53,12 +53,12 @@ class _Tasks:
         self.lists.setdefault(tasklist, {})[row["id"]] = row
         return dict(row)
 
-    def tasks_update(self, task_id: str, patch: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
+    def tasks_update(self, task_id: str, patch: dict[str, Any], tasklist: str = "@default", check: bool = True) -> dict[str, Any]:
         row = self.lists[tasklist][task_id]
         row.update(patch)
         return dict(row)
 
-    def tasks_delete(self, task_id: str, tasklist: str = "@default") -> None:
+    def tasks_delete(self, task_id: str, tasklist: str = "@default", check: bool = True) -> None:
         if task_id not in self.lists.get(tasklist, {}):
             raise RuntimeError("404 task not found")
         del self.lists[tasklist][task_id]

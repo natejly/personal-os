@@ -36,6 +36,10 @@ test('while the first start is still running, init keeps the boot logo instead o
   assert.equal(useStore.getState().ready, false)
   assert.equal(useStore.getState().backendError, null)
   starting = false
+  statusUrl = null
+  push!(info('ready'))
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(statusCalls, 2, "'ready' after a start the window waited out runs init again")
   statusCalls = 0
 })
 

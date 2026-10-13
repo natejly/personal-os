@@ -149,7 +149,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     }
   }
 
-  /** A built-in the UI handles itself (/clear, /compact, /skills, /commands). The draft is dropped once it has run. */
+  /** A built-in the UI handles itself (/clear, /btw, /compact, /skills, /commands). The draft is dropped once it has run. */
   const runClient = async ({ name, args }: { name: string; args: string }, k0: string): Promise<void> => {
     const s = useStore.getState()
     if (name === 'clear') {
@@ -166,6 +166,23 @@ export default function Composer({ conversationId, footer, compact = false, onSe
         })
       } catch (e) {
         s.toast(`Could not clear: ${(e as Error).message}`, 'error')
+      }
+      return
+    }
+    if (name === 'btw') {
+      // Answered beside the live reply: it is neither queued nor steered into the run, and the model's replay never holds it.
+      if (!args) return s.toast('Type your question after /btw.', 'info')
+      if (!activeId || activeId === PAGE_AGENT_DRAFT) return s.toast('Start the chat first: a side question needs its context.', 'info')
+      const id = activeId
+      dropDraft(k0)
+      try {
+        const row = await api.sideQuestion(id, args)
+        useStore.setState((st) => {
+          const se = st.sessions[id]
+          return se ? { sessions: { ...st.sessions, [id]: { ...se, conversation: { ...se.conversation, messages: [...(se.conversation.messages ?? []), row] } } } } : {}
+        })
+      } catch (e) {
+        s.toast(`Could not answer: ${(e as Error).message}`, 'error')
       }
       return
     }

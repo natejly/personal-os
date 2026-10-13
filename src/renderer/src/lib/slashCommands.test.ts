@@ -70,6 +70,11 @@ test('/clear is a client built-in; /skills and /commands list inline with a Libr
   assert.deepEqual(slashItems('/commands ', [], [])!.map((r) => r.label), ['No saved commands yet', 'Manage in Library'])
 })
 
+test('/btw is a client built-in that keeps its question', () => {
+  assert.deepEqual(clientCommand('/btw which file?'), { name: 'btw', args: 'which file?' })
+  assert.equal(slashItems('/bt', [], [])![0].label, '/btw <question>')
+})
+
 test('/schedule and /loop rows open the form; a typed time goes to the model', () => {
   assert.equal(slashItems('/sch', [], [])![0].act, 'form')
   assert.deepEqual(scheduleForm('/schedule'), { loop: false, task: '' })

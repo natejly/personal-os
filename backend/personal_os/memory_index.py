@@ -198,11 +198,18 @@ class MemoryIndex:
         """Score factor in [1 - TEMPORAL_BOOST/2, 1 + TEMPORAL_BOOST/2] by how close the row's date is to the window."""
         return 1.0 + ml.TEMPORAL_BOOST * (temporal_query.relevance(window, float(m.get("valid_from") or m.get("created_at") or 0.0)) - 0.5)
 
+    @classmethod
+    def _window_key(cls, window: temporal_query.Window, m: dict[str, Any], score: float) -> tuple[bool, float]:
+        """Sort key for a windowed query: rows inside the window first, then by score nudged by `_proximity`. When no row
+        is inside, every row shares the first term and the order is the nudged score alone."""
+        ts = float(m.get("valid_from") or m.get("created_at") or 0.0)
+        return not (window.start.timestamp() <= ts < window.end.timestamp()), -score * cls._proximity(window, m)
+
     def search(self, project_id: str | None, query: str, query_vec: np.ndarray | None = None, limit: int = 20,
                settings: dict[str, Any] | None = None, include_global: bool = True, now: datetime | None = None) -> list[dict[str, Any]]:
         """Memories that matched the query (lexical hit, cosine >= MEMORY_MIN_SIMILARITY, graph seed, or in-window and
         on-topic when the query names a date), ranked by RRF over those rankers plus recency among the matches, then
-        nudged by closeness to the date window. No match returns []. Never raises."""
+        (with a date phrase) in-window rows first, the rest nudged by closeness to the window. No match returns []. Never raises."""
         try:
             window = temporal_query.parse(query, now or temporal_query.local_now())
             where, args = _scope_clause(project_id, include_global)
@@ -223,7 +230,7 @@ class MemoryIndex:
                 fused = fused[:limit]
             rows = {m["id"]: m for m in (self.memories.get(i) for i, _ in fused) if m}
             if window:
-                fused = sorted(((i, s * self._proximity(window, rows[i])) for i, s in fused if i in rows), key=lambda f: -f[1])[:limit]
+                fused = sorted((f for f in fused if f[0] in rows), key=lambda f: self._window_key(window, rows[f[0]], f[1]))[:limit]
         except Exception:  # noqa: BLE001 - retrieval must never break a reply
             log.exception("memory search failed")
             return []
@@ -264,8 +271,8 @@ class MemoryIndex:
                 continue
             out.append({**head[i], "rerank_score": s})
         window = temporal_query.parse(query, now)
-        if window:  # the same date-closeness nudge as `search`; rerank_score stays the model's raw score
-            out.sort(key=lambda m: -m["rerank_score"] * self._proximity(window, m))
+        if window:  # the same in-window-first tiering as `search`; rerank_score stays the model's raw score
+            out.sort(key=lambda m: self._window_key(window, m, m["rerank_score"]))
         out += [m for i, m in enumerate(head) if i not in seen]  # rows the model skipped keep their place, after
         return (out + tail)[:limit]
 

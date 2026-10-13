@@ -1475,6 +1475,13 @@ class Subagents:
             else:
                 ch.task_obj.cancel()
 
+    async def end_of_run(self, run: Any) -> None:
+        """A reply ended: the background children it never collected stop now, not after their next round.
+        Workers (detached) outlive the reply by design."""
+        for c in list(self.children.values()):
+            if not c.detached and not c.finished.is_set() and c.ctx.get("run") is run:
+                self.stop_tree(c.id)
+
     def stop_tree(self, cid: str, reason: str = "interrupted") -> list[str]:
         """Stop a child and everything below it, leaves first. Every one still returns its partial output."""
         ch = self.children.get(cid)

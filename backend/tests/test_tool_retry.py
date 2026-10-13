@@ -13,7 +13,9 @@ import httpx
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="rttest-"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os import app as appmod  # noqa: E402
+from unittest import mock  # noqa: E402
+
+from personal_os import app as appmod, limits  # noqa: E402
 from personal_os.tools import ToolSpec, _obj  # noqa: E402
 
 CALLS: dict[str, int] = {}
@@ -38,7 +40,6 @@ _spec("rt_browse", "network", 2, group="browser")
 
 def go(name: str, retries: int = 2) -> Any:
     CALLS.clear()
-    appmod.db.set_settings({"toolReadRetries": retries})
     slept: list[float] = []
     real = asyncio.sleep
 
@@ -46,7 +47,8 @@ def go(name: str, retries: int = 2) -> Any:
         slept.append(d)
     asyncio.sleep = nosleep  # type: ignore[assignment]
     try:
-        return asyncio.run(appmod.toolbox.call(name, {}, {"tainted": False})), slept
+        with mock.patch.object(limits, "TOOL_READ_RETRIES", retries):
+            return asyncio.run(appmod.toolbox.call(name, {}, {"tainted": False})), slept
     finally:
         asyncio.sleep = real  # type: ignore[assignment]
 
@@ -77,7 +79,6 @@ def test_zero_disables_and_cap_holds() -> None:
 def test_cancel_is_respected() -> None:
     async def run() -> None:
         CALLS.clear()
-        appmod.db.set_settings({"toolReadRetries": 2})
         t = asyncio.create_task(appmod.toolbox.call("rt_always", {}, {"tainted": False}))
         await asyncio.sleep(0.05)   # inside the real backoff sleep
         t.cancel()

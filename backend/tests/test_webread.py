@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from personal_os import llm, tools, webread  # noqa: E402
+from personal_os import limits, llm, tools, webread  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 
@@ -233,16 +233,15 @@ def test_a_token_in_a_fetched_address_is_stripped(box: Toolbox) -> None:
     assert pat not in str(err) and "restricted" in err["error"] and "[github-pat]" in err["error"]
 
 
-def test_second_fetch_is_cached_and_fresh_bypasses(box: Toolbox) -> None:
+def test_second_fetch_is_cached_and_fresh_bypasses(box: Toolbox, monkeypatch: pytest.MonkeyPatch) -> None:
     Net.routes["https://a.com/p"] = FakeResp("https://a.com/p", PAGE.encode(), "text/html")
     first = fetch(box, url="https://a.com/p")
     assert first["kind"] == "html" and first["cached"] is False and len(Net.calls) == 1
     again = fetch(box, url="https://a.com/p")
     assert again["cached"] is True and len(Net.calls) == 1 and again["text"] == first["text"]
     assert fetch(box, url="https://a.com/p", fresh=True)["cached"] is False and len(Net.calls) == 2
-    box.settings()["fetchCacheSeconds"] = 0
+    monkeypatch.setattr(limits, "FETCH_CACHE_SECONDS", 0)
     assert fetch(box, url="https://a.com/p")["cached"] is False and len(Net.calls) == 3
-    box.settings()["fetchCacheSeconds"] = 3600
 
 
 def test_links_numbered_with_references(box: Toolbox) -> None:
@@ -292,10 +291,6 @@ def test_tainted_run_cannot_read_a_cached_url_it_could_not_fetch(box: Toolbox) -
     assert "restricted" in blocked["error"] and len(Net.calls) == 1
     ok = fetch(box, {"tainted": True, "allowed_urls": ["https://a.com/p"]}, url="https://a.com/p")
     assert ok["cached"] is True
-
-
-def test_setting_default_present() -> None:
-    assert llm.DEFAULT_SETTINGS["fetchCacheSeconds"] == 3600
 
 
 def test_search_and_fetch_share_one_citation_ledger(box: Toolbox, monkeypatch: pytest.MonkeyPatch) -> None:

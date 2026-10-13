@@ -35,12 +35,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import duel, egress, mac, osplat, permissions, redact, sandbox
+from . import duel, egress, limits, mac, osplat, permissions, permrules, redact, sandbox
 from .db import new_id
 
 log = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT = 120
+DEFAULT_TIMEOUT = limits.SHELL_TIMEOUT_SECONDS
 MAX_TIMEOUT = 600
 BACKGROUND_TIMEOUT = 600
 TERM_GRACE = 3.0                       # SIGTERM to the group, then SIGKILL after this long
@@ -451,7 +451,7 @@ class ShellJobs:
         if background and self.running_background(pool) >= max_background:
             if pool != "shell":
                 raise ShellError(f"{max_background} {pool} jobs are already running; wait for one to finish or stop one.")
-            raise ShellError(f"{max_background} background jobs are already running (shellMaxBackground). "
+            raise ShellError(f"{max_background} background jobs are already running. "
                              "shell_poll or shell_kill one first.")
         self._make_room()
         job = Job(new_id(), command, cwd, conversation_id, run_id, background, notify and background,
@@ -764,7 +764,7 @@ def register(tb: Any) -> None:
             return tool_error(f"The OS sandbox this shell runs in is not available here ({no_sandbox_reason()}), so "
                               "nothing was run.", alternative="run_python for a calculation, or retry with "
                               f"unsandboxed=true, which {_escape(is_allow_all)}")
-        default_t = BACKGROUND_TIMEOUT if background else int(s.get("shellTimeoutSec") or DEFAULT_TIMEOUT)
+        default_t = BACKGROUND_TIMEOUT if background else DEFAULT_TIMEOUT
         try:
             timeout = max(1, min(int(timeout_s or default_t), MAX_TIMEOUT))
         except (TypeError, ValueError):
@@ -810,7 +810,7 @@ def register(tb: Any) -> None:
             job = await jobs.start(argv, command=command, cwd=str(where), env=env, tmp=tmp,
                                    conversation_id=ctx.get("conversation_id"), run_id=ctx.get("run_id"),
                                    background=bool(background), notify=bool(notify_on_complete), timeout=timeout,
-                                   max_background=int(s.get("shellMaxBackground") or 4), on_timeout=on_timeout, egress_token=token)
+                                   max_background=limits.SHELL_MAX_BACKGROUND, on_timeout=on_timeout, egress_token=token)
             job.since_ns = since_ns
         except ShellError as e:
             jobs.egress.revoke(token)
@@ -917,13 +917,19 @@ def register(tb: Any) -> None:
     spec.default = "ask"
     if not sandbox_available():
         spec.description = unsandboxed_description()
-    # Unsandboxed asks (Allow everything lifts it, autoreview.route); so does a reply that read untrusted content while a command could reach out, and no
+    # Unsandboxed asks (Allow everything lifts it, autoreview.route; a destructive command is `floor` below, which it does not lift); so does a reply that read untrusted content while a command could reach out, and no
     # standing grant, session grant or allow rule buys that card off (it is forced). trustExternalContent lifts only the
     # taint half: an unsandboxed command still asks.
     spec.force_ask = lambda args, ctx: bool(args.get("unsandboxed")) or (
         bool(ctx.get("tainted")) and reaches_out(cfg(ctx))
         and not permissions.get(cfg(ctx), "trustExternalContent"))
     spec.force_card = lambda args, ctx: bool(args.get("unsandboxed"))  # a sandbox escape is a hard card: Auto's reviewer may not lift it
+    # A command that cannot be taken back (permrules.destructive) is the "shell" destructive category: a card in Auto and Allow
+    # everything, and in Manual whatever destructiveDefaults says (Toolbox.floor_action).
+    def _destructive(args: dict[str, Any], ctx: dict[str, Any]) -> str | None:
+        roots, cwd = perm_where(tb, ctx)
+        return "shell" if permrules.destructive(str(args.get("command") or ""), os.path.join(cwd, os.path.expanduser(str(args.get("cwd") or ""))), roots) else None
+    spec.floor = _destructive
     R("shell_run", spec)
 
     async def shell_poll(ctx: dict[str, Any], job_id: str, wait_s: float = 0) -> Any:
@@ -996,7 +1002,7 @@ async def run_fixed(jobs: ShellJobs, argv: list[str], cwd: str, settings: dict[s
         env.update(extra_env)
     job = await jobs.start(argv, command=shlex.join(argv[-3:] if sandboxed else argv), cwd=cwd, env=env, tmp=tmp,
                            conversation_id=label, run_id=None, background=False, notify=False, timeout=timeout,
-                           max_background=int(settings.get("shellMaxBackground") or 4), on_timeout="kill")
+                           max_background=limits.SHELL_MAX_BACKGROUND, on_timeout="kill")
     try:
         await jobs.wait(job)
     except asyncio.CancelledError:  # the checklist was cancelled: do not leave the command running behind it

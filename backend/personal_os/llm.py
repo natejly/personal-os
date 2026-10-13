@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Callable
 import httpx
 
 from . import anthropic_native, auth_breaker, provider_route, providers
-from .limits import (VOLATILE_HEADER, BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_AT_TOKENS, COMPACT_KEEP_RECENT, COMPACT_KEEP_TOKENS, MICRO_AT_TOKENS, CONSOLIDATE_EVERY, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SUBAGENT_MAX_DEPTH, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, WORKER_MAX_CONCURRENT, WORKFLOW_MAX_FAN_OUT)
+from .limits import (VOLATILE_HEADER, CODING_SESSION_MAX_CONCURRENT, COMPACT_AT, COMPACT_AT_TOKENS, COMPACT_KEEP_RECENT, COMPACT_KEEP_TOKENS, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, LLM_IDLE_SECONDS, LLM_RETRIES, MICRO_AT, MICRO_KEEP, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, TOOL_DEFER_ABOVE, WORKER_MAX_CONCURRENT)
 from .permissions import DEFAULTS as PERMISSION_DEFAULTS
 log = logging.getLogger("personal_os.llm")
 
@@ -89,30 +89,21 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "You are the assistant inside the user's personal AI OS. Be direct, concise and useful. Context (memories, graph, "
         "file excerpts) may be provided; use it when relevant and don't mention it unless asked."
     ),
-    "extractionModel": "",  # "" = the low tier (app.settings() fills it); a saved value overrides
     # Model tiers (providers.tier_model): "" = the active provider's default for that tier.
     "modelHigh": "",
     "modelMedium": "",
     "modelLow": "",
     "workerEffort": "medium",  # reasoning effort of workers' rounds: low | medium | high, or "chat" to follow the chat's
     "workerModel": "",  # "" = workers run on the chat model; an agent definition's own model still wins
-    "fastModel": "",  # what Auto sends a short, plain message to (router.py); empty means Auto uses the default model
     "autoRoute": False,  # new chats start on Auto: the fast or the default model per message
-    "consolidateEvery": CONSOLIDATE_EVERY,  # propose a memory tidy-up after this many new auto memories; 0 = manual only
     "autoLearn": True,
-    "captureRequests": True,  # keep the exact request of each model round (last 50 replies) for the Context drawer
     "followUps": True,  # up to 3 suggested next questions under the latest reply (uses the extraction model)
     "autoTitle": True,  # a short model-written chat title after the first reply (uses the extraction model)
     # Pre-image copies of local files the agent overwrites or moves, so Undo works (filesnap.py).
     "fileSnapshots": True,
-    "fileSnapshotMaxBytes": FILE_SNAPSHOT_MAX_BYTES,
-    "fileSnapshotRetainDays": FILE_SNAPSHOT_RETAIN_DAYS,
-    "fileSnapshotBudgetMB": FILE_SNAPSHOT_BUDGET_MB,
-    # Every permission key (tools, alwaysAsk, permissionRules, skipPermissions, ...) and its default: permissions.py.
+    # Every permission key (tools, alwaysAsk, permissionRules, ...) and its default: permissions.py.
     **PERMISSION_DEFAULTS,
-    "toolReadRetries": TOOL_READ_RETRIES,  # extra attempts for a read-only tool after a transient network error (0 = never retry)
     "parallelReads": 0,  # read-only calls of one round that run together; 0 = automatic (limits.worker_slots), 1 = one at a time
-    "stuckDetection": True,  # legacy: no longer read, stuck detection (stuck.py) is always on
     # Bank long messages the user writes as style samples and keep their voice profile current (style.py).
     # Independent of autoLearn: wanting the app to learn facts is not the same as wanting it to copy your voice.
     "learnStyle": True,
@@ -123,7 +114,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "accentCustom": "#7c8cf0",  # the colour behind accent "custom"
     "uiFont": "system",  # interface typeface: system, serif, rounded, mono and macOS faces (see lib/appearance.ts)
     "codeFont": "default",  # code typeface: default, sfmono, menlo, monaco, courier
-    "mode": "classic",
     "gatherShortcut": "Control+Alt+Command+Space",
     # Global quick capture: a small window that appends a timestamped bullet to today's daily note.
     "quickCaptureShortcut": "CommandOrControl+Shift+Space",
@@ -140,9 +130,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Bump when the default-off set changes so existing DBs pick up the change once.
     "modulesDefault": 5,
     "snapshotsEnabled": True,
-    # Keep the system prompt identical between turns and put per-turn retrieval just before the newest
-    # user message, so the provider's prefix cache survives (context.layout_messages).
-    "cacheLayout": True,
     # Show traces, the context preview, the full system prompt and OTLP export in the UI. Traces are recorded either way.
     "devTools": False,
     # Context management (compaction.py). Window and thresholds are estimates (len//4), not provider counts.
@@ -152,14 +139,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "compactKeepRecent": COMPACT_KEEP_RECENT,
     "compactAtTokens": COMPACT_AT_TOKENS,  # absolute trigger on history alone, for windows too large for the fraction to ever fire
     "compactKeepTokens": COMPACT_KEEP_TOKENS,
-    "microAtTokens": MICRO_AT_TOKENS,
     "microKeep": MICRO_KEEP,
     "microAt": MICRO_AT,  # old tool results stub out past a quarter of the window: past ~30k tokens a round, time to first token dominates
     # Opt-in OpenTelemetry GenAI export (otel_export.py). Off by default; replaced whole through PUT /settings.
     # Loopback endpoints only unless allowRemote; no message content unless includeContent.
     "otelExport": {"enabled": False, "endpoint": "", "headers": {}, "includeContent": False, "allowRemote": False, "timeoutSeconds": 5},
     # Offer MCP tools through mcp_tool_search once more than this many are ready (0 = always send every schema).
-    "mcpDeferAbove": MCP_DEFER_ABOVE,
     # Past this many built-in tools, offer the core set plus tool_search instead of every schema (0 = send them all).
     "toolDeferAbove": TOOL_DEFER_ABOVE,
     # Put the notes each connected MCP server sends at initialize into the prompt (fenced, scanned, capped).
@@ -168,17 +153,15 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # llmIdleSeconds is how long a stream may go without a byte before it is abandoned with a clear error.
     "llmRetries": LLM_RETRIES,
     "llmIdleSeconds": LLM_IDLE_SECONDS,  # a reasoning model can think a long while before its first token
-    # Retention (retention.py): days of history kept in tables that only ever grow. User content is never pruned.
     # Chats and inbox messages whose last activity is older than this many days are archived (restorable). 0 = off.
     "autoArchiveDays": 0,
-    "retainUsageDays": RETAIN_USAGE_DAYS,
-    "retainTraceDays": RETAIN_TRACE_DAYS,
-    "retainToolResultDays": RETAIN_TOOL_RESULT_DAYS,
-    "retainApprovalDays": RETAIN_APPROVAL_DAYS,
     # Cowork desks. deskMaxLive bounds how many desks may be running at once.
     # How long a desk waits on a card nobody is watching before letting the run go. The card stays
     # pending and decidable; only the run lets go. 0 = wait forever, which is what a chat does.
     "parkAfterSeconds": DESK_PARK_AFTER_SECONDS,
+    # A plan the model rates high-confidence goes ahead this many seconds after its card opens unless the user answers
+    # or touches it first. 0 = off. Never in manual permission mode, never after untrusted content.
+    "planAutoApproveSeconds": 30,
     "deskMaxLive": 0,  # 0 = automatic (limits.worker_slots); a non-zero value overrides
     # Relaunch desks a restart interrupted mid-turn. Off by default: a desk with a call whose outcome is
     # unknown, or one waiting on an approval or its plan, is never relaunched either way.
@@ -186,27 +169,14 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # A new chat's first message starts it as a task (a desk) that works through its steps; a plain question is answered
     # and the desk settles done. The composer's Autonomous switch starts from this value.
     "autonomousByDefault": True,
-    # Subagents (subagents.py): how many may run at once across the app and how deep they may nest. Hang
-    # detection: a child with no model or tool activity for subagentStaleSeconds, or stuck inside one tool for
-    # subagentToolSeconds, is stopped and returns what it had.
+    # Subagents (subagents.py): how many may run at once across the app.
     "subagentMaxConcurrent": 0,  # 0 = automatic (limits.worker_slots); a non-zero value overrides
-    "subagentMaxDepth": SUBAGENT_MAX_DEPTH,
-    "subagentStaleSeconds": SUBAGENT_STALE_SECONDS,
-    "subagentToolSeconds": SUBAGENT_TOOL_SECONDS,
     # Workers (workers.py): the chat's front agent hands multi-step work to detached background workers on the chat's own
     # model. delegationForce routes (never stops) work: after delegationAfterRounds rounds of tool calls in one reply the
     # reply may only delegate and answer. workerMaxConcurrent workers run at once; the rest queue in order.
     "delegationForce": True,
     "delegationAfterRounds": DELEGATION_AFTER_ROUNDS,
     "workerMaxConcurrent": WORKER_MAX_CONCURRENT,
-    # Workflows (workflows.py): the most items one fan-out step may map over.
-    "workflowMaxFanOut": WORKFLOW_MAX_FAN_OUT,
-    # Scheduled-job run policy (jobs_policy.py): retry backoff base in seconds (doubles per attempt, capped at
-    # 30 min) and how many consecutive failed fires switch a job off.
-    "jobRetryBackoffS": JOB_RETRY_BACKOFF_S,
-    "jobFailureStreakLimit": JOB_FAILURE_STREAK_LIMIT,
-    "proposalExpireDays": PROPOSAL_EXPIRE_DAYS,  # a job's pending proposal turns 'expired' (no longer acceptable) after this many days; 0 = never
-    "jobExpireDays": JOB_EXPIRE_DAYS,  # recurring jobs pause (reason "expired") after one last fire this many days after arming; 0 = never
     # OS notification when an unattended job fails, is paused, or leaves proposals (only while the app is hidden).
     "notifyJobs": True,
     # A system notification when a desk needs you or finishes, while the window is not focused.
@@ -234,21 +204,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "searxngUrl": "",
     # fetch_url retries a blocked or JavaScript-only page through Jina Reader (r.jina.ai), which then sees the URL.
     "readerFallback": True,
-    # fetch_url reuses a page it fetched this many seconds ago (0 = never); fresh=true on the call bypasses it.
-    "fetchCacheSeconds": FETCH_CACHE_SECONDS,
     # github_search/github_read; empty = the gh CLI's login (`gh auth token`), else unauthenticated (60 requests/h).
     "githubToken": "",
-    # Host shell (shell.py): shell_run runs in a Seatbelt sandbox: any folder, minus Grain's own data and the credential stores.
-    "shellTimeoutSec": SHELL_TIMEOUT_SECONDS,      # foreground default; a call may ask for up to 600
-    "shellMaxBackground": SHELL_MAX_BACKGROUND,     # live background jobs at once
     "codingSessionMaxConcurrent": CODING_SESSION_MAX_CONCURRENT,    # live coding sessions at once (own pool)
     # The model view_image sends pictures to. Empty = the chat model, when the provider says it reads images.
     "visionModel": "",
     # The model generate_image calls (POST /images/generations, OpenAI shape). Empty = the tool says it is not set up.
     "imageModel": "",
-    # The agent's own browser (browser.py): interactive pages in a separate cookie jar, driven from a desk or chat.
-    "browserMaxTabs": BROWSER_MAX_TABS,
-    "browserIdleSeconds": BROWSER_IDLE_SECONDS,
     # Extra packages installed into the shared work environment (envs.py) beside its base set.
     "workEnvPackages": [],
     # {model: {"input": $/M tokens, "output": $/M tokens}} overrides for cost accounting (proxy prices are used otherwise)
@@ -262,13 +224,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "googleTasksSync": {},
     # Names this computer's Drive backup folder ("Grain Backup (<label>)"); empty = the hostname. See drive_backup.py.
     "driveBackupLabel": "",
-    # Document retrieval (retrieval.py). 'bm25' forces keyword-only; hybrid falls back to it when the
-    # embedding route is unavailable. The floor only drops vector-only hits (exact keyword hits survive).
+    # Document and memory retrieval (retrieval.py, memory_index.py). 'bm25' forces keyword-only; hybrid fuses keywords,
+    # embeddings, recency and graph, and falls back to keywords when the embedding route is unavailable. The floor only drops vector-only hits (exact keyword hits survive).
     "retrievalMode": "hybrid",
-    "embeddingModel": "qwen3-embedding-8b",
+    "embeddingModel": "",  # "" = keywords only until a keyed provider serves one (app.ensure_embedding_model picks it)
     "retrievalMinSimilarity": RETRIEVAL_MIN_SIMILARITY,
-    # Memories: fuse BM25 + embeddings + recency + graph (memory_index.py). Needs embeddingModel; false = keyword-only.
-    "hybridRetrieval": True,
     "retrievalPerDocCap": RETRIEVAL_PER_DOC_CAP,
     "retrievalCandidates": RETRIEVAL_CANDIDATES,
     # Off by default, one model call per chunk: new uploads and embed-backfill (Rebuild index) write a short blurb situating each chunk in
@@ -293,7 +253,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "telegramEnabled": False,
     "telegramNotifyLongRuns": False,  # also send approvals and finish notices for runs that were not started from Telegram
     "telegramLongRunMinutes": TELEGRAM_LONG_RUN_MINUTES,
-    "telegramBotName": "",  # the bot's display name; blank = "Grain · <this Mac's name>", set when this Mac claims the bot
     "telegramPushWorkerResults": False,  # also text the owner the reply Grain writes when a background worker finishes
     # Todo time-block planner (planner.py); PlannerModule.config() merges stored values over these.
     "planner": {"workStart": "09:00", "workEnd": "17:30", "workDays": [1, 2, 3, 4, 5], "bufferMin": 10, "minBlockMin": 15,

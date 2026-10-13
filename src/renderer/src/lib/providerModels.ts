@@ -30,9 +30,6 @@ export const MODEL_FIELDS = [
   { key: 'modelMedium', label: 'Medium tier', tier: 'medium' },
   { key: 'modelLow', label: 'Low tier', tier: 'low' },
   { key: 'workerModel', label: 'Default worker model' },
-  // Older knobs, no longer shown: blank follows the tiers, but a saved value is still remapped on a provider switch.
-  { key: 'fastModel', label: 'Fast model', hidden: true },
-  { key: 'extractionModel', label: 'Helper model', hidden: true },
   { key: 'embeddingModel', label: 'Search model' },
   { key: 'retrievalRerankModel', label: 'Rerank model' },
   { key: 'visionModel', label: 'Vision model' },

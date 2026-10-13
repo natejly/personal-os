@@ -29,9 +29,7 @@ test('Allow everything only turns the mode pill red: same single button, no extr
 })
 
 test('the domains and MCP controls live in Settings > Permissions', () => {
-  const modal = readFileSync('src/renderer/src/components/SettingsModal.tsx', 'utf8')
-  const perms = modal.slice(modal.indexOf("tab === 'permissions'"), modal.indexOf("tab === 'integrations'"))
+  const perms = readFileSync('src/renderer/src/components/settings/PermissionsTab.tsx', 'utf8')
   assert.match(perms, /Allow all domains and MCP servers/)
-  assert.match(perms, /<RunSafetySettings /)
-  assert.equal(modal.match(/<RunSafetySettings /g)?.length, 1)
+  assert.equal(perms.match(/<RunSafetySettings /g)?.length, 1)
 })

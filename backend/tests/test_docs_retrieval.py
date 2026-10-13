@@ -115,6 +115,7 @@ check({h["doc_id"] for h in docs.chunk_search("pangolin", None)} == {pers["id"]}
 # (e) unified search: file chunk + doc chunk fused, tagged
 f = client.post("/documents", files={"file": ("manual.txt", b"The zeppelin manual explains inflation.", "text/plain")}, data={"project_id": pa}).json()
 d2 = j("POST", "/docs", {"title": "Zeppelin diary", "content": "Today the zeppelin landed softly.", "project_id": pa})
+db.set_settings({"embeddingModel": "qwen3-embedding-8b"})  # no default any more
 run(retriever.embed_pending(settings()))
 res = run(retriever.search(pa, "zeppelin", settings(), sources=("files", "docs")))
 tags = {(h["source"], h["document_id"]) for h in res}

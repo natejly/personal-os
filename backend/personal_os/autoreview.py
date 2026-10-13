@@ -42,14 +42,20 @@ def mode_of(cfg: dict[str, Any] | None) -> str:
 
 def route(pmode: str, *, mode: str, danger: str, explicit_on: bool = False, explicit_ask: bool = False,
           covered: bool = False, hard_forced: bool = False, soft_forced: bool = False, fenced: bool = False,
-          question: bool = False) -> str:
-    """run | card | review | review_strict | off for a call whose post-gate mode is `mode` (on|ask|off).
-    The caller has already settled refusals (deny rules, plan blocks, bad arguments)."""
+          question: bool = False, floor: str | None = None) -> str:
+    """run | card | block | review | review_strict | off for a call whose post-gate mode is `mode` (on|ask|off).
+    The caller has already settled refusals (deny rules, plan blocks, bad arguments).
+    `floor` is Toolbox.floor_action (permissions.floor_action: a destructive shell command, a settings change, or in manual
+    mode a destructive call of a category the user blocks or asks about): "card" and "block" hold in every permission mode,
+    Allow everything does not lift them and the reviewer never sees them. `question` (permrules.STILL_ASK) is the same for
+    the user's own answers."""
     if mode == "off":
         return "off"
+    if floor in ("card", "block"):
+        return floor
     if question or pmode == "manual":
         return "card" if mode == "ask" else "run"
-    if pmode == "allow_all":  # no exceptions: fenced, forced and floor cases all run
+    if pmode == "allow_all":  # everything else runs: fenced and forced cards too (only `floor` and `question` above stay)
         return "run"
     if mode == "on":
         return "run" if danger == "safe" or explicit_on or covered else "review"
@@ -64,13 +70,13 @@ def connector_gate(mode: str, tainted: bool) -> str:
 
 
 def connector_route(pmode: str, *, mode: str, raw_mode: str, hints: dict[str, Any], hard_forced: bool, tainted: bool,
-                    covered: bool = False, question: bool = False) -> str:
+                    covered: bool = False, question: bool = False, floor: str | None = None) -> str:
     """`route` for a connector tool, the one rule chat and child runs share. Only a stored 'on' grant is an explicit choice;
     a connector that calls its own tool destructive is reviewed strictly; a call forced by untrusted content stays a card
     (allow-all runs it, as in `route`)."""
     return route(pmode, mode=mode, danger="external", explicit_on=raw_mode == "on", covered=covered, hard_forced=hard_forced,
                  soft_forced=bool(hints.get("destructive")) and not hard_forced, fenced=bool(hints) and hard_forced and tainted,
-                 question=question)
+                 question=question, floor=floor)
 
 
 def apply(rt: str, verdict: str, confidence: str, tainted: bool) -> str:

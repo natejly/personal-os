@@ -52,8 +52,8 @@ may use it, so a server cannot shadow a built-in tool. A slug, once handed out, 
 reconnects. If a tool disappears and comes back, it gets the same slug and the same grant history.
 
 **Deferred tool search.** A big server (a GitHub connector exposes about 90 tools) makes the tools array
-long enough that weaker models stop choosing well. Once more than `mcpDeferAbove` connector tools are
-ready (default 12; 0 sends every schema), the model is offered only `mcp_tool_search`. A search (BM25
+long enough that weaker models stop choosing well. Once more than 12 connector tools are
+ready, the model is offered only `mcp_tool_search`. A search (BM25
 over the tool name, description, argument names and server name) loads the best matches into the next
 round. The system prompt also lists each server's tool names (up to 30 per server), and calling a listed
 tool by name loads it and runs it in the same round, so a search is only needed for what is not listed.

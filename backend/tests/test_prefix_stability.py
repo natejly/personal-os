@@ -42,7 +42,7 @@ async def _fake(settings: dict[str, Any], model: str, messages: list[dict[str, A
 
 def _setup() -> None:
     appmod.db.set_settings({"autoLearn": False, "baseUrl": "http://127.0.0.1:9/v1", "provider": "custom", "autoTitle": False,
-                            "followUps": False, "learnStyle": False, "permissionMode": "manual", "workspaceRoots": []})
+                            "followUps": False, "learnStyle": False, "permissionMode": "manual"})
 
 
 class _Clock(_dt.datetime):

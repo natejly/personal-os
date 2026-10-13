@@ -89,6 +89,9 @@ def cjk_like(col: str, text: str) -> tuple[str, list[str]]:
 AFTER_CLEAR = ("AND rowid > (SELECT COALESCE(MAX(rowid), 0) FROM messages WHERE conversation_id=? AND kind='clear' "
                "AND superseded_at IS NULL)\n")
 
+# A /btw side note is stored in the chat but is never part of what the model replays.
+NOT_SIDE_NOTE = "AND COALESCE(kind, '') != 'side_note'\n"
+
 class Projects:
     def __init__(self, db: Database):
         self.db = db
@@ -523,7 +526,7 @@ class Conversations:
         return [{"id": r["id"], "created_at": r["created_at"], "role": r["role"], "tool_events": r.get("tool_events") or []} for r in hidden]
 
     # Settings a branch carries over. The rest stays behind on purpose: standing tool grants (the `tools` map's
-    # "on" entries), skipPermissions, titles, and the desk/job markers.
+    # "on" entries), titles, and the desk/job markers.
     FORK_KEYS = (*[k for k in DEFAULT_CONV_SETTINGS if k != "tools"], "useSkills", "tainted", "taint_sources")
 
     def fork(self, conv_id: str, upto_mid: str) -> dict[str, Any]:
@@ -567,7 +570,7 @@ class Conversations:
             rows = c.execute(
                 "SELECT role, content, attachments FROM messages WHERE conversation_id=?\n"
                 "AND (content != '' OR (role = 'user' AND attachments IS NOT NULL))\n"  # an assistant row's attachments are files it sent, not text to read
-                "AND superseded_at IS NULL\n" + AFTER_CLEAR +
+                "AND superseded_at IS NULL\n" + NOT_SIDE_NOTE + AFTER_CLEAR +
                 "ORDER BY created_at, rowid",
                 (conv_id, conv_id),
             ).fetchall()
@@ -580,7 +583,7 @@ class Conversations:
             rows = c.execute(
                 "SELECT id, role, content, created_at, tool_events, attachments FROM messages WHERE conversation_id=?\n"
                 "AND (content != '' OR (role = 'user' AND attachments IS NOT NULL) OR (role = 'assistant' AND tool_events IS NOT NULL))\n"
-                "AND superseded_at IS NULL\n" + AFTER_CLEAR +
+                "AND superseded_at IS NULL\n" + NOT_SIDE_NOTE + AFTER_CLEAR +
                 "ORDER BY created_at, rowid",
                 (conv_id, conv_id),
             ).fetchall()
@@ -626,7 +629,9 @@ class Memories:
             return row_to_dict(c.execute("SELECT * FROM memories WHERE id=? AND deleted_at IS NULL", (id,)).fetchone())
 
     def create(self, project_id: str | None, content: str, kind: str = "fact", source: str = "user", pinned: bool = False,
-               provenance: dict[str, Any] | None = None, expires_at: float | None = None) -> dict[str, Any]:
+               provenance: dict[str, Any] | None = None, expires_at: float | None = None,
+               valid_from: float | None = None) -> dict[str, Any]:
+        """`valid_from` is when the fact happened, if known (default: now, when it was learned)."""
         content = content.strip()
         prov = provenance or {}
         with self.db.tx() as c:
@@ -644,7 +649,7 @@ class Memories:
             c.execute(
                 "INSERT INTO memories(id,project_id,content,kind,source,pinned,created_at,updated_at,valid_from,source_conversation_id,source_message_id,expires_at) "
                 "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                (mid, project_id, content, kind, source, int(pinned), t, t, t,
+                (mid, project_id, content, kind, source, int(pinned), t, t, valid_from or t,
                  prov.get("conversation_id"), prov.get("message_id"), expires_at),
             )
             c.execute("INSERT INTO memories_fts(content, memory_id) VALUES(?,?)", (content, mid))
@@ -680,6 +685,29 @@ class Memories:
             c.execute("UPDATE memories SET invalid_at=?, superseded_by=? WHERE id=?", (t, mid, old_id))
             c.execute("DELETE FROM memories_fts WHERE memory_id=?", (old_id,))
         return self.get(mid)
+
+    def supersede_many(self, old_ids: list[str], new_content: str, kind: str | None = None, source: str = "auto",
+                       provenance: dict[str, Any] | None = None, expires_at: float | None = None) -> dict[str, Any] | None:
+        """Merge several live, unpinned memories into one new row; every old row stays as history (invalid_at, superseded_by).
+        The new row keeps the earliest created_at of the rows it replaces. Without `expires_at` it expires only when all
+        of them did (a merge with a lasting fact lasts). None when no target is live and unpinned."""
+        olds = [o for o in (self.get(i) for i in dict.fromkeys(old_ids)) if o and o["invalid_at"] is None and not o["pinned"]]
+        if not olds:
+            return None
+        ends = [o.get("expires_at") for o in olds]
+        if expires_at is None and all(e is not None for e in ends):
+            expires_at = max(ends)
+        mem = self.supersede(olds[0]["id"], new_content, kind=kind, source=source, provenance=provenance, expires_at=expires_at)
+        if not mem:
+            return None
+        t = now()
+        with self.db.tx() as c:
+            c.execute("UPDATE memories SET created_at=?, expires_at=? WHERE id=?",
+                      (min(o["created_at"] for o in olds), expires_at, mem["id"]))
+            for o in olds[1:]:
+                c.execute("UPDATE memories SET invalid_at=?, superseded_by=? WHERE id=?", (t, mem["id"], o["id"]))
+                c.execute("DELETE FROM memories_fts WHERE memory_id=?", (o["id"],))
+        return self.get(mem["id"])
 
     def invalidate(self, id: str) -> dict[str, Any] | None:
         """Soft forget: the row leaves context and search but stays in history. Pinned rows are refused (None)."""

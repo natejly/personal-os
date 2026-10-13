@@ -19,7 +19,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os import mac  # noqa: E402
+from unittest import mock  # noqa: E402
+
+from personal_os import limits, mac  # noqa: E402
 from personal_os import filesnap as fsmod  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.filesnap import Conflict, FileSnapshots  # noqa: E402
@@ -136,11 +138,8 @@ def test_conflict_and_force() -> None:
 def test_too_large_still_writes() -> None:
     f = HOME / "Desktop" / "big.txt"
     f.write_text("x" * 100)
-    SETTINGS["fileSnapshotMaxBytes"] = 10
-    try:
+    with mock.patch.object(limits, "FILE_SNAPSHOT_MAX_BYTES", 10):
         snap = FS.capture("overwrite", str(f), CTX)
-    finally:
-        SETTINGS.pop("fileSnapshotMaxBytes")
     check(snap["snapshot_id"] is None and "larger" in snap["reason"], "no snapshot over the limit, with a reason")
     mac.write_local(str(f), "new", "overwrite")
     check(f.read_text() == "new", "the write is never blocked")
@@ -160,11 +159,8 @@ def test_prune() -> None:
     check(not blob.exists(), "aged-out blob removed")
     check(FS._row(old)["status"] == "expired", "row marked expired")
     check(FS._row(newer)["status"] == "live", "recent row kept")
-    SETTINGS["fileSnapshotBudgetMB"] = 0.0001  # 100 bytes
-    try:
+    with mock.patch.object(limits, "FILE_SNAPSHOT_BUDGET_MB", 0.0001):  # 100 bytes
         FS.prune()
-    finally:
-        SETTINGS.pop("fileSnapshotBudgetMB")
     check(FS._row(newer)["status"] == "expired", "over-budget blobs expire oldest first")
 
 

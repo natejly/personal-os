@@ -3,6 +3,7 @@ import { X } from '../icons'
 import type { AgentBrowserSignIn, Settings } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
+import Toggle from './settings/Switch'
 import { hostError, networkMode, networkPatch, normalizeHost, type NetworkMode } from '../lib/coworkSettings'
 
 /**
@@ -12,13 +13,6 @@ import { hostError, networkMode, networkPatch, normalizeHost, type NetworkMode }
  * `patch`, so nothing is saved until Save — except the environment build and browser sign-ins, which are actions on
  * the machine, not settings.
  */
-
-const Toggle = ({ title, help, checked, onChange }: { title: string; help?: string; checked: boolean; onChange: (v: boolean) => void }): JSX.Element => (
-  <label className="toggle-row plain">
-    <span className="toggle-text"><b>{title}</b>{help && <small>{help}</small>}</span>
-    <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /><span className="switch" />
-  </label>
-)
 
 /**
  * What the agent's browser remembers: sites with saved cookies, mostly sign-ins made while the user took over.

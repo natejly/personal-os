@@ -14,21 +14,18 @@ test('Rebuild index re-chunks, then backfills', async () => {
   assert.equal(r.embedded, 3)
 })
 
-type El = ReactElement<{ children?: unknown; type?: string; onChange?: (e: unknown) => void; checked?: boolean }>
+type El = ReactElement<{ children?: unknown; title?: string; onChange?: (on: boolean) => void; checked?: boolean }>
 const flat = (n: unknown): El[] => {
   if (Array.isArray(n)) return n.flatMap(flat)
   if (!n || typeof n !== 'object' || !('props' in n)) return []
   const el = n as El
   return [el, ...flat(el.props.children)]
 }
-const text = (n: unknown): string => flat(n).map((e) => [e.props.children].flat().filter((c) => typeof c === 'string').join('')).join(' ')
-
 test('toggling Search my Docs patches useDocsInContext', () => {
   const patches: Partial<Settings>[] = []
   const tree = AdvancedRetrieval({ draft: {} as Settings, patch: (p) => patches.push(p) })
-  const row = flat(tree).find((e) => e.type === 'label' && text(e.props.children).includes('Search my Docs'))
-  const box = flat(row?.props.children).find((e) => e.type === 'input')
-  assert.equal(box?.props.checked, true)
-  box?.props.onChange?.({ target: { checked: false } })
+  const row = flat(tree).find((e) => e.props.title?.includes('Search my Docs'))
+  assert.equal(row?.props.checked, true)
+  row?.props.onChange?.(false)
   assert.deepEqual(patches, [{ useDocsInContext: false }])
 })

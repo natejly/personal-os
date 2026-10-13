@@ -501,10 +501,10 @@ class TelegramBridge:
         return True
 
     async def _sync_name(self, token: str) -> None:
-        """Rename the bot to the configured name (blank = "Grain · <this Mac>") when it differs. setMyName is rate limited: back off quietly."""
+        """Rename the bot to "Grain · <this Mac>" when it differs. setMyName is rate limited: back off quietly."""
         if time.time() < self._name_retry_at:
             return
-        want = (str(self._settings().get("telegramBotName") or "").strip() or f"Grain · {self.deps.computer_name()}")[:NAME_MAX]
+        want = f"Grain · {self.deps.computer_name()}"[:NAME_MAX]
         try:
             cur = await self.deps.api(token, "getMyName", {}, 15.0)
             if (cur.get("name") if isinstance(cur, dict) else None) != want:

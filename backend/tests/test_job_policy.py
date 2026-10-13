@@ -22,14 +22,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os import app as appmod  # noqa: E402
+from personal_os import app as appmod, limits  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.jobs import Jobs, Scheduler  # noqa: E402
 from personal_os.jobs_policy import JobPolicy  # noqa: E402
 from personal_os.runs import RunStore  # noqa: E402
 
 T0 = 1772409600.0
-CFG = {"jobRetryBackoffS": 120, "jobFailureStreakLimit": 3}
+CFG: dict[str, object] = {}
 
 
 class Rig:
@@ -222,9 +222,9 @@ def test_migration_is_idempotent_on_an_old_schema() -> None:
     assert row["paused_reason"] is None and row["last_skip_at"] is None
 
 
-def test_expiry_fires_once_then_pauses_and_reenable_restarts() -> None:
+def test_expiry_fires_once_then_pauses_and_reenable_restarts(monkeypatch: pytest.MonkeyPatch) -> None:
     r = Rig()
-    r.policy.settings = lambda: {**CFG, "jobExpireDays": 7}
+    monkeypatch.setattr(limits, "JOB_EXPIRE_DAYS", 7)
     jb = r.job(max_retries=0)
 
     async def go() -> None:
@@ -321,7 +321,6 @@ def test_max_retries_is_editable_and_bounded() -> None:
     assert jb["max_retries"] == 2
     assert client.patch(f"/jobs/{jb['id']}", json={"max_retries": 0}).json()["max_retries"] == 0
     assert client.patch(f"/jobs/{jb['id']}", json={"max_retries": 99}).status_code == 422
-    assert "jobFailureStreakLimit" in client.get("/settings").json()
     client.delete(f"/jobs/{jb['id']}")
 
 

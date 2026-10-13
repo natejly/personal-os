@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { dialog, openMemory, openSettings } from './helpers/home.mjs'
+import { dialog, openMemory, openSettings, save } from './helpers/home.mjs'
 
 const benign = (e) => /ResizeObserver|favicon/i.test(e)
 const noErrors = (grain) => expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
@@ -7,18 +7,18 @@ const row = (page, name) => page.locator('.sidebar .nav-item', { hasText: new Re
 /** The Sidebar switches in Settings → Sidebar, by row label. */
 const toggle = (page, name) => dialog(page).getByRole('checkbox', { name, exact: true })
 
-test('a sidebar row turns off at once with no Save, stays off after a relaunch, and comes back', async ({ grain }) => {
+test('a sidebar row turns off on Save, stays off after a relaunch, and comes back', async ({ grain }) => {
   const { page, api } = grain
   await expect(row(page, 'Lists')).toHaveCount(1)
   await openSettings(page, 'Sidebar')
   await expect(toggle(page, 'Lists')).toBeChecked()
   await toggle(page, 'Lists').locator('xpath=following-sibling::span[contains(@class,"switch")]').click()
   await expect(toggle(page, 'Lists')).not.toBeChecked()
+  // A draft until Save: the row is still there.
+  await expect(row(page, 'Lists')).toHaveCount(1)
+  await save(page)
   await expect(row(page, 'Lists')).toHaveCount(0)
-  await expect.poll(async () => (await api('/settings')).hiddenViews).toEqual(['todos'])
-  // Nothing is unsaved: Settings closes without asking.
-  await page.keyboard.press('Escape')
-  await expect(dialog(page)).toHaveCount(0)
+  expect((await api('/settings')).hiddenViews).toEqual(['todos'])
 
   const p2 = await grain.relaunch()
   await expect(p2.locator('.sidebar').first()).toBeVisible()
@@ -27,6 +27,7 @@ test('a sidebar row turns off at once with no Save, stays off after a relaunch, 
   await expect(toggle(p2, 'Lists')).not.toBeChecked()
   await toggle(p2, 'Lists').locator('xpath=following-sibling::span[contains(@class,"switch")]').click()
   await expect(toggle(p2, 'Lists')).toBeChecked()
+  await save(p2)
   await expect(row(p2, 'Lists')).toHaveCount(1)
   await expect.poll(async () => (await api('/settings')).hiddenViews).toEqual([])
   noErrors(grain)

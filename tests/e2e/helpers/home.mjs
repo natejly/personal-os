@@ -3,12 +3,12 @@ import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { expect } from '@playwright/test'
 
-export const TABS = ['General', 'Sidebar', 'Model', 'Models', 'Agents', 'Memory', 'Integrations', 'Permissions', 'System access', 'Usage', 'Advanced']
+export const TABS = ['General', 'Models', 'Agents', 'Memory', 'Integrations', 'Permissions', 'System access', 'Sidebar', 'Usage', 'Advanced']
 
 export const dialog = (page) => page.getByRole('dialog', { name: 'Settings' })
 
 /** A Settings tab by label. Tabs carry a hint after the label ("Model" + its current model), so match the tab id, not the name. */
-export const tabBtn = (page, label) => dialog(page).locator(`#settings-tab-${label === 'General' ? 'appearance' : label === 'System access' ? 'system' : label.toLowerCase()}`)
+export const tabBtn = (page, label) => dialog(page).locator(`#settings-tab-${label === 'General' ? 'appearance' : label === 'System access' ? 'system' : label === 'Models' ? 'model' : label.toLowerCase()}`)
 
 export async function openSettings(page, tab) {
   if (!(await dialog(page).count())) await page.locator('.settings-btn').click()

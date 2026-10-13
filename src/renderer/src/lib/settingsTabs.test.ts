@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { resolveTab, searchSettings } from './settingsTabs'
 
 test('old tab ids map to the new sections', () => {
+  assert.deepEqual(resolveTab('models'), { tab: 'model' })
   assert.deepEqual(resolveTab('provider'), { tab: 'model' })
   assert.deepEqual(resolveTab('memory'), { tab: 'memory' })
   assert.deepEqual(resolveTab('modules'), { tab: 'sidebar' })

@@ -49,6 +49,7 @@ export default function WorkerChat({ id, onStop }: { id: string; onStop?: () => 
   }, [id, toast, tick])
   const rows = useMemo(() => workerRows(view?.messages ?? [], parentConv, live, tapeTimings(tape)), [view?.messages, parentConv, live, tape])
   const spans = useMemo(() => tapeSpans(tape), [tape])
+  const reasoning = useMemo(() => tape.filter((e) => e.event === 'thinking_summary').map((e) => String(e.data.text ?? '')).filter(Boolean).join('\n') || null, [tape])
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'nearest' }) }, [rows.length])
 
   const submit = async (): Promise<void> => {
@@ -86,7 +87,7 @@ export default function WorkerChat({ id, onStop }: { id: string; onStop?: () => 
       {spans.length > 0 && (
         <details className="worker-steps">
           <summary className="muted small">Steps · {spans.filter((s) => s.kind === 'llm').length} model rounds</summary>
-          <TraceView spans={spans} live={live} model={null} />
+          <TraceView spans={spans} live={live} model={null} reasoning={reasoning} />
         </details>
       )}
       <div className="composer worker-composer">

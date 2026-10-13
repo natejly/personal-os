@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from personal_os import sandbox, shell  # noqa: E402
+from personal_os import limits, sandbox, shell  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 from personal_os.working import ToolResults  # noqa: E402
@@ -84,7 +84,6 @@ def test_registered_ask_by_default_and_never_unsandboxed_unasked(box: Box) -> No
     assert not box.tb.forces_ask("shell_run", {"command": "ls"}, offline)
     from personal_os import llm
     assert llm.DEFAULT_SETTINGS["shellNetwork"] is False
-    assert (llm.DEFAULT_SETTINGS["shellTimeoutSec"], llm.DEFAULT_SETTINGS["shellMaxBackground"]) == (120, 4)
 
 
 def test_trust_external_content_lifts_only_the_tainted_shell_card(box: Box) -> None:
@@ -258,10 +257,9 @@ def test_profile_is_unrestricted_for_writes_then_denies_protected_places(tmp_pat
         assert "/Library/Keychains" in p and "LaunchAgents" in p
 
 
-def test_workspace_roots_scope_nothing_any_more(tmp_path: Path, fake_home: Path) -> None:
+def test_no_folder_grants(tmp_path: Path, fake_home: Path) -> None:
     from personal_os import fsx
-    (fake_home / "proj").mkdir()
-    stored = {"workspaceRoots": [str(fake_home / "proj")]}
+    stored: dict[str, Any] = {}
 
     class B:
         workspace = None
@@ -471,8 +469,8 @@ def test_background_poll_and_kill(box: Box) -> None:
 
 
 @needs_seatbelt
-def test_background_cap_and_completion_note(box: Box) -> None:
-    box.settings["shellMaxBackground"] = 1
+def test_background_cap_and_completion_note(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(limits, "SHELL_MAX_BACKGROUND", 1)
 
     async def go() -> None:
         a = await box.arun("shell_run", command="sleep 30", background=True)
@@ -865,11 +863,11 @@ def test_timeout_moves_the_command_to_the_background_by_default(box: Box) -> Non
 
 
 @needs_seatbelt
-def test_timeout_kills_when_asked_or_when_no_slot_is_free(box: Box) -> None:
+def test_timeout_kills_when_asked_or_when_no_slot_is_free(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
     r = box.run("shell_run", command="sleep 30", timeout_s=1, on_timeout="kill")
     assert r["timed_out"] is True and "still_running" not in r
     box.ctx["desk_id"] = "d1"
-    box.settings["shellMaxBackground"] = 1
+    monkeypatch.setattr(limits, "SHELL_MAX_BACKGROUND", 1)
     first = box.run("shell_run", command="sleep 30", background=True)
     r = box.run("shell_run", command="sleep 30", timeout_s=1)
     assert r["timed_out"] is True and "process group" in r["note"]

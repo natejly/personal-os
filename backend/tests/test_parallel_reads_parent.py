@@ -72,7 +72,7 @@ def c(i: int, name: str, k: str = "") -> dict[str, Any]:
 def drive(calls: list[dict[str, Any]], release_after: str | None = None, stop_first: bool = False,
           approve: int = 0) -> tuple[list[tuple[str, Any]], int]:
     """`approve`: how many approval cards to answer 'allow' (an external tool asks even when set to on)."""
-    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "workspaceRoots": [], "permissionRules": {"allow": [], "ask": [], "deny": []}})
+    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "permissionRules": {"allow": [], "ask": [], "deny": []}})
     cid = appmod.convos.create(None, "t", "m")["id"]
     appmod.convos.update(cid, {"settings": {"tools": {n: "on" for n in ("rd_a", "rd_b", "rd_stop", "wr", "ext")}}})
     LOG.clear()

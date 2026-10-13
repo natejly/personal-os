@@ -9,7 +9,8 @@ for an unattended run) and per-request timeouts on tools.
 llm.DEFAULT_SETTINGS takes its numeric defaults from these constants. Four settings default to 0, meaning
 "automatic": contextWindow (the model's window from the proxy, else CONTEXT_WINDOW_FALLBACK) and subagentMaxConcurrent /
 deskMaxLive / parallelReads (worker_slots()). A stored non-zero value for any key is honoured as an override, and
-PUT /settings still accepts and validates every key in RANGES. Readers of the automatic keys go through
+PUT /settings validates every key in RANGES. Constants nobody tunes (retention ages, snapshot limits, retry counts, job
+policy, shell and browser limits, subagent depth and hang clocks, the fetch cache) are read here directly, not from settings. Readers of the automatic keys go through
 context_window and slots, never the raw setting.
 """
 from __future__ import annotations
@@ -79,7 +80,9 @@ WORKER_MAX_CONCURRENT = 8          # workers running at once; the rest wait in a
 WORKER_MEMORY_FLOOR = 0.15         # a queued worker is not started while free system memory is below this share
 WORKER_RECHECK_SECONDS = 5.0       # how often a non-empty queue looks again for a free slot or recovered memory
 RUN_HEARTBEAT_SECONDS = 20.0       # a working child's agent_runs.updated_at is bumped at most this often (liveness, never a limit)
-WORKER_STALL_NOTE_SECONDS = 300    # a worker with no model, tool or job output this long says so in its status line (nothing is stopped)
+WORKER_STALL_NOTE_SECONDS = 300    # a worker with no model, tool or job output this long says so in its status line
+WORKER_STALL_NUDGE_SECONDS = 600   # ...and is sent one automatic message asking what it is blocked on (a worker waiting on a job or a session is not idle)
+WORKER_STALL_STOP_SECONDS = 1200  # ...and, still silent, is stopped and the front agent is woken with a stall report (resumable)
 
 # ---- Jobs ----
 JOB_RETRY_BACKOFF_S = 120          # retry backoff base, doubles per attempt
@@ -113,40 +116,26 @@ AUTOMATIC = ("autoArchiveDays", "contextWindow", "subagentMaxConcurrent", "deskM
 RANGES: dict[str, tuple[float, float]] = {
     "uiZoom": (80, 160),
     "subagentMaxConcurrent": (1, 20),
-    "subagentMaxDepth": (0, 3),
-    "subagentStaleSeconds": (0, 86_400),
-    "subagentToolSeconds": (0, 86_400),
-    "fileSnapshotMaxBytes": (0, 100_000_000),
-    "fileSnapshotRetainDays": (1, 365),
-    "fileSnapshotBudgetMB": (1, 20_000),
     "llmRetries": (0, 10),
     "llmIdleSeconds": (10, 3_600),
     "autoArchiveDays": (1, 3_650),  # 0 = off
-    "retainUsageDays": (7, 3_650),
     "contextWindow": (1000, 4_000_000),
     "compactAt": (0.1, 0.95),
     "microAt": (0.05, 0.95),
     "compactKeepRecent": (2, 200),
     "compactAtTokens": (4_000, 4_000_000),
     "compactKeepTokens": (1_000, 1_000_000),
-    "microAtTokens": (8_000, 4_000_000),
     "microKeep": (0, 50),
-    "retainTraceDays": (1, 3_650),
-    "retainToolResultDays": (1, 3_650),
-    "retainApprovalDays": (1, 3_650),
-    "toolReadRetries": (0, 5),
     "parallelReads": (1, 8),
-    "browserMaxTabs": (1, 12),
-    "browserIdleSeconds": (30, 86_400),
     "retrievalMinSimilarity": (0, 1),
     "retrievalPerDocCap": (1, 10),
     "retrievalCandidates": (5, 50),
-    "fetchCacheSeconds": (0, 86_400),
     "telegramLongRunMinutes": (1, 1440),
     "deskMaxLive": (1, 1000),
     "codingSessionMaxConcurrent": (1, 20),
     "delegationAfterRounds": (1, 20),
     "workerMaxConcurrent": (1, 16),
+    "planAutoApproveSeconds": (0, 600),  # 0 = off
 }
 
 

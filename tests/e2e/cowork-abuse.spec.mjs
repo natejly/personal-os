@@ -12,7 +12,7 @@ test('backend gone while a card is on screen: the click fails softly, the card s
   const { page } = grain
   const ws = homeScratch()
   try {
-    await grain.api('/settings', { method: 'PUT', body: { workspaceRoots: [ws], toolDeferAbove: 0 } })
+    await grain.api('/settings', { method: 'PUT', body: { toolDeferAbove: 0 } })
     await newChat(page)
     await say(page, `chat-gone !!tool shell_run ${JSON.stringify({ command: 'touch back.txt', cwd: ws })}`)
     await expect(card(page)).toBeVisible({ timeout: 90_000 })

@@ -12,7 +12,7 @@ test('backend crash while a chat approval waits: card is recorded, answering it 
   const { page } = grain
   const ws = homeScratch()
   try {
-    await grain.api('/settings', { method: 'PUT', body: { workspaceRoots: [ws], toolDeferAbove: 0 } })
+    await grain.api('/settings', { method: 'PUT', body: { toolDeferAbove: 0 } })
     await newChat(page)
     await say(page, `chat-crash !!tool shell_run {"command":"touch crashed.txt","cwd":"${ws}"}`)
     await expect(card(page)).toBeVisible({ timeout: 90_000 })

@@ -16,6 +16,7 @@ import { fmtCost } from '../lib/chatMeta'
 import { AskQuestion } from './DeskApprovalCard'
 import { GenericApproval, GenericBody } from './toolcards/GenericCard'
 import { OutputFiles, StatusDot } from './toolcards/parts'
+import { editedFileItem } from '../lib/showPanel'
 import SetupCard, { setupOf } from './toolcards/SetupCard'
 // Importing the index registers every dedicated card (TaskCard, FileCard, and whatever other workstreams add).
 import { TOOL_CARDS } from './toolcards'
@@ -412,6 +413,10 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
             {undoable(t) && t.undo && <UndoButton undo={t.undo} />}
           </>
         ) : <Row render={() => genericRow(t)} />}
+        {(() => {
+          const item = conversationId ? editedFileItem(t) : null
+          return item ? <button className="link small" title="Open this file in the side panel" onClick={() => useStore.getState().openShow(conversationId!, item)}>Open beside chat</button> : null
+        })()}
         {reviewLine(t.review) && <div className="tool-review muted small" title={reviewTitle(t.review)}>{reviewLine(t.review)}</div>}
         <OutputFiles event={t} conversationId={conversationId} />
         {/* The calendar cards carry their own connect notice. */}

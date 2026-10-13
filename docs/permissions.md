@@ -15,11 +15,15 @@ It holds only what the user changed; `permissions.DEFAULTS` fills in the rest on
 
 | Key | What it decides |
 | --- | --- |
+| `permissionMode` | `auto` (a reviewer model reads every call that is not known safe), `manual` (tool modes, grants and rules alone) or `allow_all` (no cards; see below) |
 | `tools` | Global mode per tool: on, ask or off |
 | `alwaysAsk` | External and scheduling tools that show a card in Auto and Manual, not in Allow everything |
 | `permissionRules` | `{allow, ask, deny}` lists of `Tool(pattern)` rules; deny beats ask beats allow |
-| `unattendedApprovals` | A job run that would ask: `deny` (refuse) or `ask` (park a card) |
-| `autoReviewModel` | Review gate: a second model looks at a call before it runs unasked |
+| `unattendedApprovals` | Manual mode only: a job run that would ask is refused (`deny`) or parks a card (`ask`) |
+| `autoReviewModel` | The model Auto mode's reviewer uses ("" = the fast model) |
+| `allowAllConnections` | Host lists admit any public hostname and MCP tools run without a per-tool grant |
+| `trustExternalContent` | Lifts the two taint-forced cards (a networked shell command, a write outside the desk) after untrusted content |
+| `codingRoute`, `codingAgent` | Repo edits go to a coding agent session, and which agent it starts by default |
 | `fetchAllowlist` | Hosts `fetch_url` may read after a reply touched untrusted content |
 | `browserAllowlist` | Hosts the agent's browser may open by typed URL after untrusted content (it also honours `fetchAllowlist`) |
 | `shellAllowedDomains` | Hosts the shell's and sandbox's egress proxy let through, beside package registries |
@@ -29,6 +33,9 @@ It holds only what the user changed; `permissions.DEFAULTS` fills in the rest on
 | `browserEnabled` | Whether desks get a browser |
 
 The three host lists stay separate fields because they gate different tools.
+
+Kept only so stored values load and old clients can still send them: `skipPermissions` (global and per chat) and
+`autoReview`. No gate reads either; `permissionMode` decides.
 
 API: `permissions.get(cfg, key)` reads one value from a settings dict (with its default); `load(rows)` returns all of
 them; `save(db, patch)` writes validated values; `update(db, fn)` is a read-modify-write under one write lock, used by
@@ -87,5 +94,4 @@ safety, folders, shell and sandbox network, browser, desks, skip permissions, fi
 Approval cards write into the same store: "Always" (`always_global`) adds to `tools`, "Always allow this pattern"
 (`always_rule`) adds to `permissionRules.allow`, "Allow this host" (`allow_host`) adds to `fetchAllowlist`.
 
-The composer's skip-permissions switch sets the chat's own value and say when they follow the default.
 Settings > Autonomy keeps the desk limits that are not permissions (turns, parking, vision, work environment).

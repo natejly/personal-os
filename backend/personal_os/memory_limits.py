@@ -10,6 +10,7 @@ RANK_DEPTH = 50          # how deep each ranker reads; well past the few lines a
 VECTOR_CAP = 5000        # rows the brute-force cosine ranker scans, newest first (a numpy dot over 5k short rows stays under ~10 ms); older rows past it are not scanned
 QUERY_TIMEOUT = 2.0      # seconds a chat turn waits for the query embedding before going lexical-only
 INDEX_BATCH = 200        # memories embedded per index() call, so a backfill never holds the route for long
+SCHEDULE_EVERY = 30.0    # seconds between a turn's full scans for memories or graph nodes still missing a vector
 QUERY_CHARS = 2000       # characters of the query that are embedded; the head of a message carries its topic
 EXPAND_TIMEOUT = 4.0     # seconds a turn waits for keyword variants (query_expand) when there is no query vector; then plain keywords
 W_EXPAND = 0.6           # the variants' keyword ranking against the query's own (1.0): a paraphrase hit counts for less than a literal one

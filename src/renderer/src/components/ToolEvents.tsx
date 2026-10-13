@@ -156,7 +156,7 @@ export function agentIds(preview: string): string[] {
   return out
 }
 
-const AGENT_DONE = ['done', 'error', 'interrupted', 'timed_out']
+const AGENT_DONE = ['done', 'error', 'interrupted', 'timed_out', 'unknown']  // 'unknown': the lookup kept failing
 
 /** One tape line in words: the verb for the call and what it acts on, or the start of its result. */
 function describeTape(e: RunTapeEvent): string {
@@ -178,6 +178,7 @@ export function AgentRunCard({ id }: { id: string }): JSX.Element {
   useEffect(() => {
     let dead = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    let misses = 0
     const poll = async (): Promise<void> => {
       try {
         const r = await api.agentRun(id)
@@ -187,7 +188,12 @@ export function AgentRunCard({ id }: { id: string }): JSX.Element {
         setName(String(inp.title || inp.role || String(inp.task ?? '').split('\n').find((l) => l.replace(/^#+\s*/, '').trim() && !l.startsWith('#')) || '').slice(0, 60))
         setCost(typeof r.budget?.cost === 'number' ? r.budget.cost : null)
         if (!AGENT_DONE.includes(r.status)) timer = setTimeout(() => void poll(), 2000)
-      } catch { /* the row may not exist yet; try again */ if (!dead) timer = setTimeout(() => void poll(), 3000) }
+      } catch {
+        // The row may not exist yet, so a few misses are retried; one that never appears (its store failed) stops the polling.
+        if (dead) return
+        if (++misses < 5) timer = setTimeout(() => void poll(), 3000)
+        else setStatus('unknown')
+      }
     }
     void poll()
     return () => { dead = true; if (timer) clearTimeout(timer) }

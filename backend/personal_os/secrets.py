@@ -68,7 +68,10 @@ class SecretStore:
             # The file wins: it only holds a value the Keychain refused, so it is newer than any Keychain copy.
             value = self._file_read().get(name)
             if value is None and self.use_keychain:
-                value = self._kc_get(name)
+                try:
+                    value = self._kc_get(name)
+                except OSError:
+                    return None  # a failed read is not "no secret": the next get asks again
             self._cache[name] = value
             _teach_logs(value)
             return value

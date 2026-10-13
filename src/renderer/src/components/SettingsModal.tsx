@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { X, Search, Plug, Cpu, Bot, Palette, ShieldCheck, SlidersHorizontal, KeyRound, Gauge, Brain, PanelLeft, type Icon } from '../icons'
-import { useStore } from '../store'
+import { useShallow } from 'zustand/react/shallow'
+import { useStore, setSettingsGuard } from '../store'
 import { modeOf, MODES } from '../lib/permissionMode'
 import { resolveTab, searchSettings, type SettingsTab } from '../lib/settingsTabs'
 import { useOnboarding } from './onboarding/onboardingStore'
@@ -47,7 +48,7 @@ export default function SettingsModal(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const models = useStore((s) => s.models)
   const view = useStore((s) => s.view)
-  const { saveSettings, setSettingsOpen, setView, toast } = useStore()
+  const { saveSettings, setSettingsOpen, setView, toast } = useStore(useShallow((s) => ({ saveSettings: s.saveSettings, setSettingsOpen: s.setSettingsOpen, setView: s.setView, toast: s.toast })))
   const [draft, setDraft] = useState<Settings>(settings)
   const [saving, setSaving] = useState(false)
   // Set while the footer asks whether to throw the draft away; it remembers what the answer leads to.
@@ -137,6 +138,11 @@ export default function SettingsModal(): JSX.Element {
     if (dirty) setPending((p) => p ?? 'close')
     else setSettingsOpen(false)
   }
+  // A link inside Settings navigates through the store; with a dirty draft the store asks through here instead of closing.
+  useEffect(() => {
+    setSettingsGuard(dirty ? () => setPending((p) => p ?? 'close') : null)
+    return () => setSettingsGuard(null)
+  }, [dirty])
   const discard = (): void => {
     const then = pending
     setPending(null)

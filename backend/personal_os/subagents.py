@@ -41,7 +41,7 @@ from typing import Any, Callable
 from . import approval_log, autoreview, coding_route, compaction, context_map, fsx, limits, llm, mac, mcp_search, permissions, permrules, redact
 from .db import new_id, now
 from . import toolcore
-from .toolcalls import parse_arguments, resolve_name
+from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .trace import Tracer, now_ms
 from .stuck import POLL_HINT_AFTER, POLL_TOOLS, STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector, result_digest
 from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, DISCARDED, ToolSpec, _obj, allows_slug, call_key, denied, summarize_result, tool_error
@@ -512,6 +512,7 @@ class Child:
     last_activity: float = field(default_factory=time.monotonic)
     tool_since: float | None = None
     task_obj: Any = None
+    writing: int = 0                # write/external calls in flight: Stop gives them STOP_GRACE_SECONDS before cancelling
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     cancel: asyncio.Event = field(default_factory=asyncio.Event)
     background: bool = False
@@ -526,6 +527,7 @@ class Child:
     beat_at: float = 0.0            # when the run row's updated_at was last bumped (wall clock)
     stalled: bool = False           # past WORKER_STALL_NOTE_SECONDS without progress (status line)
     nudged_at: float = 0.0          # wall clock of the automatic stall nudge; 0 until sent, and again once the worker shows progress
+    seen_ids: set[str] = field(default_factory=set)  # every call id this child used: a provider restarts numbering each round
     steers: list[str] = field(default_factory=list)   # user messages sent straight to this child, folded in at its next round
     # Stuck detection, the same helpers the main reply loop uses.
     detector: StuckDetector = field(default_factory=StuckDetector)
@@ -1049,6 +1051,7 @@ class Subagents:
             if ch.halt_reason:
                 raise _Halt(ch.halt_reason)
             calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
+            ensure_unique_call_ids(calls, ch.seen_ids)  # else a reused id picks up an earlier call's approval
             if text:
                 ch.text = text
             if not calls and ch.steers:
@@ -1211,11 +1214,19 @@ class Subagents:
             forced = forced or taint_only
             lockable = bool(self.toolbox.ask_locked(spec) or self.toolbox.forces_ask(name, args, ch.ctx))
             hard_forced = hard_forced or taint_only or self.toolbox.forces_card(name, args, ch.ctx) or (lockable and tainted)
-            pre_mode = mode
             from . import shell as shell_mod
+            desk, pcwd = shell_mod.perm_where(self.toolbox, ch.ctx)
+            # The chat loop's desk rule (shell.auto_ok): a sandboxed shell_run inside the desk workspace, on the tool's default
+            # `ask`, needs no card or review. Rules, doom-loop and plan mode below can still ask.
+            desk_cleared = (name == "shell_run" and mode == "ask" and raw_mode == "ask" and not forced and bool(desk)
+                            and shell_mod.auto_ok(args, ch.ctx, ch.ctx.get("settings") or self.settings(), desk))
+            if desk_cleared:
+                mode = "on"
+            pre_mode = mode
+            # A file tool's relative path starts at the desk, else home (not a narrowed root), as the tool resolves it.
+            pcwd = pcwd if name == "shell_run" else (desk[0] if desk else os.path.expanduser("~"))
             perm = permrules.resolve(name, args, mode, forced, rules=self.settings().get("permissionRules"),
-                                     roots=self._perm_roots(ch), conv=ch.conversation_id,
-                                     cwd=shell_mod.perm_where(self.toolbox, ch.ctx)[1] if name == "shell_run" else None,
+                                     roots=self._perm_roots(ch), conv=ch.conversation_id, cwd=pcwd,
                                      doom=ch.detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
             mode, forced = perm.mode, perm.forced
             bad = perm.refusal or self._confine(ch, name, args) or coding_route.check(self.toolbox, name, args, ch.ctx)
@@ -1227,7 +1238,7 @@ class Subagents:
                     pmode, mode=mode, danger=spec.danger, explicit_on=explicit == "on",
                     explicit_ask=(explicit == "ask" and not self.toolbox.ask_locked(spec)) or (
                         mode == "ask" and perm.kind in ("rule", "external_directory")),
-                    covered=(pre_mode == "ask" and mode == "on") or bool(perm.rule and mode == "on"),
+                    covered=desk_cleared or (pre_mode == "ask" and mode == "on") or bool(perm.rule and mode == "on"),
                     hard_forced=hard_forced, soft_forced=lockable and not hard_forced,
                     # a sensitive-path read/write, a tainted write or a runaway repeat stays a card in auto (allow-all runs it)
                     fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop"),
@@ -1403,7 +1414,11 @@ class Subagents:
         async def go() -> Any:
             return await self.toolbox.call(name, args, ch.ctx)
         if spec.danger in ("writes", "external") and self.store is not None:
-            res, replayed = await self.store.call_once(ch.id, ch.rounds, name, args, go, call_id=uid, inherit=ch.resume_of or None)
+            ch.writing += 1
+            try:
+                res, replayed = await self.store.call_once(ch.id, ch.rounds, name, args, go, call_id=uid, inherit=ch.resume_of or None)
+            finally:
+                ch.writing -= 1
             if replayed and isinstance(res, dict):
                 res = {**res, "replayed": True}
             return res
@@ -1617,7 +1632,17 @@ class Subagents:
         ch.halt_reason = ch.halt_reason or reason
         ch.cancel.set()
         if ch.task_obj is not None and not ch.task_obj.done():
-            ch.task_obj.cancel()
+            if ch.writing:  # a write gets the grace the main loop gives it; _exec's _check ends the child once it returns
+                asyncio.get_running_loop().call_later(limits.STOP_GRACE_SECONDS, lambda t=ch.task_obj: t.done() or t.cancel())
+            else:
+                ch.task_obj.cancel()
+
+    async def end_of_run(self, run: Any) -> None:
+        """A reply ended: the background children it never collected stop now, not after their next round.
+        Workers (detached) outlive the reply by design."""
+        for c in list(self.children.values()):
+            if not c.detached and not c.finished.is_set() and c.ctx.get("run") is run:
+                self.stop_tree(c.id)
 
     def stop_tree(self, cid: str, reason: str = "interrupted") -> list[str]:
         """Stop a child and everything below it, leaves first. Every one still returns its partial output."""
@@ -1767,11 +1792,20 @@ class Subagents:
             return {"agents": [], "note": "No background subagents to wait for."}
         deadline = time.monotonic() + max(0.0, min(float(timeout_s), 600.0))
         stop = ctx.get("stop")
-        while time.monotonic() < deadline and not all(c.finished.is_set() for c in picked):
-            if stop is not None and stop.is_set():
-                for c in picked:
-                    self.stop_tree(c.id)
-            await asyncio.sleep(0.05)
+        # Sleeps until a child ends or Stop lands; a Stop stops the children and still waits for their partial reports.
+        waits = {asyncio.ensure_future(c.finished.wait()) for c in picked}
+        stopper = asyncio.ensure_future(stop.wait()) if stop is not None else None
+        try:
+            while waits and (left := deadline - time.monotonic()) > 0:
+                done, _ = await asyncio.wait(waits | ({stopper} if stopper else set()), timeout=left, return_when=asyncio.FIRST_COMPLETED)
+                waits -= done
+                if stopper is not None and stopper in done:
+                    stopper = None
+                    for c in picked:
+                        self.stop_tree(c.id)
+        finally:
+            for f in waits | ({stopper} if stopper else set()):
+                f.cancel()
         agents = [self.report(c) if c.finished.is_set() else {"agent_id": c.id, "role": c.role.name, "state": "running"} for c in picked]
         return {"agents": agents, "still_running": [c.id for c in picked if not c.finished.is_set()]}
 

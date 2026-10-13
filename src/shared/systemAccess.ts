@@ -108,9 +108,13 @@ export function buildRows(main: MainStatus, backend: BackendAccess | null, probe
   ]
 }
 
-/** Ids still to grant: native prompts first, then the ones that need System Settings. */
-export function grantAllPlan(rows: AccessRow[]): string[] {
-  const todo = rows.filter((r) => r.state !== 'granted')
+/** Grants whose ask has no side effects. The automation probes launch their target app, and Screen Recording is
+ *  better asked when a tool first needs it. */
+export const QUIET_GRANTS = new Set(['microphone', 'notifications', 'fullDisk'])
+
+/** Ids still to grant: native prompts first, then the ones that need System Settings. `quietOnly` keeps QUIET_GRANTS. */
+export function grantAllPlan(rows: AccessRow[], quietOnly = false): string[] {
+  const todo = rows.filter((r) => r.state !== 'granted' && (!quietOnly || QUIET_GRANTS.has(r.id)))
   return [...todo.filter((r) => r.kind === 'native'), ...todo.filter((r) => r.kind === 'pane')].map((r) => r.id)
 }
 

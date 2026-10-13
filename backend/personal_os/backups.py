@@ -6,11 +6,14 @@ while the app is running; it is written to a `.tmp` name and renamed so a half-w
 listed.
 
 Kinds and rotation (applied after every backup, per kind):
-  daily       taken at startup and then by a timer once nothing newer than 24h exists;
+  daily       taken a few minutes after startup and then by a timer once nothing newer than 24h exists;
               keep the newest 7, plus the newest one of each of the 4 most recent ISO weeks
   manual      "Back up now": keep the newest 10
   premigrate  before a pending schema migration; prerestore: the live DB set aside by a restore.
               keep the newest 3 of each
+Then, while all backups together exceed SIZE_CAP_FACTOR x the live database (at least SIZE_CAP_FLOOR), the
+oldest daily backups go, down to the newest one. Each backup is a full copy, so the per-kind counts alone let
+the folder grow to ~27x the database.
 
 Restore never hot-swaps the live database. stage_restore() records the choice in backups/restore.pending;
 apply_pending_restore() runs at startup BEFORE the database is opened, sets the current file aside as
@@ -46,6 +49,8 @@ FAILED = "restore.failed"  # {name, error, at}: a staged restore that could not 
 KINDS = ("daily", "manual", "premigrate", "prerestore")
 DAILY_KEEP, WEEKLY_KEEP, MANUAL_KEEP, SAFETY_KEEP = 7, 4, 10, 3
 DAY = 24 * 3600.0
+SIZE_CAP_FACTOR, SIZE_CAP_FLOOR = 3, 1 << 30
+FIRST_RUN_DELAY_S = 300.0  # the first daily backup waits out startup instead of racing first paint for I/O
 _NAME = re.compile(r"^grain-\d{8}-\d{6}(-\d+)?-(daily|manual|premigrate|prerestore)\.db$")
 
 
@@ -67,6 +72,14 @@ def _schema_version(path: Path) -> int:
     c = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
         return int(c.execute("PRAGMA user_version").fetchone()[0])
+    finally:
+        c.close()
+
+
+def _schema_drift(path: Path) -> list[str]:
+    c = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        return migrations.drift(c)
     finally:
         c.close()
 
@@ -121,8 +134,9 @@ def delete(data_dir: Path, name: str) -> None:
 
 def rotate(data_dir: Path) -> list[str]:
     """Apply the retention policy in the module docstring; returns the names removed."""
+    everything = list_backups(data_dir)
     by_kind: dict[str, list[dict[str, Any]]] = {}
-    for b in list_backups(data_dir):
+    for b in everything:
         by_kind.setdefault(b.get("kind", "manual"), []).append(b)
     drop: list[str] = []
     daily = by_kind.get("daily", [])
@@ -138,6 +152,17 @@ def rotate(data_dir: Path) -> list[str]:
         drop += [b["name"] for b in by_kind.get(kind, [])[SAFETY_KEEP:]]
     staged = (pending_restore(data_dir) or {}).get("name")
     drop = [n for n in drop if n != staged]  # a backup waiting to be restored outlives retention
+    try:
+        live = (Path(data_dir) / DB_NAME).stat().st_size
+    except OSError:
+        live = 0
+    total = sum(b.get("size") or 0 for b in everything if b["name"] not in drop)
+    for b in reversed([b for b in daily if b["name"] not in drop][1:]):  # oldest first; the newest daily stays
+        if total <= max(SIZE_CAP_FACTOR * live, SIZE_CAP_FLOOR):
+            break
+        if b["name"] != staged:
+            drop.append(b["name"])
+            total -= b.get("size") or 0
     for n in drop:
         delete(data_dir, n)
     return drop
@@ -403,13 +428,14 @@ def _write_zip(part: Path, snap: Path, data_dir: Path) -> None:
 class Backups:
     """The daily timer. Same shape as Outbox.loop: one task, cancelled at shutdown."""
 
-    def __init__(self, data_dir: Path, tick: float = 3600.0):
-        self.data_dir, self.tick = Path(data_dir), tick
+    def __init__(self, data_dir: Path, tick: float = 3600.0, first_delay: float = FIRST_RUN_DELAY_S):
+        self.data_dir, self.tick, self.first_delay = Path(data_dir), tick, first_delay
 
     def run_due(self) -> dict[str, Any] | None:
         return create(self.data_dir, "daily") if due(self.data_dir) else None
 
     async def loop(self) -> None:
+        await asyncio.sleep(self.first_delay)
         while True:
             try:
                 await asyncio.to_thread(self.run_due)
@@ -431,7 +457,8 @@ def router(data_dir: Path) -> Any:
     def overview() -> dict[str, Any]:
         bs = list_backups(data_dir)
         return {"data_dir": str(data_dir), "backups": bs, "last_backup": bs[0]["created_at"] if bs else None,
-                "pending_restore": pending_restore(data_dir), "restore_failed": restore_failed(data_dir), "schema_version": migrations.latest(), "app_version": APP_VERSION}
+                "pending_restore": pending_restore(data_dir), "restore_failed": restore_failed(data_dir), "schema_version": migrations.latest(), "app_version": APP_VERSION,
+                "schema_drift": _schema_drift(data_dir / DB_NAME)}
 
     @r.post("/backups")
     async def backup_now() -> dict[str, Any]:

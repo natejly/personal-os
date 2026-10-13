@@ -60,6 +60,12 @@ def test_add_arrange_and_guards() -> None:
         assert len(wins) == 5
         if layout == "grid":
             assert not any(_overlap(a, b) for i, a in enumerate(wins) for b in wins[i + 1:])
+    spare = cv.get(sid)["windows"][-1]["id"]
+    cv.delete_window(spare)
+    call("space_arrange", canvas_id=sid, layout="grid")  # 4 windows tile in 2 columns; a fifth must still land clear
+    new_id = call("space_add_widget", canvas_id=sid, kind="todos")["window_id"]
+    new = cv.window(new_id)
+    assert not any(_overlap(new, b) for b in cv.get(sid)["windows"] if b["id"] != new_id)
     assert call("space_arrange", canvas_id=sid, layout="x")["error"]
     cv.update(sid, {"locked": True})
     assert call("space_arrange", canvas_id=sid)["error"]

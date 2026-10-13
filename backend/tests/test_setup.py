@@ -23,6 +23,7 @@ client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 
 
 def _clear() -> None:
+    db.secrets.delete("providerKeys")  # a key saved by an earlier test would satisfy a later "needs a key" check
     db.set_settings({"baseUrl": "", "apiKey": "", "provider": None, "onboardedAt": None, "defaultModel": "", "extractionModel": ""})
 
 
@@ -87,7 +88,7 @@ class StatusTests(unittest.TestCase):
     def test_providers_route(self) -> None:
         ps = client.get("/setup/providers").json()["providers"]
         self.assertEqual(len(ps), 7)
-        self.assertEqual(set(ps[0]), {"id", "name", "baseUrl", "needsKey", "keyUrl", "defaultModel", "models", "note", "rerankModel", "tiers"})
+        self.assertEqual(set(ps[0]), {"id", "name", "baseUrl", "needsKey", "keyUrl", "defaultModel", "models", "note", "rerankModel", "embeddingModel", "tiers"})
 
     def test_requires_token(self) -> None:
         self.assertEqual(TestClient(app).get("/setup/status").status_code, 401)
@@ -186,6 +187,8 @@ class CompleteTests(unittest.TestCase):
         _clear()
 
     def test_complete_persists_and_stamps_then_reset_clears(self) -> None:
+        db.set_settings({"extractionModel": "deepseek-v4-flash", "embeddingModel": "accounts/fireworks/models/qwen3-embedding-8b",
+                         "retrievalRerankModel": "accounts/fireworks/models/qwen3-reranker-8b"})
         r = client.post("/setup/complete", json={"provider": "openai", "baseUrl": "https://api.openai.com/v1", "apiKey": " sk-1 ", "model": "gpt-5-mini"})
         self.assertEqual(r.status_code, 200)
         s = r.json()
@@ -194,11 +197,13 @@ class CompleteTests(unittest.TestCase):
         self.assertEqual((s["provider"], s["model"]), ("openai", "gpt-5-mini"))
         self.assertTrue(s["onboardedAt"])
         stored = db.get_settings()
-        self.assertEqual(stored["apiKey"], "sk-1")
-        self.assertEqual(stored["embeddingModel"], "text-embedding-3-small")  # picked from the new key
+        self.assertEqual((stored["apiKey"], stored["extractionModel"]), ("sk-1", ""))
+        self.assertEqual((stored["embeddingModel"], stored["retrievalRerankModel"]), ("text-embedding-3-small", ""))  # picked from the new key
         s = client.post("/setup/reset").json()
         self.assertIsNone(s["onboardedAt"])
         self.assertEqual(s["provider"], "openai")
+        client.post("/setup/complete", json={"provider": "anthropic", "baseUrl": "", "apiKey": "sk-a", "model": "claude-sonnet-5-5"})
+        self.assertEqual(db.get_settings()["embeddingModel"], "")  # the endpoint has no embeddings route
 
     def test_validation(self) -> None:
         for body in ({"provider": "nope", "baseUrl": "x", "model": "m"},
@@ -212,6 +217,19 @@ class CompleteTests(unittest.TestCase):
         r = client.post("/setup/complete", json={"provider": "ollama", "baseUrl": "", "apiKey": None, "model": "llama3.2"})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["baseUrl"], "http://localhost:11434/v1")
+
+    def test_switching_provider_resets_the_other_model_fields(self) -> None:
+        old = {"modelHigh": "ember-1", "retrievalRerankModel": "qwen3-reranker-8b", "visionModel": "glm-5.3", "embeddingModel": "qwen3-embedding-8b"}
+        db.set_settings({"provider": "litellm", "baseUrl": "http://localhost:4000", **old})
+        body = {"provider": "litellm", "baseUrl": "http://localhost:4000", "apiKey": None, "model": "kimi-k3"}
+        self.assertEqual(client.post("/setup/complete", json=body).status_code, 200)
+        self.assertEqual({k: db.get_settings()[k] for k in old}, old)  # same provider: kept
+        r = client.post("/setup/complete", json={"provider": "fireworks", "baseUrl": "", "apiKey": "fw-1", "model": "accounts/fireworks/models/kimi-k3"})
+        self.assertEqual(r.status_code, 200)
+        s = db.get_settings()
+        self.assertEqual((s["modelHigh"], s["retrievalRerankModel"], s["visionModel"]), ("", "", ""))
+        self.assertEqual(s["embeddingModel"], "accounts/fireworks/models/qwen3-embedding-8b")
+        db.set_settings({**{k: "" for k in old}, "embeddingModel": llm.DEFAULT_SETTINGS["embeddingModel"]})
 
     def test_keyless_rerun_keeps_saved_key_for_same_endpoint(self) -> None:
         db.set_settings({"provider": "litellm", "baseUrl": "http://localhost:4000", "apiKey": "sk-proxy"})

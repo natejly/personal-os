@@ -2,6 +2,7 @@ import { RefreshCw, X } from '../icons'
 import { useStore } from '../store'
 import VariantSwitcher from './VariantSwitcher'
 import { followupsFor } from '../lib/followups'
+import { errorAction } from '../lib/errorAction'
 import { insertIntoComposer } from '../lib/composerInsert'
 import type { Message } from '@shared/types'
 
@@ -25,7 +26,8 @@ export default function RegenRow({ conversationId, last, streaming }: { conversa
   return (
     <>
       <div className="regen-row">
-        <button className="ghost-btn" onClick={() => void regenerate(conversationId)}><RefreshCw size={13} /> Regenerate</button>
+        {/* The error row under the reply already offers Retry, which does the same thing. */}
+        {!(last.error && errorAction(last.error_kind)?.action === 'retry') && <button className="ghost-btn" onClick={() => void regenerate(conversationId)}><RefreshCw size={13} /> Regenerate</button>}
         <VariantSwitcher conversationId={conversationId} message={last} />
       </div>
       {chips.length > 0 && (

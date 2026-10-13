@@ -73,6 +73,12 @@ def parse_date(v: Any) -> date | None:
         return None
     s = str(v).strip()
     m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", s)
+    if m and re.search(r"[T ]\d\d:\d\d.*(Z|[+-]\d\d:?\d\d)$", s):
+        # A GMT or offset timestamp is an instant: file it under the local day it happened, as epochs are.
+        try:
+            return datetime.fromisoformat(s).astimezone().date()
+        except ValueError:
+            pass
     if m:
         try:
             return date(int(m[1]), int(m[2]), int(m[3]))

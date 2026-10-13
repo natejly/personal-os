@@ -76,6 +76,7 @@ for d in (mine, theirs):
     documents.set_pinned(d["id"], True)
 sys_, used = build(project_id=proj["id"])
 check("## Pinned files" in sys_ and "pinned body" in sys_, "pinned text in prompt")
+check("## Pinned files" in used["stable_system"], "pinned files sit in the cached prefix")
 check([p["document_id"] for p in used["pinned"]] == [mine["id"]], "used['pinned'] lists the doc")
 check("SECRET" not in sys_, "other project's pin out of scope")
 check("…(truncated)" in sys_ and "w" * 4000 not in sys_, "clipped to the limit")

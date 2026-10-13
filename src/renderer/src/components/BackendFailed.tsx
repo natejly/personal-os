@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { BackendInfo } from '@shared/types'
 import { AlertTriangle, Copy, FolderOpen, RefreshCw } from '../icons'
 import { useStore } from '../store'
 
@@ -6,6 +7,10 @@ import { useStore } from '../store'
 export default function BackendFailed({ message }: { message: string }): JSX.Element {
   const [retrying, setRetrying] = useState(false)
   const toast = useStore((s) => s.toast)
+  const [info, setInfo] = useState<BackendInfo | null>(null)
+  useEffect(() => { window.os.backendInfo().then(setInfo, () => setInfo(null)) }, [])
+  // Source-setup hints only help someone running from a checkout; a packaged build's report needs the version and logs.
+  const fromSource = info ? !info.packaged : false
 
   // Asks the main process to respawn the backend, then re-runs init against it.
   const retry = async (): Promise<void> => {
@@ -22,8 +27,9 @@ export default function BackendFailed({ message }: { message: string }): JSX.Ele
 
   const details = [
     `Grain backend error: ${message}`,
-    'Setup from source: cd backend && uv venv && uv pip install -e .',
-    'Or run the backend yourself and set PERSONAL_OS_BACKEND_URL.'
+    ...(fromSource
+      ? ['Setup from source: cd backend && uv venv && uv pip install -e .', 'Or run the backend yourself and set PERSONAL_OS_BACKEND_URL.']
+      : info ? [`Grain ${info.appVersion} (Electron ${info.electron})`, `Logs: ${info.logDir}`] : [])
   ].join('\n')
   const copy = (): void => {
     void navigator.clipboard.writeText(details).then(() => toast('Details copied'), () => toast('Could not copy', 'error'))
@@ -44,10 +50,10 @@ export default function BackendFailed({ message }: { message: string }): JSX.Ele
         <details>
           <summary>Details</summary>
           <pre>{message}</pre>
-          <p className="muted">
+          {fromSource && <p className="muted">
             Running from source? Set the backend up once with <code>cd backend && uv venv && uv pip install -e .</code>, then relaunch.
             Or run it yourself and set <code>PERSONAL_OS_BACKEND_URL</code>.
-          </p>
+          </p>}
         </details>
       </div>
     </div>

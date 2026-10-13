@@ -45,7 +45,7 @@ from mcp import ClientSession, Implementation, StdioServerParameters, stdio_clie
 from mcp.client.sse import sse_client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
-from . import mac, mcp_drift, mcp_path, redact
+from . import mac, mcp_catalog, mcp_drift, mcp_path, redact
 from .vision import MAX_FILE_BYTES
 from .mcp_oauth import McpNeedsAuth, OAuthFlows, SignIn, headers_of
 from .mcp_servers import DEFAULT_DANGER, McpServers
@@ -55,6 +55,8 @@ log = logging.getLogger(__name__)
 CLIENT_INFO = Implementation(name="grain", version="0.1.0")
 
 CONNECT_TIMEOUT = 20.0     # spawn + initialize + first tools/list
+FIRST_CONNECT_TIMEOUT = 120.0  # the same, the first time a package runner starts: it downloads the server first
+PACKAGE_RUNNERS = frozenset({"npx", "uvx", "bunx"})
 CALL_TIMEOUT = 45.0        # one tools/call, unless the caller asks for less
 READY_TIMEOUT = 8.0        # how long a caller waits on a server that is (re)connecting
 PING_TIMEOUT = 5.0         # a healthy server answers ping in well under this
@@ -141,6 +143,7 @@ class _Config:
     env: dict[str, str]
     url: str = ""
     headers: dict[str, str] | None = None
+    call_timeout: float = 0.0  # the catalog entry's own tools/call ceiling (a coding agent's long prompt); 0 = the default
 
     def signature(self) -> str:
         return json.dumps([self.transport, self.command, self.args, self.cwd, sorted(self.env.items()),
@@ -156,7 +159,8 @@ def _config_from(store: McpServers, server_id: str) -> _Config | None:
     headers = {k: v or env.get(k, "") for k, v in headers_of(row.get("headers")).items()}
     return _Config(id=row["id"], slug=row["slug"], name=row["name"], transport=row["transport"],
                    command=row["command"], args=[str(a) for a in (row["args"] or [])], cwd=row["cwd"] or "",
-                   env=env, url=row.get("url") or "", headers=headers)
+                   env=env, url=row.get("url") or "", headers=headers,
+                   call_timeout=float((mcp_catalog.get(row.get("catalog_id") or "") or {}).get("call_timeout") or 0))
 
 
 def is_grain_python(command: str) -> bool:
@@ -526,11 +530,15 @@ class _Supervisor:
         err = self._err = _Stderr(self.stderr)
         self._check_now = anyio.Event()
         self._relist = anyio.Event()
+        limit = self.connect_timeout
+        if not self.server_info and os.path.basename(self.config.command) in PACKAGE_RUNNERS:
+            limit = max(limit, FIRST_CONNECT_TIMEOUT)
+            self._set_status("connecting", "starting; a first run downloads the server")
         try:
             async with _open(self.config, err, self.oauth) as (read, write):
                 async with ClientSession(read, write, read_timeout_seconds=self.call_timeout,
                                          client_info=CLIENT_INFO, message_handler=self._on_message) as session:
-                    with anyio.fail_after(self.connect_timeout):
+                    with anyio.fail_after(limit):
                         init = await session.initialize()
                         listing = await session.list_tools()
                     self.server_info = {"name": init.server_info.name, "version": init.server_info.version,
@@ -596,9 +604,11 @@ class _Supervisor:
     async def _heartbeat(self, session: ClientSession, err: _Stderr) -> None:
         """Ping on an interval, or on demand after a suspicious call. A failed ping ends the cycle."""
         while True:
-            with anyio.move_on_after(PING_INTERVAL):
+            with anyio.move_on_after(PING_INTERVAL) as idle:
                 await self._check_now.wait()
                 self._check_now = anyio.Event()
+            if idle.cancelled_caught and self._inflight:
+                continue  # a server busy with a long call may miss a ping; that call's own timeout covers a wedged one
             err.drain()
             with anyio.fail_after(PING_TIMEOUT):
                 await session.send_ping()
@@ -644,7 +654,7 @@ class _Supervisor:
 
     # ---------- calls ----------
     async def call(self, name: str, arguments: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
-        limit = float(timeout or self.call_timeout)
+        limit = float(timeout or self.config.call_timeout or self.call_timeout)
         if self._stop.is_set() or self._task is None or self._task.done():
             raise McpUnavailable(f"{self.config.name} is not running")
         if not self._ready.is_set():
@@ -801,6 +811,7 @@ class McpClient:
         return all(results)
 
     async def restart(self, server_id: str) -> dict[str, Any] | None:
+        mcp_path.forget()  # "install X, then restart this connector": see what was just installed
         async with self._sync_lock:
             sup = self._supervisors.pop(server_id, None)
             if sup:
@@ -810,8 +821,9 @@ class McpClient:
         return sup.info() if sup else None
 
     async def stop(self) -> None:
-        for sid in list(self._supervisors):
-            await self._supervisors.pop(sid).stop()
+        # Together, not in turn: the app gives the backend a few seconds at quit, and each stop can take several.
+        sups = [self._supervisors.pop(sid) for sid in list(self._supervisors)]
+        await asyncio.gather(*(s.stop() for s in sups), return_exceptions=True)
         if self.oauth:
             await self.oauth.stop()
 

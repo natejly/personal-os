@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { X } from '../icons'
 import type { SubagentView } from '@shared/types'
 import { api } from '../lib/api'
@@ -13,7 +14,7 @@ import { workerIsLive } from '../lib/workers'
  * that started it (the reply can agent_spawn it with resume_id), so the message goes there instead.
  */
 export default function SubagentPanel({ id }: { id: string }): JSX.Element {
-  const { openSubagent, toast } = useStore()
+  const { openSubagent, toast } = useStore(useShallow((s) => ({ openSubagent: s.openSubagent, toast: s.toast })))
   const [view, setView] = useState<SubagentView | null>(null)
   useEffect(() => { api.subagents.get(id).then(setView).catch(() => undefined) }, [id])
   const role = String(view?.run.input?.role ?? view?.agent?.role ?? 'agent')

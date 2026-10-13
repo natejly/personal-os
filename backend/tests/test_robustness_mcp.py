@@ -118,6 +118,42 @@ class TestCalls(Base):
         await sup._dispatch(session, queued)  # type: ignore[arg-type]
         self.assertEqual(session.sent, [])
 
+    async def test_a_catalog_entry_sets_its_own_call_timeout(self) -> None:
+        from personal_os.mcp_client import _config_from
+        long_ = self.store.create_server("OC", command="x", catalog_id="opencode")
+        plain = self.store.create_server("P", command="x")
+        self.assertEqual(_config_from(self.store, long_["id"]).call_timeout, 960)  # type: ignore[union-attr]
+        self.assertEqual(_config_from(self.store, plain["id"]).call_timeout, 0)  # type: ignore[union-attr]
+        sup = _Supervisor(self.store, _config_from(self.store, long_["id"]), call_timeout=10.0)  # type: ignore[arg-type]
+        sup._ready.set()
+        sup._task = asyncio.create_task(asyncio.sleep(30))
+        self.addCleanup(sup._task.cancel)
+        t = asyncio.create_task(sup.call("opencode_prompt", {}))
+        await asyncio.sleep(0.05)
+        self.assertEqual(sup._queue.get_nowait().timeout, 960)  # the entry's ceiling, not the 10 s default
+        t.cancel()
+
+    async def test_no_interval_ping_while_a_call_is_in_flight(self) -> None:
+        from personal_os.mcp_client import _config_from
+        srv = self.store.create_server("Busy", command="x")
+        sup = _Supervisor(self.store, _config_from(self.store, srv["id"]))  # type: ignore[arg-type]
+        pings: list[int] = []
+
+        class Session:
+            async def send_ping(self) -> None:
+                pings.append(1)
+
+        busy = _Call("slow", {}, 30.0, asyncio.get_running_loop().create_future())
+        sup._inflight.add(busy)
+        with unittest.mock.patch.object(mcp_client, "PING_INTERVAL", 0.02):
+            hb = asyncio.create_task(sup._heartbeat(Session(), _Stderr([])))  # type: ignore[arg-type]
+            await asyncio.sleep(0.15)
+            self.assertEqual(pings, [], "a busy server is not pinged on the interval")
+            sup._inflight.clear()
+            await asyncio.sleep(0.1)
+            hb.cancel()
+        self.assertTrue(pings, "an idle one is")
+
     async def test_a_cancelled_caller_abandons_its_call(self) -> None:
         srv = self.store.create_server("Q2", command="x")
         from personal_os.mcp_client import _config_from

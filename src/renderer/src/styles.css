@@ -886,6 +886,9 @@ kbd {
 .messages-inner { max-width: var(--chat-col); margin: 0 auto; padding: 14px 24px 8px; }
 
 .msg { display: flex; gap: 10px; margin-bottom: 4px; }
+/* The history is not windowed: off-screen replies skip layout and paint (their markdown, code and charts) until
+   scrolled near. Assistant rows only, since paint containment would clip a stacked user row's zero-height actions. */
+.messages-inner > .msg.assistant { content-visibility: auto; contain-intrinsic-size: auto 120px; }
 .avatar {
   width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
@@ -988,6 +991,7 @@ kbd {
 .run-error-row { display: flex; align-items: center; gap: 10px; margin: 6px 0 0 46px; font-size: 13px; color: var(--text-muted); }
 
 .msg.user.pending .user-bubble { opacity: 0.6; }
+.pending-queued { margin-top: 4px; font-size: 11.5px; color: var(--text-muted); text-align: right; }
 /* Files on a message or waiting in the composer: one chip per file, the name cut with an ellipsis. */
 .msg-files, .composer-files { display: flex; flex-wrap: wrap; gap: 6px; }
 .msg-files { margin-bottom: 6px; justify-content: flex-end; }
@@ -1313,7 +1317,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 /* Above a field the block is only as tall as its text; `flex: 1` is for the row layouts. */
 .settings-pane label:not(.toggle-row):not(.setting-row) > .toggle-text { flex: none; }
 /* A setting with a compact control is a row: label and description left, control right at its own width. */
-.settings-pane .setting-row, .settings-pane label.setting-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
+.settings-pane .setting-row, .settings-pane label.setting-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; padding: 6px 0; }
 .settings-pane .setting-row > .toggle-text { flex: 1; }
 .settings-pane .setting-row > :not(.toggle-text) { flex: none; }
 .settings-pane .setting-row > input, .settings-pane .setting-row > select { width: auto; min-width: 160px; }
@@ -2603,8 +2607,9 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .cal-now::before { content: ''; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
 /* `left`/`right` are the lone-block case; overlapping blocks get an inline left and width (calendarLayout.ts). */
 .cal-event { position: absolute; left: 3px; right: 3px; min-width: 0; background: color-mix(in srgb, var(--info) 28%, transparent); border-left: 3px solid var(--info); border-radius: 5px; padding: 3px 6px; font-size: 11.5px; overflow: hidden; cursor: pointer; display: flex; flex-direction: column; z-index: 1; }
-.cal-event b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cal-event span { color: var(--text-muted); font-size: 10.5px; }
+.cal-event b { flex: none; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The time gives way to the title in a narrow lane: one line, clipped, never wrapping into it. */
+.cal-event span { color: var(--text-muted); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cal-event:hover { background: color-mix(in srgb, var(--info) 40%, transparent); }
 /* Short blocks have no room for a second line, so the time sits after the title. */
 .cal-event.compact { flex-direction: row; align-items: baseline; gap: 5px; padding: 2px 6px; }

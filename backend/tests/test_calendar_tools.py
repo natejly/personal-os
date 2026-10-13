@@ -42,6 +42,15 @@ def test_create_sends_rfc3339_datetimes_with_seconds() -> None:
     assert body["start"]["timeZone"]  # naive wall-clock, so the user's zone rides along
 
 
+def test_a_recurring_event_with_an_offset_start_still_names_a_zone() -> None:
+    """Google rejects a series without start.timeZone, offset or not."""
+    events = _Recording()
+    _google(events).calendar_create({"summary": "Gym", "start": "2026-10-14T10:00:00-07:00",
+                                     "recurrence": ["RRULE:FREQ=WEEKLY"]})
+    body = events.kw["body"]
+    assert body["start"]["timeZone"] and body["end"]["timeZone"]
+
+
 def test_a_naive_start_is_the_users_wall_clock_not_utc() -> None:
     events = _Recording()
     _google(events).calendar_events(days=1, start="2026-10-05T09:00")

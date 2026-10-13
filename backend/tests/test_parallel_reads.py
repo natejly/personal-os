@@ -184,3 +184,18 @@ def test_stop_mid_segment_skips_the_queued_reads() -> None:
         llm.stream_chat = prev
     assert "pr_read:c" not in [a for _, a, _ in LOG]   # reads already running side by side finish; queued ones never start
     assert [d["arguments"]["tag"] for e, d in events if e == "tool_result"] == ["a"]  # the rest of the round is reported as not executed
+
+
+def test_auto_review_sees_network_reads_before_they_run() -> None:
+    async def deny(*_a: Any, **_k: Any) -> dict[str, Any]:
+        await asyncio.sleep(DELAY)  # a real review is a model call
+        return {"verdict": "deny", "reason": "no", "confidence": "high", "model": "m", "ms": 0}
+    prev = appmod.autoreview.review
+    appmod.autoreview.review = deny
+    appmod.db.set_settings({"permissionMode": "auto"})
+    try:
+        run([c("1", "pr_net", tag="a"), c("2", "pr_net", tag="b")])
+    finally:
+        appmod.autoreview.review = prev
+        appmod.db.set_settings({"permissionMode": "manual"})
+    assert not [a for _, a, _ in LOG if a.startswith("pr_net")]

@@ -48,6 +48,8 @@ test('rows keep order, probes override backend state, and the plan puts native f
   const plan = grantAllPlan(rows)
   assert.ok(!plan.includes('microphone') && plan.indexOf('camera') < plan.indexOf('screen') && plan.indexOf('screen') < plan.indexOf('fullDisk'))
   assert.equal(plan.at(-1), 'fullDisk')
+  // First run asks only for grants with no side effects: no app launches, no automation prompts.
+  assert.deepEqual(grantAllPlan(buildRows({ ...main, microphone: 'unasked', notifications: 'unknown' }, backend, {}), true), ['microphone', 'notifications', 'fullDisk'])
   assert.equal(buildRows(main, null, {}).find((r) => r.id === 'fullDisk')?.state, 'unknown')
 })
 

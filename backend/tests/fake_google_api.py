@@ -34,7 +34,7 @@ class _Call:
     def __init__(self, thunk: Any):
         self._thunk = thunk
 
-    def execute(self) -> Any:
+    def execute(self, **_kw: Any) -> Any:
         return self._thunk()
 
 
@@ -56,6 +56,8 @@ class FakeServer:
         self.keep_deleted = False              # a "delete" that does not actually delete
         self.tombstone = False                 # a deleted event stays readable as status=cancelled, like Google's
         self.reads: list[str] = []             # every id a read-back asked for, in order
+        self.send_error: Exception | None = None  # messages.send raises this instead of sending
+        self.uploads = 0                       # sends/drafts whose message came up as media, not inline raw
 
     # ---- shared read gate ----
     def _gate(self, oid: str) -> None:
@@ -111,6 +113,8 @@ class FakeServer:
 
     # ---- gmail ----
     def send_message(self, body: dict[str, Any]) -> dict[str, Any]:
+        if self.send_error is not None:
+            raise self.send_error
         mid = self._id("msg")
         msg = email.message_from_bytes(base64.urlsafe_b64decode(body["raw"]))
         m = {"id": mid, "threadId": body.get("threadId") or mid, "labelIds": list(self.send_labels),
@@ -211,12 +215,20 @@ class _Calendar:
         return _Events(self.s)
 
 
+def _with_media(s: FakeServer, message: dict[str, Any], media: Any) -> dict[str, Any]:
+    """An uploaded message in the inline form the rest of the fake reads."""
+    if media is None:
+        return message
+    s.uploads += 1
+    return {**message, "raw": base64.urlsafe_b64encode(media.getbytes(0, media.size())).decode()}
+
+
 class _GmailMessages:
     def __init__(self, s: FakeServer):
         self.s = s
 
-    def send(self, userId: str, body: dict[str, Any]) -> _Call:
-        return _Call(lambda: self.s.send_message(body))
+    def send(self, userId: str, body: dict[str, Any], media_body: Any = None) -> _Call:
+        return _Call(lambda: self.s.send_message(_with_media(self.s, body, media_body)))
 
     def get(self, userId: str, id: str, **_: Any) -> _Call:
         return _Call(lambda: self.s.read_message(id))
@@ -240,8 +252,8 @@ class _GmailDrafts:
     def __init__(self, s: FakeServer):
         self.s = s
 
-    def create(self, userId: str, body: dict[str, Any]) -> _Call:
-        return _Call(lambda: self.s.create_draft(body))
+    def create(self, userId: str, body: dict[str, Any], media_body: Any = None) -> _Call:
+        return _Call(lambda: self.s.create_draft({"message": _with_media(self.s, body["message"], media_body)}))
 
     def get(self, userId: str, id: str, **_: Any) -> _Call:
         return _Call(lambda: self.s.read_draft(id))

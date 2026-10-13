@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { learnedText, readDocMode, adoptServerDoc, flushDocOnUnload, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, PAGE_AGENT_DRAFT, type ChatSession } from './store'
+import { learnedText, readDocMode, adoptServerDoc, flushDocOnUnload, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, setSettingsGuard, patchDocRow, PAGE_AGENT_DRAFT, type ChatSession } from './store'
 import { insertIntoComposer } from './lib/composerInsert'
 import { getDraft } from './lib/drafts'
 import { ApiError } from './lib/apiError'
@@ -1425,4 +1425,127 @@ test('openAgent opens Library > Agents on that agent; null returns to the list',
   assert.equal(s.openAgentId, 'a1')
   useStore.getState().openAgent(null)
   assert.equal(useStore.getState().openAgentId, null)
+})
+
+
+test('tool_result keeps what only tool_call carried: the connector origin and the subagent tag', () => {
+  const call = { event: 'tool_call', data: { message_id: 'm1', id: 't1', name: 'mcp__x__read', arguments: {}, agent: 'scout', mcp: { server: 'x', read_only: true }, started_at: 123 } } as unknown as ChatEvent
+  const result = { event: 'tool_result', data: { message_id: 'm1', id: 't1', name: 'mcp__x__read', arguments: {}, result_preview: 'ok', duration_ms: 5, error: null } } as unknown as ChatEvent
+  const t = applyEvent(applyEvent(session(), call, true), result, true).conversation.messages?.[0].tool_events?.[0]
+  assert.equal(t?.pending, false)
+  assert.equal(t?.result_preview, 'ok')
+  assert.equal(t?.agent, 'scout')
+  assert.deepEqual(t?.mcp, { server: 'x', read_only: true })
+  assert.equal(t?.started_at, 123, 'the server start, not the moment this window applied the event')
+})
+
+test('a queued desk bubble clears when the turn that carries it starts, even joined with other text', () => {
+  const s = session({ pendingSends: [{ key: 1, text: 'first', at: 0, queued: 2 }, { key: 2, text: 'other', at: 0 }] })
+  const after = applyEvent(s, { event: 'user_message', data: msg({ id: 'u9', role: 'user', content: 'first\n\nsecond' }) } as unknown as ChatEvent, true)
+  assert.deepEqual(after.pendingSends?.map((p) => p.key), [2])
+})
+
+test('approving a card no run is waiting on re-reads the chat, so the card settles instead of spinning', async () => {
+  const card = { id: 'call1', name: 'gmail_send', arguments: {}, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: true }
+  const settled = { ...card, pending: false, needs_approval: false, approval: 'allow', error: 'Not run: the reply was interrupted before this was answered.' }
+  const conv = (ev: object): ChatSession['conversation'] => ({ ...session().conversation, messages: [msg({ tool_events: [ev] as never })] })
+  const realApprove = api.approve
+  const realGet = api.conversations.get
+  const realInbox = api.inbox
+  api.approve = (async () => ({ ok: true, live: false })) as never
+  api.conversations.get = (async () => conv(settled)) as never
+  api.inbox = (async () => { throw new Error('offline') }) as never
+  try {
+    useStore.setState({ sessions: { c1: session({ streaming: null, status: 'needs-approval', pendingApprovals: 1, conversation: conv(card) } as never) } })
+    await useStore.getState().approveTool('call1', 'allow', 'c1')
+    await new Promise((r) => setTimeout(r, 0))
+    const s = useStore.getState().sessions.c1
+    const t = s.conversation.messages?.[0].tool_events?.[0]
+    assert.equal(t?.pending, false)
+    assert.match(t?.error ?? '', /Not run/)
+    assert.equal(s.pendingApprovals, 0)
+    assert.equal(s.status, 'idle')
+  } finally {
+    api.approve = realApprove
+    api.conversations.get = realGet
+    api.inbox = realInbox
+  }
+})
+
+test('a fetched transcript with an open card counts it and shows the chat waiting', async () => {
+  const card = { id: 'call2', name: 'gmail_send', arguments: {}, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: true }
+  const realGet = api.conversations.get
+  api.conversations.get = (async () => ({ ...session().conversation, id: 'c7', messages: [msg({ conversation_id: 'c7', tool_events: [card] as never })] })) as never
+  try {
+    useStore.setState({ sessions: {} })
+    await useStore.getState().openSession('c7')
+    const s = useStore.getState().sessions.c7
+    assert.equal(s.pendingApprovals, 1)
+    assert.equal(s.status, 'needs-approval')
+  } finally {
+    api.conversations.get = realGet
+  }
+})
+
+test('navigating from Settings asks first while its draft is dirty', async () => {
+  let asked = 0
+  useStore.setState({ settingsOpen: true })
+  setSettingsGuard(() => { asked++ })
+  await useStore.getState().selectChat(null)
+  useStore.getState().newChat(null)
+  useStore.getState().openInbox()
+  assert.equal(asked, 3)
+  assert.equal(useStore.getState().settingsOpen, true)
+  setSettingsGuard(null)
+  useStore.getState().newChat(null)
+  assert.equal(useStore.getState().settingsOpen, false)
+  useStore.setState({ inboxOpen: false })
+})
+
+test('a slower memories request for the previous scope does not overwrite the newer one', async () => {
+  const real = api.memories.list
+  const waits: Record<string, (v: unknown) => void> = {}
+  api.memories.list = ((scope: string) => new Promise((r) => { waits[scope] = r })) as never
+  try {
+    useStore.setState({ dataScope: 'all' })
+    const first = useStore.getState().refreshMemories()
+    useStore.setState({ dataScope: 'p1' })
+    const second = useStore.getState().refreshMemories()
+    waits.p1([{ id: 'project' }])
+    await second
+    waits.all([{ id: 'everything' }])
+    await first
+    assert.deepEqual(useStore.getState().memories, [{ id: 'project' }])
+  } finally {
+    api.memories.list = real
+    useStore.setState({ dataScope: 'all', memories: [] })
+  }
+})
+
+test('a save patches its doc row and keeps the list order', () => {
+  const row = (id: string, updated_at: number, extra = {}) => ({ id, project_id: null, title: id, folder: '', starred: 0, pinned: 0, created_at: 0, updated_at, words: 0, ...extra })
+  const docs = [row('pinned', 1, { pinned: 1 }), row('a', 5), row('b', 3)]
+  const out = patchDocRow(docs as never, { ...row('b', 9), title: 'B!', words: 2, tags: ['x'], content: 'hi #x' } as never)
+  assert.deepEqual(out.map((d) => d.id), ['pinned', 'b', 'a'])
+  assert.equal(out[1].title, 'B!')
+  assert.deepEqual(out[1].tags, ['x'])
+  assert.equal(out[1].preview, 'hi #x')
+  assert.equal(out[1].size, 5)
+})
+
+// A bare useStore() subscribes to every set(), and patchSession runs once per streamed token, so the
+// component re-renders per token. Pick fields with a selector (or useShallow) instead.
+test('no component reads the whole store with a bare useStore()', async () => {
+  const { readdirSync, readFileSync, statSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const bad: string[] = []
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name)
+      if (statSync(p).isDirectory()) walk(p)
+      else if (p.endsWith('.tsx') && /^[^/\n]*\buseStore\(\)/m.test(readFileSync(p, 'utf8'))) bad.push(p)
+    }
+  }
+  walk(join(process.cwd(), 'src/renderer/src'))
+  assert.deepEqual(bad, [])
 })

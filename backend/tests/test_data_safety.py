@@ -109,7 +109,7 @@ class MigrationTests(unittest.TestCase):
         was = migrations.latest()
         migrations.MIGRATIONS.append((was + 1, "boom", boom))
         try:
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, rf"migration {was + 1} \(boom\) failed .*RuntimeError: nope"):
                 Database(self.d)
         finally:
             migrations.MIGRATIONS.pop()
@@ -152,6 +152,16 @@ class BackupTests(unittest.TestCase):
         # The last 7 days span 2 or 3 ISO weeks; the 4 newest weeks add at most 3 more.
         self.assertTrue(8 <= len(kept) <= 10, len(kept))
         self.assertTrue(min(stamps) > datetime.fromtimestamp(start) + timedelta(days=20))
+
+    def test_size_cap_drops_oldest_dailies_but_keeps_the_newest(self) -> None:
+        for i in range(5):
+            backups.create(self.d, "manual", now=1000 + i)
+        with unittest.mock.patch.object(backups, "SIZE_CAP_FLOOR", 0):
+            for i in range(6):
+                backups.create(self.d, "daily", now=5000 + i * 86400)
+        kept = backups.list_backups(self.d)
+        self.assertEqual([b["kind"] for b in kept].count("manual"), 5, "only dailies give way to the cap")
+        self.assertEqual([b["created_at"] for b in kept if b["kind"] == "daily"], [5000 + 5 * 86400])
 
     def test_manual_and_safety_kinds_rotate_independently(self) -> None:
         for i in range(13):

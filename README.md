@@ -2,9 +2,9 @@
 
 <img src="build/grain.svg" alt="Grain logo" width="72" align="right" />
 
-Grain is a personal AI operating system for your desktop. Chat with any model through
-[LiteLLM](https://docs.litellm.ai/) (Fireworks AI out of the box), give the
-assistant tools, and let it build memory and a knowledge graph about you as you
+Grain is a personal AI operating system for your desktop. Chat with any
+OpenAI-compatible provider (Fireworks, OpenAI, Anthropic, OpenRouter, Ollama,
+a LiteLLM proxy or your own endpoint), give the assistant tools, and let it build memory and a knowledge graph about you as you
 go. Organise work into **projects**: groups of chats with their own
 instructions, files, memories and graph.
 
@@ -35,8 +35,9 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 1. **Install and launch.** Open the packaged app (or `./scripts/dev.sh`, see
    Development). The setup wizard asks which model provider to use and for its
    key, then a few lines about you, which become a pinned memory so the first
-   reply already knows who you are. Connect Google from Settings (⌘,) →
-   Integrations; Calendar, Mail and the first-prompt suggestions wait for it.
+   reply already knows who you are. It also offers Google sign-in when the build
+   bundles an OAuth client; otherwise connect Google from Settings (⌘,) →
+   Integrations. Calendar, Mail and the first-prompt suggestions wait for it.
 2. **Chat.** ⌘N opens a new chat. The model and effort pickers sit under the
    composer. Set a fast model in Settings → Model and pick **Auto** in the model
    menu: short plain messages go to the fast model, long, analytical or
@@ -48,10 +49,9 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    Open in chat continues it in the main window.
    Drop or paste a file to attach it: it rides on the message as a chip, and its
    text is given to the model up to a size cap. Set a **Working folder** for the
-   chat if the assistant should read or write files there; the **Style** picker
-   under the box shapes replies (concise, formal, tutor, thorough or your own
-   wording), and Settings → Behavior sets it for new chats; with none set, it
-   uses `~/Grain`. Tools run on their own, and a tool in *ask* mode stops the
+   chat if the assistant should read or write files there; **Style** in Settings →
+   Model shapes replies (concise, formal, tutor, thorough or your own wording). With no working folder set, file and shell tools can still work
+   anywhere on this Mac. Tools run on their own, and a tool in *ask* mode stops the
    reply with an approve/deny card. Mail sends, calendar deletes, moving or
    trashing files, shortcuts, Python installs and scheduling always ask.
 3. **Files.** ⌘4 opens Files, with three sections: *Notes*, *Uploads* (⌘U) and *Artifacts*.
@@ -110,8 +110,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   (or right-click it) for Explain, Summarize, Verify and Ask. Each opens the Quick chat
   panel with the quote fenced as data; Verify checks claims against opened pages
   and cites sources. The floating bubble can be turned off in Settings → Chat.
-- **Provider-agnostic chat.** Streaming replies from any model LiteLLM routes to,
-  one key. Per-chat model picker. Markdown, code copy, regenerate, stop.
+- **Provider-agnostic chat.** Streaming replies from any OpenAI-compatible
+  provider (Fireworks, OpenAI, Anthropic, OpenRouter, Ollama, LiteLLM, custom), one key each. Per-chat model picker. Markdown, code copy, regenerate, stop.
   Type `/` in the composer for `/skill`, `/schedule`, `/loop`, `/research`, `/compact`,
   `/skills` and `/commands`. Attachments ride on the message as chips,
   and their text is given to the model under a size cap. Chat rows show a face
@@ -341,10 +341,10 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 ## Architecture
 
 ```
-Electron (TypeScript)               Python (FastAPI)                      LiteLLM proxy
+Electron (TypeScript)               Python (FastAPI)                      AI provider
 ┌──────────────────────┐  HTTP/SSE  ┌───────────────────────────────┐  OpenAI API  ┌──────────────┐
-│ renderer: React      │ ─────────▶ │ personal_os.app  (routes)     │ ───────────▶ │ Fireworks AI │
-│ main: sidecar spawn  │            │  ├ repos     SQLite + FTS5    │              │ (or any)     │
+│ renderer: React      │ ─────────▶ │ personal_os.app  (routes)     │ ───────────▶ │ Fireworks,   │
+│ main: sidecar spawn  │            │  ├ repos     SQLite + FTS5    │              │ Ollama, any  │
 └──────────────────────┘            │  ├ context   prompt assembly  │              └──────────────┘
                                     │  ├ tools     agent tool loop  │
                                     │  ├ learn     memory/graph ext.│
@@ -368,12 +368,26 @@ The packaged app (`npm run package`, see [docs/releasing.md](docs/releasing.md))
 is self-contained: no Python, uv or LiteLLM needed. On first launch a setup
 wizard asks a few things about you and has you pick a model provider (Fireworks
 AI, OpenAI, Anthropic, OpenRouter, a local Ollama, a LiteLLM proxy or any
-OpenAI-compatible endpoint). Google is connected from Settings → Integrations. With no workspace folder set, file and shell tools work in `~/Grain`.
+OpenAI-compatible endpoint), tests the connection, then offers Google sign-in (when the build bundles an
+OAuth client; otherwise Settings → Integrations) and the basic macOS grants. File and shell tools can work
+anywhere on this Mac.
 
 On your own Mac, `npm run install-app` puts the build at `/Applications/Grain.app` (keep only that
 copy). If a self-signed "Grain Local Signing" identity is in your keychain, `npm run package` signs
 with it, so macOS keeps Full Disk Access and other grants across rebuilds; otherwise builds are
 ad-hoc signed. See [docs/releasing.md](docs/releasing.md#signing).
+
+From a release download:
+
+- **Install:** open the .dmg and drag Grain to Applications. Run it from there; a copy started from
+  Downloads or the disk image cannot update itself, and offers to move.
+- **Update:** automatic. Grain downloads new versions in the background and asks to restart; Help →
+  Check for Updates… checks now.
+- **Where things live:** data in `~/Library/Application Support/Grain` (`personal-os` on installs from
+  before the rename), logs in `~/Library/Logs/Grain`, API keys and tokens in the login Keychain under
+  the service "Grain".
+- **Uninstall:** quit Grain, delete `/Applications/Grain.app` and the two folders above, and remove the
+  "Grain" items in Keychain Access.
 
 ## Development
 

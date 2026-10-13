@@ -55,6 +55,18 @@ check(h[1]["tool_calls"][0]["id"] == "c1" and h[1]["tool_calls"][0]["function"][
 check(h[2]["tool_call_id"] == "c1" and h[2]["content"] == json.dumps({"hit": "RESULT1"}), "text equals for_model")
 check("BASE64BYTES" not in json.dumps(h), "no image bytes")
 
+# (1b) a call that never ran (stopped before it started) still reaches the next turn, beside the ones that ran
+c3 = convos.create(None, "t", "m")["id"]
+convos.add_message(c3, "user", "search then send")
+am = convos.add_message(c3, "assistant", "")
+ran = {"id": f"{am['id']}:c1", "call_id": "c1", "name": "gmail_search", "arguments": {"q": "x"}, "for_model": json.dumps({"hit": "R"})}
+stopped = {"id": f"{am['id']}:c2", "name": "gmail_send", "arguments": {"to": "a"}, "error": "stopped", "interrupted": True}
+convos.finish_message(am["id"], "searched", None, None, [ran, stopped])
+h, _ = run(compaction.prepare_history(compactor, convos, CFG, "m", c3, 100))
+check(h[1]["tool_calls"][0]["id"] == "c1" and len(h[1]["tool_calls"]) == 1, "only the call that ran is replayed as a call")
+check("gmail_send" in h[-1]["content"] and "interrupted" in h[-1]["content"] and h[-1]["content"].startswith("searched"),
+      "the stopped call is in the reply's tool record")
+
 
 # (2) over threshold: old results only in the summary, tail results remain
 async def stub(cfg: Any, model: str, messages: list[Any], kind: str = "learn") -> str:

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { ChevronRight, X, Trash2 } from '../icons'
 import { useStore } from '../store'
 import { useModal } from '../lib/useModal'
@@ -14,7 +15,7 @@ const COLOR_NAMES = ['Terracotta', 'Red', 'Amber', 'Green', 'Blue', 'Purple', 'P
 
 export default function ProjectModal(): JSX.Element {
   const modal = useStore((s) => s.projectModal)!
-  const { setProjectModal, createProject, updateProject, deleteProject } = useStore()
+  const { setProjectModal, createProject, updateProject, deleteProject } = useStore(useShallow((s) => ({ setProjectModal: s.setProjectModal, createProject: s.createProject, updateProject: s.updateProject, deleteProject: s.deleteProject })))
   const existing = modal.mode === 'edit' ? modal.project : null
   const [name, setName] = useState(existing?.name ?? '')
   const [description, setDescription] = useState(existing?.description ?? '')

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { FileText, Upload } from '../icons'
 import { useStore } from '../store'
 import { groupByChat, groupByKind, projectFilter, type ChatFile } from '../lib/chatFiles'
@@ -15,7 +16,7 @@ export default function ProjectContext({ projectId }: { projectId: string }): JS
   const conversations = useStore((s) => s.conversations)
   const docs = useStore((s) => s.docs)
   const documents = useStore((s) => s.documents)
-  const { uploadDocuments, pinDocument, selectChat } = useStore()
+  const { uploadDocuments, pinDocument, selectChat } = useStore(useShallow((s) => ({ uploadDocuments: s.uploadDocuments, pinDocument: s.pinDocument, selectChat: s.selectChat })))
   const [files, setFiles] = useState<ChatFile[] | null>(null)
   const [cursor, setCursor] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)

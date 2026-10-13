@@ -83,13 +83,16 @@ export type BusyContext = { nowMs: number; subs?: Record<string, SubagentInfo>; 
  * depends on `nowMs` (only the countdown and elapsed time in the text do).
  * Order: status, approval, hand-off, subagents, tool call, live workers (only while no text has streamed).
  */
+/** The busy line while a card waits on the user. */
+export const APPROVAL_WAIT = 'Waiting for your approval'
+
 export function busyText(m: (Pick<Message, 'status' | 'tool_events'> & Partial<Pick<Message, 'content'>>) | null | undefined, ctx: BusyContext): string | null {
   if (!m) return null
   if (m.status) return statusText(m.status, ctx.nowMs)
   const workers = ctx.workers ?? []
   const pending = (m.tool_events ?? []).filter((t) => t.pending)
   const call = pending[pending.length - 1]
-  if (pending.some((t) => t.needs_approval)) return 'Waiting for your approval'
+  if (pending.some((t) => t.needs_approval)) return APPROVAL_WAIT
   if (call && (call.name === 'delegate' || call.name in HANDOFF)) return handoffText(call, workers)
   const running = Object.values(ctx.subs ?? {}).filter((k) => k.state === 'running')
   const n = running.length

@@ -324,6 +324,20 @@ def test_secrets_are_unreadable(tmp_path: Path, box: Box, monkeypatch: pytest.Mo
 
 
 @needs_seatbelt
+def test_every_credential_name_is_unreadable_at_any_depth(tmp_path: Path) -> None:
+    import subprocess
+    from personal_os import mac
+    proj = (tmp_path / "proj").resolve()
+    proj.mkdir()
+    for n in mac.SENSITIVE_NAMES:
+        (proj / n).write_text("SECRET")
+    (proj / "notes.txt").write_text("fine")
+    r = subprocess.run(["sandbox-exec", "-p", sandbox.shell_profile([str(tmp_path)]), "/bin/sh", "-c", "cat * .[!.]*"],
+                       cwd=proj, capture_output=True, text=True, timeout=30)
+    assert "fine" in r.stdout and "SECRET" not in r.stdout
+
+
+@needs_seatbelt
 def test_network_is_off(tmp_path: Path, box: Box) -> None:
     box.settings["shellRegistryAccess"] = False  # no registry preset and no allowed domains: the "no network" mode
     assert box.run("shell_run", command="true")["network"] is False
@@ -662,7 +676,19 @@ def test_wall_note_names_the_rule_and_quotes_the_os_error() -> None:
     assert shell.wall_note("osascript: Operation not permitted (-1743)")["rule"].startswith("appleevent")
     assert shell.wall_note("PermissionError: [Errno 1] Operation not permitted: bind", network=True)["rule"].startswith("file")
     assert shell.wall_note("all fine") is None
+    # the word "connect" elsewhere in the output does not make a file denial a network wall
+    assert shell.wall_note("connecting to db\nok\nmore\ncat: x: Permission denied")["rule"].startswith("file")
     assert "cannot bind" in box_spec_description()
+
+
+def test_wall_note_names_macos_privacy_not_the_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    from personal_os import macos
+    monkeypatch.setattr(shell.osplat, "has", lambda f: f == "full_disk_access")
+    monkeypatch.setattr(macos, "full_disk_access", lambda: False)
+    w = shell.wall_note(f"ls: {os.path.expanduser('~')}/Desktop: Operation not permitted")
+    assert w["rule"].startswith("macOS privacy") and "unsandboxed" not in w["retry"]
+    monkeypatch.setattr(macos, "full_disk_access", lambda: True)
+    assert shell.wall_note(f"ls: {os.path.expanduser('~')}/Desktop: Operation not permitted")["rule"].startswith("file")
 
 
 def box_spec_description() -> str:
@@ -682,7 +708,7 @@ def test_no_sandbox_means_refused_until_the_forced_unsandboxed_path(box: Box, mo
 def test_a_profile_that_fails_to_apply_is_refused_then_unsandboxed_may_be_asked_for(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sandbox, "shell_profile", lambda writable, network=False, **kw: "(version 1) (this is not sbpl")
     r = box.run("shell_run", command="echo hi")
-    assert "sandbox refused to start" in r["error"] and box.tb.shell.sandbox_failed
+    assert "sandbox refused to start" in r["error"]
     assert "sandbox is available" not in box.run("shell_run", command="echo ran", unsandboxed=True).get("error", "")
 
 

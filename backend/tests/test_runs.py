@@ -593,6 +593,15 @@ def test_message_seq_advances_with_a_steer_segment() -> None:
     check(first == 1 and run.message_seq == 3 and run.info()["message_seq"] == 3, "message_seq follows the newest message")
 
 
+def test_tool_call_carries_its_wall_clock_start() -> None:
+    run = Run("c-start")
+    before = int(time.time() * 1000)
+    run.publish("tool_call", {"id": "t1", "name": "shell_run"})
+    run.publish("tool_call", {"id": "t2", "name": "shell_run", "started_at": 5})
+    stamped = [d for _, ev, d in run._ring if ev == "tool_call"]
+    check(stamped[0]["started_at"] >= before and stamped[1]["started_at"] == 5, "tool_call is stamped once, a given start kept")
+
+
 def test_run_state_is_published_on_the_app_topic() -> None:
     seen: list[dict[str, Any]] = []
     prev = bus.on_change
@@ -703,7 +712,7 @@ TESTS = [test_retry_events_become_status_events, test_post_starts_a_background_r
          test_cancel_closes_the_provider_socket, test_the_learn_tail_does_not_hold_the_conversation,
          test_run_survives_every_subscriber_leaving, test_an_overflowed_subscriber_reconnects_without_a_gap,
          test_shutdown_cancels_a_live_run_and_keeps_its_text,
-         test_run_info_carries_message_seq, test_message_seq_advances_with_a_steer_segment,
+         test_run_info_carries_message_seq, test_message_seq_advances_with_a_steer_segment, test_tool_call_carries_its_wall_clock_start,
          test_run_state_is_published_on_the_app_topic, test_run_info_replied_and_stopped, test_sse_survives_non_finite_numbers,
          test_an_oversized_message_is_refused_before_it_is_stored]
 

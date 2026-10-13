@@ -100,7 +100,7 @@ class LinuxSecrets:
         except Exception as e:  # noqa: BLE001
             self._fail(self._describe(e))
             log.warning("Secret Service read of %s failed (%s)", name, self._describe(e))
-            return None
+            raise OSError(self._describe(e)) from e
 
     def set(self, service: str, name: str, value: str) -> bool:
         try:

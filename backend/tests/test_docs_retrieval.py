@@ -224,4 +224,24 @@ docs.create("Hook", "a body to index", None)
 check(sched == [1], "doc write notifies the retriever (no network in the write)")
 retriever.schedule_docs = orig  # type: ignore[method-assign]
 
+# an edit re-embeds only the chunks it changed; the untouched ones keep their vectors through the re-chunk
+two = "# Alpha\n\n" + "The heron waded through the reeds at noon. " * 40 + "\n\n# Beta\n\n" + "The otter slid down the bank. " * 40 + "\n"
+d5 = docs.create("Two sections", two, None)
+run(retriever.embed_pending(settings(), stores=("docs",)))
+n_chunks = len(chunk_rows(d5["id"]))
+embedded: list[str] = []
+
+async def counting(settings_: dict[str, Any], texts: list[str], model: str | None) -> list[list[float]]:
+    embedded.extend(texts)
+    return [fake_vec(t) for t in texts]
+
+embedder.fn = counting
+docs.save(d5["id"], content=two.replace("The otter slid", "The beaver slid"))
+with db.tx() as c:
+    kept = c.execute("SELECT COUNT(*) AS n FROM doc_chunk_embeddings WHERE doc_id=?", (d5["id"],)).fetchone()["n"]
+check(n_chunks >= 2 and 0 < kept < len(chunk_rows(d5["id"])), "unchanged chunks keep their vectors across the save")
+run(retriever.embed_pending(settings(), stores=("docs",)))
+check(embedded and all("beaver" in t for t in embedded), "only the edited chunks hit the embed route")
+embedder.fn = stub
+
 print(f"test_docs_retrieval: {passed} checks passed")

@@ -1,5 +1,6 @@
 import { describeCall } from '../lib/toolDisplay'
 import { useEffect, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { RotateCcw, Square } from '../icons'
 import type { WorkerInfo } from '@shared/types'
 import { api } from '../lib/api'
@@ -58,7 +59,7 @@ export default function WorkersPanel({ conversationId: focusId }: { conversation
   const [showAll, setShowAll] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [unfolded, setUnfolded] = useState<string | null>(null)
-  const { toast, loadWorkers } = useStore()
+  const { toast, loadWorkers } = useStore(useShallow((s) => ({ toast: s.toast, loadWorkers: s.loadWorkers })))
 
   useEffect(() => { if (conversationId) void loadWorkers(conversationId) }, [conversationId, loadWorkers])
   const anyLive = workers.some(workerIsLive)

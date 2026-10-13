@@ -52,6 +52,15 @@ test('one toggle-sidebar action toggles the sidebar once', () => {
   assert.equal(useStore.getState().sidebarOpen, !before)
 })
 
+test('⌘B toggles the sidebar inside the Markdown editor too (bold is ⇧⌘B)', async () => {
+  const sent: unknown[] = []
+  const textarea = { tagName: 'TEXTAREA', classList: { contains: (c: string) => c === 'md-input' }, dispatchEvent: (e: never) => sent.push(e) }
+  const before = useStore.getState().sidebarOpen
+  await withDom({ activeElement: textarea }, () => fire('toggle-sidebar'))
+  assert.equal(useStore.getState().sidebarOpen, !before)
+  assert.equal(sent.length, 0)
+})
+
 test('one toggle-context action toggles the context panel once', () => {
   const before = useStore.getState().contextOpen
   fire('toggle-context')
@@ -147,6 +156,9 @@ test('a hidden view stays shut: its shortcut toasts a way to turn it on', () => 
   assert.equal(t.text, 'Library is turned off')
   assert.equal(t.action?.label, 'Turn on')
   t.action?.run()
+  useStore.setState({ settings: { ...orig, hiddenViews: ['todos'] }, toasts: [] })
+  fire('view:todos')
+  assert.equal(useStore.getState().toasts[0].text, 'Lists is turned off')
   assert.equal(useStore.getState().settingsOpen, true)
   assert.equal(useStore.getState().settingsTab, 'sidebar')
   useStore.getState().setSettingsOpen(false)
@@ -232,7 +244,7 @@ test("the doc editor's chords are not menu accelerators, which would swallow the
   assert.ok(chords.length >= 4, hints)
   // A menu item may share a chord only when its handler hands the key to a focused editor first (store.ts toEditor).
   const store = readFileSync('src/renderer/src/store.ts', 'utf8')
-  const forwarded: Record<string, string> = { '⌘K': "toEditor('k', false)", '⌘B': "toEditor('b', false)", '⇧⌘M': "toEditor('M', true)" }
+  const forwarded: Record<string, string> = { '⌘K': "toEditor('k', false)", '⇧⌘M': "toEditor('M', true)" }
   for (const c of chords) {
     assert.ok(accel[c], `map ${c} to its accelerator here`)
     if (forwarded[c] && store.includes(forwarded[c])) continue

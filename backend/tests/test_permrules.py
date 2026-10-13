@@ -106,6 +106,17 @@ def test_deny_beats_ask_beats_allow():
     assert ev("git status", allow=["Bash(git *)"], ask=["Bash(git push *)"]).action == "allow"
 
 
+@pytest.mark.parametrize("cmd", ["/bin/rm -rf build", "/usr/bin/curl http://x", "git -C . push origin main",
+                                 "git --git-dir=.git push", "find . -exec rm {} +", "find . -execdir /bin/rm {} ;"])
+def test_deny_sees_other_spellings_of_the_program(cmd):
+    assert ev(cmd, deny=["Bash(rm *)", "Bash(git push *)", "Bash(curl *)"]).action == "deny"
+
+
+def test_redirect_write_is_not_readonly():
+    for cmd in ("echo hi > ~/.zshrc", "cat a > out.txt", "echo hi >> notes.txt"):
+        assert ev(cmd).action is None
+
+
 def test_one_unallowed_subcommand_stops_allow():
     r = ev("git status && rm -rf x", allow=["Bash(git *)"])
     assert r.action is None and r.pending == ["Bash(rm -rf x)"]

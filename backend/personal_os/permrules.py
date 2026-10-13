@@ -247,11 +247,8 @@ def _match_close(s: str, i: int) -> int:
     return -1
 
 
-def _scan(cmd: str, subst_ok: bool = False) -> Parsed:
-    """Conservative shell tokenizer. Anything it cannot be sure about sets `opaque`, which means ask.
-
-    `subst_ok` (the syntax-tree path) lets $() through as a placeholder word, because the commands inside are
-    judged on their own."""
+def _scan(cmd: str) -> Parsed:
+    """Conservative shell tokenizer. Anything it cannot be sure about sets `opaque`, which means ask."""
     s = cmd
     segs: list[Seg] = []
     nested: list[Seg] = []
@@ -323,9 +320,9 @@ def _scan(cmd: str, subst_ok: bool = False) -> Parsed:
                     if k < 0:
                         opaque = True
                         break
-                    inner = _scan(s[j + 2:k], subst_ok)
+                    inner = _scan(s[j + 2:k])
                     nested += inner.segments + inner.nested
-                    opaque = opaque or (inner.opaque or not subst_ok)
+                    opaque = True
                     buf.append("$SUBST")
                     j = k + 1
                     continue
@@ -334,9 +331,9 @@ def _scan(cmd: str, subst_ok: bool = False) -> Parsed:
                     if k < 0:
                         opaque = True
                         break
-                    inner = _scan(s[j + 1:k], subst_ok)
+                    inner = _scan(s[j + 1:k])
                     nested += inner.segments + inner.nested
-                    opaque = opaque or (inner.opaque or not subst_ok)
+                    opaque = True
                     buf.append("$SUBST")
                     j = k + 1
                     continue
@@ -356,9 +353,9 @@ def _scan(cmd: str, subst_ok: bool = False) -> Parsed:
                 if k < 0:
                     opaque = True
                     break
-                inner = _scan(s[i + 2:k], subst_ok)
+                inner = _scan(s[i + 2:k])
                 nested += inner.segments + inner.nested
-                opaque = opaque or (inner.opaque or not subst_ok)
+                opaque = True
                 cur.append("$SUBST")
                 started = True
                 i = k + 1
@@ -374,9 +371,9 @@ def _scan(cmd: str, subst_ok: bool = False) -> Parsed:
             if k < 0:
                 opaque = True
                 break
-            inner = _scan(s[i + 1:k], subst_ok)
+            inner = _scan(s[i + 1:k])
             nested += inner.segments + inner.nested
-            opaque = opaque or (inner.opaque or not subst_ok)
+            opaque = True
             cur.append("$SUBST")
             started = True
             i = k + 1
@@ -454,56 +451,9 @@ def _scan(cmd: str, subst_ok: bool = False) -> Parsed:
     return Parsed(segs, nested, opaque, s)
 
 
-_ts_parser: Any = None
-
-
-def _ts() -> Any:
-    """The tree-sitter bash parser when the binding is installed, else None."""
-    global _ts_parser
-    if _ts_parser is None:
-        try:
-            import tree_sitter_bash as tsb  # type: ignore[import-not-found]
-            from tree_sitter import Language, Parser  # type: ignore[import-not-found]
-            _ts_parser = Parser(Language(tsb.language()))
-        except Exception:  # noqa: BLE001 - absent or incompatible: the shlex-style scanner carries on
-            _ts_parser = False
-    return _ts_parser or None
-
-
-def _parse_ts(cmd: str) -> Parsed | None:
-    parser = _ts()
-    if parser is None:
-        return None
-    try:
-        data = cmd.encode()
-        root = parser.parse(data).root_node
-        if root.has_error:
-            return None
-        segs: list[Seg] = []
-        opaque = False
-        stack = [root]
-        while stack:
-            node = stack.pop()
-            if node.type in ("heredoc_redirect", "heredoc_body", "process_substitution"):
-                opaque = True
-            if node.type == "command":
-                sub = _scan(data[node.start_byte:node.end_byte].decode(errors="replace"), subst_ok=True)
-                segs += sub.segments
-            elif node.type == "file_redirect":
-                dest = node.child_by_field_name("destination")
-                if dest is not None:
-                    op = "<" if data[node.start_byte:node.start_byte + 1] == b"<" else ">"
-                    segs.append(Seg([], "", [(op, data[dest.start_byte:dest.end_byte].decode(errors="replace").strip("'\""))]))
-            stack.extend(reversed(node.children))
-        return Parsed(segs, [], opaque, cmd)
-    except Exception:  # noqa: BLE001
-        return None
-
-
 def split_command(cmd: str) -> Parsed:
-    """A command line as its subcommands. Nested commands come from the syntax tree when its binding is installed."""
-    text = normalize(cmd)
-    return _parse_ts(text) or _scan(text)
+    """A command line as its subcommands."""
+    return _scan(normalize(cmd))
 
 
 def strip_wrappers(tokens: list[str], aggressive: bool = False) -> list[str]:
@@ -1118,6 +1068,24 @@ def _evaluate_bash(tool: str, cmd: str, rules: RuleSet, cwd: str | None, desks: 
     def variants(seg: Seg) -> list[Subject]:
         agg, cons = strip_wrappers(seg.words, True), strip_wrappers(seg.words, False)
         texts = {_canon(agg), _canon(cons), _canon(seg.words), seg.raw}
+        # The same program spelled another way: /bin/rm for rm, git's global options before the subcommand,
+        # and the command find -exec runs.
+        for toks in (agg, cons):
+            if not toks:
+                continue
+            toks = [os.path.basename(toks[0]) or toks[0], *toks[1:]]
+            texts.add(_canon(toks))
+            if toks[0] == "git":
+                i = 1
+                while i < len(toks) and toks[i].startswith("-"):
+                    i += 2 if toks[i] in GIT_GLOBAL_ARG else 1
+                texts.add(_canon(["git", *toks[i:]]))
+            if toks[0] == "find":
+                for k, t in enumerate(toks):
+                    if t in ("-exec", "-execdir", "-ok", "-okdir") and k + 1 < len(toks):
+                        run = toks[k + 1:]
+                        run = run[:next((j for j, a in enumerate(run) if a in (";", "+")), len(run))]
+                        texts.add(_canon([os.path.basename(run[0]) or run[0], *run[1:]]))
         return [Subject("Bash", t) for t in texts if t]
 
     for seg in judged:

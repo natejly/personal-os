@@ -1066,7 +1066,8 @@ class Google:
             if tid:
                 message["threadId"] = tid
         message["raw"] = _raw_message(to, subject, body, **headers, attachments=attachments, cc=cc, bcc=bcc)
-        d = svc.users().drafts().create(userId="me", body={"message": message}).execute()
+        meta, media = _as_upload(message)
+        d = svc.users().drafts().create(userId="me", body={"message": meta}, **media).execute()
         out = {"draft_id": d.get("id"), "to": to, "subject": subject, "note": "Draft saved in Gmail; not sent.",
                "attachments": [a["name"] for a in attachments or []]}
         return verify.attach(out, self._verify_draft(d.get("id") or "", subject))
@@ -1078,8 +1079,9 @@ class Google:
                    bcc: str | None = None) -> dict[str, Any]:
         """Send now. Callers go through outbox.py instead, which holds the send so it can be undone.
 
-        Anything that fails before messages().send() is raised as NotSent (or GoogleNotConnected,
-        kept as is for the callers that map it): nothing went out.
+        Anything that fails before messages().send(), or that Gmail answers with a 4xx, is raised
+        as NotSent (or GoogleNotConnected, kept as is for the callers that map it): nothing went out.
+        A timeout or a 5xx stays as it is, since the mail may have gone.
         """
         try:
             svc = self._svc("gmail", "v1")
@@ -1094,7 +1096,16 @@ class Google:
             raise
         except Exception as e:  # noqa: BLE001
             raise NotSent(f"{type(e).__name__}: {e}") from e
-        m = svc.users().messages().send(userId="me", body=message).execute()
+        meta, media = _as_upload(message)
+        try:
+            m = svc.users().messages().send(userId="me", body=meta, **media).execute()
+        except Exception as e:
+            if isinstance(c := self.classify_error(e), GoogleNotConnected):
+                raise c from e
+            status = getattr(getattr(e, "resp", None), "status", None)
+            if status is not None and 400 <= int(status) < 500 and int(status) != 408:
+                raise NotSent(http_failure(e)[1]) from e  # refused outright (rate limit, bad header, too large)
+            raise
         out = {"sent": m.get("id"), "to": to, "subject": subject, "thread_id": m.get("threadId"),
                "attachments": [a["name"] for a in attachments or []]}
         return verify.attach(out, self._verify_sent(m.get("id") or "", to, subject, m.get("threadId")))
@@ -1905,6 +1916,23 @@ def _address_header(value: str) -> str:
     if value.isascii():
         return value
     return ", ".join(formataddr((name, addr)) for name, addr in getaddresses([value]) if addr)
+
+
+# Gmail refuses a JSON request body over about 5 MB; a bigger message goes up as media.
+_INLINE_RAW_MAX = 4 * 1024 * 1024
+
+
+def _as_upload(message: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """(metadata body, extra kwargs) for drafts.create / messages.send: inline raw when small, an upload when not."""
+    if len(message["raw"]) <= _INLINE_RAW_MAX:
+        return message, {}
+    import io
+
+    from googleapiclient.http import MediaIoBaseUpload
+
+    meta = {k: v for k, v in message.items() if k != "raw"}
+    data = base64.urlsafe_b64decode(message["raw"])
+    return meta, {"media_body": MediaIoBaseUpload(io.BytesIO(data), mimetype="message/rfc822", resumable=True)}
 
 
 def _raw_message(to: str, subject: str, body: str, in_reply_to: str | None = None, references: str | None = None,

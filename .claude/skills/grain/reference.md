@@ -285,6 +285,7 @@ From the app menu (`src/main/index.ts`); ⌘ is Cmd, ⌃ Control, ⌥ Option.
 | ⌘F, ⌘G, ⌘⇧G | Find in chat, next, previous |
 | ⌘B | Toggle sidebar |
 | ⌘I | Quick chat / Page agent panel |
+| ⌘T | Side panel on Context, with the Terminal tab (press again to close) |
 | ⌃⌘I | Toggle context panel |
 | (none) | Toggle side panel (View menu, workspace button) |
 | ⌘⇧C | Toggle Spaces |

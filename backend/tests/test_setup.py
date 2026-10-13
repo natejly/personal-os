@@ -23,6 +23,7 @@ client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 
 
 def _clear() -> None:
+    db.secrets.delete("providerKeys")  # a key saved by an earlier test would satisfy a later "needs a key" check
     db.set_settings({"baseUrl": "", "apiKey": "", "provider": None, "onboardedAt": None, "defaultModel": "", "extractionModel": ""})
 
 

@@ -314,7 +314,7 @@ class ContextOverflowError(LLMError):
         self.limit = limit
 
 
-NOT_CONFIGURED = "No AI provider is set up yet. Open Settings and choose one."
+NOT_CONFIGURED = "No AI provider is set up yet. Click Finish setup above the chat box (or Settings → Model)."
 
 
 def _url(settings: dict[str, Any], path: str, model: str | None = None) -> str:

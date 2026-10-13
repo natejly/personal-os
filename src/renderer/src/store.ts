@@ -976,9 +976,9 @@ export const useStore = create<State>((set, get) => {
   const wireMenu = (): void => {
     if (menuWired) return
     menuWired = true
-    // ⌘B (Toggle Sidebar) and ⌘K (Command Palette) are menu accelerators, and a menu accelerator never
-    // reaches the page: inside the Markdown editor they would hide the sidebar, open the palette or leave the doc instead
-    // of bold / link / maths. While the editor has focus, hand the chord back to it as the keystroke it was.
+    // ⌘K (Command Palette) is a menu accelerator, and a menu accelerator never reaches the page: inside the
+    // Markdown editor it would open the palette instead of link / maths. While the editor has focus, hand the
+    // chord back to it as the keystroke it was. ⌘B is not handed back: bold is ⇧⌘B, so ⌘B toggles the sidebar everywhere.
     const toEditor = (key: string, shift: boolean): boolean => {
       const el = typeof document === 'undefined' ? null : document.activeElement
       if (!el || el.tagName !== 'TEXTAREA' || !el.classList.contains('md-input')) return false
@@ -987,7 +987,6 @@ export const useStore = create<State>((set, get) => {
     }
     window.os.onMenu((action) => {
       const s = get()
-      if (action === 'toggle-sidebar' && toEditor('b', false)) return
       if (action === 'palette' && toEditor('k', false)) return
       // In the canvas view ⌘N opens a chat window instead; canvas/store.ts handles it there.
       if (action === 'new-chat') {
@@ -1019,7 +1018,9 @@ export const useStore = create<State>((set, get) => {
       else if (action.startsWith('view:')) {
         const v = action.slice(5) as View
         // A view turned off in Settings → Sidebar stays off: its shortcut says how to turn it back on.
-        if (viewHidden(s.settings, v)) s.toast(`${v[0].toUpperCase()}${v.slice(1)} is turned off`, 'info', { label: 'Turn on', run: () => get().openSettings('sidebar') })
+        // Named as the sidebar shows it; nav.tsx holds the labels but importing it here would close a cycle.
+        const name = v === 'todos' ? 'Lists' : `${v[0].toUpperCase()}${v.slice(1)}`
+        if (viewHidden(s.settings, v)) s.toast(`${name} is turned off`, 'info', { label: 'Turn on', run: () => get().openSettings('sidebar') })
         else s.setView(v)
       } else if (action === 'upload') {
         s.openFiles('uploads')

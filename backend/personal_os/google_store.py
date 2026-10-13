@@ -16,6 +16,8 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+FLUSH_AFTER = 2.0  # seconds a put waits before the file is rewritten
+
 
 class ReadStore:
     """Namespaced JSON snapshots. `path` None keeps them in memory only (tests)."""
@@ -25,6 +27,7 @@ class ReadStore:
         self._lock = threading.Lock()
         self._data: dict[str, dict[str, Any]] = {}
         self._dirty = False
+        self._timer: threading.Timer | None = None
         if path is not None and path.exists():
             try:
                 loaded = json.loads(path.read_text(encoding="utf-8"))
@@ -45,8 +48,13 @@ class ReadStore:
         with self._lock:
             return copy.deepcopy(list((self._data.get(namespace) or {}).values()))
 
-    def put(self, namespace: str, key: str, value: Any, *, flush: bool = True, cap: int | None = None) -> None:
-        """Save one value. With `cap`, the namespace keeps only its `cap` most recently saved keys."""
+    def put(self, namespace: str, key: str, value: Any, *, flush: bool = False, cap: int | None = None) -> None:
+        """Save one value. With `cap`, the namespace keeps only its `cap` most recently saved keys.
+
+        The file is rewritten at most once per FLUSH_AFTER seconds rather than on every put: it holds
+        every snapshot (mail bodies included), so a rewrite per opened message serialised megabytes
+        under the lock every read waits on. A quit inside that window loses only cache.
+        """
         with self._lock:
             bucket = self._data.setdefault(namespace, {})
             bucket.pop(key, None)  # re-saving moves the key to the young end
@@ -56,9 +64,14 @@ class ReadStore:
             self._dirty = True
             if flush:
                 self._flush()
+            elif self.path is not None and self._timer is None:
+                self._timer = threading.Timer(FLUSH_AFTER, self.flush)
+                self._timer.daemon = True
+                self._timer.start()
 
     def flush(self) -> None:
         with self._lock:
+            self._timer = None
             self._flush()
 
     def clear(self, *namespaces: str) -> None:

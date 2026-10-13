@@ -2011,6 +2011,16 @@ def _doc_text(doc: dict[str, Any]) -> str:
     return "".join(out)
 
 
+def _decode_part(raw: bytes, headers: list[dict[str, Any]]) -> str:
+    """Gmail hands a part back in the charset its Content-Type names (Latin-1, Shift_JIS...), not UTF-8."""
+    m = email.message.Message()
+    m["Content-Type"] = next((h.get("value") or "" for h in headers if (h.get("name") or "").lower() == "content-type"), "")
+    try:
+        return raw.decode(m.get_content_charset() or "utf-8", "replace")
+    except LookupError:  # a charset name Python does not know
+        return raw.decode("utf-8", "replace")
+
+
 def _extract_body(payload: dict[str, Any]) -> str:
     """Prefer text/plain; fall back to stripped HTML."""
     plain, html_ = [], []
@@ -2019,7 +2029,7 @@ def _extract_body(payload: dict[str, Any]) -> str:
         mime = p.get("mimeType", "")
         data = p.get("body", {}).get("data")
         if data:
-            text = base64.urlsafe_b64decode(data + "===").decode("utf-8", "replace")
+            text = _decode_part(base64.urlsafe_b64decode(data + "==="), p.get("headers") or [])
             (plain if mime == "text/plain" else html_ if mime == "text/html" else []).append(text)
         for part in p.get("parts", []) or []:
             walk(part)

@@ -187,6 +187,36 @@ def test_saved_bodies_are_capped() -> None:
     assert store.get("gmail-body", "m2") is not None and store.get("gmail-body", "m3") is None
 
 
+def test_a_body_is_decoded_in_the_charset_it_names() -> None:
+    def part(text: str, charset: str | None) -> dict[str, Any]:
+        ct = "text/plain" + (f'; charset="{charset}"' if charset else "")
+        return {"mimeType": "text/plain", "headers": [{"name": "Content-Type", "value": ct}],
+                "body": {"data": base64.urlsafe_b64encode(text.encode(charset or "utf-8")).decode()}}
+
+    assert google_mod._extract_body(part("Café à Paris", "iso-8859-1")) == "Café à Paris"
+    assert google_mod._extract_body(part("こんにちは", "shift_jis")) == "こんにちは"
+    assert google_mod._extract_body(part("plain ünïcode", None)) == "plain ünïcode"
+    assert google_mod._extract_body({**part("ok", None), "headers": [{"name": "Content-Type", "value": "text/plain; charset=x-nope"}]}) == "ok"
+
+
+def test_puts_are_written_together_not_one_rewrite_each() -> None:
+    from personal_os import google_store
+
+    path = Path(tempfile.mkdtemp()) / "reads.json"
+    store = ReadStore(path)
+    real, google_store.FLUSH_AFTER = google_store.FLUSH_AFTER, 0.05
+    try:
+        store.put("gmail-body", "m1", {"id": "m1"})
+        store.put("gmail-body", "m2", {"id": "m2"})
+        assert not path.exists()  # nothing rewritten yet
+        deadline = time.time() + 5
+        while not path.exists() and time.time() < deadline:
+            time.sleep(0.02)
+        assert ReadStore(path).get("gmail-body", "m2") == {"id": "m2"}
+    finally:
+        google_store.FLUSH_AFTER = real
+
+
 def test_only_a_refused_refresh_token_asks_for_a_new_sign_in() -> None:
     from google.auth.exceptions import RefreshError, TransportError
 

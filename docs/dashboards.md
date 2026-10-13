@@ -48,3 +48,7 @@ Bindings are references, never copies.
   on its file; an edit that would break the envelope is refused.
 - `@name` in the composer, where name is the title lowercased with runs of other characters turned into `-` (the same rule
   as chats), tells the assistant which dashboard is meant.
+- `dashboard_open` is one of the always-loaded tools, so "open my calorie dashboard" needs no tool search.
+- A project's page lists the dashboards pinned to it in a Dashboards section (hidden when there are none); a click opens
+  the dashboard in place, re-reading its live data. Pin with `dashboard_pin` from that project's chat.
+- There is no Dashboards row in the sidebar: reach dashboards from Files, the `@` menu, chat or the project page.

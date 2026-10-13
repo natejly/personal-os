@@ -12,6 +12,7 @@ import { useProjectFileCount } from '../lib/useChatFiles'
 import { PROJECT_SECTION_LABEL as L } from '../lib/projectTabs'
 import { fenced, lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
+import ProjectDashboards from './ProjectDashboards'
 
 export default function ProjectView(): JSX.Element {
   const id = useStore((s) => s.projectViewId)!
@@ -104,6 +105,7 @@ export default function ProjectView(): JSX.Element {
             <ProjectContext key={id} projectId={id} />
           </section>
         </div>
+        <ProjectDashboards projectId={id} />
         <section className="project-sec" aria-label={L.context}>
           {head(<Info size={14} />, L.context)}
           {project.description ? <p className="project-desc">{project.description}</p> : <p className="muted small">No description. Add one with Edit.</p>}

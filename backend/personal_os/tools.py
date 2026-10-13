@@ -3706,7 +3706,7 @@ Toolbox._register_mcp_search = _register_mcp_search  # type: ignore[attr-defined
 # so a plain question never costs a search round. Everything else waits for tool_search.
 CORE_GROUPS = frozenset({"memory", "docs", "todos", "knowledge", "plan", "utility", "context", "desk", "mcp"})
 CORE_TOOLS = frozenset({"calendar_events", "calendar_get", "gmail_search", "gmail_read", "web_search", "fetch_url",
-                        "skill_list", "skill_view", "writing_style", "deep_research",  # writing_style: the prompt's voice hint tells the model to call it
+                        "skill_list", "skill_view", "writing_style", "deep_research", "dashboard_open",  # writing_style: the prompt's voice hint tells the model to call it
                         "delegate", "message_worker", "check_worker", "stop_worker", "resume_worker"})  # the front agent always has its hand-off tools
 
 

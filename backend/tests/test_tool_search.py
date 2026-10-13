@@ -80,8 +80,8 @@ def test_default_offers_core_plus_search() -> None:
     # core set grew by doc_delete, show, agent_spawn text and deep_research on 2026-10-05; fetch_url/web_search Firecrawl
     # wording on 2026-10-06; the worker tools (delegate, message/check/stop/resume_worker) and send_files on 2026-10-06/07
     # 2026-10-11: terse descriptions, and examples sent only for doubly nested shapes (flat ones ride in the bad-arguments
-    # error); 22.8k measured. scripts/tool_schema_size.py prints the per-tool breakdown.
-    assert SIZES[0] < 23_500, SIZES[0]
+    # error); 22.8k measured; 2026-10-13 dashboard_open joined the core set (23.6k). scripts/tool_schema_size.py prints the per-tool breakdown.
+    assert SIZES[0] < 23_700, SIZES[0]
 
 
 def test_search_loads_and_persists_per_conversation() -> None:

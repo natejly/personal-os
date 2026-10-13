@@ -85,7 +85,7 @@ def _fresh(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
     monkeypatch.setattr(llm, "stream_chat", _fake)
     real = time.monotonic
     monkeypatch.setattr(time, "monotonic", lambda: real() + STATE["offset"])
-    appmod.db.set_settings({"permissionMode": "manual", "workspaceRoots": [],
+    appmod.db.set_settings({"permissionMode": "manual",
                             "permissionRules": {"allow": [], "ask": [], "deny": []}})
     yield
 

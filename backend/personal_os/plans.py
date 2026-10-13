@@ -33,6 +33,8 @@ from .runs import args_digest
 MAX_STEPS = 10
 MAX_TITLE = 120
 MAX_WHY = 200
+MAX_ASSUMPTIONS = 5
+CONFIDENCE = ("high", "medium", "low")
 
 
 def _line(text: Any, limit: int) -> str:
@@ -67,13 +69,21 @@ PLAN_DESCRIPTION = (
     "Get one approval for several consequential actions. Use it when a request needs two or more actions that reach "
     "outside the app (sending mail, changing calendar events, writing to Google): list every one with its exact arguments. "
     "The user accepts, edits or rejects the card. Approval is bound to those values: afterwards call each step once with "
-    "byte-identical arguments; anything changed, added or repeated asks again, so no placeholders."
+    "byte-identical arguments; anything changed, added or repeated asks again, so no placeholders. "
+    "Rate `confidence` honestly: high = you know every fact the steps depend on and the user's request leaves no real choice "
+    "open (the card then goes ahead on its own after a countdown unless the user answers first); medium = reasonable "
+    "assumptions, listed in `assumptions`; low = a key fact is unknown, so the plan is refused until you ask the user "
+    "(ask_user) the questions that would raise it."
 )
 
 PLAN_PARAMETERS: dict[str, Any] = {
     "type": "object",
     "properties": {
         "title": {"type": "string", "description": "One line naming the plan"},
+        "confidence": {"type": "string", "enum": list(CONFIDENCE),
+                       "description": "How sure you are this is what the user wants (default medium); low = key facts unknown"},
+        "assumptions": {"type": "array", "maxItems": MAX_ASSUMPTIONS, "items": {"type": "string"},
+                        "description": "Short statements of what you assumed rather than knew"},
         "steps": {
             "type": "array",
             "maxItems": MAX_STEPS,
@@ -121,6 +131,16 @@ def normalize_plan(args: dict[str, Any], modes: dict[str, str] | None = None,
     if len(raw) > MAX_STEPS:
         return args, tool_error(f"A plan may propose at most {MAX_STEPS} steps; this one has {len(raw)}.", field="steps",
                                 expected=f"at most {MAX_STEPS} steps, or several smaller plans")
+    confidence = str(args.get("confidence") or "medium").strip().lower()
+    if confidence not in CONFIDENCE:
+        return args, tool_error(f"confidence must be one of {', '.join(CONFIDENCE)}.", field="confidence",
+                                expected="high, medium or low")
+    if confidence == "low":
+        return args, tool_error("Your confidence is low, so no plan was posted. First ask the user, with ask_user, the "
+                                "clarifying questions that would raise it, then propose the plan again.",
+                                field="confidence", alternative="ask_user, then propose_plan again")
+    assumed = args.get("assumptions")
+    assumptions = [_line(a, MAX_WHY) for a in assumed if _line(a, MAX_WHY)][:MAX_ASSUMPTIONS] if isinstance(assumed, list) else []
     steps: list[dict[str, Any]] = []
     for i, s in enumerate(raw):
         if not isinstance(s, dict):
@@ -155,7 +175,7 @@ def normalize_plan(args: dict[str, Any], modes: dict[str, str] | None = None,
     expected = sorted({x["tool"] for x in steps if taints and x["tool"] in taints})
     return {"title": str(args.get("title") or "")[:MAX_TITLE],
             "intent": str(args.get("intent") or "")[:MAX_TITLE],
-            "expected_taint": expected, "steps": steps}, None
+            "expected_taint": expected, "confidence": confidence, "assumptions": assumptions, "steps": steps}, None
 
 
 def parse_plan_edits(raw: Any) -> dict[int, dict[str, Any] | None] | None:
@@ -230,6 +250,7 @@ class Plans:
             return None
         d["tainted"] = bool(d["tainted"])
         d["expected_taint"] = json.loads(d.get("expected_taint") or "[]")
+        d["assumptions"] = json.loads(d.get("assumptions") or "[]")
         d["steps"] = self._steps(c, d["plan_id"])
         return d
 
@@ -256,7 +277,8 @@ class Plans:
     # ---- writes ----
     def open(self, call_id: str, args: dict[str, Any], *, run_id: str | None = None, conversation_id: str | None = None,
              message_id: str | None = None, tainted: bool = False, desk_id: str | None = None) -> dict[str, Any]:
-        """Record a proposed plan (pending) before its card is shown. `args` must already be normalize_plan()ed."""
+        """Record a proposed plan (pending) before its card is shown. `args` must already be normalize_plan()ed.
+        `args["auto_at"]` is when a confident plan goes ahead unanswered; hold() clears it."""
         existing = self.by_call(call_id)
         if existing:  # a replayed round: the card and its digests stay as first proposed
             return existing
@@ -264,10 +286,11 @@ class Plans:
         t = now()
         with self.db.tx() as c:
             c.execute("INSERT INTO action_plans(plan_id, call_id, run_id, conversation_id, message_id, desk_id, title, intent, "
-                      "expected_taint, status, tainted, created_at) VALUES(?,?,?,?,?,?,?,?,?,'pending',?,?)",
+                      "expected_taint, confidence, assumptions, auto_at, status, tainted, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?)",
                       (plan_id, call_id, run_id, conversation_id, message_id, desk_id, args.get("title") or "",
                        args.get("intent") or "", json.dumps(args.get("expected_taint") or [], ensure_ascii=False),
-                       int(tainted), t))
+                       args.get("confidence") or "medium", json.dumps(args.get("assumptions") or [], ensure_ascii=False),
+                       args.get("auto_at"), int(tainted), t))
             for i, s in enumerate(args["steps"]):
                 c.execute("INSERT INTO plan_steps(step_id, plan_id, idx, tool, args, args_digest, why, title, danger, status) "
                           "VALUES(?,?,?,?,?,?,?,?,?,'proposed')",
@@ -275,6 +298,17 @@ class Plans:
                            args_digest(s["arguments"]), s.get("why") or "", s.get("title") or s["tool"],
                            s.get("danger") or "safe"))
         return self.get(plan_id) or {}
+
+    def hold(self, call_id: str) -> None:
+        """The user touched the card: its countdown stops for good."""
+        with self.db.tx() as c:
+            c.execute("UPDATE action_plans SET auto_at=NULL WHERE call_id=? AND status='pending'", (call_id,))
+
+    def auto_at(self, call_id: str) -> float | None:
+        """When this still-pending plan goes ahead on its own, or None (no countdown, held, or already decided)."""
+        with self.db.tx() as c:
+            r = c.execute("SELECT auto_at FROM action_plans WHERE call_id=? AND status='pending'", (call_id,)).fetchone()
+        return r["auto_at"] if r else None
 
     def decide(self, call_id: str, decision: str, *, edits: dict[int, dict[str, Any] | None] | None = None,
                by: str = "user", note: str | None = None) -> dict[str, Any] | None:
@@ -313,7 +347,7 @@ class Plans:
 
     # ---- the gate ----
     def claim(self, run_id: str | None, tool: str, args: dict[str, Any], call_id: str,
-              desk_id: str | None = None) -> dict[str, Any] | None:
+              desk_id: str | None = None, card_locked: bool = False) -> dict[str, Any] | None:
         """Consume one approved step matching this call's arguments exactly, or None.
 
         Single use, and scoped to the run the plan was approved in: the UPDATE's `status='approved'` guard is what
@@ -324,6 +358,9 @@ class Plans:
         make every step after the first unclaimable. It is not a loosening: the plan still had to be
         approved for *this* desk, each step is still single-use, and a chat run (desk_id None) is
         still confined to the run it was approved in.
+
+        `card_locked` (the tool always shows a card) skips plans that went ahead on their own countdown: only
+        a plan the user answered can stand in for such a card.
         """
         if not run_id and not desk_id:
             return None
@@ -332,7 +369,8 @@ class Plans:
         with self.db.tx() as c:
             r = c.execute("SELECT s.step_id FROM plan_steps s JOIN action_plans p ON p.plan_id=s.plan_id "
                           f"WHERE {scope} AND p.status='approved' AND s.status='approved' AND s.tool=? AND s.args_digest=? "
-                          "ORDER BY s.idx LIMIT 1", (key, tool, digest)).fetchone()
+                          "AND NOT (? AND p.decided_by='auto') ORDER BY s.idx LIMIT 1",
+                          (key, tool, digest, int(card_locked))).fetchone()
             if r is None:
                 return None
             if not c.execute("UPDATE plan_steps SET status='consumed', call_id=?, consumed_at=? WHERE step_id=? AND status='approved'",

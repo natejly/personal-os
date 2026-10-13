@@ -384,7 +384,7 @@ CREATE INDEX IF NOT EXISTS idx_job_skips_job ON job_skips(job_id, at);
 
 -- An outward-facing tool call a background run was not allowed to make: recorded here instead of executed
 -- (see app.PROPOSAL_ONLY_KINDS). Accepting one is a user action and is what actually runs it, exactly once.
--- status: pending | accepted | rejected | expired (left pending past settings.proposalExpireDays)
+-- status: pending | accepted | rejected | expired (left pending past limits.PROPOSAL_EXPIRE_DAYS)
 CREATE TABLE IF NOT EXISTS proposals (
   id TEXT PRIMARY KEY,
   run_id TEXT REFERENCES agent_runs(run_id) ON DELETE CASCADE,
@@ -424,9 +424,14 @@ CREATE TABLE IF NOT EXISTS action_plans (
   -- Tools in this plan that read untrusted content, as a JSON list. A later external step is then
   -- not re-gated by the plan's own research: see plans.taint_expected.
   expected_taint TEXT NOT NULL DEFAULT '[]',
+  -- The model's own rating (high | medium | low), what it assumed, and when a high-confidence plan goes
+  -- ahead unanswered (NULL = no countdown, or the user touched the card).
+  confidence TEXT NOT NULL DEFAULT 'medium',
+  assumptions TEXT NOT NULL DEFAULT '[]',
+  auto_at REAL,
   status TEXT NOT NULL DEFAULT 'pending',
   tainted INTEGER NOT NULL DEFAULT 0,  -- the chat had read untrusted content when the plan was proposed
-  decided_by TEXT,                     -- user | stop; only the user's own rejection blocks its steps later
+  decided_by TEXT,                     -- user | stop | steer | auto; only the user's own rejection blocks its steps later
   note TEXT,
   created_at REAL NOT NULL,
   decided_at REAL
@@ -609,7 +614,9 @@ class Database:
                      # The chat that booked this (schedule_task): its result is handed back there as a wake turn.
                      "origin_conversation_id": "TEXT"},
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
-                             "expected_taint": "TEXT NOT NULL DEFAULT '[]'"},
+                             "expected_taint": "TEXT NOT NULL DEFAULT '[]'",
+                             "confidence": "TEXT NOT NULL DEFAULT 'medium'", "assumptions": "TEXT NOT NULL DEFAULT '[]'",
+                             "auto_at": "REAL"},
             "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'",
                           # A parked desk card (runs.RunStore.park): when it was let go, what the user
                           # said with their answer, when the desk's next turn was told, and which call

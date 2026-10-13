@@ -3,8 +3,7 @@
 What is pruned is bookkeeping, never something the user wrote or would look for: the per-call usage log, the
 span traces on finished messages, the paged tool-result payloads the model could re-read, decided approval
 cards, the idempotency journal of long-finished runs and their event tape. Messages, memories, documents,
-notes, todos, plans, proposals and desks are never touched. Each threshold is a setting (retain*Days); the
-defaults live in llm.DEFAULT_SETTINGS.
+notes, todos, plans, proposals and desks are never touched. Each threshold is a constant in limits.py (RETAIN_*_DAYS).
 """
 from __future__ import annotations
 
@@ -15,6 +14,7 @@ import sqlite3
 import time
 from typing import Any, Callable
 
+from . import limits
 from .db import Database
 from .runs import EVENTS_RETAIN_S
 
@@ -23,11 +23,6 @@ log = logging.getLogger("personal_os.retention")
 DAY = 86400.0
 FIRST_RUN_DELAY_S = 120.0
 INTERVAL_S = DAY
-
-
-def _days(cfg: dict[str, Any], key: str, default: float) -> float:
-    v = cfg.get(key, default)
-    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else default
 
 
 def archive_sweep(db: Database, days: float, t: float) -> dict[str, int]:
@@ -53,10 +48,10 @@ def archive_sweep(db: Database, days: float, t: float) -> dict[str, int]:
 def sweep(db: Database, cfg: dict[str, Any], now: float | None = None) -> dict[str, int]:
     """Prune once. Returns rows removed (or message traces cleared) per table; a missing table counts 0."""
     t = time.time() if now is None else now
-    usage_cut = t - _days(cfg, "retainUsageDays", 365) * DAY
-    trace_cut = t - _days(cfg, "retainTraceDays", 60) * DAY
-    result_cut = t - _days(cfg, "retainToolResultDays", 30) * DAY
-    approval_cut = t - _days(cfg, "retainApprovalDays", 90) * DAY
+    usage_cut = t - limits.RETAIN_USAGE_DAYS * DAY
+    trace_cut = t - limits.RETAIN_TRACE_DAYS * DAY
+    result_cut = t - limits.RETAIN_TOOL_RESULT_DAYS * DAY
+    approval_cut = t - limits.RETAIN_APPROVAL_DAYS * DAY
     steps: dict[str, tuple[str, tuple[Any, ...]]] = {
         "usage_log": ("DELETE FROM usage_log WHERE created_at < ?", (usage_cut,)),
         # The message stays; only its span trace goes. NULL is what a message with no trace already has.

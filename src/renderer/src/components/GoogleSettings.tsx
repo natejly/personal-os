@@ -3,6 +3,7 @@ import { Unplug, Check, AlertTriangle, RefreshCw, ExternalLink, Upload } from '.
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import type { DriveBackupRun, GoogleTaskList } from '@shared/types'
+import Switch from './settings/Switch'
 
 /** Console pages, in the order the setup walks through them. */
 const CONSOLE = {
@@ -125,10 +126,7 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
 
       {google?.connected && (
         <div className="tasks-sync">
-          <label className="toggle-row plain">
-            <span className="toggle-text"><b>Sync Todos with Google Tasks</b></span>
-            <input type="checkbox" checked={syncEnabled} disabled={!tasksSync} onChange={(e) => void setTasksSync({ enabled: e.target.checked })} /><span className="switch" />
-          </label>
+          <Switch title="Sync Todos with Google Tasks" checked={syncEnabled} disabled={!tasksSync} onChange={(v) => void setTasksSync({ enabled: v })} />
           {syncEnabled && tasksSync && (
             <div className="tasks-sync-row">
               <select aria-label="Google Tasks list to sync with" value={tasksSync.config.tasklist} onChange={(e) => void setTasksSync({ tasklist: e.target.value })} title="Which Google Tasks list to sync with">

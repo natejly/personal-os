@@ -58,3 +58,15 @@ export const filePathOf = (href?: string): string | null => {
 
 /** Where a path lives: on this Mac (absolute or home-relative), or inside the chat's own folders. */
 export const isMacPath = (p: string): boolean => p.startsWith('/') || p.startsWith('~/')
+
+/**
+ * The path a reply's own markdown link `[text](outputs/report.md)` names: no scheme, a file extension, with any
+ * %-escapes decoded and a ?query or #anchor dropped. Null for a URL, an in-page anchor or a link with no file in it.
+ */
+export const hrefPath = (href?: string): string | null => {
+  if (!href || href.startsWith('#') || href.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(href)) return null
+  try {
+    const p = decodeURIComponent(href.replace(/[?#].*$/s, '')).replace(/^\.\//, '')
+    return /\.[A-Za-z0-9]{1,8}$/.test(p) ? p : null
+  } catch { return null }
+}

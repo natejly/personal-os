@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Copy, ExternalLink } from '../icons'
 import type { Settings, TelegramStatus } from '@shared/types'
 import { api } from '../lib/api'
+import NumberField from './settings/NumberField'
+import Switch from './settings/Switch'
 
 type Tone = '' | 'needs-you' | 'working' | 'done' | 'failed'
 
@@ -94,10 +96,7 @@ export default function TelegramSettings({ draft, patch }: { draft: Settings; pa
       </div>
       {st?.bot_username && <p className="muted small">Bot: <code>@{st.bot_username}</code></p>}
 
-      <label className="toggle-row plain">
-        <span className="toggle-text"><b>Control Grain by Telegram</b></span>
-        <input type="checkbox" checked={!!st?.enabled} disabled={busy || !hasToken} onChange={(e) => void run(() => api.telegramSetEnabled(e.target.checked))} /><span className="switch" />
-      </label>
+      <Switch title="Control Grain by Telegram" checked={!!st?.enabled} disabled={busy || !hasToken} onChange={(v) => void run(() => api.telegramSetEnabled(v))} />
 
       <p className="muted small" role="status" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span className={`inbox-dot ${view.tone}`} aria-hidden />
@@ -132,21 +131,14 @@ export default function TelegramSettings({ draft, patch }: { draft: Settings; pa
         </div>
       )}
 
-      <label className="toggle-row plain">
-        <span className="toggle-text"><b>Message me when long runs finish or need approval</b><small>Covers chat runs you started in the app, once they take at least this long.</small></span>
-        <input type="checkbox" checked={!!draft.telegramNotifyLongRuns} onChange={(e) => patch({ telegramNotifyLongRuns: e.target.checked })} /><span className="switch" />
-      </label>
+      <Switch title="Message me when long runs finish or need approval" help="Covers chat runs you started in the app, once they take at least this long." checked={!!draft.telegramNotifyLongRuns} onChange={(v) => patch({ telegramNotifyLongRuns: v })} />
       {draft.telegramNotifyLongRuns && (
         <label><span>Minutes before a run counts as long</span>
-          <input type="number" min={1} max={1440} value={draft.telegramLongRunMinutes ?? 3}
-            onChange={(e) => patch({ telegramLongRunMinutes: Math.min(1440, Math.max(1, Math.round(Number(e.target.value) || 1))) })} />
+          <NumberField name="telegramLongRunMinutes" value={draft.telegramLongRunMinutes ?? 3} fallback={1} onChange={(telegramLongRunMinutes) => patch({ telegramLongRunMinutes })} />
         </label>
       )}
 
-      <label className="toggle-row plain">
-        <span className="toggle-text"><b>Send worker results to Telegram</b><small>When a background worker finishes, the assistant's reply to it is also sent to your chat.</small></span>
-        <input type="checkbox" checked={!!draft.telegramPushWorkerResults} onChange={(e) => patch({ telegramPushWorkerResults: e.target.checked })} /><span className="switch" />
-      </label>
+      <Switch title="Send worker results to Telegram" help="When a background worker finishes, the assistant's reply to it is also sent to your chat." checked={!!draft.telegramPushWorkerResults} onChange={(v) => patch({ telegramPushWorkerResults: v })} />
       <p className="muted small">Replies, worker results and progress updates can include screenshots and files; photos you send the bot reach the chat.</p>
 
       <div className="workspace-roots-add">

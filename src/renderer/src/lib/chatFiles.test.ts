@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { actionLabel, artifactShowItem, artifactsQuery, filesQuery, formatCount, groupByChat, groupByKind, kindLabel, projectFilter, rowAction, uploadTarget, type ChatFile } from './chatFiles'
+import { actionLabel, artifactShowItem, artifactsQuery, filesQuery, formatCount, groupByChat, groupByKind, kindLabel, projectFilter, rowAction, soleOutput, uploadTarget, type ChatFile } from './chatFiles'
 
 const f = (id: string, kind: ChatFile['kind'], chat: string, at: number, over: Partial<ChatFile> = {}): ChatFile => ({
   id, conversation_id: chat, conversation_title: `Chat ${chat}`, project_id: null, kind, ref: id, name: id, action: 'created', message_id: null, chat_count: 1, pinned: false, created_at: at, missing: false, rel: null, ...over
@@ -91,4 +91,12 @@ test('artifactShowItem: a file item whose bytes come from the artifact route, no
   assert.equal(item.size, 12)
   assert.equal(artifactsQuery(), '/chat-files/artifacts?limit=50')
   assert.equal(artifactsQuery('1.5|x', 10), '/chat-files/artifacts?limit=10&cursor=1.5%7Cx')
+})
+
+test('soleOutput: a path another chat saved opens only when one output has it', () => {
+  const o = (id: string, rel: string, over: Partial<ChatFile> = {}): ChatFile => f(id, 'output', id, 1, { rel, ...over })
+  assert.equal(soleOutput([o('a', 'outputs/x.md'), o('b', 'outputs/y.md')], 'outputs/x.md')?.id, 'a')
+  assert.equal(soleOutput([o('a', 'work/PROGRESS.md'), o('b', 'work/PROGRESS.md')], 'work/PROGRESS.md'), null)
+  assert.equal(soleOutput([o('a', 'outputs/x.md', { missing: true })], 'outputs/x.md'), null)
+  assert.equal(soleOutput([f('a', 'upload', 'c', 1, { rel: 'outputs/x.md' })], 'outputs/x.md'), null)
 })

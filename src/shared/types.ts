@@ -287,6 +287,11 @@ export interface PlanRecord {
   tainted: boolean
   /** Tools in this plan that taint, so a later external step is not re-gated by the plan's own research. */
   expected_taint: string[]
+  /** The model's own rating of the plan, and what it assumed rather than knew. */
+  confidence: 'high' | 'medium'
+  assumptions: string[]
+  /** Epoch seconds when a high-confidence plan goes ahead unanswered; null = no countdown. */
+  auto_at: number | null
   note: string | null
   decided_by: string | null
   created_at: number
@@ -310,6 +315,10 @@ export interface PlanEdit { idx: number; arguments?: Record<string, unknown> }
 
 export type ApprovalDecision = 'allow' | 'deny' | 'always_chat' | 'always_global' | 'always_session' | 'always_rule' | 'allow_host'
 
+export type DestructiveKind = 'shell' | 'files' | 'items' | 'send'
+export type DestructiveAction = 'block' | 'ask' | 'allow'
+export type DestructiveDefaults = Record<DestructiveKind, DestructiveAction>
+
 /** What an approval card adds beyond the tool name: the rule that put it there and the rules it can save. */
 export interface PermissionCard {
   kind: 'rule' | 'opaque' | 'external_directory' | 'doom_loop' | 'destructive' | null
@@ -322,6 +331,8 @@ export interface PermissionCard {
   session: boolean
   /** The tool's danger tier; an 'external' or 'schedules' call offers no whole-tool standing grant. */
   danger?: string
+  /** permissions_update: what the settings change does, as plain before -> after lines. */
+  change?: string[]
 }
 
 /** Allow / ask / deny lists of `Tool(pattern)` rules (permrules.py). */
@@ -852,8 +863,6 @@ export interface ConversationSettings {
   /** This chat's reply style; absent reads as default. `responseStyleText` is the user's own wording for 'custom'. */
   responseStyle?: string
   responseStyleText?: string
-  /** Absent inherits Settings.skipPermissions. True runs tool calls that would have asked, in this chat. */
-  skipPermissions?: boolean
   autoLearn: boolean
   /** False: the chat stays in history and search, but auto-learn, skill drafting and graph extraction skip it. It can be switched at any time. */
   learn?: boolean
@@ -934,8 +943,8 @@ export interface MemorySource { conversation_id: string; message_id: string; tit
 export interface MemoryProposal {
   id: string
   project_id: string | null
-  kind: 'merge_memories' | 'rewrite_memory' | 'merge_entities'
-  payload: { ids: string[]; text?: string; label?: string; snapshot: Record<string, string> }
+  kind: 'merge_memories' | 'rewrite_memory' | 'merge_entities' | 'about_you'
+  payload: { ids: string[]; text?: string; lines?: { text: string; ids: string[] }[]; label?: string; snapshot: Record<string, string> }
   rationale: string
   status: 'pending' | 'applied' | 'dismissed' | 'stale'
   created_at: number
@@ -1480,11 +1489,12 @@ export interface Settings {
   githubTokenSet?: boolean
   googleClientSecretSet?: boolean
   defaultModel: string
-  /** Auto sends short plain messages here; empty means Auto uses the default model. */
-  fastModel: string
+  /** What Auto sends short plain messages to: the medium tier, empty when that is the default model. Read-only. */
+  fastModel?: string
   autoRoute: boolean
   systemPrompt: string
-  extractionModel: string
+  /** The low tier, as resolved by the backend. Read-only. */
+  extractionModel?: string
   /** Model tiers; empty means the active provider's default for the tier. */
   modelHigh?: string
   modelMedium?: string
@@ -1543,8 +1553,6 @@ export interface Settings {
   uiFont?: 'system' | 'serif' | 'rounded' | 'mono' | 'avenir' | 'helvetica' | 'gill' | 'futura' | 'charter' | 'georgia' | 'iowan' | 'palatino' | 'menlo'
   /** Code and monospace typeface; missing means default. */
   codeFont?: 'default' | 'sfmono' | 'menlo' | 'monaco' | 'courier'
-  /** Legacy, pre-spaces global mode. Read once by init() (→ initial view 'canvas') and reset to 'classic'; nothing else reads it. */
-  mode?: 'classic' | 'canvas'
   /** Electron accelerator for the global Gather/Scatter shortcut. */
   gatherShortcut: string
   /** Electron accelerator for the global quick-capture window (appends to today's daily note). */
@@ -1562,38 +1570,32 @@ export interface Settings {
   tools: Record<string, ToolMode | boolean>
   /** How assistant edits to docs land. Missing means review: show the diff and wait. */
   docEditMode?: 'review' | 'apply'
-  /** Connector tool count above which schemas are deferred behind tool search; 0 keeps every schema in the request. */
-  mcpDeferAbove?: number
   /** Built-in tool count above which only the core tools plus tool_search are sent; 0 sends every schema. */
   toolDeferAbove?: number
   /** Put the notes each connected connector server sends at initialize into the prompt, fenced and scanned. Default on. */
   mcpServerNotes?: boolean
   /** Embedding model id used by memory and document retrieval. Changing it re-embeds both stores. */
   embeddingModel?: string
-  /** Fuse keyword, embedding, recency and graph signals for memories; false = keyword only. */
-  hybridRetrieval?: boolean
-  /** Propose a memory tidy-up after this many new auto memories; 0 = manual only. */
-  consolidateEvery?: number
+  /** Computed by the backend: vectors exist for embeddingModel, so it cannot change. */
+  embeddingLocked?: boolean
+  /** Computed by the backend: no embedding model is available, so memory and file search use keywords only. */
+  embeddingKeywordOnly?: boolean
   /** Argument-pattern rules over the per-tool modes. Deny beats ask beats allow; forced approvals are never lifted. */
   permissionRules?: PermissionRules
   /** 'deny': a background run that would have to ask is refused instead of waiting for someone. */
   unattendedApprovals?: 'ask' | 'deny'
-  /** Review gate: a second model looks at a risky call that would run unasked and may turn it into a card. */
-  autoReview?: 'off' | 'risky' | 'all-writes'
   /** Model for the review gate; empty = the extraction model, else the chat model. */
   autoReviewModel?: string
   /** External and schedules tools that always show a card. Every other tool that acts outside the app runs on a plain yes. */
   alwaysAsk?: string[]
-  /** Legacy; the UI no longer shows it. permissionMode decides. */
-  skipPermissions?: boolean
   /** auto: a second model checks risky actions; manual: ask before each; allow_all: no checks, no cards. Default auto. */
   permissionMode?: 'auto' | 'manual' | 'allow_all'
+  /** Manual mode only: what happens to a destructive action of each kind. Auto and Allow everything card only a destructive shell command. */
+  destructiveDefaults?: DestructiveDefaults
   /** Lifts the host allow-lists (fetch, browse, shell network) and the per-tool approval for connector tools. Independent of permissionMode. */
   allowAllConnections?: boolean
   /** Off by default. Lifts the two taint-forced cards (networked shell, writes outside the desk after untrusted content). Hard blocks still ask. */
   trustExternalContent?: boolean
-  /** Keep the system prompt stable and put per-turn retrieval beside the newest message (prompt caching). Default on. */
-  cacheLayout?: boolean
   /** Show traces, the context preview, the full system prompt and OTLP export. Off by default; traces are recorded either way. */
   devTools?: boolean
   otelExport?: OtelExportConfig
@@ -1607,7 +1609,6 @@ export interface Settings {
   /** Absolute token triggers: history alone for summarizing, the whole request for clearing tool results. */
   compactAtTokens?: number
   compactKeepTokens?: number
-  microAtTokens?: number
   /** Coding sessions: how many run at once (1-20, default 3). */
   codingSessionMaxConcurrent?: number
   /** Coding goes to a coding agent: Grain's own agents may not edit files or run file-changing commands inside a git repo,
@@ -1622,17 +1623,13 @@ export interface Settings {
   workerMaxConcurrent?: number
   /** Send the assistant's reply to a finished worker to Telegram (default off). */
   telegramPushWorkerResults?: boolean
-  /** The Telegram bot's display name; blank = "Grain · <this Mac>". */
-  telegramBotName?: string
   /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
   llmRetries?: number
   llmIdleSeconds?: number
   /** Archive chats and inbox messages whose last activity is older than this many days (restorable). 0 or missing = off. */
   autoArchiveDays?: number
-  retainUsageDays?: number
-  retainTraceDays?: number
-  retainToolResultDays?: number
-  retainApprovalDays?: number
+  /** Seconds before a plan the assistant rates high-confidence goes ahead unanswered (default 30, 0 = off, 0-600). Never in manual mode. */
+  planAutoApproveSeconds?: number
   /** Hosts fetch_url may still read once the reply has seen untrusted content. */
   fetchAllowlist?: string[]
   /** Snapshot granted folders before a reply changes them, so Undo covers shell effects. Missing means on. */
@@ -1643,14 +1640,10 @@ export interface Settings {
   secretsKeychain?: boolean
   /** Why the system secret store is not in use (shown with the unencrypted-keys notice). */
   secretsReason?: string | null
-  /** Grain works anywhere on the Mac, so this no longer limits anything. The backend still accepts and stores it. */
-  workspaceRoots?: string[]
   /** New chats start working autonomously (Ask as it goes) unless switched off per chat. Missing means on. */
   autonomousByDefault?: boolean
   /** Host shell. shellNetwork opens the network entirely; off, only the allowlist below is reachable. */
   shellNetwork?: boolean
-  shellTimeoutSec?: number
-  shellMaxBackground?: number
   shellRegistryAccess?: boolean
   shellAllowedDomains?: string[]
   /** In a desk, a sandboxed shell command inside the desk's own workspace runs without a card. Missing means on. */
@@ -1664,8 +1657,6 @@ export interface Settings {
   imageModel?: string
   /** The agent's own browser. */
   browserEnabled?: boolean
-  browserMaxTabs?: number
-  browserIdleSeconds?: number
   browserAllowlist?: string[]
   /** Extra packages for the shared work environment. */
   workEnvPackages?: string[]
@@ -1684,8 +1675,6 @@ export interface Settings {
   exaApiKey?: string
   /** Base URL of your own SearXNG; searched beside Exa and merged. Empty = off. */
   searxngUrl?: string
-  /** Seconds fetch_url reuses a fetched page (0 = never). */
-  fetchCacheSeconds?: number
   /** fetch_url retries a blocked or JavaScript-only page through Jina Reader (which then sees the URL). Default on. */
   readerFallback?: boolean
   /** github_search/github_read; empty uses the gh CLI's login. */
@@ -2610,7 +2599,7 @@ export interface AgentProposal {
   tool: string
   args: Record<string, unknown>
   args_digest: string
-  /** 'expired': left pending past settings.proposalExpireDays; it can no longer be accepted. */
+  /** 'expired': left pending past limits.PROPOSAL_EXPIRE_DAYS; it can no longer be accepted. */
   status: 'pending' | 'accepted' | 'rejected' | 'expired'
   result: unknown
   error: string | null

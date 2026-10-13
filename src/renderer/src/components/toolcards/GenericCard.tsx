@@ -64,6 +64,7 @@ export function GenericApproval({ event, conversationId, decide, onWhy }: {
           From connector <b>{connector}</b> <ToolBadges readOnly={event.mcp?.read_only} destructive={event.mcp?.destructive} />
         </div>
       )}
+      {event.permission?.change && <ul className="tc-change">{event.permission.change.map((l) => <li key={l}>{l}</li>)}</ul>}
       <ArgList rows={argRows(args)} />
       <ApprovalRules event={event} conversationId={conversationId} decide={decide} />
     </div>

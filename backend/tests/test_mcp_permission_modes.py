@@ -59,7 +59,7 @@ appmod.mcp.ready_slugs = lambda: sorted(SLUGS.values())  # type: ignore[method-a
 
 def reply(pmode: str, calls: list[str]) -> list[dict[str, Any]]:
     """One reply whose model calls `calls` in successive rounds. Stops at the first approval card."""
-    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "workspaceRoots": [], "permissionMode": pmode,
+    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "permissionMode": pmode,
                             "permissionRules": {"allow": [], "ask": [], "deny": []}})
     cid = appmod.convos.create(None, "t", "m")["id"]
     CALLED.clear()

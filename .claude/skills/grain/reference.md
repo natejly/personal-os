@@ -307,14 +307,14 @@ From the app menu (`src/main/index.ts`); ⌘ is Cmd, ⌃ Control, ⌥ Option.
 | ⌘⇧[ / ⌘⇧] | Previous / next chat |
 | ⌘F, ⌘G, ⌘⇧G | Find in chat, next, previous |
 | ⌘B | Toggle sidebar |
-| ⌘I | Toggle side panel |
+| ⌘I | Quick chat / Page agent panel |
 | ⌃⌘I | Toggle context panel |
-| (none) | Quick chat (title-bar button) |
-| ⌘⇧C | Toggle Canvases (Spaces in code) |
-| ⌃⌘N | New canvas |
-| ⌃1 ... ⌃9 | Go to canvas 1-9 |
-| ⌥⌘← / ⌥⌘→ | Previous / next canvas |
-| ⌥⌘↑ | Canvas overview |
+| (none) | Toggle side panel (View menu, workspace button) |
+| ⌘⇧C | Toggle Spaces |
+| ⌃⌘N | New space |
+| ⌃1 ... ⌃9 | Go to space 1-9 |
+| ⌥⌘← / ⌥⌘→ | Previous / next space |
+| ⌥⌘↑ | Space overview |
 | ⌃⌘T | Tidy up |
 | ⌃⌘L | Lock / unlock canvas |
 | ⌃⌘O / ⌃⌘⇧O | Pop a window out of its space / return it |

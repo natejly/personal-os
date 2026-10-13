@@ -149,6 +149,8 @@ def clean():  # type: ignore[no-untyped-def]
     def reset() -> None:
         db.secrets.delete(provider_keys.SECRET)
         db.set_settings({"provider": "fireworks", "baseUrl": FW, "apiKey": "", "embeddingModel": ""})
+        with db.tx() as c:
+            c.execute("DELETE FROM memory_vectors")
     reset()
     yield
     reset()
@@ -181,7 +183,11 @@ def test_picker_models_setting_round_trips(clean) -> None:  # type: ignore[no-un
 # ---- embedding lock ----
 def test_embedding_lock(clean) -> None:  # type: ignore[no-untyped-def]
     assert client.put("/settings", json={"embeddingModel": "m1"}).status_code == 200  # from blank
-    assert client.put("/settings", json={"embeddingModel": "m1"}).status_code == 200  # same value
+    assert client.put("/settings", json={"embeddingModel": "m2"}).status_code == 200  # no vectors yet: still changeable
+    assert client.put("/settings", json={"embeddingModel": "m1"}).status_code == 200
+    with db.tx() as c:
+        c.execute("INSERT OR REPLACE INTO memories(id,content,kind,source,pinned,created_at,updated_at) VALUES('lk','x','fact','auto',0,1,1)")
+        c.execute("INSERT OR REPLACE INTO memory_vectors(memory_id,model,dim,vec,content_hash,updated_at) VALUES('lk','m1',1,x'00','h',1)")
     r = client.put("/settings", json={"embeddingModel": "m2"})
     assert r.status_code == 409 and "locked" in r.json()["detail"]
     client.put("/settings", json={"provider": "anthropic"})  # a provider switch leaves it alone

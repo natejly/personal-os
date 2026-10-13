@@ -20,7 +20,7 @@ from personal_os.graph_recall import GraphRecall  # noqa: E402
 from personal_os.memory_index import MemoryIndex  # noqa: E402
 from personal_os.repos import Documents, Graph, Memories, _scope_clause  # noqa: E402
 
-CFG = {"embeddingModel": "fake-embed", "hybridRetrieval": True}
+CFG = {"embeddingModel": "fake-embed"}
 VOCAB = ("samantha", "acme", "migration")
 SINCE = time.mktime((2026, 9, 12, 12, 0, 0, 0, 0, -1))
 SINCE_TEXT = time.strftime("%Y-%m-%d", time.localtime(SINCE))

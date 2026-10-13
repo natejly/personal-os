@@ -21,7 +21,7 @@ Mental model:
 - **Library** tabs: Skills, Agents, Automations (workflows and saved commands), Connectors (MCP).
 - **Reach**: a Telegram bot chats with Grain from a phone (Settings → Integrations, [docs/telegram.md](../../../docs/telegram.md)); coding sessions hand repo work to a coding agent ([docs/coding-agents.md](../../../docs/coding-agents.md)); `deep_research` and `/research` fan out parallel researchers ([docs/research-mode.md](../../../docs/research-mode.md)); chats can read and message each other (`list_chats`, `read_chat`, `message_chat`).
 - **Autonomy**: a reply can hand work to subagents (`agent_spawn`). With Settings → Agents → Desks "Start new chats working autonomously" on (the default), a new chat starts as a longer session (Ask as it goes, with a turn limit) with its own plan and workspace: a strip above the composer only while background workers run (the main agent has no status chrome; the composer's Stop is its control). Every chat's header "Documents in this chat" button opens a side panel with Files / Changes, plus Checklist, Workers and (for a desk) Review when they apply; settings are under Settings → Agents. Workflows are approved once and run in waves ([docs/workflows.md](../../../docs/workflows.md), [docs/cowork-design.md](../../../docs/cowork-design.md), which is the original desk spec, partly out of date; the standalone Cowork view was folded into chats on 2026-10-05). Scheduled runs only propose; results land in the Agent inbox (title-bar button).
-- **Settings** (⌘,) tabs: General (opens first), Sidebar, Model, Models, Agents, Memory, Integrations, Permissions, System access, Usage, Advanced (`TABS` in `SettingsModal.tsx`).
+- **Settings** (⌘,) tabs: General (opens first), Models, Agents, Memory, Integrations, Permissions, System access, Sidebar, Usage, Advanced (`TABS` in `SettingsModal.tsx`).
 
 ## Using it
 
@@ -32,12 +32,12 @@ First run, as a user:
 3. ⌘N for a chat. Model and effort pickers are under the composer.
 4. Drop or paste a file to attach it; it rides on the message as a chip and its text is inlined for the model up to a size cap.
 5. Set a **Working folder** on the chat if the assistant should touch files. With none set, file and shell tools work in `~/Grain` (`mac.py`).
-6. ⌘4 Files: ⌘⇧N new note, ⌘⇧D today's note, ⌘U upload. The Quick chat button (title bar) opens a small chat that sees the view behind it, including the open note.
+6. ⌘4 Files: ⌘⇧N new note, ⌘⇧D today's note, ⌘U upload. ⌘I (or the title-bar Quick chat button) opens the Page agent, a chat bound to the open note.
 7. Sidebar **+** next to Projects makes a project. Lists, Calendar and Mail are sidebar rows (⌘2, ⌘3, ⌘5).
 8. Canvases: ⌘⇧C, then Add widget or right-click the plane. Library for agents and automations.
 
-Shortcuts that matter (full list in reference.md): ⌘N new chat, ⌘K command palette, ⌘I side panel, ⌘⇧C
-Canvases, ⌘1 to ⌘6 views (Chats, Lists, Calendar, Files, Mail, Memory), ⌘, settings,
+Shortcuts that matter (full list in reference.md): ⌘N new chat, ⌘K command palette, ⌘I quick chat, ⌘⇧C
+Spaces, ⌘1 to ⌘6 views (Chats, Lists, Calendar, Files, Mail, Memory), ⌘, settings,
 ⌘⇧F search chats.
 
 Composer features:

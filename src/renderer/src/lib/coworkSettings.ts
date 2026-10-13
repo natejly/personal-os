@@ -39,14 +39,3 @@ export function networkPatch(mode: NetworkMode, hosts: string[] = []): NetSettin
   if (mode === 'open') return { shellNetwork: true, shellRegistryAccess: true, shellAllowedDomains: hosts }
   return { shellNetwork: false, shellRegistryAccess: true, shellAllowedDomains: hosts }
 }
-
-/** Limits the backend enforces (`NUMERIC_SETTING_RANGES`); keys it leaves out are only non-negative. */
-const RANGES: Record<string, [number, number]> = { browserMaxTabs: [1, 12] }
-
-/** Clamp a typed number into its range; blank or NaN falls back to `fallback`. */
-export function clampSetting(key: string, raw: string, fallback: number): number {
-  const n = Number(raw)
-  if (raw.trim() === '' || !Number.isFinite(n)) return fallback
-  const [lo, hi] = RANGES[key] ?? [0, Infinity]
-  return Math.min(hi, Math.max(lo, n))
-}

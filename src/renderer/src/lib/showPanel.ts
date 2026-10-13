@@ -120,3 +120,21 @@ export function headerMeta(item: ShowItem, viewer: FileViewer | null, at: number
   }
   return out
 }
+
+/** Tools that edit a file on this Mac and report its path (fs_edit's and write_local_file's `path` is absolute or ~/). */
+const EDIT_TOOLS = new Set(['write_local_file', 'fs_edit'])
+
+/**
+ * The panel item for a finished file edit, or null: not an edit tool, still running, failed, or no absolute path
+ * (a relative path has no folder to resolve against here; the result's own `path` is preferred when it has one).
+ */
+export function editedFileItem(e: { name: string; pending?: boolean; error?: unknown; arguments?: Record<string, unknown> | null; result_preview?: string }): ShowItem | null {
+  if (!EDIT_TOOLS.has(e.name) || e.pending || e.error) return null
+  let path = ''
+  try { const r = JSON.parse(e.result_preview ?? '') as { path?: unknown }; if (typeof r?.path === 'string') path = r.path } catch { /* preview may be cut or plain text */ }
+  const arg = e.arguments?.path
+  if (!path && typeof arg === 'string') path = arg
+  if (!(path.startsWith('/') || path.startsWith('~/'))) return null
+  const name = path.split('/').pop() || path
+  return { kind: 'file', title: name, path, name }
+}

@@ -1,11 +1,12 @@
 import { Fragment, useEffect, useState } from 'react'
-import { Eye, EyeOff, Plug, ExternalLink } from '../icons'
+import { Plug } from '../icons'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { chatModelIds } from '../lib/modelLabel'
-import { embeddingLocked } from '../lib/pickerModels'
+import { embeddingLocked, embeddingRows } from '../lib/pickerModels'
 import { MODEL_FIELDS, remapSettings, type ModelKey } from '../lib/providerModels'
-import { showsBaseUrl, type ProviderInfo } from './onboarding/steps'
+import ProviderForm from './ProviderForm'
+import type { ProviderInfo } from './onboarding/steps'
 import type { ModelInfo, Settings } from '@shared/types'
 
 const HELP: Record<ModelKey, { help: string; placeholder: string }> = {
@@ -14,9 +15,7 @@ const HELP: Record<ModelKey, { help: string; placeholder: string }> = {
   modelMedium: { help: 'Auto-review of tool calls, summaries and recaps, memory tidy-ups, and short messages under Auto.', placeholder: 'Provider default' },
   modelLow: { help: 'Titles, memories, follow-ups and other background learning.', placeholder: 'Provider default' },
   workerModel: { help: "Model for workers the chat starts. An agent's own model still wins.", placeholder: 'Same as chat' },
-  fastModel: { help: '', placeholder: '' },
-  extractionModel: { help: '', placeholder: '' },
-  embeddingModel: { help: 'After changing it, Save, then press Rebuild search index under Advanced.', placeholder: 'qwen3-embedding-8b' },
+  embeddingModel: { help: 'Chosen for you from your providers. Once the search index is built it is fixed; before that you can change it.', placeholder: 'None: keyword search' },
   retrievalRerankModel: { help: "Reorders memory and document search results by relevance. Empty uses the provider's default reranker.", placeholder: 'Not available on this provider' },
   visionModel: { help: 'Reads pictures. Empty uses the chat model when it can read images; otherwise pictures are read with OCR only.', placeholder: 'Same as the chat model' },
   imageModel: { help: 'Used when the assistant makes an image. The provider must offer an OpenAI-compatible images endpoint.', placeholder: 'Not set' }
@@ -35,7 +34,6 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
   const [providers, setProviders] = useState<ProviderInfo[]>([])
   const [live, setLive] = useState<Record<string, string[]>>({})
   const [cleared, setCleared] = useState<string[]>([])
-  const [showKey, setShowKey] = useState(false)
   // The saved key never reaches the renderer: with one saved the field stays hidden until Replace is pressed.
   const [replacing, setReplacing] = useState(false)
   const [test, setTest] = useState<{ state: 'idle' | 'testing' | 'ok' | 'fail'; msg?: string }>({ state: 'idle' })
@@ -86,57 +84,36 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
   // Every chat model of every provider with a key is selectable, not only the active provider's.
   const options = [...new Set([...(live[id] ?? preset?.models ?? []), ...chatModelIds(models)])]
   const ownerOf = new Map(models.map((m) => [m.id, m.provider]))
-  const keyLabel = preset && !preset.needsKey ? 'API key (optional)' : 'API key'
 
   return (
     <>
-      {providers.length > 0 && (
-        <label className="setting-row"><span className="toggle-text"><b>Provider</b></span>
-          <select value={id} onChange={(e) => pick(e.target.value)} aria-label="Provider">
-            {!preset && <option value={id}>{id}</option>}
-            {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </label>
-      )}
-      {!preset || showsBaseUrl(id) ? (
-        <label><span className="toggle-text"><b>Provider address</b></span>
-          <input value={draft.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="https://api.example.com/v1" spellCheck={false} />
-        </label>
-      ) : (
-        <div className="setting-row"><span className="toggle-text"><b>Provider address</b><small>{draft.baseUrl}</small></span></div>
-      )}
       {settings.providerAuthBlocked && (
         <p className="notice error" role="alert">
           The provider rejected this key, so model requests are paused until it is fixed. Save a working key, or{' '}
           <button type="button" className="link" onClick={() => void api.settings.retryAuth().then((r) => useStore.setState((st) => ({ settings: { ...st.settings, providerAuthBlocked: r.providerAuthBlocked } }))).catch(() => undefined)}>try this one again</button>.
         </p>
       )}
-      {keySaved && !replacing && !draft.apiKey ? (
-        <div className="setting-row">
-          <span className="toggle-text"><b>{keyLabel}</b><small>Key saved ••••. Stored on this Mac.</small></span>
-          <div className="button-row">
-            <button className="ghost-btn" type="button" onClick={() => setReplacing(true)}>Replace</button>
-            {id === savedId && <button className="ghost-btn" type="button" onClick={() => void saveSettings({ apiKey: null } as unknown as Partial<Settings>)}>Remove</button>}
+      <ProviderForm
+        providers={providers} provider={preset} providerId={id} onProvider={pick} fixedAddress
+        baseUrl={draft.baseUrl} onBaseUrl={(v) => patch({ baseUrl: v })}
+        apiKey={draft.apiKey} onApiKey={(v) => patch({ apiKey: v })} onKeyBlur={() => { if (draft.apiKey) fetchLive(id, draft.baseUrl, draft.apiKey) }}
+        keyRow={keySaved && !replacing && !draft.apiKey ? (
+          <div className="setting-row">
+            <span className="toggle-text"><b>{preset && !preset.needsKey ? 'API key (optional)' : 'API key'}</b><small>Key saved ••••. Stored on this Mac.</small></span>
+            <div className="button-row">
+              <button className="ghost-btn" type="button" onClick={() => setReplacing(true)}>Replace</button>
+              {id === savedId && <button className="ghost-btn" type="button" onClick={() => void saveSettings({ apiKey: null } as unknown as Partial<Settings>)}>Remove</button>}
+            </div>
           </div>
-        </div>
-      ) : (
-        <label><span className="toggle-text"><b>{keyLabel}</b><small>Stored on this Mac.</small></span>
-          <div className="input-row">
-            <input type={showKey ? 'text' : 'password'} value={draft.apiKey} onChange={(e) => patch({ apiKey: e.target.value })}
-              onBlur={() => { if (draft.apiKey) fetchLive(id, draft.baseUrl, draft.apiKey) }} placeholder="sk-…" spellCheck={false} />
-            <button className="icon-btn" type="button" aria-label={showKey ? 'Hide API key' : 'Show API key'} aria-pressed={showKey} title={showKey ? 'Hide API key' : 'Show API key'} onClick={() => setShowKey((v) => !v)}>{showKey ? <EyeOff size={14} /> : <Eye size={14} />}</button>
-          </div>
-        </label>
-      )}
-      {preset?.keyUrl && (
-        <p className="muted small"><button type="button" className="link-btn" onClick={() => void window.open(preset.keyUrl as string, '_blank')}>Get a key from {preset.name} <ExternalLink size={11} /></button></p>
-      )}
-      {preset?.note && <p className="muted small">{preset.note}</p>}
+        ) : undefined}
+        model={draft.defaultModel ?? ''} onModel={(v) => patch({ defaultModel: v })} modelLabel="Chat model" modelListId="provider-model-options"
+        modelNote={!draft.defaultModel && cleared.includes('Chat model') ? <small className="model-prompt" role="status">Pick a model for Chat model</small> : undefined}
+      />
       <div className="test-row">
         <button className="ghost-btn" type="button" onClick={() => void runTest()} disabled={test.state === 'testing'}><Plug size={14} /> {test.state === 'testing' ? 'Testing…' : 'Test connection'}</button>
         {test.msg && <span className={`test-msg ${test.state}`} role={test.state === 'fail' ? 'alert' : 'status'}>{test.msg}</span>}
       </div>
-      {MODEL_FIELDS.filter((f) => !('hidden' in f)).map((f) => {
+      {MODEL_FIELDS.filter((f) => f.key !== 'defaultModel').map((f) => {
         const value = draft[f.key] ?? ''
         const locked = f.key === 'embeddingModel' && embeddingLocked(settings)
         const tier = 'tier' in f ? f.tier : undefined
@@ -144,8 +121,8 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
           <Fragment key={f.key}>
             {tier === 'high' && <p className="muted small"><b>Model tiers</b> trade cost for quality. Leave a tier empty to use the provider's default.</p>}
           <label><span className="toggle-text"><b>{f.label}</b><small>{HELP[f.key].help}</small></span>
-            <input list="provider-model-options" disabled={locked} value={value} onChange={(e) => patch({ [f.key]: e.target.value })} placeholder={tier && preset?.tiers?.[tier] ? preset.tiers[tier] : f.key === 'defaultModel' && preset?.defaultModel ? preset.defaultModel : f.key === 'retrievalRerankModel' && preset?.rerankModel ? preset.rerankModel : HELP[f.key].placeholder} spellCheck={false} />
-            {locked && <small>Set during setup. Changing it would invalidate the search index.</small>}
+            <input list={f.key === 'embeddingModel' ? 'provider-embedding-options' : 'provider-model-options'} disabled={locked} value={value} onChange={(e) => patch({ [f.key]: e.target.value })} placeholder={tier && preset?.tiers?.[tier] ? preset.tiers[tier] : f.key === 'retrievalRerankModel' && preset?.rerankModel ? preset.rerankModel : HELP[f.key].placeholder} spellCheck={false} />
+            {locked && <small>Fixed: the search index is built with it.</small>}
             {!value && cleared.includes(f.label) && <small className="model-prompt" role="status">Pick a model for {f.label}</small>}
           </label>
             {f.key === 'workerModel' && (
@@ -158,6 +135,7 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
           </Fragment>
         )
       })}
+      <datalist id="provider-embedding-options">{embeddingRows(models, settings.providerKeysSet).map((m) => <option key={m.id} value={m.id} />)}</datalist>
       <datalist id="provider-model-options">{options.map((m) => <option key={m} value={m} label={ownerOf.get(m) ? `${m} — ${ownerOf.get(m)}` : undefined} />)}</datalist>
     </>
   )

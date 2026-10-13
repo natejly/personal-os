@@ -93,3 +93,31 @@ async def all_models(cfg: dict[str, Any], list_fn: Callable[[dict[str, Any]], Aw
         fetch(p["id"], {**cfg, "provider": p["id"], "baseUrl": p["baseUrl"], "apiKey": keys[p["id"]]}, True) for p in others))
     seen: set[str] = set()
     return [r for rows in lists for r in rows if not (r["id"] in seen or seen.add(r["id"]))]
+
+
+def first_embedding(cfg: dict[str, Any]) -> str:
+    """The embedding model of the first cloud provider with a key, the active one first; "" when none serves one."""
+    active, keys = providers.effective(cfg), _keys()
+    order = [active, *(p["id"] for p in providers.PROVIDERS if p["id"] != active)]
+    return next((EMBEDDING_IDS[pid][0] for pid in order if EMBEDDING_IDS.get(pid)
+                 and (keys.get(pid) or (pid == active and cfg.get("apiKey"))) and pid not in _LOCAL), "")
+
+
+async def local_embedding(cfg: dict[str, Any], list_fn: Callable[[dict[str, Any]], Awaitable[list[dict[str, Any]]]]) -> str:
+    """For a local or custom provider: the first model its /models listing marks as an embedding model, else ""."""
+    if providers.effective(cfg) not in _LOCAL:
+        return ""
+    try:
+        return next((r["id"] for r in await list_fn(cfg) if r.get("mode") == "embedding"), "")
+    except Exception:  # noqa: BLE001 - an unreachable server just means no pick
+        return ""
+
+
+def can_embed(cfg: dict[str, Any], model: str) -> bool:
+    """Whether some provider with a key (or the local server) serves `model`."""
+    active = providers.effective(cfg)
+    if not model:
+        return False
+    if active in _LOCAL or (active and _owns(active, model)):
+        return True
+    return route(cfg, model) is not cfg

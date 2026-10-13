@@ -66,7 +66,7 @@ def test_pinned_row_rides_in_the_profile_not_the_hits(monkeypatch) -> None:
         return np.ones(4, dtype=np.float32)
     monkeypatch.setattr(appmod.memory_index, "query_vec", qv)
     monkeypatch.setattr(appmod.memory_index, "schedule", lambda cfg: None)
-    cfg = {"embeddingModel": "x", "hybridRetrieval": True}
+    cfg = {"embeddingModel": "x"}
     hits = asyncio.run(appmod._memory_hits(None, "tea preference", cfg, {"useMemory": True}))
     assert hits and pin["id"] not in {m["id"] for m in hits}  # it matched nothing; hits are relevance-gated
     kw = dict(memories=mem, graph=appmod.graph, documents=Documents(appmod.db), project=None, project_id=None,

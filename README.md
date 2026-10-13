@@ -52,12 +52,12 @@ The sidebar holds your views (Files, Lists, Calendar, Mail, Health, Library, Job
   - `/research <question>` plans sub-questions, searches in parallel and answers with `[n]` citations and a visible trail.
   - `/compact` summarises the chat so far to free room. `/clear` starts over.
   - `/skills` and `/commands` list what you have. Your own saved commands appear in the same menu.
-- **Quick ask and quick chat.** `⌥Space` from any app opens a small ask bar. The **Quick chat** button in the title bar opens a chat beside any view (it sees the view behind it, including an open note).
+- **Quick ask and quick chat.** `⌥Space` from any app opens a small ask bar. `⌘I` or the **Quick chat** button in the title bar opens a chat beside any view (it sees the view behind it, including an open note).
 - **Selection verbs.** Select text in a chat, a note, an email or a page and choose Explain, Summarize, Verify or Ask. Verify checks claims against pages it opens and cites them.
 - **Autonomous chats.** With **Start new chats working autonomously** on (Settings → Agents, on by default), a new chat can keep working on its task in its own workspace until it is done or needs you. A strip above the composer shows state and has Pause, Resume and Stop. A side panel (`⌘I`) shows Files, Changes, Review and a checklist. Nothing a chat writes reaches your notes or files until you accept it in Review.
 - **Helper agents.** A reply can hand work to background workers. They appear as indented rows under the reply with live status. Click one to open it and message it. A crew window on a canvas shows the lead agent with its helpers around it.
 - **Charts, diagrams and previews.** Replies can include charts, Mermaid diagrams, and interactive charts with sliders that recompute on your Mac. The assistant can open an HTML page, SVG, PDF or image in a side panel. The Python sandbox draws figures inline.
-- **Image generation.** Pick an image model in Settings → Model and ask for a picture. Results are saved to your uploads.
+- **Image generation.** Pick an image model in Settings → Models and ask for a picture. Results are saved to your uploads.
 - **Browser.** The assistant has its own browser for pages that need JavaScript or a login. When it hits a sign-in, CAPTCHA or payment step, it hands the window to you and carries on when you press Hand back.
 - **Traces.** Each reply records what it did: context, every model round with timing, every tool call. Open it from the chip under the reply, or the Trace tab in the context panel (`⌃⌘I`).
 - **Context panel.** Per-chat switches for memory, graph, files, auto-learn and tools, plus an inspector showing exactly what went into the last reply.
@@ -137,7 +137,7 @@ The mic button in the composer dictates into your message. Hold the dictation sh
 
 ### Settings
 
-`⌘,` opens Settings. Tabs: General, Sidebar, Model, Models, Agents, Memory, Integrations, Permissions, System access, Usage and Advanced.
+`⌘,` opens Settings. Tabs: General, Models, Agents, Memory, Integrations, Permissions, System access, Sidebar, Usage and Advanced.
 
 - **Model and Models.** Provider, key, default and fast models, image model, and per-model price overrides.
 - **Usage.** Spend, tokens and calls over 7, 30 or 90 days, by model and project.
@@ -191,7 +191,7 @@ People using a packaged app only click **Sign in with Google**. A build from sou
 | `⌘U` | Upload a file |
 | `⌘⇧F` / `⌘F` | Search chats / find in this chat |
 | `⌘B` | Toggle sidebar |
-| `⌘I` | Toggle side panel |
+| `⌘I` | Quick chat (the side panel toggle has no chord) |
 | `⌃⌘I` | Toggle context panel |
 | `⌘⇧C` | Toggle canvases (`⌃1` to `⌃9` jump between them) |
 | `⌃⌘O` | Pop a window out of its canvas |

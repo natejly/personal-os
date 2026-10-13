@@ -32,6 +32,9 @@ from personal_os import llm as app_llm, logs  # noqa: E402
 _spec = importlib.util.spec_from_file_location("personal_os._llm_under_test", app_llm.__file__)
 llm = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
 _spec.loader.exec_module(llm)  # type: ignore[union-attr]
+from unittest import mock  # noqa: E402
+
+from personal_os import limits  # noqa: E402
 from personal_os.cowork import Desks  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.repos import Conversations  # noqa: E402
@@ -392,16 +395,12 @@ class RetentionTests(unittest.TestCase):
         self.assertEqual([archived("agent_runs", "run_id", i) for i in ("r-old", "r-new", "r-live")], [1, 0, 0])
         self.assertEqual(self.one("SELECT COUNT(*) FROM conversations"), 4)  # archived, never deleted
 
-    def test_thresholds_are_settings(self) -> None:
+    def test_thresholds_are_limits(self) -> None:
         with self.db.tx() as c:
             c.execute("INSERT INTO usage_log(id, created_at, model, kind) VALUES('u', ?, 'm', 'chat')", (self.now - 10 * 86400,))
         self.assertEqual(sweep(self.db, {}, now=self.now)["usage_log"], 0)  # default keeps a year
-        self.assertEqual(sweep(self.db, {"retainUsageDays": 7}, now=self.now)["usage_log"], 1)
-
-    def test_junk_settings_fall_back_to_defaults(self) -> None:
-        with self.db.tx() as c:
-            c.execute("INSERT INTO usage_log(id, created_at, model, kind) VALUES('u', ?, 'm', 'chat')", (self.now - 10 * 86400,))
-        self.assertEqual(sweep(self.db, {"retainUsageDays": "x", "retainTraceDays": -5, "retainToolResultDays": True}, now=self.now)["usage_log"], 0)
+        with mock.patch.object(limits, "RETAIN_USAGE_DAYS", 7):
+            self.assertEqual(sweep(self.db, {}, now=self.now)["usage_log"], 1)
 
 
 class DiagnosticsRoute(unittest.TestCase):

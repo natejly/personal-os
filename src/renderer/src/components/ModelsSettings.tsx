@@ -4,6 +4,7 @@ import { api } from '../lib/api'
 import { modelLabel } from '../lib/modelLabel'
 import { chatRows, groupByProvider, pickerVisible, togglePicker } from '../lib/pickerModels'
 import { useStore } from '../store'
+import Switch from './settings/Switch'
 import type { ProviderInfo } from './onboarding/steps'
 import type { ModelInfo, Settings } from '@shared/types'
 
@@ -44,14 +45,14 @@ function KeyRow({ p, saved }: { p: ProviderInfo; saved: boolean }): JSX.Element 
   )
 }
 
-/** The Models tab: a key per provider, and which models the composer picker offers. Every change saves at once. */
-export default function ModelsSettings({ settings, models, savePicker }: { settings: Settings; models: ModelInfo[]; savePicker: (ids: string[]) => Promise<void> }): JSX.Element {
+/** The Models tab: a key per provider (saved at once), and which models the composer picker offers (part of the Settings draft). */
+export default function ModelsSettings({ settings, models, pickerModels, setPickerModels }: { settings: Settings; models: ModelInfo[]; pickerModels: string[] | undefined; setPickerModels: (ids: string[]) => void }): JSX.Element {
   const [providers, setProviders] = useState<ProviderInfo[]>([])
   const [query, setQuery] = useState('')
   useEffect(() => { api.setup.providers().then((r) => setProviders(r.providers)).catch(() => undefined) }, [])
 
   const name = (id: string): string => providers.find((p) => p.id === id)?.name ?? id
-  const shown = new Set(pickerVisible(models, settings.pickerModels).map((m) => m.id))
+  const shown = new Set(pickerVisible(models, pickerModels).map((m) => m.id))
   const q = query.trim().toLowerCase()
   const rows = chatRows(models).filter((m) => !q || m.id.toLowerCase().includes(q) || modelLabel(m.id).toLowerCase().includes(q))
   const groups = groupByProvider(rows, settings.provider)
@@ -59,24 +60,22 @@ export default function ModelsSettings({ settings, models, savePicker }: { setti
   return (
     <div className="models-tab">
       <h4>API keys</h4>
-      <p className="muted small">Keys are stored on this Mac.</p>
+      <p className="muted small">One key per provider. Keys stay on this Mac.</p>
       <div className="setting-list">
         {providers.filter((p) => p.needsKey).map((p) => <KeyRow key={p.id} p={p} saved={!!settings.providerKeysSet?.[p.id]} />)}
       </div>
-      <h4>Models in the picker</h4>
+      <h4 id="sec-picker">Models in the picker</h4>
+      <p className="muted small">Choose which models appear in the chat box menu.</p>
       <div className="setting-row models-filter">
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter models" aria-label="Filter models" spellCheck={false} />
-        <button className="ghost-btn" type="button" disabled={!settings.pickerModels?.length} onClick={() => void savePicker([])}>Reset to suggested</button>
+        <button className="ghost-btn" type="button" disabled={!pickerModels?.length} onClick={() => setPickerModels([])}>Reset to suggested</button>
       </div>
       {rows.length === 0 && <p className="muted small">No models match.</p>}
       {groups.map((g) => (
         <div key={g.provider} className="setting-list">
           {g.provider && <p className="muted small"><b>{name(g.provider)}</b></p>}
           {g.rows.map((m) => (
-            <label key={m.id} className="toggle-row">
-              <span className="toggle-text"><b>{modelLabel(m.id)}</b></span>
-              <input type="checkbox" aria-label={m.id} checked={shown.has(m.id)} onChange={(e) => void savePicker(togglePicker(models, settings.pickerModels, m.id, e.target.checked))} /><span className="switch" />
-            </label>
+            <Switch key={m.id} plain={false} title={modelLabel(m.id)} label={m.id} checked={shown.has(m.id)} onChange={(on) => setPickerModels(togglePicker(models, pickerModels, m.id, on))} />
           ))}
         </div>
       ))}

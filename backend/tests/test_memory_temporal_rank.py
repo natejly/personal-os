@@ -120,3 +120,40 @@ def test_graph_list_ranks_seed_memories_above_neighbour_memories(env) -> None:
     idx.graph.upsert_edge(None, a["id"], b["id"], "works_at", valid_at=at("2026-08-01"))
     with db.tx() as c:
         assert idx._graph_seeded(c, "project_id IS NULL", [], None, "what is Priya up to") == [seed, neighbour]
+
+
+def _prefer_plain(idx: MemoryIndex) -> None:
+    async def stub(settings: Any, model: str, query: str, docs: list[str], *, timeout: float, top_n: int) -> Any:
+        return sorted(((i, 0.001 if "beds" in d else 0.99) for i, d in enumerate(docs)), key=lambda s: -s[1])
+    idx.rerank_fn = stub
+
+
+def test_in_window_row_outranks_more_topical_out_of_window_row_after_rerank() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(tmp)
+        memories = Memories(db)
+        idx = MemoryIndex(db, memories, Graph(db), Embedder())
+        far = add(db, memories, "Tomato note about gardening", "2026-08-30")  # the model's pick, just outside September
+        inside = add(db, memories, "Tomato note about gardening beds", "2026-09-10")
+        for i in range(2):
+            add(db, memories, f"Tomato note {i} about gardening", "2026-05-01")
+        _prefer_plain(idx)
+        got = asyncio.run(idx.search_reranked(None, "tomato gardening", settings=RERANK, now=NOW))
+        assert [m["id"] for m in got][0] == far
+        got = asyncio.run(idx.search_reranked(None, "tomato gardening last month", settings=RERANK, now=NOW))
+        assert [m["id"] for m in got][:2] == [inside, far]
+
+
+def test_nothing_in_window_keeps_the_nudged_order() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(tmp)
+        memories = Memories(db)
+        idx = MemoryIndex(db, memories, Graph(db), Embedder())
+        top = add(db, memories, "Tomato note about gardening", "2026-06-01")
+        other = add(db, memories, "Tomato note about gardening beds", "2026-07-01")
+        for i in range(2):
+            add(db, memories, f"Tomato note {i} about gardening", "2026-05-01")
+        _prefer_plain(idx)
+        got = asyncio.run(idx.search_reranked(None, "tomato gardening last month", settings=RERANK, now=NOW))
+        ids = [m["id"] for m in got]
+        assert ids[0] == top and ids[-1] == other  # model order (nudged by date), no tier

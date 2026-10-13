@@ -39,8 +39,8 @@ export function groupByProvider<T extends { provider?: string }>(rows: T[], acti
   return [...out.filter((g) => g.provider === active), ...out.filter((g) => g.provider !== active)]
 }
 
-/** The search model is fixed once set: its vectors fill the index. */
-export const embeddingLocked = (s: { embeddingModel?: string }): boolean => !!s.embeddingModel
+/** The search model is fixed once vectors exist for it (the backend reports it): they would no longer match. */
+export const embeddingLocked = (s: { embeddingLocked?: boolean }): boolean => !!s.embeddingLocked
 
 /** Embedding rows from providers that have a key, suggested ones first. */
 export function embeddingRows(models: ModelInfo[], keys: Record<string, boolean> | undefined): ModelInfo[] {

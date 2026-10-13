@@ -186,6 +186,17 @@ def test_path_rules_with_symlinks_and_globs(tmp_path):
     assert pr.evaluate("fs_edit", {"path": str(real / "sub" / "x")}, one).action is None   # * is one segment
 
 
+def test_relative_paths_resolve_where_the_file_tools_do(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    r = rules(deny=["Edit(~/.zshrc)", "Read(~/secret/**)", f"Read({tmp_path}/desk/x/**)"])
+    assert pr.evaluate("fs_edit", {"path": ".zshrc"}, r).action == "deny"
+    assert pr.evaluate("read_local_file", {"path": "secret/a.txt"}, r).action == "deny"
+    assert pr.evaluate("fs_grep", {"root": "secret", "pattern": "k"}, r).action == "deny"
+    assert pr.evaluate("read_local_file", {"path": "x/a"}, r, roots=[str(tmp_path / "desk")]).action == "deny"
+    assert pr.evaluate("fs_glob", {"pattern": "*"}, r, roots=[str(tmp_path / "desk" / "x")]).action == "deny"
+    assert pr.evaluate("read_local_file", {"path": "other.txt"}, rules()).suggestions == [f"Read({os.path.realpath(tmp_path)}/**)"]
+
+
 def test_subject_mapping_by_contract():
     s = pr.subject_for
     assert s("shell_run", {"command": "ls"}) == [pr.Subject("Bash", "ls")]

@@ -2459,7 +2459,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     break
                 if _gate(name, raw, sim, args) != "on" or toolbox.fs_needs_ask(name, args, sim):
                     break
-                proots, pcwd = shell_tool.perm_where(toolbox, sim) if name == "shell_run" else ([], None)
+                proots, pcwd = shell_tool.perm_where(toolbox, sim)
+                pcwd = pcwd if name == "shell_run" else None
                 perm = permrules.resolve(name, args, "on", False, rules=perm_rules, conv=conv_id, roots=proots, cwd=pcwd,
                                          doom=detector is not None and detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
                 if perm.mode != "on" or perm.refusal or perm.kind == "doom_loop":
@@ -2966,7 +2967,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 pre_mode = mode  # what the call would have done before rules and session grants (approval_log below)
                 if c["name"] != PLAN_TOOL and mode != "off" and not mcp_is(c["name"]):
                     # A shell command is judged from where it will start, and the desk's own folder is not Grain's data.
-                    proots, pcwd = shell_tool.perm_where(toolbox, tool_ctx) if c["name"] == "shell_run" else ([], None)
+                    # A file tool's relative path starts at the desk (proots[0]), as the tool resolves it.
+                    proots, pcwd = shell_tool.perm_where(toolbox, tool_ctx)
+                    pcwd = pcwd if c["name"] == "shell_run" else None
                     perm = permrules.resolve(
                         c["name"], args, mode, forced,
                         rules=perm_rules, conv=conv_id, roots=proots, cwd=pcwd,

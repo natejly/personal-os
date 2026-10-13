@@ -939,9 +939,9 @@ def _matches(rule: Rule, sub: Subject, tool: str, cwd: str | None) -> bool:
         return True
     if sub.value is None:
         return False
-    if sub.kind in ("Read", "Edit"):
+    if sub.kind in ("Read", "Edit") and tool not in ("fs_glob", "fs_grep"):
         return _path_match(rule.pattern, _real(sub.value, cwd))
-    if sub.kind == "external_directory":  # a folder: `dir/**` covers the folder itself too
+    if sub.kind in ("Read", "external_directory"):  # a folder: `dir/**` covers the folder itself too
         p = _real(sub.value, cwd)
         return _path_match(rule.pattern, p) or _path_match(rule.pattern, p.rstrip("/") + "/")
     if tool in MAIL_TOOLS:  # addresses are case-insensitive
@@ -1175,7 +1175,11 @@ def evaluate(tool: str, args: dict[str, Any], rules: RuleSet | dict[str, Any] | 
         c = args.get("cwd")
         start = _real(c, rl[0] if rl else cwd) if isinstance(c, str) and c else cwd  # an explicit cwd starts from the desk
         return _evaluate_bash(tool, str(args.get("command") or ""), rs, start, desk_folders(rl))
-    subs = subject_for(tool, args)
+    # A relative path means what the file tools make of it: from the desk workspace, else home. A search with no
+    # root searches there too.
+    cwd = cwd or os.path.expanduser("~")
+    subs = [Subject("Read", cwd) if tool in ("fs_glob", "fs_grep") and s == Subject("Read", None) else s
+            for s in subject_for(tool, args)]
     v = Verdict(subjects=[f"{s.kind}({s.value})" if s.value else s.kind for s in subs])
     verdict, rule = _decide(rs, subs, tool, cwd)
     v.action, v.rule = verdict, rule
@@ -1195,15 +1199,15 @@ def evaluate(tool: str, args: dict[str, Any], rules: RuleSet | dict[str, Any] | 
                 v.refusal = f"blocked by your permission rule {plain_rule}"
             else:
                 v.kind, v.pending = "rule", [tool]
-    v.suggestions = _suggest_paths(subs) if v.action != "allow" else []
+    v.suggestions = _suggest_paths(subs, cwd) if v.action != "allow" else []
     return v
 
 
-def _suggest_paths(subs: list[Subject]) -> list[str]:
+def _suggest_paths(subs: list[Subject], cwd: str | None = None) -> list[str]:
     out = []
     for s in subs:
         if s.kind in ("Read", "Edit") and s.value:
-            p = _real(s.value)
+            p = _real(s.value, cwd)
             r = f"{s.kind}({os.path.dirname(p) or '/'}/**)"
             if r not in out:
                 out.append(r)

@@ -1086,9 +1086,11 @@ class Subagents:
             hard_forced = hard_forced or taint_only or self.toolbox.forces_card(name, args, ch.ctx) or (lockable and tainted)
             pre_mode = mode
             from . import shell as shell_mod
+            desk, pcwd = shell_mod.perm_where(self.toolbox, ch.ctx)
+            # A file tool's relative path starts at the desk, else home (not a narrowed root), as the tool resolves it.
+            pcwd = pcwd if name == "shell_run" else (desk[0] if desk else os.path.expanduser("~"))
             perm = permrules.resolve(name, args, mode, forced, rules=self.settings().get("permissionRules"),
-                                     roots=self._perm_roots(ch), conv=ch.conversation_id,
-                                     cwd=shell_mod.perm_where(self.toolbox, ch.ctx)[1] if name == "shell_run" else None,
+                                     roots=self._perm_roots(ch), conv=ch.conversation_id, cwd=pcwd,
                                      doom=ch.detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
             mode, forced = perm.mode, perm.forced
             bad = perm.refusal or self._confine(ch, name, args) or coding_route.check(self.toolbox, name, args, ch.ctx)

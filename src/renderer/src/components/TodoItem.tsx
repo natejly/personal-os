@@ -40,6 +40,9 @@ export async function scheduleTodo(todo: Todo, start?: string): Promise<Todo> {
   return { ...cur, due, ...link }
 }
 
+// A transparent date input only focuses its mm/dd/yyyy segments on click; ask for the calendar popup.
+const openPicker = (e: { currentTarget: HTMLInputElement }): void => { try { e.currentTarget.showPicker() } catch { /* needs a user gesture */ } }
+
 function TodoItem({ todo, showProject = true, compact = false, depth = 0, onTag }: { todo: Todo; showProject?: boolean; compact?: boolean; depth?: number; onTag?: (tag: string) => void }): JSX.Element {
   const updateTodo = useStore((s) => s.updateTodo)
   const deleteTodo = useStore((s) => s.deleteTodo)
@@ -104,7 +107,7 @@ function TodoItem({ todo, showProject = true, compact = false, depth = 0, onTag 
         <label className={`todo-due ${due.cls} ${todo.due ? '' : 'quiet'}`} title="Due date">
           <Calendar size={11} />
           <span>{due.text || 'no date'}</span>
-          <input type="date" aria-label={`Due date for ${todo.title}`} value={todo.due ?? ''} onChange={(e) => void updateTodo(todo.id, e.target.value ? { due: e.target.value } : { clear_due: true })} />
+          <input type="date" aria-label={`Due date for ${todo.title}`} value={todo.due ?? ''} onClick={openPicker} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPicker(e) } }}onChange={(e) => void updateTodo(todo.id, e.target.value ? { due: e.target.value } : { clear_due: true })} />
         </label>
         {!compact && (
           <input className="todo-tags" placeholder="tags" title="Tags, comma separated" aria-label={`Tags for ${todo.title}`}

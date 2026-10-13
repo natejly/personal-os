@@ -17,7 +17,7 @@ import { api, backgroundStream, chatStream, getBase, getToken, setBase, type Sco
 import { currentSelection } from './lib/pageContext'
 import { panelConversationFor, type PagePin } from './lib/pagePanel'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
-import { chatNotice, finishNotice, type FinishInfo, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
+import { chatNotice, finishNotice, type FinishInfo, fetchedStatus, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
 import { adjacentChatId, sidebarOrder } from './lib/chatRows'
 import { createDeltaBuffer } from './lib/deltaBuffer'
 import { CHAT_NOTICE_BODY, notify } from './lib/notify'
@@ -95,7 +95,8 @@ export interface Streaming {
 }
 
 /** A message sent but not yet confirmed by the run's `user_message` event; shown dimmed in the transcript. */
-export interface PendingSend { key: number; text: string; at: number; attachments?: Attachment[] }
+/** `queued`: the desk holds the text until a slot frees (queue position); no row exists until its turn starts. */
+export interface PendingSend { key: number; text: string; at: number; attachments?: Attachment[]; queued?: number }
 const EMPTY_PENDING: readonly PendingSend[] = Object.freeze([])
 let pendingKeySeq = 0
 
@@ -161,11 +162,13 @@ const writeExpanded = (paths: string[]): string[] => {
 /** Writers need a scope a row can live in: 'all' and 'personal' both mean the personal voice. */
 const styleScope = (s: Scope): string | null => (s === 'all' || s === 'personal' ? null : s)
 
-const newSession = (conversation: Conversation): ChatSession =>
-  ({ conversation, streaming: null, status: 'idle', finishedAt: null, pendingApprovals: 0, unread: 0, touchedAt: Date.now(), runError: null })
-
 const countApprovals = (c: Conversation): number =>
   (c.messages ?? []).reduce((n, m) => n + (m.tool_events ?? []).filter((t) => t.pending && t.needs_approval).length, 0)
+
+const newSession = (conversation: Conversation): ChatSession => {
+  const pendingApprovals = countApprovals(conversation)
+  return { conversation, streaming: null, status: fetchedStatus('idle', pendingApprovals, false), finishedAt: null, pendingApprovals, unread: 0, touchedAt: Date.now(), runError: null }
+}
 
 export interface MailComposePrefill {
   to: string
@@ -521,7 +524,8 @@ export interface State {
   pauseDesk: (id: string) => Promise<void>
   stopDesk: (id: string) => Promise<void>
   /** The steer box, awake or asleep. `false` means the text was refused, so the caller keeps it. */
-  messageDesk: (id: string, text: string) => Promise<boolean>
+  /** Falsy on failure; `position` is set when the desk queued the message behind other desks. */
+  messageDesk: (id: string, text: string) => Promise<false | { position?: number }>
   patchDesk: (id: string, patch: Parameters<typeof api.cowork.desks.patch>[1]) => Promise<void>
   /** `quiet` is for the live refresh: a failed background reload must not toast every few seconds. */
   loadDeskFiles: (id: string, path?: string, quiet?: boolean) => Promise<void>
@@ -860,12 +864,15 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
       // The optimistic bubble this message confirms goes in the same returned session (the backend stores the stripped text).
       {
         const pend = s.pendingSends
-        const at = pend ? pend.findIndex((p) => p.text.trim() === ev.data.content) : -1
-        const rest = at >= 0 && pend ? pend.filter((_, i) => i !== at) : pend
+        const content = ev.data.content
+        const at = pend ? pend.findIndex((p) => p.text.trim() === content) : -1
+        // Queued desk messages are joined into the turn that starts the desk, so each one is matched by containment.
+        const rest = pend?.filter((p, i) => i !== at && !(p.queued && content.includes(p.text.trim())))
+        const hit = (rest?.length ?? 0) !== (pend?.length ?? 0)
         const pendingSends = rest && rest.length ? rest : undefined
         // An internal control turn (any kind) is the backend's own bookkeeping, not something the user said.
         if (isInternal(ev.data)) return s
-        if (msgs.some((m) => m.id === ev.data.id)) return at >= 0 ? { ...s, runError: null, pendingSends } : { ...s, runError: null }
+        if (msgs.some((m) => m.id === ev.data.id)) return hit ? { ...s, runError: null, pendingSends } : { ...s, runError: null }
         return { ...withMsgs([...msgs, ev.data]), runError: null, pendingSends }
       }
     case 'assistant_message': {
@@ -901,9 +908,9 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
     case 'thinking_summary':
       return mapMsg(ev.data.id, (m) => ({ ...m, reasoning: m.reasoning ? `${m.reasoning}\n${ev.data.text}` : ev.data.text, status: null }))
     case 'tool_call':
-      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, status: null, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, started_at: Date.now(), needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, review: ev.data.review ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent, ...(ev.data.mcp ? { mcp: ev.data.mcp } : {}) }] }))
+      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, status: null, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, started_at: ev.data.started_at ?? Date.now(), needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, review: ev.data.review ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent, ...(ev.data.mcp ? { mcp: ev.data.mcp } : {}) }] }))
     case 'tool_result':
-      return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === ev.data.id ? { ...ev.data, pending: false } : t)) }))
+      return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === ev.data.id ? { ...t, ...ev.data, pending: false } : t)) }))
     case 'tool_decision':
       return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === ev.data.id && t.needs_approval ? { ...t, needs_approval: false, approval: ev.data.decision } : t)) }))
     case 'span':
@@ -1080,9 +1087,11 @@ export const useStore = create<State>((set, get) => {
       return false
     }
     // The files show as a chip under whatever the user typed, rather than as words put in their mouth.
-    const ok = await get().messageDesk(deskId, [text.trim(), inputChip(added)].filter(Boolean).join('\n\n'))
-    dropPending(convId, key)
-    return ok
+    const out = await get().messageDesk(deskId, [text.trim(), inputChip(added)].filter(Boolean).join('\n\n'))
+    // A queued message has no row until its turn starts, so the bubble stays (marked) until that user_message lands.
+    if (out && out.position) patchSession(convId, (s) => ({ ...s, pendingSends: s.pendingSends?.map((p) => (p.key === key ? { ...p, queued: out.position } : p)) }))
+    else dropPending(convId, key)
+    return !!out
   }
   /** A steer's response carries the stored message: applied as the event, it settles the bubble now (the stream copy is a no-op by id). */
   const settleSteer = (convId: string, message: Message | undefined): void => {
@@ -1094,8 +1103,10 @@ export const useStore = create<State>((set, get) => {
       const cur = st.sessions[conversation.id]
       // A fetch that lands among the deltas must not clobber what the stream already applied: the
       // in-flight assistant message is not persisted yet, so an overwrite blanks the visible reply.
-      const next = cur
-        ? { ...cur, conversation: mergeConversation(cur.conversation, conversation, !!cur.streaming, cur.streaming?.answering ? cur.streaming.messageId : null), touchedAt: Date.now() }
+      const merged = cur && mergeConversation(cur.conversation, conversation, !!cur.streaming, cur.streaming?.answering ? cur.streaming.messageId : null)
+      const approvals = merged ? countApprovals(merged) : 0
+      const next = cur && merged
+        ? { ...cur, conversation: merged, pendingApprovals: approvals, status: fetchedStatus(cur.status, approvals, !!cur.streaming), touchedAt: Date.now() }
         : newSession(conversation)
       const sessions = { ...st.sessions, [conversation.id]: next }
       return { sessions: evict(sessions, st.focusedConversationId) }
@@ -1355,7 +1366,7 @@ export const useStore = create<State>((set, get) => {
     }
     // Only the events that open or settle a gate can move the count, and delta must stay free
     // of any recount: it is the one event that arrives per token.
-    const gate = ev.event === 'tool_call' || ev.event === 'tool_result'
+    const gate = ev.event === 'tool_call' || ev.event === 'tool_result' || ev.event === 'done'
       || ev.event === 'plan_card' || ev.event === 'plan_decision'
     const pendingApprovals = gate ? countApprovals(next.conversation) : s.pendingApprovals
     return { ...next, pendingApprovals, status: reduceStatus(s.status, ev, pendingApprovals) }
@@ -1616,7 +1627,7 @@ export const useStore = create<State>((set, get) => {
           }
         }
       }
-      patchSession(convId, (s) => (s.streaming?.abort === abort ? { ...s, streaming: null, status: finishStatus(s.status) } : s))
+      patchSession(convId, (s) => (s.streaming?.abort === abort ? { ...s, streaming: null, status: finishStatus(s.status, s.pendingApprovals) } : s))
       // An attached run wrote deltas this window never saw, and a stream that ended without its `done` left
       // the reply unfinished here: the persisted message is the whole reply.
       if ((attached || !settled) && !abort.signal.aborted && get().sessions[convId]) void get().openSession(convId).catch(() => undefined)
@@ -2515,7 +2526,7 @@ export const useStore = create<State>((set, get) => {
         try {
           const { desk } = await api.cowork.desks.create({ conversation_id: c.id, autonomy, brief: text, start: false })
           bindDesk(c.id, desk.id)
-          await get().refreshDesks()
+          void get().refreshDesks()  // the rail only; the send below does not read the list
           deskId = desk.id
         } catch (e) {
           get().toast(`Could not start working autonomously: ${(e as Error).message}`, 'error')
@@ -3129,7 +3140,7 @@ export const useStore = create<State>((set, get) => {
         // Awake it steered the live reply, asleep it woke a new turn — either way the row has moved
         // (the question is answered, the status is live again), and `openDesk` re-attaches.
         await get().openDesk(id)
-        return true
+        return { position: out.position }
       } catch (e) {
         get().toast((e as Error).message, 'error')
         return false
@@ -3426,23 +3437,24 @@ export const useStore = create<State>((set, get) => {
     },
 
     uploadDocuments: async (files, projectId) => {
-      const saved: UploadOutcome[] = []
-      for (const f of Array.from(files)) {
+      // In parallel, and the lists refresh behind the return: a composer is waiting on these to show its chips.
+      const saved = await Promise.all(Array.from(files).map(async (f): Promise<UploadOutcome | null> => {
         const tooBig = uploadTooBig(f.size)  // refused here so a huge file is not streamed to the backend only to get a 413
-        if (tooBig) { get().toast(`${f.name}: ${tooBig}`, 'error'); continue }
+        if (tooBig) { get().toast(`${f.name}: ${tooBig}`, 'error'); return null }
         try {
           const doc = (await api.documents.upload(projectId, f)) as UploadResult
           // An older backend says nothing about readability; its files count as readable, as before.
           const r: UploadOutcome = { id: doc.id, name: doc.name || f.name, mime: doc.mime || f.type, size: doc.size, readable: doc.readable !== false, reason: doc.reason ?? null }
-          saved.push(r)
           const t = uploadToast(r)
           get().toast(t.text, t.kind)
+          return r
         } catch (e) {
           get().toast(`${f.name}: ${(e as Error).message}`, 'error')
+          return null
         }
-      }
-      await Promise.all([get().refreshDocuments(), get().refreshProjects()])
-      return saved
+      }))
+      void Promise.all([get().refreshDocuments(), get().refreshProjects()]).catch(() => undefined)
+      return saved.filter((r): r is UploadOutcome => !!r)
     },
     pinDocument: async (id, pinned) => {
       const flip = (v: boolean): void => set((s) => ({ documents: s.documents.map((d) => (d.id === id ? { ...d, pinned: v ? 1 : 0 } : d)) }))
@@ -3628,12 +3640,16 @@ export const useStore = create<State>((set, get) => {
             ? { ...t, needs_approval: false, ...(approval ? { approval } : {}), ...(approval && opts?.arguments && approval !== 'deny' ? { arguments: opts.arguments, original_arguments: t.arguments, edited_arguments: opts.arguments, edited_by: 'user' as const } : {}) }
             : t)) })) }
           const pendingApprovals = countApprovals(conversation)
-          return { ...s, conversation, pendingApprovals, status: settleApprovals(s.status, pendingApprovals) }
+          // With no stream to move it on, an answered card leaves the chat idle, not 'working'.
+          return { ...s, conversation, pendingApprovals, status: fetchedStatus(s.status, pendingApprovals, !!s.streaming) }
         })
       }
       try {
-        await api.approve(callId, decision, opts)
+        const out = await api.approve(callId, decision, opts) as { live?: boolean }
         clear(decision)
+        // No run was waiting (a backend restart, a parked desk card): no tool_result will come, and the backend has
+        // already settled the stored card ("Not run…" or the parked answer). Re-read it, or the card spins forever.
+        if (id && out?.live === false) void get().openSession(id).catch(() => undefined)
         // A card answered from a desk pane is also in that desk's `approvals`; re-read the desk so it leaves the list
         // (answerDeskCard does the same for the old banner path).
         const open = get().activeDeskId

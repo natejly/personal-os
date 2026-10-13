@@ -1427,3 +1427,63 @@ test('openAgent opens Library > Agents on that agent; null returns to the list',
   useStore.getState().openAgent(null)
   assert.equal(useStore.getState().openAgentId, null)
 })
+
+
+test('tool_result keeps what only tool_call carried: the connector origin and the subagent tag', () => {
+  const call = { event: 'tool_call', data: { message_id: 'm1', id: 't1', name: 'mcp__x__read', arguments: {}, agent: 'scout', mcp: { server: 'x', read_only: true }, started_at: 123 } } as unknown as ChatEvent
+  const result = { event: 'tool_result', data: { message_id: 'm1', id: 't1', name: 'mcp__x__read', arguments: {}, result_preview: 'ok', duration_ms: 5, error: null } } as unknown as ChatEvent
+  const t = applyEvent(applyEvent(session(), call, true), result, true).conversation.messages?.[0].tool_events?.[0]
+  assert.equal(t?.pending, false)
+  assert.equal(t?.result_preview, 'ok')
+  assert.equal(t?.agent, 'scout')
+  assert.deepEqual(t?.mcp, { server: 'x', read_only: true })
+  assert.equal(t?.started_at, 123, 'the server start, not the moment this window applied the event')
+})
+
+test('a queued desk bubble clears when the turn that carries it starts, even joined with other text', () => {
+  const s = session({ pendingSends: [{ key: 1, text: 'first', at: 0, queued: 2 }, { key: 2, text: 'other', at: 0 }] })
+  const after = applyEvent(s, { event: 'user_message', data: msg({ id: 'u9', role: 'user', content: 'first\n\nsecond' }) } as unknown as ChatEvent, true)
+  assert.deepEqual(after.pendingSends?.map((p) => p.key), [2])
+})
+
+test('approving a card no run is waiting on re-reads the chat, so the card settles instead of spinning', async () => {
+  const card = { id: 'call1', name: 'gmail_send', arguments: {}, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: true }
+  const settled = { ...card, pending: false, needs_approval: false, approval: 'allow', error: 'Not run: the reply was interrupted before this was answered.' }
+  const conv = (ev: object): ChatSession['conversation'] => ({ ...session().conversation, messages: [msg({ tool_events: [ev] as never })] })
+  const realApprove = api.approve
+  const realGet = api.conversations.get
+  const realInbox = api.inbox
+  api.approve = (async () => ({ ok: true, live: false })) as never
+  api.conversations.get = (async () => conv(settled)) as never
+  api.inbox = (async () => { throw new Error('offline') }) as never
+  try {
+    useStore.setState({ sessions: { c1: session({ streaming: null, status: 'needs-approval', pendingApprovals: 1, conversation: conv(card) } as never) } })
+    await useStore.getState().approveTool('call1', 'allow', 'c1')
+    await new Promise((r) => setTimeout(r, 0))
+    const s = useStore.getState().sessions.c1
+    const t = s.conversation.messages?.[0].tool_events?.[0]
+    assert.equal(t?.pending, false)
+    assert.match(t?.error ?? '', /Not run/)
+    assert.equal(s.pendingApprovals, 0)
+    assert.equal(s.status, 'idle')
+  } finally {
+    api.approve = realApprove
+    api.conversations.get = realGet
+    api.inbox = realInbox
+  }
+})
+
+test('a fetched transcript with an open card counts it and shows the chat waiting', async () => {
+  const card = { id: 'call2', name: 'gmail_send', arguments: {}, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: true }
+  const realGet = api.conversations.get
+  api.conversations.get = (async () => ({ ...session().conversation, id: 'c7', messages: [msg({ conversation_id: 'c7', tool_events: [card] as never })] })) as never
+  try {
+    useStore.setState({ sessions: {} })
+    await useStore.getState().openSession('c7')
+    const s = useStore.getState().sessions.c7
+    assert.equal(s.pendingApprovals, 1)
+    assert.equal(s.status, 'needs-approval')
+  } finally {
+    api.conversations.get = realGet
+  }
+})

@@ -151,7 +151,7 @@ export function agentIds(preview: string): string[] {
   return out
 }
 
-const AGENT_DONE = ['done', 'error', 'interrupted']
+const AGENT_DONE = ['done', 'error', 'interrupted', 'unknown']  // 'unknown': the lookup kept failing
 
 /** One child run: live status while it works, then its recorded calls on expand. */
 function AgentRunCard({ id }: { id: string }): JSX.Element {
@@ -162,6 +162,7 @@ function AgentRunCard({ id }: { id: string }): JSX.Element {
   useEffect(() => {
     let dead = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    let misses = 0
     const poll = async (): Promise<void> => {
       try {
         const r = await api.agentRun(id)
@@ -169,7 +170,12 @@ function AgentRunCard({ id }: { id: string }): JSX.Element {
         setStatus(r.status)
         setCost(typeof r.budget?.cost === 'number' ? r.budget.cost : null)
         if (!AGENT_DONE.includes(r.status)) timer = setTimeout(() => void poll(), 2000)
-      } catch { /* the row may not exist yet; try again */ if (!dead) timer = setTimeout(() => void poll(), 3000) }
+      } catch {
+        // The row may not exist yet, so a few misses are retried; one that never appears (its store failed) stops the polling.
+        if (dead) return
+        if (++misses < 5) timer = setTimeout(() => void poll(), 3000)
+        else setStatus('unknown')
+      }
     }
     void poll()
     return () => { dead = true; if (timer) clearTimeout(timer) }

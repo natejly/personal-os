@@ -658,7 +658,7 @@ export interface ToolEvent {
   /** deep_research's plan, steps and sources considered. */
   research?: ResearchTrail | null
   pending?: boolean
-  /** Client clock (ms) when the call arrived on the stream; drives the elapsed time of a running call. */
+  /** Wall-clock ms when the call began (the run stamps it; else when it arrived here); drives a running call's elapsed time. */
   started_at?: number
   needs_approval?: boolean
   approval?: string | null
@@ -1766,7 +1766,7 @@ export type ChatEvent =
   | { event: 'delta'; data: { id: string; text: string } }
   /** One short model-written status line about the reply's thinking; the raw chain-of-thought is never sent. */
   | { event: 'thinking_summary'; data: { id: string; text: string } }
-  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; review?: ToolEvent['review']; plan?: PlanStepRef | null; agent?: string; mcp?: McpToolOrigin | null } }
+  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; started_at?: number; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; review?: ToolEvent['review']; plan?: PlanStepRef | null; agent?: string; mcp?: McpToolOrigin | null } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   /** The card was answered (by this window, another one, or a steer): settles a replayed card so it is not asked twice. */
   | { event: 'tool_decision'; data: { message_id: string; id: string; decision: ApprovalDecision } }

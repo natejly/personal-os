@@ -45,7 +45,7 @@ test('the Terminal tab is hidden while there are no coding sessions', async ({ g
   expect(realErrors(grain)).toEqual([])
 })
 
-test('Terminal: the attached view echoes typed text, survives a tab switch and shows the exit line', async ({ grain }) => {
+test('Terminal: shell in the worktree echoes typed text, survives a tab switch, shows the exit line and End drops the view', async ({ grain }) => {
   const wt = realpathSync(mkdtempSync(join(tmpdir(), 'grain-e2e-term-')))
   try {
     const p = grain.page
@@ -56,8 +56,10 @@ test('Terminal: the attached view echoes typed text, survives a tab switch and s
     await tab.click()
     // the chat has one session: no chip row, and opening the tab attaches with no click; only the shown view's DOM is mounted
     await expect(p.getByTestId(`term-chip-${SID}`)).toHaveCount(0)
-    await expect(p.getByTestId('term-attach')).toHaveCount(0)
-    await expect(p.getByTestId('term-shell')).toHaveCount(0)
+    await expect(p.getByTestId('term-attach')).toBeVisible()
+    await expect(p.locator('.xterm-rows')).toHaveCount(1)
+    await expect(p.locator('.xterm-rows').first()).toBeVisible()
+    await p.getByTestId('term-shell').click()
     await expect(p.locator('.xterm-rows')).toHaveCount(1)
     await expect(p.locator('.xterm-rows').first()).toBeVisible()
     await p.locator('.xterm-helper-textarea').first().focus()
@@ -75,9 +77,17 @@ test('Terminal: the attached view echoes typed text, survives a tab switch and s
     await p.keyboard.press('Enter')
     await expect.poll(() => rowsText(p)).toContain('second-line')
 
-    // end of input makes cat exit on its own: the pane says so
+    // end of input makes cat exit on its own: the pane says so; End then drops the view
     await p.keyboard.press('Control+d')
-    await expect.poll(() => rowsText(p)).toContain('[session detached')
+    await expect.poll(() => rowsText(p)).toContain('[shell exited]')
+    await p.getByTestId('term-end').click()
+    // the shell is gone; the pane falls back to the session's still-live attached view
+    await expect(p.locator('.xterm-rows')).toHaveCount(1)
+    await expect.poll(() => rowsText(p)).not.toContain('[shell exited]')
+    await expect(p.getByTestId('term-end')).toBeVisible()
+    await p.getByTestId('term-end').click()
+    await expect(p.locator('.xterm-rows')).toHaveCount(0)
+    await expect(p.getByTestId('term-end')).toHaveCount(0)
     expect(realErrors(grain)).toEqual([])
   } finally {
     try { rmSync(wt, { recursive: true, force: true }) } catch {}

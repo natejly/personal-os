@@ -24,6 +24,9 @@ export const AGENT_LABEL: Record<CodingSession['agent'], string> = { claude: 'Cl
 /** Whether `claude attach` can reach this session: a claude session with a valid attach id. */
 export const canAttach = (c: CodingSession): boolean => c.agent === 'claude' && isAttachId(c.external_id)
 
+/** The terminal view a picked session opens straight away; null (nothing until asked) when it cannot attach. */
+export const defaultTermMode = (c: CodingSession): 'attach' | null => (canAttach(c) ? 'attach' : null)
+
 /** Sessions the Terminal lists, newest first: the chat's own (plus `keep`, one asked for by id), or outside a chat the newest few. */
 export function termSessions(all: CodingSession[], conversationId?: string, keep?: string): CodingSession[] {
   const byNew = [...all].sort((a, b) => b.created_at - a.created_at)

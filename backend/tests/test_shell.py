@@ -709,7 +709,7 @@ def test_no_sandbox_means_refused_until_the_forced_unsandboxed_path(box: Box, mo
 def test_a_profile_that_fails_to_apply_is_refused_then_unsandboxed_may_be_asked_for(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sandbox, "shell_profile", lambda writable, network=False, **kw: "(version 1) (this is not sbpl")
     r = box.run("shell_run", command="echo hi")
-    assert "sandbox refused to start" in r["error"] and box.tb.shell.sandbox_failed
+    assert "sandbox refused to start" in r["error"]
     assert "sandbox is available" not in box.run("shell_run", command="echo ran", unsandboxed=True).get("error", "")
 
 

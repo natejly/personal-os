@@ -19,6 +19,21 @@ jobs:
           node-version: 22
           cache: npm
       - uses: astral-sh/setup-uv@v5
+      # Without these the build falls back to an ad-hoc, un-notarized app that Gatekeeper blocks and that
+      # cannot auto-update; a tag must also match package.json, or the upload lands in another version's release.
+      - name: Check signing secrets and version
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          test -n "$CSC_LINK" && test -n "$APPLE_ID" && test -n "$APPLE_APP_SPECIFIC_PASSWORD" && test -n "$APPLE_TEAM_ID" \
+            || { echo "::error::missing signing or notarization secrets"; exit 1; }
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            v="$(node -p 'require("./package.json").version')"
+            [ "${GITHUB_REF_NAME#v}" = "$v" ] || { echo "::error::tag $GITHUB_REF_NAME does not match package.json $v"; exit 1; }
+          fi
       - run: npm ci
       # bundle-backend.sh -> electron-vite build -> electron-builder, signed with CSC_LINK and notarized
       # with the APPLE_* variables; --publish always uploads a prerelease to GitHub Releases.

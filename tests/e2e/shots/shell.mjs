@@ -126,14 +126,6 @@ await run('ob', async (g) => {
   await w.getByRole('textbox', { name: /API key/ }).fill('mock-key').catch(() => {})
   await cont().click(); await sleep(2500)
   await shot(g, `onboarding-${i++}`)
-  await cont().click(); await sleep(600)
-  await shot(g, `onboarding-${i++}`)
-  await cont('Skip for now').click(); await sleep(500)
-  await shot(g, `onboarding-${i++}`)
-  await cont('Skip for now').click(); await sleep(500)
-  await shot(g, `onboarding-${i++}`)
-  await cont('Skip for now').click(); await sleep(500)
-  await shot(g, `onboarding-${i++}`)
 }, { settings: { onboardedAt: null, apiKey: null } })
 
 await run('canvas', async (g) => {

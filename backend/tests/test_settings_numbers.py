@@ -64,17 +64,17 @@ class ContextSettingsTests(unittest.TestCase):
 
 
 class RetrievalSettingsTests(unittest.TestCase):
-    KEYS = ("retrievalMinSimilarity", "retrievalPerDocCap", "retrievalCandidates", "fetchCacheSeconds", "retrievalMode")
+    KEYS = ("retrievalMinSimilarity", "retrievalPerDocCap", "retrievalCandidates", "retrievalMode")
 
     def tearDown(self) -> None:
         client.put("/settings", json={k: llm.DEFAULT_SETTINGS[k] for k in self.KEYS})
 
     def test_retrieval_settings_are_validated(self) -> None:
         for key, bad in (("retrievalMinSimilarity", 2), ("retrievalPerDocCap", 0), ("retrievalCandidates", 500),
-                         ("fetchCacheSeconds", -1), ("retrievalMode", "keyword")):
+                         ("retrievalMode", "keyword")):
             self.assertEqual(client.put("/settings", json={key: bad}).status_code, 422, (key, bad))
         r = client.put("/settings", json={"retrievalMinSimilarity": 0.4, "retrievalPerDocCap": 5, "retrievalCandidates": 30,
-                                          "fetchCacheSeconds": 600, "retrievalMode": "bm25"})
+                                          "retrievalMode": "bm25"})
         self.assertEqual(r.status_code, 200)
         self.assertEqual((r.json()["retrievalMode"], r.json()["retrievalPerDocCap"]), ("bm25", 5))
 

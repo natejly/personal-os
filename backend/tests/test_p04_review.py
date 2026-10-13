@@ -204,8 +204,6 @@ def test_allow_all_runs_and_logs() -> None:
 def test_settings_validation() -> None:
     j("PUT", "/settings", {"permissionMode": "sometimes"}, expect=422)
     j("PUT", "/settings", {"autoReviewModel": 3}, expect=422)
-    j("PUT", "/settings", {"autoReview": "risky", "skipPermissions": True})  # legacy keys still accepted
-    j("PUT", "/settings", {"autoReview": "off", "skipPermissions": False})
 
 
 def test_the_reviewer_sees_redacted_arguments() -> None:

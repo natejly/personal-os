@@ -67,7 +67,7 @@ DESK = "desk1"
 
 class Box:
     def __init__(self, tmp: Path, **ws_kw: Any) -> None:
-        self.settings: dict[str, Any] = {"workspaceRoots": []}
+        self.settings: dict[str, Any] = {}
         self.db = Database(tmp / "data")
         with self.db.tx() as c:
             c.execute("INSERT INTO conversations(id, title, model, created_at, updated_at) VALUES(?,?,?,?,?)", ("c1", "t", "m", 0.0, 0.0))

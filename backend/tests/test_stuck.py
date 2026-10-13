@@ -139,7 +139,7 @@ def breakers_of(events: list[tuple[str, Any]]) -> list[Any]:
 
 
 def test_pingpong_nudged_then_stopped() -> None:
-    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "stuckDetection": True, "delegationForce": False})
+    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "delegationForce": False})
     cid = appmod.convos.create(None, "t", "m")["id"]
     SEEN.clear()
     ROUNDS[:] = pingpong(24)
@@ -174,19 +174,6 @@ def test_a_disabled_tool_called_with_varied_args_ends_stuck() -> None:
 def test_a_tool_called_with_arguments_it_cannot_take_ends_stuck() -> None:
     """The call is refused before it reaches the tool, and the arguments differ every time."""
     _never_runs([{"text": "", "calls": [call(f"u{i}", "doc_read", {f"bogus{i}": i})]} for i in range(60)])
-
-
-def test_legacy_off_setting_is_ignored() -> None:
-    """Stuck detection is always on: a stored stuckDetection=False (the old switch) no longer disables it."""
-    appmod.db.set_settings({"stuckDetection": False})
-    try:
-        cid = appmod.convos.create(None, "t", "m")["id"]
-        SEEN.clear()
-        ROUNDS[:] = pingpong(24)
-        breakers = breakers_of(run_chat(cid))
-        check("stuck_nudge" in breakers and "stuck" in breakers, "still nudged and stopped with the old key off")
-    finally:
-        appmod.db.set_settings({"stuckDetection": True})
 
 
 def test_paging_not_flagged() -> None:

@@ -184,7 +184,6 @@ export default function SettingsModal(): JSX.Element {
   useEffect(() => {
     const initial = base.current
     api.settings.get().then((fresh) => {
-      delete fresh.mode
       useStore.setState({ settings: fresh })
       setDraft((d) => {
         if (d !== initial) return d
@@ -542,7 +541,6 @@ export default function SettingsModal(): JSX.Element {
                 </AdvGroup></Sec>
                 <Sec id="search"><AdvGroup id="search" title="Memory search and index" {...gp}>
                   <IndexStatusLine />
-                  <Switch title="Smarter memory search" help="Combine keywords, meaning, recency and links. Off means keywords only." checked={draft.hybridRetrieval !== false} onChange={(hybridRetrieval) => patch({ hybridRetrieval })} />
                   <AdvancedRetrieval draft={draft} patch={patch} />
                   <Switch title="Describe each file passage when indexing" help="One extra model call per passage. Off by default." checked={draft.contextualChunks === true} onChange={(contextualChunks) => patch({ contextualChunks })} />
               </AdvGroup></Sec>

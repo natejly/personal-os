@@ -957,13 +957,13 @@ test('a draft parks chat settings instead of writing the global ones, and send a
   t.after(() => useStore.setState({ saveSettings: realSave }))
   useStore.setState({ sessions: {}, focusedConversationId: null, draftPendingSend: null, draftChatSettings: {}, toasts: [], saveSettings: async () => { globalWrites++ } })
   const { calls } = stubFetch(t, (m, p, b) => m === 'POST' && p.endsWith('/conversations') ? json(row({ id: 'c9' })) : m === 'PATCH' ? json(row({ id: 'c9', settings: b.settings })) : m === 'GET' ? json([]) : json({ detail: 'down' }, 500))
-  await useStore.getState().setChatSettings({ skipPermissions: true })
+  await useStore.getState().setChatSettings({ useGraph: false })
   await useStore.getState().setChatSettings({ useMemory: false })
   assert.equal(globalWrites, 0)
   assert.equal(calls.length, 0, 'nothing reaches the server, settings included')
-  assert.deepEqual(useStore.getState().draftChatSettings, { skipPermissions: true, useMemory: false })
+  assert.deepEqual(useStore.getState().draftChatSettings, { useGraph: false, useMemory: false })
   await useStore.getState().send('hi')
-  assert.deepEqual(calls.find((c) => c.method === 'PATCH')?.body, { settings: { skipPermissions: true, useMemory: false } })
+  assert.deepEqual(calls.find((c) => c.method === 'PATCH')?.body, { settings: { useGraph: false, useMemory: false } })
   assert.equal(calls.some((c) => c.path.includes('/settings')), false)
   assert.deepEqual(useStore.getState().draftChatSettings, {})
 })
@@ -1119,26 +1119,6 @@ test('the memory proposals badge counts every pending proposal', async () => {
 test('learnedText counts updates and forgets as changes', () => {
   assert.equal(learnedText({ memories: [], nodes: [], edges: [] }), '')
   assert.equal(learnedText({ memories: [], removed: [{}], nodes: [], edges: [] } as never), 'Forgot 1')
-})
-
-test('skip permissions on a chat with no row is parked for that chat, never written as the global default', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] })
-  useStore.setState({ sessions: {}, toasts: [], focusedConversationId: null, draftChatSettings: {}, pageAgentChatSettings: {}, uploadTaintTarget: null, draftPendingSend: null })
-  const { calls } = stubFetch(t, (m, p, b) => {
-    if (m === 'POST' && p.endsWith('/conversations')) return json(row({ id: 'c9', settings: {} }))
-    if (m === 'PATCH') return json(row({ id: 'c9', settings: b.settings }))
-    if (m === 'POST') return json({ detail: 'down' }, 500)
-    return json([])
-  })
-  await useStore.getState().setChatSettings({ skipPermissions: true })
-  await useStore.getState().setChatSettings({ skipPermissions: true }, PAGE_AGENT_DRAFT)
-  assert.equal(calls.length, 0)
-  assert.deepEqual(useStore.getState().draftChatSettings, { skipPermissions: true })
-  assert.deepEqual(useStore.getState().pageAgentChatSettings, { skipPermissions: true })
-  await useStore.getState().send('hi')
-  assert.deepEqual(calls.find((c) => c.method === 'PATCH')?.body, { settings: { skipPermissions: true } })
-  assert.equal(calls.some((c) => c.path.includes('/settings')), false)
-  assert.deepEqual(useStore.getState().draftChatSettings, {})
 })
 
 test('a send while Stop is pending waits for the run to end and starts a reply instead of steering', async () => {

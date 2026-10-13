@@ -50,7 +50,7 @@ VECTORS = FIXTURES / "vectors.npz"
 RERANK_SCORES = FIXTURES / "rerank_scores.json"
 OFFLINE_MODEL = "eval-embed"
 # A provider so providers.rerank_model resolves; no key, and the network is never reached (rerank_fn is injected).
-OFFLINE_SETTINGS = {**llm.DEFAULT_SETTINGS, "embeddingModel": OFFLINE_MODEL, "hybridRetrieval": True,
+OFFLINE_SETTINGS = {**llm.DEFAULT_SETTINGS, "embeddingModel": OFFLINE_MODEL,
                     "provider": "fireworks", "baseUrl": "https://api.fireworks.ai/inference/v1"}
 FALLBACK_DIM = 512
 
@@ -392,7 +392,7 @@ def main() -> None:
             raise SystemExit("no embeddingModel in the settings")
     else:
         settings = dict(OFFLINE_SETTINGS)
-    settings = {**settings, "hybridRetrieval": True, **parse_config(a.config)}
+    settings = {**settings, "retrievalMode": "hybrid", **parse_config(a.config)}
     limits = apply_limits(a.limit)
     res = asyncio.run(evaluate(settings, a.live, a.record, a.case))
     if a.json:

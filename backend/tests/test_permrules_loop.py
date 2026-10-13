@@ -62,7 +62,7 @@ def sh(i: int, command: str) -> dict[str, Any]:
 
 
 def setup(rules: dict[str, list[str]] | None = None, mode: str = "ask", **settings: Any) -> str:
-    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "stuckDetection": True, "delegationForce": False, "workspaceRoots": [],
+    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "delegationForce": False,
                             "permissionMode": "manual", "unattendedApprovals": "ask", "permissionRules": {"allow": [], "ask": [], "deny": [], **(rules or {})}, **settings})
     cid = appmod.convos.create(None, "t", "m")["id"]
     appmod.convos.update(cid, {"settings": {"tools": {"shell_run": mode}}})
@@ -199,10 +199,7 @@ def test_three_refusals_in_a_row_add_a_hard_stop_note() -> None:
     check(len(notes) == 4, "all four refused")
 
 
-def test_skip_permissions_runs_an_ask_without_a_card() -> None:
-    cid = setup(skipPermissions=True)
-    ev = drive(cid, [[sh(0, "make deploy")]])
-    check(len(cards(ev)) == 1 and RAN == ["make deploy"], "manual mode ignores the legacy switch: the card still shows")
+def test_allow_all_runs_an_ask_without_a_card() -> None:
     cid = setup(permissionMode="allow_all")
     ev = drive(cid, [[sh(0, "make deploy")]])
     check(not cards(ev) and RAN == ["make deploy"], "allow-all runs an uncleared shell command without a card")

@@ -58,9 +58,8 @@ class MemoryIndex:
     # ---------- settings ----------
     @staticmethod
     def enabled(settings: dict[str, Any]) -> bool:
-        """Off with no embedding model, with hybridRetrieval false, or when retrievalMode forces keywords."""
-        return (bool(settings.get("embeddingModel")) and bool(settings.get("hybridRetrieval", True))
-                and settings.get("retrievalMode", "hybrid") != "bm25")
+        """Off with no embedding model, or when retrievalMode forces keywords."""
+        return bool(settings.get("embeddingModel")) and settings.get("retrievalMode", "hybrid") != "bm25"
 
     # ---------- indexing ----------
     def _stale(self, model: str) -> list[Any]:

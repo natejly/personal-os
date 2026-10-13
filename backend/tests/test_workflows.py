@@ -29,7 +29,7 @@ from typing import Any
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="wftest-"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os import llm  # noqa: E402
+from personal_os import limits, llm  # noqa: E402
 from personal_os import app as appmod  # noqa: E402
 from personal_os import commands as cmds  # noqa: E402
 from personal_os import workflows as wf  # noqa: E402
@@ -134,7 +134,8 @@ def reset() -> None:
     appmod.subagent_mgr.children.clear()
     engine.tasks.clear()
     engine.stops.clear()
-    appmod.db.set_settings({"workflowMaxFanOut": 50, "subagentMaxConcurrent": 4, "workspaceRoots": []})
+    limits.WORKFLOW_MAX_FAN_OUT = 50
+    appmod.db.set_settings({"subagentMaxConcurrent": 4})
     with appmod.db.tx() as c:
         c.execute("DELETE FROM workflow_runs")
         c.execute("DELETE FROM workflows")
@@ -362,7 +363,7 @@ def test_a_chats_retired_working_folder_changes_nothing_for_its_steps() -> None:
         w = save(DIGEST)
         r = store.create_run(w, {"folder": "/a"}, conversation_id=cid)
         cfg = engine._ctx(store.get_run(r["id"]), asyncio.Event())["settings"]
-        check(folder not in (cfg.get("workspaceRoots") or []), "a working folder is not injected into the step's workspaceRoots")
+        check(folder not in str(cfg), "a working folder is not injected into the step's settings")
     finally:
         os.rmdir(folder)
 
@@ -564,14 +565,14 @@ def test_tool_off_and_cancel_and_fanout_limit() -> None:
 
     reset()
     FILES["files"] = [f"{i}.md" for i in range(5)]
-    appmod.db.set_settings({"workflowMaxFanOut": 3})
+    limits.WORKFLOW_MAX_FAN_OUT = 3
     w = save(DIGEST)
 
     async def go2() -> None:
         r = store.create_run(w, {"folder": "/d"})
         engine.approve(r["id"], r["plan_digest"])
         cur = await until(lambda: (g := store.get_run(r["id"]))["status"] == "failed" and g)
-        check("workflowMaxFanOut" in next(s for s in cur["steps"] if s["step_id"] == "sums")["error"], "a fan-out over too many items is refused")
+        check("WORKFLOW_MAX_FAN_OUT" in next(s for s in cur["steps"] if s["step_id"] == "sums")["error"], "a fan-out over too many items is refused")
         check(not TASKS, "no agent was started")
         # cancelling a run that waits on a card
         reset()

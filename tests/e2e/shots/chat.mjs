@@ -53,7 +53,7 @@ if (want('approval')) {
   try {
     await session(async (g) => {
       const { page } = g
-      await g.api('/settings', { method: 'PUT', body: { workspaceRoots: [ws], toolDeferAbove: 0 } })
+      await g.api('/settings', { method: 'PUT', body: { toolDeferAbove: 0 } })
       await newChat(page)
       await say(page, `!!tool shell_run {"command":"touch notes.txt","cwd":"${ws}"}`)
       await attempt('chat-approval-card', async () => { await page.getByRole('group', { name: 'Run command' }).waitFor({ timeout: 60000 }); await sleep(500); await snap(g, 'chat-approval-card') })

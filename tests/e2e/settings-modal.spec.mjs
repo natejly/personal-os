@@ -54,8 +54,6 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
   await dialog(page).locator('summary', { hasText: 'Learning' }).click()
   await setToggle(field(page, 'Learn from chats'), false)
   await setToggle(field(page, 'Learn how I write'), false)
-  await openAdvanced(page, 'Search')
-  await setToggle(field(page, 'Smarter memory search'), false)
   await openAdvanced(page, 'Approvals')
   await dialog(page).getByRole('button', { name: 'Full agentic editing', exact: true }).click()
   await openSettings(page, 'Integrations')
@@ -72,7 +70,7 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
     const s = await api('/settings')
     expect(s).toMatchObject({
       chatNotify: false, notifyJobs: false, systemPrompt: 'Always answer in haiku.', dictationChord: 'Control+Alt+K', devTools: true,
-      autoLearn: false, autoTitle: false, learnStyle: false, hybridRetrieval: false, modelLow: 'mock-chat-2',
+      autoLearn: false, autoTitle: false, learnStyle: false, modelLow: 'mock-chat-2',
       docEditMode: 'apply', searxngUrl: 'http://localhost:8080', defaultModel: 'mock-chat-2'
     })
     expect(s.gmailSendHold.enabled).toBe(false)

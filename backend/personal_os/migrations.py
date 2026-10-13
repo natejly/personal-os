@@ -618,6 +618,36 @@ def _drop_unused_tables_and_settings(c: sqlite3.Connection) -> None:
         c.execute("UPDATE settings SET value = ? WHERE key = 'hiddenViews'", (json.dumps([v for v in views if v != "dashboards"]),))
 
 
+_CONSTANT_SETTINGS = ("microAtTokens", "mcpDeferAbove", "retainUsageDays", "retainTraceDays", "retainToolResultDays",
+                      "retainApprovalDays", "fileSnapshotMaxBytes", "fileSnapshotRetainDays", "fileSnapshotBudgetMB",
+                      "workflowMaxFanOut", "jobRetryBackoffS", "jobFailureStreakLimit", "proposalExpireDays", "jobExpireDays",
+                      "shellTimeoutSec", "shellMaxBackground", "browserMaxTabs", "browserIdleSeconds", "consolidateEvery",
+                      "cacheLayout", "captureRequests", "fetchCacheSeconds", "toolReadRetries", "subagentMaxDepth",
+                      "subagentStaleSeconds", "subagentToolSeconds", "telegramBotName")
+_LEGACY_SETTINGS = ("stuckDetection", "mode", "skipPermissions", "autoReview", "workspaceRoots")
+
+
+def _simplify_settings(c: sqlite3.Connection) -> None:
+    """Settings that did nothing or that nobody tunes. Legacy keys (the old chat mode, stuckDetection, and the permission
+    store's skipPermissions, autoReview and workspaceRoots) and the numbers that now live only in limits.py are deleted;
+    hybridRetrieval folded into retrievalMode (false becomes 'bm25' unless retrievalMode was already chosen)."""
+    c.executemany("DELETE FROM settings WHERE key = ?", [(k,) for k in (*_CONSTANT_SETTINGS, *_LEGACY_SETTINGS)])
+    row = c.execute("SELECT value FROM settings WHERE key = 'permissions'").fetchone()
+    try:
+        perm = json.loads(row[0]) if row else None
+    except ValueError:
+        perm = None
+    if isinstance(perm, dict) and any(k in perm for k in _LEGACY_SETTINGS):
+        c.execute("UPDATE settings SET value = ? WHERE key = 'permissions'",
+                  (json.dumps({k: v for k, v in perm.items() if k not in _LEGACY_SETTINGS}),))
+    row = c.execute("SELECT value FROM settings WHERE key = 'hybridRetrieval'").fetchone()
+    if row:
+        c.execute("DELETE FROM settings WHERE key = 'hybridRetrieval'")
+        mode = c.execute("SELECT value FROM settings WHERE key = 'retrievalMode'").fetchone()
+        if row[0].strip() == "false" and (not mode or mode[0] == '"hybrid"'):
+            c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('retrievalMode', ?)", (json.dumps("bm25"),))
+
+
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
     (2, "messages_fts", _messages_fts),
@@ -658,6 +688,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (37, "coding_session_events", _coding_session_events),
     (38, "model_votes", _model_votes),
     (39, "default_sidebar_rows", _default_sidebar_rows),
+    (40, "simplify_settings", _simplify_settings),
 ]
 
 

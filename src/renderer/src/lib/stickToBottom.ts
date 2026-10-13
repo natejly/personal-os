@@ -7,13 +7,15 @@ export const ATTACH_PX = 80
 /**
  * Whether the scroller should keep following the bottom. `distance` is scrollHeight - scrollTop -
  * clientHeight. Content growth never lowers scrollTop, so it cannot release; a shrink clamp lands
- * at distance 0 and stays attached.
+ * at distance 0 and stays attached. Moving up (even by sub-pixel steps) never re-attaches; only
+ * reaching the bottom or a real downward scroll within ATTACH_PX does.
  */
 export function nextStick(prev: boolean, m: { top: number; prevTop: number; distance: number }): boolean {
-  const up = m.top < m.prevTop - 1
-  if (up && m.distance > RELEASE_PX) return false
-  if (!up && m.distance < ATTACH_PX) return true
-  if (up && m.distance <= RELEASE_PX) return true
+  const up = m.top < m.prevTop - 0.5
+  const down = m.top > m.prevTop + 0.5
+  if (up) return m.distance > RELEASE_PX ? false : prev
+  if (m.distance <= 1) return true
+  if (down && m.distance < ATTACH_PX) return true
   return prev
 }
 

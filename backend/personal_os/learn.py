@@ -300,17 +300,19 @@ async def learn_from_exchange(
         try:
             # The same statement reworded supersedes its live twin instead of adding a row (pinned rows never match).
             dup = await index.near_duplicate(settings, project_id, content) if index is not None else None
+            if dup and dup["project_id"] != project_id:
+                continue  # a project chat restating a personal memory: already known, and never rewritten from here
             if dup and dup["content"].strip().lower() != content.lower():  # the same words: create() dedupes, no new version
                 mem = memories.supersede(dup["id"], content, kind=kind, source="auto", provenance=prov, expires_at=expires)
                 if mem:
                     updated_memories.append(mem)
                     superseded.append({"old_id": dup["id"], "new_id": mem["id"]})
                     continue
-            before = {x["id"] for x in memories.list(project_id, include_global=False)}
+            t0 = time.time()
             mem = memories.create(project_id, content, kind=kind, source="auto", provenance=prov, expires_at=expires)
         except Exception:  # noqa: BLE001
             continue
-        if mem["id"] not in before:
+        if mem["created_at"] >= t0:  # create() hands back the existing row for the same words
             added_memories.append(mem)
 
     if index is not None:
@@ -717,6 +719,7 @@ class LearnJob:
     skills_in_use: list[dict[str, Any]] = field(default_factory=list)  # approved rows whose body the reply saw
     user_only: bool = False  # the reply read someone else's text: mine the user's words alone
     user_message_id: str | None = None
+    learn_graph: bool = True  # the chat's useGraph: off = nothing from it reaches the knowledge graph
 
 
 @dataclass
@@ -940,6 +943,10 @@ class LearnWorker:
         except Exception:  # noqa: BLE001
             log.exception("graph extraction failed for %s", job.message_id)
             return
+        if job.user_message_id:  # the backfill reads user messages; this one is done
+            from .graph_backfill import mark_done
+            with contextlib.suppress(Exception):  # bookkeeping: at worst a backfill extracts it again
+                mark_done(self._graph.db, job.user_message_id)
         learned.update(nodes=g["nodes"], edges=g["edges"], ended=g["ended"])
 
     async def _run(self, job: LearnJob) -> None:
@@ -958,7 +965,8 @@ class LearnWorker:
                 tool_events=job.tool_events, skills_in_use=job.skills_in_use,
                 user_only=job.user_only, user_message_id=job.user_message_id,
             )
-            await self._learn_graph(job, learned)
+            if job.learn_graph:
+                await self._learn_graph(job, learned)
             # A skill draft needs the assistant half, which a user-only job never saw.
             learned["skill_candidates"] = [] if job.user_only else await self._suggest_skill(job, learned)
             learned["skill_revisions"] = [] if job.user_only else await self._revise_skills(job, learned)

@@ -221,17 +221,19 @@ def router(get_settings: Callable[[], dict[str, Any]], set_settings: Callable[[d
         if preset["needsKey"] and not key:
             raise HTTPException(422, f"{preset['name']} needs an API key")
         # extractionModel is cleared: one left over from another provider (a LiteLLM alias) would fail every
-        # background call. Empty means "use the default model".
+        # background call. Empty means "use the default model". The embedding and rerank models follow the preset
+        # for the same reason: an id the endpoint does not serve turns semantic search off without a word.
         patch = {"provider": body.provider, "baseUrl": base, "apiKey": key, "defaultModel": model,
-                 "extractionModel": "", "fastModel": "", "onboardedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")}
-        # A switch to another provider resets every other model field the same way: blank follows the new provider's
-        # tiers and rerank default, and search uses its embedding model (none where it has no embeddings route).
+                 "extractionModel": "", "fastModel": "", "embeddingModel": preset["embeddingModel"], "retrievalRerankModel": "", "onboardedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        # A switch to another provider resets the other model fields too: blank follows the new provider's tiers.
         if providers.effective(get_settings()) != body.provider:
-            patch.update({k: "" for k in _SWITCH_RESET}, embeddingModel=preset.get("embeddingModel", ""))
+            patch.update({k: "" for k in _SWITCH_RESET})
         # No key for the endpoint the saved key belongs to means "unchanged", as in PUT /settings; an empty
         # value would delete it from the secret store. A different endpoint never inherits the old key.
         if not key and _same_base(base, get_settings().get("baseUrl")):
             del patch["apiKey"]
+        if body.provider == get_settings().get("provider") and _same_base(base, get_settings().get("baseUrl")):
+            del patch["embeddingModel"], patch["retrievalRerankModel"]  # same endpoint: keep what the user picked for it
         set_settings(patch)
         return status()
 

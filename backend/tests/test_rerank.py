@@ -145,5 +145,19 @@ check([k for k, _ in run(retrieval_rerank.rerank(rs, "q", fused, by_key))] == fu
 reply.clear()
 reply["err"] = 1
 check(keys() == fused_keys, "network error keeps fused order")
+
+# A slow completion fallback cannot hold up a turn: past RERANK_WAIT the fused order stands and the route backs off.
+import asyncio  # noqa: E402
+
+async def slow_complete(*a: Any, **kw: Any) -> str:
+    await asyncio.sleep(5)
+    return "[2, 0, 1]"
+
+reply.clear()
+reply.update(status=404, json={})
+llm.complete, wait = slow_complete, retrieval_rerank.RERANK_WAIT
+retrieval_rerank.RERANK_WAIT = 0.05
+check(keys() == fused_keys and retrieval_rerank._down_until > 0, "slow rerank times out to fused order and backs off")
+retrieval_rerank.RERANK_WAIT = wait
 httpx.AsyncClient.post, llm.complete = real_post, real_complete
 print(f"test_rerank: {passed} checks passed")

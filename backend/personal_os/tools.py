@@ -1267,6 +1267,9 @@ class Toolbox:
             scope = None if personal else ctx["project_id"]
             # The same statement reworded supersedes its live twin instead of adding a row (pinned rows never match).
             dup = await self.memory_index.near_duplicate(self.settings(), scope, text) if self.memory_index is not None else None
+            if dup and dup["project_id"] != scope:  # a personal memory already says it; a project save never rewrites it
+                return {"saved": dup["id"], "content": dup["content"], "already_known": True,
+                        "hint": f"Already a personal memory. To change it, pass replaces={dup['id']!r}."}
             if dup and dup["content"].strip().lower() != text.strip().lower():  # the same words: create() dedupes, no new version
                 m = self.memories.supersede(dup["id"], text, kind=kind or None, source="auto", provenance=prov, expires_at=expires)
                 if m:

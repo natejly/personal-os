@@ -52,6 +52,7 @@ class MemoryIndex:
         self.recall: Any = None  # GraphRecall, set by app: node vectors for graph-seeded ranking
         self.rerank_fn: Any = None  # tests/eval stub this; None = retrieval_rerank.rerank_scores
         self._rerank_down_until = 0.0
+        self._next_check = 0.0  # monotonic time schedule() may scan for stale rows again
         with db.tx() as c:
             c.executescript(SCHEMA)
 
@@ -78,11 +79,14 @@ class MemoryIndex:
         if not self.enabled(settings) or not self.embedder.available(settings):
             return 0
         model = self.embedder.model(settings)
+        with self.db.tx() as c:  # superseded, forgotten and expired rows are never ranked; a restored one is re-embedded via _stale
+            c.execute(f"DELETE FROM memory_vectors WHERE memory_id IN (SELECT m.id FROM memories m WHERE NOT {live_mem('m')})")
         want = set(memory_ids) if memory_ids is not None else None
         todo = [r for r in self._stale(model) if want is None or r["id"] in want][:limit]
         if not todo:
             return 0
-        vecs = await self.embedder.embed(settings, [r["content"] for r in todo])
+        # Cut like the query: one over-long paste would 4xx the whole batch and back off every vector search.
+        vecs = await self.embedder.embed(settings, [r["content"][:ml.QUERY_CHARS] for r in todo])
         if vecs is None or len(vecs) != len(todo):
             return 0
         t = time.time()
@@ -98,6 +102,11 @@ class MemoryIndex:
         try:
             if not self.enabled(settings) or not self.embedder.available(settings):
                 return
+            # ponytail: the stale check scans every live row, so a chat turn runs it at most once per SCHEDULE_EVERY;
+            # auto-learn indexes its own rows at once. A write-side dirty flag if the store grows large.
+            if time.monotonic() < self._next_check:
+                return
+            self._next_check = time.monotonic() + ml.SCHEDULE_EVERY
             if not self.pending_count(self.embedder.model(settings)):
                 return
             task = asyncio.get_running_loop().create_task(self.index(settings))
@@ -114,21 +123,22 @@ class MemoryIndex:
         if not query.strip() or not self.enabled(settings) or not self.embedder.available(settings):
             return None
         try:
-            vecs = await asyncio.wait_for(self.embedder.embed(settings, [query[:ml.QUERY_CHARS]]), timeout)
-        except Exception:  # noqa: BLE001 - timeouts included
+            vecs = await self.embedder.embed(settings, [query[:ml.QUERY_CHARS]], timeout=timeout)  # too slow = backed off
+        except Exception:  # noqa: BLE001
             return None
         return vecs[0] if vecs else None
 
     async def near_duplicate(self, settings: dict[str, Any], project_id: str | None, text: str) -> dict[str, Any] | None:
-        """The live, unpinned memory in scope whose meaning is closest to `text`, if its cosine reaches
-        NEAR_DUP_SIMILARITY; else None (also with embeddings off, down or slow). Never raises.
+        """The live, unpinned memory visible in scope (a project's own rows and personal ones) whose meaning is closest
+        to `text`, if its cosine reaches NEAR_DUP_SIMILARITY; else None (also with embeddings off, down or slow). Never raises.
+        A hit outside `project_id` is already known there: callers skip the save rather than rewrite a personal row.
         ponytail: rows with no vector yet are not compared, so a fact saved before the backfill ran can be duplicated once."""
         try:
             qv = await self.query_vec(settings, text)
             model = self.embedder.model(settings) if qv is not None else ""
             if qv is None or not model:
                 return None
-            where, args = _scope_clause(project_id, include_global=False)  # a project save never rewrites a personal row
+            where, args = _scope_clause(project_id)
             with self.db.tx() as c:
                 rows = c.execute(
                     f"""SELECT v.memory_id, v.vec, v.dim FROM memory_vectors v JOIN memories m ON m.id=v.memory_id

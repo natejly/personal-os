@@ -63,6 +63,45 @@ def test_reads_user_messages_only_and_stamps_them(env, monkeypatch) -> None:
     assert edge["source_message_id"] == u["id"] and edge["valid_at"] == u["created_at"]
 
 
+def test_a_message_learned_live_is_not_backfilled(env, monkeypatch) -> None:
+    db, convos, graph = env
+    conv = convos.create(None, "t", "m")
+    u = convos.add_message(conv["id"], "user", "I use Docker daily")
+    bf = GraphBackfill(db, graph)
+    assert bf.pending(None) == 1
+    graph_backfill.mark_done(db, u["id"])  # what LearnWorker._learn_graph does after a live extraction
+    assert bf.pending(None) == 0
+
+
+def test_live_learning_marks_its_message_and_honours_use_graph(env, monkeypatch) -> None:
+    from personal_os import learn
+    from personal_os.repos import Memories
+    db, convos, graph = env
+    conv = convos.create(None, "t", "m")
+    u1 = convos.add_message(conv["id"], "user", "I use Docker daily")
+    u2 = convos.add_message(conv["id"], "user", "I use Podman too")
+    seen: list[Any] = []
+    _fake(monkeypatch, seen)
+
+    async def no_memories(**kw: Any) -> dict[str, Any]:
+        return {"memories": [], "nodes": [], "edges": [], "superseded": [], "invalidated": [], "ended": []}
+
+    monkeypatch.setattr(learn, "learn_from_exchange", no_memories)
+    worker = learn.LearnWorker(memories=Memories(db), graph=graph, set_trace=lambda *_: None, publish=lambda *_: None)
+
+    def job(u: dict[str, Any], use_graph: bool) -> learn.LearnJob:
+        return learn.LearnJob(conversation_id=conv["id"], message_id="a", project_id=None, user_text=u["content"],
+                              assistant_text="", model="m", settings={}, spans=[], user_only=True,
+                              user_message_id=u["id"], learn_graph=use_graph)
+
+    asyncio.run(worker._run(job(u1, True)))
+    asyncio.run(worker._run(job(u2, False)))
+    assert len(seen) == 1  # the useGraph-off chat made no graph extraction call
+    pending = GraphBackfill(db, graph)
+    assert pending.pending(None) == 1  # u1 was learned live; only u2 still waits
+
+
+
 def test_second_run_processes_nothing(env, monkeypatch) -> None:
     db, convos, graph = env
     conv = convos.create(None, "t", "m")

@@ -186,3 +186,53 @@ def test_context_unchanged_without_memory_hits(env) -> None:
     swapped, used2 = build_context(**kw, memory_hits=hits)
     assert "Priya" in swapped and "dark mode" not in swapped and len(used2["memories"]) == 1
     assert fake.calls == 0  # building context never embeds
+
+
+def test_slow_embed_route_backs_off_instead_of_stalling_every_turn(env) -> None:
+    db, memories, graph, idx, fake = env
+
+    async def slow(settings: Any, texts: list[str], model: Any) -> list[list[float]]:
+        fake.calls += 1
+        await asyncio.sleep(1)
+        return [_vec(t) for t in texts]
+
+    idx.embedder.fn = slow
+    assert asyncio.run(idx.query_vec(CFG, "who is my boss", timeout=0.05)) is None
+    assert not idx.embedder.available(CFG)  # the next turn goes lexical-only at once
+    assert asyncio.run(idx.query_vec(CFG, "who is my boss", timeout=0.05)) is None and fake.calls == 1
+
+
+def test_long_memory_is_cut_and_dead_vectors_are_swept(env) -> None:
+    db, memories, graph, idx, fake = env
+    seen: list[int] = []
+
+    async def capped(settings: Any, texts: list[str], model: Any) -> list[list[float]]:
+        seen.extend(len(t) for t in texts)
+        return [_vec(t) for t in texts]
+
+    idx.embedder.fn = capped
+    long = memories.create(None, "User pasted " + "x" * 5000, kind="note")
+    old = memories.create(None, "User lives in Boston", kind="fact")
+    assert asyncio.run(idx.index(CFG)) == 2 and max(seen) <= 2000
+    memories.supersede(old["id"], "User lives in Denver")
+    asyncio.run(idx.index(CFG))
+    with db.tx() as c:
+        ids = {r["memory_id"] for r in c.execute("SELECT memory_id FROM memory_vectors")}
+    assert old["id"] not in ids and long["id"] in ids and len(ids) == 2
+
+
+def test_project_save_of_a_personal_fact_is_not_duplicated(env, monkeypatch) -> None:
+    from personal_os.repos import Projects
+    db, memories, graph, idx, fake = env
+    pid = Projects(db).create("Work")["id"]
+    personal = memories.create(None, "User's daughter is called Mira", kind="fact")
+    asyncio.run(idx.index(CFG))
+    assert asyncio.run(idx.near_duplicate(CFG, pid, "User's daughter is called Mira"))["id"] == personal["id"]
+
+    async def fake_complete(settings: Any, model: str, messages: Any, kind: str = "learn", **kw: Any) -> str:
+        return json.dumps({"memories": [{"content": "User's daughter is called Mira", "kind": "fact"}]})
+
+    monkeypatch.setattr(learn.llm, "complete", fake_complete)
+    out = asyncio.run(learn.learn_from_exchange(settings=CFG, memories=memories, graph=graph, project_id=pid,
+                                                user_text="my daughter Mira is sick", assistant_text="ok", model="m", index=idx))
+    assert out["memories"] == [] and memories.list(pid, include_global=False) == []

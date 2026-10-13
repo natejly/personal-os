@@ -1,4 +1,3 @@
-import { useShallow } from 'zustand/react/shallow'
 /**
  * The Agent Inbox, shown under the greeting of a new chat. Two sections: "Needs you" (pending approvals and proposals, desks waiting on the user, and
  * a link into every other review queue: doc edits, skills, workflow runs, memory tidy-ups) and
@@ -8,6 +7,7 @@ import { useShallow } from 'zustand/react/shallow'
  * proposals (GET /inbox) — never from the assistant's prose. A run's own report is shown as the body of
  * its card, but no number, badge or state is read out of that text.
  */
+import { useShallow } from 'zustand/react/shallow'
 import { splitReport } from '../lib/report'
 import { type RoutineDraft } from '../lib/routine'
 import { useEffect, useRef, useState } from 'react'

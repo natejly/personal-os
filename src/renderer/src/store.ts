@@ -706,6 +706,16 @@ const docEdits = (doc: FullDoc, docDraft: string | null, docTitleDraft: string |
   return content === undefined && title === undefined ? null : { content, title }
 }
 
+/** The list row for a just-saved doc, refreshed from the save, in the list's order (pinned, starred, newest). */
+export function patchDocRow(docs: Doc[], saved: Doc): Doc[] {
+  const body = saved.content ?? ''
+  const rows = docs.map((d) => (d.id !== saved.id ? d : {
+    ...d, title: saved.title, updated_at: saved.updated_at, words: saved.words, tags: saved.tags ?? d.tags,
+    size: body.length, preview: body.slice(0, 240)
+  }))
+  return rows.sort((a, b) => (b.pinned ?? 0) - (a.pinned ?? 0) || b.starred - a.starred || b.updated_at - a.updated_at)
+}
+
 /**
  * The state after a request that replaced the doc body (accept, restore). `sent` is the draft right
  * before the request and `base` the body the editor showed then, so a draft that differs now was
@@ -717,16 +727,6 @@ const docEdits = (doc: FullDoc, docDraft: string | null, docTitleDraft: string |
  * the body was replaced outright there is nothing to merge the typing into, so the server wins, as
  * it always has.
  */
-/** The list row for a just-saved doc, refreshed from the save, in the list's order (pinned, starred, newest). */
-export function patchDocRow(docs: Doc[], saved: Doc): Doc[] {
-  const body = saved.content ?? ''
-  const rows = docs.map((d) => (d.id !== saved.id ? d : {
-    ...d, title: saved.title, updated_at: saved.updated_at, words: saved.words, tags: saved.tags ?? d.tags,
-    size: body.length, preview: body.slice(0, 240)
-  }))
-  return rows.sort((a, b) => (b.pinned ?? 0) - (a.pinned ?? 0) || b.starred - a.starred || b.updated_at - a.updated_at)
-}
-
 export function adoptServerDoc(
   draft: string | null, doc: FullDoc, sent: string | null, base: string
 ): { activeDoc: FullDoc; docDraft: string | null } {

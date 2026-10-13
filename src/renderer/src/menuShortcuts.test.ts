@@ -233,7 +233,7 @@ test("the doc editor's chords are not menu accelerators, which would swallow the
   assert.ok(chords.length >= 4, hints)
   // A menu item may share a chord only when its handler hands the key to a focused editor first (store.ts toEditor).
   const store = readFileSync('src/renderer/src/store.ts', 'utf8')
-  const forwarded: Record<string, string> = { '⌘K': "toEditor('k', false)",'⇧⌘M': "toEditor('M', true)" }
+  const forwarded: Record<string, string> = { '⌘K': "toEditor('k', false)", '⇧⌘M': "toEditor('M', true)" }
   for (const c of chords) {
     assert.ok(accel[c], `map ${c} to its accelerator here`)
     if (forwarded[c] && store.includes(forwarded[c])) continue

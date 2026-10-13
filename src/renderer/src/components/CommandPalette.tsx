@@ -37,7 +37,6 @@ export default function CommandPalette(): JSX.Element {
     ...VIEWS.filter((v) => !viewHidden(settings, v.view)).map((v) => ({ key: `view:${v.view}`, label: v.label, hint: 'Go to', run: () => s.setView(v.view) })),
     // Places with no number key, and the ones a hidden sidebar row leaves reachable only from here.
     { key: 'inbox', label: 'Agent inbox and jobs', hint: 'Go to', run: () => s.openInbox() },
-    { key: 'memory', label: 'Memory', hint: 'Go to', run: () => s.openMemory() },
     ...projects.map((p) => ({ key: `project:${p.id}`, label: p.name, hint: 'Project', run: () => s.openProject(p.id) })),
     ...canvases.map((c) => ({ key: `space:${c.id}`, label: c.name, hint: 'Canvas', run: () => void useCanvas.getState().enterSpace(c.id) })),
     { key: 'new-chat', label: 'New chat', hint: 'Create', run: () => s.newChat(null) },

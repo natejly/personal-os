@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Check, ChevronDown, ChevronRight, Pencil, Play, Plus, RotateCw, Square, Workflow as WorkflowIcon, X } from '../icons'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -34,7 +35,7 @@ const STEP_MARK: Record<WorkflowStepStatus, string> = {
 const LIVE: WorkflowRunStatus[] = ['running', 'waiting_approval']
 
 function RunCard({ run, onChange }: { run: WorkflowRun; onChange: () => void }): JSX.Element {
-  const { toast } = useStore()
+  const { toast } = useStore(useShallow((s) => ({ toast: s.toast })))
   const [open, setOpen] = useState(run.status === 'awaiting_approval' || LIVE.includes(run.status))
   const [full, setFull] = useState<WorkflowRun | null>(null)
   const cur = full && full.id === run.id ? full : run
@@ -106,7 +107,7 @@ function RunCard({ run, onChange }: { run: WorkflowRun; onChange: () => void }):
 }
 
 function Editor({ wf, onDone }: { wf: Workflow | null; onDone: () => void }): JSX.Element {
-  const { toast } = useStore()
+  const { toast } = useStore(useShallow((s) => ({ toast: s.toast })))
   const [text, setText] = useState(wf?.text || TEMPLATE)
   const [errors, setErrors] = useState<string[]>([])
   const seq = useRef(0)
@@ -141,7 +142,7 @@ function Editor({ wf, onDone }: { wf: Workflow | null; onDone: () => void }): JS
 }
 
 export function ParamForm({ wf, onProposed }: { wf: Workflow; onProposed: () => void }): JSX.Element {
-  const { toast } = useStore()
+  const { toast } = useStore(useShallow((s) => ({ toast: s.toast })))
   const [vals, setVals] = useState<Record<string, string>>({})
   const propose = async (): Promise<void> => {
     const params: Record<string, unknown> = {}
@@ -165,7 +166,7 @@ export function ParamForm({ wf, onProposed }: { wf: Workflow; onProposed: () => 
 }
 
 export default function WorkflowsPanel(): JSX.Element {
-  const { toast } = useStore()
+  const { toast } = useStore(useShallow((s) => ({ toast: s.toast })))
   const [wfs, setWfs] = useState<Workflow[]>([])
   const [runs, setRuns] = useState<WorkflowRun[]>([])
   const [mode, setMode] = useState<{ kind: 'edit' | 'run'; id: string | 'new' } | null>(null)

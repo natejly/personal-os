@@ -93,6 +93,7 @@ export default function Sidebar(): JSX.Element {
   /** Chats working autonomously with something unseen that needs you: the one badge worth interrupting for. */
   const needsYou = useStore((s) => new Set(s.deskInbox.map((e) => e.desk_id)).size)
   const inCanvas = useStore((s) => s.view === 'canvas')
+  const pageAgentOpen = useStore((s) => s.pageAgentOpen)
   // One selector per action. Sidebar is mounted in every view, the canvas included, so a bare
   // useStore() here is what made App's whole subtree commit once per streamed token.
   const newChat = useStore((s) => s.newChat)
@@ -105,6 +106,7 @@ export default function Sidebar(): JSX.Element {
   const setProjectModal = useStore((s) => s.setProjectModal)
   // Inside a space a chat opens (or focuses) as a window there; from any other view it routes to the chat view.
   const openConversation = (id: string): void => void (inCanvas ? useCanvas.getState().openChat(id) : selectChat(id))
+  const startChat = (): void => void (inCanvas ? useCanvas.getState().newChatWindow() : newChat(null))
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
   // Full-text hits over message bodies, for queries of 3+ characters. Title matches stay instant; these
@@ -275,14 +277,15 @@ export default function Sidebar(): JSX.Element {
 
   return (
     <aside className="sidebar">
-      <ResizeHandle id="sidebar-w" defaultSize={260} min={190} max={480} grows="right" onCollapse={toggleSidebar} label="Sidebar width" className="at-right" />
+      {/* Leave the view 420px, plus the ⌘I panel's 280px minimum while it is open (styles.css clamps that column). */}
+      <ResizeHandle id="sidebar-w" defaultSize={260} min={190} max={480} keep={pageAgentOpen ? 700 : 420} grows="right" onCollapse={toggleSidebar} label="Sidebar width" className="at-right" />
       <div className="sidebar-top drag">
-        <button className="brand no-drag" onClick={() => newChat(null)}><GrainLogo size={15} /><span>Grain</span></button>
+        <button className="brand no-drag" aria-label="Grain: new chat" title="New chat" onClick={startChat}><GrainLogo size={15} /><span>Grain</span></button>
         <button className="icon-btn no-drag" aria-label="Hide sidebar" title="Hide sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftClose size={16} /></button>
       </div>
 
       {/* Above the scroller, so the one action every session starts with never scrolls away. */}
-      <button className="new-chat" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow() : newChat(null))}>
+      <button className="new-chat" onClick={startChat}>
         <MessageSquarePlus size={15} /><span>New chat</span><kbd>⌘N</kbd>
       </button>
 
@@ -458,7 +461,7 @@ export default function Sidebar(): JSX.Element {
           <h4 className="archived-head"><button className="section-toggle" aria-expanded={archivedOpen} onClick={() => setArchivedOpen((o) => !o)}><ChevronRight size={11} className={archivedOpen ? 'rot90' : ''} /> Archived</button></h4>
           {archivedShown && shownArchived.length === 0 && <p className="empty-hint">{archived.length ? 'No archived chats match.' : 'Nothing archived.'}</p>}
           {archivedShown && shownArchived.map((c) => (
-            <div key={c.id} className="convo-item archived" {...rowButton(() => void selectChat(c.id))}>
+            <div key={c.id} className="convo-item archived" {...rowButton(() => openConversation(c.id))}>
               <span className="convo-title">{c.title}</span>
               <button className="icon-btn ghost" aria-label={`Unarchive chat: ${c.title}`} title="Unarchive" onClick={(e) => { e.stopPropagation(); void archiveChat(c.id, false) }}><ArchiveRestore size={13} /></button>
               <button className="icon-btn ghost" aria-label={`Delete chat: ${c.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id).then(() => setArchived((a) => a.filter((x) => x.id !== c.id))) }}><Trash2 size={13} /></button>
@@ -479,8 +482,8 @@ export default function Sidebar(): JSX.Element {
       </div>
 
       <div className="sidebar-bottom">
-        <button className="settings-btn" onClick={() => setSettingsOpen(true)}><Settings size={16} /><span>Settings</span>
-          {memoryProposals > 0 && <span className="count pending" title={`${memoryProposals} memory tidy-up suggestion${memoryProposals === 1 ? '' : 's'} to review, under Knowledge base`}>{memoryProposals}</span>}
+        <button className="settings-btn" onClick={() => (memoryProposals > 0 ? useStore.getState().openMemory('list') : setSettingsOpen(true))}><Settings size={16} /><span>Settings</span>
+          {memoryProposals > 0 && <span className="count pending" title={`${memoryProposals} memory tidy-up suggestion${memoryProposals === 1 ? '' : 's'} to review, under Memory`}>{memoryProposals}</span>}
           <kbd>⌘,</kbd></button>
       </div>
     </aside>

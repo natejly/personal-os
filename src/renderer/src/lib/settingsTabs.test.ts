@@ -24,6 +24,7 @@ test('search matches every typed word against titles and keywords', () => {
   assert.deepEqual(searchSettings('telegram').map((e) => e.sec), ['texting'])
   assert.equal(searchSettings('firecrawl key')[0].tab, 'integrations')
   assert.ok(searchSettings('dictation').some((e) => e.tab === 'appearance'))
+  assert.deepEqual(searchSettings('workspace map').map((e) => e.sec), ['map'])
   assert.deepEqual(searchSettings('  '), [])
   assert.deepEqual(searchSettings('zzzz'), [])
 })

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type KeyboardEvent } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { ArrowLeft, ArrowRight, Check, ExternalLink, Eye, EyeOff, Loader2, Lock, RefreshCw } from '../../icons'
 import GrainLogo from '../GrainLogo'
 import { api } from '../../lib/api'
@@ -31,7 +32,7 @@ export default function Onboarding(): JSX.Element {
   const root = useRef<HTMLDivElement>(null)
   const closeWizard = useOnboarding((s) => s.closeWizard)
   const google = useStore((s) => s.google)
-  const { refreshGoogle, connectGoogle } = useStore()
+  const { refreshGoogle, connectGoogle } = useStore(useShallow((s) => ({ refreshGoogle: s.refreshGoogle, connectGoogle: s.connectGoogle })))
 
   const [state, rawDispatch] = useReducer(
     (s: WizardState, a: WizardAction & { provider_?: ProviderInfo }) => reduce(s, a, a.provider_),

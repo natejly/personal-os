@@ -46,6 +46,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'agents', sec: 'checks', title: 'Checks and commands', keys: 'gates test lint build verify commands' },
   { tab: 'memory', sec: 'learning', title: 'Learning', keys: 'learn from chats writing style remember profile' },
   { tab: 'memory', sec: 'search', title: 'Memory search and index', keys: 'embedding rebuild index retrieval vectors passages hybrid reranker chunks' },
+  { tab: 'memory', sec: 'map', title: 'Workspace map', keys: 'map context memory counts topics files uploads projects skills pointer sources today background workers' },
   { tab: 'appearance', sec: 'look', title: 'Theme, accent and zoom', keys: 'dark light colour color font size scale recap blobs' },
   { tab: 'appearance', sec: 'notifications', title: 'Notifications', keys: 'notify alerts unread dot jobs finish' },
   { tab: 'appearance', sec: 'shortcuts', title: 'Shortcuts and voice', keys: 'keyboard hotkey dictation microphone speech quick note quick ask gather widgets' },

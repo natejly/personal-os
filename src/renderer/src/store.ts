@@ -681,6 +681,16 @@ const toastClocks = new Map<number, { left: number; at?: number; timer?: ReturnT
 let toastsHeld = false
 /** The completion popup's snooze timer. Its own, so dismissing a toast never clears a snoozed popup. */
 let completionTimer: ReturnType<typeof setTimeout> | null = null
+/** Set by the Settings modal while its draft is dirty: it asks before discarding instead of closing. */
+let settingsGuard: (() => void) | null = null
+let memoriesSeq = 0
+export function setSettingsGuard(fn: (() => void) | null): void { settingsGuard = fn }
+/** The patch a navigation action spreads to close Settings; with a dirty draft it asks and stays open. */
+function closeSettings(): { settingsOpen?: false } {
+  if (!settingsGuard) return { settingsOpen: false }
+  settingsGuard()
+  return {}
+}
 let flushChain: Promise<void> = Promise.resolve()
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
@@ -698,6 +708,16 @@ const docEdits = (doc: FullDoc, docDraft: string | null, docTitleDraft: string |
   const title = docTitleDraft !== null && docTitleDraft.trim() && docTitleDraft !== doc.title
     ? docTitleDraft.trim() : heading && heading !== doc.title ? heading : undefined
   return content === undefined && title === undefined ? null : { content, title }
+}
+
+/** The list row for a just-saved doc, refreshed from the save, in the list's order (pinned, starred, newest). */
+export function patchDocRow(docs: Doc[], saved: Doc): Doc[] {
+  const body = saved.content ?? ''
+  const rows = docs.map((d) => (d.id !== saved.id ? d : {
+    ...d, title: saved.title, updated_at: saved.updated_at, words: saved.words, tags: saved.tags ?? d.tags,
+    size: body.length, preview: body.slice(0, 240)
+  }))
+  return rows.sort((a, b) => (b.pinned ?? 0) - (a.pinned ?? 0) || b.starred - a.starred || b.updated_at - a.updated_at)
 }
 
 /**
@@ -973,9 +993,9 @@ export const useStore = create<State>((set, get) => {
   const wireMenu = (): void => {
     if (menuWired) return
     menuWired = true
-    // ⌘B (Toggle Sidebar) and ⌘K (Command Palette) are menu accelerators, and a menu accelerator never
-    // reaches the page: inside the Markdown editor they would hide the sidebar, open the palette or leave the doc instead
-    // of bold / link / maths. While the editor has focus, hand the chord back to it as the keystroke it was.
+    // ⌘K (Command Palette) is a menu accelerator, and a menu accelerator never reaches the page: inside the
+    // Markdown editor it would open the palette instead of link / maths. While the editor has focus, hand the
+    // chord back to it as the keystroke it was. ⌘B is not handed back: bold is ⇧⌘B, so ⌘B toggles the sidebar everywhere.
     const toEditor = (key: string, shift: boolean): boolean => {
       const el = typeof document === 'undefined' ? null : document.activeElement
       if (!el || el.tagName !== 'TEXTAREA' || !el.classList.contains('md-input')) return false
@@ -984,7 +1004,6 @@ export const useStore = create<State>((set, get) => {
     }
     window.os.onMenu((action) => {
       const s = get()
-      if (action === 'toggle-sidebar' && toEditor('b', false)) return
       if (action === 'palette' && toEditor('k', false)) return
       // In the canvas view ⌘N opens a chat window instead; canvas/store.ts handles it there.
       if (action === 'new-chat') {
@@ -1016,7 +1035,9 @@ export const useStore = create<State>((set, get) => {
       else if (action.startsWith('view:')) {
         const v = action.slice(5) as View
         // A view turned off in Settings → Sidebar stays off: its shortcut says how to turn it back on.
-        if (viewHidden(s.settings, v)) s.toast(`${v[0].toUpperCase()}${v.slice(1)} is turned off`, 'info', { label: 'Turn on', run: () => get().openSettings('sidebar') })
+        // Named as the sidebar shows it; nav.tsx holds the labels but importing it here would close a cycle.
+        const name = v === 'todos' ? 'Lists' : `${v[0].toUpperCase()}${v.slice(1)}`
+        if (viewHidden(s.settings, v)) s.toast(`${name} is turned off`, 'info', { label: 'Turn on', run: () => get().openSettings('sidebar') })
         else s.setView(v)
       } else if (action === 'upload') {
         s.openFiles('uploads')
@@ -1822,7 +1843,7 @@ export const useStore = create<State>((set, get) => {
       get().openInbox()
     },
     inboxOpen: false,
-    openInbox: () => set({ inboxOpen: true, settingsOpen: false }),
+    openInbox: () => set({ inboxOpen: true, ...closeSettings() }),
     closeInbox: () => set({ inboxOpen: false, routineDraft: null }),
     clearRoutineDraft: () => set({ routineDraft: null }),
     projects: [],
@@ -2134,7 +2155,7 @@ export const useStore = create<State>((set, get) => {
     },
     // `draftProjectId` is deliberately not set here: opening a project is looking at it, not
     // choosing it for the next chat. Its own "New chat" buttons pass the id to `newChat` instead.
-    openProject: (id) => set({ view: 'project', projectViewId: id, draftProjectId: null, settingsOpen: false }),
+    openProject: (id) => set({ view: 'project', projectViewId: id, draftProjectId: null, ...closeSettings() }),
     createProject: async (p) => {
       const project = await api.projects.create(p)
       await get().refreshProjects()
@@ -2177,7 +2198,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftChatSettings: {}, view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftChatSettings: {}, view: 'chat', ...closeSettings() }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -2198,7 +2219,7 @@ export const useStore = create<State>((set, get) => {
       }
     },
     selectChat: async (id) => {
-      set({ view: 'chat', settingsOpen: false, traceMessageId: null })
+      set({ view: 'chat', ...closeSettings(), traceMessageId: null })
       if (!id) return set({ focusedConversationId: null })
       // Opening the chat the completion popup named settles it: there is nothing left to open.
       if (get().completionPopup?.convId === id) get().dismissCompletion()
@@ -2666,7 +2687,7 @@ export const useStore = create<State>((set, get) => {
       }
       putSession(c)
       // A fresh copy has no run to attach to, so it is focused directly rather than refetched through selectChat.
-      set((s) => ({ conversations: [c, ...s.conversations.filter((x) => x.id !== c.id)], view: 'chat', settingsOpen: false,
+      set((s) => ({ conversations: [c, ...s.conversations.filter((x) => x.id !== c.id)], view: 'chat', ...closeSettings(),
                      traceMessageId: null, focusedConversationId: c.id, draftProjectId: c.project_id }))
       const from = get().sessions[conversationId]?.conversation.title ?? get().conversations.find((x) => x.id === conversationId)?.title
       get().toast(`Branched from ${from || 'the original chat'}`, 'info', { label: 'Open original', run: () => void get().selectChat(conversationId) })
@@ -2833,7 +2854,8 @@ export const useStore = create<State>((set, get) => {
             docSaving: false
           }
         })
-        void get().refreshDocs()
+        // Patch this doc's list row from the save instead of re-listing every doc after each pause in typing.
+        set((st) => ({ docs: patchDocRow(st.docs, saved) }))
         void get().refreshDocRevisions(doc.id)
       } catch (e) {
         set({ docSaving: false })
@@ -3345,7 +3367,13 @@ export const useStore = create<State>((set, get) => {
       if (skillDrafted) void get().refreshSkills()
       refreshAll()
     },
-    refreshMemories: async (q = '') => set({ memories: await api.memories.list(get().dataScope, q) }),
+    refreshMemories: async (q = '') => {
+      // A search and a scope switch can overlap (a child panel's effect runs before its parent's
+      // loadScope), so only the latest request lands.
+      const seq = ++memoriesSeq
+      const memories = await api.memories.list(get().dataScope, q)
+      if (seq === memoriesSeq) set({ memories })
+    },
     addMemory: async (content, kind, projectId) => {
       await api.memories.create({ project_id: projectId, content, kind })
       await Promise.all([get().refreshMemories(), get().refreshProjects()])
@@ -3379,8 +3407,16 @@ export const useStore = create<State>((set, get) => {
       } catch (e) { get().toast(`Could not forget: ${(e as Error).message}`, 'error') }
     },
 
-    refreshGraph: async () => set({ graph: await api.graph.get(get().dataScope) }),
-    refreshDocuments: async () => set({ documents: await api.documents.list(get().dataScope) }),
+    refreshGraph: async () => {
+      const scope = get().dataScope
+      const graph = await api.graph.get(scope)
+      if (get().dataScope === scope) set({ graph })
+    },
+    refreshDocuments: async () => {
+      const scope = get().dataScope
+      const documents = await api.documents.list(scope)
+      if (get().dataScope === scope) set({ documents })
+    },
 
     // ---- writing style ----
     // The scope here is the data scope the Memory panel loaded. 'all' has no voice of its own, so the

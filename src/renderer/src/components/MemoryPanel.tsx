@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Search, Columns2, List, Share2, PenLine } from '../icons'
 import { useStore, type MemoryMode, type Scope } from '../store'
 import MemoryView from './MemoryView'
@@ -24,14 +25,17 @@ export default function MemoryPanel({ projectId }: { projectId?: string; embedde
   const memories = useStore((s) => s.memories)
   const graph = useStore((s) => s.graph)
   const mode = useStore((s) => s.memoryMode)
-  const { loadScope, setMemoryMode } = useStore()
+  const { loadScope, setMemoryMode } = useStore(useShallow((s) => ({ loadScope: s.loadScope, setMemoryMode: s.setMemoryMode })))
   const style = useStore((s) => s.style)
   const scope: Scope = projectId ?? libraryScope
   const [q, setQ] = useState('')
   const samples = style?.stats.samples ?? 0
   const styleCount = `${style?.profile ? 'voice learned' : 'no voice yet'} · ${samples} sample${samples === 1 ? '' : 's'}`
 
-  useEffect(() => { void loadScope(scope) }, [scope, loadScope])
+  // The loaded list is global. Settings' own panel takes it over while open, so a project's panel
+  // behind the modal waits, then loads its scope back when the modal closes.
+  const yielded = useStore((s) => !!projectId && s.settingsOpen)
+  useEffect(() => { if (!yielded) void loadScope(scope) }, [scope, loadScope, yielded])
 
   const entityCount = graph.nodes.filter((n) => !n.properties?.self && !n.properties?.literal).length
   const showStyle = mode === 'style'

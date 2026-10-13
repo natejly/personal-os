@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { MessageSquarePlus, Pencil, Files, FolderX, Brain, MessageSquare, BookOpen, Trash2, Info } from '../icons'
 import { useStore, useProject } from '../store'
 import { dragProps } from '../canvas/dnd'
@@ -17,7 +18,7 @@ export default function ProjectView(): JSX.Element {
   const id = useStore((s) => s.projectViewId)!
   const project = useProject(id)
   const conversations = useStore((s) => s.conversations)
-  const { newChat, selectChat, deleteChat, setProjectModal, updateProject, loadScope, setView } = useStore()
+  const { newChat, selectChat, deleteChat, setProjectModal, updateProject, loadScope, setView } = useStore(useShallow((s) => ({ newChat: s.newChat, selectChat: s.selectChat, deleteChat: s.deleteChat, setProjectModal: s.setProjectModal, updateProject: s.updateProject, loadScope: s.loadScope, setView: s.setView })))
   const fileCount = useProjectFileCount(id)
   const [prompt, setPrompt] = useState(project?.system_prompt ?? '')
   const rows = useMemo(() => conversations.filter((c) => c.project_id === id), [conversations, id])

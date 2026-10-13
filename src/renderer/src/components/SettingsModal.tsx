@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { X, Search, Download, Upload, Plug, Cpu, Bot, Palette, ShieldCheck, ShieldAlert, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, Gauge, Brain, PanelLeft, type Icon } from '../icons'
-import { useStore, type View } from '../store'
+import { useStore, setSettingsGuard, type View } from '../store'
 import { modeOf } from '../lib/permissionMode'
 import { searchSettings, type SettingsTab } from '../lib/settingsTabs'
 import { MODES } from '../lib/permissionMode'
@@ -118,11 +119,13 @@ function IndexStatusLine(): JSX.Element | null {
   )
 }
 
+const STRIP_QUERY = '(max-width: 720px)'
+
 export default function SettingsModal(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const models = useStore((s) => s.models)
   const view = useStore((s) => s.view)
-  const { saveSettings, setSettingsOpen, setView, toast } = useStore()
+  const { saveSettings, setSettingsOpen, setView, toast } = useStore(useShallow((s) => ({ saveSettings: s.saveSettings, setSettingsOpen: s.setSettingsOpen, setView: s.setView, toast: s.toast })))
   const libraryScope = useStore((s) => s.libraryScope)
   const setLibraryScope = useStore((s) => s.setLibraryScope)
   const [draft, setDraft] = useState<Settings>(settings)
@@ -148,7 +151,7 @@ export default function SettingsModal(): JSX.Element {
   /** Go to a search hit: its tab, any collapsed group around it opened, then scrolled to once it has rendered. */
   const goTo = (h: { tab: Tab; sec: string }): void => {
     setTab(h.tab)
-    if (h.tab === 'advanced' || h.sec === 'search') setOpenGroups((g) => new Set(g).add(h.sec))
+    setOpenGroups((g) => new Set(g).add(h.sec)) // a no-op for a section that is not a collapsed group
     setJump(h.sec)
     setQ('')
   }
@@ -217,6 +220,12 @@ export default function SettingsModal(): JSX.Element {
     if (dirty) setPending((p) => p ?? 'close')
     else setSettingsOpen(false)
   }
+  // A link inside Settings (a memory's "from chat", ⌘N) navigates through the store; with a dirty
+  // draft the store asks through here instead of closing the modal.
+  useEffect(() => {
+    setSettingsGuard(dirty ? () => setPending((p) => p ?? 'close') : null)
+    return () => setSettingsGuard(null)
+  }, [dirty])
   const discard = (): void => {
     const then = pending
     setPending(null)
@@ -312,11 +321,20 @@ export default function SettingsModal(): JSX.Element {
   }
 
   // Vertical tablist: arrows move and select, Home/End jump to the ends.
+  // Matches the styles.css breakpoint where the rail becomes a horizontal strip.
+  const [strip, setStrip] = useState(() => window.matchMedia(STRIP_QUERY).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(STRIP_QUERY)
+    const on = (): void => setStrip(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>): void => {
     if ((e.target as HTMLElement).tagName === 'INPUT') return
     const i = TABS.findIndex((t) => t.id === tab)
-    const next = e.key === 'ArrowDown' ? (i + 1) % TABS.length
-      : e.key === 'ArrowUp' ? (i - 1 + TABS.length) % TABS.length
+    // Up/Down on the side rail, Left/Right once a narrow window turns it into a strip; both work either way.
+    const next = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? (i + 1) % TABS.length
+      : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? (i - 1 + TABS.length) % TABS.length
         : e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : -1
     if (next < 0) return
     e.preventDefault()
@@ -355,7 +373,7 @@ export default function SettingsModal(): JSX.Element {
                 )) : <p className="muted small">No settings match.</p>}
               </div>
             ) : (
-              <nav className="settings-tabs" role="tablist" aria-orientation="vertical" aria-label="Settings sections" onKeyDown={onTabKey}>
+              <nav className="settings-tabs" role="tablist" aria-orientation={strip ? 'horizontal' : 'vertical'} aria-label="Settings sections" onKeyDown={onTabKey}>
                 {TABS.map(({ id, label, icon: Icon }) => {
                   const hint = hintOf(id)
                   return (
@@ -409,12 +427,12 @@ export default function SettingsModal(): JSX.Element {
 
             {tab === 'permissions' && <section className="permissions-tab">
               <h3>Permissions</h3>
-              <p className="muted">How Grain handles actions that could change something: sending, deleting, running, scheduling.</p>
+              <p className="muted">How Grain handles actions that could change something: sending, deleting, running, scheduling. The mode and Allow all apply as soon as you pick them; the rest wait for Save.</p>
               <Sec id="mode"><PermissionModeCards mode={mode} onPick={(m) => saveEarly({ permissionMode: m })} /></Sec>
               <label className={`toggle-row plain all-connections ${draft.allowAllConnections ? 'danger' : ''}`}>
                 <span className="toggle-text">
                   <b>{draft.allowAllConnections && <ShieldAlert size={13} aria-hidden />} Allow all domains and MCP servers</b>
-                  <small>Lifts the host allow-lists for fetching, browsing and shell network, and lets every connector tool run without a per-tool approval. Grain&apos;s own data, app, credential stores and the untrusted-content checks stay protected.</small>
+                  <small>Lifts the host allow-lists for fetching, browsing and shell network, and lets every connector tool run without a per-tool approval. Grain&apos;s own data, app, credential stores and the untrusted-content checks stay protected. Applies at once: Cancel does not undo it.</small>
                 </span>
                 <input type="checkbox" aria-label="Allow all domains and MCP servers" checked={!!draft.allowAllConnections}
                   onChange={(e) => void saveEarly({ allowAllConnections: e.target.checked }).catch((err: Error) => toast(err.message, 'error'))} /><span className="switch" />

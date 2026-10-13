@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { learnedText, readDocMode, adoptServerDoc, flushDocOnUnload, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, PAGE_AGENT_DRAFT, type ChatSession } from './store'
+import { learnedText, readDocMode, adoptServerDoc, flushDocOnUnload, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, setSettingsGuard, patchDocRow, PAGE_AGENT_DRAFT, type ChatSession } from './store'
 import { insertIntoComposer } from './lib/composerInsert'
 import { getDraft } from './lib/drafts'
 import { ApiError } from './lib/apiError'
@@ -1486,4 +1486,67 @@ test('a fetched transcript with an open card counts it and shows the chat waitin
   } finally {
     api.conversations.get = realGet
   }
+})
+
+test('navigating from Settings asks first while its draft is dirty', async () => {
+  let asked = 0
+  useStore.setState({ settingsOpen: true })
+  setSettingsGuard(() => { asked++ })
+  await useStore.getState().selectChat(null)
+  useStore.getState().newChat(null)
+  useStore.getState().openInbox()
+  assert.equal(asked, 3)
+  assert.equal(useStore.getState().settingsOpen, true)
+  setSettingsGuard(null)
+  useStore.getState().newChat(null)
+  assert.equal(useStore.getState().settingsOpen, false)
+  useStore.setState({ inboxOpen: false })
+})
+
+test('a slower memories request for the previous scope does not overwrite the newer one', async () => {
+  const real = api.memories.list
+  const waits: Record<string, (v: unknown) => void> = {}
+  api.memories.list = ((scope: string) => new Promise((r) => { waits[scope] = r })) as never
+  try {
+    useStore.setState({ dataScope: 'all' })
+    const first = useStore.getState().refreshMemories()
+    useStore.setState({ dataScope: 'p1' })
+    const second = useStore.getState().refreshMemories()
+    waits.p1([{ id: 'project' }])
+    await second
+    waits.all([{ id: 'everything' }])
+    await first
+    assert.deepEqual(useStore.getState().memories, [{ id: 'project' }])
+  } finally {
+    api.memories.list = real
+    useStore.setState({ dataScope: 'all', memories: [] })
+  }
+})
+
+test('a save patches its doc row and keeps the list order', () => {
+  const row = (id: string, updated_at: number, extra = {}) => ({ id, project_id: null, title: id, folder: '', starred: 0, pinned: 0, created_at: 0, updated_at, words: 0, ...extra })
+  const docs = [row('pinned', 1, { pinned: 1 }), row('a', 5), row('b', 3)]
+  const out = patchDocRow(docs as never, { ...row('b', 9), title: 'B!', words: 2, tags: ['x'], content: 'hi #x' } as never)
+  assert.deepEqual(out.map((d) => d.id), ['pinned', 'b', 'a'])
+  assert.equal(out[1].title, 'B!')
+  assert.deepEqual(out[1].tags, ['x'])
+  assert.equal(out[1].preview, 'hi #x')
+  assert.equal(out[1].size, 5)
+})
+
+// A bare useStore() subscribes to every set(), and patchSession runs once per streamed token, so the
+// component re-renders per token. Pick fields with a selector (or useShallow) instead.
+test('no component reads the whole store with a bare useStore()', async () => {
+  const { readdirSync, readFileSync, statSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const bad: string[] = []
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name)
+      if (statSync(p).isDirectory()) walk(p)
+      else if (p.endsWith('.tsx') && /^[^/\n]*\buseStore\(\)/m.test(readFileSync(p, 'utf8'))) bad.push(p)
+    }
+  }
+  walk(join(process.cwd(), 'src/renderer/src'))
+  assert.deepEqual(bad, [])
 })

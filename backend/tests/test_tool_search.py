@@ -96,10 +96,9 @@ def test_search_loads_and_persists_per_conversation() -> None:
     assert "graph_search" not in OFFERED[0]  # another conversation does not
 
 
-def test_unloaded_tool_is_refused_not_run() -> None:
-    ev = reply(new_conv(), [[call("graph_search", {"query": "x"})]])
-    res = [e for e in ev if e["event"] == "tool_result"]
-    assert not CALLED and res and "not loaded; call tool_search first" in json.dumps(res[0])
+def test_unloaded_tool_called_by_name_loads_and_runs() -> None:
+    reply(new_conv(), [[call("graph_search", {"query": "x"})]])
+    assert CALLED == ["graph_search"] and "graph_traverse" in OFFERED[1]
 
 
 def test_plan_bound_call_loads_its_group() -> None:

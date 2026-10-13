@@ -145,6 +145,7 @@ class DriveBackup:
                     did = self.google.drive_backup_put(folder, it["name"], it.get("file"), it.get("data"), prev and prev["id"], props=props)
                     files[it["key"]] = {"sig": it["sig"], "id": did}
                     res["copied"] += 1
+                    self._save()  # an interrupted run must not forget what it uploaded, or the next one duplicates it
                 except GoogleNotConnected:
                     raise
                 except Exception as e:  # noqa: BLE001 - one bad file must not stop the rest, and must be reported

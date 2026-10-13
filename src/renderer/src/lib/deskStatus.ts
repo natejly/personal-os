@@ -1,4 +1,4 @@
-import type { Desk, DeskAutonomy, DeskStatus } from '@shared/types'
+import type { DeskAutonomy, DeskStatus } from '@shared/types'
 
 /** Words and clocks for a desk's state, shared by the chat strip, the crew widget and the Agent inbox. */
 export const AUTONOMY: { value: DeskAutonomy; label: string; hint: string }[] = [

@@ -605,11 +605,6 @@ class McpServers:
                 "approved_hash": (grant or {}).get("schema_hash", ""), "schema_hash": (tool or {}).get("schema_hash", ""),
                 "missing": bool(tool and tool["missing_since"]), "known": tool is not None}
 
-    def effective_modes(self, project_id: str | None = None, conversation_id: str | None = None,
-                        include_missing: bool = False) -> dict[str, dict[str, Any]]:
-        return {t["slug"]: self.effective_mode(t["slug"], project_id, conversation_id)
-                for t in self.tools(include_missing=include_missing)}
-
     # ---------- eval reports ----------
     def record_eval(self, server_id: str | None, status: str, summary: str = "", findings: list[Any] | None = None,
                     tool_slug: str = "", model: str = "", schema_hash: str = "") -> dict[str, Any]:

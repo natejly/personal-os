@@ -19,9 +19,6 @@ const LIVE = new Set(['streaming', 'running', 'working', 'planning'])
 /** Every face is drawn this much larger than the size its caller asks for. */
 export const FACE_SCALE = 1.25
 
-/** Spaces all wear this one color; the space id then picks only the silhouette. */
-export const SPACE_HUE = { hue: 150, tone: 0.45 }
-
 /**
  * The same name always draws the same creature, so an agent is recognisable wherever it shows up.
  * Live ones move all the time; the rest only move on hover, which keeps a long transcript quiet.

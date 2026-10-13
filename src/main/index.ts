@@ -361,7 +361,6 @@ if (gotLock) app.whenReady().then(async () => {
   handle('ui:zoom', (e, percent: number) => {
     if (typeof percent === 'number' && percent >= 80 && percent <= 160) e.sender.setZoomFactor(percent / 100)
   })
-  handle('backend:url', () => backendUrl())
   handle('backend:status', () => backendStatus())
   handle('backend:token', () => backendToken())
   handle('backend:info', () => backendInfo())
@@ -391,10 +390,6 @@ if (gotLock) app.whenReady().then(async () => {
   handle('data:choose-input-files', async () => {
     const r = await dialog.showOpenDialog({ title: 'Add inputs to the desk', defaultPath: app.getPath('home'), properties: ['openFile', 'multiSelections'] })
     return r.canceled ? [] : r.filePaths
-  })
-  handle('data:choose-folder', async () => {
-    const r = await dialog.showOpenDialog({ title: 'Work in a folder', defaultPath: app.getPath('home'), properties: ['openDirectory', 'createDirectory'] })
-    return r.canceled || !r.filePaths[0] ? null : r.filePaths[0]
   })
   // Folders only: openPath on a file or .app would run it.
   handle('data:reveal', async (_e, path: string) => {

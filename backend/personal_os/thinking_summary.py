@@ -51,7 +51,6 @@ class ThinkingSummary:
         self._cfg, self._model, self._fn = cfg, model, summarise_fn
         self.lines: list[str] = []
         self._pending = ""
-        self._sent = 0
         self._last = float("-inf")
         self._task: asyncio.Task[str] | None = None
         self._ready: list[str] = []

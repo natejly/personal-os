@@ -1351,10 +1351,6 @@ class Google:
             raise
         return None if meta.get("trashed") else (meta.get("name") or "")
 
-    def drive_backup_folder_alive(self, folder_id: str) -> bool:
-        """False when the folder was deleted (404) or trashed."""
-        return self.drive_backup_folder_name(folder_id) is not None
-
     def drive_backup_put(self, folder_id: str, name: str, path: Any, data: bytes | None, existing_id: str | None,
                          props: dict[str, str] | None = None) -> str:
         """Upload a local file (or bytes) into the folder; update in place when `existing_id` is given."""

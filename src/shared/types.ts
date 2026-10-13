@@ -1967,7 +1967,6 @@ export interface BackendInfo {
 }
 
 export interface GrainApi {
-  backendUrl: () => Promise<string>
   backendStatus: () => Promise<{ running: boolean; url: string; error: string | null }>
   backendToken: () => Promise<string>
   /** Store an HTML fence's source for the preview scheme; returns the id for `previewUrl`. */
@@ -2014,8 +2013,6 @@ export interface GrainApi {
     chooseExportPath: () => Promise<string | null>
     /** Native open dialog for files to hand a desk as inputs; [] when cancelled. */
     chooseInputFiles: () => Promise<string[]>
-    /** One folder from the system dialog, or null when cancelled. */
-    chooseFolder: () => Promise<string | null>
     reveal: (path: string) => Promise<boolean>
     /** A file the side panel shows: select it in Finder, or open it in its default app (only types that cannot run). */
     fileAction: (path: string, action: 'reveal' | 'open') => Promise<boolean>

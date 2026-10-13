@@ -162,12 +162,6 @@ def approval_reason(p: Path, ctx: dict[str, Any], g: Grants, *, write: bool = Tr
     return None
 
 
-def needs_approval(p: Path, ctx: dict[str, Any], g: Grants, raw: Any = None) -> bool:
-    """True for a write the user has not pre-authorised: a credential store, or any write outside a desk workspace
-    while the reply has read untrusted content."""
-    return approval_reason(p, ctx, g, raw=raw) is not None
-
-
 def write_target(raw: Any, ctx: dict[str, Any], g: Grants) -> Path:
     p = resolve_path(raw, g, write=True)
     if g.in_desk(p):

@@ -935,11 +935,6 @@ def get_settings() -> dict[str, Any]:
     return public_settings()
 
 
-# The numeric settings with a control in the UI; every key in limits.RANGES is still validated on PUT.
-USER_EDITABLE = ("uiZoom",)
-NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {k: limits.RANGES[k] for k in USER_EDITABLE}
-
-
 def _check_numeric_setting(key: str, value: Any) -> int | float:
     """A number settings key must stay a finite number of its default's kind, within its range."""
     default = llm.DEFAULT_SETTINGS[key]

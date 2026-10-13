@@ -23,7 +23,6 @@ dependencies = [
   "pillow>=10.0",
   "google-api-python-client>=2.140",
   "google-auth-oauthlib>=1.2",
-  "google-auth-httplib2>=0.2",
   # Linux secret store (osplat/linux_secrets.py): the freedesktop Secret Service over D-Bus.
   "keyring>=25; sys_platform == 'linux'",
 ]

@@ -8,7 +8,6 @@
  * its card, but no number, badge or state is read out of that text.
  */
 import { splitReport } from '../lib/report'
-import { type RoutineDraft } from '../lib/routine'
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Archive, ArchiveRestore, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Rocket, Timer, Trash2, Users, Wrench, X } from '../icons'
 import ReactMarkdown from 'react-markdown'
@@ -704,12 +703,12 @@ function SchedulePicker({ value, onChange, timezone }: { value: Schedule; onChan
  * as matching mail arrives), or, given `job`, edit that
  * one: only the changed fields are sent. A spent one-off is offered a new time to run again at. */
 /** `agentId` makes it a routine of that agent: every fire runs as it, so a desk is not offered. */
-export function NewTask({ onDone, job, draft, agentId }: { onDone: () => void; job?: Job; draft?: RoutineDraft | null; agentId?: string }): JSX.Element {
-  const { createJob, updateJob, clearRoutineDraft } = useStore()
+export function NewTask({ onDone, job, agentId }: { onDone: () => void; job?: Job; agentId?: string }): JSX.Element {
+  const { createJob, updateJob } = useStore()
   const spent = !!job && job.kind === 'once' && job.last_fired_at !== null && job.next_due_at === null
   const [f, setF] = useState(job
     ? { ...BLANK, name: job.name, prompt: job.prompt, mode: job.kind === 'cron' ? 'repeat' as const : job.kind === 'mail' ? 'mail' as const : job.kind === 'calendar' ? 'calendar' as const : 'once' as const, when: job.run_at && !spent ? toLocalInput(job.run_at) : '', query: (job.kind === 'calendar' ? job.calendar_query : job.mail_query) ?? '', mins: String(job.minutes_before ?? 15), onlyChange: !!job.only_on_change }
-    : draft ? { ...BLANK, name: draft.name, prompt: draft.prompt, mode: 'repeat' as const } : BLANK)
+    : BLANK)
   const [sched, setSched] = useState<Schedule>(job?.kind === 'cron' ? cronPreset(job.cron) : DEFAULT_SCHEDULE)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -743,13 +742,12 @@ export function NewTask({ onDone, job, draft, agentId }: { onDone: () => void; j
       setErr(refused)
       ok = refused === null
     } else {
-      ok = await createJob({ ...common, ...schedule, enabled: !draft, allowed_tools: f.onlyTools && !f.desk ? picked : null,
+      ok = await createJob({ ...common, ...schedule, enabled: true, allowed_tools: f.onlyTools && !f.desk ? picked : null,
         ...(f.desk && !agentId ? { target: 'desk' as const, desk_autonomy: f.autonomy } : {}), ...(agentId ? { agent_id: agentId } : {}) })
     }
     setBusy(false)
     if (ok) {
       if (!job) setF(BLANK)
-      if (draft) clearRoutineDraft()
       onDone()
     }
   }
@@ -799,7 +797,6 @@ export function NewTask({ onDone, job, draft, agentId }: { onDone: () => void; j
         <input type="checkbox" checked={f.onlyChange} onChange={(e) => setF({ ...f, onlyChange: e.target.checked })} />
         <span>Notify only when the result changes</span>
       </label>
-      {draft && <p className="muted small">It starts switched off. Pick when it repeats, save, then use Test run on its row and Enable once the result looks right.</p>}
       {!job && !agentId && (
         <label className="chip-check-row small">
           <input type="checkbox" checked={f.desk} onChange={(e) => setF({ ...f, desk: e.target.checked })} />
@@ -827,7 +824,6 @@ export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
   const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, goToDesk, selectChat, setLibraryTab, markDeskSeen, markInboxRunSeen, rejectJobProposals, clearInbox, archiveInboxRun } = useStore()
-  const draft = useStore((s) => s.routineDraft)
   const [showArchived, setShowArchived] = useState(false)
   const [archivedRuns, setArchivedRuns] = useState<ArchivedInboxRun[]>([])
   const [archivedQ, setArchivedQ] = useState('')
@@ -835,9 +831,8 @@ export default function AgentInbox(): JSX.Element | null {
   useEffect(() => {
     if (showArchived) void api.inboxArchived().then(setArchivedRuns).catch(() => undefined)
   }, [showArchived, awayCount])
-  const [showJobs, setShowJobs] = useState(!!draft)
-  const [adding, setAdding] = useState(!!draft)
-  useEffect(() => { if (draft) { setShowJobs(true); setAdding(true) } }, [draft])
+  const [showJobs, setShowJobs] = useState(false)
+  const [adding, setAdding] = useState(false)
   useEffect(() => { void refreshJobs() }, [refreshJobs])  // once, so the Scheduled count is real before it is opened
 
   if (!box) return null
@@ -904,7 +899,7 @@ export default function AgentInbox(): JSX.Element | null {
             <button className={`icon-btn sm ${adding ? 'on' : ''}`} title="Schedule a task" aria-label="Schedule a task"
               onClick={() => setAdding((v) => !v)}><Plus size={13} /></button>
           </h5>
-          {adding && <NewTask key={draft?.prompt ?? ''} draft={draft} onDone={() => setAdding(false)} />}
+          {adding && <NewTask onDone={() => setAdding(false)} />}
           {jobs.length === 0 ? <p className="muted">None yet.</p> : <ul>{jobs.map((j) => <JobRow key={j.id} job={j} />)}</ul>}
           <p className="muted small">A scheduled task can read, search and write inside Grain. Anything that leaves the
             app — mail, calendar, Docs — comes back here as a proposal; accepting it is what sends it. You can also just

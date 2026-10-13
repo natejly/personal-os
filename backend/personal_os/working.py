@@ -158,10 +158,11 @@ class Plans:
             c.execute("DELETE FROM chat_plans WHERE conversation_id=?", (conversation_id,))
 
     def block(self, conversation_id: str, desk: bool = False) -> str:
-        """The prompt block for this conversation's plan, or '' when there is no plan yet or every step is done (a finished
-        plan would otherwise tell every later turn to stop calling tools)."""
+        """The prompt block for this conversation's plan, or '' when there is no plan yet or, in a chat, every step is done
+        (a finished plan would otherwise tell every later turn to stop calling tools). A desk keeps it: its footer is
+        what says to deliver and call desk_done."""
         plan = self.get(conversation_id)
-        if not plan or all(s["status"] == "done" for s in plan["steps"]):
+        if not plan or not plan["steps"] or (not desk and all(s["status"] == "done" for s in plan["steps"])):
             return ""
         return plan_block(plan["steps"], desk)
 

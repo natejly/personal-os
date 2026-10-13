@@ -108,6 +108,7 @@ def test_plan_persists_and_normalizes() -> None:
     check("[x] 1. Read the config" in block and "it was yaml" in block, "the block renders status, order and notes")
     appmod.work_plans.set(cid, [{"text": "Read the config", "status": "done"}, {"text": "Patch it", "status": "done"}])
     check(appmod.work_plans.block(cid) == "", "a finished plan is not re-sent: it would tell later turns to stop calling tools")
+    check("desk_done" in appmod.work_plans.block(cid, desk=True), "a desk's finished plan still says to deliver")
     appmod.work_plans.clear(cid)
     check(appmod.work_plans.get(cid) is None and appmod.work_plans.block(cid) == "", "clearing removes the plan and its block")
 

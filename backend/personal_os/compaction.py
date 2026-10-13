@@ -372,7 +372,7 @@ def _over_limit(cfg: dict[str, Any], rows: list[dict[str, Any]], history: list[d
 
 # The summarizer sits before a reply's first token. It gets this long, and after it fails the conversation is not
 # compacted again for RETRY_AFTER_S, so a degraded side model costs one wait instead of one per reply.
-SUMMARIZER_DEADLINE_S = 20.0
+SUMMARIZER_DEADLINE_S = 60.0  # a long fold on a slow model can need most of this
 RETRY_AFTER_S = 300.0
 _failed_at: dict[str, float] = {}  # conversation id -> time.monotonic() of the last failed summarizer call
 

@@ -2071,7 +2071,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                               for e in (r.get("tool_events") or []) if isinstance(e, dict) and e.get("name")}
         # One set for both searches: MCP slugs and built-in names cannot collide (reserved prefix).
         tool_ctx["mcp_loaded"] = tool_ctx["tool_loaded"] = loaded
-        tool_ctx["deferred"] = set()  # built-ins held back this round (_schemas); a call to one is "not loaded"
+        tool_ctx["deferred"] = set()  # built-ins held back this round (_schemas); a call to one by name loads its group
         # What tool_search searches: exactly the held-back tools, tagged with their group so a group name matches.
         tool_ctx["tool_catalog"] = lambda: [{"slug": n, "description": sp.description, "parameters": sp.parameters, "server": sp.group}
                                             for n in sorted(tool_ctx["deferred"]) if (sp := toolbox.specs.get(n))]

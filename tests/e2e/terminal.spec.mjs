@@ -94,7 +94,7 @@ test('Terminal: shell in the worktree echoes typed text, survives a tab switch, 
   }
 })
 
-test('Terminal: a chat's attachable session shows the attached view', async ({ grain }) => {
+test('Terminal: the attachable session of a chat session shows the attached view', async ({ grain }) => {
   const wt = realpathSync(mkdtempSync(join(tmpdir(), 'grain-e2e-term-')))
   try {
     const p = grain.page

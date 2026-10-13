@@ -232,6 +232,13 @@
 .desk-browser-url b { color: var(--text); font-weight: 600; }
 .desk-browser-live { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
 .desk-browser-live .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--chart-3, var(--accent)); }
+.desk-browser-live.idle, .desk-browser-live.ended { color: var(--text-muted, inherit); }
+.desk-browser-live.error { color: var(--danger); }
+.desk-browser-stage { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+.desk-browser-stage img { display: block; }
+.desk-browser-stage.ended img { opacity: 0.5; filter: grayscale(0.6); }
+.desk-browser-mark { position: absolute; box-sizing: border-box; border: 2px solid var(--accent); border-radius: 4px; background: color-mix(in srgb, var(--accent) 18%, transparent); box-shadow: 0 0 0 1px var(--bg); pointer-events: none; transition: left 0.15s, top 0.15s, width 0.15s, height 0.15s; }
+.desk-browser-caption { margin: 0; color: var(--text); }
 .desk-browser-help, .desk-browser-error { margin: 0; }
 .desk-browser-error { color: var(--danger); }
 .desk-browser-frame { display: flex; justify-content: center; min-height: 0; }

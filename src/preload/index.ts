@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AgentBrowserFrame, BackendInfo, BusMessage, GrainApi, PopoutChange, PopoutOpenRequest, ShortcutState } from '../shared/types'
+import type { AgentBrowserFrame, AgentBrowserLiveState, BackendInfo, BusMessage, GrainApi, PopoutChange, PopoutOpenRequest, ShortcutState } from '../shared/types'
 
 /** Subscribe to a main->renderer channel, returning an unsubscribe function. */
 function listen<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -99,13 +99,17 @@ const api: GrainApi = {
     hide: (session: string) => ipcRenderer.invoke('agentBrowser:hide', session),
     signIns: () => ipcRenderer.invoke('agentBrowser:signIns'),
     clearSignIns: (domain?: string) => ipcRenderer.invoke('agentBrowser:clearSignIns', domain),
-    subscribe: (session: string, cb) => {
+    subscribe: (session: string, cb, onState) => {
       const off = listen<AgentBrowserFrame & { session: string }>('agentBrowser:frame', (f) => {
-        if (f.session === session) cb({ dataUrl: f.dataUrl, url: f.url, title: f.title, at: f.at })
+        if (f.session === session) cb({ dataUrl: f.dataUrl, url: f.url, title: f.title, at: f.at, mark: f.mark })
+      })
+      const offState = listen<AgentBrowserLiveState>('agentBrowser:state', (s) => {
+        if (s.session === session) onState?.(s)
       })
       void ipcRenderer.invoke('agentBrowser:subscribe', session)
       return () => {
         off()
+        offState()
         void ipcRenderer.invoke('agentBrowser:unsubscribe', session)
       }
     }

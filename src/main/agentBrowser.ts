@@ -18,6 +18,8 @@ import { handle } from './ipc'
 import { clearSignIn, listSignIns } from './agentCookies'
 import { buildSnapshot, hintsFromDomSnapshot, riskOf, type NodeHint, type RefEntry } from './axSnapshot'
 import { reveal } from './background'
+import { FRAME_EVERY_MS, paceFor } from './browserLive'
+import type { AgentBrowserFrame, AgentBrowserLiveState, AgentBrowserMark } from '../shared/types'
 
 const PARTITION = 'persist:agent'
 const MAX_SESSIONS = 3
@@ -31,7 +33,6 @@ const VIEW_W = 1280
 const VIEW_H = 800
 const SHOT_MAX_EDGE = 1568
 const DOWNLOAD_CAP = 100 * 1024 * 1024
-const FRAME_EVERY_MS = 1_500
 
 export type ErrorCode =
   | 'no_session' | 'stale_ref' | 'blocked_host' | 'timeout' | 'busy' | 'dialog_open' | 'too_many_tabs' | 'too_many_sessions'
@@ -76,6 +77,13 @@ interface Sess {
   timer: NodeJS.Timeout | null
   closing: boolean
   downloads: Set<Promise<void>>
+  /** Live view: last activity, the state last announced, the element being acted on, the capture cadence timer. */
+  lastActivity: number
+  live: AgentBrowserLiveState['state']
+  mark: AgentBrowserMark | null
+  liveTimer: NodeJS.Timeout | null
+  capturing: boolean
+  again: boolean
 }
 
 const sessions = new Map<string, Sess>()
@@ -167,29 +175,27 @@ function touch(s: Sess): void {
   if (s.timer) clearTimeout(s.timer)
   s.timer = setTimeout(() => {
     if (s.busy || s.visible) return touch(s) // never reap mid-action, nor a window the user has taken over (a handoff can outlast the idle limit)
-    closeSession(s.name)
+    closeSession(s.name, 'closed after being idle')
   }, s.idleSeconds * 1000)
   s.timer.unref()
 }
 
-function closeSession(name: string): boolean {
+function closeSession(name: string, reason = 'closed by the assistant'): boolean {
   const s = sessions.get(name)
   if (!s) return false
   s.closing = true
   if (s.timer) clearTimeout(s.timer)
+  setLive(s, 'ended', reason)
   sessions.delete(name)
   for (const t of s.tabs) destroyTab(t)
   s.tabs = []
   s.active = null
   subscribers.delete(name)
-  stopFramesIfIdle()
   return true
 }
 
-export function closeAllAgentBrowsers(): void {
-  for (const name of [...sessions.keys()]) closeSession(name)
-  if (frameTimer) clearInterval(frameTimer)
-  frameTimer = null
+export function closeAllAgentBrowsers(reason = 'app closing'): void {
+  for (const name of [...sessions.keys()]) closeSession(name, reason)
 }
 
 function destroyTab(t: Tab): void {
@@ -241,9 +247,12 @@ function createTab(s: Sess): Tab {
     if (s.snap?.tab === tab) s.snap = null // refs die with the document they were taken from
   })
   wc.on('did-fail-load', (_e, code, desc, _u, isMainFrame) => {
-    if (isMainFrame && code !== -3) tab.failure = { code, desc }
+    if (isMainFrame && code !== -3) { tab.failure = { code, desc }; setLive(s, 'error', desc || String(code)) }
   })
-  wc.on('render-process-gone', (_e, d) => s.notes.push(`the page crashed (${d.reason}); reload it or open it again`))
+  wc.on('render-process-gone', (_e, d) => {
+    s.notes.push(`the page crashed (${d.reason}); reload it or open it again`)
+    setLive(s, 'error', `the page crashed (${d.reason})`) // recoverable: the assistant can reload
+  })
   wc.on('unresponsive', () => s.notes.push('the page is not responding'))
   wc.setWindowOpenHandler(({ url }) => {
     if (forbidden(url)) s.notes.push(`popup blocked: ${safeHost(url)}`)
@@ -303,7 +312,8 @@ function applyVisibility(s: Sess): void {
 function newSess(name: string): Sess {
   const s: Sess = {
     name, tabs: [], active: null, busy: false, maxTabs: DEFAULT_MAX_TABS, idleSeconds: DEFAULT_IDLE_S, downloadDir: '', allowDownload: false,
-    snap: null, notes: [], visible: false, lastUsed: Date.now(), timer: null, closing: false, downloads: new Set()
+    snap: null, notes: [], visible: false, lastUsed: Date.now(), timer: null, closing: false, downloads: new Set(),
+    lastActivity: Date.now(), live: 'idle', mark: null, liveTimer: null, capturing: false, again: false
   }
   sessions.set(name, s)
   touch(s)
@@ -322,8 +332,10 @@ function existing(name: unknown): Sess {
 async function exclusive<T>(s: Sess, fn: () => Promise<T>): Promise<T> {
   if (s.busy) throw new BrowserError('busy', 'another browser action is still running in this session; wait for it, then retry')
   s.busy = true
+  s.mark = null
+  markActivity(s)
   const p = fn()
-  const release = (): void => { s.busy = false; if (!s.closing) touch(s) }
+  const release = (): void => { s.busy = false; if (!s.closing) { touch(s); markActivity(s) } } // the second call captures the settled page
   p.then(release, release)
   let tid: NodeJS.Timeout | undefined
   const deadline = new Promise<never>((_r, reject) => {
@@ -492,7 +504,8 @@ async function target(s: Sess, tab: Tab, ref: unknown): Promise<Target> {
   }
 }
 
-async function centreOf(tab: Tab, backendNodeId: number): Promise<{ x: number; y: number }> {
+/** The first quad of the element with a visible area (viewport CSS px). */
+async function visibleQuad(tab: Tab, backendNodeId: number): Promise<number[]> {
   let quads: number[][] = []
   try {
     quads = ((await send(tab, 'DOM.getContentQuads', { backendNodeId })).quads ?? []) as number[][]
@@ -513,9 +526,36 @@ async function centreOf(tab: Tab, backendNodeId: number): Promise<{ x: number; y
       const j = (i + 1) % 4
       area += q[i * 2] * q[j * 2 + 1] - q[j * 2] * q[i * 2 + 1]
     }
-    if (Math.abs(area) / 2 > 1) return { x: (q[0] + q[2] + q[4] + q[6]) / 4, y: (q[1] + q[3] + q[5] + q[7]) / 4 }
+    if (Math.abs(area) / 2 > 1) return q
   }
   throw new BrowserError('not_interactable', 'that element has no visible box (hidden, zero-sized or off-screen)')
+}
+
+async function centreOf(tab: Tab, backendNodeId: number): Promise<{ x: number; y: number }> {
+  const q = await visibleQuad(tab, backendNodeId)
+  return { x: (q[0] + q[2] + q[4] + q[6]) / 4, y: (q[1] + q[3] + q[5] + q[7]) / 4 }
+}
+
+/** Show the viewer which element is about to be acted on: its box plus a frame, before the action. Never fails the action. */
+async function markTarget(s: Sess, tab: Tab, action: AgentBrowserMark['action'], t: Target): Promise<void> {
+  if (!subscribers.get(s.name)?.size) return
+  try {
+    await send(tab, 'DOM.scrollIntoViewIfNeeded', { backendNodeId: t.entry.backendNodeId }).catch(() => undefined)
+    const q = await visibleQuad(tab, t.entry.backendNodeId)
+    const xs = [q[0], q[2], q[4], q[6]]
+    const ys = [q[1], q[3], q[5], q[7]]
+    const m = await send(tab, 'Page.getLayoutMetrics').catch(() => ({}) as Json)
+    const vp = m.cssVisualViewport ?? m.cssLayoutViewport
+    const label = t.entry.name ? `${t.entry.role} "${t.entry.name}"` : t.entry.role // never the typed text
+    s.mark = {
+      action, label,
+      box: { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) },
+      viewport: { width: vp?.clientWidth || VIEW_W, height: vp?.clientHeight || VIEW_H }
+    }
+    await Promise.race([captureFrame(s), sleep(1_500)])
+  } catch {
+    /* a marker is a nicety */
+  }
 }
 
 /** Scroll the target into view, find its centre and make sure nothing else is on top of it. */
@@ -773,12 +813,14 @@ async function act(b: Json): Promise<Json> {
         case 'click': {
           const t = await target(s, tab, b.ref)
           const { x, y } = await pointFor(s, tab, t)
+          await markTarget(s, tab, 'click', t)
           await mouseClick(tab, x, y, b.button === 'right' ? 'right' : 'left', b.double === true)
           break
         }
         case 'type': {
           const t = await target(s, tab, b.ref)
           const { x, y } = await pointFor(s, tab, t)
+          await markTarget(s, tab, 'type', t)
           await mouseClick(tab, x, y, 'left', false) // focus the way a user would
           await send(tab, 'DOM.focus', { backendNodeId: t.entry.backendNodeId }).catch(() => undefined)
           if (b.clear !== false) {
@@ -795,6 +837,7 @@ async function act(b: Json): Promise<Json> {
           if (!key) throw new BrowserError('bad_request', 'press needs a key')
           if (b.ref) {
             const t = await target(s, tab, b.ref)
+            await markTarget(s, tab, 'press', t)
             await send(tab, 'DOM.focus', { backendNodeId: t.entry.backendNodeId }).catch(() => undefined)
           }
           await pressKey(tab, key)
@@ -804,6 +847,7 @@ async function act(b: Json): Promise<Json> {
           const t = await target(s, tab, b.ref)
           const values = Array.isArray(b.values) ? b.values.map(String) : []
           if (!values.length) throw new BrowserError('bad_request', 'select needs values')
+          await markTarget(s, tab, 'select', t)
           const r = await send(tab, 'Runtime.callFunctionOn', {
             objectId: t.objectId, functionDeclaration: SELECT_FN, arguments: [{ value: values }], returnByValue: true
           })
@@ -987,13 +1031,70 @@ export async function routeBrowser(path: string, body: unknown): Promise<Json | 
 
 const subscribers = new Map<string, Set<WebContents>>()
 const watched = new WeakSet<WebContents>()
-let frameTimer: NodeJS.Timeout | null = null
-let capturing = false
+
+function sendAll(s: Sess, channel: string, payload: unknown): void {
+  for (const wc of subscribers.get(s.name) ?? []) if (!wc.isDestroyed()) wc.send(channel, payload)
+}
+
+function sendState(s: Sess, state: AgentBrowserLiveState['state'], reason?: string, to?: WebContents): void {
+  const msg: AgentBrowserLiveState = { session: s.name, state, reason, at: Date.now() }
+  if (to) { if (!to.isDestroyed()) to.send('agentBrowser:state', msg) } else sendAll(s, 'agentBrowser:state', msg)
+}
+
+/** Move the live state (announced once per change) and stop the cadence when the session is over. */
+function setLive(s: Sess, state: AgentBrowserLiveState['state'], reason?: string): void {
+  if (s.live === state || s.live === 'ended') return
+  s.live = state
+  sendState(s, state, reason)
+  if (state === 'ended') pace(s)
+}
+
+function markActivity(s: Sess): void {
+  if (s.closing) return
+  s.lastActivity = Date.now()
+  pace(s)
+}
+
+/** One decision point: capture on the cadence while busy or just after, say idle once, stay silent otherwise. */
+function pace(s: Sess): void {
+  const subscribed = !!subscribers.get(s.name)?.size
+  const p = paceFor({ now: Date.now(), lastActivity: s.lastActivity, busy: s.busy, subscribed, ended: s.live === 'ended' })
+  if (p === 'capture') {
+    setLive(s, 'active')
+    void captureFrame(s)
+    if (!s.liveTimer) {
+      s.liveTimer = setInterval(() => pace(s), FRAME_EVERY_MS)
+      s.liveTimer.unref()
+    }
+    return
+  }
+  if (s.liveTimer) clearInterval(s.liveTimer)
+  s.liveTimer = null
+  if (p === 'idle') {
+    setLive(s, 'idle')
+    void captureFrame(s) // the settled page, once
+  }
+}
 
 async function captureFrame(s: Sess): Promise<void> {
+  if (s.capturing) { s.again = true; return }
+  s.capturing = true
+  try {
+    do {
+      s.again = false
+      await captureOnce(s)
+    } while (s.again)
+  } catch {
+    /* a frame is a nicety, never an error */
+  } finally {
+    s.capturing = false
+  }
+}
+
+async function captureOnce(s: Sess): Promise<void> {
   const tab = s.active
   const subs = subscribers.get(s.name)
-  if (!tab || tab.wc.isDestroyed() || !subs?.size) return
+  if (!tab || tab.wc.isDestroyed() || !subs?.size || s.live === 'ended') return
   let img = await tab.wc.capturePage().catch(() => null)
   if (!img || img.isEmpty()) {
     // A never-shown window can hand back an empty page capture; the protocol screenshot still works there.
@@ -1004,29 +1105,15 @@ async function captureFrame(s: Sess): Promise<void> {
   }
   const { width } = img.getSize()
   if (width > 960) img = img.resize({ width: 960, quality: 'good' })
-  const frame = { session: s.name, dataUrl: `data:image/jpeg;base64,${img.toJPEG(60).toString('base64')}`, url: tab.wc.getURL(), title: tab.wc.getTitle(), at: Date.now() }
-  for (const wc of subs) if (!wc.isDestroyed()) wc.send('agentBrowser:frame', frame)
-}
-
-async function captureAll(): Promise<void> {
-  if (capturing) return
-  capturing = true
-  try {
-    for (const s of sessions.values()) if (subscribers.get(s.name)?.size) await captureFrame(s)
-  } catch {
-    /* a frame is a nicety, never an error */
-  } finally {
-    capturing = false
+  const frame: AgentBrowserFrame & { session: string } = {
+    session: s.name, dataUrl: `data:image/jpeg;base64,${img.toJPEG(60).toString('base64')}`, url: tab.wc.getURL(), title: tab.wc.getTitle(), at: Date.now(),
+    mark: s.mark ?? undefined
   }
-}
-
-function stopFramesIfIdle(): void {
-  if ([...subscribers.values()].some((set) => set.size)) return
-  if (frameTimer) clearInterval(frameTimer)
-  frameTimer = null
+  sendAll(s, 'agentBrowser:frame', frame)
 }
 
 function subscribe(wc: WebContents, name: string): void {
+  const s = sessions.get(name)
   let set = subscribers.get(name)
   if (!set) subscribers.set(name, (set = new Set()))
   set.add(wc)
@@ -1034,14 +1121,13 @@ function subscribe(wc: WebContents, name: string): void {
     watched.add(wc)
     wc.once('destroyed', () => {
       for (const x of subscribers.values()) x.delete(wc)
-      stopFramesIfIdle()
+      for (const x of sessions.values()) pace(x)
     })
   }
-  if (!frameTimer) {
-    frameTimer = setInterval(() => void captureAll(), FRAME_EVERY_MS)
-    frameTimer.unref()
-  }
-  void captureAll()
+  if (!s) return // nothing to show; the viewer sees the session is gone
+  sendState(s, s.live, undefined, wc) // a late viewer learns where things stand
+  pace(s)
+  if (s.live === 'idle') void captureFrame(s)
 }
 
 export function registerAgentBrowserIpc(): void {
@@ -1057,7 +1143,8 @@ export function registerAgentBrowserIpc(): void {
   handle('agentBrowser:subscribe', (e, name: string) => subscribe(e.sender, String(name)))
   handle('agentBrowser:unsubscribe', (e, name: string) => {
     subscribers.get(String(name))?.delete(e.sender)
-    stopFramesIfIdle()
+    const s = sessions.get(String(name))
+    if (s) pace(s)
   })
   handle('agentBrowser:signIns', () => listSignIns(getSession()))
   handle('agentBrowser:clearSignIns', async (_e, domain?: string) => {
@@ -1065,7 +1152,7 @@ export function registerAgentBrowserIpc(): void {
     // Everything: nothing may still be signed in mid-page, so every window on this session goes first,
     // the interactive sessions and any page fetch in flight (they share the partition).
     const ses = getSession()
-    closeAllAgentBrowsers()
+    closeAllAgentBrowsers('sign-ins cleared')
     for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed() && w.webContents.session === ses) w.destroy()
     await ses.clearStorageData()
   })

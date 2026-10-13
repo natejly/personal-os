@@ -425,6 +425,18 @@ class OpencodeDriver(CodingTestCase):
         with self.assertRaisesRegex(ca.CodingError, "Stop it first"):
             await self.cs.send("s2", "more")
 
+    def test_a_sandbox_that_refused_to_start_says_so(self) -> None:
+        wt, t = str(self.repo), 1.0
+        with self.cs.db.tx() as c:
+            c.execute("INSERT INTO coding_sessions(id, agent, external_id, repo_path, worktree, name, prompt, status, log_tail, "
+                      "created_at, updated_at) VALUES('s9','pi','j9',?,?,'n','p','working','',?,?)", (wt, wt, t, t))
+        self.jobs.jobs["j9"] = SimpleNamespace(status="exited", exit_code=65, buf="sandbox-exec: profile error\n", total=30,
+                                               live=lambda: False)
+        with unittest.mock.patch.object(ca.osplat.current().sandbox, "failed_to_start", lambda code, out: code == 65):
+            row = self.cs.refresh(self.cs.get("s9"))
+        self.assertEqual(row["status"], "failed")
+        self.assertIn("OS sandbox refused to start", row["detail"])
+
     async def test_send_refused_while_the_job_runs_and_a_gone_job_is_blocked(self) -> None:
         wt, t = str(self.repo), 1.0
         with self.cs.db.tx() as c:

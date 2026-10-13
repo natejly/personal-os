@@ -53,7 +53,7 @@ import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from . import claude_hook, coding_events, mac, opencode, permrules, pi, shell
+from . import claude_hook, coding_events, mac, opencode, osplat, permrules, pi, shell
 from .coding_route import AGENT_NAMES
 from .db import new_id
 from .limits import CODING_SESSION_MAX_CONCURRENT, LOGIN_SHELL_TIMEOUT_SECONDS
@@ -571,6 +571,8 @@ class CodingSessions:
         raw = job.buf
         if job.live() and not raw.endswith("\n"):
             raw = raw[:raw.rfind("\n") + 1]  # the last line is still being written
+        if status == "failed" and osplat.current().sandbox.failed_to_start(job.exit_code, raw):
+            detail = "the OS sandbox refused to start (" + shell._scrub(raw.strip())[:200] + "), so nothing was run"
         if row["agent"] == "pi":
             text, session, err = pi.summarize(shell._scrub(raw))
             if err and status == "done":

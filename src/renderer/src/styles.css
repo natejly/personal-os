@@ -883,9 +883,6 @@ kbd {
 .page-agent .composer-wrap.compact .composer { border-radius: 12px; }
 
 .messages { flex: 1; overflow-y: auto; }
-/* The gutter is reserved on both sides from the start: the scrollbar appearing when a reply first
-   overflows no longer narrows the column mid-stream, and the column stays centred over the composer. */
-.chat-main > .messages { scrollbar-gutter: stable both-edges; }
 .messages-inner { max-width: var(--chat-col); margin: 0 auto; padding: 14px 24px 8px; }
 
 .msg { display: flex; gap: 10px; margin-bottom: 4px; }
@@ -1387,10 +1384,9 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
   .settings-modal .settings-pane > section { padding-left: 14px; padding-right: 14px; }
 }
 
-::-webkit-scrollbar { width: 10px; }
-::-webkit-scrollbar-corner { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-faint); background-clip: content-box; }
+/* No scrollbars anywhere; wheel, trackpad and keyboard scrolling still work. */
+* { scrollbar-width: none; }
+*::-webkit-scrollbar { display: none; }
 
 /* ---------- Backend error ---------- */
 /* The boot and could-not-start screens borrow the shell's box but not its sidebar grid: as a grid
@@ -2515,8 +2511,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .primary-btn.sm, .ghost-btn.sm, .primary-btn.small, .ghost-btn.small { min-height: 24px; padding: 3px 9px; font-size: 12px; gap: 4px; }
 
 /* ---------- Kanban ---------- */
-/* Scroll stays inside the board area: the scrollbar sits above the window edge and
-   a trailing spacer keeps the last column off the right edge. */
+/* Scroll stays inside the board area: a trailing spacer keeps the last column off the right edge. */
 .kanban { flex: 1; display: flex; gap: 12px; padding: 16px 20px 8px; margin-bottom: 8px; min-height: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; align-items: flex-start; }
 .kanban::after { content: ''; flex: 0 0 8px; align-self: stretch; }
 .kcol { width: 272px; flex-shrink: 0; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; max-height: 100%; }

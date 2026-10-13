@@ -120,8 +120,31 @@ class GoogleNotConnected(Exception):
     pass
 
 
+REAUTH = "Google sign-in expired or was revoked. Open Settings → Integrations and sign in again."
+# Lists and gets only (writes are not safe to repeat): the client itself backs off and retries on 429/5xx.
+READ_RETRIES = 2
+
+
 class NotSent(Exception):
-    """gmail_send failed before Gmail was asked to send, so the mail certainly did not go out."""
+    """gmail_send failed before Gmail was asked to send, or Gmail refused it outright: the mail did not go out."""
+
+
+def http_failure(e: BaseException) -> tuple[int, str]:
+    """An HTTP status and a readable reason for a failed Google call, never the client's repr."""
+    status = getattr(getattr(e, "resp", None), "status", None)
+    if status is None:
+        return 502, f"Google API error: {(str(e).strip().splitlines() or [type(e).__name__])[0][:300]}"
+    status = int(status)
+    reason = str(getattr(e, "reason", "") or "").strip() or f"HTTP {status}"
+    detail = (getattr(e, "content", b"") or b"")
+    detail = (detail.decode("utf-8", "replace") if isinstance(detail, bytes) else str(detail)).lower()
+    if status == 429 or "ratelimitexceeded" in detail:
+        return 503, "Google is rate limiting requests; try again shortly."
+    if status in (404, 410):
+        return 404, f"Google: {reason}"
+    if status == 403 and ("insufficientpermissions" in detail or "insufficient authentication scopes" in detail):
+        return 409, "Google refused: this sign-in was not given that permission. Reconnect under Settings → Integrations and allow the access it asks for."
+    return 502, f"Google API error ({status}): {reason}"
 
 
 # A saved calendar window whose last full list is older than this is listed again in full.
@@ -331,6 +354,8 @@ class Google:
         tok = self.get_settings().get("googleToken") or {}
         if not tok.get("refresh_token"):
             raise GoogleNotConnected("Google account not connected")
+        if tok.get("needs_reauth"):
+            raise GoogleNotConnected(REAUTH)  # Google already refused this refresh token; asking again only repeats it
         # One Credentials object per (account, client), reused across calls: building a
         # fresh one every call threw away the live access token, so a long-lived backend
         # re-checked expiry - and sometimes re-refreshed - on every single API call.
@@ -361,9 +386,7 @@ class Google:
                 # invalid_grant: the refresh token was revoked, expired (testing-mode consent
                 # screens expire them in 7 days) or belongs to a different OAuth client.
                 self._save_token(tok, {"needs_reauth": True})
-                raise GoogleNotConnected(
-                    "Google sign-in expired or was revoked. Open Settings → Integrations and sign in again."
-                ) from e
+                raise GoogleNotConnected(REAUTH) from e
             self._save_token(tok, {"token": creds.token, "expiry": creds.expiry.isoformat() if creds.expiry else None, "needs_reauth": False})
         with self._svc_lock:
             self._creds_obj = creds
@@ -383,6 +406,18 @@ class Google:
         if cur.get("refresh_token") != tok.get("refresh_token"):
             return
         self.set_settings({"googleToken": {**cur, **patch}})
+
+    def classify_error(self, e: Exception) -> Exception:
+        """A sign-in revoked while its access token still worked fails inside .execute(), where the
+        transport's own refresh raises RefreshError. Flag it as _creds does and report it as GoogleNotConnected."""
+        if not _refresh_rejected(e):
+            return e
+        tok = self.get_settings().get("googleToken") or {}
+        if tok.get("refresh_token"):
+            self._save_token(tok, {"needs_reauth": True})
+        with self._svc_lock:
+            self._creds_obj = None
+        return GoogleNotConnected(REAUTH)
 
     def _svc(self, name: str, version: str):  # type: ignore[no-untyped-def]
         """A built API client, reused per (api, version).
@@ -415,7 +450,7 @@ class Google:
     @cached("calendar", TTL["calendar_list"])
     def calendars(self) -> list[dict[str, Any]]:
         """The user's calendar list: primary first, then the ones they can write to."""
-        res = self._svc("calendar", "v3").calendarList().list(maxResults=100).execute()
+        res = self._svc("calendar", "v3").calendarList().list(maxResults=100).execute(num_retries=READ_RETRIES)
         out = []
         for c in res.get("items", []):
             if c.get("deleted"):
@@ -923,14 +958,14 @@ class Google:
             ids, token, started = list(entry["ids"]), entry.get("next"), entry["ts"]
         else:
             started = now
-            res = svc.users().messages().list(userId="me", q=query, maxResults=max(want, _GMAIL_LIST_CHUNK)).execute()
+            res = svc.users().messages().list(userId="me", q=query, maxResults=max(want, _GMAIL_LIST_CHUNK)).execute(num_retries=READ_RETRIES)
             ids = [m["id"] for m in res.get("messages") or []]
             token = res.get("nextPageToken")
             if isinstance(res.get("historyId"), str):
                 listed_history = res["historyId"]
         while len(ids) < want and token:  # Gmail may return fewer than asked per page
             res = svc.users().messages().list(userId="me", q=query, maxResults=max(want - len(ids), _GMAIL_LIST_CHUNK),
-                                              pageToken=token).execute()
+                                              pageToken=token).execute(num_retries=READ_RETRIES)
             ids += [m["id"] for m in res.get("messages") or []]
             token = res.get("nextPageToken")
         if len(ids) > _GMAIL_LIST_IDS_KEPT:
@@ -977,7 +1012,7 @@ class Google:
     def gmail_threads_recent(self, query: str = "newer_than:14d -category:promotions -category:social -in:spam", max_threads: int = 40) -> list[dict[str, Any]]:
         """Recent threads as metadata only (headers plus snippet, never bodies), messages oldest to newest."""
         svc = self._svc("gmail", "v1")
-        res = svc.users().threads().list(userId="me", q=query, maxResults=max(1, min(int(max_threads), 100))).execute()
+        res = svc.users().threads().list(userId="me", q=query, maxResults=max(1, min(int(max_threads), 100))).execute(num_retries=READ_RETRIES)
         ids = [t["id"] for t in res.get("threads") or []]
         if not ids:
             return []
@@ -995,7 +1030,7 @@ class Google:
             if isinstance(hit, dict) and hit.get("id") == message_id:
                 return hit
         svc = self._svc("gmail", "v1")
-        msg = svc.users().messages().get(userId="me", id=message_id, format="full").execute()
+        msg = svc.users().messages().get(userId="me", id=message_id, format="full").execute(num_retries=READ_RETRIES)
         h = {x["name"].lower(): x["value"] for x in msg.get("payload", {}).get("headers", [])}
         body = _extract_body(msg.get("payload", {}))
         out = {"id": message_id, "thread_id": msg.get("threadId"), "from": h.get("from"), "to": h.get("to"), "subject": h.get("subject"), "date": _rfc2822_iso(h.get("date")), "body": body[:max_chars],
@@ -1159,14 +1194,14 @@ class Google:
 
     @cached("gmail", TTL["gmail_labels"])
     def gmail_labels(self) -> list[dict[str, Any]]:
-        res = self._svc("gmail", "v1").users().labels().list(userId="me").execute()
+        res = self._svc("gmail", "v1").users().labels().list(userId="me").execute(num_retries=READ_RETRIES)
         labels = [{"id": l["id"], "name": l.get("name", l["id"]), "type": l.get("type", "user")} for l in res.get("labels", [])]
         return sorted(labels, key=lambda x: (x["type"] != "system", x["name"].lower()))
 
     # ---------- Tasks ----------
     @cached("tasks", TTL["tasks_lists"])
     def tasks_lists(self) -> list[dict[str, Any]]:
-        res = self._svc("tasks", "v1").tasklists().list(maxResults=50).execute()
+        res = self._svc("tasks", "v1").tasklists().list(maxResults=50).execute(num_retries=READ_RETRIES)
         return [{"id": t["id"], "title": t["title"]} for t in res.get("items", [])]
 
     @cached("tasks", TTL["tasks"])
@@ -1176,7 +1211,7 @@ class Google:
         token = None
         while True:  # a page holds at most 100
             res = svc.list(tasklist=tasklist, showCompleted=show_completed, showHidden=show_completed,
-                           maxResults=min(100, want - len(items)), pageToken=token).execute()
+                           maxResults=min(100, want - len(items)), pageToken=token).execute(num_retries=READ_RETRIES)
             items += res.get("items", [])
             token = res.get("nextPageToken")
             if not token or len(items) >= want:
@@ -1213,7 +1248,7 @@ class Google:
         token = None
         extra = {"updatedMin": updated_min, "showDeleted": True} if updated_min else {}
         while True:
-            res = svc.list(tasklist=tasklist, showCompleted=True, showHidden=True, maxResults=100, pageToken=token, **extra).execute()
+            res = svc.list(tasklist=tasklist, showCompleted=True, showHidden=True, maxResults=100, pageToken=token, **extra).execute(num_retries=READ_RETRIES)
             out += [_task_row(t) for t in res.get("items", [])]
             token = res.get("nextPageToken")
             if not token:
@@ -1273,7 +1308,7 @@ class Google:
         if not (query or "").strip():
             # Drive rejects orderBy on fullText queries; relevance order is fine there.
             params["orderBy"] = "modifiedTime desc"
-        res = self._svc("drive", "v3").files().list(**params).execute()
+        res = self._svc("drive", "v3").files().list(**params).execute(num_retries=READ_RETRIES)
         out = []
         for f in res.get("files", []):
             owners = f.get("owners") or []
@@ -1678,7 +1713,7 @@ def _list_events(svc: Any, cid: str, time_min: dt.datetime, time_max: dt.datetim
     for _ in range(8 if paginate else 1):
         if token:
             kwargs["pageToken"] = token
-        res = svc.events().list(**kwargs).execute()
+        res = svc.events().list(**kwargs).execute(num_retries=READ_RETRIES)
         items.extend(res.get("items") or [])
         token = res.get("nextPageToken")
         if not token or not paginate:
@@ -1710,7 +1745,7 @@ def _gmail_history(svc: Any, start_history_id: str) -> tuple[set[str], set[str],
         }
         if token:
             kwargs["pageToken"] = token
-        res = svc.users().history().list(**kwargs).execute()
+        res = svc.users().history().list(**kwargs).execute(num_retries=READ_RETRIES)
         if isinstance(res.get("historyId"), str):
             latest = res["historyId"]
         for record in res.get("history") or []:

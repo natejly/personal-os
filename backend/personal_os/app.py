@@ -56,7 +56,7 @@ from .recap import Recaps, generate_recap
 from . import vision
 from .docs import ASSET_MIMES, asset_path, AssetError, Docs, clean_typography, save_asset, unified_diff
 from . import cache as google_cache
-from .google import Google, GoogleNotConnected, json_safe
+from .google import Google, GoogleNotConnected, http_failure, json_safe
 from . import job_history, job_tools
 from .jobs_policy import JobPolicy
 from .jobs import (DESK_JOB_AUTONOMY, KINDS, MAIL_MAX_THREADS, TARGETS, PowerWake, check_watch_dir, PROPOSAL_STATUSES, Jobs, Proposals,
@@ -7187,7 +7187,13 @@ def _gcall(fn, *args, refresh: bool = False):  # type: ignore[no-untyped-def]
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"Google API error: {e}") from e
+        raise _google_http_error(e) from e
+
+
+def _google_http_error(e: Exception) -> HTTPException:
+    if isinstance(c := google.classify_error(e), GoogleNotConnected):
+        return HTTPException(409, str(c))
+    return HTTPException(*http_failure(e))
 
 
 @app.get("/integrations/google/calendars")
@@ -7384,7 +7390,7 @@ async def _fetch_attachment(message_id: str, attachment_id: str) -> tuple[dict[s
     except GoogleNotConnected as e:
         raise HTTPException(409, str(e)) from e
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"Google API error: {e}") from e
+        raise _google_http_error(e) from e
 
 
 @app.post("/integrations/google/gmail/{message_id}/attachments/{attachment_id}/import")

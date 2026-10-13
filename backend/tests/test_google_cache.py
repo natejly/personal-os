@@ -24,7 +24,7 @@ class _Req:
     def __init__(self, result: Any):
         self._result = result
 
-    def execute(self) -> Any:
+    def execute(self, **_kw: Any) -> Any:
         return self._result
 
 

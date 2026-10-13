@@ -196,6 +196,38 @@ def test_only_a_refused_refresh_token_asks_for_a_new_sign_in() -> None:
     assert not google_mod._refresh_rejected(OSError("network is down"))
 
 
+def test_a_refresh_refused_mid_call_flags_the_sign_in_and_stops_asking() -> None:
+    from google.auth.exceptions import RefreshError
+
+    tok = {"refresh_token": "r", "token": "t", "token_uri": "u", "client_id": "c", "client_secret": "s"}
+    s = _Settings(googleToken=dict(tok))
+    g = google_mod.Google(s.get, s.set)
+    out = g.classify_error(RefreshError("invalid_grant: Token has been expired or revoked."))
+    assert isinstance(out, google_mod.GoogleNotConnected) and "sign in again" in str(out)
+    assert s.data["googleToken"]["needs_reauth"] is True
+    with pytest.raises(google_mod.GoogleNotConnected):
+        g._creds()  # no refresh attempt: Google already refused this token
+    plain = OSError("network is down")
+    assert g.classify_error(plain) is plain
+
+
+def test_google_http_errors_read_as_a_status_and_a_reason() -> None:
+    from googleapiclient.errors import HttpError
+    from httplib2 import Response
+
+    def err(status: int, reason: str, detail: str = "") -> HttpError:
+        content = f'{{"error": {{"message": "{reason}", "errors": [{{"reason": "{detail}"}}]}}}}'.encode()
+        return HttpError(Response({"status": status}), content, uri="https://www.googleapis.com/calendar/v3/x")
+
+    assert google_mod.http_failure(err(404, "Not Found")) == (404, "Google: Not Found")
+    assert google_mod.http_failure(err(429, "Too many"))[0] == 503
+    assert google_mod.http_failure(err(403, "Quota", "userRateLimitExceeded"))[0] == 503
+    assert google_mod.http_failure(err(403, "Insufficient Permission", "insufficientPermissions"))[0] == 409
+    status, msg = google_mod.http_failure(err(500, "Backend Error"))
+    assert status == 502 and "googleapis.com" not in msg and "Backend Error" in msg
+    assert google_mod.http_failure(RuntimeError("boom"))[0] == 502
+
+
 class _Get:
     def __init__(self, event: dict[str, Any]) -> None:
         self.event = event
@@ -203,7 +235,7 @@ class _Get:
     def get(self, **_kw: Any) -> "_Get":
         return self
 
-    def execute(self) -> dict[str, Any]:
+    def execute(self, **_kw: Any) -> dict[str, Any]:
         return self.event
 
 

@@ -34,7 +34,7 @@ class _Call:
     def __init__(self, thunk: Any):
         self._thunk = thunk
 
-    def execute(self) -> Any:
+    def execute(self, **_kw: Any) -> Any:
         return self._thunk()
 
 

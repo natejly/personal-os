@@ -43,8 +43,7 @@ MAP_PROJECTS = 8                   # projects listed in the prompt
 MAP_UPLOADS = 5                    # newest uploads listed in the prompt
 MAP_TOPICS = 8                     # memory topic labels listed in the prompt
 MAP_TITLE_CHARS = 60               # a title is cut to this many characters
-MAP_SHRUNK_TOKENS = 500            # the map's cap once retrieved blocks fill MAP_SHRINK_AT of their shares
-MAP_SHRINK_AT = 0.7                # share of the memories + excerpts + graph shares at which the map shrinks
+MAP_SHRUNK_TOKENS = 500            # the map's cap in worker prompts
 MAP_HARD_CEILING_TOKENS = 1500     # whatever the window, the map never exceeds this
 MAP_PAGE = 25                      # lines per context_map call
 MAP_UPCOMING_EVENTS = 3            # calendar events in the volatile status block
@@ -54,6 +53,7 @@ JOB_IDLE_SECONDS = 1800            # an unattended run with no model or tool act
 REPEAT_LIMIT = 5                   # identical tool calls in a row before a reply is stopped
 TOOL_ERROR_LIMIT = 3               # consecutive errors from one tool before the model is told to change approach
 FINAL_ROUND_SECONDS = 90.0         # a closing-answer model call still open after this long is abandoned
+STOP_GRACE_SECONDS = 3.0           # a write that Stop caught mid-call gets this long to report its real outcome before it is cancelled
 REVIEW_TIMEOUT_SECONDS = 30        # a hung reviewer call fails closed (-> an approval card)
 
 # ---- Provider ----

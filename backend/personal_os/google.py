@@ -134,8 +134,31 @@ class GoogleNotConnected(Exception):
     pass
 
 
+REAUTH = "Google sign-in expired or was revoked. Open Settings → Integrations and sign in again."
+# Lists and gets only (writes are not safe to repeat): the client itself backs off and retries on 429/5xx.
+READ_RETRIES = 2
+
+
 class NotSent(Exception):
-    """gmail_send failed before Gmail was asked to send, so the mail certainly did not go out."""
+    """gmail_send failed before Gmail was asked to send, or Gmail refused it outright: the mail did not go out."""
+
+
+def http_failure(e: BaseException) -> tuple[int, str]:
+    """An HTTP status and a readable reason for a failed Google call, never the client's repr."""
+    status = getattr(getattr(e, "resp", None), "status", None)
+    if status is None:
+        return 502, f"Google API error: {(str(e).strip().splitlines() or [type(e).__name__])[0][:300]}"
+    status = int(status)
+    reason = str(getattr(e, "reason", "") or "").strip() or f"HTTP {status}"
+    detail = (getattr(e, "content", b"") or b"")
+    detail = (detail.decode("utf-8", "replace") if isinstance(detail, bytes) else str(detail)).lower()
+    if status == 429 or "ratelimitexceeded" in detail:
+        return 503, "Google is rate limiting requests; try again shortly."
+    if status in (404, 410):
+        return 404, f"Google: {reason}"
+    if status == 403 and ("insufficientpermissions" in detail or "insufficient authentication scopes" in detail):
+        return 409, "Google refused: this sign-in was not given that permission. Reconnect under Settings → Integrations and allow the access it asks for."
+    return 502, f"Google API error ({status}): {reason}"
 
 
 # A saved calendar window whose last full list is older than this is listed again in full.
@@ -346,6 +369,8 @@ class Google:
         tok = self.get_settings().get("googleToken") or {}
         if not tok.get("refresh_token"):
             raise GoogleNotConnected("Google account not connected")
+        if tok.get("needs_reauth"):
+            raise GoogleNotConnected(REAUTH)  # Google already refused this refresh token; asking again only repeats it
         # One Credentials object per (account, client), reused across calls: building a
         # fresh one every call threw away the live access token, so a long-lived backend
         # re-checked expiry - and sometimes re-refreshed - on every single API call.
@@ -376,9 +401,7 @@ class Google:
                 # invalid_grant: the refresh token was revoked, expired (testing-mode consent
                 # screens expire them in 7 days) or belongs to a different OAuth client.
                 self._save_token(tok, {"needs_reauth": True})
-                raise GoogleNotConnected(
-                    "Google sign-in expired or was revoked. Open Settings → Integrations and sign in again."
-                ) from e
+                raise GoogleNotConnected(REAUTH) from e
             self._save_token(tok, {"token": creds.token, "expiry": creds.expiry.isoformat() if creds.expiry else None, "needs_reauth": False})
         with self._svc_lock:
             self._creds_obj = creds
@@ -398,6 +421,18 @@ class Google:
         if cur.get("refresh_token") != tok.get("refresh_token"):
             return
         self.set_settings({"googleToken": {**cur, **patch}})
+
+    def classify_error(self, e: Exception) -> Exception:
+        """A sign-in revoked while its access token still worked fails inside .execute(), where the
+        transport's own refresh raises RefreshError. Flag it as _creds does and report it as GoogleNotConnected."""
+        if not _refresh_rejected(e):
+            return e
+        tok = self.get_settings().get("googleToken") or {}
+        if tok.get("refresh_token"):
+            self._save_token(tok, {"needs_reauth": True})
+        with self._svc_lock:
+            self._creds_obj = None
+        return GoogleNotConnected(REAUTH)
 
     def _svc(self, name: str, version: str):  # type: ignore[no-untyped-def]
         """A built API client, reused per (api, version).
@@ -430,7 +465,7 @@ class Google:
     @cached("calendar", TTL["calendar_list"])
     def calendars(self) -> list[dict[str, Any]]:
         """The user's calendar list: primary first, then the ones they can write to."""
-        res = self._svc("calendar", "v3").calendarList().list(maxResults=100).execute()
+        res = self._svc("calendar", "v3").calendarList().list(maxResults=100).execute(num_retries=READ_RETRIES)
         out = []
         for c in res.get("items", []):
             if c.get("deleted"):
@@ -682,10 +717,12 @@ class Google:
         """
         svc = self._svc("calendar", "v3").events()
         updates = _send_updates(send_updates)
-        self._drop_saved_event(calendar_id, event_id)
+        # The saved copy is dropped only once a write lands: dropped first, a refused write
+        # (a read-only calendar, a bad time) hid the unchanged event until the next full re-list.
         dest = event.get("move_to_calendar_id")
         if dest and dest != calendar_id:
             svc.move(calendarId=calendar_id, eventId=event_id, destination=dest, sendUpdates=updates).execute()
+            self._drop_saved_event(calendar_id, event_id)
             calendar_id = dest
         if event.get("start") and not event.get("end"):
             # Only the start moved. Without an end the body below falls back to one hour
@@ -705,6 +742,7 @@ class Google:
             # Nothing was written (a bare move, or an empty patch), so there is nothing to prove.
             return _event_out(svc.get(calendarId=calendar_id, eventId=event_id).execute(), calendar_id, full=True)
         out = _event_out(svc.patch(**kwargs).execute(), calendar_id, full=True)
+        self._drop_saved_event(calendar_id, event_id)
         return verify.attach(out, self._verify_event(calendar_id, event_id, out, body))
 
     @invalidates("calendar")
@@ -749,8 +787,8 @@ class Google:
         if "conferenceData" in body:
             kwargs["conferenceDataVersion"] = 1
         if event_id:
-            self._drop_saved_event(calendar_id, event_id)
             e = svc.patch(eventId=event_id, **kwargs).execute()
+            self._drop_saved_event(calendar_id, event_id)
         else:
             e = svc.insert(**kwargs).execute()
         out = _event_out(e, calendar_id, full=True)
@@ -829,7 +867,9 @@ class Google:
                 start, end = _parse_iso(start).isoformat(), _parse_iso(str(end)).isoformat()
                 body["start"], body["end"] = {"dateTime": start}, {"dateTime": end}
                 naive = "T" in start and not re.search(r"[+-]\d\d:\d\d$|Z$", start)
-                tz = f.get("time_zone") or (_local_tz() if naive else None)
+                # A series needs a zone to expand in even when the start carries an offset (400
+                # "Missing time zone definition" otherwise), and a patch cannot tell it is not one.
+                tz = f.get("time_zone") or (_local_tz() if naive or patch or body.get("recurrence") else None)
                 if tz:
                     body["start"]["timeZone"] = body["end"]["timeZone"] = tz
                 if patch:
@@ -936,14 +976,14 @@ class Google:
             ids, token, started = list(entry["ids"]), entry.get("next"), entry["ts"]
         else:
             started = now
-            res = svc.users().messages().list(userId="me", q=query, maxResults=max(want, _GMAIL_LIST_CHUNK)).execute()
+            res = svc.users().messages().list(userId="me", q=query, maxResults=max(want, _GMAIL_LIST_CHUNK)).execute(num_retries=READ_RETRIES)
             ids = [m["id"] for m in res.get("messages") or []]
             token = res.get("nextPageToken")
             if isinstance(res.get("historyId"), str):
                 listed_history = res["historyId"]
         while len(ids) < want and token:  # Gmail may return fewer than asked per page
             res = svc.users().messages().list(userId="me", q=query, maxResults=max(want - len(ids), _GMAIL_LIST_CHUNK),
-                                              pageToken=token).execute()
+                                              pageToken=token).execute(num_retries=READ_RETRIES)
             ids += [m["id"] for m in res.get("messages") or []]
             token = res.get("nextPageToken")
         if len(ids) > _GMAIL_LIST_IDS_KEPT:
@@ -991,7 +1031,7 @@ class Google:
     def gmail_threads_recent(self, query: str = "newer_than:14d -category:promotions -category:social -in:spam", max_threads: int = 40) -> list[dict[str, Any]]:
         """Recent threads as metadata only (headers plus snippet, never bodies), messages oldest to newest."""
         svc = self._svc("gmail", "v1")
-        res = svc.users().threads().list(userId="me", q=query, maxResults=max(1, min(int(max_threads), 100))).execute()
+        res = svc.users().threads().list(userId="me", q=query, maxResults=max(1, min(int(max_threads), 100))).execute(num_retries=READ_RETRIES)
         ids = [t["id"] for t in res.get("threads") or []]
         if not ids:
             return []
@@ -1009,7 +1049,7 @@ class Google:
             if isinstance(hit, dict) and hit.get("id") == message_id:
                 return hit
         svc = self._svc("gmail", "v1")
-        msg = svc.users().messages().get(userId="me", id=message_id, format="full").execute()
+        msg = svc.users().messages().get(userId="me", id=message_id, format="full").execute(num_retries=READ_RETRIES)
         h = {x["name"].lower(): x["value"] for x in msg.get("payload", {}).get("headers", [])}
         body = _extract_body(msg.get("payload", {}))
         out = {"id": message_id, "thread_id": msg.get("threadId"), "from": h.get("from"), "to": h.get("to"), "subject": h.get("subject"), "date": _rfc2822_iso(h.get("date")), "body": body[:max_chars],
@@ -1045,7 +1085,8 @@ class Google:
             if tid:
                 message["threadId"] = tid
         message["raw"] = _raw_message(to, subject, body, **headers, attachments=attachments, cc=cc, bcc=bcc)
-        d = svc.users().drafts().create(userId="me", body={"message": message}).execute()
+        meta, media = _as_upload(message)
+        d = svc.users().drafts().create(userId="me", body={"message": meta}, **media).execute()
         out = {"draft_id": d.get("id"), "to": to, "subject": subject, "note": "Draft saved in Gmail; not sent.",
                "attachments": [a["name"] for a in attachments or []]}
         return verify.attach(out, self._verify_draft(d.get("id") or "", subject))
@@ -1057,8 +1098,9 @@ class Google:
                    bcc: str | None = None) -> dict[str, Any]:
         """Send now. Callers go through outbox.py instead, which holds the send so it can be undone.
 
-        Anything that fails before messages().send() is raised as NotSent (or GoogleNotConnected,
-        kept as is for the callers that map it): nothing went out.
+        Anything that fails before messages().send(), or that Gmail answers with a 4xx, is raised
+        as NotSent (or GoogleNotConnected, kept as is for the callers that map it): nothing went out.
+        A timeout or a 5xx stays as it is, since the mail may have gone.
         """
         try:
             svc = self._svc("gmail", "v1")
@@ -1073,7 +1115,16 @@ class Google:
             raise
         except Exception as e:  # noqa: BLE001
             raise NotSent(f"{type(e).__name__}: {e}") from e
-        m = svc.users().messages().send(userId="me", body=message).execute()
+        meta, media = _as_upload(message)
+        try:
+            m = svc.users().messages().send(userId="me", body=meta, **media).execute()
+        except Exception as e:
+            if isinstance(c := self.classify_error(e), GoogleNotConnected):
+                raise c from e
+            status = getattr(getattr(e, "resp", None), "status", None)
+            if status is not None and 400 <= int(status) < 500 and int(status) != 408:
+                raise NotSent(http_failure(e)[1]) from e  # refused outright (rate limit, bad header, too large)
+            raise
         out = {"sent": m.get("id"), "to": to, "subject": subject, "thread_id": m.get("threadId"),
                "attachments": [a["name"] for a in attachments or []]}
         return verify.attach(out, self._verify_sent(m.get("id") or "", to, subject, m.get("threadId")))
@@ -1182,14 +1233,14 @@ class Google:
 
     @cached("gmail", TTL["gmail_labels"])
     def gmail_labels(self) -> list[dict[str, Any]]:
-        res = self._svc("gmail", "v1").users().labels().list(userId="me").execute()
+        res = self._svc("gmail", "v1").users().labels().list(userId="me").execute(num_retries=READ_RETRIES)
         labels = [{"id": l["id"], "name": l.get("name", l["id"]), "type": l.get("type", "user")} for l in res.get("labels", [])]
         return sorted(labels, key=lambda x: (x["type"] != "system", x["name"].lower()))
 
     # ---------- Tasks ----------
     @cached("tasks", TTL["tasks_lists"])
     def tasks_lists(self) -> list[dict[str, Any]]:
-        res = self._svc("tasks", "v1").tasklists().list(maxResults=50).execute()
+        res = self._svc("tasks", "v1").tasklists().list(maxResults=50).execute(num_retries=READ_RETRIES)
         return [{"id": t["id"], "title": t["title"]} for t in res.get("items", [])]
 
     @cached("tasks", TTL["tasks"])
@@ -1199,7 +1250,7 @@ class Google:
         token = None
         while True:  # a page holds at most 100
             res = svc.list(tasklist=tasklist, showCompleted=show_completed, showHidden=show_completed,
-                           maxResults=min(100, want - len(items)), pageToken=token).execute()
+                           maxResults=min(100, want - len(items)), pageToken=token).execute(num_retries=READ_RETRIES)
             items += res.get("items", [])
             token = res.get("nextPageToken")
             if not token or len(items) >= want:
@@ -1236,7 +1287,7 @@ class Google:
         token = None
         extra = {"updatedMin": updated_min, "showDeleted": True} if updated_min else {}
         while True:
-            res = svc.list(tasklist=tasklist, showCompleted=True, showHidden=True, maxResults=100, pageToken=token, **extra).execute()
+            res = svc.list(tasklist=tasklist, showCompleted=True, showHidden=True, maxResults=100, pageToken=token, **extra).execute(num_retries=READ_RETRIES)
             out += [_task_row(t) for t in res.get("items", [])]
             token = res.get("nextPageToken")
             if not token:
@@ -1245,22 +1296,30 @@ class Google:
     def tasks_get(self, task_id: str, tasklist: str = "@default") -> dict[str, Any]:
         return _task_row(self._svc("tasks", "v1").tasks().get(tasklist=tasklist, task=task_id).execute())
 
+    # `check=False` skips the read-back: the two-way sync's own writes, which its next listing confirms
+    # anyway. Read-backs there cost an extra call (and retry sleeps) per todo on a first sync.
     @invalidates("tasks")
-    def tasks_insert(self, body: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
+    def tasks_insert(self, body: dict[str, Any], tasklist: str = "@default", check: bool = True) -> dict[str, Any]:
         t = self._svc("tasks", "v1").tasks().insert(tasklist=tasklist, body=_task_body(body)).execute()
         row = _task_row(t)
+        if not check:
+            return row
         return verify.attach(row, self._verify_task(tasklist, t["id"], row, ("title", "notes", "due", "status")))
 
     @invalidates("tasks")
-    def tasks_update(self, task_id: str, patch: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
+    def tasks_update(self, task_id: str, patch: dict[str, Any], tasklist: str = "@default", check: bool = True) -> dict[str, Any]:
         t = self._svc("tasks", "v1").tasks().patch(tasklist=tasklist, task=task_id, body=_task_body(patch)).execute()
         row = _task_row(t)
+        if not check:
+            return row
         fields = tuple(k for k in ("title", "notes", "due", "status") if k in patch) or ("title",)
         return verify.attach(row, self._verify_task(tasklist, task_id, row, fields))
 
     @invalidates("tasks")
-    def tasks_delete(self, task_id: str, tasklist: str = "@default") -> dict[str, Any]:
+    def tasks_delete(self, task_id: str, tasklist: str = "@default", check: bool = True) -> dict[str, Any]:
         self._svc("tasks", "v1").tasks().delete(tasklist=tasklist, task=task_id).execute()
+        if not check:
+            return {"deleted": task_id, "tasklist": tasklist}
         return verify.attach({"deleted": task_id, "tasklist": tasklist},
                              verify.check(f"task {task_id} in {tasklist}", self._task_reader(tasklist, task_id),
                                           absent=True, gone_if=lambda t: bool(t.get("deleted")), compared=["absent"]))
@@ -1296,7 +1355,7 @@ class Google:
         if not (query or "").strip():
             # Drive rejects orderBy on fullText queries; relevance order is fine there.
             params["orderBy"] = "modifiedTime desc"
-        res = self._svc("drive", "v3").files().list(**params).execute()
+        res = self._svc("drive", "v3").files().list(**params).execute(num_retries=READ_RETRIES)
         out = []
         for f in res.get("files", []):
             owners = f.get("owners") or []
@@ -1697,7 +1756,7 @@ def _list_events(svc: Any, cid: str, time_min: dt.datetime, time_max: dt.datetim
     for _ in range(8 if paginate else 1):
         if token:
             kwargs["pageToken"] = token
-        res = svc.events().list(**kwargs).execute()
+        res = svc.events().list(**kwargs).execute(num_retries=READ_RETRIES)
         items.extend(res.get("items") or [])
         token = res.get("nextPageToken")
         if not token or not paginate:
@@ -1729,7 +1788,7 @@ def _gmail_history(svc: Any, start_history_id: str) -> tuple[set[str], set[str],
         }
         if token:
             kwargs["pageToken"] = token
-        res = svc.users().history().list(**kwargs).execute()
+        res = svc.users().history().list(**kwargs).execute(num_retries=READ_RETRIES)
         if isinstance(res.get("historyId"), str):
             latest = res["historyId"]
         for record in res.get("history") or []:
@@ -1891,6 +1950,23 @@ def _address_header(value: str) -> str:
     return ", ".join(formataddr((name, addr)) for name, addr in getaddresses([value]) if addr)
 
 
+# Gmail refuses a JSON request body over about 5 MB; a bigger message goes up as media.
+_INLINE_RAW_MAX = 4 * 1024 * 1024
+
+
+def _as_upload(message: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """(metadata body, extra kwargs) for drafts.create / messages.send: inline raw when small, an upload when not."""
+    if len(message["raw"]) <= _INLINE_RAW_MAX:
+        return message, {}
+    import io
+
+    from googleapiclient.http import MediaIoBaseUpload
+
+    meta = {k: v for k, v in message.items() if k != "raw"}
+    data = base64.urlsafe_b64decode(message["raw"])
+    return meta, {"media_body": MediaIoBaseUpload(io.BytesIO(data), mimetype="message/rfc822", resumable=True)}
+
+
 def _raw_message(to: str, subject: str, body: str, in_reply_to: str | None = None, references: str | None = None,
                  attachments: list[dict[str, Any]] | None = None, cc: str | None = None, bcc: str | None = None) -> str:
     """The RFC 822 message, base64url. With attachments it is multipart/mixed; without, plain text.
@@ -1959,6 +2035,16 @@ def _doc_text(doc: dict[str, Any]) -> str:
     return "".join(out)
 
 
+def _decode_part(raw: bytes, headers: list[dict[str, Any]]) -> str:
+    """Gmail hands a part back in the charset its Content-Type names (Latin-1, Shift_JIS...), not UTF-8."""
+    m = email.message.Message()
+    m["Content-Type"] = next((h.get("value") or "" for h in headers if (h.get("name") or "").lower() == "content-type"), "")
+    try:
+        return raw.decode(m.get_content_charset() or "utf-8", "replace")
+    except LookupError:  # a charset name Python does not know
+        return raw.decode("utf-8", "replace")
+
+
 def _extract_body(payload: dict[str, Any]) -> str:
     """Prefer text/plain; fall back to stripped HTML."""
     plain, html_ = [], []
@@ -1967,7 +2053,7 @@ def _extract_body(payload: dict[str, Any]) -> str:
         mime = p.get("mimeType", "")
         data = p.get("body", {}).get("data")
         if data:
-            text = base64.urlsafe_b64decode(data + "===").decode("utf-8", "replace")
+            text = _decode_part(base64.urlsafe_b64decode(data + "==="), p.get("headers") or [])
             (plain if mime == "text/plain" else html_ if mime == "text/html" else []).append(text)
         for part in p.get("parts", []) or []:
             walk(part)

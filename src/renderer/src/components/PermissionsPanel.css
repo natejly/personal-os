@@ -9,5 +9,4 @@
 .perm-badge.unasked { color: var(--warn, #b7791f); }
 .perm-badge.unknown { opacity: .65; }
 .perm-bar { display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
-.perm-panel.compact .perm-reason { display: none; }
 .perm-panel ul { margin: 4px 0; padding-left: 18px; }

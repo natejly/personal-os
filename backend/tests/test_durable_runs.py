@@ -304,6 +304,7 @@ def test_recovery_parks_a_desks_pending_card_so_one_answer_is_enough() -> None:
     desk_card, chat_card = store.approval(f"{run.run_id}:d"), store.approval(f"{run.run_id}:c")
     assert desk_card["status"] == "pending" and desk_card["parked_at"], "still answerable, and no run holds it"
     assert not chat_card["parked_at"], "a chat card is not a desk's"
+    assert chat_card["status"] == "denied", "nothing would run a dead chat run's card: it leaves Needs-you"
     store.decide(f"{run.run_id}:d", "allow")
     assert store.claim_parked("desk_recover", "gmail_send", args, "next:call_0"), "the desk's next turn runs it with no second card"
 
@@ -357,7 +358,7 @@ def test_read_only_tools_skip_the_journal() -> None:
 
 
 # ---------------- startup recovery ----------------
-def test_startup_marks_orphaned_runs_interrupted_and_keeps_the_approval_answerable() -> None:
+def test_startup_marks_orphaned_runs_interrupted_and_settles_their_cards() -> None:
     cid = j("POST", "/conversations", {})["id"]
     am = appmod.convos.add_message(cid, "assistant", "")
     # A run the previous process left mid-reply, blocked on an approval.
@@ -385,16 +386,10 @@ def test_startup_marks_orphaned_runs_interrupted_and_keeps_the_approval_answerab
     assert msg["content"] == "Let me send that.", "the reply is salvaged from the tape"
     assert msg["error"] and "Interrupted" in msg["error"]
     card = [t for t in msg["tool_events"] if t["id"] == uid][0]
-    assert card["pending"] is True and card["needs_approval"] is True, "the UI still has an approval card to show"
-
-    pend = [a for a in j("GET", "/approvals") if a["call_id"] == uid]
-    assert pend and pend[0]["status"] == "pending" and pend[0]["live"] is False
-    res = j("POST", f"/approvals/{uid}", {"decision": "allow"})
-    # `resumed` is the desk half of the answer: a chat approval never resumes anything.
-    assert res == {"ok": True, "live": False, "resumed": False, "queued": False, "status": "approved"}
-    assert store.approval(uid)["decision"] == "allow"
-    card = [t for t in j("GET", f"/conversations/{cid}")["messages"][-1]["tool_events"] if t["id"] == uid][0]
-    assert card["pending"] is False and card["needs_approval"] is False and card["approval"] == "allow"
+    # Nothing would run it whatever the answer, so the card settles instead of sitting in Needs-you.
+    assert card["pending"] is False and card["needs_approval"] is False and card["interrupted"] is True
+    assert store.approval(uid)["status"] == "denied"
+    assert not [a for a in j("GET", "/approvals") if a["call_id"] == uid and a["status"] == "pending"]
     j("POST", f"/approvals/{uid}", {"decision": "allow"}, expect=404)
 
     # A run alive in this process is never marked interrupted.

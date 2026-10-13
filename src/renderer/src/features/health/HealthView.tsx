@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Activity, Droplet, Footprints, Gauge, HeartPulse, Link2, Moon, Pill, Plus, Scale, Settings2, Smile, Trash2, Zap } from '../../icons'
 import type { HealthEntry, HealthMetric, HealthSummary } from '@shared/types'
 import { useStore } from '../../store'
@@ -11,6 +12,7 @@ import Sources from './Sources'
 import { dayLabel, delta, fmt, goalText, meets, progress } from './format'
 import '../../styles/health.css'
 import SidebarToggle from '../../components/SidebarToggle'
+import ErrorState from '../../components/ErrorState'
 
 const ICONS: Record<string, JSX.Element> = {
   sleep: <Moon size={14} />, steps: <Footprints size={14} />, water: <Droplet size={14} />, exercise: <Activity size={14} />,
@@ -25,10 +27,11 @@ type Range = (typeof RANGES)[number]
 const SPARK_DAYS = 14
 
 export default function HealthView(): JSX.Element {
-  const { toast, refreshDashboard } = useStore()
+  const { toast, refreshDashboard } = useStore(useShallow((s) => ({ toast: s.toast, refreshDashboard: s.refreshDashboard })))
   const [days, setDays] = useState<Range>(30)
   const [today, setToday] = useState(localDay())
   const [rows, setRows] = useState<HealthSummary[] | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [sel, setSel] = useState<string | null>(null)
   const [entries, setEntries] = useState<HealthEntry[]>([])
   const [manage, setManage] = useState(false)
@@ -40,7 +43,9 @@ export default function HealthView(): JSX.Element {
     try {
       setRows(await api.healthLog.summary(Math.max(days, SPARK_DAYS), d))
       setToday(d)
+      setLoadError(null)
     } catch (e) {
+      setLoadError((e as Error).message) // shown in place of the page when nothing has loaded yet
       toast((e as Error).message, 'error')
     }
   }, [days, toast])
@@ -107,7 +112,7 @@ export default function HealthView(): JSX.Element {
       <div className="page-body hl-body">
         {connect && <Sources onSynced={changed} onClose={() => setConnect(false)} />}
         {manage && <MetricManager onChanged={changed} onClose={() => setManage(false)} />}
-        {!rows ? <p className="empty-hint big">Loading…</p> : rows.length === 0 ? (
+        {!rows ? (loadError ? <ErrorState message={loadError} onRetry={() => void load()} /> : <p className="empty-hint big">Loading…</p>) : rows.length === 0 ? (
           <div className="empty-state">
             <HeartPulse size={28} />
             <h2>Every metric is hidden</h2>

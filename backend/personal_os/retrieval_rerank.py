@@ -6,6 +6,7 @@ asking for candidate indices in relevance order.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -18,6 +19,7 @@ from . import llm, provider_route, providers
 
 log = logging.getLogger("grain.rerank")
 TIMEOUT = 10.0
+RERANK_WAIT = 3.0  # seconds `rerank` (route or completion fallback) may hold up a turn; past that it counts as a failure
 BACKOFF_SECONDS = 300.0
 _down_until = 0.0
 
@@ -65,10 +67,12 @@ async def rerank(settings: dict[str, Any], query: str, fused: list[tuple[str, fl
     head, tail = [x for x in fused[:n] if x[0] in by_key], fused[n:]
     model = providers.rerank_model(settings)
     docs = [str(by_key[k].get("text", "")) for k, _ in head]
-    try:
+    async def ask() -> list[int]:
         order = await _route(settings, model, query, docs)
-        if order is None:
-            order = await _complete(settings, model, query, docs)
+        return await _complete(settings, model, query, docs) if order is None else order
+
+    try:
+        order = await asyncio.wait_for(ask(), RERANK_WAIT)
     except Exception as e:  # noqa: BLE001 - timeouts, odd payloads, no route
         _down_until = time.monotonic() + BACKOFF_SECONDS
         log.warning("rerank unavailable, keeping fused order for %ds: %s", int(BACKOFF_SECONDS), e)

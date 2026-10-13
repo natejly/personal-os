@@ -67,6 +67,21 @@ class DriveBackupTest(unittest.TestCase):
         self.assertEqual((r["copied"], r["skipped"]), (1, 1))
         self.assertIsNotNone(self.g.puts[-1][1])  # edited doc updated in place
 
+    def test_an_interrupted_run_remembers_what_it_uploaded(self):
+        put = self.g.drive_backup_put
+
+        def killed(folder, name, *a, **kw):
+            if name == "Note.md":
+                raise KeyboardInterrupt  # the process dies mid-run: nothing after this line runs
+            return put(folder, name, *a, **kw)
+
+        self.g.drive_backup_put = killed
+        with self.assertRaises(KeyboardInterrupt):
+            self.b.run()
+        self.g.drive_backup_put = put
+        r = DriveBackup(self.db, self.g).run()
+        self.assertEqual((r["copied"], r["skipped"]), (1, 1))  # a.txt is not uploaded a second time
+
     def test_failure_reported(self):
         self.g.bad.add("a.txt")
         r = self.b.run()

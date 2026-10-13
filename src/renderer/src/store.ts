@@ -16,7 +16,7 @@ import { api, backgroundStream, chatStream, getBase, getToken, setBase, type Sco
 import { currentSelection } from './lib/pageContext'
 import { panelConversationFor, type PagePin } from './lib/pagePanel'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
-import { chatNotice, finishNotice, type FinishInfo, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
+import { chatNotice, finishNotice, type FinishInfo, fetchedStatus, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
 import { adjacentChatId, sidebarOrder } from './lib/chatRows'
 import { createDeltaBuffer } from './lib/deltaBuffer'
 import { CHAT_NOTICE_BODY, notify } from './lib/notify'
@@ -83,7 +83,8 @@ export interface Streaming {
 }
 
 /** A message sent but not yet confirmed by the run's `user_message` event; shown dimmed in the transcript. */
-export interface PendingSend { key: number; text: string; at: number; attachments?: Attachment[] }
+/** `queued`: the desk holds the text until a slot frees (queue position); no row exists until its turn starts. */
+export interface PendingSend { key: number; text: string; at: number; attachments?: Attachment[]; queued?: number }
 const EMPTY_PENDING: readonly PendingSend[] = Object.freeze([])
 let pendingKeySeq = 0
 
@@ -151,11 +152,13 @@ const writeExpanded = (paths: string[]): string[] => {
 /** Writers need a scope a row can live in: 'all' and 'personal' both mean the personal voice. */
 const styleScope = (s: Scope): string | null => (s === 'all' || s === 'personal' ? null : s)
 
-const newSession = (conversation: Conversation): ChatSession =>
-  ({ conversation, streaming: null, status: 'idle', finishedAt: null, pendingApprovals: 0, unread: 0, touchedAt: Date.now(), runError: null })
-
 const countApprovals = (c: Conversation): number =>
   (c.messages ?? []).reduce((n, m) => n + (m.tool_events ?? []).filter((t) => t.pending && t.needs_approval).length, 0)
+
+const newSession = (conversation: Conversation): ChatSession => {
+  const pendingApprovals = countApprovals(conversation)
+  return { conversation, streaming: null, status: fetchedStatus('idle', pendingApprovals, false), finishedAt: null, pendingApprovals, unread: 0, touchedAt: Date.now(), runError: null }
+}
 
 export interface MailComposePrefill {
   to: string
@@ -178,6 +181,8 @@ export interface State {
   modelsError: string | null
   tools: ToolInfo[]
   google: GoogleStatus | null
+  /** A Google sign-in is open in the browser and being polled for. */
+  googlePending: boolean
   tasksSync: TasksSyncStatus | null
   /** Mail-watch chip to open expanded on the next Mail visit (Today's "View all"); MailWatchPanel clears it. */
   mailWatchKind: 'to_reply' | 'awaiting_reply' | null
@@ -519,7 +524,8 @@ export interface State {
   /** Load one desk whole and, when it is live, attach to the run driving it. */
   openDesk: (id: string) => Promise<void>
   /** The steer box, awake or asleep. `false` means the text was refused, so the caller keeps it. */
-  messageDesk: (id: string, text: string, abModel?: string) => Promise<boolean>
+  /** Falsy on failure; `position` is set when the desk queued the message behind other desks. */
+  messageDesk: (id: string, text: string, abModel?: string) => Promise<false | { position?: number }>
   /** `quiet` is for the live refresh: a failed background reload must not toast every few seconds. */
   loadDeskFiles: (id: string, path?: string, quiet?: boolean) => Promise<void>
   /** The promotion verdicts, so the Output tab can show a verified tick or the write that failed. */
@@ -673,6 +679,16 @@ const toastClocks = new Map<number, { left: number; at?: number; timer?: ReturnT
 let toastsHeld = false
 /** The completion popup's snooze timer. Its own, so dismissing a toast never clears a snoozed popup. */
 let completionTimer: ReturnType<typeof setTimeout> | null = null
+/** Set by the Settings modal while its draft is dirty: it asks before discarding instead of closing. */
+let settingsGuard: (() => void) | null = null
+let memoriesSeq = 0
+export function setSettingsGuard(fn: (() => void) | null): void { settingsGuard = fn }
+/** The patch a navigation action spreads to close Settings; with a dirty draft it asks and stays open. */
+function closeSettings(): { settingsOpen?: false } {
+  if (!settingsGuard) return { settingsOpen: false }
+  settingsGuard()
+  return {}
+}
 let flushChain: Promise<void> = Promise.resolve()
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
@@ -690,6 +706,16 @@ const docEdits = (doc: FullDoc, docDraft: string | null, docTitleDraft: string |
   const title = docTitleDraft !== null && docTitleDraft.trim() && docTitleDraft !== doc.title
     ? docTitleDraft.trim() : heading && heading !== doc.title ? heading : undefined
   return content === undefined && title === undefined ? null : { content, title }
+}
+
+/** The list row for a just-saved doc, refreshed from the save, in the list's order (pinned, starred, newest). */
+export function patchDocRow(docs: Doc[], saved: Doc): Doc[] {
+  const body = saved.content ?? ''
+  const rows = docs.map((d) => (d.id !== saved.id ? d : {
+    ...d, title: saved.title, updated_at: saved.updated_at, words: saved.words, tags: saved.tags ?? d.tags,
+    size: body.length, preview: body.slice(0, 240)
+  }))
+  return rows.sort((a, b) => (b.pinned ?? 0) - (a.pinned ?? 0) || b.starred - a.starred || b.updated_at - a.updated_at)
 }
 
 /**
@@ -876,12 +902,15 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
       // The optimistic bubble this message confirms goes in the same returned session (the backend stores the stripped text).
       {
         const pend = s.pendingSends
-        const at = pend ? pend.findIndex((p) => p.text.trim() === ev.data.content) : -1
-        const rest = at >= 0 && pend ? pend.filter((_, i) => i !== at) : pend
+        const content = ev.data.content
+        const at = pend ? pend.findIndex((p) => p.text.trim() === content) : -1
+        // Queued desk messages are joined into the turn that starts the desk, so each one is matched by containment.
+        const rest = pend?.filter((p, i) => i !== at && !(p.queued && content.includes(p.text.trim())))
+        const hit = (rest?.length ?? 0) !== (pend?.length ?? 0)
         const pendingSends = rest && rest.length ? rest : undefined
         // An internal control turn (any kind) is the backend's own bookkeeping, not something the user said.
         if (isInternal(ev.data)) return s
-        if (msgs.some((m) => m.id === ev.data.id)) return at >= 0 ? { ...s, runError: null, pendingSends } : { ...s, runError: null }
+        if (msgs.some((m) => m.id === ev.data.id)) return hit ? { ...s, runError: null, pendingSends } : { ...s, runError: null }
         return { ...withMsgs([...msgs, ev.data]), runError: null, pendingSends }
       }
     case 'assistant_message': {
@@ -917,9 +946,9 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
     case 'thinking_summary':
       return mapMsg(ev.data.id, (m) => ({ ...m, reasoning: m.reasoning ? `${m.reasoning}\n${ev.data.text}` : ev.data.text, status: null }))
     case 'tool_call':
-      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, status: null, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, started_at: Date.now(), needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, review: ev.data.review ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent, ...(ev.data.mcp ? { mcp: ev.data.mcp } : {}) }] }))
+      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, status: null, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, started_at: ev.data.started_at ?? Date.now(), needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, review: ev.data.review ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent, ...(ev.data.mcp ? { mcp: ev.data.mcp } : {}) }] }))
     case 'tool_result':
-      return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === ev.data.id ? { ...ev.data, pending: false } : t)) }))
+      return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === ev.data.id ? { ...t, ...ev.data, pending: false } : t)) }))
     case 'tool_decision':
       return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === ev.data.id && t.needs_approval ? { ...t, needs_approval: false, approval: ev.data.decision } : t)) }))
     case 'span':
@@ -976,9 +1005,9 @@ export const useStore = create<State>((set, get) => {
   const wireMenu = (): void => {
     if (menuWired) return
     menuWired = true
-    // ⌘B (Toggle Sidebar) and ⌘K (Command Palette) are menu accelerators, and a menu accelerator never
-    // reaches the page: inside the Markdown editor they would hide the sidebar, open the palette or leave the doc instead
-    // of bold / link / maths. While the editor has focus, hand the chord back to it as the keystroke it was.
+    // ⌘K (Command Palette) is a menu accelerator, and a menu accelerator never reaches the page: inside the
+    // Markdown editor it would open the palette instead of link / maths. While the editor has focus, hand the
+    // chord back to it as the keystroke it was. ⌘B is not handed back: bold is ⇧⌘B, so ⌘B toggles the sidebar everywhere.
     const toEditor = (key: string, shift: boolean): boolean => {
       const el = typeof document === 'undefined' ? null : document.activeElement
       if (!el || el.tagName !== 'TEXTAREA' || !el.classList.contains('md-input')) return false
@@ -987,7 +1016,6 @@ export const useStore = create<State>((set, get) => {
     }
     window.os.onMenu((action) => {
       const s = get()
-      if (action === 'toggle-sidebar' && toEditor('b', false)) return
       if (action === 'palette' && toEditor('k', false)) return
       // In the canvas view ⌘N opens a chat window instead; canvas/store.ts handles it there.
       if (action === 'new-chat') {
@@ -1021,7 +1049,9 @@ export const useStore = create<State>((set, get) => {
       else if (action.startsWith('view:')) {
         const v = action.slice(5) as View
         // A view turned off in Settings → Sidebar stays off: its shortcut says how to turn it back on.
-        if (viewHidden(s.settings, v)) s.toast(`${v[0].toUpperCase()}${v.slice(1)} is turned off`, 'info', { label: 'Turn on', run: () => get().openSettings('sidebar') })
+        // Named as the sidebar shows it; nav.tsx holds the labels but importing it here would close a cycle.
+        const name = v === 'todos' ? 'Lists' : `${v[0].toUpperCase()}${v.slice(1)}`
+        if (viewHidden(s.settings, v)) s.toast(`${name} is turned off`, 'info', { label: 'Turn on', run: () => get().openSettings('sidebar') })
         else s.setView(v)
       } else if (action === 'upload') {
         s.openFiles('uploads')
@@ -1092,9 +1122,11 @@ export const useStore = create<State>((set, get) => {
       return false
     }
     // The files show as a chip under whatever the user typed, rather than as words put in their mouth.
-    const ok = await get().messageDesk(deskId, [text.trim(), inputChip(added)].filter(Boolean).join('\n\n'), abFor(get(), convId))
-    dropPending(convId, key)
-    return ok
+    const out = await get().messageDesk(deskId, [text.trim(), inputChip(added)].filter(Boolean).join('\n\n'), abFor(get(), convId))
+    // A queued message has no row until its turn starts, so the bubble stays (marked) until that user_message lands.
+    if (out && out.position) patchSession(convId, (s) => ({ ...s, pendingSends: s.pendingSends?.map((p) => (p.key === key ? { ...p, queued: out.position } : p)) }))
+    else dropPending(convId, key)
+    return !!out
   }
   /** A steer's response carries the stored message: applied as the event, it settles the bubble now (the stream copy is a no-op by id). */
   const settleSteer = (convId: string, message: Message | undefined): void => {
@@ -1106,8 +1138,10 @@ export const useStore = create<State>((set, get) => {
       const cur = st.sessions[conversation.id]
       // A fetch that lands among the deltas must not clobber what the stream already applied: the
       // in-flight assistant message is not persisted yet, so an overwrite blanks the visible reply.
-      const next = cur
-        ? { ...cur, conversation: mergeConversation(cur.conversation, conversation, !!cur.streaming, cur.streaming?.answering ? cur.streaming.messageId : null), touchedAt: Date.now() }
+      const merged = cur && mergeConversation(cur.conversation, conversation, !!cur.streaming, cur.streaming?.answering ? cur.streaming.messageId : null)
+      const approvals = merged ? countApprovals(merged) : 0
+      const next = cur && merged
+        ? { ...cur, conversation: merged, pendingApprovals: approvals, status: fetchedStatus(cur.status, approvals, !!cur.streaming), touchedAt: Date.now() }
         : newSession(conversation)
       const sessions = { ...st.sessions, [conversation.id]: next }
       return { sessions: evict(sessions, st.focusedConversationId) }
@@ -1132,10 +1166,14 @@ export const useStore = create<State>((set, get) => {
   /** True once init has loaded the app's data at least once; a recovered backend then needs a refresh, not a re-init. */
   let loadedOnce = false
   let backendSeen: BackendState = 'ready'
+  /** Counts supervisor announcements, so init can tell whether one arrived while it was asking. */
+  let stateEvents = 0
   let watching = false
   let stateWired = false
   // `/events` resume cursor. The topic's seq restarts with the backend process, so a restart zeroes it.
   let eventsSince = 0
+  // Proposals with a decision on the wire: a second click (or keypress) before it lands is dropped.
+  const deciding = new Set<string>()
 
   /**
    * The main process supervises the sidecar and announces each state. While it restarts the UI stays up
@@ -1143,6 +1181,7 @@ export const useStore = create<State>((set, get) => {
    * data re-fetched. If the first start failed, init never loaded anything, so it runs for real now.
    */
   const onBackendState = (info: BackendInfo): void => {
+    stateEvents++
     const was = backendSeen
     backendSeen = info.state
     set({ backendState: info.state })
@@ -1367,7 +1406,7 @@ export const useStore = create<State>((set, get) => {
     }
     // Only the events that open or settle a gate can move the count, and delta must stay free
     // of any recount: it is the one event that arrives per token.
-    const gate = ev.event === 'tool_call' || ev.event === 'tool_result'
+    const gate = ev.event === 'tool_call' || ev.event === 'tool_result' || ev.event === 'done'
       || ev.event === 'plan_card' || ev.event === 'plan_decision'
     const pendingApprovals = gate ? countApprovals(next.conversation) : s.pendingApprovals
     return { ...next, pendingApprovals, status: reduceStatus(s.status, ev, pendingApprovals) }
@@ -1642,7 +1681,7 @@ export const useStore = create<State>((set, get) => {
           }
         }
       }
-      patchSession(convId, (s) => (s.streaming?.abort === abort ? { ...s, streaming: null, status: finishStatus(s.status) } : s))
+      patchSession(convId, (s) => (s.streaming?.abort === abort ? { ...s, streaming: null, status: finishStatus(s.status, s.pendingApprovals) } : s))
       // An attached run wrote deltas this window never saw, and a stream that ended without its `done` left
       // the reply unfinished here: the persisted message is the whole reply.
       if ((attached || !settled) && !abort.signal.aborted && get().sessions[convId]) void get().openSession(convId).catch(() => undefined)
@@ -1787,6 +1826,7 @@ export const useStore = create<State>((set, get) => {
     modelsError: null,
     tools: [],
     google: null,
+    googlePending: false,
     tasksSync: null,
     mailWatchKind: null,
     dashboard: null,
@@ -1836,10 +1876,10 @@ export const useStore = create<State>((set, get) => {
     inboxOpen: false,
     jobsFocusId: null,
     openJobs: (jobId) => {
-      set({ jobsFocusId: jobId ?? null, inboxOpen: false, settingsOpen: false })
+      set({ jobsFocusId: jobId ?? null, inboxOpen: false, ...closeSettings() })
       get().setView('jobs')
     },
-    openInbox: () => set({ inboxOpen: true, settingsOpen: false }),
+    openInbox: () => set({ inboxOpen: true, ...closeSettings() }),
     closeInbox: () => set({ inboxOpen: false }),
     projects: [],
     view: 'chat',
@@ -1942,7 +1982,15 @@ export const useStore = create<State>((set, get) => {
         stateWired = true
         window.os.onBackendState(onBackendState)
       }
+      // The window opens while the backend is still starting: stay on the boot screen until the supervisor
+      // announces ready (onBackendState then runs init again) or failed (it shows the error).
+      const seen = stateEvents
+      const info = typeof window.os.backendInfo === 'function' ? await window.os.backendInfo().catch(() => null) : null
+      if (info?.state === 'starting' && seen === stateEvents) { inited = false; backendSeen = 'starting'; return }
       const status = await window.os.backendStatus()
+      // The window opens while the backend starts: keep the boot logo, and the 'ready' state runs init again (its
+      // 'starting' broadcast went out before this window listened, so record it here or 'ready' looks like no change).
+      if (status.starting) { inited = false; backendSeen = 'starting'; return }
       // A failed start must stay retryable from the error screen's "Try again".
       if (!status.url) { inited = false; return set({ ready: true, backendError: status.error ?? 'Backend not running' }) }
       setBase(status.url)
@@ -2147,7 +2195,7 @@ export const useStore = create<State>((set, get) => {
     },
     // `draftProjectId` is deliberately not set here: opening a project is looking at it, not
     // choosing it for the next chat. Its own "New chat" buttons pass the id to `newChat` instead.
-    openProject: (id) => set({ view: 'project', projectViewId: id, draftProjectId: null, settingsOpen: false }),
+    openProject: (id) => set({ view: 'project', projectViewId: id, draftProjectId: null, ...closeSettings() }),
     createProject: async (p) => {
       const project = await api.projects.create(p)
       await get().refreshProjects()
@@ -2190,7 +2238,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftChatSettings: {}, view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftChatSettings: {}, view: 'chat', ...closeSettings() }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -2211,7 +2259,7 @@ export const useStore = create<State>((set, get) => {
       }
     },
     selectChat: async (id) => {
-      set({ view: 'chat', settingsOpen: false, traceMessageId: null })
+      set({ view: 'chat', ...closeSettings(), traceMessageId: null })
       if (!id) return set({ focusedConversationId: null })
       // Opening the chat the completion popup named settles it: there is nothing left to open.
       if (get().completionPopup?.convId === id) get().dismissCompletion()
@@ -2539,7 +2587,7 @@ export const useStore = create<State>((set, get) => {
         try {
           const { desk } = await api.cowork.desks.create({ conversation_id: c.id, autonomy, brief: text, start: false })
           bindDesk(c.id, desk.id)
-          await get().refreshDesks()
+          void get().refreshDesks()  // the rail only; the send below does not read the list
           deskId = desk.id
         } catch (e) {
           get().toast(`Could not start working autonomously: ${(e as Error).message}`, 'error')
@@ -2679,7 +2727,7 @@ export const useStore = create<State>((set, get) => {
       }
       putSession(c)
       // A fresh copy has no run to attach to, so it is focused directly rather than refetched through selectChat.
-      set((s) => ({ conversations: [c, ...s.conversations.filter((x) => x.id !== c.id)], view: 'chat', settingsOpen: false,
+      set((s) => ({ conversations: [c, ...s.conversations.filter((x) => x.id !== c.id)], view: 'chat', ...closeSettings(),
                      traceMessageId: null, focusedConversationId: c.id, draftProjectId: c.project_id }))
       const from = get().sessions[conversationId]?.conversation.title ?? get().conversations.find((x) => x.id === conversationId)?.title
       get().toast(`Branched from ${from || 'the original chat'}`, 'info', { label: 'Open original', run: () => void get().selectChat(conversationId) })
@@ -2846,7 +2894,8 @@ export const useStore = create<State>((set, get) => {
             docSaving: false
           }
         })
-        void get().refreshDocs()
+        // Patch this doc's list row from the save instead of re-listing every doc after each pause in typing.
+        set((st) => ({ docs: patchDocRow(st.docs, saved) }))
         void get().refreshDocRevisions(doc.id)
       } catch (e) {
         set({ docSaving: false })
@@ -3114,7 +3163,7 @@ export const useStore = create<State>((set, get) => {
         // Awake it steered the live reply, asleep it woke a new turn — either way the row has moved
         // (the question is answered, the status is live again), and `openDesk` re-attaches.
         await get().openDesk(id)
-        return true
+        return { position: out.position }
       } catch (e) {
         get().toast((e as Error).message, 'error')
         return false
@@ -3303,7 +3352,13 @@ export const useStore = create<State>((set, get) => {
       if (skillDrafted) void get().refreshSkills()
       refreshAll()
     },
-    refreshMemories: async (q = '') => set({ memories: await api.memories.list(get().dataScope, q) }),
+    refreshMemories: async (q = '') => {
+      // A search and a scope switch can overlap (a child panel's effect runs before its parent's
+      // loadScope), so only the latest request lands.
+      const seq = ++memoriesSeq
+      const memories = await api.memories.list(get().dataScope, q)
+      if (seq === memoriesSeq) set({ memories })
+    },
     addMemory: async (content, kind, projectId) => {
       await api.memories.create({ project_id: projectId, content, kind })
       await Promise.all([get().refreshMemories(), get().refreshProjects()])
@@ -3333,8 +3388,16 @@ export const useStore = create<State>((set, get) => {
       } catch (e) { get().toast(`Could not forget: ${(e as Error).message}`, 'error') }
     },
 
-    refreshGraph: async () => set({ graph: await api.graph.get(get().dataScope) }),
-    refreshDocuments: async () => set({ documents: await api.documents.list(get().dataScope) }),
+    refreshGraph: async () => {
+      const scope = get().dataScope
+      const graph = await api.graph.get(scope)
+      if (get().dataScope === scope) set({ graph })
+    },
+    refreshDocuments: async () => {
+      const scope = get().dataScope
+      const documents = await api.documents.list(scope)
+      if (get().dataScope === scope) set({ documents })
+    },
 
     // ---- writing style ----
     // The scope here is the data scope the Memory panel loaded. 'all' has no voice of its own, so the
@@ -3391,23 +3454,24 @@ export const useStore = create<State>((set, get) => {
     },
 
     uploadDocuments: async (files, projectId) => {
-      const saved: UploadOutcome[] = []
-      for (const f of Array.from(files)) {
+      // In parallel, and the lists refresh behind the return: a composer is waiting on these to show its chips.
+      const saved = await Promise.all(Array.from(files).map(async (f): Promise<UploadOutcome | null> => {
         const tooBig = uploadTooBig(f.size)  // refused here so a huge file is not streamed to the backend only to get a 413
-        if (tooBig) { get().toast(`${f.name}: ${tooBig}`, 'error'); continue }
+        if (tooBig) { get().toast(`${f.name}: ${tooBig}`, 'error'); return null }
         try {
           const doc = (await api.documents.upload(projectId, f)) as UploadResult
           // An older backend says nothing about readability; its files count as readable, as before.
           const r: UploadOutcome = { id: doc.id, name: doc.name || f.name, mime: doc.mime || f.type, size: doc.size, readable: doc.readable !== false, reason: doc.reason ?? null }
-          saved.push(r)
           const t = uploadToast(r)
           get().toast(t.text, t.kind)
+          return r
         } catch (e) {
           get().toast(`${f.name}: ${(e as Error).message}`, 'error')
+          return null
         }
-      }
-      await Promise.all([get().refreshDocuments(), get().refreshProjects()])
-      return saved
+      }))
+      void Promise.all([get().refreshDocuments(), get().refreshProjects()]).catch(() => undefined)
+      return saved.filter((r): r is UploadOutcome => !!r)
     },
     pinDocument: async (id, pinned) => {
       const flip = (v: boolean): void => set((s) => ({ documents: s.documents.map((d) => (d.id === id ? { ...d, pinned: v ? 1 : 0 } : d)) }))
@@ -3550,6 +3614,8 @@ export const useStore = create<State>((set, get) => {
       }
     },
     decideProposal: async (id, accept, args) => {
+      if (deciding.has(id)) return null
+      deciding.add(id)
       try {
         if (!accept) {
           await api.proposals.reject(id)
@@ -3564,6 +3630,7 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         return (e as Error).message
       } finally {
+        deciding.delete(id)
         void get().refreshAgentInbox()
       }
     },
@@ -3590,12 +3657,16 @@ export const useStore = create<State>((set, get) => {
             ? { ...t, needs_approval: false, ...(approval ? { approval } : {}), ...(approval && opts?.arguments && approval !== 'deny' ? { arguments: opts.arguments, original_arguments: t.arguments, edited_arguments: opts.arguments, edited_by: 'user' as const } : {}) }
             : t)) })) }
           const pendingApprovals = countApprovals(conversation)
-          return { ...s, conversation, pendingApprovals, status: settleApprovals(s.status, pendingApprovals) }
+          // With no stream to move it on, an answered card leaves the chat idle, not 'working'.
+          return { ...s, conversation, pendingApprovals, status: fetchedStatus(s.status, pendingApprovals, !!s.streaming) }
         })
       }
       try {
-        await api.approve(callId, decision, opts)
+        const out = await api.approve(callId, decision, opts) as { live?: boolean }
         clear(decision)
+        // No run was waiting (a backend restart, a parked desk card): no tool_result will come, and the backend has
+        // already settled the stored card ("Not run…" or the parked answer). Re-read it, or the card spins forever.
+        if (id && out?.live === false) void get().openSession(id).catch(() => undefined)
         // A card answered from a desk pane is also in that desk's `approvals`; re-read the desk so it leaves the list
         // (answerDeskCard does the same for the old banner path).
         const open = get().activeDeskId
@@ -3638,19 +3709,23 @@ export const useStore = create<State>((set, get) => {
       }
     },
     connectGoogle: async () => {
+      if (get().googlePending) return  // one poller per sign-in
+      set({ googlePending: true })
       try {
         // Re-authing an already-connected account looks identical unless we watch for a new
         // token, so remember which one we had before opening the browser.
         const before = get().google?.connected_at ?? null
         const { url } = await api.google.start()
         window.open(url, '_blank')
-        // poll until the callback lands
+        // poll until the callback lands, or reports that it failed
         const started = Date.now()
         const timer = setInterval(async () => {
           const st = await api.google.status().catch(() => null)
           const fresh = !!st?.connected && st.connected_at !== before
-          if (fresh || Date.now() - started > 180_000) {
+          if (fresh || st?.last_error || Date.now() - started > 180_000) {
             clearInterval(timer)
+            set({ googlePending: false })
+            if (st?.last_error && !fresh) get().toast(`Google sign-in failed: ${st.last_error}`, 'error')
             if (fresh && st) {
               clearViews()
               set({ google: st })
@@ -3661,6 +3736,7 @@ export const useStore = create<State>((set, get) => {
           }
         }, 1500)
       } catch (e) {
+        set({ googlePending: false })
         get().toast((e as Error).message, 'error')
       }
     },

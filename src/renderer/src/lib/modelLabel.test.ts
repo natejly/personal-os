@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { chatModelIds, modelChoices, modelLabel, showsEffort } from './modelLabel'
+import { chatModelIds, hasModelKey, modelChoices, modelLabel, showsEffort } from './modelLabel'
 
 test('the auto model is labelled Auto', () => {
   assert.equal(modelLabel('auto'), 'Auto')
@@ -48,4 +48,13 @@ test('showsEffort is false only for an explicit reasoning:false', () => {
   assert.equal(showsEffort(models, 'c'), true)
   assert.equal(showsEffort(models, 'd'), true)
   assert.equal(showsEffort(models, 'missing'), true)
+})
+
+test('hasModelKey: a key, a local endpoint, or a finished setup (keyless server on the network)', () => {
+  assert.equal(hasModelKey({ apiKeySet: true }), true)
+  assert.equal(hasModelKey({ baseUrl: 'http://localhost:11434/v1' }), true)
+  assert.equal(hasModelKey({ baseUrl: 'http://192.168.1.20:8000/v1' }), false)
+  assert.equal(hasModelKey({ baseUrl: 'http://192.168.1.20:8000/v1', provider: 'custom', onboardedAt: '2026-10-13T00:00:00+00:00' }), true)
+  // A hosted provider still needs its key: switching to one in Settings without pasting a key brings the banner back.
+  assert.equal(hasModelKey({ baseUrl: 'https://api.openai.com/v1', provider: 'openai', onboardedAt: '2026-10-13T00:00:00+00:00' }), false)
 })

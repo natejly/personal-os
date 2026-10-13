@@ -191,7 +191,7 @@ def build_server() -> Any:
                              "Returns the reply text, the session id and the tools it used.")
     async def opencode_prompt(prompt: str, directory: str | None = None, session_id: str | None = None,
                               timeout_seconds: int = 900) -> dict[str, Any]:
-        return await svc.call(lambda c: c.prompt(prompt, directory, session_id, float(max(5, min(timeout_seconds, 3600)))))
+        return await svc.call(lambda c: c.prompt(prompt, directory, session_id, float(max(5, min(timeout_seconds, 900)))))
 
     @server.tool(description="List recent OpenCode sessions, newest first.", annotations=ToolAnnotations(read_only_hint=True))
     async def opencode_sessions(limit: int = 20) -> list[dict[str, Any]]:

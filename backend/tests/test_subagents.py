@@ -470,6 +470,40 @@ def test_a_poll_with_nothing_new_gets_a_hint_after_three() -> None:
     check("No new output in 3 polls" in got[2], "and counts them")
     mixed = _tool_msgs("poll-mixed", [quiet, quiet, {**quiet, "output": "line"}, quiet], "shell_poll", 4)
     check(not any("poll_hint" in m for m in mixed), "new output resets the count")
+def test_child_call_ids_stay_unique_and_names_resolve() -> None:
+    reset()
+    # a provider that restarts its numbering every round, and one that prefixes the namespace
+    SCRIPTS["ids"] = [{"text": "", "calls": [call("functions.current_time:0", "current_time", {})]},
+                      {"text": "", "calls": [call("functions.current_time:0", "functions.current_time", {"tz": "UTC"})]},
+                      {"text": "", "calls": [call("x", "Nope_Tool", {})]},
+                      {"text": "done"}]
+    run(appmod.toolbox.call("agent_spawn", {"task": "ids"}, mkctx(new_conv())))
+    msgs = next(c for c in mgr.children.values()).messages
+    ids = [tc["id"] for m in msgs if m["role"] == "assistant" for tc in m.get("tool_calls") or []]
+    check(len(ids) == 3 and len(set(ids)) == 3, "a reused provider id is replaced in a later round")
+    names = [tc["function"]["name"] for m in msgs if m["role"] == "assistant" for tc in m.get("tool_calls") or []]
+    check(names[1] == "current_time", "a namespaced name resolves to the one tool it names")
+    last = [m for m in msgs if m["role"] == "tool"][-1]["content"]
+    check("Did you mean" in last and "Do not retry" not in last, "an unknown name gets a did-you-mean, not a refusal")
+
+
+def test_end_of_run_stops_uncollected_background_children() -> None:
+    reset()
+    SCRIPTS["lingers"] = [{"text": "still going", "delay": 5}]
+    fr = FakeRun()
+    ctx = mkctx(new_conv(), run=fr)
+
+    async def go() -> Any:
+        out = await appmod.toolbox.call("agent_spawn", {"task": "lingers", "background": True}, ctx)
+        ch = mgr.children[out["agent_id"]]
+        await asyncio.sleep(0.05)
+        t0 = time.monotonic()
+        await mgr.end_of_run(fr)
+        await asyncio.wait_for(ch.finished.wait(), 2)
+        return ch, time.monotonic() - t0
+
+    ch, took = run(go())
+    check(ch.state == "partial" and took < 2, f"the reply ending stops its uncollected child at once ({ch.state}, {took:.2f}s)")
 
 
 # ---- approvals -------------------------------------------------------------------------------------
@@ -1269,6 +1303,38 @@ def test_a_token_in_a_child_tool_result_is_stripped() -> None:
     finally:
         mgr._call, mgr.store = prev_call, prev_store
     check(pat not in text and "[github-pat]" in text, "a token in a child tool result is stripped")
+
+
+def test_a_workers_desk_shell_call_gets_the_desk_rule_without_a_review() -> None:
+    from personal_os import autoreview, shell
+    desk = tempfile.mkdtemp()
+    ch = sa.Child(
+        id="c-desk", parent_id="p", role=sa.BUILTIN_ROLES["worker"], task="build", model="m",
+        depth=1, conversation_id=None, message_id=None, desk_id="d1",
+        ctx={"settings": {**appmod.settings(), "permissionMode": "auto"}, "desk_id": "d1"}, modes={"shell_run": "ask"},
+        meter=sa.Meter(), roots=(),
+    )
+    reviewed: list[str] = []
+    ran: list[str] = []
+
+    async def fake_call(_ch: Any, name: str, _args: dict[str, Any], _uid: str, _spec: Any) -> dict[str, str]:
+        ran.append(name)
+        return {"output": "ok"}
+
+    async def fake_review(*_a: Any, **k: Any) -> dict[str, Any]:
+        reviewed.append(k["name"])
+        return {"verdict": "ask", "reason": "", "confidence": "low"}
+
+    prev = (mgr._call, mgr.store, shell.auto_ok, shell.perm_where, autoreview.review)
+    mgr._call, mgr.store = fake_call, None
+    shell.auto_ok = lambda *_a, **_k: True  # type: ignore[assignment]
+    shell.perm_where = lambda *_a, **_k: ([desk], desk)  # type: ignore[assignment]
+    autoreview.review = fake_review  # type: ignore[assignment]
+    try:
+        run(asyncio.wait_for(mgr._exec(ch, {"id": "1", "name": "shell_run"}, {"command": "make test"}), 5))  # a card would wait
+    finally:
+        mgr._call, mgr.store, shell.auto_ok, shell.perm_where, autoreview.review = prev
+    check(ran == ["shell_run"] and not reviewed, "a sandboxed shell call in the desk runs as it would in the front agent")
 
 
 def test_a_token_in_a_subagent_root_is_stripped() -> None:

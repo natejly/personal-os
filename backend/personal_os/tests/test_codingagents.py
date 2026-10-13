@@ -281,6 +281,24 @@ class ClaudeDriver(CodingTestCase):
         self.assertEqual(argv[argv.index("--resume") + 1], SID)  # the full id, never the short one
         self.assertEqual((row["status"], row["external_id"]), ("working", "deadbeef"))
 
+    async def test_a_failed_session_can_be_followed_up(self) -> None:
+        row = await self.started()
+        self.job_files("deadbeef", "failed", "API error")
+        self.assertEqual(self.cs.refresh(self.cs.get(row["id"]))["status"], "failed")
+        row = await self.cs.send(row["id"], "carry on")
+        self.assertEqual(row["status"], "working")
+        self.assertEqual(self.cs.refresh(self.cs.get(row["id"]))["status"], "working")  # the stale "failed" is not read back
+
+    async def test_a_settled_session_is_not_reread_until_its_state_changes(self) -> None:
+        row = await self.started()
+        self.job_files("deadbeef", "done", "finished")
+        self.cs.refresh(self.cs.get(row["id"]))
+        self.cs.refresh(self.cs.get(row["id"]))  # the first look at it settled records the state file's mtime
+        with unittest.mock.patch.object(self.cs, "_refresh_claude", side_effect=AssertionError("re-read")):
+            self.cs.refresh(self.cs.get(row["id"]))
+        self.job_files("deadbeef", "working", "resumed in the terminal")
+        self.assertEqual(self.cs.refresh(self.cs.get(row["id"]))["status"], "working")
+
     async def test_a_copy_started_by_the_cli_is_recorded(self) -> None:
         row = await self.started()
         self.job_files("deadbeef", "done")
@@ -407,6 +425,18 @@ class OpencodeDriver(CodingTestCase):
         with self.assertRaisesRegex(ca.CodingError, "Stop it first"):
             await self.cs.send("s2", "more")
 
+    def test_a_sandbox_that_refused_to_start_says_so(self) -> None:
+        wt, t = str(self.repo), 1.0
+        with self.cs.db.tx() as c:
+            c.execute("INSERT INTO coding_sessions(id, agent, external_id, repo_path, worktree, name, prompt, status, log_tail, "
+                      "created_at, updated_at) VALUES('s9','pi','j9',?,?,'n','p','working','',?,?)", (wt, wt, t, t))
+        self.jobs.jobs["j9"] = SimpleNamespace(status="exited", exit_code=65, buf="sandbox-exec: profile error\n", total=30,
+                                               live=lambda: False)
+        with unittest.mock.patch.object(ca.osplat.current().sandbox, "failed_to_start", lambda code, out: code == 65):
+            row = self.cs.refresh(self.cs.get("s9"))
+        self.assertEqual(row["status"], "failed")
+        self.assertIn("OS sandbox refused to start", row["detail"])
+
     async def test_send_refused_while_the_job_runs_and_a_gone_job_is_blocked(self) -> None:
         wt, t = str(self.repo), 1.0
         with self.cs.db.tx() as c:
@@ -421,7 +451,8 @@ class OpencodeDriver(CodingTestCase):
         self.assertEqual((row["status"], row["log_tail"]), ("working", "hi"))
         job.status, job.exit_code = "exited", 0
         self.assertEqual(self.cs.refresh(row)["status"], "done")
-        row["status"] = "working"
+        with self.cs.db.tx() as c:  # refresh diffs against the saved row
+            c.execute("UPDATE coding_sessions SET status = 'working' WHERE id = 's1'")
         self.jobs.jobs.clear()
         self.assertEqual(self.cs.refresh(row)["status"], "blocked")
 
@@ -456,6 +487,27 @@ class Wake(CodingTestCase):
         self.cs.refresh(self.cs.get(row["id"]))
         self.cs.refresh(self.cs.get(row["id"]))
         self.assertEqual(woken, ["done"])  # once
+
+    async def test_a_finish_after_needs_you_wakes_too(self) -> None:
+        woken: list[str] = []
+        self.cs.on_finish = lambda r: woken.append(r["status"])
+        row = await self.started()
+        self.job_files("deadbeef", "blocked", "x", needs="permission prompt")
+        self.cs.refresh(self.cs.get(row["id"]))
+        self.job_files("deadbeef", "done", "finished")  # the user answered in the terminal
+        self.cs.refresh(self.cs.get(row["id"]))
+        self.assertEqual(woken, ["needs_you", "done"])
+
+    async def test_a_stale_copy_of_the_row_does_not_settle_it_twice(self) -> None:
+        woken: list[str] = []
+        self.cs.on_finish = lambda r: woken.append(r["status"])
+        row = await self.started()
+        stale = self.cs.get(row["id"])  # the watcher's snapshot, taken while it was working
+        self.job_files("deadbeef", "done", "finished")
+        self.cs.refresh(self.cs.get(row["id"]))
+        self.cs.refresh(stale)
+        self.assertEqual(woken, ["done"])
+        self.assertEqual(sum(1 for e, d in self.events if e == "coding_session_event" and "→ done" in str(d)), 1)
 
     async def test_wait_returns_when_all_settled_or_on_timeout_and_does_not_wake(self) -> None:
         woken: list[str] = []

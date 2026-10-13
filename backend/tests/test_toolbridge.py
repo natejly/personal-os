@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from personal_os import sandbox, toolbridge  # noqa: E402
+from personal_os import permrules, sandbox, toolbridge  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.tools import ToolSpec, Toolbox, _obj  # noqa: E402
 from personal_os.working import ToolResults  # noqa: E402
@@ -325,6 +325,35 @@ def test_profile_with_a_socket_allows_exactly_that_path(tmp_path: Path) -> None:
     p = sandbox._mac_profile(str(tmp_path), sys.executable, str(tmp_path / "b.sock"))
     assert "(deny network*)" in p and "unix-socket" in p and "b.sock" in p
     assert "unix-socket" not in sandbox._mac_profile(str(tmp_path), sys.executable)
+
+
+def test_auto_mode_reviews_a_bridged_write_that_is_on(tmp_path: Path) -> None:
+    """The script's own calls get Auto's review, as the same calls would in the reply loop; Manual runs an `on` call."""
+    r = Rig(tmp_path)
+    asked: list[str] = []
+
+    async def approve(name: str, args: dict[str, Any], forced: bool) -> bool:
+        asked.append(name)
+        return False
+    b = toolbridge.Bridge(r.tb, r.ctx, ["fs_edit", "fs_glob"], {"fs_edit": "on", "fs_glob": "on"}, approve)
+    r.ctx["permission_mode"] = "auto"
+    res = asyncio.run(b.handle("fs_edit", {"path": str(r.root / "a.py"), "old": "1", "new": "9"}))
+    assert res["ok"] is False and asked == ["fs_edit"] and not r.seen
+    asyncio.run(b.handle("fs_glob", {"pattern": "*.py", "root": str(r.root)}))
+    assert asked == ["fs_edit"], "a safe read needs no review"
+    # An `ask` the user granted for this chat session is covered, as in the reply loop: no review.
+    edit = {"path": str(r.root / "a.py"), "old": "1", "new": "9"}
+    b.modes = {"fs_edit": "ask", "fs_glob": "on"}
+    permrules.SESSION.add("c1", permrules.resolve("fs_edit", edit, "ask", False, rules=None).keys)
+    try:
+        assert asyncio.run(b.handle("fs_edit", edit))["ok"] is True and asked == ["fs_edit"]
+    finally:
+        permrules.SESSION.clear("c1")
+    (r.root / "a.py").write_text("x = 1  # TODO one\n")
+    b.modes = {"fs_edit": "on", "fs_glob": "on"}
+    r.ctx["permission_mode"] = "manual"
+    assert asyncio.run(b.handle("fs_edit", {"path": str(r.root / "a.py"), "old": "1", "new": "9"}))["ok"] is True
+    assert asked == ["fs_edit"]
 
 
 def test_permission_rules_apply_to_bridged_calls(tmp_path: Path) -> None:

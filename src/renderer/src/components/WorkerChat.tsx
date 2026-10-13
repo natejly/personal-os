@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { ArrowUp, Square } from '../icons'
 import type { RunTapeEvent, SubagentView } from '@shared/types'
 import { api } from '../lib/api'
@@ -17,7 +18,7 @@ const DONE = ['done', 'error', 'interrupted', 'stopped', 'completed', 'partial']
  * chat that started it. Stop ends a live worker. Approvals stay with the worker's row, under the same rules.
  */
 export default function WorkerChat({ id, onStop }: { id: string; onStop?: () => Promise<unknown> }): JSX.Element {
-  const { send, selectChat, openSubagent, toast } = useStore()
+  const { send, selectChat, openSubagent, toast } = useStore(useShallow((s) => ({ send: s.send, selectChat: s.selectChat, openSubagent: s.openSubagent, toast: s.toast })))
   const [view, setView] = useState<SubagentView | null>(null)
   const [tape, setTape] = useState<RunTapeEvent[]>([])
   const [text, setText] = useState('')

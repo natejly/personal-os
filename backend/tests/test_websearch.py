@@ -206,3 +206,18 @@ def test_tool_registers_every_result_for_a_tainted_run(monkeypatch: pytest.Monke
 
 def test_setting_default_present() -> None:
     assert llm.DEFAULT_SETTINGS["searxngUrl"] == ""
+
+
+def test_allowed_domains_restrict_the_engine_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
+
+    async def brave(cfg: dict[str, Any], q: str, n: int, tr: str) -> list[dict[str, Any]]:
+        seen.append(q)
+        return R2
+    monkeypatch.setattr(websearch, "brave", brave)
+    rows, _ = run(websearch.search({"braveApiKey": "k"}, "wal", 6, allowed_domains=["a.com"]))
+    assert seen[-1] == "wal site:a.com" and [r["url"] for r in rows] == ["https://www.a.com"]
+    run(websearch.search({"braveApiKey": "k"}, "wal", 6, allowed_domains=["a.com", "c.org"]))
+    assert seen[-1] == "wal (site:a.com OR site:c.org)"
+    rows, meta = run(websearch.search({"braveApiKey": "k"}, "wal", 6, allowed_domains=["c.org"]))
+    assert rows == [] and "no results on these domains" in meta["note"]

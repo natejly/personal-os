@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { PenLine, Wand2, Trash2, Plus, RefreshCw, FileText, MessageSquare, ClipboardPaste, Pencil } from '../icons'
 import { useStore, type Scope } from '../store'
 import type { StyleSample } from '@shared/types'
@@ -40,7 +41,7 @@ function Lines({ label, hint, items, onChange }: { label: string; hint: string; 
 }
 
 function SampleRow({ s }: { s: StyleSample }): JSX.Element {
-  const { deleteStyleSample } = useStore()
+  const { deleteStyleSample } = useStore(useShallow((s) => ({ deleteStyleSample: s.deleteStyleSample })))
   const [open, setOpen] = useState(false)
   const preview = s.text.length > 180 ? `${s.text.slice(0, 180)}…` : s.text
   return (
@@ -75,7 +76,7 @@ export default function StyleView({ projectId }: { projectId?: string }): JSX.El
   const learning = useStore((s) => s.styleLearning)
   const settings = useStore((s) => s.settings)
   const libraryScope = useStore((s) => s.libraryScope)
-  const { refreshStyle, saveStyle, learnStyle, resetStyle, addStyleSample, saveSettings, openMemory } = useStore()
+  const { refreshStyle, saveStyle, learnStyle, resetStyle, addStyleSample, saveSettings, openMemory } = useStore(useShallow((s) => ({ refreshStyle: s.refreshStyle, saveStyle: s.saveStyle, learnStyle: s.learnStyle, resetStyle: s.resetStyle, addStyleSample: s.addStyleSample, saveSettings: s.saveSettings, openMemory: s.openMemory })))
   const scope: Scope = projectId ?? libraryScope
   const [paste, setPaste] = useState('')
   const [summaryDraft, setSummaryDraft] = useState<string | null>(null)

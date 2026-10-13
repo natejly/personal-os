@@ -97,7 +97,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const { shown, hidden } = sinceClear(all)
   const showEarlier = hidden > 0 && earlierFor === convo?.id
   const msgs = showEarlier ? all : shown
-  const lastLen = msgs[msgs.length - 1]?.content.length ?? 0
+  // Frozen while a reply streams: the page context is rebuilt once the reply settles, not on every token batch.
+  const lastLen = isStreamingHere ? -1 : msgs[msgs.length - 1]?.content.length ?? 0
 
   const last = msgs[msgs.length - 1]
   const watchId = latestBrowserMessage(msgs)
@@ -184,7 +185,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 )}
               </div>
             ) : (
-              <div className="messages-inner">
+              <div className="messages-inner" role="log" aria-label="Conversation">
                 {msgs.map((m, i) => (
                   <Fragment key={m.id}>
                     {m.created_at > 0 && (i === 0 || dayKey(m.created_at) !== dayKey(msgs[i - 1].created_at)) && <div className="day-divider" role="separator">{dayLabel(m.created_at)}</div>}
@@ -193,12 +194,12 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                       browserSession={m.id === watchId ? (deskId ? deskBrowserSession(deskId) : chatBrowserSession(m.conversation_id)) : undefined} />}
                   </Fragment>
                 ))}
-                {pending.map((p) => <PendingUserMessage key={p.key} text={p.text} attachments={p.attachments} />)}
+                {pending.map((p) => <PendingUserMessage key={p.key} text={p.text} attachments={p.attachments} queued={p.queued} />)}
                 {draftPending && <PendingUserMessage text={draftPending.text} attachments={draftPending.attachments} />}
                 {/* From the click, and from user_message to the first assistant row (context assembly), nothing else shows work.
                     A brand-new chat has no id yet, so its slot stays empty rather than showing a face that would change once the row lands. */}
-                {(pending.length > 0 || draftPending || isStreamingHere) && streamingMessageId === null && duelLive === null && (
-                  <div className="msg assistant"><div className="avatar face-avatar">{(convo?.id ?? conversationId) && <Face {...face} name={face.name || conversationId!} status="streaming" />}</div><div className="bubble"><Thinking /></div></div>
+                {(pending.some((p) => !p.queued) || draftPending || isStreamingHere) && streamingMessageId === null && duelLive === null && (
+                  <div className="msg assistant"><div className="avatar face-avatar">{(convo?.id ?? conversationId) && <Face {...face} name={face.name || conversationId!} status="streaming" />}</div><div className="bubble"><Thinking chat={convo?.id ?? conversationId} /></div></div>
                 )}
                 {!conversationId && <DuelPanel conversationId={convo?.id} />}
                 {desk && <DeskInline desk={desk} events={msgs.flatMap((m) => m.tool_events ?? [])} />}

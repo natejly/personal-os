@@ -106,6 +106,9 @@ def test_plan_persists_and_normalizes() -> None:
     check(appmod.work_plans.get(cid)["steps"] == plan["steps"], "the plan survives a reread (it is in SQLite)")
     block = appmod.work_plans.block(cid)
     check("[x] 1. Read the config" in block and "it was yaml" in block, "the block renders status, order and notes")
+    appmod.work_plans.set(cid, [{"text": "Read the config", "status": "done"}, {"text": "Patch it", "status": "done"}])
+    check(appmod.work_plans.block(cid) == "", "a finished plan is not re-sent: it would tell later turns to stop calling tools")
+    check("desk_done" in appmod.work_plans.block(cid, desk=True), "a desk's finished plan still says to deliver")
     appmod.work_plans.clear(cid)
     check(appmod.work_plans.get(cid) is None and appmod.work_plans.block(cid) == "", "clearing removes the plan and its block")
 
@@ -136,6 +139,7 @@ def test_plan_is_reinjected_last_every_round() -> None:
     events = run_chat(cid)
 
     check(len(SEEN) == 3, f"three rounds were streamed, got {len(SEEN)}")
+    check(appmod._request_extra.get(cid, 0) > 1000, "the turn's tool schemas and hints are measured for the next compaction check")
     check(not plan_messages(SEEN[0]), "round 1 has no plan: none existed yet")
     for r in (1, 2):
         msgs = SEEN[r]
@@ -155,7 +159,7 @@ def test_plan_is_reinjected_last_every_round() -> None:
 def test_user_edit_of_the_plan_reaches_the_next_round() -> None:
     cid = new_conv()
     appmod.work_plans.set(cid, [{"text": "Step one", "status": "pending"}])
-    appmod.work_plans.set(cid, [{"text": "Step one", "status": "done", "note": "user ticked it"}])
+    appmod.work_plans.set(cid, [{"text": "Step one", "status": "done", "note": "user ticked it"}, {"text": "Step two", "status": "pending"}])
     SEEN.clear()
     ROUNDS[:] = [{"text": "ok", "calls": []}]
     run_chat(cid, "carry on")
@@ -305,6 +309,17 @@ def test_render_returns_the_handle_id_and_small_results_stay_inline() -> None:
     content, rid = appmod.tool_results.render(cid, "m1", "fs_read", big_result)
     check(rid and json.loads(content)["result_id"] == rid, "a big result is stored and its handle id comes back")
     check(appmod.tool_results.for_model(cid, "m1", "fs_read", {"a": 1}) == _dumps({"a": 1}), "for_model is the first element of render")
+
+
+def test_a_call_id_reused_from_an_earlier_turn_is_rewritten() -> None:
+    """A provider that numbers ids per turn must not put two calls with one id into a request."""
+    cid = new_conv()
+    for _ in range(2):
+        SEEN.clear()
+        ROUNDS[:] = [{"text": "checking", "calls": [call("c1", "current_time", {})]}, {"text": "done", "calls": []}]
+        run_chat(cid)
+    ids = [tc["id"] for m in SEEN[-1] for tc in (m.get("tool_calls") or [])]
+    check(len(ids) == 2 and len(set(ids)) == 2, f"call ids in one request are unique, got {ids}")
 
 
 def test_the_handle_id_reaches_the_stored_event_and_the_next_turn() -> None:

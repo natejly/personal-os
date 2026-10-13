@@ -106,6 +106,26 @@ class MimeTests(Base):
         self.assertEqual(out["attachments"], ["f.txt"])
         raw = next(iter(self.server.drafts.values()))["message"]["raw"]
         self.assertEqual([p.get_filename() for p in _parsed(raw).walk() if p.get_filename()], ["f.txt"])
+        self.assertEqual(self.server.uploads, 0)  # small mail stays inline
+
+    def test_a_large_message_goes_up_as_media(self) -> None:
+        """Gmail refuses an inline JSON body over about 5 MB, well under the 25 MB attachment limit."""
+        big = self.items(self.upload("big.pdf", size=6 * MB))
+        out = self.g.gmail_send("a@example.com", "Big", "b", attachments=big)
+        self.g.gmail_draft("a@example.com", "Big", "b", attachments=big)
+        self.assertEqual(self.server.uploads, 2)
+        parts = [p.get_filename() for p in _parsed(self.server.messages[out["sent"]]["raw"]).walk() if p.get_filename()]
+        self.assertEqual(parts, ["big.pdf"])
+
+    def test_a_send_gmail_refuses_is_not_sent_and_an_unknown_one_is_not_masked(self) -> None:
+        from fake_google_api import ApiError
+
+        self.server.send_error = ApiError(429, "User-rate limit exceeded")
+        with self.assertRaises(NotSent):
+            self.g.gmail_send("a@example.com", "s", "b")
+        self.server.send_error = ApiError(503, "backendError")
+        with self.assertRaises(ApiError):  # 5xx: the mail may have gone, so it is not "not sent"
+            self.g.gmail_send("a@example.com", "s", "b")
 
 
 class LimitTests(Base):

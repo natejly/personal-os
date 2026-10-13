@@ -40,8 +40,12 @@ tar -xzf "$CACHE/$NAME" -C "$OUT"   # -> $OUT/python
 PY="$OUT/python/bin/python3"
 
 # Non-editable install of the backend plus the macOS (mac), whistle and charts extras. The backend never imports
-# LiteLLM; it only talks to a proxy over HTTP, so nothing LiteLLM-shaped is bundled.
-uv pip install --python "$PY" --reinstall-package grain-backend "$ROOT/backend[mac,whistle,charts]"
+# LiteLLM; it only talks to a proxy over HTTP, so nothing LiteLLM-shaped is bundled. Dependency versions come
+# from backend/uv.lock (the ones the tests ran against); --locked fails if pyproject changed without a relock.
+uv export --project "$ROOT/backend" --locked --no-dev --extra mac --extra whistle --extra charts --no-emit-project \
+  -q -o "$CACHE/requirements.txt"
+uv pip install --python "$PY" -r "$CACHE/requirements.txt"
+uv pip install --python "$PY" --no-deps --reinstall-package grain-backend "$ROOT/backend"
 
 # The standalone build's console scripts carry absolute shebangs into this build dir; nothing uses
 # them (the app runs `python -m personal_os`), so drop them.
@@ -49,11 +53,12 @@ find "$OUT/python/bin" -type f ! -name 'python*' -delete
 rm -f "$OUT/python/bin/python3-config" "$OUT/python/bin/python3.12-config"
 find "$OUT/python" -type l ! -exec test -e {} \; -delete   # dangling links (idle3, pydoc3, ...)
 
-# Shrink: caches, tests, docs, headers, unused stdlib GUI/test packages.
+# Shrink: caches, tests, docs, headers, unused stdlib GUI/test packages. ensurepip stays: without uv on PATH,
+# envs.py builds the work venv with `python -m venv`, which needs it.
 SP="$OUT/python/lib/python3.12"
 find "$OUT" -name '__pycache__' -type d -prune -exec rm -rf {} +
 find "$SP/site-packages" -type d \( -name tests -o -name test -o -name testing \) -prune -exec rm -rf {} + 2>/dev/null || true
-rm -rf "$SP/test" "$SP/idlelib" "$SP/tkinter" "$SP/turtledemo" "$SP/lib2to3" "$SP/ensurepip" \
+rm -rf "$SP/test" "$SP/idlelib" "$SP/tkinter" "$SP/turtledemo" "$SP/lib2to3" \
        "$OUT/python/include" "$OUT/python/share" "$SP/config-3.12-darwin"
 rm -rf "$SP/site-packages/pip" "$SP"/site-packages/pip-*
 # matplotlib ships sample data and test images; the backend only renders charts.
@@ -75,7 +80,7 @@ fi
 
 # Smoke test from a neutral cwd so a stray source tree cannot mask a missing install.
 SMOKE="$(mktemp -d)"
-(cd / && PYTHONDONTWRITEBYTECODE=1 PERSONAL_OS_DATA_DIR="$SMOKE" "$PY" -c "import personal_os.app, personal_os.__main__; print('bundle ok:', personal_os.__file__)")
+(cd / && PYTHONDONTWRITEBYTECODE=1 PERSONAL_OS_DATA_DIR="$SMOKE" "$PY" -c "import personal_os.app, personal_os.__main__, ensurepip; print('bundle ok:', personal_os.__file__)")
 rm -rf "$SMOKE"
 # Precompile now: the app runs with PYTHONDONTWRITEBYTECODE so nothing writes into the signed bundle.
 # unchecked-hash: packaging resets every source file's mtime, which makes timestamp-checked .pyc files stale in the

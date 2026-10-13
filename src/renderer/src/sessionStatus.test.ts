@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { ChatEvent, Conversation, Message, RunInfo, Span, ToolEvent } from '@shared/types'
-import { chatNotice, finishNotice, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals } from './sessionStatus'
+import { chatNotice, fetchedStatus, finishNotice, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals } from './sessionStatus'
 
 const ev = (event: string, data: Record<string, unknown> = {}): ChatEvent => ({ event, data }) as unknown as ChatEvent
 const done = (error: string | null, stopped = false): ChatEvent => ev('done', { id: 'm1', error, context_used: null, tool_events: [], trace: [], stopped })
@@ -273,4 +273,18 @@ test('finishNotice: once, when a chat or desk run replies or fails; never for a 
   assert.equal(finishNotice(live, run({ kind: 'desk', answering: false, replied: true })), 'reply')
   assert.equal(finishNotice(live, run({ kind: 'job', answering: false, replied: true })), null)
   assert.equal(finishNotice(live, run({ kind: 'worker', answering: false, replied: true })), null)
+})
+
+
+test('a done that parks with a card still open leaves the session waiting on the user', () => {
+  assert.equal(reduceStatus('needs-approval', done(null), 1), 'needs-approval')
+  assert.equal(reduceStatus('working', done('boom'), 1), 'error')
+  assert.equal(finishStatus('needs-approval', 1), 'needs-approval')
+})
+
+test('a fetched transcript sets the approval verdict', () => {
+  assert.equal(fetchedStatus('idle', 2, false), 'needs-approval')
+  assert.equal(fetchedStatus('needs-approval', 0, false), 'idle')
+  assert.equal(fetchedStatus('needs-approval', 0, true), 'working')
+  assert.equal(fetchedStatus('done', 0, false), 'done')
 })

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, powerMonitor, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, crashReporter, dialog, Menu, powerMonitor, shell, systemPreferences } from 'electron'
 import { existsSync, statSync, writeFileSync } from 'fs'
 import { basename, join, resolve, sep } from 'path'
 import { isOpenable } from '../shared/openable'
@@ -18,7 +18,7 @@ import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListen
 import { registerShortcuts } from './shortcuts'
 import { createTray } from './tray'
 import { chromeTheme, platform, setChromeTheme } from './platform'
-import { startUpdater } from './updater'
+import { checkForUpdatesNow, offerMoveToApplications, startUpdater } from './updater'
 import { registerSystemAccess } from './systemAccess'
 import { registerTerminals } from './terminals'
 import { background, goBackground, reveal } from './background'
@@ -46,6 +46,8 @@ for (const legacy of userDataOverride ? [] : ['personal-os', 'Personal OS']) {
 // <userData>/logs in dev. The backend writes its own backend.log into the same folder (PERSONAL_OS_LOG_DIR).
 initLogs(app.isPackaged ? app.getPath('logs') : join(app.getPath('userData'), 'logs'))
 hookConsole()
+// Native crashes in main, GPU or renderer leave a minidump in app.getPath('crashDumps'); nothing is uploaded.
+crashReporter.start({ uploadToServer: false })
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -331,6 +333,7 @@ function buildMenu(): void {
         item('help'),
         { label: 'Using Grain', click: () => sendMenu('help:guide') },
         { type: 'separator' },
+        { label: 'Check for Updates…', click: () => void checkForUpdatesNow() },
         { label: 'Open Logs', click: () => void (logDir() ? shell.openPath(logDir()) : undefined) }
       ]
     }
@@ -354,6 +357,7 @@ if (!gotLock) app.quit()
 else app.on('second-instance', () => { if (app.isReady()) showMain() })
 
 if (gotLock) app.whenReady().then(async () => {
+  await offerMoveToApplications()
   goBackground()
   servePreviews()
   registerAgentBrowserIpc()
@@ -433,16 +437,18 @@ if (gotLock) app.whenReady().then(async () => {
     if (item) item.checked = on
   })
   createTray(showMain)
+  // Before the backend: its import and startup hooks take seconds, and the renderer shows its boot logo until the
+  // 'ready' state (store.init waits on it). Everything below that needs the backend still waits for it.
+  createWindow()
   try {
     await startBackend()
   } catch (e) {
     console.error('[main] backend failed to start:', (e as Error).message)
   }
   await startPageBridge() // open_page's offscreen loader; registers itself with the backend
-  // After the backend, so the stored accelerator wins over the default; still before any renderer exists.
+  // After the backend, so the stored accelerator wins over the default. The renderer only asks for it from Settings.
   const stored = await storedShortcuts()
   registerShortcuts(() => win, stored.gather, stored.capture, stored.ask)
-  createWindow()
   void restorePopouts()
   startUpdater()
   powerMonitor.on('resume', nudgeScheduler)

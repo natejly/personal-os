@@ -10,8 +10,9 @@ import type { BackendInfo } from '@shared/types'
 let push: ((i: BackendInfo) => void) | null = null
 let statusCalls = 0
 let statusUrl: string | null = null
+let starting = false
 const info = (state: BackendInfo['state'], error: string | null = null): BackendInfo =>
-  ({ state, url: '', error, restarts: [], logDir: '', appVersion: '0', electron: '0' })
+  ({ state, url: '', error, restarts: [], logDir: '', appVersion: '0', electron: '0', packaged: false })
 
 ;(globalThis as unknown as { window: unknown }).window = {
   os: {
@@ -22,12 +23,25 @@ const info = (state: BackendInfo['state'], error: string | null = null): Backend
     },
     backendStatus: async () => {
       statusCalls++
-      return { url: statusUrl, error: statusUrl ? null : 'Backend not running' }
+      return { url: statusUrl, error: statusUrl ? null : 'Backend not running', starting }
     },
     backendToken: async () => '',
     restartBackend: async () => info('ready')
   }
 }
+
+test('while the first start is still running, init keeps the boot logo instead of the error screen', async () => {
+  starting = true
+  await useStore.getState().init()
+  assert.equal(useStore.getState().ready, false)
+  assert.equal(useStore.getState().backendError, null)
+  starting = false
+  statusUrl = null
+  push!(info('ready'))
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(statusCalls, 2, "'ready' after a start the window waited out runs init again")
+  statusCalls = 0
+})
 
 test('restarting is only a state; failed shows the error; ready re-runs init when nothing had loaded', async () => {
   await useStore.getState().init()
@@ -50,6 +64,24 @@ test('restarting is only a state; failed shows the error; ready re-runs init whe
 test('restartBackend asks the main process and applies its answer', async () => {
   await useStore.getState().restartBackend()
   assert.equal(useStore.getState().backendState, 'ready')
+})
+
+test('a window opened while the backend starts waits on the boot screen, then loads on ready', async () => {
+  const os = (globalThis as unknown as { window: { os: Record<string, unknown> } }).window.os
+  os.backendInfo = async () => info('starting')
+  try {
+    useStore.setState({ ready: false, backendError: null })
+    const before = statusCalls
+    await useStore.getState().init()
+    assert.equal(statusCalls, before, 'no status check, no error screen while starting')
+    assert.equal(useStore.getState().ready, false)
+    delete os.backendInfo
+    push!(info('ready'))
+    await new Promise((r) => setTimeout(r, 0))
+    assert.equal(statusCalls, before + 1, 'ready ran init for real')
+  } finally {
+    delete os.backendInfo
+  }
 })
 
 // Last: module-level `inited` / `loadedOnce` are shared across the file.

@@ -11,7 +11,7 @@ One dialog, `HelpOverlay`, with two sections and one search box.
 - ⌘/ (Help → Keyboard Shortcuts…), or ? when no text field has focus.
 - Help → Using Grain opens it on the guide.
 - Command palette: "Help and keyboard shortcuts", "Using Grain".
-- Settings → Behavior → Shortcuts → Show all shortcuts; Settings → Data → Support → Help.
+- Settings → General → Shortcuts → Show all shortcuts; Settings → Advanced → Data → Diagnostics → Help.
 
 ## The registry
 

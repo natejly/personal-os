@@ -30,7 +30,7 @@ export default function DataSettings(): JSX.Element {
   }
 
   const restore = async (name: string, when: string): Promise<void> => {
-    if (!window.confirm(`Restore the backup from ${when}?\n\nGrain will replace your current data with it the next time it starts. Your current data is saved as a backup first, so this can be undone. Nothing changes until you restart.`)) return
+    if (!window.confirm(`Restore the backup from ${when}?\n\nGrain will replace your chats, notes, memory and settings with it the next time it starts. Your current data is saved as a backup first, so this can be undone. Uploaded files and chat outputs are not part of a backup: any deleted since then stay deleted. Nothing changes until you restart.`)) return
     try {
       await api.data.restore(name)
       void refresh()
@@ -89,6 +89,12 @@ export default function DataSettings(): JSX.Element {
         <div className="data-row pending" role="alert">
           <span className="toggle-text"><b>The last restore was not applied</b><small>The restore staged before the last start could not be applied ({info.restore_failed.error}), so your data was left as it was.</small></span>
           <button className="ghost-btn" onClick={() => void cancelRestore()}>Dismiss</button>
+        </div>
+      )}
+
+      {(info?.schema_drift?.length ?? 0) > 0 && (
+        <div className="data-row pending" role="alert">
+          <span className="toggle-text"><b>Your data was changed by a different version of Grain</b><small>{info?.schema_drift?.join('; ')}. Some features may fail until you update Grain or restore a backup made before then.</small></span>
         </div>
       )}
 

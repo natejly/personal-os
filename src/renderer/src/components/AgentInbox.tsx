@@ -7,6 +7,7 @@
  * proposals (GET /inbox) — never from the assistant's prose. A run's own report is shown as the body of
  * its card, but no number, badge or state is read out of that text.
  */
+import { useShallow } from 'zustand/react/shallow'
 import { splitReport } from '../lib/report'
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Archive, ArchiveRestore, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Rocket, Timer, Trash2, Users, Wrench, X } from '../icons'
@@ -25,6 +26,7 @@ import { AgentRunCard } from './ToolEvents'
 import { ShipChecklistView } from './toolcards/ShipChecklistCard'
 import { TOOL_CARDS } from './toolcards'
 import type { ShipChecklist } from '@shared/types'
+import ErrorState from './ErrorState'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 export const fmtWhen = (ts: number): string => {
@@ -407,7 +409,7 @@ function ToolPicker({ value, onChange }: { value: string[]; onChange: (next: str
 }
 
 export function JobRow({ job }: { job: Job }): JSX.Element {
-  const { setJobEnabled, runJobNow, deleteJob, refreshJobs, selectChat, toast } = useStore()
+  const { setJobEnabled, runJobNow, deleteJob, refreshJobs, selectChat, toast } = useStore(useShallow((s) => ({ setJobEnabled: s.setJobEnabled, runJobNow: s.runJobNow, deleteJob: s.deleteJob, refreshJobs: s.refreshJobs, selectChat: s.selectChat, toast: s.toast })))
   const openAgent = useStore((s) => s.openAgent)
   const agent = useStore((s) => (job.agent_id ? s.agentDefs.custom.find((d) => d.id === job.agent_id) : undefined))
   const openJobAgent = async (): Promise<void> => {
@@ -704,7 +706,7 @@ function SchedulePicker({ value, onChange, timezone }: { value: Schedule; onChan
  * one: only the changed fields are sent. A spent one-off is offered a new time to run again at. */
 /** `agentId` makes it a routine of that agent: every fire runs as it, so a desk is not offered. */
 export function NewTask({ onDone, job, agentId }: { onDone: () => void; job?: Job; agentId?: string }): JSX.Element {
-  const { createJob, updateJob } = useStore()
+  const { createJob, updateJob } = useStore(useShallow((s) => ({ createJob: s.createJob, updateJob: s.updateJob })))
   const spent = !!job && job.kind === 'once' && job.last_fired_at !== null && job.next_due_at === null
   const [f, setF] = useState(job
     ? { ...BLANK, name: job.name, prompt: job.prompt, mode: job.kind === 'cron' ? 'repeat' as const : job.kind === 'mail' ? 'mail' as const : job.kind === 'calendar' ? 'calendar' as const : 'once' as const, when: job.run_at && !spent ? toLocalInput(job.run_at) : '', query: (job.kind === 'calendar' ? job.calendar_query : job.mail_query) ?? '', mins: String(job.minutes_before ?? 15), onlyChange: !!job.only_on_change }
@@ -823,7 +825,7 @@ export function NewTask({ onDone, job, agentId }: { onDone: () => void; job?: Jo
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, goToDesk, selectChat, setLibraryTab, markDeskSeen, markInboxRunSeen, rejectJobProposals, clearInbox, archiveInboxRun } = useStore()
+  const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, goToDesk, selectChat, setLibraryTab, markDeskSeen, markInboxRunSeen, rejectJobProposals, clearInbox, archiveInboxRun } = useStore(useShallow((s) => ({ refreshJobs: s.refreshJobs, setJobEnabled: s.setJobEnabled, setView: s.setView, openFiles: s.openFiles, openDoc: s.openDoc, goToDesk: s.goToDesk, selectChat: s.selectChat, setLibraryTab: s.setLibraryTab, markDeskSeen: s.markDeskSeen, markInboxRunSeen: s.markInboxRunSeen, rejectJobProposals: s.rejectJobProposals, clearInbox: s.clearInbox, archiveInboxRun: s.archiveInboxRun })))
   const [showArchived, setShowArchived] = useState(false)
   const [archivedRuns, setArchivedRuns] = useState<ArchivedInboxRun[]>([])
   const [archivedQ, setArchivedQ] = useState('')
@@ -834,8 +836,12 @@ export default function AgentInbox(): JSX.Element | null {
   const [showJobs, setShowJobs] = useState(false)
   const [adding, setAdding] = useState(false)
   useEffect(() => { void refreshJobs() }, [refreshJobs])  // once, so the Scheduled count is real before it is opened
+  // refreshAgentInbox swallows its error, so a read that ends with no inbox is the failure signal.
+  const [tried, setTried] = useState(false)
+  const loadInbox = (): void => { setTried(false); void useStore.getState().refreshAgentInbox().finally(() => setTried(true)) }
+  useEffect(() => { if (!box) loadInbox() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!box) return null
+  if (!box) return tried ? <ErrorState message="the agent inbox" onRetry={loadInbox} /> : <p className="muted">Loading…</p>
   const { approvals, proposals } = box.needs_you
   const paused = box.needs_you.paused_jobs ?? []
   // A desk waiting on an approval is already a row above with Allow/Deny, so its desk event is dropped.

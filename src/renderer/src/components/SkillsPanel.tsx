@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Check, ChevronDown, ChevronRight, Download, Eye, Globe, Plus, Sparkles, Trash2, Undo2, Upload, X } from '../icons'
 import { useStore } from '../store'
 import type { Skill, SkillFinding, SkillPreview } from '@shared/types'
@@ -79,7 +80,7 @@ export function ConfirmDelete({ label, onDelete }: { label: string; onDelete: ()
 }
 
 function SkillRow({ skill }: { skill: Skill }): JSX.Element {
-  const { updateSkill, deleteSkill, toast } = useStore()
+  const { updateSkill, deleteSkill, toast } = useStore(useShallow((s) => ({ updateSkill: s.updateSkill, deleteSkill: s.deleteSkill, toast: s.toast })))
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<SkillText | null>(null)
 
@@ -112,7 +113,7 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <span className="skill-name">{skill.name}</span>
         <span className="skill-desc muted">{skill.description}</span>
-        <ProjectChip projectId={skill.project_id} showPersonal />
+        {skill.source !== 'builtin' && <ProjectChip projectId={skill.project_id} showPersonal />}
         <small className="muted" title={skill.source === 'builtin' ? 'Part of Grain: revoke it to stop using it, it cannot be deleted' : undefined}>{SOURCE_LABEL[skill.source] ?? skill.source}</small>
         {!!skill.use_count && <small className="muted" title="Times the assistant read this skill">used {skill.use_count}×</small>}
         <div className="skill-actions no-drag" onClick={(e) => e.stopPropagation()}>
@@ -122,7 +123,7 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
               onClick={() => void updateSkill(skill.id, { status: 'approved' })}><Check size={13} /> Approve</button>
           )}
           {skill.status === 'approved' && (
-            <button className="ghost-btn sm" title="Stop injecting this skill"
+            <button className="ghost-btn sm" title={skill.source === 'builtin' ? 'Part of Grain: revoke it to stop using it, it cannot be deleted' : 'Stop injecting this skill'}
               onClick={() => void updateSkill(skill.id, { status: 'candidate' })}><Undo2 size={13} /> Revoke</button>
           )}
           {skill.status === 'candidate' && (
@@ -155,7 +156,7 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
 
 export default function SkillsPanel(): JSX.Element {
   const skills = useStore((s) => s.skills)
-  const { createSkill, refreshSkills, toast } = useStore()
+  const { createSkill, refreshSkills, toast } = useStore(useShallow((s) => ({ createSkill: s.createSkill, refreshSkills: s.refreshSkills, toast: s.toast })))
   const [adding, setAdding] = useState(false)
   const [importing, setImporting] = useState(false)
   const [mdText, setMdText] = useState('')

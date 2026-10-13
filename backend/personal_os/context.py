@@ -113,12 +113,19 @@ def cite_ref(h: dict[str, Any], n: int) -> dict[str, Any]:
 CITE_TEXT_KEEP = 400  # what a saved citation keeps of its chunk (repos.finish_message saves cite_slim)
 
 
+PROMPT_KEYS = ("system_prompt", "stable_system", "volatile_blocks")  # live-only: request_log keeps the exact request
+
+
 def cite_slim(used: dict[str, Any] | None) -> dict[str, Any] | None:
-    """The copy a streamed event carries (and the run tape journals): excerpts trimmed as the saved row will be.
-    The live dict always keeps the full text, so every cite_check on it sees whole excerpts."""
-    if not used or not used.get("chunks"):
+    """The copy a streamed event carries, the run tape journals and the messages row saves: excerpts trimmed and the
+    assembled prompt dropped (tens of KB a turn, never read back). The live dict keeps both, so every cite_check on it
+    sees whole excerpts and later rounds can rebuild the prompt."""
+    if not used:
         return used
-    return {**used, "chunks": [{**r, "text": str(r.get("text") or "")[:CITE_TEXT_KEEP]} for r in used["chunks"]]}
+    out = {k: v for k, v in used.items() if k not in PROMPT_KEYS}
+    if used.get("chunks"):
+        out["chunks"] = [{**r, "text": str(r.get("text") or "")[:CITE_TEXT_KEEP]} for r in used["chunks"]]
+    return out
 _STOP = frozenset("a an and are as at be been but by can did do does for from had has have he her his i if in into is it its "
                   "me my no not of on or our she so than that the their them then there these they this to was we were what "
                   "when which who will with would you your".split())
@@ -308,8 +315,7 @@ def build_context(
                 used["profile"] = [{"id": m["id"], "content": m["content"], "project_id": m["project_id"], "pinned": bool(m["pinned"])}
                                    for m, _ in rows[:len(rows) - n]]
 
-    map_at = len(parts)  # the workspace map goes here, once retrieval has shown how much room it has
-    retrieved = {"memories": 0, "graph": 0, "chunks": 0}  # estimated tokens of the blocks retrieval added this turn
+    map_at = len(parts)  # the workspace map goes here, right after the standing preferences
 
     if page:
         block = page_block(page)
@@ -334,7 +340,6 @@ def build_context(
                 lines.append(_omitted(n, True))
                 trimmed["memories"] = n
             volatile.append(head + "\n".join(lines))
-            retrieved["memories"] = estimate_tokens(volatile[-1])
             used["memories"] = [{"id": m["id"], "content": m["content"], "project_id": m["project_id"]} for m in mems]
 
     if conv_settings.get("useGraph", True):
@@ -351,7 +356,6 @@ def build_context(
                 if n:
                     kept.append(_omitted(n))
                 volatile.append(head + "\n".join(kept))
-                retrieved["graph"] = estimate_tokens(volatile[-1])
                 ids = {i for e in edges for i in (e["source_id"], e["target_id"])}
                 # The user's node and value nodes are listed too, so the drawer can label an edge's ends; "kind" marks them.
                 used["nodes"] = [{"id": x["id"], "label": x["label"], "type": x["type"],
@@ -386,8 +390,8 @@ def build_context(
             if n:
                 items.append(_omitted(n))
                 trimmed["pinned"] = n
-            if shown:
-                volatile.append(head + "\n\n".join(items))
+            if shown:  # the same every turn, whatever the query: cached prefix, not the per-turn block
+                parts.append(head + "\n\n".join(items))
                 used["pinned"] = [{"document_id": d["document_id"], "name": d["name"]} for d in shown]
                 used["chunks"] = [{**r, "n": i} for i, r in enumerate(shown, 1)]
             hits = [h for h in hits if h["document_id"] not in {d["id"] for d in pins}]
@@ -402,7 +406,6 @@ def build_context(
                 blocks.append(_omitted(n))
                 trimmed["chunks"] = n
             volatile.append(head + "\n\n".join(blocks))
-            retrieved["chunks"] = estimate_tokens(volatile[-1])
             used["chunks"] += [cite_ref(h, i) for i, h in enumerate(hits, first)]
 
     # Procedural memory. Only skills the user approved by hand are ever injected, and the block says so
@@ -456,13 +459,13 @@ def build_context(
         from . import context_map
 
         try:
-            cap, shrunk = context_map.cap_tokens(shares, retrieved)
-            text, info = context_map.build_stable(db, project_id=project_id, switches=context_map.resolve_switches(settings, conv_settings), cap=cap)
+            text, info = context_map.build_stable(db, project_id=project_id, switches=context_map.resolve_switches(settings, conv_settings),
+                                                  cap=context_map.cap_tokens(shares))
         except Exception:  # noqa: BLE001 - the map is an aid: a failed read leaves the prompt without it
-            text, info, shrunk = "", {}, False
+            text, info = "", {}
         if text:
             parts.insert(map_at, text)
-            used["map"] = context_map.used_stable(text, info, shrunk)
+            used["map"] = context_map.used_stable(text, info)
             if info.get("trimmed"):
                 trimmed["map"] = sum(info["trimmed"].values())
 

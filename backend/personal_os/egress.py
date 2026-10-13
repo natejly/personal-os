@@ -12,7 +12,9 @@ and writes its contacted / blocked report to a file the host reads back. Binding
 about the checks below: no token, no tunnel, and IP literals and private addresses stay refused.
 
 What it speaks: HTTP `CONNECT host:port` tunnels and plain-HTTP absolute-URI requests. No TLS interception (the
-tunnel is opaque bytes, so nothing here can read or alter what a command sends), no SOCKS. Only ports 80 and 443.
+tunnel is opaque bytes, so nothing here can read or alter what a command sends, and the TLS name or Host inside a
+tunnel cannot be checked against the CONNECT name), no SOCKS. Only ports 80 and 443. A plain-HTTP request is sent on
+with the vetted name as its Host.
 
 The checks that matter, in order: the name must match the run's allowed set (exact host or a subdomain on a dot
 boundary); it must not be an IP literal; every address it resolves to must be a public one (no loopback, private,
@@ -283,8 +285,11 @@ class Egress:
                     writer.write(f"{version} 200 Connection established\r\n\r\n".encode())
                     await writer.drain()
                 else:
+                    # Host is the vetted name, never the client's: a shared front end routes by Host, so a client's
+                    # own Host would reach a site the allowlist never saw.
                     kept = [ln for ln in headers if ln.split(":", 1)[0].strip().lower() not in
-                            ("proxy-authorization", "proxy-connection", "connection")]
+                            ("proxy-authorization", "proxy-connection", "connection", "host")]
+                    kept.insert(0, f"Host: {host}" + (f":{port}" if port != 80 else ""))
                     up_w.write((f"{method} {path} {version}\r\n" + "\r\n".join(kept + ["Connection: close"]) + "\r\n\r\n").encode("latin-1"))
                     await up_w.drain()
                 await self._pipe(reader, writer, up_r, up_w, token or "")

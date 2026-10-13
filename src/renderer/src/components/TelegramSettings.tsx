@@ -131,7 +131,7 @@ export default function TelegramSettings({ draft, patch }: { draft: Settings; pa
         </div>
       )}
 
-      <Switch title="Message me when long runs finish or need approval" help="Covers chat runs you started in the app, once they take at least this long." checked={!!draft.telegramNotifyLongRuns} onChange={(v) => patch({ telegramNotifyLongRuns: v })} />
+      <Switch title="Message me when long runs finish or need approval" help="Finish notices cover chat runs you started in the app that take at least this long. Approval requests from any chat are texted right away." checked={!!draft.telegramNotifyLongRuns} onChange={(v) => patch({ telegramNotifyLongRuns: v })} />
       {draft.telegramNotifyLongRuns && (
         <label><span>Minutes before a run counts as long</span>
           <NumberField name="telegramLongRunMinutes" value={draft.telegramLongRunMinutes ?? 3} fallback={1} onChange={(telegramLongRunMinutes) => patch({ telegramLongRunMinutes })} />

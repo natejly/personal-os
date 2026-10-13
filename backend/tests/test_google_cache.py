@@ -24,7 +24,7 @@ class _Req:
     def __init__(self, result: Any):
         self._result = result
 
-    def execute(self) -> Any:
+    def execute(self, **_kw: Any) -> Any:
         return self._result
 
 
@@ -428,6 +428,22 @@ class IncrementalTests(unittest.TestCase):
         self.assertIn("updatedMin", events.calls[-1])
         # The quiet second page must not have been a per-event refetch.
         self.assertEqual(events.counts.get("get", 0), 0)
+
+    def test_a_refused_edit_keeps_the_event_on_the_grid(self) -> None:
+        event = {"id": "e1", "summary": "Standup", "start": {"dateTime": _soon(1)}, "end": {"dateTime": _soon(2)}}
+        events = _RecordingEvents([event])
+
+        def refused(**_kw: Any) -> _Req:
+            raise RuntimeError("403 forbidden: reader only")
+
+        events.patch = refused  # type: ignore[attr-defined]
+        g = _google(events)
+        g.calendar_events(days=7)
+        with self.assertRaises(RuntimeError):
+            g.calendar_update("e1", {"summary": "Moved"})
+        g.invalidate("calendar")  # the next read after the minute-scale cache
+        self.assertEqual([e["id"] for e in g.calendar_events(days=7)], ["e1"])
+        self.assertIn("updatedMin", events.calls[-1])  # the incremental read alone still has it
 
     def _two(self) -> tuple[dict[str, Any], dict[str, Any]]:
         return (

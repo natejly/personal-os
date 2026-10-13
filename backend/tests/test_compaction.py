@@ -129,6 +129,12 @@ check(stored == f"the key is {pat}", "the transcript still has the token")
 bad = make_conv(40)
 hb, infob = run(compaction.prepare_history(compactor, convos, CFG, "m", bad, 100, complete=boom))
 check(hb == convos.history(bad) and not infob["compacted"] and compactor.get(bad) is None, "failure falls back to full history")
+check(compaction.needs_compaction(compactor, convos, CFG, bad, 100) is False, "after a failure the chat is not announced as compacting")
+_, infob = run(compaction.prepare_history(compactor, convos, CFG, "m", bad, 100, complete=stub))
+check(not infob["compacted"] and compactor.get(bad) is None, "after a failure the next turn does not wait on the summarizer again")
+compaction._failed_at.pop(bad)
+_, infob = run(compaction.prepare_history(compactor, convos, CFG, "m", bad, 100, complete=stub))
+check(infob["compacted"], "once the pause is over it compacts again")
 # a failure with a summary already on file keeps that summary + the recent tail, not the raw transcript
 prior = make_conv(40)
 run(compaction.prepare_history(compactor, convos, CFG, "m", prior, 100, complete=stub))
@@ -163,6 +169,9 @@ for i, c in enumerate(contents):
 msgs.append({"role": "system", "content": "## Your current plan\n" + "p" * 500})
 before = [dict(m) for m in msgs]
 check(compaction.microcompact(msgs, 3, 10000, 0.9) == (0, 0), "below threshold no-op")
+n, saved = compaction.microcompact(msgs, 3, 10000, 0.9, fixed_tokens=10000)  # the tool schemas push it over
+check(n == 3, "tool schemas outside the messages count toward the threshold")
+msgs[:] = [dict(m) for m in before]
 n, saved = compaction.microcompact(msgs, 3, 100, 0.5)
 tools = [m for m in msgs if m["role"] == "tool"]
 cleared = [json.loads(m["content"]).get("cleared") for m in tools]

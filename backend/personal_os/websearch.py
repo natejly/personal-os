@@ -201,13 +201,21 @@ async def search(cfg: dict[str, Any], query: str, want: int, time_range: str = "
                  allowed_domains: list[str] | None = None, blocked_domains: list[str] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """(rows, meta). meta: engines_used, failed{provider: first error line}, time_range_ignored / time_range_note.
 
-    allowed_domains / blocked_domains filter the merged rows; setting both is an error raised before any engine is called."""
+    allowed_domains restricts the query to those sites, and both filter the merged rows; setting both is an error raised before any engine is called."""
     if allowed_domains and blocked_domains:
         raise ValueError("set allowed_domains or blocked_domains, not both")
     allow, block = _hosts(allowed_domains), _hosts(blocked_domains)
     if allow or block:
+        if allow and not site:  # restrict at the engine: a general search filtered afterwards is usually empty
+            if len(allow) == 1:
+                site = allow[0]
+            else:
+                query = f"{query} ({' OR '.join('site:' + d for d in allow)})"
         rows, meta = await search(cfg, query, want, time_range, site)
-        return filter_domains(rows, allow, block), meta
+        kept = filter_domains(rows, allow, block)
+        if rows and not kept:
+            meta["note"] = "no results on these domains; try a broader query"
+        return kept, meta
     tr = (time_range or "").strip().lower()
     if tr and tr not in TIME_RANGES:
         raise ValueError(f"time_range must be one of {', '.join(TIME_RANGES)}")

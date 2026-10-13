@@ -386,6 +386,11 @@ class Docs:
         st = c.execute("SELECT hash FROM doc_chunk_state WHERE doc_id=?", (doc_id,)).fetchone()
         if st and st["hash"] == digest:
             return False
+        # Vectors of chunks whose embedded text (title > heading path, body; no blurb) is unchanged carry over to the
+        # new rows, so an edit re-embeds only the chunks it touched and the rest of the doc stays in vector search.
+        keep = {r["ctx"]: r for r in c.execute(
+            """SELECT f.text AS ctx, e.model, e.dim, e.vec FROM doc_chunks ch JOIN doc_chunks_fts f ON f.chunk_id=ch.id
+               JOIN doc_chunk_embeddings e ON e.chunk_id=ch.id WHERE ch.doc_id=? AND ch.blurb=''""", (doc_id,))}
         c.execute("DELETE FROM doc_chunks_fts WHERE doc_id=?", (doc_id,))
         c.execute("DELETE FROM doc_chunks WHERE doc_id=?", (doc_id,))  # cascades the vectors
         try:
@@ -396,6 +401,9 @@ class Docs:
             cid = new_id()
             c.execute("INSERT INTO doc_chunks(id,doc_id,idx,heading,text) VALUES(?,?,?,?,?)", (cid, doc_id, i, ch.heading_str, ch.text))
             c.execute("INSERT INTO doc_chunks_fts(text, chunk_id, doc_id) VALUES(?,?,?)", (ch.ctx, cid, doc_id))
+            if (old := keep.get(ch.ctx)) is not None:
+                c.execute("INSERT INTO doc_chunk_embeddings(chunk_id,doc_id,model,dim,vec) VALUES(?,?,?,?,?)",
+                          (cid, doc_id, old["model"], old["dim"], old["vec"]))
         c.execute("INSERT OR REPLACE INTO doc_chunk_state(doc_id, hash) VALUES(?,?)", (doc_id, digest))
         if self.on_chunks and chunks:
             try:
@@ -484,6 +492,7 @@ class Docs:
                 "SELECT * FROM doc_revisions WHERE doc_id=? AND status='pending' ORDER BY created_at", (id,)).fetchall()]
         _parse_typography(d)
         d["words"] = word_count(d["content"])
+        d["tags"] = sorted(extract_tags(d["content"]))  # as list() reports them, so a saved doc can patch its row
         d["pending"] = [self._rev_view(r, d["content"]) for r in pending]  # type: ignore[arg-type]
         return d
 

@@ -187,6 +187,9 @@ if (want('library')) await session(async (g) => {
     await page.getByRole('button', { name: 'Schedule a task' }).click(); await sleep(500)
     await shot(g, 'library-scheduled-job-form')
   })
+  // The inbox modal would sit over the Library and block every click below.
+  await page.keyboard.press('Escape'); await sleep(300)
+  await page.keyboard.press('Escape'); await sleep(300)
   await openLibrary(page, 'Connectors')
   await page.getByRole('tab', { name: 'Connectors' }).click(); await sleep(800)
   await shot(g, 'library-connectors')

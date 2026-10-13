@@ -19,6 +19,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import time
 from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException
@@ -112,16 +113,19 @@ def estimate_messages(msgs: list[dict[str, Any]]) -> int:
 
 
 def _with_tools(r: dict[str, Any], include_untrusted: bool = False) -> list[dict[str, Any]]:
-    """An assistant row, preceded by the tool calls and results it stored (the text for_model produced). A row
-    without stored results (older rows, calls that never ran) carries the compact tool record in its text."""
+    """An assistant row, preceded by the tool calls and results it stored (the text for_model produced). Calls with
+    no stored result (older rows, calls that never ran: bad arguments, a Stop, a loop stop) go in the compact tool
+    record in the row's text, also when the same reply has stored ones."""
     out: list[dict[str, Any]] = []
-    evs = [e for e in (r.get("tool_events") or []) if isinstance(e, dict) and e.get("call_id") and isinstance(e.get("for_model"), str)]
+    events = [e for e in (r.get("tool_events") or []) if isinstance(e, dict)]
+    evs = [e for e in events if e.get("call_id") and isinstance(e.get("for_model"), str)]
     if r["role"] == "assistant" and evs:
         out.append({"role": "assistant", "content": None, "tool_calls": [
             {"id": e["call_id"], "type": "function", "function": {"name": e.get("name") or "", "arguments": json.dumps(e.get("arguments") or {}, default=str)}}
             for e in evs]})
         out += [{"role": "tool", "tool_call_id": e["call_id"], "content": e["for_model"]} for e in evs]
-        return out + [{"role": r["role"], "content": r["content"]}]
+        rest = [e for e in events if not (e.get("call_id") and isinstance(e.get("for_model"), str))]
+        return out + [{"role": r["role"], "content": _row_content({**r, "tool_events": rest}, include_untrusted)}]
     return [{"role": r["role"], "content": _row_content(r, include_untrusted)}]
 
 
@@ -366,9 +370,22 @@ def _over_limit(cfg: dict[str, Any], rows: list[dict[str, Any]], history: list[d
     return sum(_row_tokens(r, include_untrusted) for r in rows[start:_cut(cfg, rows, include_untrusted)]) >= max(1, at // 4)
 
 
+# The summarizer sits before a reply's first token. It gets this long, and after it fails the conversation is not
+# compacted again for RETRY_AFTER_S, so a degraded side model costs one wait instead of one per reply.
+SUMMARIZER_DEADLINE_S = 60.0  # a long fold on a slow model can need most of this
+RETRY_AFTER_S = 300.0
+_failed_at: dict[str, float] = {}  # conversation id -> time.monotonic() of the last failed summarizer call
+
+
+def _cooling(conv_id: str) -> bool:
+    return time.monotonic() - _failed_at.get(conv_id, float("-inf")) < RETRY_AFTER_S
+
+
 def needs_compaction(compactor: Compactor, convos: Any, cfg: dict[str, Any], conv_id: str, system_tokens: int, *,
                      window: int | None = None) -> bool:
     """Whether `prepare_history` would run the summarizer now, so the caller can say so first. Never raises."""
+    if _cooling(conv_id):
+        return False
     try:
         rows = convos.history_rows(conv_id)
         summary, untrusted = compactor.get(conv_id), _tainted(convos, conv_id)
@@ -393,9 +410,11 @@ async def prepare_history(compactor: Compactor, convos: Any, cfg: dict[str, Any]
         untrusted = _tainted(convos, conv_id)
         summary = compactor.get(conv_id)
         history = compactor.build_history(rows, summary, untrusted)
-        if _over_limit(cfg, rows, history, system_tokens, window, include_untrusted=untrusted, summary=summary):
-            res = await compactor.compact(cfg, model, conv_id, rows, include_untrusted=untrusted,
-                                          complete=bind_supported(complete or llm.complete, cancel=cancel, deadline=deadline))
+        if not _cooling(conv_id) and _over_limit(cfg, rows, history, system_tokens, window, include_untrusted=untrusted, summary=summary):
+            res = await compactor.compact(cfg, model, conv_id, rows, include_untrusted=untrusted, complete=bind_supported(
+                complete or llm.complete, cancel=cancel, effort="low",
+                deadline=min(deadline or float("inf"), time.monotonic() + SUMMARIZER_DEADLINE_S)))
+            _failed_at.pop(conv_id, None)
             if res:
                 info = {**res, "row_ids": info["row_ids"]}
                 history = compactor.build_history(rows, compactor.get(conv_id), untrusted)
@@ -403,13 +422,15 @@ async def prepare_history(compactor: Compactor, convos: Any, cfg: dict[str, Any]
     except llm.LLMError:
         if cancel is not None and cancel.is_set():
             raise
+        _failed_at[conv_id] = time.monotonic()
         log.warning("history compaction failed; sending the history uncompacted", exc_info=True)
     except Exception:  # noqa: BLE001 - a summarizer failure must never fail the reply
+        _failed_at[conv_id] = time.monotonic()
         log.warning("history compaction failed; sending the history uncompacted", exc_info=True)
     # The summary + recent tail built before the summarizer ran is still good; raw rows only when nothing was built.
     if history is not None:
         return history, {"compacted": False, "row_ids": [r["id"] for r in rows]}
-    return ([{"role": r["role"], "content": r["content"]} for r in rows if r["content"]] or convos.history(conv_id),
+    return ([{"role": r["role"], "content": _public(r["content"])} for r in rows if r["content"]] or convos.history(conv_id),
             {"compacted": False, "row_ids": [r["id"] for r in rows]})
 
 
@@ -446,8 +467,9 @@ def memory_nudge(n_cleared: int, already_nudged: bool, tool_schemas: list[dict[s
 
 
 def microcompact(messages: list[dict[str, Any]], keep: int, window_tokens: int, at_fraction: float,
-                 at_tokens: int | None = None) -> tuple[int, int]:
+                 at_tokens: int | None = None, fixed_tokens: int = 0) -> tuple[int, int]:
     """Replace old tool-result content in place with a stub once the context passes at_fraction of the window.
+    `fixed_tokens` is what the request carries outside `messages` (the tool schemas), counted toward the threshold.
 
     Skips the tool messages after the last assistant tool-call turn (the round the model has not seen yet),
     the newest `keep` results before that, small results, and anything already cleared. Returns (cleared, tokens_saved).
@@ -455,7 +477,7 @@ def microcompact(messages: list[dict[str, Any]], keep: int, window_tokens: int, 
     threshold = at_fraction * window_tokens
     if at_tokens:
         threshold = min(threshold, at_tokens)
-    if estimate_messages(messages) <= threshold:
+    if estimate_messages(messages) + fixed_tokens <= threshold:
         return 0, 0
     last_call = max((i for i, m in enumerate(messages) if m.get("role") == "assistant" and m.get("tool_calls")), default=-1)
     names = {tc.get("id", ""): (tc.get("function") or {}).get("name", "")

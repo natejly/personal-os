@@ -347,7 +347,7 @@ class Plans:
 
     # ---- the gate ----
     def claim(self, run_id: str | None, tool: str, args: dict[str, Any], call_id: str,
-              desk_id: str | None = None, card_locked: bool = False) -> dict[str, Any] | None:
+              desk_id: str | None = None, card_locked: bool = False, inherit: str | None = None) -> dict[str, Any] | None:
         """Consume one approved step matching this call's arguments exactly, or None.
 
         Single use, and scoped to the run the plan was approved in: the UPDATE's `status='approved'` guard is what
@@ -361,16 +361,19 @@ class Plans:
 
         `card_locked` (the tool always shows a card) skips plans that went ahead on their own countdown: only
         a plan the user answered can stand in for such a card.
+
+        `inherit` is the run a chat run resumes (the user's Resume click): the plan approved there still covers the
+        steps it had not reached, one level deep like the call journal's own inherit.
         """
         if not run_id and not desk_id:
             return None
         digest = args_digest(args)
-        scope, key = ("p.desk_id=?", desk_id) if desk_id else ("p.run_id=?", run_id)
+        scope, keys = ("p.desk_id=?", (desk_id,)) if desk_id else ("p.run_id IN (?,?)", (run_id, inherit or run_id))
         with self.db.tx() as c:
             r = c.execute("SELECT s.step_id FROM plan_steps s JOIN action_plans p ON p.plan_id=s.plan_id "
                           f"WHERE {scope} AND p.status='approved' AND s.status='approved' AND s.tool=? AND s.args_digest=? "
                           "AND NOT (? AND p.decided_by='auto') ORDER BY s.idx LIMIT 1",
-                          (key, tool, digest, int(card_locked))).fetchone()
+                          (*keys, tool, digest, int(card_locked))).fetchone()
             if r is None:
                 return None
             if not c.execute("UPDATE plan_steps SET status='consumed', call_id=?, consumed_at=? WHERE step_id=? AND status='approved'",

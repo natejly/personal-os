@@ -351,15 +351,18 @@ class Conversations:
             c.execute("DELETE FROM conversations WHERE id=?", (id,))
 
     def add_message(self, conv_id: str, role: str, content: str, model: str | None = None, *, variant_of: str | None = None,
-                    attachments: list[dict[str, Any]] | None = None, kind: str | None = None) -> dict[str, Any]:
+                    attachments: list[dict[str, Any]] | None = None, kind: str | None = None,
+                    created_at: float | None = None) -> dict[str, Any]:
+        """`created_at` places the row in the history order (which sorts on it); default now."""
         mid = new_id()
-        t = now()
+        stamp = now()
+        t = stamp if created_at is None else created_at
         with self.db.tx() as c:
             c.execute(
                 "INSERT INTO messages(id,conversation_id,role,content,model,created_at,variant_of,attachments,kind) VALUES(?,?,?,?,?,?,?,?,?)",
                 (mid, conv_id, role, content, model, t, variant_of, json.dumps(attachments) if attachments else None, kind),
             )
-            c.execute("UPDATE conversations SET updated_at=? WHERE id=?", (t, conv_id))
+            c.execute("UPDATE conversations SET updated_at=? WHERE id=?", (stamp, conv_id))
             # A row opened into an existing regenerate group announces its siblings, so the switcher shows on
             # the live event rather than after a reload.
             variants = self._variant_groups(c, conv_id).get(variant_of) if variant_of else None
@@ -480,9 +483,10 @@ class Conversations:
             # Every saved reply goes through here: check its [n] against the full excerpts (adding quote/support in
             # place, so the 'done' event carries them too), then save a trimmed copy. The live refs keep their full
             # text, so a second finish on the same ledger (a parked card, a steer's next segment) checks the same.
-            from .context import cite_check, cite_slim
+            from .context import cite_check
             cite_check(content, context_used["chunks"])
-            context_used = cite_slim(context_used)
+        from .context import cite_slim
+        context_used = cite_slim(context_used)
         with self.db.tx() as c:
             c.execute(
                 "UPDATE messages SET content=?, error=?, context_used=?, tool_events=?, trace=?, reasoning=?, "

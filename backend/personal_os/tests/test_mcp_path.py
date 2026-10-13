@@ -72,6 +72,9 @@ def test_user_path_is_resolved_once(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(mcp_path, "_login_shell_path", lambda: calls.append(1) or str(tmp_path))
     assert mcp_path.user_path() == mcp_path.user_path()
     assert len(calls) == 1 and str(tmp_path) in mcp_path.user_path().split(os.pathsep)
+    mcp_path.forget()  # a connector restart or a catalog look: what was installed since is found
+    mcp_path.user_path()
+    assert len(calls) == 2
 
 
 def test_resolve_uses_the_servers_own_path_or_the_users(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

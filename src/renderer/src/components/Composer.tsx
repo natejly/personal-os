@@ -45,6 +45,9 @@ interface ComposerProps {
   draftKey?: string
 }
 
+/** Keys for the uploading chips. */
+let uploadSeq = 0
+
 export default function Composer({ conversationId, footer, compact = false, onSend, placeholder = 'Ask anything', draftKey }: ComposerProps): JSX.Element {
   const box = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -57,7 +60,9 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const key = draftKey ?? composerKey({ conversationId, page: !!onSend, focusedId: activeId, draftProjectId })
   const [text, setText] = useDraft(key)
   const files = useDraftFiles(key)
-  const canSend = !!text.trim() || files.length > 0
+  // Files still uploading: shown as chips, and sending waits for them so a quick Enter does not go out without the file.
+  const [uploading, setUploading] = useState<{ id: number; name: string }[]>([])
+  const canSend = (!!text.trim() || files.length > 0) && uploading.length === 0
   const uploadTarget = useStore((s) => s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.project_id ?? s.draftProjectId)
   const hasKey = useStore((s) => hasModelKey(s.settings))
   // A local endpoint (Ollama, a local proxy) needs no key, so it is not "unfinished".
@@ -278,7 +283,9 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     // The chat on screen when the files were picked, as `key` resolves it: the main view passes no id,
     // and a mark left for "the next send" would land on whichever chat sends next.
     const real = activeId && activeId !== PAGE_AGENT_DRAFT ? activeId : undefined
-    const saved = await uploadDocuments(list, uploadTarget)
+    const marks = list.map((f) => ({ id: ++uploadSeq, name: f.name }))
+    setUploading((u) => [...u, ...marks])
+    const saved = await uploadDocuments(list, uploadTarget).finally(() => setUploading((u) => u.filter((x) => !marks.includes(x))))
     if (!saved.length) return
     await noteUntrustedUpload(real, onSend ? 'page' : 'draft').catch((e: unknown) => {
       useStore.getState().toast((e as Error).message, 'error')
@@ -392,6 +399,14 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     else void deliver()
   }
 
+  /** Focus the newest card waiting in this chat (its Approve button); false when none is on screen. */
+  const focusCard = (): boolean => {
+    const cards = box.current?.closest('.chat, .win, .page-agent, .quick-ask')?.querySelectorAll<HTMLElement>('.tc-approval, .tc-card.awaiting')
+    const btn = cards?.[cards.length - 1]?.querySelector<HTMLElement>('.primary-btn')
+    btn?.focus()
+    return !!btn
+  }
+
   const sendNow = (item: QueuedItem): void => {
     if (streaming && cardPending && !desk) setConfirm({ item })
     else void deliverItem(item)
@@ -457,8 +472,13 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           <button className="link" onClick={() => setConfirm(null)}>Cancel</button>
         </div>
       )}
-      {files.length > 0 && (
+      {files.length + uploading.length > 0 && (
         <div className="composer-files" aria-label="Attached files">
+          {uploading.map((u) => (
+            <span key={`up-${u.id}`} className="file-chip" title={`Uploading ${u.name}`} aria-busy="true">
+              <Loader2 size={12} className="spin" /><span>{u.name}</span>
+            </span>
+          ))}
           {files.map((a) => (
             <span key={a.id} className="file-chip" title={a.name}>
               <FileText size={12} /><span>{a.name}</span>
@@ -502,6 +522,8 @@ export default function Composer({ conversationId, footer, compact = false, onSe
             else if (onRecallKey(e)) return
             // Tab with nothing to accept stays in the box rather than moving focus away (Shift+Tab still leaves).
             else if (e.key === 'Tab' && !e.shiftKey && !e.nativeEvent.isComposing) e.preventDefault()
+            // ⌘↵ in an empty box while a card waits goes to that card, where ⌘↵ again approves it.
+            else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !text.trim() && !files.length && cardPending && focusCard()) e.preventDefault()
             else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(e.metaKey || e.ctrlKey) }
             // Escape closes the decline prompt first, then ends the reply; while an input method is composing it belongs to the method.
             else if (e.key === 'Escape' && confirm && !e.nativeEvent.isComposing) { e.preventDefault(); setConfirm(null) }

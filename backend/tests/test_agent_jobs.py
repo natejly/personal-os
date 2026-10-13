@@ -400,7 +400,8 @@ def test_a_job_run_is_told_it_is_a_job_and_has_no_caps() -> None:
     b = run["budget"]
     assert not [k for k in b if k.startswith("max_")], "the stored snapshot is usage only"
     assert not hasattr(appmod, "JOB_BUDGET") and not hasattr(appmod, "_job_caps")
-    system = next(d for _, e, d in store.events(run["run_id"]) if e == "assistant_message")["context_used"]["system_prompt"]
+    sent = appmod.request_log.read(appmod.db.data_dir, run["message_id"])[0]["messages"]  # the saved reply keeps no prompt
+    system = json.dumps([m["content"] for m in sent if m["role"] == "system"])
     assert "scheduled background run" in system and "recorded as a proposal" in system
 
 
@@ -502,6 +503,7 @@ def test_a_proposal_can_be_edited_before_it_is_accepted_or_simply_rejected() -> 
 
     q = _one_proposal("calendar_create", {"summary": "Coffee", "start": "2026-10-01T10:00"})
     assert j("POST", f"/proposals/{q['id']}/reject")["proposal"]["status"] == "rejected"
+    assert j("POST", f"/proposals/{q['id']}/reject")["proposal"]["status"] == "rejected", "a second reject is a no-op"
     assert [n for n, _ in SENT] == ["gmail_send"], "a rejected proposal never runs"
     assert all(x["id"] != q["id"] for x in proposals.list("pending"))
     assert proposals.list("rejected")[0]["id"] == q["id"]

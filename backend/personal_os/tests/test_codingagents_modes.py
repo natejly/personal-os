@@ -27,6 +27,8 @@ class Mapping(unittest.TestCase):
         self.assertTrue(own("a1", ["coding_session:list:a1"]))
         self.assertTrue(own("a1", ["coding_session:list:"]))
         self.assertFalse(own("a1", ["coding_session:list:a1,b2"]))
+        self.assertTrue(own("a1", ["coding_session:start:a1", "coding_session:wait:a1"]))  # start -> wait -> send
+        self.assertFalse(own("a1", ["coding_session:wait:a1,b2"]))
         self.assertFalse(own("a1", ["coding_session:status:a1", "fetch_url"]))
         self.assertFalse(own("a1", ["coding_session:status:a1", "opencode_run:network"]))
         self.assertFalse(own("a1", []))

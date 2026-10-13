@@ -163,8 +163,10 @@ def _collect(db: Any, project_id: str | None, sw: dict[str, bool], file_cap: int
         if sw.get("files") and _has(c, "docs"):
             total = c.execute(f"SELECT COUNT(*) FROM docs WHERE {where} AND deleted_at IS NULL", args).fetchone()[0]
             rows = c.execute(
-                f"SELECT id, title, folder, COALESCE(pinned,0) AS pinned, COALESCE(starred,0) AS starred, updated_at FROM docs "
-                f"WHERE {where} AND deleted_at IS NULL ORDER BY (COALESCE(pinned,0)+COALESCE(starred,0) > 0) DESC, updated_at DESC, id LIMIT ?",
+                f"SELECT id, title, folder, COALESCE(pinned,0) AS pinned, COALESCE(starred,0) AS starred FROM docs "
+                # Creation order, not last edit, and no edit date in the line: this list sits in the cached prefix, and a
+                # save must not reorder it. Only a new, removed, renamed or (un)pinned doc changes the text.
+                f"WHERE {where} AND deleted_at IS NULL ORDER BY (COALESCE(pinned,0)+COALESCE(starred,0) > 0) DESC, created_at DESC, id LIMIT ?",
                 (*args, file_cap)).fetchall()
             out["files"] = {"total": total, "rows": [tuple(r) for r in rows]}
         if sw.get("uploads") and _has(c, "documents"):
@@ -213,10 +215,10 @@ def _topics(db: Any, project_id: str | None) -> list[tuple[str, int]]:
 
 # ---------------------------------------------------------------- the stable text
 def _file_line(r: tuple[Any, ...]) -> str:
-    rid, title, folder, pinned, starred, ts = r
+    rid, title, folder, pinned, starred = r
     bits = [b for b in (("pinned" if pinned else ""), ("starred" if starred else ""),
-                        sanitize_title(folder, "folder", 40) if (folder or "").strip() else "", f"edited {_day(ts)}") if b]
-    return f'doc:{rid} "{sanitize_title(title, "file")}" ({", ".join(bits)})'
+                        sanitize_title(folder, "folder", 40) if (folder or "").strip() else "") if b]
+    return f'doc:{rid} "{sanitize_title(title, "file")}"' + (f" ({', '.join(bits)})" if bits else "")
 
 
 def _upload_line(r: tuple[Any, ...]) -> str:
@@ -274,15 +276,10 @@ def _join(sections: dict[str, str]) -> str:
     return HEADER + "\n" + "\n".join(sections[k] for k in ("memory", "files", "uploads", "projects", "skills") if k in sections) if sections else ""
 
 
-def cap_tokens(shares: dict[str, int], retrieved: dict[str, int] | None = None) -> tuple[int, bool]:
-    """(cap, shrunk): the map's share of the window, held to MAP_SHRUNK_TOKENS once the memory, excerpt and graph blocks already
-    in this turn (`retrieved`: estimated tokens by 'memories' / 'chunks' / 'graph') fill MAP_SHRINK_AT of their shares."""
-    cap = min(int(shares.get("map", 0)), limits.MAP_HARD_CEILING_TOKENS)
-    pool = sum(int(shares.get(k, 0)) for k in ("memories", "chunks", "graph"))
-    used = sum(int(v) for v in (retrieved or {}).values())
-    if pool and used >= limits.MAP_SHRINK_AT * pool and cap > limits.MAP_SHRUNK_TOKENS:
-        return limits.MAP_SHRUNK_TOKENS, True
-    return cap, False
+def cap_tokens(shares: dict[str, int]) -> int:
+    """The map's share of the window. A function of the window only: the map sits in the cached prefix, so its size must
+    not follow how much this turn happened to retrieve."""
+    return min(int(shares.get("map", 0)), limits.MAP_HARD_CEILING_TOKENS)
 
 
 _MEMO: "OrderedDict[tuple[Any, ...], tuple[str, dict[str, Any]]]" = OrderedDict()
@@ -332,11 +329,11 @@ def build_stable(db: Any, *, project_id: str | None, switches: dict[str, bool], 
     return text, info
 
 
-def used_stable(text: str, info: dict[str, Any], shrunk: bool) -> dict[str, Any] | None:
+def used_stable(text: str, info: dict[str, Any]) -> dict[str, Any] | None:
     """The context_used["map"] value for the Context drawer (JSON-safe); None when there is no map."""
     if not text:
         return None
-    return {"tokens": info["tokens"], "shrunk": bool(shrunk), "hash": info["hash"], "sections": dict(info["sections"]),
+    return {"tokens": info["tokens"], "shrunk": bool(info.get("trimmed")), "hash": info["hash"], "sections": dict(info["sections"]),
             "volatile": None, "text": text}
 
 

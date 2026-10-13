@@ -129,7 +129,7 @@ function ContextUsedView({ ctx, messageId }: { ctx: ContextUsed; messageId?: str
         ~{ctx.tokens_estimate} tokens of context
         {ctx.trimmed && Object.keys(ctx.trimmed).length > 0 && <span className="muted"> · trimmed {Object.entries(ctx.trimmed).map(([k, n]) => `${k} ${n}`).join(', ')}</span>}
         {(ctx.tools_deferred ?? 0) > 0 && <span className="muted" title="Held out of the request until the assistant searches for them"> · {ctx.tools_deferred} tools loaded on demand</span>}
-        {devTools && <button className="link" onClick={() => setShowPrompt((v) => !v)}>{showPrompt ? 'hide' : 'view full system prompt'}</button>}
+        {devTools && ctx.system_prompt && <button className="link" onClick={() => setShowPrompt((v) => !v)}>{showPrompt ? 'hide' : 'view full system prompt'}</button>}
       </div>
       {devTools && showPrompt && <pre className="ctx-prompt">{ctx.system_prompt}</pre>}
       {messageId && <ExactRequest messageId={messageId} />}

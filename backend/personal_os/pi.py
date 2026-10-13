@@ -23,7 +23,7 @@ import shutil
 import tempfile
 from typing import Any
 
-from . import sandbox, shell
+from . import osplat, sandbox, shell
 
 # npm -g lands in Homebrew's or the system prefix, a user prefix (~/.npm-global), a node version manager's bin, or ~/.local/bin.
 BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "~/.npm-global/bin", "~/.local/bin", "~/.bun/bin", "~/.volta/bin")
@@ -103,7 +103,7 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str, session
     # loopback: a model served on this Mac (a local proxy) is a common pi provider
     profile = sandbox.shell_profile([tmp], network=False, allow_hosts=ALLOW_HOSTS, loopback=True)
     try:
-        return await tb.shell.start(["sandbox-exec", "-p", profile, *argv(exe, prompt, model, session)],
+        return await tb.shell.start(osplat.current().sandbox.wrap(argv(exe, prompt, model, session), profile),
                                     command=f"pi {prompt[:160]!r}", cwd=cwd, env=env, tmp=tmp,
                                     conversation_id=conversation_id, run_id=run_id, background=True, timeout=None,
                                     notify=False, max_background=max_background or 4, pool=pool, on_timeout="kill")

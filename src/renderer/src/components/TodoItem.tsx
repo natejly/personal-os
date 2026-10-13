@@ -102,15 +102,15 @@ function TodoItem({ todo, showProject = true, compact = false, depth = 0, onTag 
         {todo.repeat && <span className="todo-repeat" title={`Repeats every ${todo.repeat.every > 1 ? todo.repeat.every + ' ' : ''}${todo.repeat.unit}${todo.repeat.every > 1 ? 's' : ''}${todo.repeat.mode === 'from_completion' ? ' after completion' : ''}`}><Repeat size={11} /></span>}
         {todo.external_id && <span className="g-logo g-logo-sm" title="Synced with Google Tasks">G</span>}
         {showProject && todo.project_id && <ProjectChip projectId={todo.project_id} />}
-        {/* `quiet`: a control with nothing set fades out until the row is hovered or focused. Its
+        {/* `quiet`: a control with nothing set (or, for tags, one the chips already show) fades out until the row is hovered or focused. Its
             space is kept, so nothing moves when it comes back. */}
-        <label className={`todo-due ${due.cls} ${todo.due ? '' : 'quiet'}`} title="Due date">
+        <label className={`todo-due ${todo.done ? '' : due.cls} ${todo.due ? '' : 'quiet'}`} title="Due date">
           <Calendar size={11} />
           <span>{due.text || 'no date'}</span>
           <input type="date" aria-label={`Due date for ${todo.title}`} value={todo.due ?? ''} onClick={openPicker} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPicker(e) } }}onChange={(e) => void updateTodo(todo.id, e.target.value ? { due: e.target.value } : { clear_due: true })} />
         </label>
         {!compact && (
-          <input className="todo-tags" placeholder="tags" title="Tags, comma separated" aria-label={`Tags for ${todo.title}`}
+          <input className="todo-tags quiet" placeholder="tags" title="Tags, comma separated" aria-label={`Tags for ${todo.title}`}
             defaultValue={(todo.tags ?? []).join(', ')} key={(todo.tags ?? []).join(',')}
             onBlur={(e) => { const v = e.target.value.split(',').map((x) => x.trim().replace(/^#/, '').toLowerCase()).filter(Boolean); if (v.join(',') !== (todo.tags ?? []).join(',')) void updateTodo(todo.id, { tags: v }) }} />
         )}

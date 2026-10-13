@@ -43,6 +43,13 @@ _ELIGIBLE = """FROM messages m JOIN conversations c ON c.id = m.conversation_id
     AND NOT EXISTS (SELECT 1 FROM kg_backfill_done d WHERE d.message_id = m.id)"""
 
 
+def mark_done(db: Database, message_id: str) -> None:
+    """Record that a user message's graph extraction returned, live or here, so a backfill never extracts it again."""
+    with db.tx() as c:
+        c.execute(SCHEMA)
+        c.execute("INSERT OR IGNORE INTO kg_backfill_done(message_id, done_at) VALUES(?, ?)", (message_id, time.time()))
+
+
 class BackfillRunning(RuntimeError):
     pass
 
@@ -133,8 +140,7 @@ class GraphBackfill:
                         st["errors"] += 1
                         log.exception("graph backfill failed for message %s", r["id"])
                     else:
-                        with self.db.tx() as c:
-                            c.execute("INSERT OR IGNORE INTO kg_backfill_done(message_id, done_at) VALUES(?, ?)", (r["id"], time.time()))
+                        mark_done(self.db, r["id"])
                         st["done"] += 1
                     await asyncio.sleep(GRAPH_BACKFILL_DELAY_SECONDS)  # keeps a backfill from crowding live chat on the proxy
         except asyncio.CancelledError:

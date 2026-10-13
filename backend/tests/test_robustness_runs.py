@@ -136,3 +136,19 @@ def test_topic_cursor_from_previous_process_replays_from_start() -> None:
 
     got = run(go())
     assert len(got) == 2 and '"n": 1' in got[0].replace('"n":1', '"n": 1')
+
+
+def test_topic_publish_from_a_thread_reaches_a_waiting_subscriber() -> None:
+    async def go() -> list[str]:
+        t = runs.Topic()
+        t.publish("x", {"n": 0})  # on the loop: the topic learns its loop
+        gen = t.subscribe(since=1)
+        nxt = asyncio.ensure_future(gen.__anext__())
+        await asyncio.sleep(0.05)
+        await asyncio.to_thread(t.publish, "coding_session", {"n": 1})
+        chunk = await asyncio.wait_for(nxt, 2)  # not the keepalive's 15 s
+        await gen.aclose()
+        return [chunk]
+
+    got = run(go())
+    assert "coding_session" in got[0] and "id: 2" in got[0]

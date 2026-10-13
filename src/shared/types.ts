@@ -61,7 +61,8 @@ export interface ContextUsed {
   tools_deferred?: number
   /** The workspace map block of the prompt. Null or absent when it is off. */
   map?: WorkspaceMapUsed | null
-  system_prompt: string
+  /** Context previews only: a saved reply drops it (its Exact request shows the prompt it was sent). */
+  system_prompt?: string
   tokens_estimate: number
 }
 
@@ -672,7 +673,7 @@ export interface ToolEvent {
   /** deep_research's plan, steps and sources considered. */
   research?: ResearchTrail | null
   pending?: boolean
-  /** Client clock (ms) when the call arrived on the stream; drives the elapsed time of a running call. */
+  /** Wall-clock ms when the call began (the run stamps it; else when it arrived here); drives a running call's elapsed time. */
   started_at?: number
   needs_approval?: boolean
   approval?: string | null
@@ -1140,6 +1141,8 @@ export interface GoogleStatus {
   /** Connected, but the token is expired, revoked or short on scopes: sign in again. */
   needs_reauth: boolean
   reauth_reason: string | null
+  /** Why the last browser sign-in failed (denied, cancelled); cleared when a new one starts. */
+  last_error?: string | null
 }
 
 /** Verdict of the read-back that every external write goes through (backend verify.py).
@@ -1478,6 +1481,8 @@ export interface Settings {
   providerAuthBlocked?: string
   /** The provider preset in use (a /setup/providers id); null or missing means the address was typed by hand. */
   provider?: string | null
+  /** ISO time the setup wizard last finished; null until then. */
+  onboardedAt?: string | null
   /** Which providers have a key saved. Never the keys. Missing on an older backend. */
   providerKeysSet?: Record<string, boolean>
   /** Model ids the composer picker offers. Empty means every model its provider suggests. */
@@ -1805,7 +1810,7 @@ export type ChatEvent =
   | { event: 'delta'; data: { id: string; text: string } }
   /** One short model-written status line about the reply's thinking; the raw chain-of-thought is never sent. */
   | { event: 'thinking_summary'; data: { id: string; text: string } }
-  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; review?: ToolEvent['review']; plan?: PlanStepRef | null; agent?: string; mcp?: McpToolOrigin | null } }
+  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; started_at?: number; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; review?: ToolEvent['review']; plan?: PlanStepRef | null; agent?: string; mcp?: McpToolOrigin | null } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   /** The card was answered (by this window, another one, or a steer): settles a replayed card so it is not asked twice. */
   | { event: 'tool_decision'; data: { message_id: string; id: string; decision: ApprovalDecision } }
@@ -1950,6 +1955,8 @@ export interface DataOverview {
   pending_restore: { name: string } | null; schema_version: number; app_version: string
   /** A staged restore that could not be applied at the last start; the live data was left as it was. */
   restore_failed?: { name: string | null; error: string; at: number } | null
+  /** Why the live database's schema does not match this build (a newer or unmerged build migrated it). */
+  schema_drift?: string[]
 }
 /** The sidecar's lifecycle, as the main process supervises it. */
 export type BackendState = 'starting' | 'ready' | 'restarting' | 'failed'
@@ -1966,10 +1973,12 @@ export interface BackendInfo {
   logDir: string
   appVersion: string
   electron: string
+  packaged: boolean
 }
 
 export interface GrainApi {
-  backendStatus: () => Promise<{ running: boolean; url: string; error: string | null }>
+  /** `starting`: the first start is still waiting for /health (the window opens before the backend is up). */
+  backendStatus: () => Promise<{ running: boolean; url: string; error: string | null; starting?: boolean }>
   backendToken: () => Promise<string>
   /** Store an HTML fence's source for the preview scheme; returns the id for `previewUrl`. */
   previewPut: (source: string) => Promise<string>

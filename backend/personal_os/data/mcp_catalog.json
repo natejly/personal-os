@@ -1608,6 +1608,7 @@
     },
     {
       "id": "claude-code",
+      "call_timeout": 900,
       "name": "Claude Code",
       "description": "Claude Code's own tools (read, edit, search, run) as a connector, served by `claude mcp serve`.",
       "category": "Developer",
@@ -1648,6 +1649,7 @@
     },
     {
       "id": "opencode",
+      "call_timeout": 960,
       "name": "OpenCode",
       "description": "Hand coding tasks to a local OpenCode: run a prompt, list sessions, read a session's messages.",
       "category": "Developer",

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import {
   FileText, Files, PanelRight, X, Columns2, Eye, Pencil, MessageSquarePlus, Type,
   Sparkles, FolderTree, SlidersHorizontal, Code2
@@ -88,11 +89,8 @@ export default function DocsView(): JSX.Element {
   const docFocusId = useStore((s) => s.docFocusId)
   const section = useStore((s) => s.filesSection)
   const libraryScope = useStore((s) => s.libraryScope)
-  const { openFiles, setLibraryScope } = useStore()
-  const {
-    refreshDocs, openDoc, closeDocTab, createDoc, editDoc, editDocTitle, flushDoc,
-    setDocMode, acceptRevision, rejectRevision, restoreRevision, openDailyNote, setDocTypography
-  } = useStore()
+  const { openFiles, setLibraryScope } = useStore(useShallow((s) => ({ openFiles: s.openFiles, setLibraryScope: s.setLibraryScope })))
+  const { refreshDocs, openDoc, closeDocTab, createDoc, editDoc, editDocTitle, flushDoc, setDocMode, acceptRevision, rejectRevision, restoreRevision, openDailyNote, setDocTypography } = useStore(useShallow((s) => ({ refreshDocs: s.refreshDocs, openDoc: s.openDoc, closeDocTab: s.closeDocTab, createDoc: s.createDoc, editDoc: s.editDoc, editDocTitle: s.editDocTitle, flushDoc: s.flushDoc, setDocMode: s.setDocMode, acceptRevision: s.acceptRevision, rejectRevision: s.rejectRevision, restoreRevision: s.restoreRevision, openDailyNote: s.openDailyNote, setDocTypography: s.setDocTypography })))
   const globalType = useStore((s) => s.settings.docTypography)
 
   const [query, setQuery] = useState('')

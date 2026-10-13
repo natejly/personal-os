@@ -42,6 +42,7 @@ check(found("#work") == ["A"], "parent tag matches nested")
 check(found("#wor") == [], "no prefix match inside a segment")
 row = next(d for d in client.get("/docs").json() if d["id"] == a["id"])
 check(row["tags"] == ["idea", "work/now"], "list rows carry tags")
+check(docs.get(a["id"])["tags"] == row["tags"], "a fetched doc reports the same tags as its list row")
 
 docs.save(a["id"], content="plan only")
 check(found("#idea") == ["B"] and found("#work") == [], "editing a tag away removes its row")

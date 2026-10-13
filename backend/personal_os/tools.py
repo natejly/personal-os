@@ -350,6 +350,28 @@ def checked(name: str, out: Any) -> Any:
 DISCARDED = "discarded by the user on the email card; nothing was sent and no draft was saved"
 
 
+def coerce_args(spec: "ToolSpec", args: dict[str, Any]) -> dict[str, Any] | None:
+    """Fit `args` to the schema's scalar types, in place, before anything gates or runs on them: an open model's
+    "false" would otherwise be truthy (unsandboxed, replace_all, archive). A null for an optional key is dropped so
+    the signature's default applies. Idempotent. Returns a tool_error for a value that cannot fit, else None."""
+    props = spec.parameters.get("properties") or {}
+    required = set(spec.parameters.get("required") or [])
+    for key in list(args):
+        v, t = args[key], (props.get(key) or {}).get("type")
+        if v is None and key not in required and key in props:
+            del args[key]
+        elif not isinstance(v, str) or t not in ("boolean", "integer", "number"):
+            continue
+        elif t == "boolean" and v.strip().lower() in ("true", "false"):
+            args[key] = v.strip().lower() == "true"
+        elif t != "boolean" and re.fullmatch(r"-?\d+" if t == "integer" else r"-?\d+(\.\d+)?", v.strip()):
+            args[key] = int(v) if t == "integer" else float(v)
+        else:
+            return tool_error(redact.scrub_command_output(f"{spec.name}: {key} must be a {t}, not {v[:40]!r}."),
+                              field=key, expected=t, example=(spec.examples or [None])[0])
+    return None
+
+
 def denied(name: str, reason: str) -> dict[str, Any]:
     alt = ALTERNATIVE.get(name)
     return tool_error(f"{name} is {reason}. Do not retry it.",
@@ -1008,6 +1030,8 @@ class Toolbox:
         Listing that hold does not ask.
         """
         spec = self.specs.get(name)
+        if spec and isinstance(args, dict):
+            coerce_args(spec, args)  # before force_ask reads them: "unsandboxed": "false" must not card, or skip one
         cancel_send = name == "gmail_outbox" and isinstance(args, dict) and args.get("action") == "cancel"
         # A doc_edit in review mode (the default) lands as a diff the user accepts or rejects: that is its card.
         # A card in front of it as well would ask twice for one edit, so taint only cards it under "apply".
@@ -1043,11 +1067,13 @@ class Toolbox:
 
     def precheck(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> dict[str, Any] | None:
         """The error `call` would return for arguments the tool's signature cannot take, found before anything is
-        approved or run. Binds only (no type checks: tools coerce), so None means the call may go on. Not a spec
+        approved or run. Coerces scalar types (coerce_args), then binds, so None means the call may go on. Not a spec
         (a connector tool) is None as well. With `ctx`, a repo edit that coding_route sends to a coding agent too."""
         spec = self.specs.get(name)
         if not spec:
             return None
+        if (bad := coerce_args(spec, args)) is not None:
+            return bad
         if ctx is not None and (routed := coding_route.check(self, name, args, ctx)):
             return tool_error(routed, alternative="coding_session_start")
         try:
@@ -1074,6 +1100,8 @@ class Toolbox:
         if ctx.get("proposal_only") and spec.danger in PROPOSAL_ONLY_DANGER:
             refused = PROPOSAL_ONLY_REFUSED_SCHEDULE if spec.danger == "schedules" else PROPOSAL_ONLY_REFUSED
             return tool_error(refused.format(name=name), alternative=ALTERNATIVE.get(name))
+        if (bad := coerce_args(spec, args)) is not None:
+            return bad
         if routed := coding_route.check(self, name, args, ctx):  # every caller (chat, desk, worker, subagent, script, workflow)
             return tool_error(routed, alternative="coding_session_start")
         # The precheck above judges the command's text; this diffs the repo it ran in, for what the text hid (a script, a heredoc).
@@ -1088,10 +1116,15 @@ class Toolbox:
             return self._bad_arguments(name, spec, e)
         except Exception as e:  # noqa: BLE001
             log.warning("tool %s failed", name, exc_info=True)
+            if classify := getattr(self.google, "classify_error", None):
+                e = classify(e)  # a sign-in revoked mid-call becomes GoogleNotConnected
             if type(e).__name__ == "GoogleNotConnected":
                 c = setup_cards.google_card(self)  # a connect/reconnect button inline; the user's click, not this call, starts the sign-in
                 return {**tool_error(f"{name}: " + ("Google needs to be reconnected." if c.get("reauth") else "Google is not connected."),
                                      alternative="a connect button was shown in the chat; tell the user to click it, then retry"), "setup": c}
+            if type(e).__name__ == "HttpError":
+                from .google import http_failure
+                return tool_error(redact.scrub_command_output(f"{name}: {http_failure(e)[1]}"), alternative=ALTERNATIVE.get(name))
             if isinstance(e, httpx.HTTPStatusError):
                 return tool_error(redact.scrub_command_output(f"{name}: HTTP {e.response.status_code} from {e.request.url.host}"),
                                   alternative=ALTERNATIVE.get(name))
@@ -1260,7 +1293,7 @@ class Toolbox:
             _obj({"query": {"type": "string"}, "offset": {"type": "integer", "default": 0},
                   "include_chats": {"type": "boolean", "default": False, "description": "also search past conversations"},
                   "kind": {"type": "string", "enum": sorted(MEMORY_KINDS), "description": "only memories of this kind"},
-                  "since": {"type": "string", "description": "YYYY-MM-DD, learned on or after"}}, ["query"]),
+                  "since": {"type": "string", "description": "YYYY-MM-DD, learned on or after"}}, []),
             search_memory, "memory",
             examples=[{"query": "coffee"}, {"query": "work schedule"}, {"query": "preferences", "offset": 20},
                       {"query": "pricing decision", "include_chats": True},
@@ -1322,6 +1355,9 @@ class Toolbox:
             scope = None if personal else ctx["project_id"]
             # The same statement reworded supersedes its live twin instead of adding a row (pinned rows never match).
             dup = await self.memory_index.near_duplicate(self.settings(), scope, text) if self.memory_index is not None else None
+            if dup and dup["project_id"] != scope:  # a personal memory already says it; a project save never rewrites it
+                return {"saved": dup["id"], "content": dup["content"], "already_known": True,
+                        "hint": f"Already a personal memory. To change it, pass replaces={dup['id']!r}."}
             if dup and dup["content"].strip().lower() != text.strip().lower():  # the same words: create() dedupes, no new version
                 m = self.memories.supersede(dup["id"], text, kind=kind or None, source="auto", provenance=prov, expires_at=expires)
                 if m:
@@ -1490,6 +1526,8 @@ class Toolbox:
                     # The cache is read only here, after the taint and SSRF checks for this very URL.
                     if cache is not None and ttl > 0 and (key := _norm_url(cur)):
                         hit = cache.get(key, ttl)
+                        if hit and links and str(hit.get("content_type") or "").startswith("text/markdown"):
+                            hit = None  # a Firecrawl read has no link references: links=true needs the plain fetch
                         if hit:
                             return None
                     # Primary reader; any failure falls through to the plain fetch below. Not for links=true: Firecrawl's
@@ -1522,7 +1560,7 @@ class Toolbox:
                     r = await asyncio.wait_for(_follow(c), reach.BODY_DEADLINE_S * 2)
             except UrlBlocked as e:
                 return tool_error(redact.scrub_command_output(f"fetch_url refused {url}: {e}"), field="url", alternative=e.alternative or ALTERNATIVE["fetch_url"])
-            except asyncio.TimeoutError:
+            except (asyncio.TimeoutError, httpx.TimeoutException):  # final: a retry would wait out the same slow host again
                 return tool_error(redact.scrub_command_output(f"fetch_url: {url} did not finish within {int(reach.BODY_DEADLINE_S * 2)}s"), field="url", alternative=ALTERNATIVE["fetch_url"])
             if isinstance(r, dict):  # the redirect-limit error
                 return r
@@ -1541,7 +1579,7 @@ class Toolbox:
             try:
                 rendered = webread.render(kind, raw, webread.decode(ctype, raw) if kind not in ("pdf", "binary") else "", final_url, include_links=links)
             except webread.Unreadable as e:
-                return tool_error(redact.scrub_command_output(f"fetch_url: {final_url} is {ctype or 'of unknown type'}: {e}"), field="url", alternative=ALTERNATIVE["fetch_url"])
+                return tool_error(redact.scrub_command_output(f"fetch_url: {final_url} is {ctype.split(';')[0].strip()[:60] or 'of unknown type'}: {e}"), field="url", alternative=ALTERNATIVE["fetch_url"])
             text = rendered.text
             via = "firecrawl" if fc_page else None
             # Reader-service fallback: when our plain client is turned away, or the page is a JavaScript shell, read it

@@ -113,7 +113,11 @@ def test_connect_and_plain_http_through_the_proxy(monkeypatch: pytest.MonkeyPatc
             assert out.startswith(b"HTTP/1.1 200") and out.endswith(b"ok")
             head = w.heads[-1].decode()
             assert head.startswith("GET /path?q=1 HTTP/1.1") and "Proxy-" not in head and "Connection: close" in head
-            assert w.connects == [(PUBLIC, 443), (PUBLIC, 80)]  # connected to the address that was checked
+            # a client's own Host never reaches the upstream: a shared front end would route by it
+            await w.request(eg, "GET http://example.com/ HTTP/1.1\r\nHost: attacker.test\r\n\r\n", tok)
+            head = w.heads[-1].decode()
+            assert "Host: example.com\r\n" in head and "attacker" not in head
+            assert w.connects == [(PUBLIC, 443), (PUBLIC, 80), (PUBLIC, 80)]  # connected to the address that was checked
             assert eg.stats(tok) == {"contacted": ["api.example.com", "example.com"], "blocked": []}
         finally:
             await w.close(eg)

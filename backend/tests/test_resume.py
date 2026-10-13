@@ -257,6 +257,10 @@ def test_resumable_route() -> None:
     check(set(got) == {"run_id", "resumable", "reason", "message_id"}, "shape")
     check(got["run_id"] == rid and got["resumable"] is True and got["reason"] == "interrupted" and got["message_id"], "interrupted run is resumable")
     check(client.get(f"/runs/{rid}").json()["resume_reason"] == "interrupted", "GET /runs/{id} carries resume_reason")
+    time.sleep(0.01)
+    store.create("wake" + str(time.time_ns()), cid, "chat", {"content": "worker done", "wake": {"ids": ["w1"]}})
+    got = client.get(f"/conversations/{cid}/resumable").json()
+    check(got["run_id"] == rid and got["resumable"] is True, f"a worker's wake turn does not hide the interrupted reply, got {got}")
     cid, rid = dead_run(status="done")
     with appmod.db.tx() as c:
         c.execute("UPDATE messages SET outcome='stopped', error=NULL WHERE id=?", (store.get(rid)["message_id"],))
@@ -288,7 +292,7 @@ def test_shutdown_and_salvage_persist_interrupted() -> None:
     check(row["outcome"] == "interrupted", "the salvaged reply is marked interrupted")
     by = {e["id"]: e for e in row["tool_events"]}
     check(by["k1"]["interrupted"] is True and by["k1"]["pending"] is False and "may or may not" in by["k1"]["error"], "the open call is an interrupted event")
-    check(by["k2"].get("pending") is True and not by["k2"].get("interrupted"), "a call waiting on a card stays a pending approval card")
+    check(by["k2"].get("pending") is False and by["k2"].get("interrupted") is True, "a call waiting on a card is settled, not left asking")
 
     # The cancel path: a live run cancelled by shutdown persists the text, the reason and the outcome.
     prev = llm.stream_chat

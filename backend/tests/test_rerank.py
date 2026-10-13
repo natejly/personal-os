@@ -58,6 +58,17 @@ check(len(calls) == n_calls, "a blank resolved model skips the document rerank")
 run(retriever.search(None, "gadget", {**blank, "provider": "fireworks"}, limit=4))
 check(len(calls) == n_calls + 1, "blank model on a provider with a default still reranks")
 
+
+async def stall(s: Any, q: str, fused: list, by_key: dict) -> list:
+    await asyncio.sleep(5)
+    return list(reversed(fused))
+
+
+retriever.rerank_fn = stall
+got = [h["chunk_id"] for h in run(retriever.search(None, "gadget", on, limit=4, budget=0.05))]
+check(got == full[:4], "a rerank past the budget keeps the fused order instead of stalling the turn")
+retriever.rerank_fn = reverse
+
 # The real function over a stubbed HTTP layer and completion.
 import httpx  # noqa: E402
 
@@ -134,5 +145,19 @@ check([k for k, _ in run(retrieval_rerank.rerank(rs, "q", fused, by_key))] == fu
 reply.clear()
 reply["err"] = 1
 check(keys() == fused_keys, "network error keeps fused order")
+
+# A slow completion fallback cannot hold up a turn: past RERANK_WAIT the fused order stands and the route backs off.
+import asyncio  # noqa: E402
+
+async def slow_complete(*a: Any, **kw: Any) -> str:
+    await asyncio.sleep(5)
+    return "[2, 0, 1]"
+
+reply.clear()
+reply.update(status=404, json={})
+llm.complete, wait = slow_complete, retrieval_rerank.RERANK_WAIT
+retrieval_rerank.RERANK_WAIT = 0.05
+check(keys() == fused_keys and retrieval_rerank._down_until > 0, "slow rerank times out to fused order and backs off")
+retrieval_rerank.RERANK_WAIT = wait
 httpx.AsyncClient.post, llm.complete = real_post, real_complete
 print(f"test_rerank: {passed} checks passed")

@@ -66,6 +66,12 @@ def test_secret_assign() -> None:
     assert redact.scrub("the password is hunter2hunter2", secret_assign=False) == "the password is hunter2hunter2"
 
 
+def test_token_rule_spares_code_identifiers() -> None:
+    for text in ("rename api_request_handler in app.py", "the key_bindings_manager module", "KEY_PREFIX_LENGTH=4"):
+        assert redact.scrub_command_output(text) == text
+    assert "[token]" in redact.scrub("pk_live_abcdefghij1234", ("token",), secret_assign=False)
+
+
 def test_other_rules() -> None:
     assert redact.scrub("ssn 123-45-6789") == "ssn [ssn]"
     assert "[aws-key]" in redact.scrub_secrets("AKIAIOSFODNN7EXAMPLE is the id")

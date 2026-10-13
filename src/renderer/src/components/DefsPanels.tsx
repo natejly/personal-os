@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Pencil, Plus, Trash2 } from '../icons'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -24,7 +25,7 @@ function Editor({ initial, save, onDone }: { initial: string; save: (text: strin
 }
 
 export function CommandsPanel(): JSX.Element {
-  const { toast } = useStore()
+  const { toast } = useStore(useShallow((s) => ({ toast: s.toast })))
   const [cmds, setCmds] = useState<Command[]>([])
   const [edit, setEdit] = useState<string | null>(null)
   const load = useCallback(async () => { setCmds(await api.commands.list()) }, [])

@@ -14,8 +14,9 @@ export const reduceStatus = (prev: SessionStatus, ev: ChatEvent, pendingApproval
     case 'done':
       // A steer segment closing is not the end of the run: the next segment is already coming.
       if (ev.data.segment && !ev.data.error) return prev
-      // `stopped` is not a failure: a partial answer still counts as done (contract §12.3).
-      return ev.data.error ? 'error' : 'done'
+      // `stopped` is not a failure: a partial answer still counts as done (contract §12.3). A run that parks
+      // with a card still open is done talking but still waiting on the user.
+      return ev.data.error ? 'error' : settleApprovals('done', pendingApprovals)
     case 'error':
       return 'error'
     case 'tool_call':
@@ -39,9 +40,16 @@ export const reduceStatus = (prev: SessionStatus, ev: ChatEvent, pendingApproval
   }
 }
 
-/** `finally` in runStream: an interrupted run falls back to idle, a finished one keeps its verdict. */
-export const finishStatus = (prev: SessionStatus): SessionStatus =>
-  prev === 'done' || prev === 'error' ? prev : 'idle'
+/**
+ * `finally` in runStream: an interrupted run falls back to idle, a finished one keeps its verdict, and a card
+ * still on screen keeps the session waiting on the user.
+ */
+export const finishStatus = (prev: SessionStatus, pendingApprovals = 0): SessionStatus =>
+  prev === 'done' || prev === 'error' ? prev : pendingApprovals > 0 ? 'needs-approval' : 'idle'
+
+/** The verdict a fetched transcript implies: an open card is waiting on the user whatever the session last saw. */
+export const fetchedStatus = (prev: SessionStatus, pendingApprovals: number, streaming: boolean): SessionStatus =>
+  pendingApprovals > 0 ? 'needs-approval' : prev === 'needs-approval' ? (streaming ? 'working' : 'idle') : prev
 
 /** Just enough of a session for the LRU to rank it; `ChatSession` satisfies it structurally. */
 export interface EvictCandidate { streaming: unknown; unread: number; touchedAt: number }

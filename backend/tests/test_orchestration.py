@@ -576,21 +576,20 @@ def test_stop_worker_tool_ends_it_without_a_wake() -> None:
     assert on_loop(lambda: mgr.stop(other, holder[0], "tool"))["error"]
 
 
-def test_stop_from_the_ui_wakes_the_chat_and_resume_keeps_history() -> None:
+def test_stop_from_the_ui_stays_quiet_and_resume_keeps_history() -> None:
     cid = new_conv()
     GATES["Long job"] = threading.Event()
     WORKER["Long job"] = [{"text": "FOUND: 42"}]
     FRONT[:] = [delegate("Long job"), {"text": "Started."}]
-    WAKE[:] = [{"text": "I stopped that."}, {"text": "The follow up is done."}]
+    WAKE[:] = [{"text": "The follow up is done."}]
     say(cid)
     wait(lambda: not appmod.bus.live(cid) and workers_of(cid), "the worker to start")
     wid = workers_of(cid)[0]["id"]
     r = client.post(f"/workers/{wid}/stop")
     assert r.status_code == 200 and r.json()["ok"] is True and r.json()["worker"]["status"] == "stopped"
     msgs = settle(cid)
-    wake = [m for m in msgs if m.get("kind") == "wake"]
-    assert len(wake) == 1 and "stopped" in wake[0]["content"] and f"resume_worker (worker_id {wid})" in wake[0]["content"]
-    assert msgs[-1]["content"] == "I stopped that."
+    assert not [m for m in msgs if m.get("kind") == "wake"], "the user stopped it, so the front agent is not woken"
+    assert msgs[-1]["content"].endswith("Started.")
     assert client.post("/workers/nope/stop").status_code == 404
 
     # the stopped worker had one round of history; resume continues it as a new worker

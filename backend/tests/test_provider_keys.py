@@ -427,3 +427,51 @@ def test_an_unknown_provider_is_refused_and_changes_nothing(bad: object) -> None
     db.set_settings({"provider": "openai"})
     assert client.put("/settings", json={"provider": bad}).status_code == 422
     assert db.get_settings()["provider"] == "openai"
+
+
+# ---- onboarding: rerun, blank keys, listing auth, Ollama hints ----
+def complete(**kw):  # type: ignore[no-untyped-def]
+    body = {"provider": "fireworks", "baseUrl": FW, "apiKey": None, "model": "m", **kw}
+    return client.post("/setup/complete", json=body)
+
+
+def test_rerun_with_a_blank_key_keeps_the_saved_one() -> None:
+    start_on_fireworks()
+    assert complete().status_code == 200
+    assert active() == ("fireworks", FW, FW_KEY)
+
+
+def test_blank_key_switch_back_restores_that_providers_key() -> None:
+    start_on_fireworks()
+    put(provider="openai", apiKey=OAI_KEY)
+    assert complete().status_code == 200  # Fireworks' saved key, no paste
+    assert active() == ("fireworks", FW, FW_KEY)
+
+
+def test_blank_key_with_nothing_saved_is_still_refused() -> None:
+    assert complete(provider="openai", baseUrl=OAI).status_code == 422
+
+
+def test_listing_401_lets_the_chat_probe_decide() -> None:
+    mock(lambda req: httpx.Response(401, json={}) if req.url.path.endswith("/models") else listing(req))
+    assert check(model="m")["ok"]
+
+
+def test_blank_key_401_asks_for_a_key() -> None:
+    mock(lambda req: httpx.Response(401, json={}))
+    lite = {"provider": "litellm", "baseUrl": "http://localhost:4000", "apiKey": ""}
+    assert check(**lite, model="m")["error"] == "This server needs an API key."
+    assert models(**lite)["error"] == "This server needs an API key."
+
+
+def test_ollama_hints() -> None:
+    mock(lambda req: httpx.Response(200, json={"data": [{"id": "qwen3"}]}) if req.url.path.endswith("/models")
+         else httpx.Response(404, json={}))
+    base = "http://localhost:11434/v1"
+    assert check(provider="ollama", baseUrl=base, apiKey="", model="llama3.2")["error"] == \
+        "Model llama3.2 not found. Run: ollama pull llama3.2. Pulled: qwen3."
+
+    def refused(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused")
+    mock(refused)
+    assert "ollama.com/download" in check(provider="ollama", baseUrl=base, apiKey="")["error"]

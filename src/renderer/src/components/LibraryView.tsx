@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Library, Plug, Sparkles, Terminal, Users, Workflow, Zap } from '../icons'
 import { useStore, type LibraryTab } from '../store'
 import SkillsPanel from './SkillsPanel'
@@ -25,7 +26,7 @@ const KINDS = [
 export default function LibraryView(): JSX.Element {
   const tab = useStore((s) => s.libraryTab)
   const candidates = useStore((s) => s.skills.filter((x) => x.status === 'candidate').length)
-  const { setLibraryTab, refreshLibrary } = useStore()
+  const { setLibraryTab, refreshLibrary } = useStore(useShallow((s) => ({ setLibraryTab: s.setLibraryTab, refreshLibrary: s.refreshLibrary })))
   const [kind, setKind] = useState('all')
 
   // Cheap enough to re-run on every entry, and it is the only thing that notices a connector that

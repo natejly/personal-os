@@ -207,14 +207,27 @@ def _escape(allow_all: bool) -> str:
     return "runs it without asking (Allow everything is on)" if allow_all else "asks the user for approval on every call"
 
 
+_PRIVACY_DIRS = ("Desktop", "Documents", "Downloads")  # macOS privacy-protected for the app itself, sandbox or not
+
+
 def wall_note(output: str, network: bool = False, allow_all: bool = False) -> dict[str, str] | None:
-    """The sandbox rule behind a failed call, the OS error quoted: None unless the output holds a denial. With open
-    network the network rule is not what blocked it."""
-    line = next((ln.strip()[:300] for ln in output.splitlines() if _DENIED.search(ln)), None)
-    if line is None:
+    """The sandbox rule behind a failed call, the OS error quoted: None unless the output holds a denial. The wall is
+    named from the denial line and the two before it (a traceback's call), not from words anywhere in the output. With
+    open network the network rule is not what blocked it."""
+    lines = output.splitlines()
+    at = next((i for i, ln in enumerate(lines) if _DENIED.search(ln)), None)
+    if at is None:
         return None
+    line, near = lines[at].strip()[:300], "\n".join(lines[max(0, at - 2):at + 1])
+    home = os.path.expanduser("~")
+    if any(f"{h}/{d}" in line for h in (home, "~") for d in _PRIVACY_DIRS) and osplat.has("full_disk_access"):
+        from . import macos
+        if not macos.full_disk_access():
+            return {"rule": "macOS privacy (Full Disk Access)", "error": line,
+                    "why": "macOS privacy protection blocks this folder for Grain itself; running unsandboxed fails the same way",
+                    "retry": "ask the user to give Grain Full Disk Access in System Settings > Privacy & Security"}
     for pat, rule, why in _WALLS:
-        if pat.search(output) and not (network and rule.startswith("network")):
+        if pat.search(near) and not (network and rule.startswith("network")):
             return {"rule": rule, "error": line, "why": why, "retry": "unsandboxed=true " + _escape(allow_all).replace(" on every call", " for this one command")}
     return None
 
@@ -859,11 +872,10 @@ def register(tb: Any) -> None:
             _note_shell_copies(ctx, since_ns)
             return res
         if not unsandboxed and osplat.current().sandbox.failed_to_start(job.exit_code, text):
-            jobs.sandbox_failed = True
             return tool_error(_scrub("The OS sandbox refused to start (" + text.strip()[:200] + "), so nothing was run."),
                               alternative=f"retry with unsandboxed=true, which {_escape(is_allow_all)}")
         shown, cut = truncate(text)
-        wall = None if unsandboxed else wall_note(text, network, is_allow_all)
+        wall = None if unsandboxed or job.exit_code == 0 else wall_note(text, network, is_allow_all)
         if job.end_cwd:
             try:
                 ended = resolve_cwd(job.end_cwd, default, dr)

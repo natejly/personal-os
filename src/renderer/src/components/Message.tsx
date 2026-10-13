@@ -1,4 +1,4 @@
-import { Component, memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite, splitSources } from '../lib/remarkCites'
@@ -22,7 +22,7 @@ import { staysVisible, traceLines } from '../lib/toolDisplay'
 import { quietEvents } from '../lib/orchestration'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
-import { busyText, nowText, waitText } from '../lib/runStatus'
+import { APPROVAL_WAIT, busyText, nowText, waitText } from '../lib/runStatus'
 import { clockTime, fullTime } from '../lib/chatMeta'
 import Face from './Face'
 import ResearchTrail from './ResearchTrail'
@@ -62,7 +62,7 @@ function ReplyActivity({ reasoning, events, conversationId, streaming, answering
     return <span key={i} className={`trace-line ${l.error ? 'err' : ''} ${isLive ? 'shimmer' : ''}`}>{isLive && now && !l.error ? now : l.text}</span>
   }
   return (
-    <div className="trace" aria-live="polite">
+    <div className="trace" aria-live={live ? 'polite' : undefined}>
       {line(lines[lines.length - 1], lines.length - 1)}
     </div>
   )
@@ -135,6 +135,7 @@ function ContinueButton({ conversationId, messageId }: { conversationId: string;
 /** The single action an error class earns, under the newest reply. */
 function ErrorAction({ conversationId, kind }: { conversationId: string; kind: string }): JSX.Element | null {
   const [busy, setBusy] = useState(false)
+  const btn = useRef<HTMLButtonElement>(null)
   const act = errorAction(kind)
   if (!act) return null
   const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
@@ -142,8 +143,8 @@ function ErrorAction({ conversationId, kind }: { conversationId: string; kind: s
     if (act.action === 'retry') void st().regenerate(conversationId)
     else if (act.action === 'settings') st().openSettings('model')
     else if (act.action === 'models') {
-      // The model menu lives under the composer; settings is the fallback when no menu is mounted.
-      const trigger = document.querySelector<HTMLButtonElement>('.model-menu-trigger')
+      // The model menu lives under this chat's composer (not another window's); settings is the fallback when none is mounted.
+      const trigger = btn.current?.closest('.chat, .win, .page-agent, .quick-ask')?.querySelector<HTMLButtonElement>('.model-menu-trigger')
       if (trigger) trigger.click()
       else st().openSettings('model')
     } else {
@@ -154,7 +155,7 @@ function ErrorAction({ conversationId, kind }: { conversationId: string; kind: s
         .finally(() => setBusy(false))
     }
   }
-  return <button className="ghost-btn" disabled={busy} onClick={go}>{busy ? 'Working…' : act.label}</button>
+  return <button ref={btn} className="ghost-btn" disabled={busy} onClick={go}>{busy ? 'Working…' : act.label}</button>
 }
 
 // Tools that can change a granted folder; a reply without one never asks the backend for a change list.
@@ -212,19 +213,44 @@ function BusyLine({ message }: { message: Message }): JSX.Element | null {
     return () => clearInterval(t)
   }, [])
   const text = busyText(message, { nowMs: now, subs, workers })
-  return text ? <div className="thinking run-status busy-line shimmer" role="status">{text}</div> : null
+  return text ? <StatusLine className="thinking run-status busy-line shimmer" text={text} urgent={text === APPROVAL_WAIT} /> : null
 }
 
-/** A shimmering "Thinking…" for a reply with nothing to show yet; past 5s it gains the elapsed time, so a slow model does not look hung. */
-export function Thinking(): JSX.Element {
-  const [start] = useState(() => Date.now())
+/**
+ * A line that ticks every second: only its words are live, so a screen reader hears "Running shell" once rather
+ * than every second of it. A card waiting on the user is announced at once (`urgent`).
+ */
+function StatusLine({ className, text, urgent }: { className: string; text: string; urgent?: boolean }): JSX.Element {
+  const m = / \d+s$/.exec(text)
+  const words = m ? text.slice(0, m.index) : text
+  return (
+    <div className={className}>
+      <span role={urgent ? 'alert' : 'status'}>{words}</span>{m && <span aria-hidden="true">{m[0]}</span>}
+    </div>
+  )
+}
+
+/** When each chat's wait began, while a Thinking line shows for it: the chat's placeholder hands over to the reply row's own. */
+const thinkingSince = new Map<string, number>()
+
+/**
+ * A shimmering "Thinking…" for a reply with nothing to show yet; past 5s it gains the elapsed time, so a slow model does
+ * not look hung. `chat` keys the start time, so the count carries on (rather than restarting) when the reply row takes over.
+ */
+export function Thinking({ chat }: { chat?: string }): JSX.Element {
+  // Read at render, before the line it replaces has unmounted.
+  const [start] = useState(() => (chat && thinkingSince.get(chat)) || Date.now())
   const [now, setNow] = useState(start)
   useEffect(() => {
+    if (chat) thinkingSince.set(chat, start)
     const t = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(t)
-  }, [])
+    return () => {
+      clearInterval(t)
+      if (chat && thinkingSince.get(chat) === start) thinkingSince.delete(chat)
+    }
+  }, [chat, start])
   const text = waitText(now - start)
-  return <div className="thinking run-status shimmer" role="status">{text ?? 'Thinking…'}</div>
+  return <StatusLine className="thinking run-status shimmer" text={text ?? 'Thinking…'} />
 }
 
 /** The "N steps · ms · tok" chip, shown only with Settings → Behavior → Developer tools on. Its own component so the
@@ -291,7 +317,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   // A reply that only handed work on has nothing to draw (the backend removes it once the turn ends); nor does one that is only the sentinel.
   if (!isUser && !streaming && !content && !message.reasoning && !message.error && !message.attachments?.length && !events.length && (message.tool_events?.length || sentinel)) return null
   return (
-    <div className={`msg ${message.role}`} data-message-id={message.id}>
+    <div className={`msg ${message.role}`} data-message-id={message.id} aria-busy={streaming || undefined}>
       {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a face, and each thread its own. */}
       {!isUser && <div className="avatar face-avatar"><Face name={face?.name ?? message.conversation_id} hue={face?.hue} tone={face?.tone} status={streaming ? 'streaming' : message.error ? 'error' : undefined} /></div>}
       <div className="bubble">
@@ -317,7 +343,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
                   </ShowCtx.Provider>
                 </div>
               ) : streaming && !message.reasoning && !folded.length && !shown.some((t) => t.pending) && !busy ? (
-                <Thinking />
+                <Thinking chat={message.conversation_id} />
               ) : null}
               {/* The one named live line, below whatever has streamed: it replaces the trace's live step and the bare Thinking. */}
               {busy && <BusyLine message={message} />}
@@ -438,11 +464,12 @@ function UserText({ content }: { content: string }): JSX.Element {
   )
 }
 
-export function PendingUserMessage({ text, attachments }: { text: string; attachments?: Attachment[] }): JSX.Element {
+export function PendingUserMessage({ text, attachments, queued }: { text: string; attachments?: Attachment[]; queued?: number }): JSX.Element {
   return (
     <div className="msg user pending" aria-busy="true">
       <div className="avatar"><User size={14} /></div>
-      <div className="bubble"><div className="user-bubble"><AttachmentChips files={attachments} />{text && <UserText content={text} />}</div></div>
+      <div className="bubble"><div className="user-bubble"><AttachmentChips files={attachments} />{text && <UserText content={text} />}</div>
+        {queued && <div className="pending-queued">Queued #{queued}: it starts when another desk finishes</div>}</div>
     </div>
   )
 }

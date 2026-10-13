@@ -51,10 +51,11 @@ class DarwinSecrets:
     def get(self, service: str, name: str) -> str | None:
         r = self._security(f"find-generic-password -s {self._quote(service)} -a {self._quote(name)} -w")
         if r is None:
-            return None
+            raise OSError("Keychain unavailable")
         if r.returncode != 0 or not r.stdout.strip():
             if r.returncode not in (0, self.NOT_FOUND):
                 log.warning("Keychain read of %s failed (%s)", name, r.returncode)
+                raise OSError(f"Keychain read failed ({r.returncode})")
             return None
         try:
             return base64.b64decode(r.stdout.strip()).decode()

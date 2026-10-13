@@ -15,9 +15,11 @@ npm run package:x64      # Intel build
 
 1. `scripts/bundle-backend.sh [arm64|x64]` downloads the pinned CPython (tag and sha256 are constants
    at the top of the script; the download is checksum-verified and cached in `build/.cache`), runs
-   `uv pip install ./backend[mac]` into it (non-editable, with the macOS pyobjc extras), strips
-   tests, caches, unused stdlib and Google discovery documents, precompiles bytecode, and smoke-imports
-   the result from a neutral directory. Output: `build/backend-bundle/` (gitignored, ~315 MB).
+   `uv export --locked` on `backend/uv.lock` (extras `mac`, `whistle`, `charts`) and installs exactly
+   those versions into it, then the backend itself (non-editable), strips tests, caches, unused stdlib
+   and Google discovery documents, precompiles bytecode, and smoke-imports the result from a neutral
+   directory. Output: `build/backend-bundle/` (gitignored, ~345 MB; the whole app is ~820 MB).
+   A dependency change in `backend/pyproject.toml` needs `uv lock` first, or the bundle step fails.
    Needs `uv` on the build machine only.
 2. `electron-vite build`
 3. `electron-builder --mac --config electron-builder.config.cjs`, which copies the bundle to
@@ -47,8 +49,9 @@ To bump Python, change `PBS_TAG`, `PBS_PY` and the two checksums in `bundle-back
   Developer ID for builds you hand to other people. `GRAIN_ADHOC_SIGN=1` forces ad-hoc.
 - Neither: electron-builder skips signing and `scripts/adhoc-sign.cjs` ad-hoc signs the
   bundled Python binaries and the app (hardened runtime, same entitlements). This is what CI and
-  other Macs get. On another Mac, Gatekeeper needs right-click, Open the first time. Auto-update
-  cannot install an ad-hoc build, and every rebuild drops privacy grants.
+  other Macs get. On another Mac, macOS 15 blocks the first launch: open System Settings → Privacy &
+  Security and click Open Anyway (right-click → Open no longer bypasses it). Auto-update cannot
+  install an ad-hoc build, and every rebuild drops privacy grants.
 
 Creating the local identity (once per Mac; Keychain Access → Certificate Assistant → Create a
 Certificate, Identity Type "Self Signed Root", Certificate Type "Code Signing", does the same):
@@ -106,8 +109,11 @@ Publishing as a draft first (`--publish always` with `releaseType: draft` via
 
 ## Friends beta
 
-`.github/workflows/release.yml` builds, signs, notarizes and publishes an arm64 prerelease when a
-`v*` tag is pushed (or from the Actions tab). Users bring their own model API keys.
+`.github/workflows/release.yml` builds, signs, notarizes and publishes an arm64 release when a
+`v*` tag is pushed (or from the Actions tab). A version with a prerelease part (`0.2.0-beta.1`) is
+published as a GitHub prerelease, a plain one (`0.2.0`) as a full release: installed builds on a plain
+version only see full releases. The workflow fails before building if a signing or notarization secret
+is missing, or if the tag does not match `package.json`'s version. Users bring their own model API keys.
 
 - Repo secrets: `CSC_LINK` (base64 or URL of the Developer ID .p12), `CSC_KEY_PASSWORD`, `APPLE_ID`,
   `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`, `GRAIN_GOOGLE_CLIENT_ID`, `GRAIN_GOOGLE_CLIENT_SECRET`.
@@ -125,8 +131,10 @@ Publishing as a draft first (`--publish always` with `releaseType: draft` via
 
 `src/main/updater.ts` (packaged builds only; `GRAIN_DISABLE_UPDATES=1` turns it off) checks GitHub
 Releases at startup and every 6 hours, downloads in the background, and shows an "Update ready"
-dialog with Restart / Later. Later still installs on the next quit. Updates need a Developer
-ID signed build (macOS refuses to swap in an ad-hoc one).
+dialog with Restart / Later (once per version). Later still installs on the next quit. Help → Check for
+Updates… runs a check and shows the outcome or the error. Updates need a Developer ID signed build
+(macOS refuses to swap in an ad-hoc one) running from Applications: a copy started from Downloads or
+the disk image offers to move itself there at launch.
 
 ## Verifying a build
 

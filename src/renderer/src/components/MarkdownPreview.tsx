@@ -19,7 +19,7 @@ import MermaidBlock from './MermaidBlock'
 import HtmlBlock, { SvgBlock } from './HtmlBlock'
 import { fenceKind } from '../lib/htmlFence'
 import remarkWikilinks from '../features/notes/remarkWikilinks'
-import remarkFilePaths, { filePathOf } from '../lib/pathLinks'
+import remarkFilePaths, { filePathOf, hrefPath } from '../lib/pathLinks'
 import { openPathLink } from '../lib/useChatFiles'
 import { ShowCtx } from './ShowButton'
 import remarkAi from '../features/notes/remarkAi'
@@ -59,6 +59,8 @@ function CopyButton({ text, label = false }: { text: string; label?: boolean }):
 function ExternalLink({ href, children, ...rest }: React.AnchorHTMLAttributes<HTMLAnchorElement>): JSX.Element {
   const file = filePathOf(href)
   if (file !== null) return <FileLink path={file}>{children}</FileLink>
+  const named = hrefPath(href)
+  if (named !== null) return <FileLink path={named} label={children}>{children}</FileLink>
   const ok = !!href && /^https?:\/\//i.test(href)
   return (
     <a {...rest} href={ok ? href : undefined} title={href} rel="noreferrer noopener"
@@ -71,13 +73,13 @@ function ExternalLink({ href, children, ...rest }: React.AnchorHTMLAttributes<HT
  * itself names reach here (remarkFilePaths wraps them, and the link text is the path), so the chip stands in
  * for the text. Outside a chat there is no panel to open it in, so the text stays as is.
  */
-function FileLink({ path, children }: { path: string; children?: React.ReactNode }): JSX.Element {
+function FileLink({ path, label, children }: { path: string; label?: React.ReactNode; children?: React.ReactNode }): JSX.Element {
   const chat = useContext(ShowCtx)
   if (!chat) return <>{children}</>
   const Icon = FILE_KIND_ICON[fileKind(path)]
   return (
     <button type="button" className="file-chip inline" title={path} onClick={() => { void openPathLink(path, chat) }}>
-      <Icon size={13} /><span>{baseName(path)}</span>
+      <Icon size={13} /><span>{label ?? baseName(path)}</span>
     </button>
   )
 }

@@ -503,6 +503,7 @@ def test_a_proposal_can_be_edited_before_it_is_accepted_or_simply_rejected() -> 
 
     q = _one_proposal("calendar_create", {"summary": "Coffee", "start": "2026-10-01T10:00"})
     assert j("POST", f"/proposals/{q['id']}/reject")["proposal"]["status"] == "rejected"
+    assert j("POST", f"/proposals/{q['id']}/reject")["proposal"]["status"] == "rejected", "a second reject is a no-op"
     assert [n for n, _ in SENT] == ["gmail_send"], "a rejected proposal never runs"
     assert all(x["id"] != q["id"] for x in proposals.list("pending"))
     assert proposals.list("rejected")[0]["id"] == q["id"]

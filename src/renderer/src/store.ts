@@ -1124,6 +1124,8 @@ export const useStore = create<State>((set, get) => {
   let stateWired = false
   // `/events` resume cursor. The topic's seq restarts with the backend process, so a restart zeroes it.
   let eventsSince = 0
+  // Proposals with a decision on the wire: a second click (or keypress) before it lands is dropped.
+  const deciding = new Set<string>()
 
   /**
    * The main process supervises the sidecar and announces each state. While it restarts the UI stays up
@@ -3582,6 +3584,8 @@ export const useStore = create<State>((set, get) => {
       }
     },
     decideProposal: async (id, accept, args) => {
+      if (deciding.has(id)) return null
+      deciding.add(id)
       try {
         if (!accept) {
           await api.proposals.reject(id)
@@ -3596,6 +3600,7 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         return (e as Error).message
       } finally {
+        deciding.delete(id)
         void get().refreshAgentInbox()
       }
     },

@@ -6031,7 +6031,10 @@ def reject_proposal(pid: str) -> dict[str, Any]:
         raise HTTPException(404, "No such proposal")
     row = proposals.reject(pid)
     if row is None:
-        raise HTTPException(409, f"That proposal was already {p['status']}")
+        cur = proposals.get(pid) or p
+        if cur["status"] == "rejected":  # idempotent: a double click or a second window asked for the same thing
+            return {"ok": True, "proposal": cur}
+        raise HTTPException(409, f"That proposal was already {cur['status']}")
     return {"ok": True, "proposal": row}
 
 

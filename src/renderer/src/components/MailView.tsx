@@ -17,6 +17,7 @@ import { shortDate, shortDateTime } from '../lib/dates'
 import SidebarToggle from './SidebarToggle'
 import { fmtBytes } from '../lib/showPanel'
 import { attachmentKind, attachmentsOverLimit, forwardCompose, parseAddressList, type AttachmentKind } from '../lib/mailCompose'
+import ErrorState from './ErrorState'
 
 const KIND_ICON: Record<AttachmentKind, typeof FileIcon> = { image: ImageIcon, pdf: FileText, text: FileText, sheet: FileSpreadsheet, archive: FileArchive, file: FileIcon }
 const AttachIcon = ({ a }: { a: { mime: string; name: string } }): JSX.Element => {
@@ -69,9 +70,11 @@ const RANGES = [
 const isStarred = (m: GmailMessage): boolean => m.labels.includes('STARRED')
 
 /** The open message. Its own component so the dialog behaviour mounts and unmounts with it. */
-function MailReader({ message: m, full, onClose, onReply, onForward, onStar, onArchive, onSnooze, onUnread, onAsk }: {
+function MailReader({ message: m, full, error, onRetry, onClose, onReply, onForward, onStar, onArchive, onSnooze, onUnread, onAsk }: {
   message: GmailMessage
   full: GmailFullMessage | null
+  error: string | null
+  onRetry: () => void
   onClose: () => void
   onReply: () => void
   onForward: () => void
@@ -106,7 +109,7 @@ function MailReader({ message: m, full, onClose, onReply, onForward, onStar, onA
             {full?.to && <span className="muted">to {full.to}</span>}{full?.to && <br />}
             <span className="muted">{m.date && !isNaN(new Date(m.date).getTime()) ? shortDateTime(new Date(m.date)) : m.date ?? ''}</span>
           </p>
-          {full ? <pre className="doc-text mail-body">{full.body || '(no text content)'}</pre> : <p className="muted">Loading…</p>}
+          {full ? <pre className="doc-text mail-body">{full.body || '(no text content)'}</pre> : error ? <ErrorState message={error} onRetry={onRetry} /> : <p className="muted">Loading…</p>}
           {!!full?.attachments?.length && (
             <div className="mail-attachments" aria-label="Attachments">
               {full.attachments.map((a) => (
@@ -270,6 +273,7 @@ export default function MailView(): JSX.Element {
   const [q, setQ] = useState('')
   const [open, setOpen] = useState<GmailMessage | null>(null)
   const [full, setFull] = useState<GmailFullMessage | null>(null)
+  const [bodyError, setBodyError] = useState<string | null>(null)
   // A slow body fetch can land after another message was opened; only the latest one's is kept.
   const openedId = useRef<string | null>(null)
   const [snoozed, setSnoozed] = useState<string[]>([])
@@ -383,7 +387,9 @@ export default function MailView(): JSX.Element {
     const key = `mailbody:${m.id}`
     const cached = readView<GmailFullMessage>(key)
     setFull(cached)
-    api.google.gmailGet(m.id).then((full) => { writeView(key, full); if (openedId.current === m.id) setFull(full) }).catch((e) => toast((e as Error).message, 'error'))
+    setBodyError(null)
+    api.google.gmailGet(m.id).then((full) => { writeView(key, full); if (openedId.current === m.id) setFull(full) })
+      .catch((e) => { if (openedId.current === m.id) setBodyError((e as Error).message) })
     if (m.unread) void modify(m, { mark_read: true })
   }
 
@@ -601,7 +607,7 @@ export default function MailView(): JSX.Element {
 
       {opened && (
         <MailReader
-          message={opened} full={full} onClose={() => setOpen(null)}
+          message={opened} full={full} error={bodyError} onRetry={() => openMessage(opened)} onClose={() => setOpen(null)}
           onReply={() => startReply(opened)}
           onForward={() => startForward(opened)}
           onStar={() => void modify(opened, { star: !isStarred(opened) })}

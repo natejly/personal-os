@@ -15,6 +15,7 @@ import TodoBoard, { type BoardGroup } from './TodoBoard'
 import { clearHandoff, peekHandoff } from '../lib/handoff'
 import SidebarToggle from './SidebarToggle'
 import { rowButton } from '../lib/rowButton'
+import ErrorState from './ErrorState'
 
 /** The unlisted todos are the default list; this is what it is called in the rail. */
 const DEFAULT_LIST = 'Todos'
@@ -53,9 +54,16 @@ export default function TodosView(): JSX.Element {
   const dropFilter = async (id: string): Promise<void> => { await api.todos.deleteFilter(id).catch(() => undefined); setSaved((s) => s.filter((f) => f.id !== id)) }
   // The store starts with no todos, which is not the same as there being none.
   const [loaded, setLoaded] = useState(false)
+  // A failed read is not an empty list either: it says so and offers a retry.
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [retry, setRetry] = useState(0)
 
   const todosTick = useStore((s) => s.todosTick)
-  useEffect(() => { void refreshTodos(scope, showDone || board, sort).finally(() => setLoaded(true)) }, [scope, showDone, board, sort, refreshTodos, todosTick])
+  useEffect(() => {
+    void refreshTodos(scope, showDone || board, sort)
+      .then(() => setLoadError(null), (e) => setLoadError((e as Error).message))
+      .finally(() => setLoaded(true))
+  }, [scope, showDone, board, sort, refreshTodos, todosTick, retry])
   useEffect(() => { void refreshTasksSync() }, [refreshTasksSync])
   // Lists live on their own (an empty one still exists), so they are read apart from the todos.
   useEffect(() => { void api.todos.lists().then(setLists).catch(() => undefined) }, [todosTick])
@@ -252,7 +260,8 @@ export default function TodosView(): JSX.Element {
             </div>
           )}
           {/* No button: the add row right above is the action, and a second filled one would compete with it. */}
-          {loaded && shown.length === 0 && (
+          {loaded && shown.length === 0 && loadError && <ErrorState message={loadError} onRetry={() => setRetry((n) => n + 1)} />}
+          {loaded && shown.length === 0 && !loadError && (
             <div className="empty-state">
               <ListChecks size={28} />
               <h2>{showDone || board ? `Nothing on ${listLabel}` : 'Nothing open'}</h2>

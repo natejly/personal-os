@@ -26,6 +26,7 @@ import Face from './Face'
 import { ShipChecklistView } from './toolcards/ShipChecklistCard'
 import { TOOL_CARDS } from './toolcards'
 import type { ShipChecklist } from '@shared/types'
+import ErrorState from './ErrorState'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 const fmtWhen = (ts: number): string => {
@@ -826,8 +827,12 @@ export default function AgentInbox(): JSX.Element | null {
   const [adding, setAdding] = useState(!!draft)
   useEffect(() => { if (draft) { setShowJobs(true); setAdding(true) } }, [draft])
   useEffect(() => { void refreshJobs() }, [refreshJobs])  // once, so the Scheduled count is real before it is opened
+  // refreshAgentInbox swallows its error, so a read that ends with no inbox is the failure signal.
+  const [tried, setTried] = useState(false)
+  const loadInbox = (): void => { setTried(false); void useStore.getState().refreshAgentInbox().finally(() => setTried(true)) }
+  useEffect(() => { if (!box) loadInbox() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!box) return null
+  if (!box) return tried ? <ErrorState message="the agent inbox" onRetry={loadInbox} /> : <p className="muted">Loading…</p>
   const { approvals, proposals } = box.needs_you
   const paused = box.needs_you.paused_jobs ?? []
   // A desk waiting on an approval is already a row above with Allow/Deny, so its desk event is dropped.

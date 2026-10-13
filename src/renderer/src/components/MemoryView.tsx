@@ -166,11 +166,15 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
     } catch { setTidyNote('Tidy up failed.') } finally { setTidying(false) }
   }
   const decide = async (p: MemoryProposal, apply: boolean): Promise<void> => {
-    if (apply) await api.memories.applyProposal(p.id); else await api.memories.dismissProposal(p.id)
-    loadProposals(); await refreshMemories(query)
-    if (apply) { await useStore.getState().refreshGraph() }
+    try {
+      if (apply) await api.memories.applyProposal(p.id); else await api.memories.dismissProposal(p.id)
+      loadProposals(); await refreshMemories(query)
+      if (apply) { await useStore.getState().refreshGraph() }
+    } catch (e) { toast((e as Error).message, 'error') }
   }
-  const restore = async (id: string): Promise<void> => { await api.memories.restore(id); await refreshMemories(query); loadHistory() }
+  const restore = async (id: string): Promise<void> => {
+    try { await api.memories.restore(id); await refreshMemories(query); loadHistory() } catch (e) { toast((e as Error).message, 'error') }
+  }
 
   const { toast } = useStore(useShallow((s) => ({ toast: s.toast })))
   const exportMemories = async (): Promise<void> => {
@@ -192,8 +196,10 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
   const targetProject = scope === 'all' || scope === 'personal' ? null : scope
   const add = async (): Promise<void> => {
     if (!draft.trim()) return
-    await addMemory(draft, kind, targetProject)
-    setDraft('')
+    try {
+      await addMemory(draft, kind, targetProject)
+      setDraft('')
+    } catch (e) { toast((e as Error).message, 'error') }
   }
 
   return (

@@ -13,6 +13,7 @@ const HELP: Record<ModelKey, { help: string; placeholder: string }> = {
   modelHigh: { help: 'Drafting skills and agents.', placeholder: 'Provider default' },
   modelMedium: { help: 'Auto-review of tool calls, summaries and recaps, memory tidy-ups, and short messages under Auto.', placeholder: 'Provider default' },
   modelLow: { help: 'Titles, memories, follow-ups and other background learning.', placeholder: 'Provider default' },
+  workerModel: { help: "Model for workers the chat starts. An agent's own model still wins.", placeholder: 'Same as chat' },
   fastModel: { help: '', placeholder: '' },
   extractionModel: { help: '', placeholder: '' },
   embeddingModel: { help: 'After changing it, Save, then press Rebuild search index under Advanced.', placeholder: 'qwen3-embedding-8b' },

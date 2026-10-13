@@ -84,6 +84,11 @@ def sweep(db: Database, cfg: dict[str, Any], now: float | None = None) -> dict[s
             out.update(archive_sweep(db, float(days), t))
         except sqlite3.Error as e:
             log.warning("retention: archive skipped (%s)", e)
+    try:
+        with db.tx() as c:
+            c.execute("PRAGMA optimize")  # refresh the planner's statistics for what the sweep and the day changed
+    except sqlite3.Error as e:
+        log.warning("retention: optimize skipped (%s)", e)
     if any(out.values()):
         log.info("retention sweep: %s", ", ".join(f"{k}={v}" for k, v in out.items() if v))
     return out

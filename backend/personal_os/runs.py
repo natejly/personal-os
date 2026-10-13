@@ -117,7 +117,6 @@ class RunStore:
     def __init__(self, db: Database) -> None:
         self.db = db
         self._c = db.connect()
-        self._c.execute("PRAGMA synchronous=NORMAL")
         self._lock = threading.Lock()
         self._buf: list[tuple[Any, ...]] = []
         self._buf_lock = threading.Lock()  # never held across I/O: append() takes it on the event loop

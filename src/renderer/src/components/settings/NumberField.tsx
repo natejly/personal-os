@@ -4,6 +4,7 @@ export const RANGES = {
   workerMaxConcurrent: [1, 16],
   codingSessionMaxConcurrent: [1, 20],
   autoArchiveDays: [0, 3650], // 0 = off; the backend takes 0 as "automatic" and 1 to 3650
+  planAutoApproveSeconds: [0, 600], // 0 = off
   telegramLongRunMinutes: [1, 1440]
 } as const satisfies Record<string, readonly [number, number]>
 

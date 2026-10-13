@@ -133,6 +133,7 @@ RANGES: dict[str, tuple[float, float]] = {
     "codingSessionMaxConcurrent": (1, 20),
     "delegationAfterRounds": (1, 20),
     "workerMaxConcurrent": (1, 16),
+    "planAutoApproveSeconds": (0, 600),  # 0 = off
 }
 
 

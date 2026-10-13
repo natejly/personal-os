@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronRight, Pencil, ShieldAlert, Wrench } from '../icons'
 import type { PlanDecision, PlanEdit, PlanRecord, PlanRecordStep, ToolDanger } from '@shared/types'
 import { argRows, broken, edited as reallyEdited, editPayload, invalid } from '../lib/planDigest'
+import { api } from '../lib/api'
 import { useStore } from '../store'
 // This card mounts inline in a chat bubble as well as in the Plan tab, so it carries its own sheet
 // rather than relying on another component having loaded it first.
@@ -159,6 +160,8 @@ export default function ActionPlanCard({ plan, onDecide, shortcuts = true }: {
   const [dropped, setDropped] = useState<number[]>([])
   const [note, setNote] = useState('')
   const [sending, setSending] = useState(false)
+  const [held, setHeld] = useState(false)
+  const [now, setNow] = useState(() => Date.now() / 1000)
 
   const pending = plan.status === 'pending'
   const steps = plan.steps
@@ -167,6 +170,21 @@ export default function ActionPlanCard({ plan, onDecide, shortcuts = true }: {
   const changed = payload !== null
   const kept = steps.length - dropped.length
   const strip = effects(steps.filter((s) => !dropped.includes(s.idx)))
+
+  // The server proceeds at auto_at on its own (a closed window still goes ahead); this only shows it.
+  // Any touch of the card cancels it there too.
+  const counting = pending && !held && plan.auto_at !== null
+  useEffect(() => {
+    if (!counting) return
+    const t = window.setInterval(() => setNow(Date.now() / 1000), 500)
+    return () => window.clearInterval(t)
+  }, [counting])
+  const hold = (): void => {
+    if (!counting) return
+    setHeld(true)
+    void api.holdPlan(plan.call_id).catch(() => {})
+  }
+  const secondsLeft = counting ? Math.max(0, Math.ceil((plan.auto_at as number) - now)) : 0
 
   const decide = async (decision: 'approve' | 'edit' | 'reject'): Promise<void> => {
     if (sending) return
@@ -214,6 +232,14 @@ export default function ActionPlanCard({ plan, onDecide, shortcuts = true }: {
       </header>
 
       {plan.intent && <p className="aplan-intent">{plan.intent}</p>}
+      <p className="aplan-confidence">
+        <span className={`aplan-conf ${plan.confidence}`}>{plan.confidence === 'high' ? 'High confidence' : 'Medium confidence'}</span>
+      </p>
+      {plan.assumptions.length > 0 && (
+        <ul className="aplan-assumptions">
+          {plan.assumptions.map((a, i) => <li key={i}>{a}</li>)}
+        </ul>
+      )}
       {strip.length > 0 && <p className="aplan-effects">{strip.join(' · ')}</p>}
 
       {plan.expected_taint.length > 0 && (
@@ -236,9 +262,9 @@ export default function ActionPlanCard({ plan, onDecide, shortcuts = true }: {
             dropped={dropped.includes(s.idx)}
             draft={drafts[s.idx]}
             open={Boolean(open[s.idx])}
-            onDrop={(v) => setDropped((d) => (v ? [...d, s.idx] : d.filter((i) => i !== s.idx)))}
-            onDraft={(v) => setDrafts((d) => ({ ...d, [s.idx]: v }))}
-            onToggle={() => setOpen((o) => ({ ...o, [s.idx]: !o[s.idx] }))}
+            onDrop={(v) => { hold(); setDropped((d) => (v ? [...d, s.idx] : d.filter((i) => i !== s.idx))) }}
+            onDraft={(v) => { hold(); setDrafts((d) => ({ ...d, [s.idx]: v })) }}
+            onToggle={() => { hold(); setOpen((o) => ({ ...o, [s.idx]: !o[s.idx] })) }}
           />
         ))}
       </ol>
@@ -249,8 +275,9 @@ export default function ActionPlanCard({ plan, onDecide, shortcuts = true }: {
             className="aplan-note"
             placeholder="Note to the agent (optional)"
             value={note}
-            onChange={(e) => setNote(e.target.value)}
+            onChange={(e) => { hold(); setNote(e.target.value) }}
           />
+          {counting && <p className="aplan-countdown" role="status">{secondsLeft > 0 ? `Going ahead in ${secondsLeft}s` : 'Going ahead…'} - edit or reject to stop it</p>}
           <div className="aplan-actions">
             <button
               className="primary-btn sm"

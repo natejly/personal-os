@@ -145,6 +145,9 @@ export function planOfCall(callId: string, args: unknown, tainted: boolean): Pla
   return {
     plan_id: callId, call_id: callId, run_id: null, conversation_id: null, message_id: null, desk_id: null,
     title: text(a.title), intent: text(a.intent), status: 'pending', tainted, expected_taint: [], note: null,
+    confidence: a.confidence === 'high' ? 'high' : 'medium',
+    assumptions: Array.isArray(a.assumptions) ? a.assumptions.filter((x): x is string => typeof x === 'string') : [],
+    auto_at: typeof a.auto_at === 'number' ? a.auto_at : null,
     decided_by: null, created_at: 0, decided_at: null, steps
   }
 }

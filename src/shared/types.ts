@@ -287,6 +287,11 @@ export interface PlanRecord {
   tainted: boolean
   /** Tools in this plan that taint, so a later external step is not re-gated by the plan's own research. */
   expected_taint: string[]
+  /** The model's own rating of the plan, and what it assumed rather than knew. */
+  confidence: 'high' | 'medium'
+  assumptions: string[]
+  /** Epoch seconds when a high-confidence plan goes ahead unanswered; null = no countdown. */
+  auto_at: number | null
   note: string | null
   decided_by: string | null
   created_at: number
@@ -1623,6 +1628,8 @@ export interface Settings {
   llmIdleSeconds?: number
   /** Archive chats and inbox messages whose last activity is older than this many days (restorable). 0 or missing = off. */
   autoArchiveDays?: number
+  /** Seconds before a plan the assistant rates high-confidence goes ahead unanswered (default 30, 0 = off, 0-600). Never in manual mode. */
+  planAutoApproveSeconds?: number
   /** Hosts fetch_url may still read once the reply has seen untrusted content. */
   fetchAllowlist?: string[]
   /** Snapshot granted folders before a reply changes them, so Undo covers shell effects. Missing means on. */

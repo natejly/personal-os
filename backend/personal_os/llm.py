@@ -159,6 +159,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # How long a desk waits on a card nobody is watching before letting the run go. The card stays
     # pending and decidable; only the run lets go. 0 = wait forever, which is what a chat does.
     "parkAfterSeconds": DESK_PARK_AFTER_SECONDS,
+    # A plan the model rates high-confidence goes ahead this many seconds after its card opens unless the user answers
+    # or touches it first. 0 = off. Never in manual permission mode, never after untrusted content.
+    "planAutoApproveSeconds": 30,
     "deskMaxLive": 0,  # 0 = automatic (limits.worker_slots); a non-zero value overrides
     # Relaunch desks a restart interrupted mid-turn. Off by default: a desk with a call whose outcome is
     # unknown, or one waiting on an approval or its plan, is never relaunched either way.

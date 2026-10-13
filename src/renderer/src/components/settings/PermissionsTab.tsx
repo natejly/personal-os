@@ -7,6 +7,7 @@ import { ShellNetwork } from '../CoworkSettings'
 import RunSafetySettings, { SnapshotToggle } from '../RunSafetySettings'
 import { PermissionModeCards } from '../PermissionMode'
 import { DestructiveDefaults } from '../DestructiveDefaults'
+import NumberField from './NumberField'
 import Switch from './Switch'
 import { Sec, type TabProps } from './shared'
 
@@ -16,6 +17,11 @@ export default function PermissionsTab({ draft, patch }: TabProps): JSX.Element 
     <section className="permissions-tab">
       <h3>Permissions</h3>
       <Sec id="mode"><PermissionModeCards mode={mode} onPick={(permissionMode) => patch({ permissionMode })} /></Sec>
+      {mode !== 'manual' && (
+        <label className="setting-row"><span className="toggle-text"><b>Go ahead with confident plans after</b><small>Seconds. A plan the assistant is sure about starts by itself unless you change or answer it first. Cards that always ask still ask. 0 turns this off.</small></span>
+          <NumberField name="planAutoApproveSeconds" value={draft.planAutoApproveSeconds ?? 30} fallback={0} onChange={(planAutoApproveSeconds) => patch({ planAutoApproveSeconds })} />
+        </label>
+      )}
       {mode === 'manual' && <DestructiveDefaults value={draft.destructiveDefaults} onChange={(destructiveDefaults) => patch({ destructiveDefaults })} />}
       <Switch className="all-connections" danger={!!draft.allowAllConnections} label="Allow all domains and MCP servers"
         title={<>{draft.allowAllConnections && <ShieldAlert size={13} aria-hidden />} Allow all domains and MCP servers</>}

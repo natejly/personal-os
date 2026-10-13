@@ -212,6 +212,8 @@ export const api = {
   // whose digests the backend re-derives), and one line back to the model.
   approve: (callId: string, decision: ApprovalDecision, opts?: { steps?: PlanEdit[] | null; note?: string; rules?: string[]; arguments?: Record<string, unknown> | null }) =>
     req(`/approvals/${callId}`, { method: 'POST', body: json({ decision, ...(opts?.steps ? { steps: opts.steps } : {}), ...(opts?.note ? { note: opts.note } : {}), ...(opts?.rules ? { rules: opts.rules } : {}), ...(opts?.arguments ? { arguments: opts.arguments } : {}) }) }),
+  /** The user touched a plan card: stop its go-ahead countdown. */
+  holdPlan: (callId: string) => req(`/plans/${callId}/hold`, { method: 'POST' }),
   /** What the saved permission rules say about one call (nothing runs). `rule` validates one rule string instead. */
   evaluatePermission: (body: { tool?: string; command?: string; args?: Record<string, unknown>; rule?: string }) =>
     req<PermissionEvaluation & { ok?: boolean; error?: string }>('/permissions/evaluate', { method: 'POST', body: json(body) }),

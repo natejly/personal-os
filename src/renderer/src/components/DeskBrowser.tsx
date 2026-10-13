@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useReducer, useState } from 'react'
 import { Globe, MonitorUp, EyeOff } from '../icons'
-import type { AgentBrowserFrame, AgentBrowserSession } from '@shared/types'
+import type { AgentBrowserSession } from '@shared/types'
+import { initialLive, markCaption, markRect, reduceLive } from '../lib/browserLive'
 import { splitUrl } from '../lib/deskFiles'
 
 /** While the desk works, look again for its browser session this often. A desk at rest is only re-checked on a status change. */
@@ -13,35 +14,42 @@ const RECHECK_MS = 5000
  * browser, so they can sign in or get past a challenge the agent cannot. `live`: the owner is working, so look
  * for the session again every few seconds; at rest it is re-checked only when `live` changes.
  */
-export default function DeskBrowser({ session, live, emptyText = "This desk hasn't opened its browser." }: {
+export default function DeskBrowser(props: { session: string; live: boolean; emptyText?: string }): JSX.Element {
+  return <DeskBrowserView key={props.session} {...props} /> // a different session starts from a clean view
+}
+
+function DeskBrowserView({ session, live, emptyText = "This desk hasn't opened its browser." }: {
   session: string; live: boolean; emptyText?: string
 }): JSX.Element {
   const api = window.os?.agentBrowser
   const [info, setInfo] = useState<AgentBrowserSession | null>(null)
-  const [frame, setFrame] = useState<AgentBrowserFrame | null>(null)
+  const [view, dispatch] = useReducer(reduceLive, initialLive)
   const [error, setError] = useState('')
+  const ended = view.status === 'ended'
 
   const check = useCallback(async (): Promise<void> => {
     if (!api) return
     try {
-      const all = await api.list()
-      setInfo(all.find((s) => s.session === session) ?? null)
+      const found = (await api.list()).find((s) => s.session === session) ?? null
+      setInfo(found)
+      dispatch({ type: found ? 'present' : 'missing' })
     } catch {
       setInfo(null)
+      dispatch({ type: 'missing' })
     }
   }, [api, session])
 
   useEffect(() => { void check() }, [check, live])
   useEffect(() => {
-    if (!live) return
+    if (!live || ended) return
     const t = setInterval(() => { void check() }, RECHECK_MS)
     return () => clearInterval(t)
-  }, [live, check])
+  }, [live, ended, check])
 
-  const has = info !== null
+  const has = info !== null && !ended // once ended there is nothing more to hear
   useEffect(() => {
-    if (!api || !has) { setFrame(null); return }
-    return api.subscribe(session, setFrame)
+    if (!api || !has) return
+    return api.subscribe(session, (frame) => dispatch({ type: 'frame', frame }), (state) => dispatch({ type: 'state', state }))
   }, [api, has, session])
 
   const act = (fn: 'show' | 'hide'): void => {
@@ -50,7 +58,8 @@ export default function DeskBrowser({ session, live, emptyText = "This desk hasn
     api[fn](session).then(() => check()).catch((e: Error) => setError(e.message))
   }
 
-  if (!api || !info) {
+  const frame = view.frame
+  if (!api || (!info && !frame)) {
     return (
       <div className="desk-pane">
         <div className="empty-state">
@@ -62,9 +71,11 @@ export default function DeskBrowser({ session, live, emptyText = "This desk hasn
     )
   }
 
-  const url = frame?.url || info.url
-  const title = frame?.title || info.title
+  const url = frame?.url || info?.url || ''
+  const title = frame?.title || info?.title || ''
   const { host, rest } = splitUrl(url)
+  const rect = markRect(view.mark)
+  const caption = markCaption(view.mark)
   return (
     <div className="desk-pane desk-browser">
       <div className="desk-browser-bar">
@@ -73,17 +84,28 @@ export default function DeskBrowser({ session, live, emptyText = "This desk hasn
           {url && <div className="desk-browser-url muted small"><b>{host}</b>{rest}</div>}
         </div>
         <span className="spacer" />
-        {frame && <span className="desk-browser-live muted small"><i className="live-dot" /> live {new Date(frame.at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</span>}
-        <button className="ghost-btn" onClick={() => act('show')}><MonitorUp size={13} /> Take over</button>
-        <button className="ghost-btn" disabled={!info.visible} onClick={() => act('hide')}><EyeOff size={13} /> Hand back</button>
+        <span className={`desk-browser-live muted small ${view.status}`} role="status" aria-live="polite">
+          {view.status === 'live' && <><i className="live-dot" /> Live</>}
+          {view.status === 'idle' && "Idle — the assistant isn't using the browser"}
+          {view.status === 'ended' && `Browser session ended${view.reason ? ` (${view.reason})` : ''}`}
+          {view.status === 'error' && `Page failed to load: ${view.reason}`}
+        </span>
+        <button className="ghost-btn" disabled={!info || ended} onClick={() => act('show')}><MonitorUp size={13} /> Take over</button>
+        <button className="ghost-btn" disabled={!info?.visible || ended} onClick={() => act('hide')}><EyeOff size={13} /> Hand back</button>
       </div>
       <p className="muted small desk-browser-help">
         Taking over opens the agent's own browser window, separate from your browser, so you can sign in or get past a challenge.
       </p>
       {error && <p className="small desk-browser-error">{error}</p>}
       <div className="desk-browser-frame">
-        {frame ? <img src={frame.dataUrl} alt={`The agent's browser showing ${title || host}`} /> : <p className="muted small">Waiting for the first frame…</p>}
+        {frame ? (
+          <div className={`desk-browser-stage${ended ? ' ended' : ''}`}>
+            <img src={frame.dataUrl} alt={`The agent's browser showing ${title || host}`} />
+            {rect && <div className="desk-browser-mark" style={rect} aria-hidden="true" />}
+          </div>
+        ) : <p className="muted small">Waiting for the first frame…</p>}
       </div>
+      {caption && <p className="desk-browser-caption small" aria-live="polite">{caption}</p>}
     </div>
   )
 }

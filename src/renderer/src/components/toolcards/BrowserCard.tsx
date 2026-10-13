@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Eye, EyeOff, Globe, MonitorUp } from '../../icons'
 import { hostPath } from '../../lib/browserApproval'
 import DeskBrowser from '../DeskBrowser'
@@ -23,7 +23,11 @@ function BrowserCard(props: ToolCardProps): JSX.Element {
   const notes = d ? strList(d.notes) : []
   const shot = event.name === 'browser_manage' && Array.isArray(d?.saved) ? (d?.saved[0] as Record<string, unknown> | undefined) : undefined
   const tabs = num(d?.tabs)
-  const [watch, setWatch] = useState(false)
+  // Open by default while the assistant is using the browser (the latest card of a running reply); an explicit choice wins.
+  const [chosen, setChosen] = useState<boolean | null>(null)
+  const [auto, setAuto] = useState(false) // latched: once shown for a running reply it stays up and shows idle/ended
+  useEffect(() => { if (props.streaming && props.browserSession) setAuto(true) }, [props.streaming, props.browserSession])
+  const watch = chosen ?? (auto || (!!props.streaming && !!props.browserSession))
   const [out, setOut] = useState(false) // the user holds the window
   const hold = (show: boolean): void => {
     const api = window.os?.agentBrowser
@@ -50,7 +54,7 @@ function BrowserCard(props: ToolCardProps): JSX.Element {
       <ErrorLine event={event} />
       {props.browserSession && window.os?.agentBrowser && (
         <>
-          <button type="button" className="link small" aria-expanded={watch} onClick={() => setWatch((w) => !w)}>
+          <button type="button" className="link small" aria-expanded={watch} onClick={() => setChosen(!watch)}>
             {watch ? <EyeOff size={12} /> : <Eye size={12} />} {watch ? 'Stop watching' : 'Watch the browser'}
           </button>
           {props.streaming && (

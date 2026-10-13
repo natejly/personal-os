@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ["GRAIN_SECRETS_BACKEND"] = "file"
@@ -69,6 +70,21 @@ class FileBackendTests(unittest.TestCase):
         fresh.use_keychain = True
         fresh._kc_get = lambda name: "old"  # type: ignore[method-assign]
         self.assertEqual(fresh.get("a"), "new")
+
+
+    def test_a_failed_keychain_read_is_not_cached_as_missing(self) -> None:
+        s = SecretStore(Path(tempfile.mkdtemp()), backend="keychain")
+        s.use_keychain = True
+        answers: list[Any] = [OSError("locked"), "k"]
+
+        def kc(name: str) -> str:
+            a = answers.pop(0)
+            if isinstance(a, Exception):
+                raise a
+            return a
+        s._kc_get = kc  # type: ignore[method-assign]
+        self.assertIsNone(s.get("a"))
+        self.assertEqual(s.get("a"), "k")
 
 
 class MigrationTests(unittest.TestCase):

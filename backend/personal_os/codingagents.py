@@ -48,6 +48,7 @@ import secrets
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -96,7 +97,8 @@ def own_session_taint(sid: str, sources: Any) -> bool:
     srcs = [str(x) for x in sources or []]
     return bool(srcs) and all(
         x in (f"coding_session:{k}:{sid}" for k in ("start", "send", "stop", "status", "diff"))
-        or (x.startswith("coding_session:list:") and all(i == sid for i in x[20:].split(",") if i)) for x in srcs)
+        or (x[:20] in ("coding_session:list:", "coding_session:wait:") and all(i == sid for i in x[20:].split(",") if i))
+        for x in srcs)
 
 
 def claude_binary() -> str | None:
@@ -334,6 +336,9 @@ class CodingSessions:
         self.cursors: dict[str, tuple[str, int]] = {}  # id -> (job id, absolute output offset) already turned into events (opencode, pi)
         self.timelines: dict[tuple[str, str], tuple[int, tuple[str, str] | None]] = {}  # (id, claude job id) -> (lines read, last event)
         self.seen: dict[str, tuple[int, str]] = {}   # id -> (output size, job status) at the last opencode refresh
+        self.mtimes: dict[str, int | None] = {}  # id -> state.json mtime at the last look at a settled claude session
+        # ponytail: one lock for every session's refresh (the watcher thread vs wait/status/list); per-id locks if it ever contends
+        self._refresh_lock = threading.RLock()
         self.on_finish: Callable[[dict[str, Any]], None] | None = None  # a session settled: wake the chat or run that owns it
         self.waiting: dict[str, int] = {}   # id -> coding_session_wait calls blocked on it (they report it themselves, no wake)
         self.stopping: set[str] = set()     # ids Grain is stopping itself: that stop is not news
@@ -427,19 +432,36 @@ class CodingSessions:
 
     # ---- progress ----
     def refresh(self, row: dict[str, Any]) -> dict[str, Any]:
-        """Re-read the driver's state and save when it changed. Reads files and the in-memory job registry only."""
-        prev = row["status"]
-        if row["agent"] == "claude":
-            row = self._refresh_claude(row) if row.get("external_id") and row["status"] != "failed" else row
-        else:
-            row = self._refresh_opencode(row) if row["status"] in LIVE else row
-        if prev in ("starting", "working") and row["status"] in SETTLED and self.on_finish:
-            if not (self.waiting.get(row["id"]) or row["id"] in self.stopping):
-                try:
-                    self.on_finish(row)
-                except Exception:  # noqa: BLE001 - a wake-up that fails must not break the refresh
-                    log.warning("coding session wake failed", exc_info=True)
-        return row
+        """Re-read the driver's state and save when it changed. Reads files and the in-memory job registry only. Safe from
+        a worker thread: refreshes take turns, and each diffs against the saved row, not the caller's possibly stale copy."""
+        with self._refresh_lock:
+            row.update(self.get(row["id"]) or {})  # in place: callers read the row they passed in
+            prev = row["status"]
+            if row["agent"] == "claude":
+                if row.get("external_id") and row["status"] != "failed" and (row["status"] in LIVE or self._state_moved(row)):
+                    row = self._refresh_claude(row)
+            else:
+                row = self._refresh_opencode(row) if row["status"] in LIVE else row
+            # Settling, or moving on from waiting on the user (needs_you -> done): someone is owed the result.
+            if prev in LIVE and row["status"] in SETTLED and row["status"] != prev and self.on_finish:
+                if not (self.waiting.get(row["id"]) or row["id"] in self.stopping):
+                    try:
+                        self.on_finish(row)
+                    except Exception:  # noqa: BLE001 - a wake-up that fails must not break the refresh
+                        log.warning("coding session wake failed", exc_info=True)
+            return row
+
+    def _state_moved(self, row: dict[str, Any]) -> bool:
+        """For a settled claude session: has its state.json changed since the last look (a resume from the terminal)?
+        An unchanged one is not re-read, so listing finished sessions does not re-read their timelines."""
+        try:
+            m: int | None = (self.claude_home / row["external_id"] / "state.json").stat().st_mtime_ns
+        except OSError:
+            m = None
+        if self.mtimes.get(row["id"], -1) == m:
+            return False
+        self.mtimes[row["id"]] = m
+        return True
 
     async def watch(self, every: float = 5.0, fast: float = 2.0) -> None:
         """Claude Code sessions have no process of ours to hear from: re-read the live ones so a finish is noticed (and woken
@@ -449,7 +471,8 @@ class CodingSessions:
             await asyncio.sleep(fast if rows else every)  # a working session is polled faster so its feed reads live
             try:
                 with self.db.tx() as c:
-                    rows = [dict(r) for r in c.execute("SELECT * FROM coding_sessions WHERE agent = 'claude' AND status IN ('starting','working')")]
+                    rows = [dict(r) for r in c.execute(f"SELECT * FROM coding_sessions WHERE agent = 'claude' AND status IN "
+                                                       f"({','.join('?' * len(LIVE))})", LIVE)]  # needs_you too: its finish is news
                 for row in rows:
                     await asyncio.to_thread(self.refresh, row)
             except Exception:  # noqa: BLE001 - the watcher outlives any one bad row
@@ -470,7 +493,7 @@ class CodingSessions:
             self.waiting[i] = self.waiting.get(i, 0) + 1
         try:
             while True:
-                rows = [self.refresh(self._known(i)) for i in ids]
+                rows = await asyncio.to_thread(lambda: [self.refresh(self._known(i)) for i in ids])  # file reads, off the loop
                 settled = [r for r in rows if r["status"] not in ("starting", "working")]
                 if (settled if mode == "any" else len(settled) == len(rows)) or time.monotonic() >= deadline:
                     return {"sessions": rows, "settled": [r["id"] for r in settled], "timed_out": not (settled if mode == "any" else len(settled) == len(rows))}
@@ -487,7 +510,7 @@ class CodingSessions:
         if mapped is None:
             return row
         status, detail = mapped
-        if status in ("done", "stopped") and time.monotonic() - self.resumed.get(row["id"], -1e9) < RESUME_GRACE:
+        if status in ("done", "stopped", "failed") and time.monotonic() - self.resumed.get(row["id"], -1e9) < RESUME_GRACE:
             return row  # a follow-up was just sent and state.json has not caught up
         sid = state.get("sessionId")
         log = shell._scrub("\n".join(lines))[-LOG_TAIL:]
@@ -761,7 +784,7 @@ class CodingSessions:
         self.refresh(row)
         shell.taint(ctx, f"coding_session:send:{sid}")
         if row["agent"] == "claude":
-            if row["status"] not in ("done", "stopped"):
+            if row["status"] not in ("done", "stopped", "failed"):  # a failed run (an API error) resumes on its session id
                 hint = " It is waiting for the user: `claude attach <id>` answers it." if row["status"] == "needs_you" else ""
                 raise CodingError(f"This session is {row['status'].replace('_', ' ')}; wait for it to finish or stop it first.{hint}")
             if not row.get("session_id"):

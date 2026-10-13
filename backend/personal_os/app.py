@@ -5922,10 +5922,10 @@ async def _coding_do(fn: Any, *args: Any) -> Any:
         raise HTTPException(409, shell_tool._scrub(str(e))) from e
 
 
-# These read handlers are `async` on purpose: a refresh publishes an event, and the topic is not thread-safe.
 @app.get("/coding-sessions")
 async def list_coding_sessions() -> dict[str, Any]:
-    return {"sessions": [codingagents.summary(coding.refresh(r), None) for r in coding.list(50)]}
+    # Off the loop: each refresh reads files (the topic hands a publish from a worker thread to the loop).
+    return {"sessions": await asyncio.to_thread(lambda: [codingagents.summary(coding.refresh(r), None) for r in coding.list(50)])}
 
 
 @app.get("/coding-sessions/{id}")

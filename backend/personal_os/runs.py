@@ -764,8 +764,15 @@ class Topic:
         self.seq = 0
         self._ring: deque[RunEvent] = deque(maxlen=TOPIC_RING)
         self._subs: set[_Sub] = set()
+        self._loop: asyncio.AbstractEventLoop | None = None  # the loop its subscribers' queues belong to
 
     def publish(self, event: str, data: Any) -> None:
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:  # a worker thread: hand it to the loop, or the seq races and a waiting subscriber never wakes
+            if self._loop is not None and self._loop.is_running():
+                self._loop.call_soon_threadsafe(self.publish, event, data)
+                return
         self.seq += 1
         item = (self.seq, event, data)
         self._ring.append(item)

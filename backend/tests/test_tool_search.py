@@ -88,8 +88,9 @@ def test_search_loads_and_persists_per_conversation() -> None:
     cid = new_conv()
     ev = reply(cid, [[call("tool_search", {"query": "knowledge graph entities relations"})]])
     assert "graph_search" not in OFFERED[0] and "graph_search" in OFFERED[1]
-    ctx = next(e for e in ev if e["event"] == "assistant_message")["context_used"]
-    assert ctx["tools_deferred"] > 0 and "Also available via tool_search:" in ctx["system_prompt"]
+    am = next(e for e in ev if e["event"] == "assistant_message")
+    sent = json.dumps(appmod.request_log.read(appmod.db.data_dir, am["id"])[0]["messages"])  # the event keeps no prompt
+    assert am["context_used"]["tools_deferred"] > 0 and "Also available via tool_search:" in sent
     reply(cid, [])
     assert "graph_search" in OFFERED[0]  # the next reply in the same conversation keeps it
     reply(new_conv(), [])

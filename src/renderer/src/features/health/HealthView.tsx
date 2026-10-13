@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Activity, Droplet, Footprints, Gauge, HeartPulse, Link2, Moon, Pill, Plus, Scale, Settings2, Smile, Trash2, Zap } from '../../icons'
 import type { HealthEntry, HealthMetric, HealthSummary } from '@shared/types'
 import { useStore } from '../../store'
@@ -25,7 +26,7 @@ type Range = (typeof RANGES)[number]
 const SPARK_DAYS = 14
 
 export default function HealthView(): JSX.Element {
-  const { toast, refreshDashboard } = useStore()
+  const { toast, refreshDashboard } = useStore(useShallow((s) => ({ toast: s.toast, refreshDashboard: s.refreshDashboard })))
   const [days, setDays] = useState<Range>(30)
   const [today, setToday] = useState(localDay())
   const [rows, setRows] = useState<HealthSummary[] | null>(null)

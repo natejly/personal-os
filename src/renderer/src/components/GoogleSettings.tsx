@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Unplug, Check, AlertTriangle, RefreshCw, ExternalLink, Upload } from '../icons'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -25,7 +26,7 @@ const openExternal = (url: string): void => void window.open(url, '_blank')
 export default function GoogleSettings({ clientId, clientSecret, secretSaved = false, backupLabel = '', onChange, onSaveCreds }: { clientId: string; clientSecret: string; secretSaved?: boolean; backupLabel?: string; onChange: (p: { googleClientId?: string; googleClientSecret?: string; driveBackupLabel?: string }) => void; onSaveCreds: () => Promise<void> }): JSX.Element {
   const google = useStore((s) => s.google)
   const tasksSync = useStore((s) => s.tasksSync)
-  const { refreshGoogle, connectGoogle, disconnectGoogle, setTasksSync, runTasksSync, toast } = useStore()
+  const { refreshGoogle, connectGoogle, disconnectGoogle, setTasksSync, runTasksSync, toast } = useStore(useShallow((s) => ({ refreshGoogle: s.refreshGoogle, connectGoogle: s.connectGoogle, disconnectGoogle: s.disconnectGoogle, setTasksSync: s.setTasksSync, runTasksSync: s.runTasksSync, toast: s.toast })))
   const [setupOpen, setSetupOpen] = useState(false)
   const [taskLists, setTaskLists] = useState<GoogleTaskList[]>([])
   const idRef = useRef<HTMLInputElement>(null)

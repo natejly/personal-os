@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { ArrowLeft, MessageSquare, Plus } from '../icons'
 import type { AgentDef, AgentHomeData } from '@shared/types'
 import { useStore } from '../store'
@@ -19,7 +20,7 @@ const stamp = (t: number): string => new Date(t * 1000).toLocaleString(undefined
  * still proposal-only), the approved skills it carries, a notes field it always sees, and what it did last.
  */
 export default function AgentHome({ def, onBack }: { def: AgentDef; onBack: () => void }): JSX.Element {
-  const { chatWithAgent, selectChat, refreshAgentDefs, refreshJobs, toast } = useStore()
+  const { chatWithAgent, selectChat, refreshAgentDefs, refreshJobs, toast } = useStore(useShallow((s) => ({ chatWithAgent: s.chatWithAgent, selectChat: s.selectChat, refreshAgentDefs: s.refreshAgentDefs, refreshJobs: s.refreshJobs, toast: s.toast })))
   const status = useStore((s) => s.agentStatus[def.name])
   const allJobs = useStore((s) => s.jobs)
   const allSkills = useStore((s) => s.skills)

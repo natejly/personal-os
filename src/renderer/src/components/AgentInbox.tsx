@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow'
 /**
  * The Agent Inbox, shown under the greeting of a new chat. Two sections: "Needs you" (pending approvals and proposals, desks waiting on the user, and
  * a link into every other review queue: doc edits, skills, workflow runs, memory tidy-ups) and
@@ -394,7 +395,7 @@ function ToolPicker({ value, onChange }: { value: string[]; onChange: (next: str
 }
 
 export function JobRow({ job }: { job: Job }): JSX.Element {
-  const { setJobEnabled, runJobNow, deleteJob, refreshJobs, selectChat, toast } = useStore()
+  const { setJobEnabled, runJobNow, deleteJob, refreshJobs, selectChat, toast } = useStore(useShallow((s) => ({ setJobEnabled: s.setJobEnabled, runJobNow: s.runJobNow, deleteJob: s.deleteJob, refreshJobs: s.refreshJobs, selectChat: s.selectChat, toast: s.toast })))
   const openAgent = useStore((s) => s.openAgent)
   const agent = useStore((s) => (job.agent_id ? s.agentDefs.custom.find((d) => d.id === job.agent_id) : undefined))
   const openJobAgent = async (): Promise<void> => {
@@ -691,7 +692,7 @@ function SchedulePicker({ value, onChange, timezone }: { value: Schedule; onChan
  * one: only the changed fields are sent. A spent one-off is offered a new time to run again at. */
 /** `agentId` makes it a routine of that agent: every fire runs as it, so a desk is not offered. */
 export function NewTask({ onDone, job, draft, agentId }: { onDone: () => void; job?: Job; draft?: RoutineDraft | null; agentId?: string }): JSX.Element {
-  const { createJob, updateJob, clearRoutineDraft } = useStore()
+  const { createJob, updateJob, clearRoutineDraft } = useStore(useShallow((s) => ({ createJob: s.createJob, updateJob: s.updateJob, clearRoutineDraft: s.clearRoutineDraft })))
   const spent = !!job && job.kind === 'once' && job.last_fired_at !== null && job.next_due_at === null
   const [f, setF] = useState(job
     ? { ...BLANK, name: job.name, prompt: job.prompt, mode: job.kind === 'cron' ? 'repeat' as const : job.kind === 'mail' ? 'mail' as const : job.kind === 'calendar' ? 'calendar' as const : 'once' as const, when: job.run_at && !spent ? toLocalInput(job.run_at) : '', query: (job.kind === 'calendar' ? job.calendar_query : job.mail_query) ?? '', mins: String(job.minutes_before ?? 15), onlyChange: !!job.only_on_change }
@@ -812,7 +813,7 @@ export function NewTask({ onDone, job, draft, agentId }: { onDone: () => void; j
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, goToDesk, selectChat, setLibraryTab, markDeskSeen, markInboxRunSeen, rejectJobProposals, clearInbox, archiveInboxRun } = useStore()
+  const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, goToDesk, selectChat, setLibraryTab, markDeskSeen, markInboxRunSeen, rejectJobProposals, clearInbox, archiveInboxRun } = useStore(useShallow((s) => ({ refreshJobs: s.refreshJobs, setJobEnabled: s.setJobEnabled, setView: s.setView, openFiles: s.openFiles, openDoc: s.openDoc, goToDesk: s.goToDesk, selectChat: s.selectChat, setLibraryTab: s.setLibraryTab, markDeskSeen: s.markDeskSeen, markInboxRunSeen: s.markInboxRunSeen, rejectJobProposals: s.rejectJobProposals, clearInbox: s.clearInbox, archiveInboxRun: s.archiveInboxRun })))
   const draft = useStore((s) => s.routineDraft)
   const [showArchived, setShowArchived] = useState(false)
   const [archivedRuns, setArchivedRuns] = useState<ArchivedInboxRun[]>([])

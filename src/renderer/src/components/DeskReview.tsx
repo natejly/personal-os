@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Check, ChevronRight, FileCheck2, TriangleAlert, X } from '../icons'
 import type { DeskOutput, FullDesk, PromotionKind, PromotionResult } from '@shared/types'
 import { api, saveDownload } from '../lib/api'
@@ -153,7 +154,7 @@ function OutputCard({ desk, output, picked, destination, docId, result, busy, on
 }
 
 export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
-  const { acceptOutputs, rejectOutputs, messageDesk, refreshDocs, toast } = useStore()
+  const { acceptOutputs, rejectOutputs, messageDesk, refreshDocs, toast } = useStore(useShallow((s) => ({ acceptOutputs: s.acceptOutputs, rejectOutputs: s.rejectOutputs, messageDesk: s.messageDesk, refreshDocs: s.refreshDocs, toast: s.toast })))
   const busy = useStore((s) => s.deskBusy)
   // Everything undecided starts ticked: the desk was asked to make these, so the common case is one click.
   const [picked, setPicked] = useState<string[]>(() => desk.outputs.filter((o) => !DECIDED.includes(o.status)).map((o) => o.id))

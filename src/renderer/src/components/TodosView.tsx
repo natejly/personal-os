@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Plus, ListChecks, RefreshCw, Bookmark, X, ChevronDown, KanbanSquare, List, SlidersHorizontal, Pencil, Trash2, Inbox, Layers } from '../icons'
 import type { TodoFilter, TodoRepeat } from '@shared/types'
 import { api } from '../lib/api'
@@ -22,7 +23,7 @@ export default function TodosView(): JSX.Element {
   const todos = useStore((s) => s.todos)
   const tasksSync = useStore((s) => s.tasksSync)
   const googleConnected = useStore((s) => !!s.google?.connected)
-  const { refreshTodos, addTodo, refreshTasksSync, runTasksSync, toast } = useStore()
+  const { refreshTodos, addTodo, refreshTasksSync, runTasksSync, toast } = useStore(useShallow((s) => ({ refreshTodos: s.refreshTodos, addTodo: s.addTodo, refreshTasksSync: s.refreshTasksSync, runTasksSync: s.runTasksSync, toast: s.toast })))
   const [scope, setScope] = useState<Scope>('all')
   const [showDone, setShowDone] = useState(false)
   // A canvas todos window in board view hands its view over on Expand.

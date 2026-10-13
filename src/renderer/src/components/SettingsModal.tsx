@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { X, Search, Download, Upload, Plug, Cpu, Bot, Palette, ShieldCheck, ShieldAlert, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, Gauge, Brain, PanelLeft, type Icon } from '../icons'
 import { useStore, type View } from '../store'
 import { modeOf } from '../lib/permissionMode'
@@ -122,7 +123,7 @@ export default function SettingsModal(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const models = useStore((s) => s.models)
   const view = useStore((s) => s.view)
-  const { saveSettings, setSettingsOpen, setView, toast } = useStore()
+  const { saveSettings, setSettingsOpen, setView, toast } = useStore(useShallow((s) => ({ saveSettings: s.saveSettings, setSettingsOpen: s.setSettingsOpen, setView: s.setView, toast: s.toast })))
   const libraryScope = useStore((s) => s.libraryScope)
   const setLibraryScope = useStore((s) => s.setLibraryScope)
   const [draft, setDraft] = useState<Settings>(settings)

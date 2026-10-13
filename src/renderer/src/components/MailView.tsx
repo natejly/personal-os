@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type Dispatch, type SetStateAction } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Mail as MailIcon, RefreshCw, Search, Star, Archive, MailOpen, Mail, ExternalLink, MessageSquare, Paperclip, SquarePen, Reply, Sparkles, Send, X, Forward, Download, File as FileIcon, FileText, FileSpreadsheet, FileArchive, Image as ImageIcon } from '../icons'
 import { useStore } from '../store'
 import { PIM_SETTINGS_TAB, pimLabel, pimStatus } from '../lib/pim'
@@ -254,7 +255,7 @@ export default function MailView(): JSX.Element {
   // The active mail account.
   const google = useStore(pimStatus)
   const label = useStore(pimLabel)
-  const { toast, askAboutEmail } = useStore()
+  const { toast, askAboutEmail } = useStore(useShallow((s) => ({ toast: s.toast, askAboutEmail: s.askAboutEmail })))
   const [messages, setMessages] = useState<GmailMessage[]>([])
   const [labels, setLabels] = useState<GmailLabel[]>([])
   const [loading, setLoading] = useState(false)

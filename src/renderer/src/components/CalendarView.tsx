@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Check, ChevronLeft, ChevronRight, Calendar as CalIcon, Plus, RefreshCw } from '../icons'
 import { useStore } from '../store'
 import { PIM_SETTINGS_TAB, pimLabel, pimStatus } from '../lib/pim'
@@ -60,7 +61,7 @@ export default function CalendarView(): JSX.Element {
   const google = useStore(pimStatus)
   const label = useStore(pimLabel)
   const todos = useStore((s) => s.todos)
-  const { refreshTodos, toast, updateTodo, setView } = useStore()
+  const { refreshTodos, toast, updateTodo, setView } = useStore(useShallow((s) => ({ refreshTodos: s.refreshTodos, toast: s.toast, updateTodo: s.updateTodo, setView: s.setView })))
   const [week, setWeek] = useState(() => startOfWeek(new Date()))
   // Week or month grid. `week` stays the anchor for both: the month shown is the one holding that week's Thursday.
   const [mode, setModeState] = useState<'week' | 'month'>(() => { try { return localStorage.getItem('calendar.mode') === 'month' ? 'month' : 'week' } catch { return 'week' } })

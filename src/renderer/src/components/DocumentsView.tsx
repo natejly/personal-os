@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Upload, Trash2, FileText, Pin } from '../icons'
 import { useStore, type Scope } from '../store'
 import ProjectChip from './ProjectChip'
@@ -11,7 +12,7 @@ import ProjectChip from './ProjectChip'
 export default function DocumentsView({ projectId }: { projectId?: string; embedded?: boolean }): JSX.Element {
   const documents = useStore((s) => s.documents)
   const libraryScope = useStore((s) => s.libraryScope)
-  const { uploadDocuments, deleteDocument, pinDocument, loadScope, openUploadPreview } = useStore()
+  const { uploadDocuments, deleteDocument, pinDocument, loadScope, openUploadPreview } = useStore(useShallow((s) => ({ uploadDocuments: s.uploadDocuments, deleteDocument: s.deleteDocument, pinDocument: s.pinDocument, loadScope: s.loadScope, openUploadPreview: s.openUploadPreview })))
   // Without a project it follows the library scope, which Files → Uploads picks in its header.
   const scope: Scope = projectId ?? libraryScope
   const fileRef = useRef<HTMLInputElement>(null)

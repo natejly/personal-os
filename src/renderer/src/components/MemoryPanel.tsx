@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Search, Columns2, List, Share2, PenLine } from '../icons'
 import { useStore, type MemoryMode, type Scope } from '../store'
 import MemoryView from './MemoryView'
@@ -24,7 +25,7 @@ export default function MemoryPanel({ projectId }: { projectId?: string; embedde
   const memories = useStore((s) => s.memories)
   const graph = useStore((s) => s.graph)
   const mode = useStore((s) => s.memoryMode)
-  const { loadScope, setMemoryMode } = useStore()
+  const { loadScope, setMemoryMode } = useStore(useShallow((s) => ({ loadScope: s.loadScope, setMemoryMode: s.setMemoryMode })))
   const style = useStore((s) => s.style)
   const scope: Scope = projectId ?? libraryScope
   const [q, setQ] = useState('')

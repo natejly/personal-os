@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Check, MessageSquare, Pencil, Plus, Sparkles, Trash2 } from '../icons'
 import type { AgentFields, AgentScope, ToolMode } from '@shared/types'
 import { useStore } from '../store'
@@ -20,7 +21,7 @@ const scopeOf = (f: AgentFields): AgentScope => ({ label: f.label ?? '', boundar
  */
 export default function AgentsPanel(): JSX.Element {
   const { builtin, custom } = useStore((s) => s.agentDefs)
-  const { refreshAgentDefs, chatWithAgent, toast } = useStore()
+  const { refreshAgentDefs, chatWithAgent, toast } = useStore(useShallow((s) => ({ refreshAgentDefs: s.refreshAgentDefs, chatWithAgent: s.chatWithAgent, toast: s.toast })))
   const agentStatus = useStore((s) => s.agentStatus)
   const homeId = useStore((s) => s.openAgentId)
   const setHomeId = useStore((s) => s.openAgent)

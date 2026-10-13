@@ -1427,3 +1427,20 @@ test('openAgent opens Library > Agents on that agent; null returns to the list',
   useStore.getState().openAgent(null)
   assert.equal(useStore.getState().openAgentId, null)
 })
+
+// A bare useStore() subscribes to every set(), and patchSession runs once per streamed token, so the
+// component re-renders per token. Pick fields with a selector (or useShallow) instead.
+test('no component reads the whole store with a bare useStore()', async () => {
+  const { readdirSync, readFileSync, statSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const bad: string[] = []
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name)
+      if (statSync(p).isDirectory()) walk(p)
+      else if (p.endsWith('.tsx') && /\buseStore\(\)/.test(readFileSync(p, 'utf8'))) bad.push(p)
+    }
+  }
+  walk(join(process.cwd(), 'src/renderer/src'))
+  assert.deepEqual(bad, [])
+})

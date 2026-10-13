@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Plus, Pin, PinOff, Trash2, Wand2, User, History, Undo2, Sparkles, Download, Upload } from '../icons'
 import { useStore, type Scope } from '../store'
 import type { Memory, MemoryProposal, MemorySource } from '@shared/types'
@@ -10,7 +11,7 @@ import { memorySections } from '../lib/memorySections'
 const KINDS = ['fact', 'preference', 'instruction', 'goal', 'note']
 
 function MemoryRow({ m, showProject }: { m: Memory; showProject: boolean }): JSX.Element {
-  const { updateMemory, deleteMemory, selectChat, projects } = useStore()
+  const { updateMemory, deleteMemory, selectChat, projects } = useStore(useShallow((s) => ({ updateMemory: s.updateMemory, deleteMemory: s.deleteMemory, selectChat: s.selectChat, projects: s.projects })))
   const expired = m.invalid_at == null && m.expires_at != null && m.expires_at * 1000 <= Date.now()
   const isolated = projects.some((p) => p.id === m.project_id && p.memory_mode === 'isolated')
   const [editing, setEditing] = useState(false)
@@ -124,7 +125,7 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
   const focus = useStore((s) => s.memoryFocus)
   const memories = useMemo(() => (focus ? allMemories.filter((m) => focus.includes(m.id)) : allMemories), [focus, allMemories])
   const libraryScope = useStore((s) => s.libraryScope)
-  const { refreshMemories, addMemory } = useStore()
+  const { refreshMemories, addMemory } = useStore(useShallow((s) => ({ refreshMemories: s.refreshMemories, addMemory: s.addMemory })))
   const autoLearn = useStore((s) => s.settings.autoLearn)
   const scope: Scope = projectId ?? libraryScope
   const [draft, setDraft] = useState('')
@@ -171,7 +172,7 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
   }
   const restore = async (id: string): Promise<void> => { await api.memories.restore(id); await refreshMemories(query); loadHistory() }
 
-  const { toast } = useStore()
+  const { toast } = useStore(useShallow((s) => ({ toast: s.toast })))
   const exportMemories = async (): Promise<void> => {
     try {
       const f = await api.memories.exportFile(scope)

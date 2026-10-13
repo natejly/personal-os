@@ -667,7 +667,10 @@ export const api = {
     consolidate: (projectId: string | null) => req<MemoryProposal[]>('/memories/consolidate', { method: 'POST', body: json({ project_id: projectId }) }, NO_TIMEOUT),
     proposals: (s: Scope) => req<MemoryProposal[]>(`/memories/proposals?status=pending&${scope(s)}`),
     applyProposal: (id: string) => req<MemoryProposal>(`/memories/proposals/${id}/apply`, { method: 'POST' }),
-    dismissProposal: (id: string) => req<MemoryProposal>(`/memories/proposals/${id}/dismiss`, { method: 'POST' })
+    dismissProposal: (id: string) => req<MemoryProposal>(`/memories/proposals/${id}/dismiss`, { method: 'POST' }),
+    aboutYou: () => req<{ current: Memory | null; pending: MemoryProposal | null }>('/memories/about-you'),
+    draftAboutYou: () => req<{ proposal: MemoryProposal | null; reason: 'ok' | 'too_few' | 'unchanged' | 'failed' }>('/memories/about-you/draft', { method: 'POST' }, NO_TIMEOUT),
+    acceptAboutYou: (id: string, text: string) => req<MemoryProposal>(`/memories/about-you/${id}/accept`, { method: 'POST', body: json({ text }) })
   },
   style: {
     get: (s: Scope) => req<StyleState>(`/style?project_id=${encodeURIComponent(s === 'all' ? 'personal' : s)}`),

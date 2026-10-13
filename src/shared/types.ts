@@ -938,8 +938,8 @@ export interface MemorySource { conversation_id: string; message_id: string; tit
 export interface MemoryProposal {
   id: string
   project_id: string | null
-  kind: 'merge_memories' | 'rewrite_memory' | 'merge_entities'
-  payload: { ids: string[]; text?: string; label?: string; snapshot: Record<string, string> }
+  kind: 'merge_memories' | 'rewrite_memory' | 'merge_entities' | 'about_you'
+  payload: { ids: string[]; text?: string; lines?: { text: string; ids: string[] }[]; label?: string; snapshot: Record<string, string> }
   rationale: string
   status: 'pending' | 'applied' | 'dismissed' | 'stale'
   created_at: number

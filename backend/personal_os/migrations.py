@@ -677,6 +677,12 @@ def _simplify_settings(c: sqlite3.Connection) -> None:
             c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('retrievalMode', ?)", (json.dumps("bm25"),))
 
 
+def _learn_pending(c: sqlite3.Connection) -> None:
+    """Auto-learn jobs not yet finished (learn.LearnWorker): ids only, rebuilt from messages on replay."""
+    c.execute("CREATE TABLE IF NOT EXISTS learn_pending (message_id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, "
+              "project_id TEXT, user_message_id TEXT, user_only INTEGER NOT NULL DEFAULT 0, created_at REAL NOT NULL)")
+
+
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
     (2, "messages_fts", _messages_fts),
@@ -720,6 +726,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (40, "simplify_settings", _simplify_settings),
     (41, "embedding_model_unset", _embedding_model_unset),
     (42, "tiers_replace_legacy_models", _tiers_replace_legacy_models),
+    (43, "learn_pending", _learn_pending),
 ]
 
 

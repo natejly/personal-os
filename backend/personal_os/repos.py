@@ -626,7 +626,9 @@ class Memories:
             return row_to_dict(c.execute("SELECT * FROM memories WHERE id=? AND deleted_at IS NULL", (id,)).fetchone())
 
     def create(self, project_id: str | None, content: str, kind: str = "fact", source: str = "user", pinned: bool = False,
-               provenance: dict[str, Any] | None = None, expires_at: float | None = None) -> dict[str, Any]:
+               provenance: dict[str, Any] | None = None, expires_at: float | None = None,
+               valid_from: float | None = None) -> dict[str, Any]:
+        """`valid_from` is when the fact happened, if known (default: now, when it was learned)."""
         content = content.strip()
         prov = provenance or {}
         with self.db.tx() as c:
@@ -644,7 +646,7 @@ class Memories:
             c.execute(
                 "INSERT INTO memories(id,project_id,content,kind,source,pinned,created_at,updated_at,valid_from,source_conversation_id,source_message_id,expires_at) "
                 "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                (mid, project_id, content, kind, source, int(pinned), t, t, t,
+                (mid, project_id, content, kind, source, int(pinned), t, t, valid_from or t,
                  prov.get("conversation_id"), prov.get("message_id"), expires_at),
             )
             c.execute("INSERT INTO memories_fts(content, memory_id) VALUES(?,?)", (content, mid))

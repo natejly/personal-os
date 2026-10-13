@@ -7,7 +7,9 @@ import { useStore, useConversation, useWorkerFace, useWorkers } from '../store'
 import Face from './Face'
 import WorkerChat from './WorkerChat'
 import { workersCardShown } from '../lib/statusChrome'
-import { liveWorkerCount, listedWorkers, workerActions, workerIsLive, workerWord } from '../lib/workers'
+import { fmtCost } from '../lib/chatMeta'
+import { fmtMs } from '../lib/toolDisplay'
+import { ENDED_SHOWN, liveWorkerCount, listedWorkers, treeOrder, workerActions, workerElapsedMs, workerIsLive, workerWord } from '../lib/workers'
 
 const TONE: Record<WorkerInfo['status'], string> = { queued: '', running: 'working', awaiting_approval: 'needs-you', done: 'done', error: 'failed', interrupted: 'failed', stopped: '' }
 
@@ -27,6 +29,7 @@ export default function WorkersPanel({ conversationId: focusId }: { conversation
   const workers = useWorkers(conversationId)
   const [open, setOpen] = useState(true)
   const [showFinished, setShowFinished] = useState(false)
+  const [showAll, setShowAll] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [unfolded, setUnfolded] = useState<string | null>(null)
   const { toast, loadWorkers } = useStore()
@@ -40,7 +43,7 @@ export default function WorkersPanel({ conversationId: focusId }: { conversation
   }, [anyLive, conversationId, loadWorkers])
 
   if (!workers.length || !workersCardShown(liveWorkerCount(workers))) return null
-  const shown = listedWorkers(workers, showFinished)
+  const shown = treeOrder(listedWorkers(workers, showFinished, showAll))
   const live = liveWorkerCount(workers)
   const anyEnded = workers.some((w) => !workerIsLive(w))
 
@@ -65,7 +68,7 @@ export default function WorkersPanel({ conversationId: focusId }: { conversation
             const a = workerActions(w)
             const on = unfolded === w.id
             return (
-              <li key={w.id} className={`worker-row ${on ? 'on' : ''}`}>
+              <li key={w.id} className={`worker-row ${on ? 'on' : ''}`} style={w.depth > 1 ? { paddingLeft: (w.depth - 1) * 14 } : undefined}>
                 <div className="worker-line">
                   <button className="worker-open" aria-expanded={on} title={on ? 'Hide chat' : 'Open chat'} onClick={() => setUnfolded(on ? null : w.id)}>
                     <WorkerFace w={w} />
@@ -75,6 +78,11 @@ export default function WorkersPanel({ conversationId: focusId }: { conversation
                   {a.stop && !on && <button className="ghost-btn xs" disabled={busy === w.id} onClick={() => void act(w.id, () => api.workers.stop(w.id))}><Square size={11} /> Stop</button>}
                   {a.resume && <button className="ghost-btn xs" disabled={busy === w.id} onClick={() => void act(w.id, () => api.workers.resume(w.id))}><RotateCcw size={11} /> Resume</button>}
                 </div>
+                {(() => {
+                  const bits = [w.now, w.cost ? fmtCost(w.cost) : '', w.started_at ? fmtMs(workerElapsedMs(w)) : '', [w.model, w.effort].filter(Boolean).join(' · ')].filter(Boolean)
+                  return bits.length ? <div className="worker-meta muted small">{bits.join(' · ')}</div> : null
+                })()}
+                {on && w.error && (w.status === 'error' || w.status === 'interrupted') && <p className="worker-error small">{w.error}</p>}
                 {on && <WorkerChat id={w.id} onStop={() => act(w.id, () => api.workers.stop(w.id))} />}
                 {w.pending_approvals.map((p) => (
                   <div key={p.call_id} className="worker-approval">
@@ -88,6 +96,7 @@ export default function WorkersPanel({ conversationId: focusId }: { conversation
           })}
         </ul>
       )}
+      {open && showFinished && workers.filter((w) => !workerIsLive(w)).length > ENDED_SHOWN && <button className="ghost-btn xs worker-finished" aria-expanded={showAll} onClick={() => setShowAll((v) => !v)}>{showAll ? 'Show fewer' : 'Show all'}</button>}
       {open && anyEnded && <button className="ghost-btn xs worker-finished" aria-expanded={showFinished} aria-label={showFinished ? 'Hide finished workers' : 'Show finished workers'} onClick={() => setShowFinished((v) => !v)}>{showFinished ? 'Hide finished' : 'Show finished'}</button>}
     </section>
   )

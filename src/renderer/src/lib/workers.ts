@@ -16,8 +16,10 @@ const LABEL: Record<WorkerStatus, string> = {
 }
 
 /** The short word beside a worker's title: its place in line while queued, else its status. */
-export const workerWord = (w: Pick<WorkerInfo, 'status' | 'queued_behind'>): string =>
-  w.status === 'queued' && w.queued_behind ? `Queued behind ${w.queued_behind}` : LABEL[w.status]
+const ENDED_WORD: Record<string, string> = { stuck: 'Ended: stuck', stale: 'Ended: no progress', shutdown: 'Interrupted: app closed' }
+
+export const workerWord = (w: Pick<WorkerInfo, 'status' | 'queued_behind' | 'exit_reason'>): string =>
+  w.status === 'queued' && w.queued_behind ? `Queued behind ${w.queued_behind}` : (!workerIsLive(w) && ENDED_WORD[w.exit_reason ?? '']) || LABEL[w.status]
 
 /** Live workers first (oldest first within them, so the order does not jump), then ended ones newest first. */
 export function sortWorkers(ws: WorkerInfo[]): WorkerInfo[] {
@@ -28,10 +30,22 @@ export function sortWorkers(ws: WorkerInfo[]): WorkerInfo[] {
 export const ENDED_SHOWN = 4
 
 /** The rows the workers card lists: every live worker, then (only when asked) the newest ended ones, in sort order. */
-export function listedWorkers(ws: readonly WorkerInfo[], showFinished: boolean): WorkerInfo[] {
+export function listedWorkers(ws: readonly WorkerInfo[], showFinished: boolean, all = false): WorkerInfo[] {
   const sorted = sortWorkers([...ws])
-  return showFinished ? [...sorted.filter(workerIsLive), ...sorted.filter((x) => !workerIsLive(x)).slice(0, ENDED_SHOWN)] : sorted.filter(workerIsLive)
+  return showFinished ? [...sorted.filter(workerIsLive), ...sorted.filter((x) => !workerIsLive(x)).slice(0, all ? undefined : ENDED_SHOWN)] : sorted.filter(workerIsLive)
 }
+
+/** Each worker's sub-workers right under it, in the given order; one whose parent is not in the list stands at the top level. */
+export function treeOrder(ws: readonly WorkerInfo[]): WorkerInfo[] {
+  const ids = new Set(ws.map((x) => x.id))
+  const kids = (id: string): WorkerInfo[] => ws.filter((x) => x.parent_run_id === id)
+  const walk = (x: WorkerInfo): WorkerInfo[] => [x, ...kids(x.id).flatMap(walk)]
+  return ws.filter((x) => !x.parent_run_id || !ids.has(x.parent_run_id)).flatMap(walk)
+}
+
+/** How long a worker has run (live: so far; ended: start to end), in ms. started_at and ended_at are epoch seconds. */
+export const workerElapsedMs = (w: Pick<WorkerInfo, 'started_at' | 'ended_at'>, nowMs = Date.now()): number =>
+  Math.max(0, ((w.ended_at ?? nowMs / 1000) - w.started_at) * 1000)
 
 /** Replace or add one worker (an event's payload) in the list. */
 export const upsertWorker = (ws: WorkerInfo[], w: WorkerInfo): WorkerInfo[] => (ws.some((x) => x.id === w.id) ? ws.map((x) => (x.id === w.id ? w : x)) : [w, ...ws])

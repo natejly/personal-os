@@ -9,7 +9,7 @@
  */
 import { splitReport } from '../lib/report'
 import { type RoutineDraft } from '../lib/routine'
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Archive, ArchiveRestore, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Rocket, Timer, Trash2, Users, Wrench, X } from '../icons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -22,6 +22,7 @@ import { describeCron } from '../lib/cron'
 import { SAFE_MD } from './Message'
 import { AUTONOMY } from '../lib/deskStatus'
 import Face from './Face'
+import { AgentRunCard } from './ToolEvents'
 import { ShipChecklistView } from './toolcards/ShipChecklistCard'
 import { TOOL_CARDS } from './toolcards'
 import type { ShipChecklist } from '@shared/types'
@@ -298,6 +299,7 @@ export function JobHistory({ job }: { job: Job }): JSX.Element {
   const previews = runs?.filter((r) => 'dry_run' in r && r.dry_run).length ?? 0
   const [stats, setStats] = useState<JobStats | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [stepsFor, setStepsFor] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
@@ -344,7 +346,8 @@ export function JobHistory({ job }: { job: Job }): JSX.Element {
           <span>{skipReason(r.reason)}</span>
         </div>
       ) : (
-        <div key={r.run_id} className="job-history-run small">
+        <Fragment key={r.run_id}>
+        <div className="job-history-run small">
           <span className={`chip ${STATUS_CHIP[r.status]}`}>{STATUS_LABEL[r.status]}</span>
           <span>{fmtDate(r.started_at)}</span>
           <span className="muted">{fmtDur(r.duration_s)}</span>
@@ -361,8 +364,11 @@ export function JobHistory({ job }: { job: Job }): JSX.Element {
             <span className="muted">{r.proposals.accepted}/{r.proposals.pending + r.proposals.accepted + r.proposals.rejected} proposals accepted</span>
           )}
           <span className="spacer" />
+          <button className="link small" aria-expanded={stepsFor === r.run_id} onClick={() => setStepsFor(stepsFor === r.run_id ? null : r.run_id)}>Steps</button>
           {r.conversation_id && <button className="link small" onClick={() => void selectChat(r.conversation_id as string)}>Open</button>}
         </div>
+        {stepsFor === r.run_id && <AgentRunCard id={r.run_id} />}
+        </Fragment>
       ))}
     </li>
   )

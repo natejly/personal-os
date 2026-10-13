@@ -649,6 +649,8 @@ export interface ToolEvent {
   arguments: Record<string, unknown>
   result_preview: string
   duration_ms: number
+  /** Milliseconds of duration spent waiting for an approval. */
+  wait_ms?: number
   error: string | null
   /** Images the tool produced (e.g. matplotlib figures from run_python). */
   images?: ToolImage[] | null
@@ -813,6 +815,17 @@ export interface WorkerInfo {
   /** An ended worker's final report, else ''. */
   report?: string
   depth: number
+  /** The worker that started this one; null for a chat's own. */
+  parent_run_id?: string | null
+  /** Live workers only. */
+  model?: string
+  effort?: string
+  /** Seconds without progress while running. */
+  idle_s?: number
+  /** How an ended worker stopped: completed, stuck, interrupted, error, stopped, ... */
+  exit_reason?: string
+  /** The error text of an ended worker, else ''. */
+  error?: string
   /** Info only. */
   cost: number | null
 }

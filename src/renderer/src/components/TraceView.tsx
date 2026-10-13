@@ -3,6 +3,7 @@ import { Layers, Sparkles, Wrench, Wand2, Shrink, AlertCircle, ChevronRight } fr
 import { api } from '../lib/api'
 import type { Span, SpanKind } from '@shared/types'
 import { modelLabel } from '../lib/modelLabel'
+import { useStore } from '../store'
 
 /** Waterfall view of one assistant reply's execution trace. */
 
@@ -39,6 +40,8 @@ function detail(s: Span): string {
       const calls = (m.tool_calls as string[] | undefined) ?? []
       return [
         `round ${n('round')}`,
+        s.name && modelLabel(s.name),
+        m.effort && m.effort !== 'default' && `effort ${String(m.effort)}`,
         m.ttft_ms != null && `first token ${fmtMs(Number(m.ttft_ms))}`,
         (u.prompt_tokens || u.completion_tokens) && `${(u.prompt_tokens ?? 0).toLocaleString()} in / ${(u.completion_tokens ?? 0).toLocaleString()} out`,
         u.cached_tokens && `${u.cached_tokens.toLocaleString()} cached`,
@@ -73,6 +76,7 @@ async function downloadOtlp(messageId: string): Promise<void> {
 }
 
 export default function TraceView({ spans, live, model, messageId }: { spans: Span[]; live: boolean; model: string | null; messageId?: string }): JSX.Element {
+  const devTools = useStore((s) => s.settings.devTools === true)  // the OTLP export stays a developer tool
   const [now, setNow] = useState(Date.now())
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const running = live || spans.some((s) => s.end === null)
@@ -99,7 +103,7 @@ export default function TraceView({ spans, live, model, messageId }: { spans: Sp
         {sum.errors > 0 && <span className="err"><AlertCircle size={11} /> {sum.errors} failed</span>}
       </div>
       {model && <div className="trace-model" title={model === modelLabel(model) ? undefined : model}>{modelLabel(model)}</div>}
-      {messageId && !live && <button className="link small" onClick={() => void downloadOtlp(messageId)}>Export OTLP JSON</button>}
+      {devTools && messageId && !live && <button className="link small" onClick={() => void downloadOtlp(messageId)}>Export OTLP JSON</button>}
       <ol className="trace-rows">
         {sorted.map((s) => {
           const end = s.end ?? now

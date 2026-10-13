@@ -32,7 +32,7 @@ let supervising = false
 let launching = false
 
 export function backendInfo(): BackendInfo {
-  return { state, url, error: lastError, restarts: history.slice(-20), logDir: logDir(), appVersion: app.getVersion(), electron: process.versions.electron ?? '' }
+  return { state, url, error: lastError, restarts: history.slice(-20), logDir: logDir(), appVersion: app.getVersion(), electron: process.versions.electron ?? '', packaged: app.isPackaged }
 }
 
 export function onBackendState(cb: (info: BackendInfo) => void): () => void {
@@ -80,8 +80,8 @@ function readTokenFile(): string {
   return ''
 }
 
-export function backendStatus(): { running: boolean; url: string; error: string | null } {
-  return { running: !!url && (!!process.env.PERSONAL_OS_BACKEND_URL || (!!child && child.exitCode === null)), url, error: lastError }
+export function backendStatus(): { running: boolean; url: string; error: string | null; state: BackendState } {
+  return { running: !!url && (!!process.env.PERSONAL_OS_BACKEND_URL || (!!child && child.exitCode === null)), url, error: lastError, state }
 }
 
 function canBind(p: number): Promise<boolean> {
@@ -221,6 +221,8 @@ async function spawnAndWait(reuse: boolean): Promise<void> {
     ...(app.isPackaged ? {} : loadDotEnv()),
     ...process.env,
     PYTHONUNBUFFERED: '1',
+    // A native crash (pyobjc, uvloop, ...) prints the Python stack to stderr, so it lands in the backend log.
+    PYTHONFAULTHANDLER: '1',
     ...(bundled ? { PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' } : {}),
     PERSONAL_OS_AUTH_TOKEN: token,
     // The backend exits when this process goes away, even if it was killed without a chance to stop it.
@@ -244,7 +246,7 @@ async function spawnAndWait(reuse: boolean): Promise<void> {
     const s = String(d)
     process.stderr.write(`[backend] ${s}`)
     logBackendOutput(s)
-    if (/error|traceback|No module named/i.test(s)) lastError = s.trim().split('\n').slice(-3).join('\n')
+    if (/\b(ERROR|CRITICAL)\b|Traceback|Error:|No module named/.test(s)) lastError = s.trim().split('\n').slice(-3).join('\n')
   })
   me.on('error', (e) => {
     lastError = `Failed to start python (${py}): ${e.message}`

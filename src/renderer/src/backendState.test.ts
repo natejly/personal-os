@@ -10,8 +10,9 @@ import type { BackendInfo } from '@shared/types'
 let push: ((i: BackendInfo) => void) | null = null
 let statusCalls = 0
 let statusUrl: string | null = null
+let statusState: BackendInfo['state'] | undefined
 const info = (state: BackendInfo['state'], error: string | null = null): BackendInfo =>
-  ({ state, url: '', error, restarts: [], logDir: '', appVersion: '0', electron: '0' })
+  ({ state, url: '', error, restarts: [], logDir: '', appVersion: '0', electron: '0', packaged: false })
 
 ;(globalThis as unknown as { window: unknown }).window = {
   os: {
@@ -22,7 +23,7 @@ const info = (state: BackendInfo['state'], error: string | null = null): Backend
     },
     backendStatus: async () => {
       statusCalls++
-      return { url: statusUrl, error: statusUrl ? null : 'Backend not running' }
+      return { url: statusUrl, error: statusUrl ? null : 'Backend not running', state: statusState }
     },
     backendToken: async () => '',
     restartBackend: async () => info('ready')
@@ -52,7 +53,7 @@ test('restartBackend asks the main process and applies its answer', async () => 
   assert.equal(useStore.getState().backendState, 'ready')
 })
 
-// Last: module-level `inited` / `loadedOnce` are shared across the file.
+// Module-level `inited` / `loadedOnce` are shared across the file, so these two run last, in this order.
 test('a data-load failure after a healthy /health shows the error screen and stays retryable', async () => {
   const realFetch = globalThis.fetch
   const hits: string[] = []
@@ -74,4 +75,19 @@ test('a data-load failure after a healthy /health shows the error screen and sta
   } finally {
     globalThis.fetch = realFetch
   }
+})
+
+test('init while the first start is still running waits on the boot screen for the ready announcement', async () => {
+  useStore.setState({ ready: false, backendError: null })
+  statusState = 'starting'
+  statusUrl = null
+  const before = statusCalls
+  await useStore.getState().init()
+  assert.equal(useStore.getState().ready, false)
+  assert.equal(useStore.getState().backendError, null)
+  statusState = undefined
+  push!(info('starting'))
+  push!(info('ready'))
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(statusCalls, before + 2, 'the ready announcement ran init again')
 })

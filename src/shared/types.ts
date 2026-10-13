@@ -1926,11 +1926,12 @@ export interface BackendInfo {
   logDir: string
   appVersion: string
   electron: string
+  packaged: boolean
 }
 
 export interface GrainApi {
   backendUrl: () => Promise<string>
-  backendStatus: () => Promise<{ running: boolean; url: string; error: string | null }>
+  backendStatus: () => Promise<{ running: boolean; url: string; error: string | null; state?: BackendState }>
   backendToken: () => Promise<string>
   /** Store an HTML fence's source for the preview scheme; returns the id for `previewUrl`. */
   previewPut: (source: string) => Promise<string>

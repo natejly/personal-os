@@ -2445,11 +2445,18 @@ def _register_google(self: Toolbox) -> None:
         _obj({"action": {"type": "string", "enum": ["list", "cancel"], "default": "list"}, "id": {"type": "string", "description": "the queued send to cancel"}}, []), gmail_outbox, "google", "writes",
         examples=[{}, {"action": "cancel", "id": "a1b2c3d4"}]))
 
-    async def gmail_modify(ctx: dict[str, Any], message_id: str, mark_read: bool | None = None, archive: bool = False, star: bool | None = None) -> Any:
-        return _scrub_strings(await run(g.gmail_modify, message_id, mark_read, archive, star))
-    R("gmail_modify", ToolSpec("gmail_modify", "Mark an email read/unread, star it, or archive it.",
-        _obj({"message_id": {"type": "string"}, "mark_read": {"type": "boolean"}, "archive": {"type": "boolean", "default": False}, "star": {"type": "boolean"}}, ["message_id"]), gmail_modify, "google", "external",
-        examples=[{"message_id": "18f2c1a9b7e4d0aa", "mark_read": True}, {"message_id": "18f2c1a9b7e4d0aa", "archive": True}, {"message_id": "18f2c1a9b7e4d0aa", "star": True}]))
+    async def gmail_modify(ctx: dict[str, Any], message_id: str | None = None, mark_read: bool | None = None, archive: bool = False, star: bool | None = None,
+                           message_ids: list[str] | None = None) -> Any:
+        ids = list(dict.fromkeys(m.strip() for m in [message_id, *(message_ids or [])] if isinstance(m, str) and m.strip()))
+        if not ids:
+            return {"error": "Pass message_id, or message_ids to change several emails in one call."}
+        target = ids if message_ids else ids[0]
+        return _scrub_strings(await run(g.gmail_modify, target, mark_read, archive, star))
+    R("gmail_modify", ToolSpec("gmail_modify", "Mark emails read/unread, star them, or archive them. To change more than one email, pass all their ids in message_ids in ONE call (a single batch request, up to 1000 ids) - never one call per email. Use message_id only for a single email.",
+        _obj({"message_id": {"type": "string"}, "message_ids": {"type": "array", "items": {"type": "string"}, "description": "several emails changed together in one request"},
+              "mark_read": {"type": "boolean"}, "archive": {"type": "boolean", "default": False}, "star": {"type": "boolean"}}, []), gmail_modify, "google", "external",
+        examples=[{"message_ids": ["18f2c1a9b7e4d0aa", "18f2c1a9b7e4d0ab", "18f2c1a9b7e4d0ac"], "mark_read": True, "archive": True},
+                  {"message_id": "18f2c1a9b7e4d0aa", "mark_read": True}, {"message_id": "18f2c1a9b7e4d0aa", "star": True}]))
 
     def _task_text(row: dict[str, Any]) -> dict[str, Any]:
         return _scrub_strings(row)

@@ -77,6 +77,7 @@ SCOPES = [
 # stale a *third-party* change can be.
 # Most calendars one read fans out to (one API call each). Past this the rest are dropped, in list order.
 MAX_CALENDARS = 40
+HTTP_TIMEOUT = 30   # seconds a Google request may sit silent before it fails
 
 TTL = {
     "calendar_list": 10 * 60,   # calendars are added/removed rarely
@@ -103,6 +104,19 @@ def _id_token_email(id_token: Any) -> str | None:
         return json.loads(base64.urlsafe_b64decode(claims + "=" * (-len(claims) % 4))).get("email") or None
     except Exception:  # noqa: BLE001
         return None
+
+
+def _authorized_http(creds: Any) -> Any:
+    """An httplib2 client that gives up on a silent socket after `HTTP_TIMEOUT` seconds.
+
+    The timeout covers each connect and read, not the call as a whole, so keep it short:
+    `build()` otherwise defaults to 60 s per socket operation, and one stalled calendar
+    in a fan-out (or a request that outlives a sleeping laptop) held the tool for minutes.
+    """
+    import google_auth_httplib2
+    import httplib2
+
+    return google_auth_httplib2.AuthorizedHttp(creds, http=httplib2.Http(timeout=HTTP_TIMEOUT))
 
 
 def _forgets_gmail_lists(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -135,6 +149,7 @@ _GMAIL_META_CAP = 800
 _GMAIL_LIST_CHUNK = 100   # ids asked of one messages.list; the first few pages of a look cost one call
 _GMAIL_LIST_IDS_KEPT = 500  # most ids saved for one query
 _GMAIL_LISTS_KEPT = 32   # queries whose id listing is saved
+_GMAIL_MODIFY_MAX = 1000  # ids Gmail accepts in one messages.batchModify
 _GMAIL_BATCH_MAX = 100   # Gmail refuses more sub-requests than this in one batch
 # Saved message bodies: plain mail text on disk, and the whole store is rewritten on each
 # save, so keep only the recently opened ones.
@@ -406,7 +421,7 @@ class Google:
             entry = self._svcs.get(key)
             if entry is not None and entry[0] is creds:
                 return entry[1]
-        svc = build(name, version, credentials=creds, cache_discovery=False)
+        svc = build(name, version, http=_authorized_http(creds), cache_discovery=False)
         with self._svc_lock:
             self._svcs[key] = (creds, svc)
         return svc
@@ -490,9 +505,12 @@ class Google:
         svc = self._svc("calendar", "v3")
         out: list[dict[str, Any]] = []
         failures: list[Exception] = []
+        deadline = time.monotonic() + 2 * HTTP_TIMEOUT  # a slow feed fails its own calendar, not the whole fan-out
         try:
             for cid in ids:
                 try:
+                    if failures and time.monotonic() > deadline:
+                        raise TimeoutError("calendar read budget spent")
                     out.extend(self._sync_calendar(svc, cid, now, end, max_results))
                 except Exception as e:  # noqa: BLE001  # one broken subscription should not empty the whole grid
                     if len(ids) == 1:
@@ -947,21 +965,22 @@ class Google:
         return _gmail_batch(svc, ids, lambda mid: svc.users().messages().get(
             userId="me", id=mid, format="metadata", metadataHeaders=["From", "Subject", "Date"]), _gmail_meta)
 
-    def _note_gmail_labels(self, message_id: str, add: list[str], rem: list[str]) -> None:
+    def _note_gmail_labels(self, message_ids: list[str], add: list[str], rem: list[str]) -> None:
         """Keep the saved header in step with a label change we just made, so the next
         list does not paint the old unread/star state while history catches up."""
         snap = self._reads.get("gmail", "meta")
         if not isinstance(snap, dict):
             return
         by_id = dict(snap.get("by_id") or {})
-        row = by_id.get(message_id)
-        if not isinstance(row, dict):
-            return
-        labels = [l for l in (row.get("labels") or []) if l not in rem]
-        for label in add:
-            if label not in labels:
-                labels.append(label)
-        by_id[message_id] = {**row, "labels": labels, "unread": "UNREAD" in labels}
+        for message_id in message_ids:
+            row = by_id.get(message_id)
+            if not isinstance(row, dict):
+                continue
+            labels = [l for l in (row.get("labels") or []) if l not in rem]
+            for label in add:
+                if label not in labels:
+                    labels.append(label)
+            by_id[message_id] = {**row, "labels": labels, "unread": "UNREAD" in labels}
         self._reads.put("gmail", "meta", {**snap, "by_id": by_id})
 
     def _me(self) -> str | None:
@@ -1110,7 +1129,8 @@ class Google:
 
     @invalidates("gmail")
     @_forgets_gmail_lists
-    def gmail_modify(self, message_id: str, mark_read: bool | None = None, archive: bool = False, star: bool | None = None) -> dict[str, Any]:
+    def gmail_modify(self, message_id: str | list[str], mark_read: bool | None = None, archive: bool = False, star: bool | None = None) -> dict[str, Any]:
+        """One message, or a list changed with batchModify (Gmail takes 1000 ids per request)."""
         add, rem = [], []
         if mark_read is True:
             rem.append("UNREAD")
@@ -1122,8 +1142,16 @@ class Google:
             add.append("STARRED")
         if star is False:
             rem.append("STARRED")
-        self._svc("gmail", "v1").users().messages().modify(userId="me", id=message_id, body={"addLabelIds": add, "removeLabelIds": rem}).execute()
-        self._note_gmail_labels(message_id, add, rem)
+        msgs = self._svc("gmail", "v1").users().messages()
+        if isinstance(message_id, list):
+            ids = list(dict.fromkeys(message_id))
+            for i in range(0, len(ids), _GMAIL_MODIFY_MAX):
+                msgs.batchModify(userId="me", body={"ids": ids[i:i + _GMAIL_MODIFY_MAX], "addLabelIds": add, "removeLabelIds": rem}).execute()
+            self._note_gmail_labels(ids, add, rem)
+            # ponytail: one message is read back as the sample; every id would cost a get each
+            return verify.attach({"ok": True, "added": add, "removed": rem, "count": len(ids)}, self._verify_labels(ids[0], add, rem))
+        msgs.modify(userId="me", id=message_id, body={"addLabelIds": add, "removeLabelIds": rem}).execute()
+        self._note_gmail_labels([message_id], add, rem)
         return verify.attach({"ok": True, "added": add, "removed": rem}, self._verify_labels(message_id, add, rem))
 
     def _verify_labels(self, message_id: str, add: list[str], rem: list[str]) -> dict[str, Any]:

@@ -15,8 +15,8 @@ from typing import Any, AsyncIterator, Callable
 
 import httpx
 
-from . import auth_breaker, provider_route, providers
-from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_AT_TOKENS, COMPACT_KEEP_RECENT, COMPACT_KEEP_TOKENS, MICRO_AT_TOKENS, CONSOLIDATE_EVERY, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SUBAGENT_MAX_DEPTH, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, WORKER_MAX_CONCURRENT, WORKFLOW_MAX_FAN_OUT)
+from . import anthropic_native, auth_breaker, provider_route, providers
+from .limits import (VOLATILE_HEADER, BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_AT_TOKENS, COMPACT_KEEP_RECENT, COMPACT_KEEP_TOKENS, MICRO_AT_TOKENS, CONSOLIDATE_EVERY, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SUBAGENT_MAX_DEPTH, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, WORKER_MAX_CONCURRENT, WORKFLOW_MAX_FAN_OUT)
 from .permissions import DEFAULTS as PERMISSION_DEFAULTS
 log = logging.getLogger("personal_os.llm")
 
@@ -672,7 +672,7 @@ def _learn_cap(settings: dict[str, Any], model: str, effort: str) -> None:
             log.exception("model caps listener failed")
 
 
-_EFFORT_MSG = ("reasoning_effort", "reasoning effort", "does not support thinking", "does not support reasoning")
+_EFFORT_MSG = ("reasoning_effort", "output_config", "reasoning effort", "does not support thinking", "does not support reasoning")
 
 
 def _rejected_optional(status: int, text: str, body: dict[str, Any]) -> str | None:
@@ -741,7 +741,8 @@ async def _send_attempts(client: httpx.AsyncClient, settings: dict[str, Any], bo
     A key the provider already rejected fails here before any request (auth_breaker), with kind "auth" and no status.
     """
     retries = _retries(settings)
-    url = _url(settings, "/chat/completions", body.get("model"))
+    native = anthropic_native.is_native(settings)  # the OpenAI-compatible endpoint drops cache_control: use the Messages API
+    url = _url(settings, "/messages" if native else "/chat/completions", body.get("model"))
     if (held := auth_breaker.check(settings)) is not None:
         raise LLMError(held, kind="auth")
     stepped = dropped = False
@@ -749,14 +750,15 @@ async def _send_attempts(client: httpx.AsyncClient, settings: dict[str, Any], bo
     while True:
         if cancel is not None and cancel.is_set():
             raise _Aborted("cancelled")
-        cm = client.stream("POST", url, headers=_headers(settings), json=body) if stream else None
+        hdrs, payload = (anthropic_native.headers(settings), anthropic_native.to_request(body)) if native else (_headers(settings), body)
+        cm = client.stream("POST", url, headers=hdrs, json=payload) if stream else None
         try:
             if cm is not None:
                 r = await _race(cm.__aenter__(), cancel, deadline_at)
                 if r.status_code >= 400:
                     await _race(r.aread(), cancel, deadline_at)
             else:
-                r = await _race(client.post(url, headers=_headers(settings), json=body), cancel, deadline_at)
+                r = await _race(client.post(url, headers=hdrs, json=payload), cancel, deadline_at)
         except _Aborted:
             await _close_cm(cm)
             raise
@@ -962,6 +964,49 @@ def wire_messages(model: str, messages: list[dict[str, Any]]) -> list[dict[str, 
     return [{k: v for k, v in m.items() if k != "reasoning_content"} for m in messages]
 
 
+def is_anthropic_model(model: str) -> bool:
+    return "claude" in model.lower()
+
+
+def with_cache_breakpoints(model: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Anthropic models cache only behind explicit `cache_control` marks (other providers cache a shared prefix by themselves).
+
+    Up to four, all on content that repeats between rounds: the stable system prompt, the tool list, the message before
+    the newest turn (the per-turn retrieval block, or the newest user message, follows it), and the last message, so the
+    next round of a tool loop re-reads everything already sent. Mutates `body` only; the caller's messages are copied, not edited.
+    """
+    if not is_anthropic_model(model):
+        return body
+    mark = {"type": "ephemeral"}
+    msgs = list(body["messages"])
+
+    def put(i: int) -> None:
+        while i >= 0:  # a tool-calling assistant message has no text to mark: walk back to one that does
+            c = msgs[i].get("content")
+            if isinstance(c, str) and c:
+                msgs[i] = {**msgs[i], "content": [{"type": "text", "text": c, "cache_control": mark}]}
+                return
+            if isinstance(c, list) and c and isinstance(c[-1], dict):
+                msgs[i] = {**msgs[i], "content": [*c[:-1], {**c[-1], "cache_control": mark}]}
+                return
+            i -= 1
+
+    first_sys = next((i for i, m in enumerate(msgs) if m.get("role") == "system"), None)
+    if first_sys is not None:
+        put(first_sys)
+    last = len(msgs) - 1
+    newest = last if msgs[last].get("role") == "user" else next((i for i in range(last, -1, -1) if msgs[i].get("role") == "user"), last)
+    if newest > 0 and msgs[newest - 1].get("role") == "system" and str(msgs[newest - 1].get("content", "")).startswith(VOLATILE_HEADER):
+        newest -= 1
+    if (first_sys or 0) < newest - 1:
+        put(newest - 1)
+    put(last)
+    body["messages"] = msgs
+    if tools := body.get("tools"):
+        body["tools"] = [*tools[:-1], {**tools[-1], "cache_control": mark}]
+    return body
+
+
 def effort_supported(model: str, caps: dict[str, Any] | None) -> bool | None:
     """Whether the model takes a reasoning level: False for the Kimi K2 family, else what the proxy reports (None = unknown)."""
     if _model_slug(model).startswith("kimi-k2"):
@@ -1161,6 +1206,7 @@ async def stream_chat(
         if supports_parallel_tool_calls(settings):
             body["parallel_tool_calls"] = True
     _with_affinity(settings, body)
+    with_cache_breakpoints(model, body)
     calls: dict[int, dict[str, Any]] = {}
     by_index: dict[int, int] = {}  # provider `index` -> slot, re-pointed when an index is reused for a new call
     last_idx = 0
@@ -1213,7 +1259,7 @@ async def stream_chat(
                 # Closes the socket from a second task so a read blocked on the next token returns at once.
                 abort = asyncio.create_task(_close_when(cancel, r)) if cancel is not None else None
                 try:
-                    lines = r.aiter_lines().__aiter__()
+                    lines = (anthropic_native.stream_lines(r.aiter_lines()) if anthropic_native.is_native(settings) else r.aiter_lines()).__aiter__()
                     while True:
                         left = idle if deadline_at is None else min(idle, deadline_at - time.monotonic())
                         try:
@@ -1506,6 +1552,7 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
     if cap := output_cap(settings, model):
         body["max_tokens"] = cap
     _with_affinity(settings, body)
+    with_cache_breakpoints(model, body)
     async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=CONNECT_TIMEOUT_S)) as client:
         try:
             r, _, _ = await _send_with_retry(client, settings, body, stream=False, cancel=cancel, deadline_at=deadline)
@@ -1513,7 +1560,7 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
             if a.reason == "cancelled":
                 raise LLMError("Stopped.", kind="cancelled") from None
             raise LLMError("The model provider took too long.", kind="timeout") from None
-    data = r.json()
+    data = anthropic_native.to_response(r.json()) if anthropic_native.is_native(settings) else r.json()
     text = strip_think(_content_text(data["choices"][0]["message"]))
     _emit_usage(model, kind, parse_usage(data["usage"]) if isinstance(data.get("usage"), dict) else None, int((time.time() - t0) * 1000), _prompt_chars(messages), len(text))
     return text

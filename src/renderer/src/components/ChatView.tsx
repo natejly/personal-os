@@ -159,7 +159,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
         <div className="no-drag header-right">
           {conversationId && <ChatFilesButton conversationId={convo?.id} />}
         </div>
-        {/* The full-window chat gives the last title-bar slot to its own workspace panel; ⌘I still opens the quick chat. */}
+        {/* The full-window chat gives the last title-bar slot to its own workspace panel; ⌘I opens the quick chat. */}
         <AppSwitcher last={conversationId ? undefined : (
           <button className={`icon-btn${deskPanel || contextOpen ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={deskPanel || contextOpen} disabled={!convo?.id}
             onClick={() => { if (contextOpen) toggleContext(); setDeskPanel(!(deskPanel || contextOpen)) }}><SlidersHorizontal size={15} /></button>

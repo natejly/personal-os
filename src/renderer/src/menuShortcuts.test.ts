@@ -260,3 +260,8 @@ test('the Quick chat button and the Page Agent menu item are the same toggle', (
   useStore.getState().togglePageAgent()
   assert.equal(useStore.getState().pageAgentOpen, was)
 })
+
+test('⌘I is the Quick chat chord; the side panel toggle has none', async () => {
+  const { SHORTCUTS } = await import('@shared/shortcuts')
+  assert.deepEqual(SHORTCUTS.filter((s) => s.keys === 'CmdOrCtrl+I').map((s) => s.action), ['page-agent'])
+})

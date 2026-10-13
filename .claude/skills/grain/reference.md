@@ -284,9 +284,9 @@ From the app menu (`src/main/index.ts`); ⌘ is Cmd, ⌃ Control, ⌥ Option.
 | ⌘⇧[ / ⌘⇧] | Previous / next chat |
 | ⌘F, ⌘G, ⌘⇧G | Find in chat, next, previous |
 | ⌘B | Toggle sidebar |
-| ⌘I | Toggle side panel (opens on Context) |
+| ⌘I | Quick chat / Page agent panel |
 | ⌃⌘I | Toggle context panel |
-| (none) | Quick chat (View → Page Agent, title-bar button) |
+| (none) | Toggle side panel (View menu, workspace button) |
 | ⌘⇧C | Toggle Spaces |
 | ⌃⌘N | New space |
 | ⌃1 ... ⌃9 | Go to space 1-9 |

@@ -173,7 +173,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
     for its replies to you. Every guideline is editable and every sample
     deletable; editing one stops auto-relearn overwriting it. Projects can have
     their own voice. See [docs/writing-style.md](docs/writing-style.md).
-- **Side chat.** The Quick chat button opens a chat beside any view, with the same model and effort pickers as the main chat. The pin button keeps it on the page it was opened on while you switch views; Back to this page unpins.
+- **Side chat.** ⌘I or the Quick chat button opens a chat beside any view, with the same model and effort pickers as the main chat. The pin button keeps it on the page it was opened on while you switch views; Back to this page unpins.
 - **Files.** One view with two sections:
   - *Notes* — writing of your own, in an editor rather than an upload box:
     markdown and LaTeX, a line-numbered editor beside a live preview, folders
@@ -513,9 +513,9 @@ and its verdict is kept on the row.
 | ⌘⇧[ / ⌘⇧] | Previous / next chat |
 | ⌘F | Find in this chat |
 | ⌘B | Toggle sidebar (bold while typing in a doc) |
-| ⌘I | Toggle side panel (opens on Context) |
+| ⌘I | Quick chat / Page agent panel |
 | ⌃⌘I | Toggle context panel |
-| (none) | Quick chat (View → Page Agent, title-bar button) |
+| (none) | Toggle side panel (View menu, workspace button) |
 | ⌘⇧C | Toggle Canvases (Canvases menu) |
 | ⌃1 … ⌃9 | Go to canvas 1–9 |
 | ⌘, | Settings: General, Sidebar, Model, Models, Agents, Memory, Integrations, Permissions, System access, Usage, Advanced |

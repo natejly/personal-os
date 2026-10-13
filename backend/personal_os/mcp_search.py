@@ -9,18 +9,23 @@ schema-hash decay all key off the slug in app.py and are untouched by whether a 
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 import math
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
-from . import mcp_eval
+from . import mcp_eval, providers, retrieval_rerank
 from .learn import _shown, normalize_skill_text
 
+log = logging.getLogger("grain.mcp_search")
 MAX_QUERY = 500
 MAX_LIMIT = 10
 DEFAULT_LIMIT = 5
 
+RANK_DOC_CHARS = 200
 _WORD = re.compile(r"[a-z0-9]+")
 
 
@@ -33,6 +38,7 @@ def tokenize(text: str) -> list[str]:
 class Doc:
     slug: str
     tokens: list[str]
+    text: str = ""  # what the reranker reads: the name and the description
 
 
 def _props(parameters: Any) -> dict[str, Any]:
@@ -53,7 +59,7 @@ def build_docs(tools: Iterable[dict[str, Any]], server_names: dict[str, str] | N
             if isinstance(spec, dict):
                 toks += tokenize(str(spec.get("description") or ""))
         toks += tokenize(str(t.get("server") or (server_names or {}).get(str(t.get("server_id") or "")) or ""))
-        out.append(Doc(slug, toks))
+        out.append(Doc(slug, toks, f"{' '.join(tokenize(slug))}: {' '.join(str(t.get('description') or '').split())}"[:RANK_DOC_CHARS]))
     return out
 
 
@@ -96,6 +102,44 @@ def preselect(docs: list[Doc], text: str) -> list[str]:
     """Held-back tools a user message obviously asks for: the best bm25 hits, if strong and near the top one. Often none."""
     hits = bm25_search(docs, (text or "")[:PRESELECT_CHARS], limit=PRESELECT_LIMIT)
     return [s for s, v in hits if v >= PRESELECT_MIN and v >= 0.6 * hits[0][1]]
+
+
+PRESELECT_RANK_MIN = 0.02       # rerank score; calibrated on scripts/tool_preselect_eval.py (chit-chat tops out near 0.011, short tool docs score low)
+PRESELECT_RANK_NEAR = 0.25      # a pick must also score at least this share of the top score
+PRESELECT_CANDIDATES = 150      # held-back tools sent to the reranker; more than this are cut to the bm25 head
+PRESELECT_TIMEOUT = 2.0         # seconds a turn waits for it: a loading aid must not stall a reply
+PRESELECT_BACKOFF = 300.0       # after a failed call, a dead route costs one wait, not one per turn
+_rank_down_until = 0.0
+
+
+async def preselect_ranked(docs: list[Doc], text: str, settings: dict[str, Any]) -> list[str]:
+    """`preselect`, decided by the rerank model so a paraphrase with no shared keyword still loads its tool.
+    Falls back to the bm25 `preselect` with no rerank model, while backed off, and on any timeout or error. Never raises."""
+    global _rank_down_until
+    query = (text or "")[:PRESELECT_CHARS]
+    try:
+        model = providers.rerank_model(settings)
+    except Exception:  # noqa: BLE001 - odd settings are a missing model
+        model = ""
+    if not model or not query.strip() or not docs or time.monotonic() < _rank_down_until:
+        return preselect(docs, text)
+    if len(docs) > PRESELECT_CANDIDATES:
+        head = [s for s, _ in bm25_search(docs, query, limit=MAX_LIMIT)]
+        cand = sorted(docs, key=lambda d: d.slug not in head)[:PRESELECT_CANDIDATES]
+    else:
+        cand = docs
+    try:
+        scored = await asyncio.wait_for(retrieval_rerank.rerank_scores(
+            settings, model, query, [d.text or d.slug for d in cand], timeout=PRESELECT_TIMEOUT, top_n=PRESELECT_LIMIT), PRESELECT_TIMEOUT)
+        if scored is None:
+            raise RuntimeError("no rerank route")
+        scored = sorted(((i, s) for i, s in scored if 0 <= i < len(cand)), key=lambda x: -x[1])
+    except Exception as e:  # noqa: BLE001 - timeouts, odd payloads, no route: bm25 is the answer
+        _rank_down_until = time.monotonic() + PRESELECT_BACKOFF
+        log.warning("tool preselect rerank unavailable, using bm25 for %ds: %s", int(PRESELECT_BACKOFF), e)
+        return preselect(docs, text)
+    top = scored[0][1] if scored else 0.0
+    return [cand[i].slug for i, s in scored[:PRESELECT_LIMIT] if s >= PRESELECT_RANK_MIN and s >= PRESELECT_RANK_NEAR * top]
 
 
 def should_defer(n_tools: int, threshold: int) -> bool:

@@ -2512,7 +2512,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         tool_schemas = _schemas()
         if tool_ctx["deferred"] and tool_ctx["user_text"] and not body.resume_of:
             # What the message plainly asks for is loaded before round 1, so it costs no tool_search round.
-            if picks := mcp_search.preselect(mcp_search.build_docs(tool_ctx["tool_catalog"]()), tool_ctx["user_text"]):
+            if picks := await mcp_search.preselect_ranked(mcp_search.build_docs(tool_ctx["tool_catalog"]()), tool_ctx["user_text"], cfg):
                 loaded.update(picks)
                 tool_schemas = _schemas()
 

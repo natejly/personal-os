@@ -75,7 +75,7 @@ async function downloadOtlp(messageId: string): Promise<void> {
   URL.revokeObjectURL(url)
 }
 
-export default function TraceView({ spans, live, model, messageId }: { spans: Span[]; live: boolean; model: string | null; messageId?: string }): JSX.Element {
+export default function TraceView({ spans, live, model, messageId, reasoning }: { spans: Span[]; live: boolean; model: string | null; messageId?: string; reasoning?: string | null }): JSX.Element {
   const devTools = useStore((s) => s.settings.devTools === true)  // the OTLP export stays a developer tool
   const [now, setNow] = useState(Date.now())
   const [open, setOpen] = useState<Record<string, boolean>>({})
@@ -104,6 +104,7 @@ export default function TraceView({ spans, live, model, messageId }: { spans: Sp
       </div>
       {model && <div className="trace-model" title={model === modelLabel(model) ? undefined : model}>{modelLabel(model)}</div>}
       {devTools && messageId && !live && <button className="link small" onClick={() => void downloadOtlp(messageId)}>Export OTLP JSON</button>}
+      {reasoning && <details className="trace-thinking"><summary className="muted small">Thinking</summary><p>{reasoning}</p></details>}
       <ol className="trace-rows">
         {sorted.map((s) => {
           const end = s.end ?? now

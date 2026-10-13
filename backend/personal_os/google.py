@@ -664,10 +664,12 @@ class Google:
         """
         svc = self._svc("calendar", "v3").events()
         updates = _send_updates(send_updates)
-        self._drop_saved_event(calendar_id, event_id)
+        # The saved copy is dropped only once a write lands: dropped first, a refused write
+        # (a read-only calendar, a bad time) hid the unchanged event until the next full re-list.
         dest = event.get("move_to_calendar_id")
         if dest and dest != calendar_id:
             svc.move(calendarId=calendar_id, eventId=event_id, destination=dest, sendUpdates=updates).execute()
+            self._drop_saved_event(calendar_id, event_id)
             calendar_id = dest
         if event.get("start") and not event.get("end"):
             # Only the start moved. Without an end the body below falls back to one hour
@@ -687,6 +689,7 @@ class Google:
             # Nothing was written (a bare move, or an empty patch), so there is nothing to prove.
             return _event_out(svc.get(calendarId=calendar_id, eventId=event_id).execute(), calendar_id, full=True)
         out = _event_out(svc.patch(**kwargs).execute(), calendar_id, full=True)
+        self._drop_saved_event(calendar_id, event_id)
         return verify.attach(out, self._verify_event(calendar_id, event_id, out, body))
 
     @invalidates("calendar")
@@ -731,8 +734,8 @@ class Google:
         if "conferenceData" in body:
             kwargs["conferenceDataVersion"] = 1
         if event_id:
-            self._drop_saved_event(calendar_id, event_id)
             e = svc.patch(eventId=event_id, **kwargs).execute()
+            self._drop_saved_event(calendar_id, event_id)
         else:
             e = svc.insert(**kwargs).execute()
         out = _event_out(e, calendar_id, full=True)
@@ -811,7 +814,9 @@ class Google:
                 start, end = _parse_iso(start).isoformat(), _parse_iso(str(end)).isoformat()
                 body["start"], body["end"] = {"dateTime": start}, {"dateTime": end}
                 naive = "T" in start and not re.search(r"[+-]\d\d:\d\d$|Z$", start)
-                tz = f.get("time_zone") or (_local_tz() if naive else None)
+                # A series needs a zone to expand in even when the start carries an offset (400
+                # "Missing time zone definition" otherwise), and a patch cannot tell it is not one.
+                tz = f.get("time_zone") or (_local_tz() if naive or patch or body.get("recurrence") else None)
                 if tz:
                     body["start"]["timeZone"] = body["end"]["timeZone"] = tz
                 if patch:

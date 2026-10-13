@@ -71,6 +71,14 @@ def _schema_version(path: Path) -> int:
         c.close()
 
 
+def _schema_drift(path: Path) -> list[str]:
+    c = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        return migrations.drift(c)
+    finally:
+        c.close()
+
+
 def create(data_dir: Path, kind: str = "manual", now: float | None = None) -> dict[str, Any]:
     """Snapshot the live database; returns its manifest (with `name`)."""
     assert kind in KINDS
@@ -431,7 +439,8 @@ def router(data_dir: Path) -> Any:
     def overview() -> dict[str, Any]:
         bs = list_backups(data_dir)
         return {"data_dir": str(data_dir), "backups": bs, "last_backup": bs[0]["created_at"] if bs else None,
-                "pending_restore": pending_restore(data_dir), "restore_failed": restore_failed(data_dir), "schema_version": migrations.latest(), "app_version": APP_VERSION}
+                "pending_restore": pending_restore(data_dir), "restore_failed": restore_failed(data_dir), "schema_version": migrations.latest(), "app_version": APP_VERSION,
+                "schema_drift": _schema_drift(data_dir / DB_NAME)}
 
     @r.post("/backups")
     async def backup_now() -> dict[str, Any]:

@@ -92,6 +92,12 @@ export default function DataSettings(): JSX.Element {
         </div>
       )}
 
+      {(info?.schema_drift?.length ?? 0) > 0 && (
+        <div className="data-row pending" role="alert">
+          <span className="toggle-text"><b>Your data was changed by a different version of Grain</b><small>{info?.schema_drift?.join('; ')}. Some features may fail until you update Grain or restore a backup made before then.</small></span>
+        </div>
+      )}
+
       {info && info.backups.length > 0 && <h4>Backups</h4>}
       {info && info.backups.length > 0 && (
         <ul className="data-list" aria-label="Backups">

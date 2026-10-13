@@ -521,6 +521,9 @@ class Database:
             c.executescript(SCHEMA)
             self._migrate(c)
             migrations.run(c)
+            self.schema_drift = migrations.drift(c)
+        for problem in self.schema_drift:
+            log.error("Schema drift in %s: %s", self.path, problem)
         self._migrate_secrets()
         self._lock_down()
 

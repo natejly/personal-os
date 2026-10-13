@@ -1911,6 +1911,8 @@ export interface DataOverview {
   pending_restore: { name: string } | null; schema_version: number; app_version: string
   /** A staged restore that could not be applied at the last start; the live data was left as it was. */
   restore_failed?: { name: string | null; error: string; at: number } | null
+  /** Why the live database's schema does not match this build (a newer or unmerged build migrated it). */
+  schema_drift?: string[]
 }
 /** The sidecar's lifecycle, as the main process supervises it. */
 export type BackendState = 'starting' | 'ready' | 'restarting' | 'failed'

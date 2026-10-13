@@ -480,6 +480,7 @@ class Child:
     last_activity: float = field(default_factory=time.monotonic)
     tool_since: float | None = None
     task_obj: Any = None
+    writing: int = 0                # write/external calls in flight: Stop gives them STOP_GRACE_SECONDS before cancelling
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     cancel: asyncio.Event = field(default_factory=asyncio.Event)
     background: bool = False
@@ -1252,7 +1253,11 @@ class Subagents:
         async def go() -> Any:
             return await self.toolbox.call(name, args, ch.ctx)
         if spec.danger in ("writes", "external") and self.store is not None:
-            res, replayed = await self.store.call_once(ch.id, ch.rounds, name, args, go, call_id=uid, inherit=ch.resume_of or None)
+            ch.writing += 1
+            try:
+                res, replayed = await self.store.call_once(ch.id, ch.rounds, name, args, go, call_id=uid, inherit=ch.resume_of or None)
+            finally:
+                ch.writing -= 1
             if replayed and isinstance(res, dict):
                 res = {**res, "replayed": True}
             return res
@@ -1465,7 +1470,10 @@ class Subagents:
         ch.halt_reason = ch.halt_reason or reason
         ch.cancel.set()
         if ch.task_obj is not None and not ch.task_obj.done():
-            ch.task_obj.cancel()
+            if ch.writing:  # a write gets the grace the main loop gives it; _exec's _check ends the child once it returns
+                asyncio.get_running_loop().call_later(limits.STOP_GRACE_SECONDS, lambda t=ch.task_obj: t.done() or t.cancel())
+            else:
+                ch.task_obj.cancel()
 
     def stop_tree(self, cid: str, reason: str = "interrupted") -> list[str]:
         """Stop a child and everything below it, leaves first. Every one still returns its partial output."""

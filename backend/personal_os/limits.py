@@ -53,6 +53,7 @@ JOB_IDLE_SECONDS = 1800            # an unattended run with no model or tool act
 REPEAT_LIMIT = 5                   # identical tool calls in a row before a reply is stopped
 TOOL_ERROR_LIMIT = 3               # consecutive errors from one tool before the model is told to change approach
 FINAL_ROUND_SECONDS = 90.0         # a closing-answer model call still open after this long is abandoned
+STOP_GRACE_SECONDS = 3.0           # a write that Stop caught mid-call gets this long to report its real outcome before it is cancelled
 REVIEW_TIMEOUT_SECONDS = 30        # a hung reviewer call fails closed (-> an approval card)
 
 # ---- Provider ----

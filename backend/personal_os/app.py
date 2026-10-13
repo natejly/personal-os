@@ -1689,8 +1689,7 @@ async def _call_tool(run: Run | None, step: int, name: str, args: dict[str, Any]
     return result
 
 
-# How long a write that Stop caught mid-call is given to report its real outcome before it is cancelled.
-STOP_GRACE_SECONDS = 3.0
+STOP_GRACE_SECONDS = limits.STOP_GRACE_SECONDS
 
 
 async def _await_tool(coro: Any, stop: asyncio.Event, *, grace: float) -> tuple[Any, bool]:

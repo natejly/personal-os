@@ -106,6 +106,17 @@ def test_deny_beats_ask_beats_allow():
     assert ev("git status", allow=["Bash(git *)"], ask=["Bash(git push *)"]).action == "allow"
 
 
+@pytest.mark.parametrize("cmd", ["/bin/rm -rf build", "/usr/bin/curl http://x", "git -C . push origin main",
+                                 "git --git-dir=.git push", "find . -exec rm {} +", "find . -execdir /bin/rm {} ;"])
+def test_deny_sees_other_spellings_of_the_program(cmd):
+    assert ev(cmd, deny=["Bash(rm *)", "Bash(git push *)", "Bash(curl *)"]).action == "deny"
+
+
+def test_redirect_write_is_not_readonly():
+    for cmd in ("echo hi > ~/.zshrc", "cat a > out.txt", "echo hi >> notes.txt"):
+        assert ev(cmd).action is None
+
+
 def test_one_unallowed_subcommand_stops_allow():
     r = ev("git status && rm -rf x", allow=["Bash(git *)"])
     assert r.action is None and r.pending == ["Bash(rm -rf x)"]
@@ -173,6 +184,20 @@ def test_path_rules_with_symlinks_and_globs(tmp_path):
     one = rules(allow=[f"Edit({real}/*)"])
     assert pr.evaluate("fs_edit", {"path": str(real / "x")}, one).action == "allow"
     assert pr.evaluate("fs_edit", {"path": str(real / "sub" / "x")}, one).action is None   # * is one segment
+
+
+def test_relative_paths_resolve_where_the_file_tools_do(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    r = rules(deny=["Edit(~/.zshrc)", "Read(~/secret/**)", f"Read({tmp_path}/desk/x/**)"])
+    assert pr.evaluate("fs_edit", {"path": ".zshrc"}, r).action == "deny"
+    assert pr.evaluate("read_local_file", {"path": "secret/a.txt"}, r).action == "deny"
+    assert pr.evaluate("fs_grep", {"root": "secret", "pattern": "k"}, r).action == "deny"
+    assert pr.evaluate("fs_grep", {"root": "x", "pattern": "k"}, r, roots=[str(tmp_path / "desk")]).action == "deny"
+    # the *_local_file tools start at home even in a desk
+    assert pr.evaluate("read_local_file", {"path": "secret/a.txt"}, r, roots=[str(tmp_path / "desk")]).action == "deny"
+    assert pr.evaluate("read_local_file", {"path": "x/a"}, r, roots=[str(tmp_path / "desk")]).action is None
+    assert pr.evaluate("fs_glob", {"pattern": "*"}, r, roots=[str(tmp_path / "desk" / "x")]).action == "deny"
+    assert pr.evaluate("read_local_file", {"path": "other.txt"}, rules()).suggestions == [f"Read({os.path.realpath(tmp_path)}/**)"]
 
 
 def test_subject_mapping_by_contract():

@@ -37,6 +37,7 @@ HARD_STOP = ("Three calls in a row were refused. Stop attempting variations of t
 
 READ_TOOLS = {"read_local_file", "fs_glob", "fs_grep"}
 EDIT_TOOLS = {"write_local_file", "fs_edit", "fs_copy", "fs_mkdir", "move_local_file", "trash_local_file"}
+HOME_TOOLS = {"read_local_file", "write_local_file", "move_local_file", "trash_local_file"}  # mac.py resolves from home
 MAIL_TOOLS = {"gmail_send", "gmail_draft"}
 CALENDAR_TOOLS = {"calendar_create", "calendar_update", "calendar_delete", "calendar_propose"}
 PATH_KEYS = ("path", "root", "directory", "dir", "file_path", "folder")
@@ -247,11 +248,8 @@ def _match_close(s: str, i: int) -> int:
     return -1
 
 
-def _scan(cmd: str, subst_ok: bool = False) -> Parsed:
-    """Conservative shell tokenizer. Anything it cannot be sure about sets `opaque`, which means ask.
-
-    `subst_ok` (the syntax-tree path) lets $() through as a placeholder word, because the commands inside are
-    judged on their own."""
+def _scan(cmd: str) -> Parsed:
+    """Conservative shell tokenizer. Anything it cannot be sure about sets `opaque`, which means ask."""
     s = cmd
     segs: list[Seg] = []
     nested: list[Seg] = []
@@ -323,9 +321,9 @@ def _scan(cmd: str, subst_ok: bool = False) -> Parsed:
                     if k < 0:
                         opaque = True
                         break
-                    inner = _scan(s[j + 2:k], subst_ok)
+                    inner = _scan(s[j + 2:k])
                     nested += inner.segments + inner.nested
-                    opaque = opaque or (inner.opaque or not subst_ok)
+                    opaque = True
                     buf.append("$SUBST")
                     j = k + 1
                     continue
@@ -334,9 +332,9 @@ def _scan(cmd: str, subst_ok: bool = False) -> Parsed:
                     if k < 0:
                         opaque = True
                         break
-                    inner = _scan(s[j + 1:k], subst_ok)
+                    inner = _scan(s[j + 1:k])
                     nested += inner.segments + inner.nested
-                    opaque = opaque or (inner.opaque or not subst_ok)
+                    opaque = True
                     buf.append("$SUBST")
                     j = k + 1
                     continue
@@ -356,9 +354,9 @@ def _scan(cmd: str, subst_ok: bool = False) -> Parsed:
                 if k < 0:
                     opaque = True
                     break
-                inner = _scan(s[i + 2:k], subst_ok)
+                inner = _scan(s[i + 2:k])
                 nested += inner.segments + inner.nested
-                opaque = opaque or (inner.opaque or not subst_ok)
+                opaque = True
                 cur.append("$SUBST")
                 started = True
                 i = k + 1
@@ -374,9 +372,9 @@ def _scan(cmd: str, subst_ok: bool = False) -> Parsed:
             if k < 0:
                 opaque = True
                 break
-            inner = _scan(s[i + 1:k], subst_ok)
+            inner = _scan(s[i + 1:k])
             nested += inner.segments + inner.nested
-            opaque = opaque or (inner.opaque or not subst_ok)
+            opaque = True
             cur.append("$SUBST")
             started = True
             i = k + 1
@@ -454,56 +452,9 @@ def _scan(cmd: str, subst_ok: bool = False) -> Parsed:
     return Parsed(segs, nested, opaque, s)
 
 
-_ts_parser: Any = None
-
-
-def _ts() -> Any:
-    """The tree-sitter bash parser when the binding is installed, else None."""
-    global _ts_parser
-    if _ts_parser is None:
-        try:
-            import tree_sitter_bash as tsb  # type: ignore[import-not-found]
-            from tree_sitter import Language, Parser  # type: ignore[import-not-found]
-            _ts_parser = Parser(Language(tsb.language()))
-        except Exception:  # noqa: BLE001 - absent or incompatible: the shlex-style scanner carries on
-            _ts_parser = False
-    return _ts_parser or None
-
-
-def _parse_ts(cmd: str) -> Parsed | None:
-    parser = _ts()
-    if parser is None:
-        return None
-    try:
-        data = cmd.encode()
-        root = parser.parse(data).root_node
-        if root.has_error:
-            return None
-        segs: list[Seg] = []
-        opaque = False
-        stack = [root]
-        while stack:
-            node = stack.pop()
-            if node.type in ("heredoc_redirect", "heredoc_body", "process_substitution"):
-                opaque = True
-            if node.type == "command":
-                sub = _scan(data[node.start_byte:node.end_byte].decode(errors="replace"), subst_ok=True)
-                segs += sub.segments
-            elif node.type == "file_redirect":
-                dest = node.child_by_field_name("destination")
-                if dest is not None:
-                    op = "<" if data[node.start_byte:node.start_byte + 1] == b"<" else ">"
-                    segs.append(Seg([], "", [(op, data[dest.start_byte:dest.end_byte].decode(errors="replace").strip("'\""))]))
-            stack.extend(reversed(node.children))
-        return Parsed(segs, [], opaque, cmd)
-    except Exception:  # noqa: BLE001
-        return None
-
-
 def split_command(cmd: str) -> Parsed:
-    """A command line as its subcommands. Nested commands come from the syntax tree when its binding is installed."""
-    text = normalize(cmd)
-    return _parse_ts(text) or _scan(text)
+    """A command line as its subcommands."""
+    return _scan(normalize(cmd))
 
 
 def strip_wrappers(tokens: list[str], aggressive: bool = False) -> list[str]:
@@ -989,9 +940,9 @@ def _matches(rule: Rule, sub: Subject, tool: str, cwd: str | None) -> bool:
         return True
     if sub.value is None:
         return False
-    if sub.kind in ("Read", "Edit"):
+    if sub.kind in ("Read", "Edit") and tool not in ("fs_glob", "fs_grep"):
         return _path_match(rule.pattern, _real(sub.value, cwd))
-    if sub.kind == "external_directory":  # a folder: `dir/**` covers the folder itself too
+    if sub.kind in ("Read", "external_directory"):  # a folder: `dir/**` covers the folder itself too
         p = _real(sub.value, cwd)
         return _path_match(rule.pattern, p) or _path_match(rule.pattern, p.rstrip("/") + "/")
     if tool in MAIL_TOOLS:  # addresses are case-insensitive
@@ -1118,6 +1069,24 @@ def _evaluate_bash(tool: str, cmd: str, rules: RuleSet, cwd: str | None, desks: 
     def variants(seg: Seg) -> list[Subject]:
         agg, cons = strip_wrappers(seg.words, True), strip_wrappers(seg.words, False)
         texts = {_canon(agg), _canon(cons), _canon(seg.words), seg.raw}
+        # The same program spelled another way: /bin/rm for rm, git's global options before the subcommand,
+        # and the command find -exec runs.
+        for toks in (agg, cons):
+            if not toks:
+                continue
+            toks = [os.path.basename(toks[0]) or toks[0], *toks[1:]]
+            texts.add(_canon(toks))
+            if toks[0] == "git":
+                i = 1
+                while i < len(toks) and toks[i].startswith("-"):
+                    i += 2 if toks[i] in GIT_GLOBAL_ARG else 1
+                texts.add(_canon(["git", *toks[i:]]))
+            if toks[0] == "find":
+                for k, t in enumerate(toks):
+                    if t in ("-exec", "-execdir", "-ok", "-okdir") and k + 1 < len(toks):
+                        run = toks[k + 1:]
+                        run = run[:next((j for j, a in enumerate(run) if a in (";", "+")), len(run))]
+                        texts.add(_canon([os.path.basename(run[0]) or run[0], *run[1:]]))
         return [Subject("Bash", t) for t in texts if t]
 
     for seg in judged:
@@ -1207,7 +1176,11 @@ def evaluate(tool: str, args: dict[str, Any], rules: RuleSet | dict[str, Any] | 
         c = args.get("cwd")
         start = _real(c, rl[0] if rl else cwd) if isinstance(c, str) and c else cwd  # an explicit cwd starts from the desk
         return _evaluate_bash(tool, str(args.get("command") or ""), rs, start, desk_folders(rl))
-    subs = subject_for(tool, args)
+    # A relative path means what the file tools make of it: the *_local_file tools start at home, the fs_* tools at the
+    # desk workspace, else home. A search with no root searches there too.
+    cwd = os.path.expanduser("~") if tool in HOME_TOOLS else cwd or os.path.expanduser("~")
+    subs = [Subject("Read", cwd) if tool in ("fs_glob", "fs_grep") and s == Subject("Read", None) else s
+            for s in subject_for(tool, args)]
     v = Verdict(subjects=[f"{s.kind}({s.value})" if s.value else s.kind for s in subs])
     verdict, rule = _decide(rs, subs, tool, cwd)
     v.action, v.rule = verdict, rule
@@ -1227,15 +1200,15 @@ def evaluate(tool: str, args: dict[str, Any], rules: RuleSet | dict[str, Any] | 
                 v.refusal = f"blocked by your permission rule {plain_rule}"
             else:
                 v.kind, v.pending = "rule", [tool]
-    v.suggestions = _suggest_paths(subs) if v.action != "allow" else []
+    v.suggestions = _suggest_paths(subs, cwd) if v.action != "allow" else []
     return v
 
 
-def _suggest_paths(subs: list[Subject]) -> list[str]:
+def _suggest_paths(subs: list[Subject], cwd: str | None = None) -> list[str]:
     out = []
     for s in subs:
         if s.kind in ("Read", "Edit") and s.value:
-            p = _real(s.value)
+            p = _real(s.value, cwd)
             r = f"{s.kind}({os.path.dirname(p) or '/'}/**)"
             if r not in out:
                 out.append(r)

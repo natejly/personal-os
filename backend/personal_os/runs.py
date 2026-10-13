@@ -526,7 +526,7 @@ class RunStore:
     def recover(self, live: Iterable[str] = ()) -> list[dict[str, Any]]:
         """At startup: every run still marked active, but not running in this process, died with the last one.
         Mark it interrupted and append an `error` event saying so (naming any approval it was blocked on).
-        Pending approvals stay pending: the UI can still show the card and record the decision. A desk's are parked.
+        A desk's pending approvals are parked for its next turn; any other is denied, since nothing would run it.
         Also drops the event tape of runs that ended more than EVENTS_RETAIN_S ago."""
         keep = set(live)
         out = []
@@ -537,6 +537,8 @@ class RunStore:
             for a in pending:
                 if a.get("desk_id"):
                     self.park(a["call_id"])  # the desk's next turn picks the answer up, with no second card
+                else:  # nothing will run it whatever the answer: settle it, so Needs-you only holds answerable cards
+                    self.decide(a["call_id"], "deny", by="restart", note="the backend restarted before this was answered")
             msg = "Interrupted: the backend stopped while this reply was running."
             if pending:
                 msg += " It was waiting on your approval of " + ", ".join(f"{a['tool']} ({a['call_id']})" for a in pending) + "."

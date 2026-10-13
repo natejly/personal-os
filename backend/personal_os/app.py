@@ -2477,10 +2477,15 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     break
                 if _gate(name, raw, sim, args) != "on" or toolbox.fs_needs_ask(name, args, sim):
                     break
-                proots, pcwd = shell_tool.perm_where(toolbox, sim) if name == "shell_run" else ([], None)
+                proots, pcwd = shell_tool.perm_where(toolbox, sim)
+                pcwd = pcwd if name == "shell_run" else None
                 perm = permrules.resolve(name, args, "on", False, rules=perm_rules, conv=conv_id, roots=proots, cwd=pcwd,
                                          doom=detector is not None and detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
                 if perm.mode != "on" or perm.refusal or perm.kind == "doom_loop":
+                    break
+                # A call Auto mode would hand the reviewer must not have gone out before the review.
+                if autoreview.route(pmode, mode="on", danger=spec.danger, explicit_on=explicit_modes.get(name) == "on",
+                                    covered=bool(perm.rule)) != "run":
                     break
                 seg.append((c, args))
                 if spec.taints:
@@ -2981,7 +2986,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 pre_mode = mode  # what the call would have done before rules and session grants (approval_log below)
                 if c["name"] != PLAN_TOOL and mode != "off" and not mcp_is(c["name"]):
                     # A shell command is judged from where it will start, and the desk's own folder is not Grain's data.
-                    proots, pcwd = shell_tool.perm_where(toolbox, tool_ctx) if c["name"] == "shell_run" else ([], None)
+                    # A file tool's relative path starts at the desk (proots[0]), as the tool resolves it.
+                    proots, pcwd = shell_tool.perm_where(toolbox, tool_ctx)
+                    pcwd = pcwd if c["name"] == "shell_run" else None
                     perm = permrules.resolve(
                         c["name"], args, mode, forced,
                         rules=perm_rules, conv=conv_id, roots=proots, cwd=pcwd,
@@ -3067,7 +3074,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 review = None
                 is_background = run is not None and run.kind in UNATTENDED_KINDS
                 # Permission mode (autoreview.route). Manual leaves the gate above exactly as it settled; auto sends what is not
-                # known safe to the reviewer; allow_all lifts every card except a credential-store access, a tainted write and a runaway repeat. Refusals, proposals and
+                # known safe to the reviewer; allow_all lifts every card (only a question to the user still asks). Refusals, proposals and
                 # approved plan steps are already settled, so they never get here.
                 if pmode != "manual" and claimed is None and pre is None and not proposing and mode != "off":
                     explicit = explicit_modes.get(c["name"]) if not mcp_is(c["name"]) else ("on" if raw_mode == "on" else None)
@@ -5171,7 +5178,12 @@ def evaluate_permission(body: PermissionEvalIn) -> dict[str, Any]:
 async def _recover_runs() -> None:
     """Runs left active by the last process died with it: mark them interrupted and salvage their reply from the tape."""
     recovered = run_store.recover(bus.live_ids())
+    gone = {"pending": False, "needs_approval": False, "interrupted": True,
+            "error": "Not run: the reply was interrupted before this was answered. Ask again to run it."}
     for r in recovered:
+        for a in r["pending_approvals"]:
+            if not a.get("desk_id"):  # recover() denied it: a persisted card stops asking
+                _patch_tool_event(a.get("message_id"), a["call_id"], gone)
         mid = r.get("message_id")
         if not mid:
             continue
@@ -5194,7 +5206,8 @@ async def _recover_runs() -> None:
             for a in r["pending_approvals"]:
                 if a["message_id"] == mid and a["call_id"] not in done:
                     tool_events.append({"id": a["call_id"], "name": a["tool"], "arguments": a["args"], "result_preview": "",
-                                        "duration_ms": 0, "error": None, "pending": True, "needs_approval": True, "forced": a["forced"]})
+                                        "duration_ms": 0, "error": None, "pending": True, "needs_approval": True, "forced": a["forced"],
+                                        **({} if a.get("desk_id") else gone)})
             convos.finish_message(mid, text, r["error"], json.loads(cur["context_used"]) if cur["context_used"] else None, tool_events,
                                   outcome="interrupted")
         except Exception:  # noqa: BLE001 - recovery must never stop the backend from starting

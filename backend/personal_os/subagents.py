@@ -1092,11 +1092,19 @@ class Subagents:
             forced = forced or taint_only
             lockable = bool(self.toolbox.ask_locked(spec) or self.toolbox.forces_ask(name, args, ch.ctx))
             hard_forced = hard_forced or taint_only or self.toolbox.forces_card(name, args, ch.ctx) or (lockable and tainted)
-            pre_mode = mode
             from . import shell as shell_mod
+            desk, pcwd = shell_mod.perm_where(self.toolbox, ch.ctx)
+            # The chat loop's desk rule (shell.auto_ok): a sandboxed shell_run inside the desk workspace, on the tool's default
+            # `ask`, needs no card or review. Rules, doom-loop and plan mode below can still ask.
+            desk_cleared = (name == "shell_run" and mode == "ask" and raw_mode == "ask" and not forced and bool(desk)
+                            and shell_mod.auto_ok(args, ch.ctx, ch.ctx.get("settings") or self.settings(), desk))
+            if desk_cleared:
+                mode = "on"
+            pre_mode = mode
+            # A file tool's relative path starts at the desk, else home (not a narrowed root), as the tool resolves it.
+            pcwd = pcwd if name == "shell_run" else (desk[0] if desk else os.path.expanduser("~"))
             perm = permrules.resolve(name, args, mode, forced, rules=self.settings().get("permissionRules"),
-                                     roots=self._perm_roots(ch), conv=ch.conversation_id,
-                                     cwd=shell_mod.perm_where(self.toolbox, ch.ctx)[1] if name == "shell_run" else None,
+                                     roots=self._perm_roots(ch), conv=ch.conversation_id, cwd=pcwd,
                                      doom=ch.detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
             mode, forced = perm.mode, perm.forced
             bad = perm.refusal or self._confine(ch, name, args) or coding_route.check(self.toolbox, name, args, ch.ctx)
@@ -1107,7 +1115,7 @@ class Subagents:
                     pmode, mode=mode, danger=spec.danger, explicit_on=explicit == "on",
                     explicit_ask=(explicit == "ask" and not self.toolbox.ask_locked(spec)) or (
                         mode == "ask" and perm.kind in ("rule", "external_directory")),
-                    covered=(pre_mode == "ask" and mode == "on") or bool(perm.rule and mode == "on"),
+                    covered=desk_cleared or (pre_mode == "ask" and mode == "on") or bool(perm.rule and mode == "on"),
                     hard_forced=hard_forced, soft_forced=lockable and not hard_forced,
                     # a sensitive-path read/write, a tainted write or a runaway repeat stays a card (not in allow-all)
                     fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop"),

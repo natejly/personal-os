@@ -1241,6 +1241,38 @@ def test_a_token_in_a_child_tool_result_is_stripped() -> None:
     check(pat not in text and "[github-pat]" in text, "a token in a child tool result is stripped")
 
 
+def test_a_workers_desk_shell_call_gets_the_desk_rule_without_a_review() -> None:
+    from personal_os import autoreview, shell
+    desk = tempfile.mkdtemp()
+    ch = sa.Child(
+        id="c-desk", parent_id="p", role=sa.BUILTIN_ROLES["worker"], task="build", model="m",
+        depth=1, conversation_id=None, message_id=None, desk_id="d1",
+        ctx={"settings": {**appmod.settings(), "permissionMode": "auto"}, "desk_id": "d1"}, modes={"shell_run": "ask"},
+        meter=sa.Meter(), roots=(),
+    )
+    reviewed: list[str] = []
+    ran: list[str] = []
+
+    async def fake_call(_ch: Any, name: str, _args: dict[str, Any], _uid: str, _spec: Any) -> dict[str, str]:
+        ran.append(name)
+        return {"output": "ok"}
+
+    async def fake_review(*_a: Any, **k: Any) -> dict[str, Any]:
+        reviewed.append(k["name"])
+        return {"verdict": "ask", "reason": "", "confidence": "low"}
+
+    prev = (mgr._call, mgr.store, shell.auto_ok, shell.perm_where, autoreview.review)
+    mgr._call, mgr.store = fake_call, None
+    shell.auto_ok = lambda *_a, **_k: True  # type: ignore[assignment]
+    shell.perm_where = lambda *_a, **_k: ([desk], desk)  # type: ignore[assignment]
+    autoreview.review = fake_review  # type: ignore[assignment]
+    try:
+        run(asyncio.wait_for(mgr._exec(ch, {"id": "1", "name": "shell_run"}, {"command": "make test"}), 5))  # a card would wait
+    finally:
+        mgr._call, mgr.store, shell.auto_ok, shell.perm_where, autoreview.review = prev
+    check(ran == ["shell_run"] and not reviewed, "a sandboxed shell call in the desk runs as it would in the front agent")
+
+
 def test_a_token_in_a_subagent_root_is_stripped() -> None:
     pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
     root = tempfile.mkdtemp()

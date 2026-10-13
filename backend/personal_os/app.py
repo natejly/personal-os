@@ -2417,7 +2417,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         stop_text: str | None = None
         blocked: set[str] = set()
         _round = 0
-        seen_call_ids: set[str] = set()  # a provider restarts its call numbering every round; ids stay unique per reply
+        # A provider restarts its call numbering every round (and every turn): ids stay unique against the replayed
+        # history too, since one request must not carry two calls with the same id.
+        seen_call_ids: set[str] = {tc["id"] for m in history for tc in (m.get("tool_calls") or []) if tc.get("id")}
         quiet_retries = 0  # silent retries of an incomplete or empty round: at most one per reply
         cut_recoveries = 0  # rounds whose tool calls were cut off at the output limit
         seen_ids = set(cinfo.get("row_ids") or [])  # rows the context was built from; a steer in it is not sent twice

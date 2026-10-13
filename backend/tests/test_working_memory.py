@@ -310,6 +310,17 @@ def test_render_returns_the_handle_id_and_small_results_stay_inline() -> None:
     check(appmod.tool_results.for_model(cid, "m1", "fs_read", {"a": 1}) == _dumps({"a": 1}), "for_model is the first element of render")
 
 
+def test_a_call_id_reused_from_an_earlier_turn_is_rewritten() -> None:
+    """A provider that numbers ids per turn must not put two calls with one id into a request."""
+    cid = new_conv()
+    for _ in range(2):
+        SEEN.clear()
+        ROUNDS[:] = [{"text": "checking", "calls": [call("c1", "current_time", {})]}, {"text": "done", "calls": []}]
+        run_chat(cid)
+    ids = [tc["id"] for m in SEEN[-1] for tc in (m.get("tool_calls") or [])]
+    check(len(ids) == 2 and len(set(ids)) == 2, f"call ids in one request are unique, got {ids}")
+
+
 def test_the_handle_id_reaches_the_stored_event_and_the_next_turn() -> None:
     cid = new_conv()
     SEEN.clear()

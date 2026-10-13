@@ -677,7 +677,19 @@ def test_wall_note_names_the_rule_and_quotes_the_os_error() -> None:
     assert shell.wall_note("osascript: Operation not permitted (-1743)")["rule"].startswith("appleevent")
     assert shell.wall_note("PermissionError: [Errno 1] Operation not permitted: bind", network=True)["rule"].startswith("file")
     assert shell.wall_note("all fine") is None
+    # the word "connect" elsewhere in the output does not make a file denial a network wall
+    assert shell.wall_note("connecting to db\nok\nmore\ncat: x: Permission denied")["rule"].startswith("file")
     assert "cannot bind" in box_spec_description()
+
+
+def test_wall_note_names_macos_privacy_not_the_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    from personal_os import macos
+    monkeypatch.setattr(shell.osplat, "has", lambda f: f == "full_disk_access")
+    monkeypatch.setattr(macos, "full_disk_access", lambda: False)
+    w = shell.wall_note(f"ls: {os.path.expanduser('~')}/Desktop: Operation not permitted")
+    assert w["rule"].startswith("macOS privacy") and "unsandboxed" not in w["retry"]
+    monkeypatch.setattr(macos, "full_disk_access", lambda: True)
+    assert shell.wall_note(f"ls: {os.path.expanduser('~')}/Desktop: Operation not permitted")["rule"].startswith("file")
 
 
 def box_spec_description() -> str:

@@ -40,6 +40,7 @@ from typing import Any, Callable
 
 from . import approval_log, autoreview, coding_route, compaction, context_map, fsx, limits, llm, mac, mcp_search, permissions, permrules, redact
 from .db import new_id, now
+from . import toolcore
 from .toolcalls import parse_arguments, resolve_name
 from .trace import Tracer, now_ms
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
@@ -950,6 +951,11 @@ class Subagents:
         out.update({n: s for n, s in (ch.ctx.get("mcp_schemas") or {}).items() if ch.modes.get(n) in ("on", "ask")})
         return out
 
+    @staticmethod
+    def _core(ch: Child) -> tuple[str, ...]:
+        """The worker core in force, read once per child: a daily refresh (toolcore.py) never changes a running child's tools."""
+        return ch.ctx.setdefault("core", toolcore.CURRENT.get("worker") or WORKER_CORE)
+
     def _held_back(self, ch: Child) -> list[str]:
         """The names this child gets through the index and tool_search rather than as schemas: all but WORKER_CORE once it
         has more than toolDeferAbove tools. Empty below that (a read-only role's short list is sent whole)."""
@@ -957,7 +963,7 @@ class Subagents:
         cfg = ch.ctx.get("settings") or self.settings()
         if not mcp_search.should_defer(len(names), int(cfg.get("toolDeferAbove", 40) or 0)):
             return []
-        return [n for n in names if n not in WORKER_CORE]
+        return [n for n in names if n not in self._core(ch)]
 
     def _schemas(self, ch: Child) -> list[dict[str, Any]]:
         """What the model is sent this round: everything (a short tool list), or tool_search, the worker core in its fixed order
@@ -976,7 +982,7 @@ class Subagents:
         ch.ctx["tool_catalog"] = lambda: [
             {"slug": n, "description": d, "parameters": p, "server": g}
             for n in sorted(ch.ctx["deferred"]) for d, p, g in [self._about(n, by_name[n])]]
-        return ([self.toolbox.specs["tool_search"].schema()] + [by_name[n] for n in WORKER_CORE if n in by_name]
+        return ([self.toolbox.specs["tool_search"].schema()] + [by_name[n] for n in self._core(ch) if n in by_name]
                 + [by_name[n] for n in order])
 
     def _about(self, name: str, schema: dict[str, Any]) -> tuple[str, Any, str]:

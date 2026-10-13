@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { fileViewer, fmtBytes, fromFence, headerMeta, itemRawPath, parseDelimited, pdfPageCount, pdfSrc, rawPath, textLang, uploadShowItem } from './showPanel'
+import { editedFileItem, fileViewer, fmtBytes, fromFence, headerMeta, itemRawPath, parseDelimited, pdfPageCount, pdfSrc, rawPath, textLang, uploadShowItem } from './showPanel'
 
 test('a file item routes by mime first, then by extension', () => {
   assert.equal(fileViewer({ mime: 'application/pdf', name: 'lease.pdf' }), 'pdf')
@@ -120,4 +120,14 @@ test('uploadShowItem points the panel at the document; a row without the flag co
     { kind: 'file', title: 'a.pdf', name: 'a.pdf', mime: 'application/pdf', size: 9, documentId: 'd1', hasOriginal: true })
   assert.equal(uploadShowItem({ id: 'd', name: 'a', mime: '', size: 0, has_original: false }).hasOriginal, false)
   assert.equal(uploadShowItem({ id: 'd', name: 'a', mime: '', size: 0 }).hasOriginal, true)
+})
+
+test('editedFileItem: finished edits with an absolute path open as file items', () => {
+  const ok = { name: 'fs_edit', arguments: { path: '~/a/b.md' }, result_preview: '{"path": "/Users/x/a/b.md", "diff": ""}' }
+  assert.deepEqual(editedFileItem(ok), { kind: 'file', title: 'b.md', path: '/Users/x/a/b.md', name: 'b.md' })
+  assert.equal(editedFileItem({ name: 'write_local_file', arguments: { path: '~/n.txt' }, result_preview: 'cut off {' })?.path, '~/n.txt')
+  assert.equal(editedFileItem({ ...ok, pending: true }), null)
+  assert.equal(editedFileItem({ ...ok, error: 'x' }), null)
+  assert.equal(editedFileItem({ name: 'write_local_file', arguments: { path: 'rel/x.md' }, result_preview: '' }), null)
+  assert.equal(editedFileItem({ name: 'read_local_file', arguments: { path: '~/x' } }), null)
 })

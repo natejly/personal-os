@@ -467,4 +467,5 @@ def build_context(
     used["volatile_blocks"] = list(volatile)
     used["system_prompt"] = system
     used["tokens_estimate"] = estimate_tokens(system)
+    used["section_tokens"] = dict(retrieved)  # replay traces (replay_trace.py): what retrieval added, already estimated above
     return system, used

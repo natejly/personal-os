@@ -32,7 +32,7 @@ from pydantic import AfterValidator, BaseModel, Field
 
 from . import auth_breaker, blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
-from . import branch_summary, compaction, followups, otel_export, router, thinking_summary, titles
+from . import branch_summary, compaction, followups, otel_export, replay_trace, router, thinking_summary, titles
 from . import chatlink, coding_route, fsx, opencode_usage, request_log
 from .fsx import sensitive_reason
 from . import context_map
@@ -358,6 +358,7 @@ def clear_context(conv_id: str) -> dict[str, Any]:
     if not convos.get(conv_id, with_messages=False):
         raise HTTPException(404, "No such conversation")
     compactor.clear(conv_id)
+    replay_trace.boundary(db.data_dir, conv_id, "clear")
     return convos.clear_context(conv_id)
 
 
@@ -1804,6 +1805,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # Auto: the model for this turn is chosen from the message (router.py). The chat keeps `auto`; the reply row and
     # the trace record what was used. An explicit pick for a regenerated variant arrives as body.model and wins.
     routed: tuple[str, str] | None = None
+    requested_model = model  # before auto-routing: the replay trace records what was asked for and what ran
     if router.wanted(model, body.model or "", cfg):
         msgs_ = conv["messages"]
         last_user = next((m for m in reversed(msgs_) if _said(m)), None)
@@ -1840,6 +1842,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 return
             edited_from = body.replace_from
             hidden = {r["id"] for r in cut}
+            replay_trace.followup(db.data_dir, conv_id=conv_id, kind="edit", message_id=next((r["id"] for r in cut if r.get("role") == "assistant"), None))
             for r in cut:
                 yield "removed_message", {"id": r["id"]}
             cut_at = cut[0]["created_at"]
@@ -1864,6 +1867,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if first_user and first_user["id"] in hidden and conv["title"] == _title_from(first_user["content"]):
                 convos.update(conv_id, {"title": "New chat"})
                 conv = {**conv, "title": "New chat"}
+        if not internal and not edited_from and conv["messages"] and conv["messages"][-1]["role"] == "assistant" and replay_trace.is_correction(user_text):
+            replay_trace.followup(db.data_dir, conv_id=conv_id, kind="correction", message_id=conv["messages"][-1]["id"], text=user_text)
         um = convos.add_message(conv_id, "user", user_text, attachments=attachments or None, kind="wake" if is_wake else body.kind)
         user_msg_id = um["id"]
         yield "user_message", {**um, **({"edited_from": edited_from, "had_writes": had_writes} if edited_from else {})}
@@ -1880,6 +1885,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             return
         user_text = users[-1]["content"]
         user_msg_id = users[-1]["id"]
+        replay_trace.followup(db.data_dir, conv_id=conv_id, kind="retry", message_id=next((m["id"] for m in reversed(conv["messages"]) if m.get("role") == "assistant"), None))
     else:
         # regenerate: the trailing answer is superseded, not deleted, so it survives a failed or stopped replacement
         msgs = conv["messages"]
@@ -1907,6 +1913,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 regen_done = [te for r in rows for te in json.loads(r["tool_events"]) or []
                               if not te.get("pending") and not te.get("error") and _mutates(str(te.get("name") or ""))]
             yield "removed_message", {"id": last["id"]}
+            replay_trace.followup(db.data_dir, conv_id=conv_id, kind="regenerate", message_id=last["id"])
         user_text = users[-1]["content"]
         user_msg_id = users[-1]["id"]
 
@@ -1972,6 +1979,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             _active.pop(pre_am["id"], None)
             convos.finish_message(pre_am["id"], "", None, used, [], tracer.spans, None, outcome="stopped")
             convos.touch(conv_id)
+            replay_trace.trace(db.data_dir, conv_id=conv_id, message_id=pre_am["id"], user_msg_id=user_msg_id, user_text=user_text, reply="", requested_model=requested_model, cfg=cfg, routed=routed is not None, model=model, used=used, spans=tracer.spans, tool_events=[], cost=None, outcome="stopped", error=None)
         yield "done", {"id": pre_am["id"] if pre_am else None, "error": None, "context_used": None, "tool_events": [], "trace": tracer.spans, "stopped": True,
                        "partial": None, "segment": False, "tainted": bool(conv["settings"].get("tainted")), "taint_sources": [],
                        "reasoning": None, "outcome": "stopped", "error_kind": None}
@@ -2624,6 +2632,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             _active.pop(am["id"], None)
             convos.finish_message(am["id"], "", str(e), used, [], tracer.spans, None, error_kind=getattr(e, "kind", None))
             convos.touch(conv_id)
+            replay_trace.trace(db.data_dir, conv_id=conv_id, message_id=am["id"], user_msg_id=user_msg_id, user_text=user_text, reply="", requested_model=requested_model, cfg=cfg, routed=routed is not None, model=model, used=used, spans=tracer.spans, tool_events=[], cost=None, outcome="error", error=str(e))
         yield "done", {"id": am.get("id"), "error": str(e), "context_used": cite_slim(used), "tool_events": [], "trace": tracer.spans,
                        "stopped": False, "partial": None, "segment": False, "tainted": False, "taint_sources": [],
                        "reasoning": None, "outcome": None, "error_kind": getattr(e, "kind", None)}
@@ -3596,6 +3605,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                               outcome=outcome, error_kind=error_kind, attachments=tool_ctx.get("reply_attachments"))
         convos.touch(conv_id)
         otel_export.export_in_background(cfg, conv_id, am["id"], model, project["name"] if project else None, tracer.spans, used, text)
+        replay_trace.trace(db.data_dir, conv_id=conv_id, message_id=am["id"], user_msg_id=user_msg_id, user_text=user_text, reply=text, requested_model=requested_model, cfg=cfg, routed=routed is not None, model=model, used=used, spans=tracer.spans, tool_events=tool_events, cost=meter.cost, outcome="error" if error else "stopped" if stop.is_set() else "ok", error=error)
     if run is not None:
         # What this reply spent, for whoever is supervising it. A desk turn chains on these; an
         # ordinary chat never reads them back.

@@ -50,6 +50,14 @@ RERANK_BACKOFF = 300.0   # seconds after a failed call before trying again, like
 # to supersede: newer wins.
 NEAR_DUP_SIMILARITY = 0.92
 
+# Merge judge: a new memory whose nearest live unpinned rows score at or above JUDGE_MIN_SIMILARITY (loose: the same
+# fact reworded lands ~0.75-0.9, below the near-duplicate guard) is shown to one batched model call that says whether
+# to store, skip, update or merge it. Pairs at NEAR_DUP_SIMILARITY or above never reach it: the guard already decides.
+JUDGE_MIN_SIMILARITY = 0.6
+JUDGE_CANDIDATES = 5     # live rows shown per new memory
+JUDGE_TIMEOUT = 20.0     # seconds; a slow judge costs a duplicate row, not a stalled learn job
+JUDGE_MIN_OVERLAP = 0.8  # share of a merged text's content words that must appear in the new memory or its targets
+
 # ---- Tainted-chat save_memory ----
 # In a chat that read untrusted text, save_memory skips its card only when at least this share of the memory's
 # content words appear in one message the user typed in this chat. The rest is the third-person rewrite ("User", a date).

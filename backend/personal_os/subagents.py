@@ -749,7 +749,7 @@ class Subagents:
                 return tool_error(got, field="root")
             roots, confine = got
         cfg = ctx.get("settings") or self.settings()
-        model = str(a.get("model") or role.model or ctx.get("model") or cfg.get("defaultModel") or "")
+        model = str(a.get("model") or role.model or str(cfg.get("workerModel") or "").strip() or ctx.get("model") or cfg.get("defaultModel") or "")
         cid = "sa_" + new_id()
         cctx = {**ctx, "depth": depth + 1, "agent_run_id": cid, "modes": modes, "mcp_modes": {n: m for n, m in modes.items() if n in (ctx.get("mcp_schemas") or {})}, "tainted": bool(ctx.get("tainted")),
                 # a worker owns what it starts: its shell and opencode jobs are keyed to its run and die with it, not the reply's

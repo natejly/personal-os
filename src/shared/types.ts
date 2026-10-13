@@ -1474,6 +1474,8 @@ export interface Settings {
   modelHigh?: string
   modelMedium?: string
   modelLow?: string
+  /** Model for workers the chat starts; empty means the chat model. An agent definition's own model wins. */
+  workerModel?: string
   autoLearn: boolean
   /** New uploads and Rebuild index write a model-made context blurb per chunk (one call each). */
   contextualChunks?: boolean

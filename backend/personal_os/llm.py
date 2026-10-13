@@ -346,8 +346,9 @@ RETRY_AFTER_MAX_S = 60.0
 CONNECT_TIMEOUT_S = 10.0
 DEFAULT_IDLE_S = float(LLM_IDLE_SECONDS)
 # How long a stream may wait for response headers. A hosted provider answers with headers at once and thinks afterwards,
-# so a silent header wait is a stuck replica or proxy: retry it long before the between-chunk idle limit. A local server
-# (Ollama) may hold its headers while it loads the model or reads a long prompt, so it keeps the idle limit.
+# so a silent header wait is a stuck replica: retry it long before the between-chunk idle limit. A local server (Ollama)
+# may hold its headers while it loads the model or reads a long prompt, and a LiteLLM proxy may hold them until the
+# upstream's first chunk (minutes for a model that thinks without streaming it), so those keep the idle limit.
 FIRST_BYTE_S = 60.0
 
 _clients: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, tuple[Any, httpx.AsyncClient]]" = weakref.WeakKeyDictionary()
@@ -371,8 +372,8 @@ async def aclose() -> None:
 
 
 def _first_byte_s(settings: dict[str, Any]) -> float | None:
-    """The header-wait limit for a stream, or None to leave it to the idle limit (a server on the user's own machine)."""
-    return None if providers.effective(settings) in ("ollama", "custom") else min(FIRST_BYTE_S, _idle_s(settings))
+    """The header-wait limit for a stream, or None to leave it to the idle limit (a local server or a proxy)."""
+    return None if providers.effective(settings) in ("ollama", "custom", "litellm") else min(FIRST_BYTE_S, _idle_s(settings))
 
 
 def parse_retry_after(value: str | None, now: float | None = None) -> float | None:

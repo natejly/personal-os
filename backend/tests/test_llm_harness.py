@@ -29,6 +29,7 @@ llm = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
 _spec.loader.exec_module(llm)  # type: ignore[union-attr]
 
 S: dict[str, Any] = {"baseUrl": "http://provider.test/v1", "apiKey": "k", "provider": "litellm", "llmRetries": 2}
+FW: dict[str, Any] = {**S, "baseUrl": "https://api.fireworks.ai/inference/v1", "provider": "fireworks"}  # a hosted provider
 SSE = b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
 
 
@@ -83,7 +84,7 @@ def test_silent_header_wait_is_retried_without_affinity(provider: Any, monkeypat
 
     async def go() -> list[dict[str, Any]]:
         llm.session_affinity.set("chat-1")
-        return await _collect()
+        return await _collect(FW)
 
     events = asyncio.run(asyncio.wait_for(go(), 10))
     assert "".join(e["text"] for e in events if e["type"] == "delta") == "hi"
@@ -92,9 +93,10 @@ def test_silent_header_wait_is_retried_without_affinity(provider: Any, monkeypat
     assert "user" not in json.loads(seen[1].content) and "x-session-affinity" not in seen[1].headers  # may land elsewhere
 
 
-def test_local_server_keeps_the_idle_limit_for_headers() -> None:
+def test_local_server_and_proxy_keep_the_idle_limit_for_headers() -> None:
     assert llm._first_byte_s({"provider": "ollama", "baseUrl": "http://localhost:11434/v1"}) is None
-    assert llm._first_byte_s(S) == llm.FIRST_BYTE_S
+    assert llm._first_byte_s(S) is None  # a proxy may hold its headers until the upstream's first chunk
+    assert llm._first_byte_s(FW) == llm.FIRST_BYTE_S
 
 
 def test_complete_read_timeout_is_not_resent(provider: Any) -> None:

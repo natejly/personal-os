@@ -1225,9 +1225,9 @@ class Subagents:
                         mode == "ask" and perm.kind in ("rule", "external_directory")),
                     covered=(pre_mode == "ask" and mode == "on") or bool(perm.rule and mode == "on"),
                     hard_forced=hard_forced, soft_forced=lockable and not hard_forced,
-                    # a sensitive-path read/write, a tainted write or a runaway repeat stays a card (not in allow-all)
+                    # a sensitive-path read/write, a tainted write or a runaway repeat stays a card in auto (allow-all runs it)
                     fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop"),
-                    question=name in permrules.STILL_ASK)
+                    question=name in permrules.STILL_ASK, floor=self.toolbox.floor_card(name, args, ch.ctx))
                 if rt == "run":
                     if mode == "ask":
                         mode, forced = "on", False

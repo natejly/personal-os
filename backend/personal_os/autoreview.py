@@ -42,14 +42,18 @@ def mode_of(cfg: dict[str, Any] | None) -> str:
 
 def route(pmode: str, *, mode: str, danger: str, explicit_on: bool = False, explicit_ask: bool = False,
           covered: bool = False, hard_forced: bool = False, soft_forced: bool = False, fenced: bool = False,
-          question: bool = False) -> str:
+          question: bool = False, floor: bool = False) -> str:
     """run | card | review | review_strict | off for a call whose post-gate mode is `mode` (on|ask|off).
-    The caller has already settled refusals (deny rules, plan blocks, bad arguments)."""
+    The caller has already settled refusals (deny rules, plan blocks, bad arguments).
+    `floor` (Toolbox.floor_card: a mail send, a destructive shell command) is a card in every permission mode; Allow everything
+    does not lift it and the reviewer never sees it. `question` (permrules.STILL_ASK) is the same for the user's own answers."""
     if mode == "off":
         return "off"
+    if floor:
+        return "card"
     if question or pmode == "manual":
         return "card" if mode == "ask" else "run"
-    if pmode == "allow_all":  # no exceptions: fenced, forced and floor cases all run
+    if pmode == "allow_all":  # everything else runs: fenced and forced cards too (only `floor` and `question` above stay)
         return "run"
     if mode == "on":
         return "run" if danger == "safe" or explicit_on or covered else "review"

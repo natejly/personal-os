@@ -668,8 +668,8 @@ def test_child_allow_all_lifts_asks() -> None:
         check(out["state"] == "completed", f"{rules}: the child carried on")
 
 
-def test_child_allow_all_has_no_floor() -> None:
-    """Allow everything has no floor for a child either: a force-push from a worker runs with no card, logged under the child's run with its kind."""
+def test_child_allow_all_keeps_the_destructive_floor() -> None:
+    """Allow everything runs a worker's routine call with no card (logged under the child's run with its kind), but a force-push from a worker is still a forced card."""
     root = tempfile.mkdtemp()
     reset(permissionMode="allow_all", workspaceRoots=[root])
     spec = appmod.toolbox.specs["shell_run"]
@@ -703,12 +703,12 @@ def test_child_allow_all_has_no_floor() -> None:
     finally:
         spec.fn = real
     cards = [d for e, d in fr.events if e == "tool_call" and d.get("needs_approval")]
-    check(hits == ["ls", "git push --force origin main"] and not cards, f"both ran, no card: {hits} {cards}")
+    check(hits == ["ls"] and len(cards) == 1 and cards[0]["id"].endswith(":p2") and cards[0]["forced"], f"ls ran, the force-push was carded and denied: {hits} {cards}")
     with appmod.db.tx() as c:
         rows = [dict(r) for r in c.execute("SELECT agent, run_id, decision FROM approval_log WHERE call_id LIKE ? ORDER BY id",
-                                           (f"%{out['agent_id']}:p%",)).fetchall()]
-    check([r["decision"] for r in rows] == ["auto", "auto"] and all(r["run_id"] == out["agent_id"] and r["agent"] == "subagent" for r in rows),
-          f"both calls are in the approval history under the child's run: {rows}")
+                                           (f"%{out['agent_id']}:p1",)).fetchall()]
+    check([r["decision"] for r in rows] == ["auto"] and all(r["run_id"] == out["agent_id"] and r["agent"] == "subagent" for r in rows),
+          f"the routine call is in the approval history under the child's run: {rows}")
 
 
 def test_child_untrusted_result_is_fenced() -> None:

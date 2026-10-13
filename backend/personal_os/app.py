@@ -2220,14 +2220,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             danger = spec.danger if spec else "external"
             fenced = bool(toolbox.fs_needs_ask(name, args, tool_ctx))
             blog = f"{am['id']}:bridgelog{bridge_n + 1}"
-            if pmode == "allow_all":
+            floor = toolbox.floor_card(name, args, tool_ctx)
+            if pmode == "allow_all" and not floor:
                 if danger != "safe":
                     _log_mode(name, args, blog, "auto", "allow-all", "allowed (allow-all mode)")
                 return True
             if pmode == "auto":
                 locked = bool(spec and (toolbox.ask_locked(spec) or toolbox.forces_ask(name, args, tool_ctx)))
                 hard = forced and (toolbox.tainted_for(name, args, tool_ctx) or toolbox.forces_card(name, args, tool_ctx) or not locked)
-                rt = autoreview.route("auto", mode="ask", danger=danger, hard_forced=hard, soft_forced=locked and not hard, fenced=fenced)
+                rt = autoreview.route("auto", mode="ask", danger=danger, hard_forced=hard, soft_forced=locked and not hard, fenced=fenced,
+                                     floor=floor)
                 if rt in ("review", "review_strict"):
                     rv = await _review_call(name, args, danger, "ask")
                     out = autoreview.apply(rt, rv["verdict"], rv["confidence"], toolbox.tainted_for(name, args, tool_ctx))
@@ -3375,7 +3377,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 review = None
                 is_background = run is not None and run.kind in UNATTENDED_KINDS
                 # Permission mode (autoreview.route). Manual leaves the gate above exactly as it settled; auto sends what is not
-                # known safe to the reviewer; allow_all lifts every card except a credential-store access, a tainted write and a runaway repeat. Refusals, proposals and
+                # known safe to the reviewer; allow_all lifts every card except the floor (a mail send, a destructive shell command) and the user's own questions. Refusals, proposals and
                 # approved plan steps are already settled, so they never get here.
                 if pmode != "manual" and claimed is None and pre is None and not proposing and mode != "off":
                     explicit = explicit_modes.get(c["name"]) if not mcp_is(c["name"]) else ("on" if raw_mode == "on" else None)
@@ -3394,9 +3396,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         covered=desk_cleared or (pre_mode == "ask" and perm.mode == "on") or bool(perm.rule and perm.mode == "on"),
                         # a connector that calls its own tool destructive is reviewed strictly (a confident, untainted allow)
                         hard_forced=hard_forced, soft_forced=(lockable or bool(hints.get("destructive"))) and not hard_forced,
-                        # a sensitive-path read/write, a tainted write or a runaway repeat stays a card (not in allow-all)
+                        # a sensitive-path read/write, a tainted write or a runaway repeat stays a card in auto (allow-all runs it)
                         fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop") or mcp_tainted,
-                        question=c["name"] in permrules.STILL_ASK or c["name"] == PLAN_TOOL)
+                        question=c["name"] in permrules.STILL_ASK or c["name"] == PLAN_TOOL,
+                        floor=toolbox.floor_card(c["name"], args, tool_ctx))
                     if rt == "run":
                         if mode == "ask":
                             mode, forced = "on", False

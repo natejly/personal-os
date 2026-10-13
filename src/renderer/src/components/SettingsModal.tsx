@@ -422,7 +422,7 @@ export default function SettingsModal(): JSX.Element {
                   onChange={(e) => void saveEarly({ allowAllConnections: e.target.checked }).catch((err: Error) => toast(err.message, 'error'))} /><span className="switch" />
               </label>
               <Sec id="safety"><RunSafetySettings draft={draft} patch={patch} /></Sec>
-              <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits. Allow everything never asks, not even before permanent deletes, disk wipes, force-pushes, credential access or sending email; Auto and Manual still do.</p>
+              <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits. Allow everything asks only before permanent deletes, disk wipes, force-pushes and sending email; Auto and Manual ask more, including for credential access.</p>
               {mode === 'auto' && (
                 <details className="modal-free">
                   <summary>Reviewer model: {draft.autoReviewModel ? draft.autoReviewModel : 'automatic'}</summary>

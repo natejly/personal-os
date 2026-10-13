@@ -155,6 +155,9 @@ class ToolSpec:
         self.force_ask: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
         # (args, ctx) -> True when the forced card is HARD: auto mode's reviewer may not lift it (counts as force_ask too)
         self.force_card: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
+        # (args, ctx) -> True when this call is a card in EVERY permission mode, Allow everything included: no mode,
+        # grant, rule or reviewer lifts it (implies force_ask and force_card)
+        self.floor: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
         # (args, ctx) -> True when the run's taint comes only from this call's own subject, so it does not count as tainted here
         self.taint_ok: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
         # () -> False while the thing this tool needs is missing (a binary, the desktop bridge); it is then not offered
@@ -929,12 +932,17 @@ class Toolbox:
     def forces_ask(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> bool:
         """True when this call, with these arguments in this run, may never run without a card (and no standing grant buys it off)."""
         spec = self.specs.get(name)
-        return bool(spec and spec.force_ask and spec.force_ask(args, ctx or {}))
+        return bool(spec and ((spec.force_ask and spec.force_ask(args, ctx or {})) or self.floor_card(name, args, ctx)))
+
+    def floor_card(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> bool:
+        """A card that Allow everything keeps too (a mail send, a destructive shell command): autoreview.route's `floor`."""
+        spec = self.specs.get(name)
+        return bool(spec and spec.floor and spec.floor(args, ctx or {}))
 
     def forces_card(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> bool:
         """A forced ask that auto mode's reviewer may not lift either."""
         spec = self.specs.get(name)
-        return bool(spec and spec.force_card and spec.force_card(args, ctx or {}))
+        return bool(spec and ((spec.force_card and spec.force_card(args, ctx or {})) or self.floor_card(name, args, ctx)))
 
     def tainted_for(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> bool:
         """ctx's taint as it counts for this call: a tool may exempt taint that only its own subject caused."""
@@ -2401,13 +2409,14 @@ def _register_google(self: Toolbox) -> None:
             return _mail_shown(await run(lambda: g.gmail_send(to, subject, body, reply_to_message_id, **outbox_mod.extras(items, cc, bcc))))
         row = await run(self.outbox.queue, to, subject, body, reply_to_message_id, "assistant", ctx.get("conversation_id"), ids, cc, bcc)
         return outbox_mod.queued_result(row)
-    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it. Pass reply_to_message_id to answer an existing message in its thread. Files can be attached (25 MB in total), with optional cc and bcc. Unless Allow everything is on, the user reviews and edits the email on a card first, and only their Send click sends it, so an approved send may differ from what you wrote: the result says what was finally sent, or that it was discarded or saved as a draft. Leave as_draft unset: the user sets it on the card.",
+    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it. Pass reply_to_message_id to answer an existing message in its thread. Files can be attached (25 MB in total), with optional cc and bcc. The user reviews and edits the email on a card first, and only their Send click sends it, so an approved send may differ from what you wrote: the result says what was finally sent, or that it was discarded or saved as a draft. Leave as_draft unset: the user sets it on the card.",
         _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "reply_to_message_id": {"type": "string"},
               "as_draft": {"type": "boolean", "default": False}, "attachments": _ATTACH_PARAM, "cc": _ADDR_PARAM, "bcc": _ADDR_PARAM}, ["to", "subject", "body"]), gmail_send, "google", "external",
         examples=[{"to": "mira@example.com", "subject": "Running late", "body": "I will be 10 minutes late."},
                   {"to": "mira@example.com", "subject": "Invoice 42", "body": "Attached.", "attachments": ["~/Documents/invoice-42.pdf"]}]))
-    # Never sent unasked, in any permission mode: no allow rule, grant, plan step or reviewer stands in for the user's click.
-    self.specs["gmail_send"].force_ask = self.specs["gmail_send"].force_card = lambda args, ctx: True
+    # Never sent unasked, in any permission mode (Allow everything included): no allow rule, grant, plan step or reviewer
+    # stands in for the user's click.
+    self.specs["gmail_send"].floor = lambda args, ctx: True
 
     async def gmail_outbox(ctx: dict[str, Any], action: str = "list", id: str | None = None) -> Any:
         if self.outbox is None:

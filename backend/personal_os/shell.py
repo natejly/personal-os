@@ -35,7 +35,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import duel, egress, mac, osplat, permissions, redact, sandbox
+from . import duel, egress, mac, osplat, permissions, permrules, redact, sandbox
 from .db import new_id
 
 log = logging.getLogger(__name__)
@@ -917,13 +917,18 @@ def register(tb: Any) -> None:
     spec.default = "ask"
     if not sandbox_available():
         spec.description = unsandboxed_description()
-    # Unsandboxed asks (Allow everything lifts it, autoreview.route); so does a reply that read untrusted content while a command could reach out, and no
+    # Unsandboxed asks (Allow everything lifts it, autoreview.route; a destructive command is `floor` below, which it does not); so does a reply that read untrusted content while a command could reach out, and no
     # standing grant, session grant or allow rule buys that card off (it is forced). trustExternalContent lifts only the
     # taint half: an unsandboxed command still asks.
     spec.force_ask = lambda args, ctx: bool(args.get("unsandboxed")) or (
         bool(ctx.get("tainted")) and reaches_out(cfg(ctx))
         and not permissions.get(cfg(ctx), "trustExternalContent"))
     spec.force_card = lambda args, ctx: bool(args.get("unsandboxed"))  # a sandbox escape is a hard card: Auto's reviewer may not lift it
+    # A command that cannot be taken back (permrules.destructive) is a card in every mode, Allow everything included.
+    def _destructive(args: dict[str, Any], ctx: dict[str, Any]) -> bool:
+        roots, cwd = perm_where(tb, ctx)
+        return bool(permrules.destructive(str(args.get("command") or ""), os.path.join(cwd, os.path.expanduser(str(args.get("cwd") or ""))), roots))
+    spec.floor = _destructive
     R("shell_run", spec)
 
     async def shell_poll(ctx: dict[str, Any], job_id: str, wait_s: float = 0) -> Any:

@@ -73,7 +73,7 @@ def test_routing(monkeypatch: Any) -> None:
 def test_usage_estimate_ignores_image_bytes() -> None:
     big = "data:image/jpeg;base64," + "A" * 3_000_000
     msgs = [{"role": "user", "content": [{"type": "text", "text": "hi"}, {"type": "image_url", "image_url": {"url": big}}]}]
-    assert llm._prompt_chars(msgs) < 500
+    assert llm._prompt_chars(msgs) < 500 + llm.IMAGE_PROMPT_CHARS  # a fixed share per picture, not its bytes
     assert llm._prompt_chars([{"role": "user", "content": "plain"}]) == len(json.dumps([{"role": "user", "content": "plain"}]))
 
 

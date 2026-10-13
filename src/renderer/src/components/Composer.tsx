@@ -95,6 +95,14 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const agentRows = useMemo(() => [...agentDefs.builtin, ...agentDefs.custom.filter((d) => d.approved && !d.hidden)], [agentDefs])
   const conversations = useStore((s) => s.conversations)
   const chatRows = useMemo(() => mentionChats(conversations, activeId), [conversations, activeId])
+  // Saved dashboards for the `@` menu, fetched the first time an `@` is typed.
+  const [dashRows, setDashRows] = useState<{ id: string; title: string }[]>([])
+  const dashAsked = useRef(false)
+  useEffect(() => {
+    if (!text.includes('@') || dashAsked.current) return
+    dashAsked.current = true
+    api.savedDashboards.list().then(setDashRows).catch(() => undefined)
+  }, [text])
   const caret = box.current?.querySelector('textarea')?.selectionStart ?? text.length
   // Menus rank against this chat (lib/composerRank.ts), read only while one could open: subscribing would re-render on every streamed token.
   const menuCtx = (): ComposerContext => {
@@ -106,7 +114,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const ctx = slashClosedAt === text ? EMPTY_CONTEXT : menuCtx()
   const slash = slashClosedAt === text ? null
     : slashItems(text, commands, skills, ctx) ?? (onSend ? null : mentionItems(text, caret,
-      rankByContext(agentRows, (a) => overlap(a.description, ctx)), 8, rankChats(chatRows, ctx)))
+      rankByContext(agentRows, (a) => overlap(a.description, ctx)), 8, rankChats(chatRows, ctx), dashRows))
   /** `/schedule` or `/loop` without a time: the inline form (ScheduleForm), seeded with the rest of the line. */
   const [sched, setSched] = useState<{ loop: boolean; task: string } | null>(null)
   const pickSlash = (it: SlashItem | { insert: string }): void => {

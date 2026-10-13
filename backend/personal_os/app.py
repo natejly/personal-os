@@ -55,6 +55,7 @@ from .repos import ALL, Conversations, Documents, Graph, Memories, Projects, is_
 from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .recap import Recaps, generate_recap
 from . import vision
+from .saved_dashboards import FOLDER as DASHBOARD_FOLDER, SavedDashboards, is_dashboard as saved_dashboards_is
 from .docs import ASSET_MIMES, asset_path, AssetError, Docs, clean_typography, save_asset, unified_diff
 from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
@@ -634,6 +635,8 @@ toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=
 chat_files = ChatFiles(db, toolbox.chat_outputs.root if toolbox.chat_outputs is not None else None)
 app.include_router(chat_files_router(chat_files))
 toolbox.chat_files = chat_files
+saved_dashboards = SavedDashboards(docs)
+toolbox.dashboards = saved_dashboards
 if toolbox.chat_outputs is not None:
     toolbox.chat_outputs.on_save = chat_files.record_output
 workspace.on_save = chat_files.record_desk_output  # a desk's files are its chat's artifacts too
@@ -1641,6 +1644,7 @@ Besides markdown, the UI renders these fenced blocks inline:
   - Formulas: `+ - * / % ^`, comparisons, `&& || !`, `cond ? a : b`, `pi`, `e`, and only these functions: abs sqrt cbrt exp log ln log2 log10 sin cos tan asin acos atan sinh cosh tanh sign floor ceil trunc round(x[,digits]) sqr pow atan2 mod logb lerp clamp step min max hypot if(cond,a,b). No assignment, indexing or other names.
   Use it for assumptions worth playing with, ```chart for fixed numbers.
 - ```mermaid: diagrams.
+- Saved dashboards: "open my calorie dashboard" -> dashboard_open (it renders inline); "save this" for a chart or table the user wants to keep -> dashboard_save with bindings (references to a doc or health metric) instead of pasted data.
 - ```html: a self-contained document or fragment (inline CSS, no network or external files), shown as a sandboxed preview with a Code/Preview toggle; inline scripts do not run. ```svg renders as an image.
 Maths: inline `$...$`, display `$$` on its own lines; not `\\(` `\\)` or `\\[` `\\]`.
 The `show` tool opens these (plus markdown and Mac files) in a side panel beside the chat."""
@@ -2548,7 +2552,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             run_notes.append({"role": "system", "content": parked_note})
         if regen_done:
             run_notes.append({"role": "system", "content": resume.build_regen_note(regen_done)})
-        if not internal and "@" in user_text and (mnote := chatlink.mention_note(user_text, chat_links.chats(), conv_id)):
+        if not internal and "@" in user_text and (mnote := chatlink.mention_note(user_text, chat_links.chats(), conv_id, saved_dashboards.list())):
             run_notes.append({"role": "system", "content": mnote})
         if body.resume_of:
             old = run_store.get(body.resume_of) or {}
@@ -3838,6 +3842,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # likewise the side panel's content (the `show` tool): the model keeps only the one-line receipt
                 show = result.pop("show", None) if isinstance(result, dict) else None
                 research = result.pop("research", None) if isinstance(result, dict) else None  # deep_research's trail, UI only
+                dashboard = result.pop("dashboard", None) if isinstance(result, dict) else None  # dashboard_open: the UI renders it inline
                 preview = summarize_result(result)
                 err = result.get("error") if isinstance(result, dict) else None
                 if not err:
@@ -3856,7 +3861,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         yield "taint", {"message_id": am["id"], "source": c["name"]}
                     tool_ctx["taint_sources"].append(c["name"])
                 event = {"id": uid, "name": c["name"], "arguments": args, "result_preview": preview, "duration_ms": ms,
-                         "error": err, "images": images or None, "show": show or None, "research": research or None, **edit_info,
+                         "error": err, "images": images or None, "show": show or None, "research": research or None, "dashboard": dashboard or None, **edit_info,
                          "undo": result.get("undo") if isinstance(result, dict) and isinstance(result.get("undo"), dict) else None,
                          "approval": (("plan" if claimed else decision) if mode == "ask" and not invalid else None),
                          "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None,
@@ -8353,6 +8358,59 @@ class DocMetaPatch(BaseModel):
     scope: str | None = None
     # Per-doc type ({font, size, measure}); {} clears it so the doc follows the global default again.
     typography: dict[str, Any] | None = None
+
+
+class SavedDashboardIn(BaseModel):
+    title: str
+    format: str | None = None
+    mode: str | None = None
+    bindings: list[Any] | None = None
+    views: list[Any] | None = None
+    html: str | None = None
+    project_id: str | None = None
+
+
+class DashboardPinIn(BaseModel):
+    project_id: str | None = None
+
+
+def _dashboard_made(d: dict[str, Any]) -> dict[str, Any]:
+    return {"id": d["id"], "title": d["title"], "project_id": d["project_id"], "folder": DASHBOARD_FOLDER}
+
+
+def _dashboard_doc(id: str) -> dict[str, Any]:
+    d = docs.get(id)
+    if not d or not saved_dashboards_is(d["content"]):
+        raise HTTPException(404, "No such dashboard")
+    return d
+
+
+@app.post("/saved-dashboards")
+def create_saved_dashboard(body: SavedDashboardIn) -> dict[str, Any]:
+    try:
+        return _dashboard_made(saved_dashboards.save(body.title, wsid(body.project_id), body.format, body.mode, body.bindings, body.views, body.html))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/saved-dashboards")
+def list_saved_dashboards(project_id: str | None = "all") -> list[dict[str, Any]]:
+    return saved_dashboards.list(sid(project_id))
+
+
+@app.get("/saved-dashboards/{id}/render")
+def render_saved_dashboard(id: str) -> dict[str, Any]:
+    d = _dashboard_doc(id)
+    try:
+        return saved_dashboards.render(d)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@app.post("/saved-dashboards/{id}/pin")
+def pin_saved_dashboard(id: str, body: DashboardPinIn) -> dict[str, Any]:
+    _dashboard_doc(id)
+    return _dashboard_made(saved_dashboards.pin(id, wsid(body.project_id)))  # type: ignore[arg-type]
 
 
 @app.get("/docs")

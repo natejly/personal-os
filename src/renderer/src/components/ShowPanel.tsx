@@ -8,6 +8,7 @@ import { fileViewer, headerMeta, rawPath } from '../lib/showPanel'
 import { entryOf, type Entry, type Pane, type PanelState } from '../lib/panelPanes'
 import HtmlBlock, { SvgBlock } from './HtmlBlock'
 import FileView, { UploadActions } from './FileView'
+import DashboardView from './DashboardView'
 import ChartBlock from './ChartBlock'
 import InteractiveBlock from './InteractiveBlock'
 import MermaidBlock from './MermaidBlock'
@@ -109,6 +110,7 @@ function ShowBody({ item, tick, toolbar, onPages }: { item: ShowItem; tick: numb
     case 'chart': return <ChartBlock source={src} streaming={false} />
     case 'interactive': return <InteractiveBlock source={src} streaming={false} />
     case 'markdown': return <div className="markdown"><MarkdownPreview source={src} /></div>
+    case 'dashboard': return <DashboardView id={src} />
     case 'file': return <FileView item={item} tick={tick} toolbar={toolbar} onPages={onPages} />
   }
 }

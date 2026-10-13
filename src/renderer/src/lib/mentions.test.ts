@@ -60,3 +60,11 @@ test('mentionChats skips archived, current and job chats', () => {
   const list = [c('a', {}), c('b', { archived_at: 5 }), c('cur', {}), c('j', { settings: { job_id: 'x' } })]
   assert.deepEqual(mentionChats(list, 'cur').map((x) => x.id), ['a'])
 })
+
+test('mentionItems offers saved dashboards under the chat slug rule', () => {
+  const rows = mentionItems('@job', 4, [], 8, [], [{ id: 'd1', title: 'Job Tracker' }])
+  assert.equal(rows?.length, 1)
+  assert.equal(rows?.[0].key, 'dashboard:d1')
+  assert.equal(rows?.[0].label, '@job-tracker')
+  assert.equal(rows?.[0].insert, '@job-tracker ')
+})

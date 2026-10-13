@@ -80,7 +80,9 @@ WORKER_MAX_CONCURRENT = 8          # workers running at once; the rest wait in a
 WORKER_MEMORY_FLOOR = 0.15         # a queued worker is not started while free system memory is below this share
 WORKER_RECHECK_SECONDS = 5.0       # how often a non-empty queue looks again for a free slot or recovered memory
 RUN_HEARTBEAT_SECONDS = 20.0       # a working child's agent_runs.updated_at is bumped at most this often (liveness, never a limit)
-WORKER_STALL_NOTE_SECONDS = 300    # a worker with no model, tool or job output this long says so in its status line (nothing is stopped)
+WORKER_STALL_NOTE_SECONDS = 300    # a worker with no model, tool or job output this long says so in its status line
+WORKER_STALL_NUDGE_SECONDS = 600   # ...and is sent one automatic message asking what it is blocked on (a worker waiting on a job or a session is not idle)
+WORKER_STALL_STOP_SECONDS = 1200  # ...and, still silent, is stopped and the front agent is woken with a stall report (resumable)
 
 # ---- Jobs ----
 JOB_RETRY_BACKOFF_S = 120          # retry backoff base, doubles per attempt

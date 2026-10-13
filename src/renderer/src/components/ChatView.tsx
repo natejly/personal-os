@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { isBranchNote, isClear, sinceClear } from '../lib/workers'
+import { isSideNote, isBranchNote, isClear, sinceClear } from '../lib/workers'
 import BranchNote from '../components/BranchNote'
+import SideNote from '../components/SideNote'
 import { Pencil, Sparkles, ArrowDown, SlidersHorizontal } from '../icons'
 import { useStore, useProject, useChatFace, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
 import MessageView, { PendingUserMessage, Thinking } from './Message'
@@ -187,7 +188,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {msgs.map((m, i) => (
                   <Fragment key={m.id}>
                     {m.created_at > 0 && (i === 0 || dayKey(m.created_at) !== dayKey(msgs[i - 1].created_at)) && <div className="day-divider" role="separator">{dayLabel(m.created_at)}</div>}
-                    {isClear(m) ? <div className="day-divider" role="separator">Chat cleared{i === 0 && hidden > 0 && <> · <button className="ghost-btn" onClick={() => setEarlierFor(convo?.id ?? null)}>Show earlier</button></>}</div> : m.id === duelLive ? null : isBranchNote(m) ? <BranchNote content={m.content} /> : <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} resendable={!isStreamingHere && !isDeskOrJob} showContextChips
+                    {isClear(m) ? <div className="day-divider" role="separator">Chat cleared{i === 0 && hidden > 0 && <> · <button className="ghost-btn" onClick={() => setEarlierFor(convo?.id ?? null)}>Show earlier</button></>}</div> : m.id === duelLive ? null : isSideNote(m) ? <SideNote key={m.id} content={m.content} /> : isBranchNote(m) ? <BranchNote content={m.content} /> : <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} resendable={!isStreamingHere && !isDeskOrJob} showContextChips
                       branchable={m.created_at > 0 && !isDeskOrJob}
                       browserSession={m.id === watchId ? (deskId ? deskBrowserSession(deskId) : chatBrowserSession(m.conversation_id)) : undefined} />}
                   </Fragment>

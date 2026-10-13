@@ -648,6 +648,9 @@ export const api = {
     req<{ compacted: boolean }>(`/conversations/${conversationId}/compact`, { method: 'POST', body: json({ focus: focus ?? null }) }, NO_TIMEOUT),
   /** `/clear`: the marker row the model's replay starts after; the rolling summary is dropped with it. */
   clearContext: (conversationId: string) => req<Message>(`/conversations/${conversationId}/clear`, { method: 'POST' }),
+  /** `/btw`: answered from the chat's context beside any live reply; the stored note row comes back. */
+  sideQuestion: (conversationId: string, question: string) =>
+    req<Message>(`/chats/${conversationId}/side-question`, { method: 'POST', body: json({ question }) }, NO_TIMEOUT),
   activateMessage: (conversationId: string, messageId: string) =>
     req<Conversation>(`/conversations/${conversationId}/messages/${messageId}/activate`, { method: 'POST' }),
   discardSummary: (conversationId: string) => req<{ removed: boolean }>(`/conversations/${conversationId}/summary`, { method: 'DELETE' }),

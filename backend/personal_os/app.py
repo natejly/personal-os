@@ -32,7 +32,7 @@ from pydantic import AfterValidator, BaseModel, Field
 
 from . import auth_breaker, blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
-from . import branch_summary, compaction, followups, otel_export, router, thinking_summary, titles
+from . import branch_summary, compaction, side_question, followups, otel_export, router, thinking_summary, titles
 from . import chatlink, coding_route, duel, fsx, labels, opencode_usage, request_log, toolcore
 from .fsx import sensitive_reason
 from . import context_map
@@ -453,6 +453,25 @@ def clear_context(conv_id: str) -> dict[str, Any]:
     if (desk := desks.by_conversation(conv_id)):
         plans.supersede_desk(desk["id"])  # a desk's approved plan is no longer live; the rows stay as history
     return convos.clear_context(conv_id)
+
+
+class SideQuestionIn(BaseModel):
+    question: str
+
+
+@app.post("/chats/{conv_id}/side-question")
+async def side_question_route(conv_id: str, body: SideQuestionIn) -> dict[str, Any]:
+    """`/btw`: answer from this chat's context beside any live reply, which never sees it. Stored as a hidden-from-the-model note."""
+    q = body.question.strip()
+    if not q:
+        raise HTTPException(400, "Ask a question after /btw")
+    if not convos.get(conv_id, with_messages=False):
+        raise HTTPException(404, "No such conversation")
+    try:
+        a = await side_question.answer(settings(), compactor, convos, run_store, conv_id, q)
+    except llm.LLMError as e:
+        raise HTTPException(502, str(e)) from e
+    return convos.add_message(conv_id, "assistant", json.dumps({"q": q, "a": a or "No answer."}), kind=side_question.KIND)
 
 
 def _int_setting(cfg: dict[str, Any], key: str, default: int) -> int:
@@ -4536,7 +4555,7 @@ def _wake_reports(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for r in rows:
         info, inp = workers_mgr.info(r), r.get("input") or {}
         out.append({"id": r["run_id"], "title": info["title"], "goal": info["goal"], "status": info["status"],
-                    "text": workers_mgr.report_text(r), "tainted": bool(inp.get("tainted")), "attachments": inp.get("attachments") or []})
+                    "text": workers_mgr.report_text(r), "actions": workers_mgr.side_effects(r["run_id"]), "error": info["error"], "tainted": bool(inp.get("tainted")), "attachments": inp.get("attachments") or []})
     return out
 
 

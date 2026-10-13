@@ -73,7 +73,7 @@ TASK_TIERS: dict[str, str] = {
     "chat": "default", "planning": "high", "draft_skill": "high", "draft_agent": "high",
     "auto_route_fast": "medium", "auto_review": "medium", "compaction": "medium", "recap": "medium", "consolidation": "medium",
     "extraction": "low", "auto_learn": "low", "style": "low", "title": "low", "followups": "low", "thinking_summary": "low",
-    "branch_summary": "low", "assist": "low",
+    "branch_summary": "low", "assist": "low", "side_question": "low",
 }
 for _p in PROVIDERS:  # shipped to the Settings pickers as the blank-state placeholder
     _p["tiers"] = TIER_DEFAULTS.get(_p["id"], {})

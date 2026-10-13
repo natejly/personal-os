@@ -45,6 +45,16 @@ export const artifactsQuery = (cursor?: string | null, limit = 50): string =>
 export const artifactShowItem = (f: Pick<ChatFile, 'id' | 'name' | 'size'>): ShowItem =>
   ({ kind: 'file', title: f.name, name: f.name, size: f.size, rawPath: `/chat-files/${f.id}/raw` })
 
+/**
+ * A path a reply named that is not among its own chat's files: work a delegate or another chat saved is filed under
+ * that chat. It opens only when exactly one chat's output has that path, so a name many desks share (PROGRESS.md)
+ * never opens the wrong one.
+ */
+export const soleOutput = (files: ChatFile[], path: string): ChatFile | null => {
+  const hits = files.filter((x) => x.kind === 'output' && !x.missing && x.rel === path)
+  return hits.length === 1 ? hits[0] : null
+}
+
 /** The personal (no-project) chats, or one project's files: its chats', its notes and its uploads. */
 export type FilesScope = 'personal' | { projectId: string }
 

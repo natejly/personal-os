@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 import remarkGfm from 'remark-gfm'
-import remarkFilePaths, { filePathOf, findPaths, isMacPath } from './pathLinks'
+import remarkFilePaths, { filePathOf, findPaths, hrefPath, isMacPath } from './pathLinks'
 
 const paths = (s: string): string[] => findPaths(s).map((h) => h.path)
 
@@ -33,8 +33,32 @@ test('links prose and a whole inline-code path, not code blocks, existing links 
   assert.deepEqual(found, ['outputs/a.csv', 'work/b.md', null, null])
 })
 
+test('hrefPath: the file a reply\'s own markdown link names', () => {
+  assert.equal(hrefPath('outputs/report.md'), 'outputs/report.md')
+  assert.equal(hrefPath('./outputs/my%20report.md#top'), 'outputs/my report.md')
+  assert.equal(hrefPath('/Users/me/a.md?x=1'), '/Users/me/a.md')
+  assert.equal(hrefPath('https://example.com/a.md'), null)
+  assert.equal(hrefPath('mailto:a@b.co'), null)
+  assert.equal(hrefPath('#section.one'), null)
+  assert.equal(hrefPath('outputs/'), null)
+  assert.equal(hrefPath('%E0%A4%A.md'), null)
+  assert.equal(hrefPath(undefined), null)
+})
+
 test('filePathOf and isMacPath', () => {
   assert.equal(filePathOf('https://x.com'), null)
   assert.equal(isMacPath('outputs/a.csv'), false)
   assert.equal(isMacPath('~/a.csv'), true)
+})
+
+test('hrefPath: a reply\'s own markdown link to a file', () => {
+  assert.equal(hrefPath('outputs/report.md'), 'outputs/report.md')
+  assert.equal(hrefPath('./outputs/my%20report.md#top'), 'outputs/my report.md')
+  assert.equal(hrefPath('/Users/me/a.md?x=1'), '/Users/me/a.md')
+  assert.equal(hrefPath('https://example.com/a.md'), null)
+  assert.equal(hrefPath('mailto:a@b.co'), null)
+  assert.equal(hrefPath('#section.one'), null)
+  assert.equal(hrefPath('outputs/'), null)
+  assert.equal(hrefPath('%E0%A4%A.md'), null)
+  assert.equal(hrefPath(undefined), null)
 })

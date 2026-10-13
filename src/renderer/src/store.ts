@@ -1122,6 +1122,8 @@ export const useStore = create<State>((set, get) => {
   /** True once init has loaded the app's data at least once; a recovered backend then needs a refresh, not a re-init. */
   let loadedOnce = false
   let backendSeen: BackendState = 'ready'
+  /** Counts supervisor announcements, so init can tell whether one arrived while it was asking. */
+  let stateEvents = 0
   let watching = false
   let stateWired = false
   // `/events` resume cursor. The topic's seq restarts with the backend process, so a restart zeroes it.
@@ -1133,6 +1135,7 @@ export const useStore = create<State>((set, get) => {
    * data re-fetched. If the first start failed, init never loaded anything, so it runs for real now.
    */
   const onBackendState = (info: BackendInfo): void => {
+    stateEvents++
     const was = backendSeen
     backendSeen = info.state
     set({ backendState: info.state })
@@ -1912,6 +1915,11 @@ export const useStore = create<State>((set, get) => {
         stateWired = true
         window.os.onBackendState(onBackendState)
       }
+      // The window opens while the backend is still starting: stay on the boot screen until the supervisor
+      // announces ready (onBackendState then runs init again) or failed (it shows the error).
+      const seen = stateEvents
+      const info = typeof window.os.backendInfo === 'function' ? await window.os.backendInfo().catch(() => null) : null
+      if (info?.state === 'starting' && seen === stateEvents) { inited = false; backendSeen = 'starting'; return }
       const status = await window.os.backendStatus()
       // A failed start must stay retryable from the error screen's "Try again".
       if (!status.url) { inited = false; return set({ ready: true, backendError: status.error ?? 'Backend not running' }) }

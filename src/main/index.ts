@@ -437,16 +437,18 @@ if (gotLock) app.whenReady().then(async () => {
     if (item) item.checked = on
   })
   createTray(showMain)
+  // Before the backend: the boot screen shows at once instead of a bare Dock icon for the seconds a start takes.
+  // The renderer waits for the supervisor's "ready" (see store.init).
+  createWindow()
   try {
     await startBackend()
   } catch (e) {
     console.error('[main] backend failed to start:', (e as Error).message)
   }
   await startPageBridge() // open_page's offscreen loader; registers itself with the backend
-  // After the backend, so the stored accelerator wins over the default; still before any renderer exists.
+  // After the backend, so the stored accelerator wins over the default.
   const stored = await storedShortcuts()
   registerShortcuts(() => win, stored.gather, stored.capture, stored.ask)
-  createWindow()
   void restorePopouts()
   startUpdater()
   powerMonitor.on('resume', nudgeScheduler)

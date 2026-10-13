@@ -375,5 +375,6 @@ def test_near_duplicate_stays_in_its_own_scope(env) -> None:
     personal = memories.create(None, "User wants answers under 100 words", kind="preference")
     VEC.update({"User wants answers under 100 words": unit(1.0), "Keep answers below 100 words": unit(0.96)})
     asyncio.run(idx.index(CFG))
-    assert asyncio.run(idx.near_duplicate(CFG, pid, "Keep answers below 100 words")) is None  # a project save never rewrites a personal row
+    # A project chat sees the personal twin (so it adds no copy); callers skip on a hit outside their scope, never rewrite it.
+    assert asyncio.run(idx.near_duplicate(CFG, pid, "Keep answers below 100 words"))["project_id"] is None
     assert asyncio.run(idx.near_duplicate(CFG, None, "Keep answers below 100 words"))["id"] == personal["id"]

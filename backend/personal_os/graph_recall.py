@@ -24,7 +24,7 @@ from .embed import Embedder, pack, unpack
 from .memory_limits import (
     GRAPH_CONTEXT_MAX_EDGES, GRAPH_CONTEXT_MAX_SEEDS, GRAPH_MATCH_SIMILARITY, GRAPH_MIN_MENTION_CHARS,
     GRAPH_INDEX_BATCH, GRAPH_NAME_CHARS, GRAPH_NODE_VECTOR_CAP, GRAPH_QUALIFIER_CHARS, GRAPH_RECENCY_HALF_LIFE_DAYS, GRAPH_RELATION_CHARS,
-    GRAPH_RESOLVE_SIMILARITY,
+    GRAPH_RESOLVE_SIMILARITY, SCHEDULE_EVERY,
 )
 from .repos import Graph, _scope_clause
 
@@ -152,6 +152,7 @@ class GraphRecall:
         self.db, self.graph = db, graph
         self.embedder = embedder or Embedder()
         self._tasks: set[asyncio.Task[Any]] = set()
+        self._next_check = 0.0  # monotonic time schedule() may scan for stale nodes again (learn_graph indexes its own)
         with db.tx() as c:
             c.executescript(SCHEMA)
 
@@ -197,7 +198,10 @@ class GraphRecall:
     def schedule(self, settings: dict[str, Any]) -> None:
         """Backfill in the background when something is waiting; never blocks or raises."""
         try:
-            if not self.enabled(settings) or not self._stale(self.embedder.model(settings)):
+            if not self.enabled(settings) or time.monotonic() < self._next_check:
+                return
+            self._next_check = time.monotonic() + SCHEDULE_EVERY
+            if not self._stale(self.embedder.model(settings)):
                 return
             task = asyncio.get_running_loop().create_task(self.index(settings))
         except RuntimeError:

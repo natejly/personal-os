@@ -10,7 +10,8 @@ RANK_DEPTH = 50          # how deep each ranker reads; well past the few lines a
 VECTOR_CAP = 5000        # rows the brute-force cosine ranker scans, newest first (a numpy dot over 5k short rows stays under ~10 ms); older rows past it are not scanned
 QUERY_TIMEOUT = 2.0      # seconds a chat turn waits for the query embedding before going lexical-only
 INDEX_BATCH = 200        # memories embedded per index() call, so a backfill never holds the route for long
-QUERY_CHARS = 2000       # characters of the query that are embedded; the head of a message carries its topic
+QUERY_CHARS = 2000       # characters of the query (and of a memory) that are embedded; the head of a message carries its topic
+SCHEDULE_EVERY = 30.0    # seconds between a turn's full scans for memories or graph nodes still missing a vector
 # RRF weights. A lexical or semantic match is the evidence; graph seeding is weaker (a label hit, not the row's
 # meaning); recency only orders rows that already matched and never brings one in by itself.
 W_BM25 = 1.0

@@ -2095,19 +2095,20 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                 desk_id=desk_id or None, agent=run.kind if run else None, decision=decision, scope=scope,
                                 note=note, review=review)
 
-        async def _bridge_approve(name: str, args: dict[str, Any], forced: bool) -> bool:
+        async def _bridge_approve(name: str, args: dict[str, Any], forced: bool, wait: bool = False) -> bool:
             """A card for one call a run_python script made through the tool bridge. The script waits; the reply does not
-            end. One-shot only: an 'always' answer is treated as 'allow' here, never as a standing grant."""
+            end. One-shot only: an 'always' answer is treated as 'allow' here, never as a standing grant. `wait` marks a
+            card that hands the user something to do (a browser handoff): no permission mode answers it for them."""
             nonlocal bridge_n
             spec = toolbox.specs.get(name)
             danger = spec.danger if spec else "external"
             fenced = bool(toolbox.fs_needs_ask(name, args, tool_ctx))
             blog = f"{am['id']}:bridgelog{bridge_n + 1}"
-            if pmode == "allow_all":
+            if pmode == "allow_all" and not wait:
                 if danger != "safe":
                     _log_mode(name, args, blog, "auto", "allow-all", "allowed (allow-all mode)")
                 return True
-            if pmode == "auto":
+            if pmode == "auto" and not wait:
                 locked = bool(spec and (toolbox.ask_locked(spec) or toolbox.forces_ask(name, args, tool_ctx)))
                 hard = forced and (toolbox.tainted_for(name, args, tool_ctx) or toolbox.forces_card(name, args, tool_ctx) or not locked)
                 rt = autoreview.route("auto", mode="ask", danger=danger, hard_forced=hard, soft_forced=locked and not hard, fenced=fenced)

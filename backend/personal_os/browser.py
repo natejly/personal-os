@@ -152,12 +152,12 @@ def register(tb: Any) -> None:
             return _fail(name, res)
         return shaped(desk_root(ctx), res, None if ctx.get("desk_id") else tb.files_for(ctx))
 
-    async def ask(ctx: dict[str, Any], args: dict[str, Any]) -> bool:
+    async def ask(ctx: dict[str, Any], args: dict[str, Any], wait: bool = False) -> bool:
         approve = ctx.get("approve")
         if approve is None:  # subagents, workflows, tests: nobody to ask
             return False
         try:
-            return bool(await approve("browser", args, True))
+            return bool(await (approve("browser", args, True, wait=True) if wait else approve("browser", args, True)))
         except Exception:  # noqa: BLE001 - an approval that cannot be raised is a no
             return False
 
@@ -416,7 +416,8 @@ def register(tb: Any) -> None:
         shown = await mac.page_bridge.browser("manage", {"session": sess, "action": "show"}, 15)
         if not shown.get("ok"):
             return _fail("browser_handoff", shown)
-        ok = await ask(ctx, {"action": "handoff", "reason": (reason or "the page needs you")[:300], "url": shown.get("url") or ""})
+        ok = await ask(ctx, {"action": "handoff", "reason": (reason or "the page needs you")[:300], "url": shown.get("url") or ""},
+                       wait=True)  # a wait for the user, never auto-approved: the card is the Hand back button
         await mac.page_bridge.browser("manage", {"session": sess, "action": "hide"}, 15)  # whatever the answer, the window goes away
         if not ok:
             return {"handed_back": False, "note": "the user did not take this step; stop this path and desk_ask what they would like instead"}

@@ -97,11 +97,13 @@ def test_bridge_fenced_call_is_approved_too() -> None:
             llm.stream_chat = prev
         ap = CTX["bridge_approve"]
         return {"plain": await ap("t_write", {"x": "a"}, False), "forced": await ap("t_write", {"x": "a"}, True),
-                "ext": await ap("t_ext", {"x": "a"}, False), "fs": await ap("t_fs", {"x": "a"}, False)}
+                "ext": await ap("t_ext", {"x": "a"}, False), "fs": await ap("t_fs", {"x": "a"}, False),
+                "wait": await ap("browser", {"action": "handoff"}, True, wait=True)}
 
     r = asyncio.run(go())
     check(r["plain"] and r["forced"] and r["ext"], "unfenced bridge calls are approved")
     check(r["fs"], "a fenced bridge call is approved too")
+    check(r["wait"] is False, "a handoff wait is never approved by allow-all (no run here, so nobody to card)")
 
 
 def test_job_bridge_card_refused_and_wait_off_the_clock() -> None:

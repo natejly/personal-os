@@ -1124,6 +1124,8 @@ export const useStore = create<State>((set, get) => {
   let stateWired = false
   // `/events` resume cursor. The topic's seq restarts with the backend process, so a restart zeroes it.
   let eventsSince = 0
+  // Proposals with a decision on the wire: a second click (or keypress) before it lands is dropped.
+  const deciding = new Set<string>()
 
   /**
    * The main process supervises the sidecar and announces each state. While it restarts the UI stays up
@@ -1910,6 +1912,9 @@ export const useStore = create<State>((set, get) => {
         window.os.onBackendState(onBackendState)
       }
       const status = await window.os.backendStatus()
+      // The window opens while the backend starts: keep the boot logo, and the 'ready' state runs init again (its
+      // 'starting' broadcast went out before this window listened, so record it here or 'ready' looks like no change).
+      if (status.starting) { inited = false; backendSeen = 'starting'; return }
       // A failed start must stay retryable from the error screen's "Try again".
       if (!status.url) { inited = false; return set({ ready: true, backendError: status.error ?? 'Backend not running' }) }
       setBase(status.url)
@@ -3580,6 +3585,8 @@ export const useStore = create<State>((set, get) => {
       }
     },
     decideProposal: async (id, accept, args) => {
+      if (deciding.has(id)) return null
+      deciding.add(id)
       try {
         if (!accept) {
           await api.proposals.reject(id)
@@ -3594,6 +3601,7 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         return (e as Error).message
       } finally {
+        deciding.delete(id)
         void get().refreshAgentInbox()
       }
     },

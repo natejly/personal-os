@@ -437,16 +437,18 @@ if (gotLock) app.whenReady().then(async () => {
     if (item) item.checked = on
   })
   createTray(showMain)
+  // Before the backend: its import and startup hooks take seconds, and the renderer shows its boot logo until the
+  // 'ready' state (store.init waits on it). Everything below that needs the backend still waits for it.
+  createWindow()
   try {
     await startBackend()
   } catch (e) {
     console.error('[main] backend failed to start:', (e as Error).message)
   }
   await startPageBridge() // open_page's offscreen loader; registers itself with the backend
-  // After the backend, so the stored accelerator wins over the default; still before any renderer exists.
+  // After the backend, so the stored accelerator wins over the default. The renderer only asks for it from Settings.
   const stored = await storedShortcuts()
   registerShortcuts(() => win, stored.gather, stored.capture, stored.ask)
-  createWindow()
   void restorePopouts()
   startUpdater()
   powerMonitor.on('resume', nudgeScheduler)

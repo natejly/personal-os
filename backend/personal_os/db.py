@@ -7,7 +7,7 @@ import os
 import sqlite3
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -516,7 +516,7 @@ class Database:
         self.path = self.data_dir / "personal-os.db"
         self.secrets = SecretStore(self.data_dir)
         existing = self.path.exists() and self.path.stat().st_size > 0
-        with self.connect() as c:
+        with closing(self.connect()) as c, c:  # a Connection's own `with` commits but never closes
             # A database with content gets a snapshot before anything pending touches it (adopting the
             # versioned system on a pre-existing file counts: the baseline re-runs _migrate).
             if existing and migrations.pending(c):
@@ -524,6 +524,9 @@ class Database:
             c.executescript(SCHEMA)
             self._migrate(c)
             migrations.run(c)
+            self.schema_drift = migrations.drift(c)
+        for problem in self.schema_drift:
+            log.error("Schema drift in %s: %s", self.path, problem)
         self._migrate_secrets()
         self._lock_down()
 
@@ -651,6 +654,7 @@ class Database:
         c = sqlite3.connect(self.path, timeout=30, check_same_thread=False)  # default 5 s: a burst of writers (indexing, imports) outlasted it and a save failed with "database is locked"
         c.row_factory = sqlite3.Row
         c.execute("PRAGMA foreign_keys=ON")
+        c.execute("PRAGMA synchronous=NORMAL")  # safe in WAL mode against an app crash; FULL fsyncs every commit
         return c
 
     @contextmanager

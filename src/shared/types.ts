@@ -61,7 +61,8 @@ export interface ContextUsed {
   tools_deferred?: number
   /** The workspace map block of the prompt. Null or absent when it is off. */
   map?: WorkspaceMapUsed | null
-  system_prompt: string
+  /** Context previews only: a saved reply drops it (its Exact request shows the prompt it was sent). */
+  system_prompt?: string
   tokens_estimate: number
 }
 
@@ -1910,6 +1911,8 @@ export interface DataOverview {
   pending_restore: { name: string } | null; schema_version: number; app_version: string
   /** A staged restore that could not be applied at the last start; the live data was left as it was. */
   restore_failed?: { name: string | null; error: string; at: number } | null
+  /** Why the live database's schema does not match this build (a newer or unmerged build migrated it). */
+  schema_drift?: string[]
 }
 /** The sidecar's lifecycle, as the main process supervises it. */
 export type BackendState = 'starting' | 'ready' | 'restarting' | 'failed'
@@ -1930,7 +1933,8 @@ export interface BackendInfo {
 
 export interface GrainApi {
   backendUrl: () => Promise<string>
-  backendStatus: () => Promise<{ running: boolean; url: string; error: string | null }>
+  /** `starting`: the first start is still waiting for /health (the window opens before the backend is up). */
+  backendStatus: () => Promise<{ running: boolean; url: string; error: string | null; starting?: boolean }>
   backendToken: () => Promise<string>
   /** Store an HTML fence's source for the preview scheme; returns the id for `previewUrl`. */
   previewPut: (source: string) => Promise<string>

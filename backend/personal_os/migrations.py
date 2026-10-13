@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import time
 from bisect import bisect_left, bisect_right
 from typing import Callable
 
@@ -663,17 +664,41 @@ def pending(c: sqlite3.Connection) -> list[tuple[int, str, Step]]:
     return [m for m in MIGRATIONS if m[0] > have]
 
 
+LEDGER = "CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at REAL NOT NULL)"
+
+
+def drift(c: sqlite3.Connection) -> list[str]:
+    """Why this database does not match this build, if it does not: a build with more (or unmerged) steps ran on it,
+    or a recorded step's name differs from this build's step of that number (numbers collided across branches).
+    user_version alone cannot tell: pending() would skip a different step of an already-used number forever."""
+    out: list[str] = []
+    have = current(c)
+    if have > latest():
+        out.append(f"database schema is version {have}, this build knows up to {latest()}")
+    if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'").fetchone():
+        names = {v: n for v, n, _ in MIGRATIONS}
+        for v, n in c.execute("SELECT version, name FROM schema_migrations ORDER BY version").fetchall():
+            if names.get(v) != n:
+                out.append(f"step {v} was applied as {n!r}, this build's step {v} is {names.get(v)!r}")
+    return out
+
+
 def run(c: sqlite3.Connection) -> list[int]:
-    """Apply every pending step in order; returns the versions applied."""
+    """Apply every pending step in order, recording each (version, name) in schema_migrations; returns the versions
+    applied. Databases from before the ledger have no rows for their earlier steps: drift() checks what is recorded."""
     done: list[int] = []
-    for version, _name, step in pending(c):
+    c.execute(LEDGER)
+    for version, name, step in pending(c):
         try:
             c.execute("BEGIN")
             step(c)
             c.execute(f"PRAGMA user_version = {int(version)}")  # PRAGMA takes no bound parameters
+            c.execute("INSERT OR REPLACE INTO schema_migrations VALUES(?,?,?)", (version, name, time.time()))
             c.commit()
-        except Exception:
+        except Exception as e:
             c.rollback()
-            raise
+            # One line, last on stderr: it is what the app's "backend failed to start" screen shows.
+            raise RuntimeError(f"Database migration {version} ({name}) failed and was rolled back, so your data is unchanged "
+                               f"(the premigrate copy in the backups folder holds it too): {type(e).__name__}: {e}") from e
         done.append(version)
     return done

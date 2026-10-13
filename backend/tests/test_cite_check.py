@@ -94,3 +94,9 @@ def test_event_copy_is_trimmed_and_live_ledger_is_not() -> None:
     slim = cite_slim(used)
     assert len(slim["chunks"][0]["text"]) == 400 and len(used["chunks"][0]["text"]) == 900
     assert cite_slim(None) is None
+
+
+def test_saved_copy_drops_the_assembled_prompt() -> None:
+    used = {"chunks": [], "system_prompt": "S" * 9000, "stable_system": "S", "volatile_blocks": ["V"], "tokens_estimate": 3}
+    assert cite_slim(used) == {"chunks": [], "tokens_estimate": 3}
+    assert used["system_prompt"], "the live dict keeps the prompt for later rounds"

@@ -30,7 +30,7 @@ def test_dead_tables_and_settings_go_and_the_rest_stays() -> None:
     c = _db({"maxRunCost": "1.0", "pimProvider": '"google"', "sandboxNetwork": '"off"', "meetings": "{}", "theme": '"dark"',
              "hiddenViews": '["dashboards","mail"]'})
     assert V in migrations.run(c)
-    tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")} - {"coding_session_events", "sqlite_sequence"}  # made by later migrations
+    tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")} - {"coding_session_events", "sqlite_sequence", "schema_migrations"}  # made by later migrations and the runner
     assert tables == {"settings", "legacy_cards"}  # shadow tables of turns_fts went with it
     keys = {r[0] for r in c.execute("SELECT key FROM settings")}
     assert keys == {"meetings", "theme", "hiddenViews"}

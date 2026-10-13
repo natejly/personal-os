@@ -10,6 +10,7 @@ import type { BackendInfo } from '@shared/types'
 let push: ((i: BackendInfo) => void) | null = null
 let statusCalls = 0
 let statusUrl: string | null = null
+let starting = false
 const info = (state: BackendInfo['state'], error: string | null = null): BackendInfo =>
   ({ state, url: '', error, restarts: [], logDir: '', appVersion: '0', electron: '0' })
 
@@ -22,12 +23,25 @@ const info = (state: BackendInfo['state'], error: string | null = null): Backend
     },
     backendStatus: async () => {
       statusCalls++
-      return { url: statusUrl, error: statusUrl ? null : 'Backend not running' }
+      return { url: statusUrl, error: statusUrl ? null : 'Backend not running', starting }
     },
     backendToken: async () => '',
     restartBackend: async () => info('ready')
   }
 }
+
+test('while the first start is still running, init keeps the boot logo instead of the error screen', async () => {
+  starting = true
+  await useStore.getState().init()
+  assert.equal(useStore.getState().ready, false)
+  assert.equal(useStore.getState().backendError, null)
+  starting = false
+  statusUrl = null
+  push!(info('ready'))
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(statusCalls, 2, "'ready' after a start the window waited out runs init again")
+  statusCalls = 0
+})
 
 test('restarting is only a state; failed shows the error; ready re-runs init when nothing had loaded', async () => {
   await useStore.getState().init()

@@ -94,7 +94,7 @@ def _args(args: Any, n: int = 300) -> str:
 
 def build_resume_note(run: dict[str, Any], events: list[tuple[int, str, Any]], executed: list[dict[str, Any]],
                       approvals: list[dict[str, Any]], max_text: int = 1500, max_preview: int = 300,
-                      reason: str | None = None) -> str:
+                      reason: str | None = None, plan_steps: list[dict[str, Any]] | None = None) -> str:
     mid = run.get("message_id")
     text = "".join((d.get("text") or "") for _, e, d in events
                    if e == "delta" and isinstance(d, dict) and d.get("id") == mid).strip()
@@ -117,6 +117,10 @@ def build_resume_note(run: dict[str, Any], events: list[tuple[int, str, Any]], e
     if waiting:
         parts.append("Calls that were waiting on the user's approval; they were NOT run; ask again if still needed:\n"
                      + "\n".join(f"- {a.get('tool')} {_args(a.get('args'))}" for a in waiting))
+    if plan_steps:
+        parts.append("Steps of the plan the user already approved that it had not reached; they need no new approval "
+                     "when called with exactly these arguments:\n"
+                     + "\n".join(f"- {s.get('tool')} {_args(s.get('arguments'))}" for s in plan_steps))
     if not parts:
         parts.append("It had not done anything yet.")
     tag = reason or reason_tag(run) or "interrupted"

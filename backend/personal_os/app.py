@@ -2360,7 +2360,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             old_events = run_store.events(body.resume_of)
             run_notes.append({"role": "system", "content": resume.build_resume_note(
                 old, old_events, run_store.executed(body.resume_of), run_store.approvals(None, run_id=body.resume_of),
-                reason=resume.reason_tag(old, _run_message(old)))})
+                reason=resume.reason_tag(old, _run_message(old)),
+                plan_steps=[s for p in plans.for_run(body.resume_of) if p["status"] == "approved" for s in p["steps"] if s["status"] == "approved"])})
             # Taint is only ever added to: a resume cannot launder what the dead run read.
             for src in resume.taint_from_tape(old_events):
                 tool_ctx["tainted"] = True
@@ -3032,7 +3033,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # external/schedules taint lock when that taint is one the plan card already showed.
                     if (not forced or taint_only) and (mode == "ask" or (active_plan is not None and mode == "on")):
                         claimed = plans.claim(run.run_id if run else None, c["name"], args, uid,
-                                              desk_id=run.desk_id if run else None)
+                                              desk_id=run.desk_id if run else None, inherit=body.resume_of)
                         # Progress, for a supervisor deciding whether another turn is worth it: a
                         # turn that consumed no approved step did not advance the plan.
                         if claimed is not None and run is not None:

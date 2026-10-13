@@ -363,6 +363,21 @@ def test_a_claim_is_atomic_so_two_calls_cannot_share_one_approval() -> None:
     assert again["status"] == "approved" and again["steps"][0]["status"] == "consumed"
 
 
+def test_a_resumed_run_claims_the_steps_its_predecessor_had_not_reached() -> None:
+    cid = j("POST", "/conversations", {})["id"]
+    appmod.run_store.create("plan-dead-run", cid)
+    one, two = {"title": "first"}, {"title": "second"}
+    plans.open("plan-dead:call", {"title": "t", "steps": [{"tool": "todo_add", "arguments": a, "why": ""} for a in (one, two)]},
+               run_id="plan-dead-run", conversation_id=cid)
+    plans.decide("plan-dead:call", "allow")
+    assert plans.claim("plan-dead-run", "todo_add", one, "c1")
+    assert plans.claim("plan-resumed-run", "todo_add", two, "c2") is None, "a fresh run does not inherit by itself"
+    assert plans.claim("plan-resumed-run", "todo_add", two, "c2", inherit="plan-dead-run"), "Resume carries the plan on"
+    from personal_os import resume as resume_mod
+    note = resume_mod.build_resume_note({"run_id": "r"}, [], [], [], plan_steps=[{"tool": "todo_add", "arguments": two}])
+    assert "already approved" in note and "second" in note
+
+
 def test_a_pending_plan_authorises_nothing() -> None:
     cid = j("POST", "/conversations", {})["id"]
     appmod.run_store.create("plan-pending-run", cid)

@@ -119,6 +119,8 @@ function IndexStatusLine(): JSX.Element | null {
   )
 }
 
+const STRIP_QUERY = '(max-width: 720px)'
+
 export default function SettingsModal(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const models = useStore((s) => s.models)
@@ -319,11 +321,20 @@ export default function SettingsModal(): JSX.Element {
   }
 
   // Vertical tablist: arrows move and select, Home/End jump to the ends.
+  // Matches the styles.css breakpoint where the rail becomes a horizontal strip.
+  const [strip, setStrip] = useState(() => window.matchMedia(STRIP_QUERY).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(STRIP_QUERY)
+    const on = (): void => setStrip(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>): void => {
     if ((e.target as HTMLElement).tagName === 'INPUT') return
     const i = TABS.findIndex((t) => t.id === tab)
-    const next = e.key === 'ArrowDown' ? (i + 1) % TABS.length
-      : e.key === 'ArrowUp' ? (i - 1 + TABS.length) % TABS.length
+    // Up/Down on the side rail, Left/Right once a narrow window turns it into a strip; both work either way.
+    const next = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? (i + 1) % TABS.length
+      : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? (i - 1 + TABS.length) % TABS.length
         : e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : -1
     if (next < 0) return
     e.preventDefault()
@@ -362,7 +373,7 @@ export default function SettingsModal(): JSX.Element {
                 )) : <p className="muted small">No settings match.</p>}
               </div>
             ) : (
-              <nav className="settings-tabs" role="tablist" aria-orientation="vertical" aria-label="Settings sections" onKeyDown={onTabKey}>
+              <nav className="settings-tabs" role="tablist" aria-orientation={strip ? 'horizontal' : 'vertical'} aria-label="Settings sections" onKeyDown={onTabKey}>
                 {TABS.map(({ id, label, icon: Icon }) => {
                   const hint = hintOf(id)
                   return (
@@ -416,12 +427,12 @@ export default function SettingsModal(): JSX.Element {
 
             {tab === 'permissions' && <section className="permissions-tab">
               <h3>Permissions</h3>
-              <p className="muted">How Grain handles actions that could change something: sending, deleting, running, scheduling.</p>
+              <p className="muted">How Grain handles actions that could change something: sending, deleting, running, scheduling. The mode and Allow all apply as soon as you pick them; the rest wait for Save.</p>
               <Sec id="mode"><PermissionModeCards mode={mode} onPick={(m) => saveEarly({ permissionMode: m })} /></Sec>
               <label className={`toggle-row plain all-connections ${draft.allowAllConnections ? 'danger' : ''}`}>
                 <span className="toggle-text">
                   <b>{draft.allowAllConnections && <ShieldAlert size={13} aria-hidden />} Allow all domains and MCP servers</b>
-                  <small>Lifts the host allow-lists for fetching, browsing and shell network, and lets every connector tool run without a per-tool approval. Grain&apos;s own data, app, credential stores and the untrusted-content checks stay protected.</small>
+                  <small>Lifts the host allow-lists for fetching, browsing and shell network, and lets every connector tool run without a per-tool approval. Grain&apos;s own data, app, credential stores and the untrusted-content checks stay protected. Applies at once: Cancel does not undo it.</small>
                 </span>
                 <input type="checkbox" aria-label="Allow all domains and MCP servers" checked={!!draft.allowAllConnections}
                   onChange={(e) => void saveEarly({ allowAllConnections: e.target.checked }).catch((err: Error) => toast(err.message, 'error'))} /><span className="switch" />

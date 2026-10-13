@@ -235,15 +235,21 @@ def scrubbed_env(tmp: str) -> dict[str, str]:
 
 
 def truncate(text: str) -> tuple[str, bool]:
-    """Keep the tail (that is where a failure is) within TRUNC_LINES lines and TRUNC_BYTES bytes."""
+    """Within TRUNC_LINES lines and TRUNC_BYTES bytes: the first third and the last two thirds (a failure and the exit
+    land at the end, the command's own banner at the start), with a marker where the middle was dropped."""
+    def mark(n: int, unit: str) -> str:
+        return f"[... {n} {unit} omitted from the middle; the full output is stored, page it with read_tool_result(result_id) ...]"
     lines = text.split("\n")
     cut = False
     if len(lines) > TRUNC_LINES:
-        lines, cut = lines[-TRUNC_LINES:], True
+        h = TRUNC_LINES // 3
+        lines, cut = lines[:h] + [mark(len(lines) - TRUNC_LINES, "lines")] + lines[-(TRUNC_LINES - h):], True
     out = "\n".join(lines)
     raw = out.encode("utf-8", "replace")
     if len(raw) > TRUNC_BYTES:
-        out, cut = raw[-TRUNC_BYTES:].decode("utf-8", "ignore"), True
+        h = TRUNC_BYTES // 3
+        m = mark(len(raw) - TRUNC_BYTES, "bytes").encode()
+        out, cut = (raw[:h] + b"\n" + m + b"\n" + raw[-(TRUNC_BYTES - h - len(m) - 2):]).decode("utf-8", "ignore"), True
     return out, cut
 
 
@@ -263,7 +269,7 @@ def unsandboxed_description() -> str:
     return ("Run a shell command (cd persists, environment variables do not) on this computer. There is no OS sandbox for the shell here: a command runs unsandboxed, with "
             "the user's own permissions (it can read and write their files and use the network), and only after the user approves "
             "that one command. Pass unsandboxed=true on every call; without it nothing runs. Output is stdout and stderr together, "
-            "cut to the last 2000 lines / 50 KB; the rest is behind result_id. Default timeout 120s (max 600s); then the command "
+            "cut to 2000 lines / 50 KB (head and tail); the rest is behind result_id. Default timeout 120s (max 600s); then the command "
             "keeps running as a background job (on_timeout=background, the default; poll it with shell_poll) or, with "
             "on_timeout=kill, the whole process group is killed. For anything long-running pass background=true, then shell_poll "
             "and shell_kill with the job_id. Outside a desk, background jobs are stopped when the reply ends and a timeout always kills.")
@@ -719,7 +725,7 @@ def register(tb: Any) -> None:
         modes = ctx.get("modes")
         can_spawn = "agent_spawn" in tb.specs and (modes is None or modes.get("agent_spawn", "off") != "off")
         extra = ", or agent_spawn a researcher to read it" if can_spawn else ""
-        return ("Output was cut to the last 2000 lines / 50 KB. Page through all of it with read_tool_result"
+        return ("Output was cut to 2000 lines / 50 KB (head and tail, the middle dropped). Page through all of it with read_tool_result"
                 f"(result_id, offset), search the files it wrote with fs_grep{extra}.")
 
     async def shell_run(ctx: dict[str, Any], command: str, cwd: str | None = None, timeout_s: int | None = None,
@@ -890,7 +896,7 @@ def register(tb: Any) -> None:
                     "open only if the user enabled it, otherwise limited to package registries and the user's allowed domains "
                     "through a proxy (anything else is blocked), or off. macOS-protected folders (Desktop, Documents, Downloads...) need "
                     "Full Disk Access in System Settings. cwd is any folder on this Mac; by default it is where the last command in this "
-                    "conversation ended (cd persists, environment variables do not), else the desk workspace in a desk, else the home folder. Output is stdout and stderr together, cut to the last 2000 lines / 50 KB; the rest is "
+                    "conversation ended (cd persists, environment variables do not), else the desk workspace in a desk, else the home folder. Output is stdout and stderr together, cut to 2000 lines / 50 KB (head and tail); the rest is "
                     "behind result_id. Default timeout 120s (max 600s); then the command keeps running as a background job "
                     "(on_timeout=background, the default; poll it with shell_poll) or, with on_timeout=kill, the whole process "
                     "group is killed. For anything long-running pass background=true, then shell_poll and shell_kill with the job_id. "

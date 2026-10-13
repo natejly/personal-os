@@ -66,7 +66,7 @@ class Concurrency(CodingTestCase):
     async def test_send_refuses_at_the_limit_and_relaunches_nothing(self) -> None:
         done = await self.started()
         self.cs._apply(done, status="done", session_id=SID)
-        live = await self.started()  # a second, live session on its own job id (the fake always prints deadbeef)
+        live = await self.started(new_worktree=True)  # a second, live session on its own job id (the fake always prints deadbeef)
         self.cs._apply(live, external_id="cafebabe")
         self.job_files("cafebabe", "working")
         self.job_files("deadbeef", "done")
@@ -86,7 +86,7 @@ class Concurrency(CodingTestCase):
     async def test_below_the_limit_starts(self) -> None:
         self.cs.settings = lambda: {"codingSessionMaxConcurrent": 2}
         await self.started()
-        row = await self.started()
+        row = await self.started(new_worktree=True)
         self.assertIn(row["status"], ca.LIVE)
 
 

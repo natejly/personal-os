@@ -4,10 +4,12 @@ Three drivers behind one row (`coding_sessions`, migration 11):
 
 - claude: `claude --bg` starts a background session that outlives this app. It runs OUTSIDE the OS sandbox with the
   user's own account and tools, and prompts for permission inside its own session: a prompt shows as state "blocked",
-  which becomes `needs_you` here, and the user answers it with `claude attach <id>`. Progress is read from the plain
+  which becomes `needs_you` here. A chat reply to it (`send`) stops the session and resumes it under the same id with the
+  reply as the next message, in its worktree; that never grants the pending permission (the user approves it in the
+  session itself, `claude attach <id>`, or restarts with a permission_mode). Progress is read from the plain
   files the CLI keeps under ~/.claude/jobs/<id>/ (state.json, timeline.jsonl), never by following the session's
-  output. Those files are untrusted text. A finished session stays open in the daemon, so a follow-up runs in a copy
-  with a new id that the row then follows; a stopped one is woken under the same id. The session's `--permission-mode`
+  output. Those files are untrusted text. A follow-up to a done, failed or stopped session stops it first when it is
+  still open in the daemon, so the resume wakes the same id; if the CLI starts a copy anyway, the row follows the copy. The session's `--permission-mode`
   follows Grain's own mode (Auto -> auto, Allow all -> bypassPermissions, Manual -> no flag, so it prompts and shows
   needs_you) unless the caller names a permission_mode (acceptEdits, auto, dontAsk or bypassPermissions) for that one
   session. Only an explicit bypassPermissions under Auto or Manual forces a card the reviewer cannot lift. Every start
@@ -25,7 +27,9 @@ Three drivers behind one row (`coding_sessions`, migration 11):
   (`--session`). pi exits 0 even when its model call failed, so a final error in its event stream marks the row failed.
 
 On a repo's main checkout every agent gets its own worktree unless the caller passes new_worktree=false, so neither
-edits a checkout the user or another agent is working in by default.
+edits a checkout the user or another agent is working in by default. One live session per worktree: start and send
+refuse while another session is starting, working or needs_you there. Every tool takes the Grain id, the harness's
+short `external_id` or the Claude Code `session_id` (`CodingSessions.get`).
 
 A session belongs to the run that started it (`run_id`: the calling subagent or worker, else the chat or desk reply).
 When that run is stopped, not when it finishes normally, its live sessions are stopped too (stop_owned, called from
@@ -68,7 +72,8 @@ SETTLED = ("done", "failed", "stopped", "needs_you", "blocked")  # a session in 
 ATTENTION = {"starting": "working", "working": "working", "needs_you": "needs_you", "blocked": "blocked"}
 LOG_TAIL = 4000
 READ_CAP = 256 * 1024
-START_TIMEOUT, GIT_TIMEOUT, RESUME_GRACE = 180.0, 60.0, 15.0
+START_TIMEOUT, GIT_TIMEOUT, RESUME_GRACE, STOP_WAIT = 180.0, 60.0, 15.0, 5.0
+PERMISSION_RE = re.compile(r"permission|approve|allow|(?-i:\b[A-Z][A-Za-z]+\()", re.I)  # a waiting text that looks like a tool-permission prompt
 STAT_CAP, DIFF_CAP = 8_000, 60_000
 CLAUDE_BINS = ("~/.local/bin", "/opt/homebrew/bin", "/usr/local/bin")
 CLAUDE_HINT = "Claude Code is not installed on this Mac (no `claude` in ~/.local/bin, /opt/homebrew/bin or /usr/local/bin)."
@@ -84,7 +89,9 @@ Runner = Callable[..., Awaitable[tuple[bool, str]]]
 
 
 class CodingError(ValueError):
-    pass
+    def __init__(self, msg: str, alt: str | None = None):
+        super().__init__(msg)
+        self.alt = alt   # what the caller can do instead, for the tool error's try_instead
 
 
 def cli_permission_mode(grain_mode: str, explicit: str | None) -> str | None:
@@ -96,7 +103,7 @@ def own_session_taint(sid: str, sources: Any) -> bool:
     """True when the run's taint came only from this coding session's own labels (so a follow-up to it is not untrusted-driven)."""
     srcs = [str(x) for x in sources or []]
     return bool(srcs) and all(
-        x in (f"coding_session:{k}:{sid}" for k in ("start", "send", "stop", "status", "diff"))
+        x in (f"coding_session:{k}:{sid}" for k in ("start", "send", "stop", "status", "summary", "diff"))
         or (x[:20] in ("coding_session:list:", "coding_session:wait:") and all(i == sid for i in x[20:].split(",") if i))
         for x in srcs)
 
@@ -326,6 +333,22 @@ def summary(row: dict[str, Any], tail: int | None = 1500) -> dict[str, Any]:
     return out
 
 
+def brief(row: dict[str, Any], now: float | None = None) -> dict[str, Any]:
+    """The cheap view: identity, status, when it last moved and (waiting) what it waits on or (else) its detail and last log line."""
+    t = row["updated_at"]
+    out = {k: row.get(k) for k in ("id", "agent", "name", "status")}
+    out.update(attention=ATTENTION.get(row["status"], "idle"), branch=row.get("branch"), worktree=row["worktree"], repo_path=row["repo_path"],
+              external_id=row.get("external_id"), session_id=row.get("session_id"),
+              last_activity=time.strftime("%-I:%M %p", time.localtime(t)), idle_s=max(0, int((now or time.time()) - t)))
+    if row["status"] == "needs_you":
+        text = row.get("detail") or ""
+        out["waiting_on"] = {"kind": "permission" if PERMISSION_RE.search(text) else "question", "text": text}
+    else:
+        out["detail"] = row.get("detail")
+        out["last_log"] = next((ln.strip()[:300] for ln in reversed((row.get("log_tail") or "").splitlines()) if ln.strip()), "")
+    return out
+
+
 class CodingSessions:
     def __init__(self, db: Any, jobs: shell.ShellJobs, run: Runner, publish: Callable[[str, Any], None],
                  settings: Callable[[], dict[str, Any]], tb: Any = None, claude_home: Path | None = None):
@@ -359,8 +382,11 @@ class CodingSessions:
 
     # ---- rows ----
     def get(self, sid: str) -> dict[str, Any] | None:
+        """A row by Grain id, else by the harness's own id (`external_id`, the Claude Code short id) or `session_id` (its UUID)."""
+        sid = str(sid or "")
         with self.db.tx() as c:
-            r = c.execute("SELECT * FROM coding_sessions WHERE id = ?", (sid,)).fetchone()
+            r = c.execute("SELECT * FROM coding_sessions WHERE id = ?1 OR external_id = ?1 OR session_id = ?1 "
+                          "ORDER BY id = ?1 DESC, created_at DESC, rowid DESC LIMIT 1", (sid,)).fetchone()
         return dict(r) if r else None
 
     def list(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -374,13 +400,25 @@ class CodingSessions:
         except (TypeError, ValueError):
             return CODING_SESSION_MAX_CONCURRENT
 
-    def _check_capacity(self) -> None:
-        limit = self._max_concurrent()
+    def _live(self) -> list[dict[str, Any]]:
         with self.db.tx() as c:
             rows = [dict(r) for r in c.execute(f"SELECT * FROM coding_sessions WHERE status IN ({','.join('?' * len(LIVE))})", LIVE)]
-        n = sum(1 for r in rows if self.refresh(r)["status"] in LIVE)  # a session that ended unseen must not hold a slot
-        if n >= limit:
-            raise CodingError(f"{n} coding sessions are already running (codingSessionMaxConcurrent); wait for one to finish or stop one.")
+        return [r for r in map(self.refresh, rows) if r["status"] in LIVE]  # a session that ended unseen must not hold a slot
+
+    def _check_capacity(self) -> None:
+        n = len(self._live())
+        if n >= self._max_concurrent():
+            raise CodingError(f"{n} coding sessions are already running (codingSessionMaxConcurrent); wait for one to finish or stop one.",
+                              "coding_session_wait for one, or coding_session_stop one, then try again")
+
+    def _check_free(self, worktree: str, own: str | None = None) -> None:
+        """One live session per worktree: refuse when a session other than `own` is starting, working or needs_you there."""
+        here = os.path.realpath(worktree)
+        for r in self._live():
+            if r["id"] != own and os.path.realpath(r["worktree"]) == here:
+                raise CodingError(f"{worktree} is in use by session {r['id']} ('{r['name']}', {r['agent']}, {r['status'].replace('_', ' ')}).",
+                                  "wait for it (coding_session_wait), answer it (coding_session_send if it needs_you), stop it "
+                                  "(coding_session_stop), or start in a new worktree (new_worktree=true)")
 
     def _known(self, sid: str) -> dict[str, Any]:
         row = self.get(str(sid))
@@ -481,10 +519,9 @@ class CodingSessions:
     async def wait(self, ids: list[str], mode: str = "all", timeout_s: float = 120) -> dict[str, Any]:
         """Block (asynchronously) until the sessions have settled (all of them, or any one) or the timeout passes."""
         ids = [str(i) for i in ids][:20]
-        for i in ids:
-            self._known(i)
         if not ids:
             raise CodingError("ids is empty.")
+        ids = [self._known(i)["id"] for i in ids]  # Grain ids: the settle and wake bookkeeping is keyed by them
         try:
             deadline = time.monotonic() + max(1.0, min(float(timeout_s or 120), 600.0))
         except (TypeError, ValueError):
@@ -659,6 +696,8 @@ class CodingSessions:
             found = await asyncio.to_thread(opencode.repo_of, repo)
             new_worktree = bool(found and found[1])
         self._check_capacity()
+        if not new_worktree:
+            self._check_free(str(repo))
         name = " ".join(str(name or prompt).split())[:60].lstrip("- ") or "coding session"
         sid, wt, want = new_id(), repo, branch
         branch = None
@@ -777,30 +816,66 @@ class CodingSessions:
                               max_background=self._max_concurrent())
         row["external_id"] = job.id
 
+    async def _quiesce(self, row: dict[str, Any], exe: str) -> None:
+        """Stop a live Claude Code session and wait (bounded) until its state.json no longer reads blocked or working, so the
+        resume wakes this id instead of starting a copy. Stopping cancels whatever it was waiting on; nothing is granted."""
+        self.stopping.add(row["id"])
+        try:
+            await self._stop(row, "stopped to take the user's reply")
+        except CodingError as e:
+            raise CodingError(f"Could not stop the waiting session to deliver the reply: {e}",
+                              f"open it with `claude attach {row['external_id']}` and answer there, or coding_session_stop it and send again") from e
+        finally:
+            self.stopping.discard(row["id"])
+        end = time.monotonic() + STOP_WAIT
+        while True:
+            mapped = map_claude(read_claude(self.claude_home, row["external_id"])[0] or {})
+            if mapped is None or mapped[0] not in ("needs_you", "working"):
+                return
+            if time.monotonic() >= end:
+                raise CodingError("The session did not stop in time, so the reply was not delivered.",
+                                  f"open it with `claude attach {row['external_id']}` and answer there, or try coding_session_send again")
+            await asyncio.sleep(0.25)
+
     async def send(self, sid: str, message: str, ctx: dict[str, Any] | None = None) -> dict[str, Any]:
         ctx = ctx if ctx is not None else {}
         row = self._known(sid)
         message = self._text(message, "message")
         if not os.path.isdir(row["worktree"]):
-            raise CodingError(f"{row['worktree']} no longer exists.")
+            raise CodingError(f"{row['worktree']} no longer exists, so the session cannot continue there.", "start a new session")
         self.refresh(row)
-        shell.taint(ctx, f"coding_session:send:{sid}")
+        shell.taint(ctx, f"coding_session:send:{row['id']}")
+        note = None
         if row["agent"] == "claude":
-            if row["status"] not in ("done", "stopped", "failed"):  # a failed run (an API error) resumes on its session id
-                hint = " It is waiting for the user: `claude attach <id>` answers it." if row["status"] == "needs_you" else ""
-                raise CodingError(f"This session is {row['status'].replace('_', ' ')}; wait for it to finish or stop it first.{hint}")
-            if not row.get("session_id"):
-                raise CodingError("This session's id is not known yet, so it cannot be resumed.")
-            self._check_capacity()
+            if row["status"] not in ("done", "failed", "stopped", "needs_you"):
+                raise CodingError(f"This session is {row['status'].replace('_', ' ')}; it cannot take a message now.",
+                                  "coding_session_wait until it settles, or coding_session_stop it, then send")
+            self._check_free(row["worktree"], row["id"])
+            if not (row.get("session_id") and ID_RE.fullmatch(row.get("external_id") or "")):
+                raise CodingError("This session's Claude Code id is not known, so it cannot be resumed.",
+                                  "start a new session with the context in the prompt" + (f", or open it with `claude attach {row['external_id']}`" if row.get("external_id") else ""))
             exe = claude_binary()
             if not exe:
-                raise CodingError(CLAUDE_HINT)
+                raise CodingError(CLAUDE_HINT, "install Claude Code, or start the task with another harness")
+            waiting = row["status"] == "needs_you"
+            if waiting:  # it holds a slot itself: count the slots once it is stopped
+                perm = bool(PERMISSION_RE.search(row.get("detail") or ""))
+                self._check_capacity()
+                await self._quiesce(row, exe)
+            else:
+                self._check_capacity()
+            if row["status"] == "done":  # still open in the daemon: resuming it would start a copy, so close it first
+                await self.run([exe, "stop", row["external_id"]], row["worktree"], GIT_TIMEOUT, await asyncio.to_thread(claude_env))
             ok, out = await self.run(resume_argv(exe, row["session_id"], message, own_worktree(row), row["permission_mode"], self._lifted(row, ctx)), row["worktree"], START_TIMEOUT,
                                      await asyncio.to_thread(claude_env))
             if not ok:
-                raise CodingError(f"claude did not resume: {out.strip()[-300:]}")
+                if waiting:  # the quiesce already stopped it: say so instead of leaving a stale question
+                    self._apply(row, detail="reply not delivered: claude did not resume; the session is stopped")
+                raise CodingError(f"claude did not resume: {out.strip()[-300:]}",
+                                  f"the session is now stopped: coding_session_send can retry, or `claude attach {row['external_id']}` opens it" if waiting
+                                  else f"open it with `claude attach {row['external_id']}`, or start a new session")
             new = parse_job_id(out)
-            detail = "follow-up sent"
+            detail = "reply sent" if waiting else "follow-up sent"
             if new and new != row["external_id"]:  # the CLI started a copy instead of continuing this one
                 row["external_id"], row["session_id"] = new, None
                 detail = f"the original session was still open, so Claude Code continued in a copy ({new}); this session now follows the copy"
@@ -809,14 +884,22 @@ class CodingSessions:
                 if isinstance(sess, str) and UUID_RE.fullmatch(sess):
                     row["session_id"] = sess
             self.resumed[row["id"]] = time.monotonic()
+            if waiting and perm:
+                note = ("The reply was delivered as a message. The pending permission was NOT granted: a chat reply cannot approve a "
+                        "Claude Code permission prompt. If the agent still needs it, it will ask again and the user approves it in the "
+                        f"session itself (`claude attach {row['external_id']}`), or restart the session with a permission_mode the user chooses.")
         else:
+            name = AGENT_NAMES[row["agent"]]
             job = self.jobs.jobs.get(row.get("external_id") or "")
             if (job is not None and job.status in ("running", "orphaned")) or row["status"] in LIVE:
-                raise CodingError(f"{AGENT_NAMES[row['agent']]} is still working on this session; wait for it to finish or stop it first.")
+                raise CodingError(f"{name} is still working on this session; it cannot take a message now.",
+                                  "coding_session_wait until it finishes, or coding_session_stop it, then send")
             if row["status"] == "blocked":  # the job record was lost; the process may still run on the same state folder
-                raise CodingError(f"{AGENT_NAMES[row['agent']]} may still be running on this session (its job record was lost); Stop it first, then send the follow-up.")
+                raise CodingError(f"{name} may still be running on this session (its job record was lost); Stop it first, then send the follow-up.",
+                                  "coding_session_stop it, then send")
             if row["agent"] == "pi" and not row.get("session_id"):
-                raise CodingError("pi's session id was not seen yet, so it cannot be reopened for a follow-up.")
+                raise CodingError("pi's session id was not seen yet, so it cannot be reopened for a follow-up.", "start a new session")
+            self._check_free(row["worktree"], row["id"])
             self._check_capacity()
             try:
                 if row["agent"] == "pi":
@@ -824,10 +907,11 @@ class CodingSessions:
                 else:
                     await self._launch_opencode(row, ctx, message, True)
             except shell.ShellError as e:
-                raise CodingError(shell._scrub(str(e))) from e
+                raise CodingError(shell._scrub(str(e)), "start a new session") from e
             detail = "follow-up sent"
         self.event(row["id"], "user", message)
-        return self._apply(row, status="working", detail=detail, log_tail="", ended_at=None)
+        out = self._apply(row, status="working", detail=detail, log_tail="", ended_at=None)
+        return {**out, "note": note} if note else out
 
     async def stop(self, sid: str, reason: str = "stopped by the user") -> dict[str, Any]:
         row = self._known(sid)
@@ -961,7 +1045,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
 
     def view(sid: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         row = sessions.get(str(sid or ""))
-        return (sessions.refresh(row), None) if row else (None, tool_error(f"No coding session '{sid}'.", field="id"))
+        return (sessions.refresh(row), None) if row else (None, tool_error(f"No coding session '{sid}'.", field="id", alternative="coding_session_list shows the ids"))
 
     async def coding_session_start(ctx: dict[str, Any], repo_path: str, prompt: str, agent: str | None = None,
                                    new_worktree: bool | None = None, branch: str | None = None, model: str | None = None,
@@ -979,7 +1063,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
             return tool_error(row.get("detail") or "The session did not start.",
                               alternative="fix the cause named above, or run the task another way")
         note = ("Started. It works in the background; coding_session_status(id) reads progress. "
-                + ("If it needs a permission answer its status becomes needs_you and the user runs `claude attach <external_id>`."
+                + ("If it needs a permission answer its status becomes needs_you; coding_session_send answers a question, but a permission is approved by the user in the session (`claude attach <external_id>`)."
                    if agent == "claude" else f"{AGENT_NAMES[agent]} runs until it finishes or coding_session_stop; send a follow-up to continue."))
         return {**summary(row), "note": note}
 
@@ -991,7 +1075,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
                     "the agent its own branch and git worktree under <repo>/.claude/worktrees so the repo's checkout stays "
                     "untouched (on a repo's main checkout every agent gets one unless new_worktree=false). Give a complete, self-contained task: it does not see this conversation. Claude Code runs OUTSIDE "
                     "the OS sandbox with the user's own account and tools, and asks for permission inside its own session "
-                    "(status needs_you; the user answers with `claude attach <id>`); in every mode it is refused Grain's own data folder and app "
+                    "(status needs_you; coding_session_send answers a question, but only the user approves a permission, with `claude attach <id>`); in every mode it is refused Grain's own data folder and app "
                     "and asks before credential stores, deletes, force-pushes and sending mail. OpenCode and pi run inside the OS sandbox (Grain's own data folder and app, credential stores and the "
                     "files that run code later are off limits); pi has no permission prompts of its own, so the sandbox is all that limits it. permission_mode ('acceptEdits', 'auto', 'dontAsk' or 'bypassPermissions', "
                     "Claude Code only) overrides the mode this session runs in (default follows Grain's permission mode); only 'bypassPermissions' "
@@ -1043,6 +1127,13 @@ def register(tb: Any, sessions: CodingSessions) -> None:
             out["events"] = recent_events(sessions.db, row["id"], want)
         return out
 
+    async def coding_session_summary(ctx: dict[str, Any], id: str) -> Any:
+        row, err = view(id)
+        if err:
+            return err
+        shell.taint(ctx, f"coding_session:summary:{row['id']}")  # detail and the waiting text were written by a coding agent
+        return brief(row)
+
     async def coding_session_wait(ctx: dict[str, Any], ids: list[str], mode: str = "all", timeout_s: int = 120) -> Any:
         try:
             out = await sessions.wait(list(ids or []), "any" if mode == "any" else "all", timeout_s)
@@ -1055,9 +1146,12 @@ def register(tb: Any, sessions: CodingSessions) -> None:
         if ctx.get("proposal_only"):
             return unattended("coding_session_send")
         try:
-            return summary(await sessions.send(str(id), message, ctx))
-        except (CodingError, shell.ShellError) as e:
-            return tool_error(shell._scrub(str(e)))
+            row = await sessions.send(str(id), message, ctx)
+        except CodingError as e:
+            return tool_error(shell._scrub(str(e)), alternative=e.alt)
+        except shell.ShellError as e:
+            return tool_error(shell._scrub(str(e)), alternative="start a new session")
+        return {**summary(row), "note": row["note"]} if row.get("note") else summary(row)
 
     async def coding_session_stop(ctx: dict[str, Any], id: str) -> Any:
         if ctx.get("proposal_only"):
@@ -1074,15 +1168,15 @@ def register(tb: Any, sessions: CodingSessions) -> None:
             out = await sessions.diff(str(id), bool(full))
         except (CodingError, shell.ShellError) as e:
             return tool_error(shell._scrub(str(e)))
-        shell.taint(ctx, f"coding_session:diff:{str(id)}")  # agent-written content
+        shell.taint(ctx, f"coding_session:diff:{sessions.get(str(id))['id']}")  # agent-written content
         return out
 
     sid = {"id": {"type": "string"}}
     for name, desc, params, fn, danger in (
         ("coding_session_list", "List coding sessions (newest first) with their status, plus `harnesses`: each supported coding agent with "
-         "installed and default flags. needs_you means the session is waiting for the user to answer a permission prompt in its own window.", _obj({}, []), coding_session_list, "safe"),
+         "installed and default flags. needs_you means the session waits for an answer (a question or a permission prompt).", _obj({}, []), coding_session_list, "safe"),
         ("coding_session_status", "One non-blocking look at a coding session: status, current step and the end of its log (refreshed first). "
-         "Use it to inspect; to wait for a session to settle use coding_session_wait. events=N adds the last N structured "
+         "Use it to inspect (coding_session_summary is the cheaper look); to wait for a session to settle use coding_session_wait. events=N adds the last N structured "
          "events (tool calls, messages) when recorded.",
          _obj({**sid, "lines": {"type": "integer", "default": 30, "description": "Log lines to return (1-200)"},
                "events": {"type": "integer", "default": 0, "description": "Also return the last N structured events (0 = none, max 100)"}}, ["id"]), coding_session_status, "safe"),
@@ -1091,10 +1185,16 @@ def register(tb: Any, sessions: CodingSessions) -> None:
          "call it again to keep waiting. Prefer this to repeated coding_session_status calls.",
          _obj({"ids": {"type": "array", "items": {"type": "string"}}, "mode": {"type": "string", "enum": ["all", "any"], "default": "all"},
                "timeout_s": {"type": "integer", "default": 120}}, ["ids"]), coding_session_wait, "safe"),
-        ("coding_session_send", "Send a follow-up message to a coding session that has finished, failed or been stopped (to fix, extend or answer something; "
-         "it keeps its worktree and context; do not start a new session for it). A session "
-         "that is still working or waiting for the user cannot take one: wait, or stop it first. A finished Claude Code session "
-         "may continue as a copy with a new external_id. Asks the user in Manual mode, and whenever the run read other untrusted content.",
+        ("coding_session_summary", "Cheap look at one session: status, branch, worktree, ids, last activity (time and idle seconds) and, when "
+         "it needs_you, what it waits on (waiting_on: kind permission|question, text), else its detail and last log line. No log tail.",
+         _obj(sid, ["id"]), coding_session_summary, "safe"),
+        ("coding_session_send", "Send a message to a coding session: a follow-up to one that is done, failed or stopped (to fix or extend; it keeps "
+         "its worktree and context, so do not start a new session for it), or the answer to a Claude Code session that needs_you "
+         "(Claude Code only: OpenCode and pi run in the sandbox with no prompts and never wait for one; for Claude Code the session is stopped "
+         "and resumed under the same id). A reply NEVER approves a pending permission prompt: the result's note says so, and the user approves it "
+         "in the session (`claude attach <id>`). A working session cannot take one: wait or stop it first. Takes the Grain id, external_id or session_id. "
+         "Refused while another session is live in the same worktree. A resumed Claude Code session may continue as a copy with a new external_id. "
+         "Asks the user in Manual mode, and whenever the run read other untrusted content.",
          _obj({**sid, "message": {"type": "string"}}, ["id", "message"]), coding_session_send, "external"),
         ("coding_session_stop", "Stop a running coding session. It keeps its files and can be continued with "
          "coding_session_send. Never removes a session.", _obj(sid, ["id"]), coding_session_stop, "executes"),
@@ -1107,6 +1207,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
         if name == "coding_session_send":
             s.default = "ask"
             s.taint_ok = lambda args, ctx: (not ctx.get("taint_unsourced")
-                                            and own_session_taint(str(args.get("id") or ""), ctx.get("taint_sources")))
+                                            and (r := sessions.get(str(args.get("id") or ""))) is not None
+                                            and own_session_taint(r["id"], ctx.get("taint_sources")))
             s.force_ask = lambda args, ctx, ok=s.taint_ok: bool(ctx.get("tainted")) and not ok(args, ctx)
         tb.specs[name] = s

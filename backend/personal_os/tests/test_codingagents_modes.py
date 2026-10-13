@@ -43,7 +43,7 @@ class Start(CodingTestCase):
         for mode, want in (("auto", "auto"), ("manual", None), ("allow_all", "bypassPermissions")):
             self.fake.calls.clear()
             self.cs.settings = lambda m=mode: {"permissionMode": m}
-            row = await self.started()
+            row = await self.started(new_worktree=True)
             argv = self.argv()
             self.assertEqual(row["permission_mode"], want, mode)
             self.assertEqual(argv[argv.index("--permission-mode") + 1] if want else None, want, mode)
@@ -51,9 +51,9 @@ class Start(CodingTestCase):
 
     async def test_ctx_override_and_explicit_win(self) -> None:
         self.cs.settings = lambda: {"permissionMode": "manual"}
-        row = await self.started(ctx={"permission_mode": "allow_all"})
+        row = await self.started(new_worktree=True, ctx={"permission_mode": "allow_all"})
         self.assertEqual(row["permission_mode"], "bypassPermissions")
-        row = await self.started(permission_mode="dontAsk", ctx={"permission_mode": "allow_all"})
+        row = await self.started(new_worktree=True, permission_mode="dontAsk", ctx={"permission_mode": "allow_all"})
         self.assertEqual(row["permission_mode"], "dontAsk")
 
     async def test_opencode_never_maps(self) -> None:
@@ -84,13 +84,15 @@ class Gate(CodingTestCase):
         self.assertTrue(self.box.forces_ask("coding_session_start", {}, ctx))
         self.assertFalse(self.box.forces_ask("coding_session_start", {}, {}))
 
-    def test_send_exempts_only_its_own_session(self) -> None:
-        a = {"id": "a1", "message": "go"}
-        own = {"tainted": True, "taint_sources": ["coding_session:status:a1", "coding_session:diff:a1"]}
+    async def test_send_exempts_only_its_own_session(self) -> None:
+        rid = (await self.started())["id"]
+        a = {"id": rid, "message": "go"}
+        own = {"tainted": True, "taint_sources": [f"coding_session:status:{rid}", f"coding_session:diff:{rid}"]}
         self.assertFalse(self.box.tainted_for("coding_session_send", a, own))
         self.assertFalse(self.box.forces_ask("coding_session_send", a, own))
         self.assertTrue(self.box.tainted_for("coding_session_send", {"id": "b2"}, own))
-        mixed = {"tainted": True, "taint_sources": ["coding_session:status:a1", "fetch_url"]}
+        self.assertFalse(self.box.tainted_for("coding_session_send", {"id": "deadbeef"}, own))  # by external id
+        mixed = {"tainted": True, "taint_sources": [f"coding_session:status:{rid}", "fetch_url"]}
         self.assertTrue(self.box.tainted_for("coding_session_send", a, mixed))
         self.assertTrue(self.box.forces_ask("coding_session_send", a, mixed))
         self.assertFalse(self.box.tainted_for("coding_session_send", a, {}))

@@ -6,7 +6,7 @@ Grain does not edit code in a git repository itself. It hands the change to an e
 
 | id | Harness | Notes |
 | --- | --- | --- |
-| `claude` | Claude Code | Runs outside the OS sandbox with the user's own account; asks for permission inside its own session (status `needs_you`, the user answers with `claude attach <id>`). |
+| `claude` | Claude Code | Runs outside the OS sandbox with the user's own account; asks inside its own session (status `needs_you`): a question can be answered with `coding_session_send`, a permission only by the user with `claude attach <id>`. |
 | `opencode` | OpenCode | Runs inside the OS sandbox with every permission allowed. |
 | `pi` | pi | Runs inside the OS sandbox; has no prompts of its own, so the sandbox is the only limit. |
 
@@ -29,17 +29,23 @@ Settings, Advanced, Coding sessions, "Coding agent" (key `codingAgent`): `any` (
 | `coding_session_list` | Recent sessions plus `harnesses: [{id, name, installed, default}]`. |
 | `coding_session_wait` | Block until sessions finish, fail, stop or need the user (`mode` all or any, `timeout_s`). Prefer it over polling. |
 | `coding_session_status` | One non-blocking look: status, current step, log tail. `events=N` adds the last N structured events. |
-| `coding_session_send` | Follow-up to a session that is done, failed or stopped. Not accepted while it is working. |
+| `coding_session_summary` | Cheap look: status, ids, last activity, and when `needs_you` what it waits on (`waiting_on`: permission or question). No log tail. |
+| `coding_session_send` | Follow-up to a session that is done, failed or stopped (same id, same worktree and context), or the answer to a Claude Code session that is `needs_you` (it is stopped and resumed). Never approves a permission prompt. OpenCode and pi never wait for an answer. Not accepted while working. |
 | `coding_session_stop` | Stop a running session. Files are kept; it can be continued with send. |
 | `coding_session_diff` | What the session changed: status, stat, new files, commits; `full=true` adds the patch. |
 
+Every tool takes the Grain id, the harness's `external_id` or its `session_id`. A failed delivery returns why and what to do.
+
 ## Worktrees
+
+One live session per worktree: `coding_session_start` with `new_worktree=false` and `coding_session_send` are refused while another session is starting, working or `needs_you` there. The error names it; wait for it, answer it, stop it, or use `new_worktree=true`.
 
 On a repo's main checkout every session gets its own branch and git worktree under `<repo>/.claude/worktrees` unless `new_worktree=false`. The checkout stays untouched and the branch can be reviewed and pushed on its own.
 
 ## Permissions
 
 - Starting and following up ask the user in Manual mode, and whenever the run read untrusted content. An unattended background run can only propose them.
+- A chat reply to a waiting Claude Code session is a message, not an approval: the pending permission is not granted. The user approves it in the session (`claude attach <id>`) or restarts it with a `permission_mode`.
 - `permission_mode` (Claude Code only) overrides the session's mode; `bypassPermissions` under Auto or Manual always asks.
 - With "Route coding to a coding agent" on (key `codingRoute`), Grain's own file writers and file-changing shell commands are refused inside a git work tree and the agent is told to start a session instead.
 

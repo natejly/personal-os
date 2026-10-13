@@ -149,7 +149,7 @@ export default function SettingsModal(): JSX.Element {
   /** Go to a search hit: its tab, any collapsed group around it opened, then scrolled to once it has rendered. */
   const goTo = (h: { tab: Tab; sec: string }): void => {
     setTab(h.tab)
-    if (h.tab === 'advanced' || h.sec === 'search') setOpenGroups((g) => new Set(g).add(h.sec))
+    setOpenGroups((g) => new Set(g).add(h.sec)) // a no-op for a section that is not a collapsed group
     setJump(h.sec)
     setQ('')
   }

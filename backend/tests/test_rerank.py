@@ -58,6 +58,17 @@ check(len(calls) == n_calls, "a blank resolved model skips the document rerank")
 run(retriever.search(None, "gadget", {**blank, "provider": "fireworks"}, limit=4))
 check(len(calls) == n_calls + 1, "blank model on a provider with a default still reranks")
 
+
+async def stall(s: Any, q: str, fused: list, by_key: dict) -> list:
+    await asyncio.sleep(5)
+    return list(reversed(fused))
+
+
+retriever.rerank_fn = stall
+got = [h["chunk_id"] for h in run(retriever.search(None, "gadget", on, limit=4, budget=0.05))]
+check(got == full[:4], "a rerank past the budget keeps the fused order instead of stalling the turn")
+retriever.rerank_fn = reverse
+
 # The real function over a stubbed HTTP layer and completion.
 import httpx  # noqa: E402
 

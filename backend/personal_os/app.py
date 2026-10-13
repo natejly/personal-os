@@ -1928,13 +1928,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         last_u = max((i for i, m in enumerate(prior) if m["role"] == "user"), default=len(prior))
         prior = prior[:last_u]
     rq = str((body.wake or {}).get("title") or "background work") if is_wake else retrieval_query(prior, user_text)
-    doc_hits = await _doc_hits(conv["project_id"], rq, cfg, conv["settings"])
     win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))  # every context block is a share of it
+    # One query embedding for all three, then the three lookups side by side: they all sit before the first token.
     qvec = await _query_vec(rq, cfg, conv["settings"])
+    doc_hits, memory_hits, graph_hits = await asyncio.gather(
+        _doc_hits(conv["project_id"], rq, cfg, conv["settings"], qvec),
+        _memory_hits(conv["project_id"], rq, cfg, conv["settings"], qvec),
+        _graph_hits(conv["project_id"], rq, cfg, conv["settings"], qvec))
     system, used = build_context(
         memories=memories, graph=graph, documents=documents, doc_hits=doc_hits,
-        memory_hits=await _memory_hits(conv["project_id"], rq, cfg, conv["settings"], qvec),
-        graph_hits=await _graph_hits(conv["project_id"], rq, cfg, conv["settings"], qvec),
+        memory_hits=memory_hits, graph_hits=graph_hits,
         project=project, project_id=conv["project_id"], query=user_text, retrieval_text=rq,
         settings=cfg, conv_settings=conv["settings"],
         global_system_prompt="\n\n".join(p for p in (_persona_text(persona), cfg["systemPrompt"]) if p),
@@ -6327,13 +6330,13 @@ class ContextPreviewIn(BaseModel):
     conv_settings: dict[str, Any] = {}
 
 
-async def _doc_hits(project_id: str | None, query: str, cfg: dict[str, Any], conv_settings: dict[str, Any]) -> list[dict[str, Any]] | None:
+async def _doc_hits(project_id: str | None, query: str, cfg: dict[str, Any], conv_settings: dict[str, Any], qvec: Any = None) -> list[dict[str, Any]] | None:
     """Pre-computed excerpts for build_context (which is sync). None = let it fall back to BM25."""
     if not conv_settings.get("useDocuments", True):
         return None
     try:
         srcs = ("files", "docs") if cfg.get("useDocsInContext", True) else ("files",)
-        return await retriever.search(project_id, query, cfg, sources=srcs)
+        return await retriever.search(project_id, query, cfg, sources=srcs, query_vec=qvec, budget=memory_limits.QUERY_TIMEOUT)
     except Exception:  # noqa: BLE001 - retrieval must never break a reply
         log.exception("retrieval failed; falling back to keyword search")
         return None
@@ -6343,8 +6346,8 @@ _UNSET: Any = object()  # "compute the query vector yourself"
 
 
 async def _query_vec(query: str, cfg: dict[str, Any], conv_settings: dict[str, Any]) -> Any:
-    """The turn's query embedding, computed once for memory and graph retrieval. None when neither is on or embeddings are off."""
-    if not (conv_settings.get("useMemory", True) or conv_settings.get("useGraph", True)):
+    """The turn's query embedding, computed once for document, memory and graph retrieval. None when none is on or embeddings are off."""
+    if not any(conv_settings.get(k, True) for k in ("useDocuments", "useMemory", "useGraph")):
         return None
     return await memory_index.query_vec(cfg, query)
 
@@ -6388,7 +6391,7 @@ async def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
     qvec = await _query_vec(body.query, cfg, conv_settings)
     _, used = build_context(
         memories=memories, graph=graph, documents=documents, project=project,
-        doc_hits=await _doc_hits(sid(body.project_id), body.query, cfg, conv_settings), project_id=sid(body.project_id),
+        doc_hits=await _doc_hits(sid(body.project_id), body.query, cfg, conv_settings, qvec), project_id=sid(body.project_id),
         memory_hits=await _memory_hits(sid(body.project_id), body.query, cfg, conv_settings, qvec),
         graph_hits=await _graph_hits(sid(body.project_id), body.query, cfg, conv_settings, qvec),
         query=body.query, settings=cfg, conv_settings=conv_settings,

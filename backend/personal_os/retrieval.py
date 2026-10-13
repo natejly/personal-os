@@ -277,9 +277,11 @@ class Retriever:
         return out
 
     async def search(self, project_id: str | None, query: str, settings: dict[str, Any], limit: int = 6,
-                     sources: tuple[str, ...] = ("files",)) -> list[dict[str, Any]]:
+                     sources: tuple[str, ...] = ("files",), query_vec: Any = None, budget: float | None = None) -> list[dict[str, Any]]:
         """Top `limit` chunks across the requested stores ('files', 'docs'), each tagged `source` ('file'|'doc')
-        and `sources` (which rankers found it: 'bm25', 'vector')."""
+        and `sources` (which rankers found it: 'bm25', 'vector'). `query_vec` is the query's embedding when the caller
+        already has one. `budget` bounds the embed and the rerank in seconds each (a chat turn waits on them before its
+        first token); past it the search goes keyword-only or keeps the fused order."""
         stores = [s for s in ALL_SOURCES if s in sources and (s == "files" or self.docs is not None)]
         cand = max(limit, int(settings.get("retrievalCandidates") or 20))
         by_key: dict[str, dict[str, Any]] = {}
@@ -295,7 +297,14 @@ class Retriever:
             bm25_lists.append(keys)
         hybrid = (settings.get("retrievalMode", "hybrid") == "hybrid" and self.embedder.available(settings)
                   and bool(query.strip()) and self._has_vectors(stores, self.embedder.model(settings)))
-        qv = await self.embedder.embed(settings, [query[:2000]]) if hybrid else None  # a long paste would 400 the embed route
+        qv: Any = None
+        if hybrid and query_vec is not None:
+            qv = [query_vec]
+        elif hybrid:
+            try:  # a long paste would 400 the embed route
+                qv = await asyncio.wait_for(self.embedder.embed(settings, [query[:2000]]), budget)
+            except asyncio.TimeoutError:
+                qv = None
         vec_lists: list[list[str]] = []
         sims: dict[str, float] = {}
         if qv:
@@ -316,7 +325,10 @@ class Retriever:
             fused = rrf(bm25_lists, [1.0] * len(bm25_lists), k=RRF_K) if len(bm25_lists) > 1 else \
                 [(k, -float(by_key[k].get("score") or 0.0)) for k in (bm25_lists[0] if bm25_lists else [])]
         if settings.get("retrievalRerank") and providers.rerank_model(settings) and len(fused) > 1:
-            fused = await (self.rerank_fn or rerank)(settings, query, fused, by_key)
+            try:
+                fused = await asyncio.wait_for((self.rerank_fn or rerank)(settings, query, fused, by_key), budget)
+            except asyncio.TimeoutError:
+                pass  # the fused order stands
         floor = float(settings.get("retrievalMinSimilarity") or 0.0)
         cap = int(settings.get("retrievalPerDocCap") or 0)
         per_doc: dict[tuple[str, str], int] = {}

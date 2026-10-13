@@ -87,7 +87,7 @@ def _portal():  # type: ignore[no-untyped-def]
 def test_stream_retrieves_with_history_and_regenerate_counts_once(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
 
-    async def spy(project_id: Any, query: str, cfg: Any, conv_settings: Any) -> Any:
+    async def spy(project_id: Any, query: str, cfg: Any, conv_settings: Any, qvec: Any = None) -> Any:
         seen.append(query)
         return None
 

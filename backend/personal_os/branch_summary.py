@@ -57,11 +57,13 @@ async def add(convos: Any, cfg: dict[str, Any], src_id: str, upto_mid: str, new_
         ids = [m["id"] for m in (src or {}).get("messages", [])]
         if upto_mid not in ids:
             return
-        rows = src["messages"][ids.index(upto_mid) + 1:]
+        at = ids.index(upto_mid)
+        rows = src["messages"][at + 1:]
         if not rows:
             return
         summary = await summarise(cfg, src["model"], rows)
         if summary:
-            convos.add_message(new_id, "system", note(summary), kind=KIND)
+            # Right after the fork point (the copied rows keep their times), not after what the user typed meanwhile.
+            convos.add_message(new_id, "system", note(summary), kind=KIND, created_at=src["messages"][at]["created_at"] + 0.001)
     except Exception:  # noqa: BLE001
         log.warning("branch summary skipped", exc_info=True)

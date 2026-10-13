@@ -5,6 +5,7 @@ Built on the test_runs harness (TestClient + a scripted llm.stream_chat).
 """
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_runs as T  # noqa: E402  (sets the data dir and scripts llm.stream_chat)
 
 from personal_os import app as app_mod  # noqa: E402
-from personal_os import llm  # noqa: E402
+from personal_os import branch_summary, llm  # noqa: E402
 
 client, j, check, drain = T.client, T.j, T.check, T.drain
 
@@ -149,6 +150,11 @@ def test_branch_summary_note() -> None:
         check(not any(m["kind"] for m in msgs(f2["id"])) and len(asked) == n, "forking at the last message adds no note")
         f3 = client.post(f"/conversations/{cid}/fork", json={"message_id": ms[1]["id"], "summarize": False}).json()
         check(len(asked) == n and not any(m["kind"] for m in msgs(f3["id"])), "summarize=false skips it")
+        # The user types in the fork before the summary arrives: the note still lands at the fork point.
+        app_mod.convos.add_message(f3["id"], "user", "typed right away")
+        asyncio.run(branch_summary.add(app_mod.convos, app_mod.settings(), cid, ms[1]["id"], f3["id"]))
+        order = [m["content"][:16] for m in app_mod.convos.history(f3["id"])]
+        check(order[-1] == "typed right away" and order[-2].startswith("Before this fork"), f"note before the new turn, got {order}")
 
         async def boom(*a: Any, **k: Any) -> str:
             raise llm.LLMError("down")

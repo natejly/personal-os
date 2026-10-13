@@ -28,7 +28,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from . import duel, egress, labels, mac, osplat, permissions
+from . import duel, egress, labels, limits, mac, osplat, permissions
 from .kinds import is_internal
 from .embed import rrf
 from . import fsx
@@ -1024,8 +1024,7 @@ class Toolbox:
         """spec.fn, retried on a transient network failure when the tool only reads. Nothing that writes, runs code
         or holds session state is ever called twice: a retry there could repeat a side effect."""
         from . import llm
-        v = self.settings().get("toolReadRetries", 2)
-        retries = max(0, min(int(v), 5)) if isinstance(v, (int, float)) and not isinstance(v, bool) else 2
+        retries = limits.TOOL_READ_RETRIES
         if spec.danger not in RETRY_DANGER or spec.group in NO_RETRY_GROUPS or spec.name.startswith("agent_"):
             retries = 0
         for attempt in range(1, retries + 2):
@@ -1479,7 +1478,7 @@ class Toolbox:
             cur, hops = url, 0
             cfg = self.settings()
             cache = self.web_cache
-            ttl = 0 if fresh else float(cfg.get("fetchCacheSeconds", 3600) or 0)
+            ttl = 0 if fresh else limits.FETCH_CACHE_SECONDS
             hit: dict[str, Any] | None = None
             fc, fc_page = firecrawl.key(cfg), None  # fc_page: a page Firecrawl just read (a cache hit is not)
 
@@ -1503,7 +1502,7 @@ class Toolbox:
                             log.info("firecrawl scrape failed for %s: %s", cur, _first_line(e))
                         else:
                             hit = {"status": 200, "content_type": "text/markdown; charset=utf-8", "body": fc_page["text"].encode(), "final_url": cur}
-                            if cache is not None and float(cfg.get("fetchCacheSeconds", 3600) or 0) > 0 and (key := _norm_url(cur)):
+                            if cache is not None and limits.FETCH_CACHE_SECONDS > 0 and (key := _norm_url(cur)):
                                 try:
                                     cache.put(key, 200, hit["content_type"], hit["body"], cur)
                                 except Exception as e:  # noqa: BLE001 -- the cache is an optimisation, never a failure
@@ -1531,7 +1530,7 @@ class Toolbox:
                 status, ctype, raw, final_url = hit["status"], hit["content_type"], hit["body"], hit["final_url"]
             else:
                 status, ctype, raw, final_url = r.status_code, r.headers.get("content-type", ""), r.content, cur  # not r.url: its host is the pinned address
-                if cache is not None and float(cfg.get("fetchCacheSeconds", 3600) or 0) > 0 and 200 <= status < 300 and (key := _norm_url(cur)) \
+                if cache is not None and limits.FETCH_CACHE_SECONDS > 0 and 200 <= status < 300 and (key := _norm_url(cur)) \
                         and not getattr(r, "extensions", {}).get("body_truncated"):
                     try:
                         cache.put(key, status, ctype, raw, final_url)

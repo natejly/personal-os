@@ -11,7 +11,7 @@ const card = (page) => page.getByRole('group', { name: 'Run command' })
 
 async function setup(grain, extra = {}) {
   const ws = homeScratch()
-  await grain.api('/settings', { method: 'PUT', body: { workspaceRoots: [ws], toolDeferAbove: 0, ...extra } })
+  await grain.api('/settings', { method: 'PUT', body: { toolDeferAbove: 0, ...extra } })
   return ws
 }
 const waitPending = (grain, n = 1) => expect.poll(async () => (await pending(grain)).length, { timeout: 60_000 }).toBe(n)

@@ -1,7 +1,6 @@
-"""A rate-limited model route is retried before any token streams, and the legacy workspaceRoots setting is stored as
-given (the file tools reach the whole Mac, so it is validated only as a list of strings). Offline.
+"""A rate-limited model route is retried before any token streams. Offline.
 
-Run: python backend/tests/test_stream_retry_and_roots.py
+Run: python backend/tests/test_stream_retry.py
 """
 from __future__ import annotations
 
@@ -17,10 +16,8 @@ os.environ["HOME"] = str(HOME)
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="roots-data-"))
 
 import httpx  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import llm  # noqa: E402
-from personal_os.app import AUTH_TOKEN, app  # noqa: E402
 
 SSE = b'data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
 
@@ -74,24 +71,7 @@ def main() -> None:
     events, calls = run_stream([400])
     assert calls == 1 and events[0]["type"] == "error", "a 400 is not retried"
 
-    client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
-    (HOME / "projects").mkdir()
-    (HOME / ".hidden" / "work").mkdir(parents=True)
-    ok = client.put("/settings", json={"workspaceRoots": [str(HOME / "projects")]})
-    assert ok.status_code == 200 and ok.json()["workspaceRoots"] == [str(HOME / "projects")], ok.text
-    # the roots scope nothing any more, so any list of strings is stored as given and never resolved or refused
-    anywhere = [str(HOME / ".hidden" / "work"), "/etc", "~", str(HOME), "/does/not/exist"]
-    r = client.put("/settings", json={"workspaceRoots": anywhere})
-    assert r.status_code == 200 and r.json()["workspaceRoots"] == anywhere, r.text
-    bad = client.put("/settings", json={"workspaceRoots": "/etc"})
-    assert bad.status_code == 422, bad.text
-    bad = client.put("/settings", json={"workspaceRoots": [1]})
-    assert bad.status_code == 422, bad.text
-    assert client.get("/settings").json()["workspaceRoots"] == anywhere, "a rejected update changes nothing"
-    client.put("/settings", json={"workspaceRoots": []})
-    assert client.get("/settings").json()["workspaceRoots"] == [], "GET /settings does not inject a default folder"
-    assert not (HOME / "Grain").exists()
-    print("test_stream_retry_and_roots: ok")
+    print("test_stream_retry: ok")
 
 
 if __name__ == "__main__":

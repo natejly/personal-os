@@ -21,7 +21,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel
 
-from . import mac
+from . import limits, mac
 from .db import Database, new_id
 
 log = logging.getLogger(__name__)
@@ -60,9 +60,6 @@ class FileSnapshots:
     # ---- settings ----
     def _on(self) -> bool:
         return bool(self.settings().get("fileSnapshots", True))
-
-    def _max(self) -> int:
-        return int(self.settings().get("fileSnapshotMaxBytes", 5_000_000))
 
     # ---- rows ----
     def _insert(self, op: str, path: str, ctx: dict[str, Any] | None, *, from_path: str | None = None, before: Path | None = None,
@@ -113,7 +110,7 @@ class FileSnapshots:
                 return {"snapshot_id": self._insert("create", str(p), ctx, existed=False)}
             if op == "create":
                 return None  # refused by write_local
-            if p.stat().st_size > self._max():
+            if p.stat().st_size > limits.FILE_SNAPSHOT_MAX_BYTES:
                 return {"snapshot_id": None, "reason": "file larger than limit, no undo"}
             sid = new_id()
             blob = self._blob(sid, p)
@@ -253,9 +250,8 @@ class FileSnapshots:
 
     def prune(self) -> int:
         """Expire by age, then oldest-first until the blobs fit the byte budget. Returns rows expired."""
-        s = self.settings()
-        cutoff = time.time() - float(s.get("fileSnapshotRetainDays", 14)) * 86400
-        budget = int(float(s.get("fileSnapshotBudgetMB", 200)) * 1_000_000)
+        cutoff = time.time() - limits.FILE_SNAPSHOT_RETAIN_DAYS * 86400
+        budget = limits.FILE_SNAPSHOT_BUDGET_MB * 1_000_000
         n = 0
         with self.db.tx() as c:
             rows = [dict(r) for r in c.execute("SELECT snapshot_id, before_path, created_at FROM file_snapshots "

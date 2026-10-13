@@ -39,17 +39,6 @@ import { inputChip } from './lib/deskFiles'
 import { isInternal, upsertWorker, withoutInternal } from './lib/workers'
 import { appendDelta, settleHeld } from './lib/noReply'
 
-/**
- * Settings as the renderer holds them: without the legacy `mode`, which only init() reads. Kept out
- * of the store so no Settings draft (the first-run modal, ⌘,) can PUT a stale `mode: 'canvas'` back
- * over the one-shot migration.
- */
-const withoutLegacyMode = (s: Settings): Settings => {
-  const out = { ...s }
-  delete out.mode
-  return out
-}
-
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
 export type View = 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'library' | 'jobs' | 'project' | 'canvas'
 /** Which tab a project page shows. */
@@ -290,7 +279,7 @@ export interface State {
   pageAgentOpen: boolean
   pageAgentId: string | null
   /** Skip permissions picked in the ⌘I panel before its thread exists. */
-  pageAgentChatSettings: Partial<Pick<ConversationSettings, 'skipPermissions' | 'effort' | 'fast'>>
+  pageAgentChatSettings: Partial<Pick<ConversationSettings, 'effort' | 'fast'>>
   /** Model picked in the ⌘I panel before its thread exists. */
   pageAgentModel: string | null
   /** While set, the panel keeps this view's thread whatever view or doc is on screen. */
@@ -984,11 +973,6 @@ export { adjacentChatId }
 /** The id the ⌘I panel's composer carries before its thread has a row. */
 export const PAGE_AGENT_DRAFT = '\u0000page-agent'
 
-/** The per-chat switches a row-less chat parks until `send` creates its row. */
-const parkable = (p: Partial<ConversationSettings>): Pick<ConversationSettings, 'skipPermissions'> => ({
-  ...(p.skipPermissions !== undefined ? { skipPermissions: p.skipPermissions } : {})
-})
-
 export const useStore = create<State>((set, get) => {
   /**
    * App's init effect runs twice under React.StrictMode, so both of these are latched. A second
@@ -1544,7 +1528,7 @@ export const useStore = create<State>((set, get) => {
             const open = get().activeDoc
             get().refreshDocs().then(() => { if (open && !get().docs.some((d) => d.id === open.id)) { set({ docDraft: null, docTitleDraft: null }); void get().closeDocTab(open.id) } }).catch(() => undefined)
           }
-          if (ev.data.name === 'permissions_update' && !ev.data.error) void api.settings.get().then((st) => set({ settings: withoutLegacyMode(st) })).catch(() => undefined) // the approved change is live: refresh the pill and Settings
+          if (ev.data.name === 'permissions_update' && !ev.data.error) void api.settings.get().then((st) => set({ settings: st })).catch(() => undefined) // the approved change is live: refresh the pill and Settings
           if (ev.data.name === 'doc_create' || ev.data.name === 'doc_edit') { get().refreshDocs().catch(() => undefined); void get().refreshDocsPending() }
           break
       }
@@ -1788,7 +1772,6 @@ export const useStore = create<State>((set, get) => {
 
   const patchChatSettings = async (patch: Partial<ConversationSettings>, conversationId?: string): Promise<void> => {
     const id = conversationId ?? get().focusedConversationId
-    const parked = parkable(patch)
     if (!id) {
       // No conversation to PATCH yet: park the patch and let `send` apply it to the conversation it is
       // about to create. Never the global settings: a draft's toggle is about that one chat.
@@ -1800,11 +1783,7 @@ export const useStore = create<State>((set, get) => {
       }))
       return
     }
-    if (id === PAGE_AGENT_DRAFT) {
-      // The ⌘I panel before its first message: `sendToPageAgent` applies these to the thread it creates.
-      set((s) => ({ pageAgentChatSettings: { ...s.pageAgentChatSettings, ...parked } }))
-      return
-    }
+    if (id === PAGE_AGENT_DRAFT) return // the ⌘I panel parks only effort and fast (setChatConfig)
     await writeConversation(id, { settings: patch })
   }
 
@@ -1812,7 +1791,7 @@ export const useStore = create<State>((set, get) => {
     ready: false,
     backendError: null,
     backendState: 'ready',
-    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', fastModel: '', autoRoute: false, systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true },
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', autoRoute: false, systemPrompt: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true },
     models: [],
     modelsError: null,
     tools: [],
@@ -2000,13 +1979,7 @@ export const useStore = create<State>((set, get) => {
       }
       // Quiet while the backend restarts: the banner already says so, and every refresher would fail at once.
       installRejectionToasts((m, kind) => { if (get().backendState === 'ready') get().toast(m, kind) })
-      // One-shot migration of the pre-spaces global mode: a user who left the app in canvas mode lands
-      // in the canvas once, and the setting is reset so later launches open on a new chat. Only the main
-      // window writes it back; a pop-out (`?surface=widget`) never renders App and must not touch settings.
-      const { mode: legacyMode } = settings
-      const legacyCanvas = legacyMode === 'canvas'
-      set({ settings: withoutLegacyMode(settings), view: legacyCanvas ? 'canvas' : 'chat', projects, conversations, ready: true })
-      if (legacyCanvas && !isPopout()) void get().saveSettings({ mode: 'classic' }).catch(() => undefined)
+      set({ settings, view: 'chat', projects, conversations, ready: true })
       void get().loadModels()
       void get().loadScope('all')
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
@@ -2044,7 +2017,7 @@ export const useStore = create<State>((set, get) => {
       }
     },
     saveSettings: async (patch) => {
-      set({ settings: withoutLegacyMode(await api.settings.set(patch)) })
+      set({ settings: await api.settings.set(patch) })
       // Which tools are capped at ask follows this list, and the tool rows read it from the tools listing.
       if ('alwaysAsk' in patch) void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
       if ('baseUrl' in patch || 'apiKey' in patch || 'provider' in patch) void get().loadModels()

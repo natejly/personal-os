@@ -196,8 +196,7 @@ def stored(c: sqlite3.Connection) -> dict[str, Any]:
 
 def test_migration_sets_auto_and_keeps_everything_else() -> None:
     c = settings_db()
-    row = {"version": 1, "skipPermissions": True, "autoReview": "risky", "workspaceRoots": ["/Users/x/Proj"],
-           "tools": {"web_search": "off"}, "alwaysAsk": ["gmail_send"], "docEditMode": "apply"}
+    row = {"version": 1, "tools": {"web_search": "off"}, "alwaysAsk": ["gmail_send"], "docEditMode": "apply"}
     c.execute("INSERT INTO settings VALUES ('permissions', ?)", (json.dumps(row),))
     permissions.migrate_mode(c)
     got = stored(c)
@@ -219,9 +218,9 @@ def test_migration_on_a_fresh_store_and_a_legacy_row() -> None:
     permissions.migrate_mode(c)
     assert stored(c) == {"version": 2, "permissionMode": "auto"}
     c = settings_db()
-    c.execute("INSERT INTO settings VALUES ('skipPermissions', 'true')")  # a stray top-level legacy row folds in
+    c.execute("INSERT INTO settings VALUES ('shellNetwork', 'true')")  # a stray top-level legacy row folds in
     permissions.migrate_mode(c)
-    assert stored(c)["skipPermissions"] is True and stored(c)["permissionMode"] == "auto"
+    assert stored(c)["shellNetwork"] is True and stored(c)["permissionMode"] == "auto"
 
 
 def test_validate_permission_mode() -> None:
@@ -231,5 +230,3 @@ def test_validate_permission_mode() -> None:
         with pytest.raises(ValueError):
             permissions.validate("permissionMode", bad)
     assert permissions.DEFAULTS["permissionMode"] == "auto"
-    # legacy keys still validate
-    assert permissions.validate("skipPermissions", True) is True and permissions.validate("autoReview", "risky") == "risky"

@@ -1,0 +1,673 @@
+{
+ "model": "claude-haiku-5-5",
+ "terms": {
+  "Am I a night owl?": [
+   "chronotype",
+   "sleep schedule",
+   "circadian rhythm",
+   "evening person",
+   "late chronotype",
+   "sleep pattern",
+   "body clock",
+   "nocturnal tendency"
+  ],
+  "Am I travelling to Denver soon?": [
+   "trip",
+   "visit",
+   "journey",
+   "itinerary",
+   "flight booking",
+   "vacation",
+   "mile high city",
+   "colorado"
+  ],
+  "And what about herbs?\nDo I have any food restrictions?\nYou are vegetarian except for fish, and allergic to penicillin.": [
+   "dietary limitations",
+   "pescatarian",
+   "dietary restrictions",
+   "botanicals",
+   "herbal supplements",
+   "phytotherapy",
+   "drug allergy",
+   "herbal interactions"
+  ],
+  "And when is our 1:1?\nWho do I report to at work?\nYou report to Priya Raman, the VP of Engineering at Lumen Freight.": [
+   "line manager",
+   "supervisor",
+   "reporting line",
+   "one-on-one",
+   "check-in",
+   "direct manager",
+   "team lead",
+   "catch-up"
+  ],
+  "Do I have a Citi Bike membership?": [
+   "bike share account",
+   "citi bike pass",
+   "membership status",
+   "subscription plan",
+   "rider account",
+   "annual pass",
+   "day pass",
+   "ride plan"
+  ],
+  "Do I have a penicillin allergy?": [
+   "pcn allergy",
+   "penicillin hypersensitivity",
+   "beta-lactam allergy",
+   "drug allergy",
+   "antibiotic hypersensitivity",
+   "adverse drug reaction",
+   "drug sensitivity"
+  ],
+  "Do I have any dentist appointments coming up?": [
+   "dental visit",
+   "dental checkup",
+   "teeth cleaning",
+   "oral exam",
+   "hygienist",
+   "orthodontist",
+   "scheduled booking",
+   "dental clinic"
+  ],
+  "Do I want long answers or short ones?": [
+   "concise",
+   "brief",
+   "succinct",
+   "detailed",
+   "thorough",
+   "in-depth",
+   "terse",
+   "pithy",
+   "to-the-point",
+   "comprehensive"
+  ],
+  "How do I travel across town day to day?": [
+   "commuting",
+   "transportation",
+   "daily commute",
+   "getting around",
+   "urban travel",
+   "local transit",
+   "city mobility",
+   "commuting options"
+  ],
+  "How is that going?\nWhat am I training for?\nYou are running the Chicago Marathon on October 11.": [
+   "endurance prep",
+   "race readiness",
+   "long-distance running",
+   "26.2 miles",
+   "fitness regimen",
+   "mileage build-up",
+   "pace plan",
+   "race day goal"
+  ],
+  "How much coffee do I drink?": [
+   "caffeine intake",
+   "daily consumption",
+   "coffee habits",
+   "caffeine consumption",
+   "beverage intake",
+   "java consumption",
+   "coffee use",
+   "cup count",
+   "caffeine tracking",
+   "dietary caffeine"
+  ],
+  "Recommend a good tequila for margaritas.": [
+   "blanco",
+   "silver",
+   "joven",
+   "reposado",
+   "agave spirit",
+   "plata",
+   "blanco tequila",
+   "100% agave",
+   "mixto"
+  ],
+  "Summarize the plot of Hamlet in two sentences.": [
+   "synopsis",
+   "storyline",
+   "narrative",
+   "recap",
+   "overview",
+   "outline",
+   "shakespearean tragedy",
+   "condensed account"
+  ],
+  "Tell me about the gym Diego goes to": [
+   "fitness center",
+   "health club",
+   "workout facility",
+   "training center",
+   "athletic club",
+   "exercise studio",
+   "gymnasium"
+  ],
+  "Translate 'good morning' into Japanese.": [
+   "salutation",
+   "morning greeting",
+   "ohay\u014d",
+   "nihongo",
+   "greeting phrase",
+   "rendering",
+   "localization",
+   "japonic language"
+  ],
+  "What changed at work back in January?": [
+   "altered",
+   "modified",
+   "shifted",
+   "transitioned",
+   "restructured",
+   "employment",
+   "workplace",
+   "professional role",
+   "q1",
+   "early year"
+  ],
+  "What database does Mei's project use?": [
+   "data store",
+   "datastore",
+   "backend",
+   "persistence layer",
+   "storage engine",
+   "dbms",
+   "data repository",
+   "data layer"
+  ],
+  "What did I buy yesterday?": [
+   "purchases",
+   "transactions",
+   "receipts",
+   "orders",
+   "expenses",
+   "spending",
+   "payments",
+   "order history",
+   "billing history",
+   "purchase log"
+  ],
+  "What did I change in Home Assistant two weeks ago?": [
+   "configuration history",
+   "logbook",
+   "history panel",
+   "audit log",
+   "change log",
+   "recorder",
+   "automation traces",
+   "config entries history"
+  ],
+  "What did I decide about hiring last month?": [
+   "recruitment",
+   "staffing",
+   "headcount",
+   "talent acquisition",
+   "job offers",
+   "candidate selection",
+   "personnel decisions",
+   "requisitions"
+  ],
+  "What did I decide about the team budget last month?": [
+   "resolution",
+   "allocation",
+   "funding",
+   "spending plan",
+   "expenditure",
+   "appropriation",
+   "outcome",
+   "group",
+   "headcount",
+   "fiscal plan"
+  ],
+  "What did I get done on Kiln last week?": [
+   "progress log",
+   "completed tasks",
+   "accomplishments",
+   "weekly recap",
+   "shipped",
+   "closed tickets",
+   "milestones",
+   "status update"
+  ],
+  "What did I note about Beacon last month?": [
+   "lighthouse",
+   "signal fire",
+   "landmark",
+   "waypoint",
+   "navigation light",
+   "guiding light",
+   "warning light",
+   "marker"
+  ],
+  "What did I tell Priya yesterday?": [
+   "conversation",
+   "message",
+   "discussion",
+   "chat",
+   "call",
+   "correspondence",
+   "exchange",
+   "remarks",
+   "text",
+   "dialogue"
+  ],
+  "What did we do for the holidays in Hannah's hometown?": [
+   "festivities",
+   "vacation",
+   "celebrations",
+   "getaway",
+   "christmas",
+   "winter break",
+   "birthplace",
+   "family visit",
+   "yuletide",
+   "trip"
+  ],
+  "What did we plan for the Lisbon trip in February?": [
+   "itinerary",
+   "portugal getaway",
+   "journey",
+   "excursion",
+   "travel agenda",
+   "winter break",
+   "reservations",
+   "vacation schedule"
+  ],
+  "What does Diego do for work?": [
+   "occupation",
+   "job",
+   "profession",
+   "employment",
+   "career",
+   "vocation",
+   "line of work",
+   "position"
+  ],
+  "What does Mei's team work on?": [
+   "squad",
+   "unit",
+   "department",
+   "group",
+   "projects",
+   "responsibilities",
+   "mandate",
+   "initiatives"
+  ],
+  "What does Miso need at the vet?": [
+   "veterinary checkup",
+   "vaccinations",
+   "wellness exam",
+   "pet health visit",
+   "immunizations",
+   "booster shots",
+   "parasite prevention",
+   "animal clinic"
+  ],
+  "What editor do I use?": [
+   "code editor",
+   "ide",
+   "text editor",
+   "development environment",
+   "source code editor",
+   "choose",
+   "employ",
+   "select"
+  ],
+  "What home projects was I planning last spring?": [
+   "renovations",
+   "diy",
+   "home improvement",
+   "remodeling",
+   "repairs",
+   "upgrades",
+   "fixer-upper",
+   "household tasks"
+  ],
+  "What is it written in?\nWhat project does Mei run?\nMei Tanaka leads Beacon, the route-planning engine.": [
+   "implementation language",
+   "tech stack",
+   "codebase",
+   "built with",
+   "developed in",
+   "source code",
+   "software initiative",
+   "repository"
+  ],
+  "What is my Gowanus Climbing schedule?": [
+   "timetable",
+   "itinerary",
+   "calendar",
+   "booking",
+   "session times",
+   "roster",
+   "bouldering sessions",
+   "class times"
+  ],
+  "What is my marathon goal time?": [
+   "race target",
+   "finishing objective",
+   "pace goal",
+   "target finish",
+   "race benchmark",
+   "personal best aim",
+   "26.2-mile target",
+   "finish time aspiration"
+  ],
+  "What is the boiling point of liquid nitrogen?": [
+   "cryogenic temperature",
+   "boiling point",
+   "196 \u00b0c",
+   "77 k",
+   "nitrogen liquefaction",
+   "cryogen",
+   "320 \u00b0f",
+   "ln2",
+   "nitrogen boiling temperature"
+  ],
+  "What is the capital of Australia?": [
+   "canberra",
+   "national capital",
+   "australian capital territory",
+   "seat of government",
+   "federal capital",
+   "parliament house"
+  ],
+  "What is there to do near where Sofia lives?": [
+   "attractions",
+   "points of interest",
+   "local landmarks",
+   "sightseeing",
+   "recreation",
+   "entertainment venues",
+   "nearby amenities",
+   "day trips"
+  ],
+  "What running milestones did I hit in March?": [
+   "training log",
+   "personal records",
+   "achievements",
+   "mileage totals",
+   "race results",
+   "fitness progress",
+   "reached goals",
+   "workout summary",
+   "prs",
+   "season highlights"
+  ],
+  "What should we do differently next time we move data over?": [
+   "post-mortem",
+   "lessons learned",
+   "retrospective",
+   "cutover planning",
+   "migration audit",
+   "etl redesign",
+   "reconciliation testing",
+   "rollback strategy"
+  ],
+  "What soundtrack helps me concentrate while programming?": [
+   "focus music",
+   "study music",
+   "background music",
+   "ambient playlist",
+   "lo-fi beats",
+   "deep work audio",
+   "coding playlist",
+   "flow state",
+   "productivity music"
+  ],
+  "What was my favourite meal there?\nWhere did Hannah and I go on holiday?\nYou and Hannah went to Lisbon in May 2026.": [
+   "vacation",
+   "getaway",
+   "trip",
+   "destination",
+   "travel",
+   "cuisine",
+   "dining",
+   "preferred dish",
+   "portugal",
+   "excursion"
+  ],
+  "What's my financial safety net plan?": [
+   "emergency fund",
+   "rainy day fund",
+   "financial cushion",
+   "reserve savings",
+   "liquidity buffer",
+   "contingency fund",
+   "backup savings"
+  ],
+  "What's my job title?": [
+   "position",
+   "role",
+   "occupation",
+   "designation",
+   "profession",
+   "vocation",
+   "career",
+   "post",
+   "employment",
+   "appointment"
+  ],
+  "What's my pet like?": [
+   "companion animal",
+   "temperament",
+   "disposition",
+   "behavior traits",
+   "personality",
+   "domestic animal",
+   "demeanor",
+   "character"
+  ],
+  "When did the Atlas cutover finish?": [
+   "go-live",
+   "system migration",
+   "changeover",
+   "switchover",
+   "rollout",
+   "conversion",
+   "transition",
+   "deployment"
+  ],
+  "When is her birthday?\nTell me about my sister.\nYour sister Sofia lives in Portland and has a toddler named Ines.": [
+   "sibling",
+   "date of birth",
+   "born",
+   "natal day",
+   "family member",
+   "relative",
+   "kin",
+   "big sis"
+  ],
+  "When is my 1:1 with Priya?": [
+   "check-in",
+   "one-to-one",
+   "catch-up",
+   "sync",
+   "huddle",
+   "touchpoint",
+   "supervision session",
+   "scheduled call"
+  ],
+  "When is my next appointment with Dr. Okafor?": [
+   "follow-up",
+   "consultation",
+   "office visit",
+   "scheduled session",
+   "booking",
+   "checkup",
+   "clinic visit",
+   "physician review"
+  ],
+  "When is the Chicago Marathon?": [
+   "windy city run",
+   "26.2 miles",
+   "chicago race date",
+   "bank of america chicago marathon",
+   "fall marathon",
+   "chicago road race",
+   "marathon schedule",
+   "chicago running event"
+  ],
+  "Where do I live?": [
+   "residence",
+   "home address",
+   "domicile",
+   "dwelling",
+   "place of residence",
+   "abode",
+   "living location",
+   "permanent address"
+  ],
+  "Where is Priya's company based?": [
+   "headquarters",
+   "head office",
+   "main office",
+   "corporate office",
+   "registered address",
+   "principal place of business",
+   "location",
+   "operating base"
+  ],
+  "Where is my Obsidian vault synced?": [
+   "knowledge base",
+   "markdown folder",
+   "second brain",
+   "obsidian sync",
+   "replication",
+   "cloud storage",
+   "backup",
+   "local directory"
+  ],
+  "Which Fly.io region do I use?": [
+   "region selection",
+   "app location",
+   "deployment region",
+   "primary region",
+   "data center",
+   "edge location",
+   "regions list",
+   "geographic placement"
+  ],
+  "Which books am I reading since 2026-09-01?": [
+   "currently consuming",
+   "literature log",
+   "bookshelf",
+   "volumes",
+   "titles",
+   "reading history",
+   "library tracker",
+   "novels in progress"
+  ],
+  "Which dairy alternative do I enjoy?": [
+   "plant-based milk",
+   "non-dairy",
+   "milk substitute",
+   "vegan milk",
+   "lactose-free",
+   "oat milk",
+   "soy milk",
+   "almond milk"
+  ],
+  "Which day does the Synology run its offsite backups?": [
+   "scheduled backup",
+   "hyper backup",
+   "cloud sync",
+   "backup task",
+   "replication",
+   "off-site copy",
+   "remote backup",
+   "backup schedule"
+  ],
+  "Which foreign tongue am I studying?": [
+   "second language",
+   "target language",
+   "l2",
+   "additional language",
+   "modern language",
+   "language acquisition",
+   "vernacular",
+   "lingua"
+  ],
+  "Which hobbies did I take up in 2025?": [
+   "pastimes",
+   "leisure pursuits",
+   "interests",
+   "passions",
+   "side projects",
+   "recreational activities",
+   "diversions",
+   "avocations"
+  ],
+  "Which meals are off the table for me?": [
+   "dietary restrictions",
+   "forbidden foods",
+   "prohibited dishes",
+   "excluded items",
+   "banned meals",
+   "dietary limits",
+   "restricted diet",
+   "not permitted"
+  ],
+  "Which of my projects share a database with Atlas?": [
+   "dependencies",
+   "shared storage",
+   "data sources",
+   "linked services",
+   "schema overlap",
+   "connection strings",
+   "co-located data",
+   "database coupling"
+  ],
+  "Which tools does Kiln depend on?": [
+   "dependencies",
+   "prerequisites",
+   "libraries",
+   "packages",
+   "requirements",
+   "software stack",
+   "toolchain",
+   "third-party components"
+  ],
+  "Who do I answer to at the office?": [
+   "supervisor",
+   "line manager",
+   "reporting line",
+   "chain of command",
+   "superior",
+   "team lead",
+   "direct manager",
+   "org chart"
+  ],
+  "Who do I report to for this Atlas work?": [
+   "supervisor",
+   "line manager",
+   "reporting line",
+   "team lead",
+   "project sponsor",
+   "chain of command",
+   "escalation contact",
+   "org chart"
+  ],
+  "Who won the 1998 World Cup final?": [
+   "fifa world cup",
+   "france 98",
+   "championship match",
+   "title decider",
+   "showpiece game",
+   "stade de france",
+   "triumph",
+   "trophy winners"
+  ],
+  "Write a regex that matches IPv4 addresses.": [
+   "dotted-decimal",
+   "dotted quad",
+   "octet",
+   "internet protocol version four",
+   "host identifier",
+   "network address",
+   "pattern expression",
+   "string matcher"
+  ]
+ }
+}

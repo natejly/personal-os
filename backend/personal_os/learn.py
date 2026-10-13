@@ -35,7 +35,7 @@ from datetime import date, datetime, timedelta
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from . import llm, memory_limits, redact
+from . import limits, llm, memory_limits, redact
 from .memory_limits import (EXISTING_LINE_CHARS, EXTRACT_ASSISTANT_CHARS, EXTRACT_EXISTING, EXTRACT_TOOL_CHARS,
                             EXTRACT_USER_CHARS, MIN_MEMORY_CHARS)
 from .db import Database, new_id, now, row_to_dict
@@ -839,7 +839,7 @@ class LearnWorker:
         """Every N new auto memories, queue tidy-up *proposals*. Creating them changes nothing; the user applies them.
 
         The count is derived from rows made since the last proposal run, so a relaunch no longer resets it."""
-        every = int(job.settings.get("consolidateEvery") or 0)
+        every = limits.CONSOLIDATE_EVERY
         if not self._consolidator or every <= 0 or not added:
             return
         with self._memories.db.tx() as c:

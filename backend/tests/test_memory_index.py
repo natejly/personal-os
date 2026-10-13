@@ -21,7 +21,7 @@ from personal_os.repos import Documents, Graph, Memories  # noqa: E402
 
 # Bag-of-words into 509 dims; synonyms share a bucket so 'boss' lands next to 'manager'.
 SYN = {"boss": "manager", "supervisor": "manager"}
-CFG = {"embeddingModel": "fake-embed", "hybridRetrieval": True}
+CFG = {"embeddingModel": "fake-embed"}
 
 
 def _vec(text: str) -> list[float]:
@@ -77,7 +77,7 @@ def test_paraphrase_found_with_embeddings_and_fallback_without(env) -> None:
     assert idx.search(None, q, qv, limit=3, settings=CFG)[0]["id"] == target["id"]
     # Embeddings off or failing: the same call degrades to lexical + graph only (nothing matches here), no raise.
     assert asyncio.run(idx.query_vec({"embeddingModel": ""}, q)) is None
-    assert asyncio.run(idx.query_vec({**CFG, "hybridRetrieval": False}, q)) is None
+    assert asyncio.run(idx.query_vec({**CFG, "retrievalMode": "bm25"}, q)) is None
     assert idx.search(None, q, None, limit=3, settings=CFG) == []  # no recency fill without a match
     fake.fail = True
     idx.embedder.reset()

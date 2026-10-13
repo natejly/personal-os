@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import fsx, mac, permissions, redact, screenshot, tools
+from . import fsx, limits, mac, permissions, redact, screenshot, tools
 from .tools import ToolSpec, UrlBlocked, _obj, tool_error
 from .workspace import WorkspaceError
 
@@ -190,7 +190,7 @@ def register(tb: Any) -> None:
                                   alternative=e.alternative or tools.TAINTED_HINT)
         root = desk_root(ctx)
         payload: dict[str, Any] = {"url": cur, "newTab": bool(new_tab), "timeoutMs": 30000,
-                                   "maxTabs": int(cfg.get("browserMaxTabs") or 4), "idleSeconds": int(cfg.get("browserIdleSeconds") or 300)}
+                                   "maxTabs": limits.BROWSER_MAX_TABS, "idleSeconds": limits.BROWSER_IDLE_SECONDS}
         chat = chat_root(ctx) if root is None else None
         dl = root / "work" / "downloads" if root is not None else chat / "outputs" / "downloads" if chat is not None else None
         if dl is not None:  # a download still needs the user's yes on its card (guarded); this is only where it lands

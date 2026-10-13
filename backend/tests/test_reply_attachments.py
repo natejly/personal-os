@@ -118,7 +118,7 @@ def browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     bridge.register("http://127.0.0.1:9000", TOKEN, ["page", "browser"])
     bridge.transport = httpx.MockTransport(Fake().handler)
     monkeypatch.setattr(mac, "page_bridge", bridge)
-    settings: dict[str, Any] = {"browserEnabled": True, "browserAllowlist": [], "fetchAllowlist": [], "workspaceRoots": []}
+    settings: dict[str, Any] = {"browserEnabled": True, "browserAllowlist": [], "fetchAllowlist": []}
     tb = Toolbox(None, None, Documents(Database(tmp_path)), lambda: settings, workspace=Workspace(tmp_path / "data"))  # type: ignore[arg-type]
     updates: list[tuple[dict[str, Any], str, list[dict[str, Any]]]] = []
 

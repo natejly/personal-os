@@ -48,7 +48,7 @@ def call(name: str, args: dict[str, Any], i: int = 0) -> dict[str, Any]:
 
 
 def reply(cid: str, rounds: list[list[dict[str, Any]]], text: str = "go", **settings: Any) -> list[dict[str, Any]]:
-    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "workspaceRoots": [], "toolDeferAbove": 40,
+    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "toolDeferAbove": 40,
                             **settings})
     ROUNDS[:] = rounds
     OFFERED.clear()

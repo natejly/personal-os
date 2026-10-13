@@ -622,7 +622,7 @@ group, SIGKILL three seconds later.
 `background: true` returns a job id; `shell_poll` returns what is new and the exit
 status, `shell_kill` stops it, and the finished job's exit code and last output are
 handed to the model at its next round (or wake an idle desk) unless
-`notify_on_complete` is false. At most `shellMaxBackground` jobs run at once and 64
+`notify_on_complete` is false. At most 4 jobs run at once and 64
 are tracked; finished ones are forgotten after 30 minutes. Jobs end with the chat
 reply that started them and with the app. After a restart a survivor is listed
 as `orphaned` (kill only) and is never adopted.

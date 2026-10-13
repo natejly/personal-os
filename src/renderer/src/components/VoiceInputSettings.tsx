@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import type { VoiceConfig } from '@shared/types'
+import Switch from './settings/Switch'
 
 /** How the chat mic's clips become text. Acts at once (its own endpoint): no Save needed. */
 export default function VoiceInputSettings(): JSX.Element | null {
@@ -33,14 +34,8 @@ export default function VoiceInputSettings(): JSX.Element | null {
       </label>
       {text('sttModel', 'Speech-to-text model', 'On your configured base URL, which must route /v1/audio/transcriptions.')}
       {text('whisperModelPath', 'whisper.cpp model file', 'A ggml .bin for the local backend. Blank takes the first one in the models folder.', '/opt/models/ggml-base.en.bin')}
-      <label className="toggle-row plain">
-        <span className="toggle-text"><b>Tidy dictation with the model</b><small>Each dictated clip is sent to the extraction model to fix punctuation and fillers only. Off sends nothing.</small></span>
-        <input type="checkbox" checked={cfg.dictationCleanup} onChange={(e) => patch({ dictationCleanup: e.target.checked })} /><span className="switch" />
-      </label>
-      <label className="toggle-row plain">
-        <span className="toggle-text"><b>Drop silence hallucinations</b><small>Filters the stock phrases and repeated words a transcriber invents from silence.</small></span>
-        <input type="checkbox" checked={cfg.hallucinationFilter} onChange={(e) => patch({ hallucinationFilter: e.target.checked })} /><span className="switch" />
-      </label>
+      <Switch title="Tidy dictation with the model" help="Each dictated clip is sent to the extraction model to fix punctuation and fillers only. Off sends nothing." checked={cfg.dictationCleanup} onChange={(v) => patch({ dictationCleanup: v })} />
+      <Switch title="Drop silence hallucinations" help="Filters the stock phrases and repeated words a transcriber invents from silence." checked={cfg.hallucinationFilter} onChange={(v) => patch({ hallucinationFilter: v })} />
     </>
   )
 }

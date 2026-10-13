@@ -31,7 +31,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _tb(home: Path, tmp_path: Path) -> Toolbox:
-    cfg: dict[str, Any] = {"workspaceRoots": [str(home / "proj")]}
+    cfg: dict[str, Any] = {}
     return Toolbox(None, None, None, lambda: cfg, workspace=Workspace(tmp_path / "data"))  # type: ignore[arg-type]
 
 

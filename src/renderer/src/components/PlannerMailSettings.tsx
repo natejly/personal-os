@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, type MailWatchConfig, type PlannerConfig } from '../lib/api'
 import type { GoogleCalendar } from '@shared/types'
 import { useStore } from '../store'
+import Switch from './settings/Switch'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -68,10 +69,7 @@ export default function PlannerMailSettings(): JSX.Element | null {
       </>}
       {mail && <>
         <h4>Reply tracker</h4>
-        <label className="toggle-row plain">
-          <span className="toggle-text"><b>Track replies</b><small>Read recent Gmail threads to find mail you owe a reply and mail waiting on someone else.</small></span>
-          <input type="checkbox" checked={mail.enabled} onChange={(e) => saveMail({ enabled: e.target.checked })} /><span className="switch" />
-        </label>
+        <Switch title="Track replies" help="Read recent Gmail threads to find mail you owe a reply and mail waiting on someone else." checked={mail.enabled} onChange={(v) => saveMail({ enabled: v })} />
         <label className="inline"><span>Needs a reply after</span>
           <input type="number" min={1} max={720} defaultValue={mail.needsReplyAfterHours} key={`h${mail.needsReplyAfterHours}`} onBlur={(e) => Number(e.target.value) !== mail.needsReplyAfterHours && saveMail({ needsReplyAfterHours: Number(e.target.value) })} />
           <span>hours</span>

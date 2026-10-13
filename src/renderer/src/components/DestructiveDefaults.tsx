@@ -14,7 +14,7 @@ const ACTIONS: { id: DestructiveAction; label: string }[] = [
 export const DEFAULT_DESTRUCTIVE: Defaults = { shell: 'block', files: 'block', items: 'block', send: 'block' }
 
 /** What Manual mode does with each kind of destructive action: refuse it, ask first, or leave it to the usual rules. */
-export function DestructiveDefaults({ value, onChange }: { value?: Partial<Defaults>; onChange: (next: Defaults) => Promise<void> }): JSX.Element {
+export function DestructiveDefaults({ value, onChange }: { value?: Partial<Defaults>; onChange: (next: Defaults) => void }): JSX.Element {
   const cur = { ...DEFAULT_DESTRUCTIVE, ...value }
   return (
     <div className="destructive-defaults" role="group" aria-label="Destructive actions in Manual mode">
@@ -26,7 +26,7 @@ export function DestructiveDefaults({ value, onChange }: { value?: Partial<Defau
           <div className="seg" role="radiogroup" aria-label={r.label}>
             {ACTIONS.map((a) => (
               <button key={a.id} type="button" role="radio" aria-checked={cur[r.kind] === a.id} className={cur[r.kind] === a.id ? 'on' : ''}
-                onClick={() => { if (cur[r.kind] !== a.id) void onChange({ ...cur, [r.kind]: a.id }) }}>{a.label}</button>
+                onClick={() => { if (cur[r.kind] !== a.id) onChange({ ...cur, [r.kind]: a.id }) }}>{a.label}</button>
             ))}
           </div>
         </div>

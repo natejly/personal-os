@@ -9,7 +9,7 @@
   `max_retries`, after an exponential backoff. The attempt number travels in the run's own input
   (`agent_runs.input.attempt`), so it is a stored fact and cannot reset when a watcher is rebuilt (a retry budget kept in memory loops forever).
 - Streak. A *fire* that finally fails (its retries spent) extends `consecutive_failures`; a success clears it.
-  At `jobFailureStreakLimit` the job is switched off with a `paused_reason`, which the Agent Inbox shows under
+  At `limits.JOB_FAILURE_STREAK_LIMIT` the job is switched off with a `paused_reason`, which the Agent Inbox shows under
   "Needs you" with a Resume button. A job whose key is broken stops costing a run every slot.
 
 What does not count: a run the user stopped (it ends `done`, or `stopped`/`cancelled`, never `error`); a manual
@@ -31,7 +31,7 @@ import logging
 import time
 from typing import Any, Awaitable, Callable
 
-from . import auth_breaker
+from . import auth_breaker, limits
 from .job_history import result_digest
 from .jobs import Proposals, retryable
 
@@ -42,14 +42,6 @@ FAILED = ("error", "interrupted")
 # The longest a watcher will follow one run before giving up on it (a job run is minutes, not hours; an idle one is stopped after JOB_IDLE_SECONDS).
 WATCH_MAX_S = 2 * 3600.0
 BACKOFF_CAP_S = 1800.0
-
-
-def _num(v: Any, default: float) -> float:
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return default
-    return f if f == f and f >= 0 else default
 
 
 class JobPolicy:
@@ -69,11 +61,11 @@ class JobPolicy:
 
     # ---- knobs ----
     def backoff(self, attempt: int) -> float:
-        base = _num(self.settings().get("jobRetryBackoffS"), 120.0)
+        base = float(limits.JOB_RETRY_BACKOFF_S)
         return min(BACKOFF_CAP_S, base * (2 ** max(0, attempt - 1)))
 
     def streak_limit(self) -> int:
-        return max(1, int(_num(self.settings().get("jobFailureStreakLimit"), 3)))
+        return max(1, limits.JOB_FAILURE_STREAK_LIMIT)
 
     # ---- overlap guard ----
     def live_run(self, job_id: str) -> dict[str, Any] | None:

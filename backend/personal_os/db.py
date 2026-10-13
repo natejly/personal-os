@@ -384,7 +384,7 @@ CREATE INDEX IF NOT EXISTS idx_job_skips_job ON job_skips(job_id, at);
 
 -- An outward-facing tool call a background run was not allowed to make: recorded here instead of executed
 -- (see app.PROPOSAL_ONLY_KINDS). Accepting one is a user action and is what actually runs it, exactly once.
--- status: pending | accepted | rejected | expired (left pending past settings.proposalExpireDays)
+-- status: pending | accepted | rejected | expired (left pending past limits.PROPOSAL_EXPIRE_DAYS)
 CREATE TABLE IF NOT EXISTS proposals (
   id TEXT PRIMARY KEY,
   run_id TEXT REFERENCES agent_runs(run_id) ON DELETE CASCADE,

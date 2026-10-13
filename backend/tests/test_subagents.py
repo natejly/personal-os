@@ -50,8 +50,8 @@ def check(cond: Any, label: str) -> None:
 
 
 appmod.db.set_settings({"autoLearn": False, "baseUrl": ""})
-DEFAULTS = {k: llm.DEFAULT_SETTINGS[k] for k in ("subagentMaxConcurrent", "subagentMaxDepth",
-                                                  "subagentStaleSeconds", "subagentToolSeconds")}
+DEFAULTS = {"subagentMaxConcurrent": llm.DEFAULT_SETTINGS["subagentMaxConcurrent"]}
+LIMIT_DEFAULTS = {k: getattr(limits, k) for k in ("SUBAGENT_MAX_DEPTH", "SUBAGENT_STALE_SECONDS", "SUBAGENT_TOOL_SECONDS")}
 DEFAULTS["permissionMode"] = "manual"  # the gates below are the manual ones; the mode tests set their own
 
 # ---- a scripted model ----------------------------------------------------------------------------
@@ -94,14 +94,17 @@ def call(cid: str, name: str, args: dict[str, Any]) -> dict[str, Any]:
     return {"id": cid, "name": name, "arguments": json.dumps(args)}
 
 
-def reset(**settings: Any) -> None:
+def reset(lim: dict[str, Any] | None = None, **settings: Any) -> None:
+    """Fresh scenario state. `lim` overrides limits.py constants for this scenario; the next reset puts them back."""
+    for k, v in {**LIMIT_DEFAULTS, **(lim or {})}.items():
+        setattr(limits, k, v)
     SCRIPTS.clear()
     ROUNDS.clear()
     SEEN.clear()
     LIVE.update(now=0, peak=0)
     mgr.children.clear()
     mgr.peak = 0
-    appmod.db.set_settings({**DEFAULTS, "workspaceRoots": [], **settings})
+    appmod.db.set_settings({**DEFAULTS, **settings})
 
 
 def run(coro: Any) -> Any:
@@ -175,17 +178,17 @@ def test_tool_narrowing() -> None:
 # ---- caps ------------------------------------------------------------------------------------------
 
 def test_depth_cap() -> None:
-    reset(subagentMaxDepth=2)
+    reset({"SUBAGENT_MAX_DEPTH": 2})
     ctx = mkctx(new_conv(), depth=2)
     out = run(appmod.toolbox.call("agent_spawn", {"task": "too deep"}, ctx))
     check("error" in out and "deep" in out["error"], "a spawn at max depth is refused")
-    reset(subagentMaxDepth=1)
+    reset({"SUBAGENT_MAX_DEPTH": 1})
     out = run(appmod.toolbox.call("agent_spawn", {"task": "ok at depth 1"}, mkctx(new_conv(), depth=0)))
     check(out["state"] == "completed", "below the cap it runs")
     check(next(s for s in SEEN if s["child"])["tools"].count("agent_spawn") == 0, "a researcher at the cap is never offered agent_spawn")
 
     # a worker child at depth 1 may spawn; the grandchild at depth 2 is not offered the tool
-    reset(subagentMaxDepth=2, workspaceRoots=[tempfile.mkdtemp()])
+    reset({"SUBAGENT_MAX_DEPTH": 2})
     SCRIPTS["lead"] = [{"text": "", "calls": [call("g1", "agent_spawn", {"task": "grand"})]}, {"text": "lead done"}]
     out = run(appmod.toolbox.call("agent_spawn", {"task": "lead", "role": "worker"}, mkctx(new_conv())))
     kids = [s for s in SEEN if s["child"]]
@@ -320,7 +323,7 @@ def test_background_wait_and_stop() -> None:
     check(again["agents"] == [], "a collected child is not collected twice")
 
     # stop cascades leaves-first and every cancelled child still reports
-    reset(subagentMaxDepth=3, workspaceRoots=[tempfile.mkdtemp()])
+    reset({"SUBAGENT_MAX_DEPTH": 3})
     SCRIPTS["root"] = [{"text": "spawning", "calls": [call("g", "agent_spawn", {"task": "leaf", "role": "worker", "background": True})]},
                        {"text": "waiting", "calls": [call("w", "agent_wait", {"timeout_s": 30})]}]
     SCRIPTS["leaf"] = [{"text": "leaf partial", "delay": 5}]
@@ -351,7 +354,7 @@ def test_background_wait_and_stop() -> None:
 
 
 def test_stale_child_is_stopped() -> None:
-    reset(subagentStaleSeconds=0.4)
+    reset({"SUBAGENT_STALE_SECONDS": 0.4})
     SCRIPTS["hang"] = [{"text": "got this far", "calls": [call("c", "current_time", {})]}, {"text": "never", "delay": 30}]
     t0 = time.time()
     out = run(appmod.toolbox.call("agent_spawn", {"task": "hang"}, mkctx(new_conv())))
@@ -671,7 +674,7 @@ def test_child_allow_all_lifts_asks() -> None:
 def test_child_allow_all_keeps_the_destructive_floor() -> None:
     """Allow everything runs a worker's routine call with no card (logged under the child's run with its kind), but a force-push from a worker is still a forced card."""
     root = tempfile.mkdtemp()
-    reset(permissionMode="allow_all", workspaceRoots=[root])
+    reset(permissionMode="allow_all")
     spec = appmod.toolbox.specs["shell_run"]
     real, hits = spec.fn, []
 
@@ -784,7 +787,7 @@ def test_a_child_never_holds_the_email_tools() -> None:
 def test_tainted_child_external_ask_stays_forced() -> None:
     """On a tainted child, an allow rule cannot lift the ask on an external tool: the card is still raised."""
     root = tempfile.mkdtemp()
-    reset(workspaceRoots=[root], permissionRules={"allow": ["write_local_file"], "ask": [], "deny": []})
+    reset(permissionRules={"allow": ["write_local_file"], "ask": [], "deny": []})
     target = os.path.join(root, "note.txt")
     try:
         SCRIPTS["taintw"] = [{"text": "", "calls": [call("w1", "write_local_file", {"path": target, "content": "x"})]}, {"text": "done"}]
@@ -826,7 +829,7 @@ def test_tainted_parent_taints_child_externals() -> None:
 
 def test_writers_confined_and_serialized() -> None:
     root_a, root_b = tempfile.mkdtemp(), tempfile.mkdtemp()
-    reset(workspaceRoots=[root_a, root_b])
+    reset()
     ctx = mkctx(new_conv())
     out = run(appmod.toolbox.call("agent_spawn", {"task": "w", "role": "worker", "root": os.environ["PERSONAL_OS_DATA_DIR"]}, ctx))
     check("error" in out and "off limits" in out["error"], "a worker root inside Grain's own data folder is refused")
@@ -847,7 +850,7 @@ def test_writers_confined_and_serialized() -> None:
         SCRIPTS[name] = [{"text": name, "delay": 0.25}]
 
     async def pair(ra: str, rb: str) -> None:
-        reset(workspaceRoots=[root_a, root_b])
+        reset()
         ctxs = mkctx(new_conv())
         for n in ("one", "two"):
             SCRIPTS[n] = [{"text": n, "delay": 0.25}]
@@ -865,7 +868,7 @@ def test_writers_confined_and_serialized() -> None:
     check(LIVE["peak"] == 1, "a root and one nested in it overlap, so they serialize")
 
     # with no root named the worker is not confined: it keeps its writers and may write anywhere the tools reach
-    reset(workspaceRoots=[])
+    reset()
     SCRIPTS["bare"] = [{"text": "nothing to write in"}]
     run(appmod.toolbox.call("agent_spawn", {"task": "bare", "role": "worker"}, mkctx(new_conv())))
     offered = next(s for s in SEEN if s["child"])["tools"]
@@ -879,7 +882,7 @@ def test_writers_confined_and_serialized() -> None:
 
 def test_worker_can_spawn_a_worker_on_its_own_root() -> None:
     root = tempfile.mkdtemp()
-    reset(subagentStaleSeconds=1)
+    reset({"SUBAGENT_STALE_SECONDS": 1})
     SCRIPTS["outer"] = [{"text": "", "calls": [call("g", "agent_spawn", {"task": "inner", "role": "worker", "root": root})]}, {"text": "outer done"}]
     SCRIPTS["inner"] = [{"text": "inner done"}]
     modes = {**appmod.toolbox.effective({}, None, None), "write_local_file": "on"}
@@ -1271,7 +1274,7 @@ def test_a_token_in_a_child_tool_result_is_stripped() -> None:
 def test_a_token_in_a_subagent_root_is_stripped() -> None:
     pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
     root = tempfile.mkdtemp()
-    ctx = mkctx(new_conv(), settings={**appmod.settings(), "workspaceRoots": [root]})
+    ctx = mkctx(new_conv(), settings={**appmod.settings()})
     out = run(appmod.toolbox.call("agent_spawn", {"task": "write", "role": "worker", "root": f"/Applications/Grain.app/{pat}"}, ctx))
     check(pat not in str(out) and "[github-pat]" in out["error"] and "off limits" in out["error"],
           "a token in a worker root is stripped")
@@ -1302,7 +1305,7 @@ def test_settings_and_routes() -> None:
         if k != "permissionMode":  # a permissions key (permissions.DEFAULTS), not an llm setting
             check(llm.DEFAULT_SETTINGS[k] == v, f"default {k}")
     check(llm.DEFAULT_SETTINGS["subagentMaxConcurrent"] == 0 and limits.slots(llm.DEFAULT_SETTINGS, "subagentMaxConcurrent") >= 2
-          and llm.DEFAULT_SETTINGS["subagentMaxDepth"] == 2
+          and LIMIT_DEFAULTS["SUBAGENT_MAX_DEPTH"] == 2
           and "subagentMaxRounds" not in llm.DEFAULT_SETTINGS, "the specified defaults")
     reset()
     store = appmod.run_store

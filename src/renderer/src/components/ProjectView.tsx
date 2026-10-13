@@ -15,6 +15,7 @@ import { fenced, lines, usePageContext } from '../lib/pageContext'
 import { ago } from './dataFormat'
 import { modelLabel } from '../lib/modelLabel'
 import AppSwitcher from './AppSwitcher'
+import ProjectDashboards from './ProjectDashboards'
 
 export default function ProjectView(): JSX.Element {
   const id = useStore((s) => s.projectViewId)!
@@ -112,6 +113,7 @@ export default function ProjectView(): JSX.Element {
             <ProjectContext key={id} projectId={id} />
           </section>
         </div>
+        <ProjectDashboards projectId={id} />
         <details className="project-sec project-fold project-tools" aria-label={L.context}>
           {fold(<Info size={14} />, L.context, project.description ? oneLine(project.description, 90) : 'No description')}
           {project.description ? <p className="project-desc">{project.description}</p> : null}

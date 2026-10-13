@@ -25,6 +25,9 @@ WINDOW = 24
 # Calls whose whole point is to be repeated while something else works: an unchanged answer is not a loop.
 WAITING_TOOLS = frozenset({"coding_session_status", "coding_session_wait"})
 
+POLL_HINT_AFTER = 3  # polls of one job with nothing new before the result says so
+POLL_TOOLS = frozenset({"shell_poll", "coding_session_wait", "coding_session_status"})
+
 STUCK_NUDGE = ("You appear to be stuck: {detail}. Change approach: use a different tool or arguments, "
                "or answer with what you have and say what is missing.")
 STUCK_STOP = ("This reply keeps getting stuck ({detail}), so it is stopping tool use. "
@@ -81,6 +84,15 @@ class StuckDetector:
         self.obs: deque[Obs] = deque(maxlen=WINDOW)
         self.not_run = 0
         self.last_not_run = ""
+        self.polls: dict[str, tuple[str, int]] = {}
+
+    def poll(self, key: str, result: Any) -> int:
+        """A wait or poll on one job: how many times in a row it has come back exactly the same (1 = the first time)."""
+        digest = result_digest(result)
+        prev = self.polls.get(key)
+        n = prev[1] + 1 if prev and prev[0] == digest else 1
+        self.polls[key] = (digest, n)
+        return n
 
     def reset(self) -> None:
         self.obs.clear()

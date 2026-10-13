@@ -43,7 +43,7 @@ from .db import new_id, now
 from . import toolcore
 from .toolcalls import parse_arguments, resolve_name
 from .trace import Tracer, now_ms
-from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
+from .stuck import POLL_HINT_AFTER, POLL_TOOLS, STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector, result_digest
 from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, DISCARDED, ToolSpec, _obj, allows_slug, call_key, denied, summarize_result, tool_error
 from .working import escape_tags, fence_untrusted
 
@@ -109,6 +109,17 @@ READ_TOOLS = (
     "doc_list", "doc_search", "doc_read", "youtube_search", "youtube_video", "github_search", "github_read", "read_feed",
     "desk_list_files", "desk_read_file", "view_image", "doc_guide",
 )
+
+# Reads whose repeat, when the answer is byte-identical, is answered with a stub instead of the same text again. Not the
+# ones that fetch from outside or tell the time: a second look there is meant to see something new.
+DEDUPE_TOOLS = frozenset(set(READ_TOOLS) - {"current_time", "web_search", "fetch_url", "read_tool_result", "search_tool_results", "context_map",
+                                            "youtube_search", "youtube_video", "github_search", "github_read", "read_feed"}
+                         | {"gmail_search", "gmail_read", "gmail_outbox"})
+
+
+def dedupable(name: str, args: dict[str, Any]) -> bool:
+    return name in DEDUPE_TOOLS and (name != "gmail_outbox" or args.get("action") in (None, "", "list"))
+
 
 # What a child is always offered once its tool list passes toolDeferAbove (tool_search joins it). The most-called tools of
 # 15 days of worker and subagent runs; every other tool it may call is in a prompt index and loads on first call or via
@@ -521,6 +532,7 @@ class Child:
     repeats: int = 0
     stuck_hits: int = 0
     stuck_stop: str = ""            # set when a breaker ends tool use: what to tell the model
+    seen: dict[str, tuple[str, int, str]] = field(default_factory=dict)  # call_key -> (result digest, round, result_id) of the last read-only answer
 
     @property
     def label(self) -> str:
@@ -1271,6 +1283,17 @@ class Subagents:
             result.pop("images", None)
             if hint := ch.denials.note():
                 result["permission_note"] = hint
+        if ran and name in POLL_TOOLS and isinstance(result, dict) and not err:
+            polled = ch.detector.poll(call_key(name, {k: v for k, v in args.items() if k not in ("wait_s", "timeout_s")}), result)
+            if polled >= POLL_HINT_AFTER:
+                result["poll_hint"] = f"No new output in {polled} polls; check the job's status or do other work instead of waiting again."
+        stub = None
+        if ran and not err and isinstance(result, dict) and dedupable(name, args):
+            digest, prev = result_digest(result), ch.seen.get(sig)
+            ch.seen[sig] = (digest, ch.rounds, prev[2] if prev and prev[0] == digest else "")
+            if prev and prev[0] == digest:
+                ago = f"{ch.rounds - prev[1]} rounds ago" if ch.rounds > prev[1] else "earlier in this round"
+                stub = {"unchanged": True, "note": f"Same result as your call {ago}{f' (result_id {prev[2]})' if prev[2] else ''}; nothing changed."}
         ch.denials.record(not ran and (spec is not None or mcp) and raw_mode != "off" and "_raw" not in args)
         nudge = ""
         if ran:
@@ -1283,6 +1306,8 @@ class Subagents:
                 else:
                     ch.stuck_stop = stuck.detail
         preview = summarize_result(result)
+        if stub is not None:
+            result = stub
         self._emit(ch, "tool_result", {"id": uid, "name": name, "result_preview": preview, "error": err, "approval": decision,
                                        "duration_ms": int((time.time() - t0) * 1000), "wait_ms": self.waits.pop(uid, 0), **repaired})
         # The parent loop's fence, per call: a result that read untrusted text (web, a coding agent's log) is wrapped as data
@@ -1290,8 +1315,10 @@ class Subagents:
         fence = ch.ctx.setdefault("fence_nonce", secrets.token_hex(8)) \
             if len(ch.ctx.get("taint_sources") or []) > sources_before else None
         if self.results is not None and ch.conversation_id:
-            content = self.results.render(ch.conversation_id, ch.message_id, name, result, untrusted=bool(ch.ctx.get("tainted")),
-                                          fence=fence)[0]
+            content, rid = self.results.render(ch.conversation_id, ch.message_id, name, result, untrusted=bool(ch.ctx.get("tainted")),
+                                               fence=fence)
+            if rid and sig in ch.seen and stub is None:
+                ch.seen[sig] = (*ch.seen[sig][:2], rid)  # a long answer lives behind a handle: the stub can point at it
             return content + nudge
         blob = redact.scrub_command_output(json.dumps(result, default=str, ensure_ascii=False))
         blob = blob if len(blob) <= 8000 else blob[:8000] + "...[truncated]"

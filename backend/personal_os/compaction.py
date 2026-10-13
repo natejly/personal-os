@@ -19,6 +19,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import time
 from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException
@@ -366,9 +367,22 @@ def _over_limit(cfg: dict[str, Any], rows: list[dict[str, Any]], history: list[d
     return sum(_row_tokens(r, include_untrusted) for r in rows[start:_cut(cfg, rows, include_untrusted)]) >= max(1, at // 4)
 
 
+# The summarizer sits before a reply's first token. It gets this long, and after it fails the conversation is not
+# compacted again for RETRY_AFTER_S, so a degraded side model costs one wait instead of one per reply.
+SUMMARIZER_DEADLINE_S = 20.0
+RETRY_AFTER_S = 300.0
+_failed_at: dict[str, float] = {}  # conversation id -> time.monotonic() of the last failed summarizer call
+
+
+def _cooling(conv_id: str) -> bool:
+    return time.monotonic() - _failed_at.get(conv_id, float("-inf")) < RETRY_AFTER_S
+
+
 def needs_compaction(compactor: Compactor, convos: Any, cfg: dict[str, Any], conv_id: str, system_tokens: int, *,
                      window: int | None = None) -> bool:
     """Whether `prepare_history` would run the summarizer now, so the caller can say so first. Never raises."""
+    if _cooling(conv_id):
+        return False
     try:
         rows = convos.history_rows(conv_id)
         summary, untrusted = compactor.get(conv_id), _tainted(convos, conv_id)
@@ -393,9 +407,11 @@ async def prepare_history(compactor: Compactor, convos: Any, cfg: dict[str, Any]
         untrusted = _tainted(convos, conv_id)
         summary = compactor.get(conv_id)
         history = compactor.build_history(rows, summary, untrusted)
-        if _over_limit(cfg, rows, history, system_tokens, window, include_untrusted=untrusted, summary=summary):
-            res = await compactor.compact(cfg, model, conv_id, rows, include_untrusted=untrusted,
-                                          complete=bind_supported(complete or llm.complete, cancel=cancel, deadline=deadline))
+        if not _cooling(conv_id) and _over_limit(cfg, rows, history, system_tokens, window, include_untrusted=untrusted, summary=summary):
+            res = await compactor.compact(cfg, model, conv_id, rows, include_untrusted=untrusted, complete=bind_supported(
+                complete or llm.complete, cancel=cancel, effort="low",
+                deadline=min(deadline or float("inf"), time.monotonic() + SUMMARIZER_DEADLINE_S)))
+            _failed_at.pop(conv_id, None)
             if res:
                 info = {**res, "row_ids": info["row_ids"]}
                 history = compactor.build_history(rows, compactor.get(conv_id), untrusted)
@@ -403,13 +419,15 @@ async def prepare_history(compactor: Compactor, convos: Any, cfg: dict[str, Any]
     except llm.LLMError:
         if cancel is not None and cancel.is_set():
             raise
+        _failed_at[conv_id] = time.monotonic()
         log.warning("history compaction failed; sending the history uncompacted", exc_info=True)
     except Exception:  # noqa: BLE001 - a summarizer failure must never fail the reply
+        _failed_at[conv_id] = time.monotonic()
         log.warning("history compaction failed; sending the history uncompacted", exc_info=True)
     # The summary + recent tail built before the summarizer ran is still good; raw rows only when nothing was built.
     if history is not None:
         return history, {"compacted": False, "row_ids": [r["id"] for r in rows]}
-    return ([{"role": r["role"], "content": r["content"]} for r in rows if r["content"]] or convos.history(conv_id),
+    return ([{"role": r["role"], "content": _public(r["content"])} for r in rows if r["content"]] or convos.history(conv_id),
             {"compacted": False, "row_ids": [r["id"] for r in rows]})
 
 

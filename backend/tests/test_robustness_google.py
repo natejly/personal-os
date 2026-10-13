@@ -45,7 +45,7 @@ class _Tasks:
         rows = self.lists.setdefault(tasklist, {}).values()
         return [dict(t) for t in rows if not updated_min or t["updated"] >= updated_min]
 
-    def tasks_insert(self, body: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
+    def tasks_insert(self, body: dict[str, Any], tasklist: str = "@default", check: bool = True) -> dict[str, Any]:
         if body.get("title") == self.refuse_title:
             raise RuntimeError("400 Bad Request")
         self.n += 1
@@ -53,12 +53,12 @@ class _Tasks:
         self.lists.setdefault(tasklist, {})[row["id"]] = row
         return dict(row)
 
-    def tasks_update(self, task_id: str, patch: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
+    def tasks_update(self, task_id: str, patch: dict[str, Any], tasklist: str = "@default", check: bool = True) -> dict[str, Any]:
         row = self.lists[tasklist][task_id]
         row.update(patch)
         return dict(row)
 
-    def tasks_delete(self, task_id: str, tasklist: str = "@default") -> None:
+    def tasks_delete(self, task_id: str, tasklist: str = "@default", check: bool = True) -> None:
         if task_id not in self.lists.get(tasklist, {}):
             raise RuntimeError("404 task not found")
         del self.lists[tasklist][task_id]
@@ -187,6 +187,36 @@ def test_saved_bodies_are_capped() -> None:
     assert store.get("gmail-body", "m2") is not None and store.get("gmail-body", "m3") is None
 
 
+def test_a_body_is_decoded_in_the_charset_it_names() -> None:
+    def part(text: str, charset: str | None) -> dict[str, Any]:
+        ct = "text/plain" + (f'; charset="{charset}"' if charset else "")
+        return {"mimeType": "text/plain", "headers": [{"name": "Content-Type", "value": ct}],
+                "body": {"data": base64.urlsafe_b64encode(text.encode(charset or "utf-8")).decode()}}
+
+    assert google_mod._extract_body(part("Café à Paris", "iso-8859-1")) == "Café à Paris"
+    assert google_mod._extract_body(part("こんにちは", "shift_jis")) == "こんにちは"
+    assert google_mod._extract_body(part("plain ünïcode", None)) == "plain ünïcode"
+    assert google_mod._extract_body({**part("ok", None), "headers": [{"name": "Content-Type", "value": "text/plain; charset=x-nope"}]}) == "ok"
+
+
+def test_puts_are_written_together_not_one_rewrite_each() -> None:
+    from personal_os import google_store
+
+    path = Path(tempfile.mkdtemp()) / "reads.json"
+    store = ReadStore(path)
+    real, google_store.FLUSH_AFTER = google_store.FLUSH_AFTER, 0.05
+    try:
+        store.put("gmail-body", "m1", {"id": "m1"})
+        store.put("gmail-body", "m2", {"id": "m2"})
+        assert not path.exists()  # nothing rewritten yet
+        deadline = time.time() + 5
+        while not path.exists() and time.time() < deadline:
+            time.sleep(0.02)
+        assert ReadStore(path).get("gmail-body", "m2") == {"id": "m2"}
+    finally:
+        google_store.FLUSH_AFTER = real
+
+
 def test_only_a_refused_refresh_token_asks_for_a_new_sign_in() -> None:
     from google.auth.exceptions import RefreshError, TransportError
 
@@ -196,6 +226,38 @@ def test_only_a_refused_refresh_token_asks_for_a_new_sign_in() -> None:
     assert not google_mod._refresh_rejected(OSError("network is down"))
 
 
+def test_a_refresh_refused_mid_call_flags_the_sign_in_and_stops_asking() -> None:
+    from google.auth.exceptions import RefreshError
+
+    tok = {"refresh_token": "r", "token": "t", "token_uri": "u", "client_id": "c", "client_secret": "s"}
+    s = _Settings(googleToken=dict(tok))
+    g = google_mod.Google(s.get, s.set)
+    out = g.classify_error(RefreshError("invalid_grant: Token has been expired or revoked."))
+    assert isinstance(out, google_mod.GoogleNotConnected) and "sign in again" in str(out)
+    assert s.data["googleToken"]["needs_reauth"] is True
+    with pytest.raises(google_mod.GoogleNotConnected):
+        g._creds()  # no refresh attempt: Google already refused this token
+    plain = OSError("network is down")
+    assert g.classify_error(plain) is plain
+
+
+def test_google_http_errors_read_as_a_status_and_a_reason() -> None:
+    from googleapiclient.errors import HttpError
+    from httplib2 import Response
+
+    def err(status: int, reason: str, detail: str = "") -> HttpError:
+        content = f'{{"error": {{"message": "{reason}", "errors": [{{"reason": "{detail}"}}]}}}}'.encode()
+        return HttpError(Response({"status": status}), content, uri="https://www.googleapis.com/calendar/v3/x")
+
+    assert google_mod.http_failure(err(404, "Not Found")) == (404, "Google: Not Found")
+    assert google_mod.http_failure(err(429, "Too many"))[0] == 503
+    assert google_mod.http_failure(err(403, "Quota", "userRateLimitExceeded"))[0] == 503
+    assert google_mod.http_failure(err(403, "Insufficient Permission", "insufficientPermissions"))[0] == 409
+    status, msg = google_mod.http_failure(err(500, "Backend Error"))
+    assert status == 502 and "googleapis.com" not in msg and "Backend Error" in msg
+    assert google_mod.http_failure(RuntimeError("boom"))[0] == 502
+
+
 class _Get:
     def __init__(self, event: dict[str, Any]) -> None:
         self.event = event
@@ -203,7 +265,7 @@ class _Get:
     def get(self, **_kw: Any) -> "_Get":
         return self
 
-    def execute(self) -> dict[str, Any]:
+    def execute(self, **_kw: Any) -> dict[str, Any]:
         return self.event
 
 

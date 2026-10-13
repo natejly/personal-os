@@ -3,6 +3,7 @@ import { Mail as MailIcon, RefreshCw, Search, Star, Archive, MailOpen, Mail, Ext
 import { useStore } from '../store'
 import { PIM_SETTINGS_TAB, pimLabel, pimStatus } from '../lib/pim'
 import { api } from '../lib/api'
+import { PimErrorBar } from './PimErrorBar'
 import SmartTextarea from './SmartTextarea'
 import type { Document, GmailAttachment, GmailFullMessage, GmailLabel, GmailMessage } from '@shared/types'
 import { oneLine } from '../lib/emailAsk'
@@ -529,7 +530,7 @@ export default function MailView(): JSX.Element {
           <button className="primary-btn" onClick={() => useStore.getState().openSettings(PIM_SETTINGS_TAB)}>Connect {label}</button>
         </div>
       )}
-      {error && <div className="notice-bar error">{error}</div>}
+      <PimErrorBar error={error} />
 
       {google?.connected && <>
       <div className="mail-toolbar no-drag">

@@ -9,7 +9,7 @@ import json
 import sys
 import tempfile
 import unittest
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -65,8 +65,11 @@ def garmin_answers() -> dict[str, Any]:
 
 class Helpers(unittest.TestCase):
     def test_parse_date(self) -> None:
-        for v in ["2026-10-01", "2026-10-01T23:10:00Z", 20261001, "20261001", "2026-10-01 07:00:00"]:
+        for v in ["2026-10-01", "2026-10-01T23:10:00", 20261001, "20261001", "2026-10-01 07:00:00"]:
             self.assertEqual(parse_date(v), TODAY, v)
+        # A GMT instant lands on the local day it happened, the same as an epoch does.
+        for v in ["2026-10-12T02:30:00Z", "2026-10-12T02:30:00.0+00:00"]:
+            self.assertEqual(parse_date(v), datetime(2026, 10, 12, 2, 30, tzinfo=timezone.utc).astimezone().date(), v)
         self.assertIsNone(parse_date("soon"))
         self.assertIsNone(parse_date(True))
         self.assertIsNotNone(parse_date(1790000000000))  # epoch ms

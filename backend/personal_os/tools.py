@@ -1045,9 +1045,15 @@ class Toolbox:
             return self._bad_arguments(name, spec, e)
         except Exception as e:  # noqa: BLE001
             log.warning("tool %s failed", name, exc_info=True)
+            if classify := getattr(self.google, "classify_error", None):
+                e = classify(e)  # a sign-in revoked mid-call becomes GoogleNotConnected
             if type(e).__name__ == "GoogleNotConnected":
-                return tool_error(f"{name}: Google is not connected.",
-                                  alternative="ask the user to connect Google under Settings → Integrations, then retry")
+                reauth = bool(self.google and self.google.status().get("needs_reauth"))
+                return tool_error(f"{name}: {e}",
+                                  alternative=f"ask the user to {'reconnect' if reauth else 'connect'} Google under Settings → Integrations, then retry")
+            if type(e).__name__ == "HttpError":
+                from .google import http_failure
+                return tool_error(redact.scrub_command_output(f"{name}: {http_failure(e)[1]}"), alternative=ALTERNATIVE.get(name))
             if isinstance(e, httpx.HTTPStatusError):
                 return tool_error(redact.scrub_command_output(f"{name}: HTTP {e.response.status_code} from {e.request.url.host}"),
                                   alternative=ALTERNATIVE.get(name))

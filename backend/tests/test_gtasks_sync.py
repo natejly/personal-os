@@ -58,20 +58,20 @@ class _FakeGoogle:
         """What the API shows after a delete: a tombstone, stamped now."""
         self.tasks[tid].update(deleted=True, updated=_iso(time.time()))
 
-    def tasks_insert(self, body: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
+    def tasks_insert(self, body: dict[str, Any], tasklist: str = "@default", check: bool = True) -> dict[str, Any]:
         body = _task_body(body)  # the real client normalises due dates on the way in
         tid = self.seed(body.get("title", ""), notes=body.get("notes", ""), due=body.get("due"),
                         status=body.get("status", "needsAction"))
         return dict(self.tasks[tid])
 
-    def tasks_update(self, task_id: str, patch: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
+    def tasks_update(self, task_id: str, patch: dict[str, Any], tasklist: str = "@default", check: bool = True) -> dict[str, Any]:
         patch = _task_body(patch)
         row = self.tasks[task_id]
         row.update({k: v for k, v in patch.items() if k in ("title", "notes", "due", "status")})
         row["updated"] = self._stamp()
         return dict(row)
 
-    def tasks_delete(self, task_id: str, tasklist: str = "@default") -> None:
+    def tasks_delete(self, task_id: str, tasklist: str = "@default", check: bool = True) -> None:
         if task_id not in self.tasks:
             raise RuntimeError("404 task not found")
         del self.tasks[task_id]
@@ -162,6 +162,24 @@ class SyncTests(unittest.TestCase):
         td = self.todos.list(include_done=True)[0]
         self.assertEqual((td["title"], td["done"]), ("Pay rent (Oct)", 1))
 
+    def test_a_local_edit_made_during_a_pull_is_still_pushed(self) -> None:
+        eid = self.g.seed("Pay rent")
+        self.sync.sync_once()
+        self.g.tasks_update(eid, {"title": "Pay rent (Oct)"})
+        snapshot, edited = self.todos.all_for_sync, []
+
+        def snapshot_then_edit() -> list[dict[str, Any]]:
+            rows = snapshot()
+            if not edited:  # the user types into the todo while this pass is talking to Google
+                edited.append(self.todos.update(rows[0]["id"], {"notes": "landlord's new account"}))
+            return rows
+
+        self.todos.all_for_sync = snapshot_then_edit  # type: ignore[method-assign]
+        self.sync.sync_once()
+        self.todos.all_for_sync = snapshot  # type: ignore[method-assign]
+        self.sync.sync_once()
+        self.assertEqual(self.g.tasks[eid]["notes"], "landlord's new account")
+
     def test_conflict_newer_side_wins(self) -> None:
         eid = self.g.seed("Original")
         self.sync.sync_once()
@@ -215,7 +233,7 @@ class SyncTests(unittest.TestCase):
         self.todos.update(td["id"], {"done": True})
         sent: list[dict[str, Any]] = []
         real = self.g.tasks_update
-        self.g.tasks_update = lambda tid, patch, tl="@default": (sent.append(patch), real(tid, patch, tl))[1]  # type: ignore[method-assign]
+        self.g.tasks_update = lambda tid, patch, tl="@default", **kw: (sent.append(patch), real(tid, patch, tl))[1]  # type: ignore[method-assign]
         self.assertEqual(self.sync.sync_once()["pushed"], 1)
         self.assertNotIn("notes", sent[0])
         self.assertEqual(self.g.tasks[eid]["notes"], "passport\ncharger\n" + "x" * 3000)

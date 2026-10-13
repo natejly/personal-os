@@ -74,6 +74,13 @@ class ClassifyTests(unittest.TestCase):
         t = thread("t", msg("1", "al@y.com", 3, "Can you send it?"), msg("2", ME, 2, "Sent", to="al@y.com"), msg("3", "al@y.com", 1, "Great, thanks"))
         self.assertEqual(status(t), "actioned")
 
+    def test_mail_sent_from_an_alias_counts_as_mine(self) -> None:
+        alias = {**msg("2", "me@work.example", 1, "Can you review this?", to="al@y.com"), "labels": ["SENT"]}
+        self.assertEqual(status(thread("t", msg("1", "al@y.com", 2, "hi"), alias)), "awaiting_reply")
+        reply = {**msg("2", "me@work.example", 2, "Sent", to="al@y.com"), "labels": ["SENT"]}
+        t = thread("t", msg("1", "al@y.com", 3, "Can you send it?"), reply, msg("3", "al@y.com", 1, "Great, thanks"))
+        self.assertEqual(status(t), "actioned")
+
     def test_fyi_is_never_possible_when_i_sent_last(self) -> None:
         variants = []
         for i, snip in enumerate(["", "ok", "Thanks!", "can you?", "let me know", "fyi attached", "?", "see below", "done", "when are you free"]):

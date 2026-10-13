@@ -22,6 +22,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from . import verify
 from .google import Google, GoogleNotConnected, _parse_iso
 from .todos import Todos
 
@@ -58,11 +59,6 @@ def _date_only(due: str | None) -> str | None:
 def _remote_body(td: dict[str, Any]) -> dict[str, Any]:
     return {"title": td["title"] or "(untitled)", "notes": td["notes"] or "", "due": td["due"],
             "status": "completed" if td["done"] else "needsAction"}
-
-
-def _is_missing(e: Exception) -> bool:
-    s = str(e)
-    return "404" in s or "not found" in s.lower()
 
 
 FULL_EVERY = 6 * 3600  # seconds between full listings
@@ -203,10 +199,10 @@ class TasksSync:
             eid = ts["external_id"]
             if eid in remote:
                 try:
-                    self.google.tasks_delete(eid, tasklist)
+                    self.google.tasks_delete(eid, tasklist, check=False)
                     counts["deleted_remote"] += 1
                 except Exception as e:  # noqa: BLE001
-                    if not _is_missing(e):
+                    if not verify.is_missing(e):
                         raise
                 remote.pop(eid, None)
                 self._known.pop(eid, None)
@@ -266,7 +262,7 @@ class TasksSync:
             if td.get("external_id") or td.get("source") == "board":  # cards moved in from boards stay local; they never lived in Google
                 continue
             try:
-                rt = self.google.tasks_insert(_remote_body(td), tasklist)
+                rt = self.google.tasks_insert(_remote_body(td), tasklist, check=False)
             except GoogleNotConnected:
                 raise
             except Exception as e:  # noqa: BLE001 - one refused todo must not block the rest
@@ -276,7 +272,7 @@ class TasksSync:
                 # Deleted here while the insert was in flight. Left alone, the new task would
                 # come back on the next pass as a todo the user had already removed.
                 with contextlib.suppress(Exception):
-                    self.google.tasks_delete(rt["id"], tasklist)
+                    self.google.tasks_delete(rt["id"], tasklist, check=False)
                 continue
             counts["created_remote"] += 1
         return counts
@@ -323,6 +319,12 @@ class TasksSync:
             patch["done"] = done
         cur = td
         if patch:
+            fresh = self.todos.get(td["id"])
+            if not fresh or fresh["updated_at"] != td["updated_at"]:
+                # Edited here since this pass read it: marking it synced would lose that edit, so
+                # the next pass, which sees both sides changed, settles it.
+                # ponytail: a get-then-update window remains; a conditional UPDATE closes it if it matters.
+                return 0
             cur = self.todos.update(td["id"], patch, notify=False) or td
         self.todos.set_sync_state(td["id"], td["external_id"], rt.get("updated"), cur["updated_at"])
         return 1 if patch else 0
@@ -333,5 +335,5 @@ class TasksSync:
             # Unchanged here: the local copy is the pull, so sending it again could only rewrite
             # Google's notes (CRLF line ends, or notes past the local cap).
             body.pop("notes")
-        rt = self.google.tasks_update(remote["id"], body, tasklist)
+        rt = self.google.tasks_update(remote["id"], body, tasklist, check=False)
         self.todos.set_sync_state(td["id"], remote["id"], rt.get("updated"), td["updated_at"])

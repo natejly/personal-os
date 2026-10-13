@@ -85,6 +85,11 @@ def _automated_sender(frm: str | None) -> bool:
     return any(local == p or local.startswith(p) for p in AUTOMATED_LOCALPARTS)
 
 
+def _mine(m: dict[str, Any], me: str) -> bool:
+    """Sent by this account: Gmail labels SENT whatever From it used (an alias, a second domain)."""
+    return "SENT" in (m.get("labels") or []) or _addr(m.get("from")) == me
+
+
 def classify(thread: dict[str, Any], me: str, now: datetime, cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     """Deterministic status for one thread. Rules run in order; see the module docstring."""
     msgs = thread.get("messages") or []
@@ -96,13 +101,14 @@ def classify(thread: dict[str, Any], me: str, now: datetime, cfg: dict[str, Any]
     last_from = _addr(last.get("from"))
     age = max(0.0, (now - _when(last.get("date"), now)).total_seconds() / 86400)
     out = {"age_days": round(age, 3), "last_from": last_from}
+    sent_last = _mine(last, me)
 
     def done(status: str, reason: str) -> dict[str, Any]:
         # Rule: when I sent last, "fyi" is not a possible outcome.
-        assert not (last_from == me and status == "fyi"), "fyi is impossible when the user sent last"
+        assert not (sent_last and status == "fyi"), "fyi is impossible when the user sent last"
         return {"status": status, "reason": reason, **out}
 
-    if last_from == me:
+    if sent_last:
         if has_request(last.get("snippet")):
             return done("awaiting_reply", "my last message asks something")
         return done("actioned", "my last message needs no answer")
@@ -111,8 +117,8 @@ def classify(thread: dict[str, Any], me: str, now: datetime, cfg: dict[str, Any]
         return done("fyi", "automated")
 
     # Did I reply after their last request?
-    last_q = max((i for i, m in enumerate(msgs) if _addr(m.get("from")) != me and not m.get("auto") and has_request(m.get("snippet"))), default=-1)
-    replied = [i for i, m in enumerate(msgs) if _addr(m.get("from")) == me]
+    last_q = max((i for i, m in enumerate(msgs) if not _mine(m, me) and not m.get("auto") and has_request(m.get("snippet"))), default=-1)
+    replied = [i for i, m in enumerate(msgs) if _mine(m, me)]
     if last_q >= 0 and any(i > last_q for i in replied):
         return done("actioned", "I replied after their last question")
     if has_request(last.get("snippet")):
@@ -154,7 +160,7 @@ def refine(items: list[tuple[dict[str, Any], dict[str, Any]]], llm_fn: Callable[
     for res, (thread, _), status in zip(results, items, raw):
         if status not in STATUSES:
             continue
-        sent_last = _addr(((thread.get("messages") or [{}])[-1]).get("from")) == me.strip().lower()
+        sent_last = _mine((thread.get("messages") or [{}])[-1], me.strip().lower())
         if sent_last and status == "fyi":
             continue
         if status != res["status"]:

@@ -1595,8 +1595,9 @@ PROACTIVE_HINT = (  # chats that cannot delegate (a persona without the hand-off
 # A plain chat turn that can delegate is told this instead of PROACTIVE_HINT and PLAN_HINT (workers.py).
 FRONT_AGENT_HINT = workers_mod.FRONT_AGENT_HINT
 # Only added when todo_write is actually available in this chat (see _chat_stream).
-PLAN_HINT = ("For more than a couple of tool calls, open with todo_write and update it as steps land."
-             " If a decision is genuinely the user's, call ask_user once instead of guessing.")
+PLAN_HINT = ("Open with todo_write only when the request has 3 or more distinct steps, and update it as steps land;"
+             " a one- or two-step request needs no plan, just act. "
+             "If a decision is genuinely the user's, call ask_user once instead of guessing.")
 # Only added when save_memory or search_memory is available in this chat. Static text: it sits in the cached prefix.
 MEMORY_HINT = ("Save corrections, standing instructions and durable facts with save_memory (kind instruction for always/never rules; until for facts that expire).\n"
                "Call search_memory before answering about the user's past or preferences not already in context.")

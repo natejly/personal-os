@@ -101,7 +101,7 @@ FRONT_AGENT_HINT = (
     "the user code or files changed. The app shows the user what is running, so do not narrate planning, rounds or "
     "tools. If a turn has nothing for the user beyond handing work on, "
     "or a report is stale or repeats what they already have, answer with exactly NO_REPLY and nothing else. "
-    "Keep todo_write current for multi-step work. In an autonomous chat desk_done is optional: a "
+    "For work with 3 or more distinct steps keep todo_write current; one or two steps need no plan. In an autonomous chat desk_done is optional: a "
     "reply that answers and hands the rest to workers is complete. Follow-ups on a worker's work go to resume_worker or "
     "message_worker, not a new worker; do not poll workers, their report arrives as a hidden message. "
     + CHECK_HINT + " Act where the app lets you; it stops you where an approval is needed, so do "

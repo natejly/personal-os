@@ -236,6 +236,17 @@ def _model_votes(c: sqlite3.Connection) -> None:
       a_ms INTEGER, b_ms INTEGER, a_tokens INTEGER, b_tokens INTEGER)""")
 
 
+def _dashboard_binding_cache(c: sqlite3.Connection) -> None:
+    """dashboard_binding_cache (saved_dashboards.py): the last rows each binding of a live saved dashboard read
+    successfully, so a binding that fails later still renders. doc_id is a docs id (text)."""
+    c.execute("""CREATE TABLE IF NOT EXISTS dashboard_binding_cache (
+      doc_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      rows_json TEXT NOT NULL,
+      fetched_at TEXT NOT NULL,
+      PRIMARY KEY (doc_id, name))""")
+
+
 def _sticky_notes_into_docs(c: sqlite3.Connection) -> None:
     """Sticky notes become docs. Each note row turns into a doc with the SAME id (so a space window keeps its
     ref_id), titled from its first line (docs.title_from_body), body, project and timestamps kept, filed at the
@@ -727,6 +738,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (41, "embedding_model_unset", _embedding_model_unset),
     (42, "tiers_replace_legacy_models", _tiers_replace_legacy_models),
     (43, "learn_pending", _learn_pending),
+    (44, "dashboard_binding_cache", _dashboard_binding_cache),
 ]
 
 

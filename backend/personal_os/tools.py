@@ -49,10 +49,10 @@ from . import websearch
 from . import outbox as outbox_mod
 from . import blobs as blob_store, mail_attachments
 from .extract_text import safe_upload_name
-from . import scheduling, verify
+from . import saved_dashboards, scheduling, verify
 from .jobs import check_watch_dir, local_tz_name, parse_when, valid_cron, valid_tz
 from .learn import SELF_LABELS, SKILL_STATUSES, induce_skill, run_transcript
-from .repos import Documents, Graph, Memories, is_isolated
+from .repos import Documents, Graph, Memories, Projects, is_isolated
 from .sandbox import WORKSPACE_REPORT_CAP, blocked_note, declared_limits, limits_text, profile_failed, run_python
 
 ToolFn = Callable[..., Awaitable[Any]]
@@ -118,7 +118,7 @@ STATIC_FLOOR = {"gmail_send": "send", "calendar_delete": "items", "todo_delete":
 # erase those unnoticed.
 PROMPT_WRITES = frozenset({
     "save_memory", "graph_add", "save_writing_sample",
-    "doc_create", "doc_edit", "doc_delete", "doc_comment_reply",
+    "doc_create", "doc_edit", "doc_delete", "doc_comment_reply", "dashboard_save",
     "todo_add", "todo_delete", "todo_update",
     "skill_draft", "skill_revise", "skill_from_run",
     "health_log", "health_delete_entry",
@@ -773,6 +773,7 @@ class Toolbox:
         self.user_update: Callable[[dict[str, Any], str, list[dict[str, Any]]], Awaitable[bool]] | None = None  # send_files' live delivery: (ctx, text, attachments) -> accepted; set by app.py
         self.setup_probes: dict[str, Callable[[], bool]] = {}  # setup_request's "is it set up" checks for stores app.py owns (telegram, mcp)
         self.permission_store: Callable[[Callable[[dict[str, Any]], dict[str, Any]]], Any] | None = None  # permissions_update's write: fn(current) -> keys to store; set by app.py
+        self.dashboards: Any = None  # saved_dashboards.SavedDashboards; set by app.py
         self.chat_files: Any = None  # chat_files.ChatFiles: which chat each file belongs to; set by app.py
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
         self.trash: Any = None  # soft delete (trash.py); set by app.py
@@ -2760,6 +2761,12 @@ def _register_docs(self: Toolbox) -> None:
         else:
             new = body
         retitle = title if title and title != d["title"] else None
+        if saved_dashboards.is_dashboard(body):  # a broken envelope would leave the dashboard unopenable
+            try:
+                saved_dashboards.validate_text(new)
+            except ValueError as e:
+                return {"error": f"Not proposed: the edit would break this dashboard ({e})", "doc_id": d["id"],
+                        "hint": "keep the JSON envelope valid; doc_read shows it"}
         if new == body and not retitle:
             return _scrub_strings({"doc_id": d["id"], "unchanged": True, "note": "The edit produced no change, so nothing was proposed."})
         rev = self.docs.propose(d["id"], new, summary or "Assistant edit", tool="doc_edit", title_after=retitle)
@@ -2849,6 +2856,72 @@ def _register_docs(self: Toolbox) -> None:
     R("doc_comment_reply", ToolSpec("doc_comment_reply", "Reply in a file's comment thread as the assistant. Read it with doc_comments first; answer it or say what you changed. Does not edit the file or resolve the thread.",
         _obj({"thread_id": {"type": "string", "description": "thread_id from doc_comments"}, "body": {"type": "string", "description": "The reply, markdown"}}, ["thread_id", "body"]),
         doc_comment_reply, "docs", "writes"))
+
+    # Saved dashboards are docs in the Dashboards folder (saved_dashboards.py); edits go through doc_edit.
+    def _board(ctx: dict[str, Any], name: str) -> dict[str, Any] | None:
+        return self.dashboards.find(name, lambda r: _visible(ctx, r))
+
+    def _no_board(name: str) -> dict[str, Any]:
+        return _scrub_strings({"error": f"No saved dashboard matching '{name}'", "dashboards": [r["title"] for r in self.dashboards.list()][:10]})
+
+    async def dashboard_save(ctx: dict[str, Any], title: str, format: str | None = None, mode: str | None = None,
+                             bindings: list[Any] | None = None, views: list[Any] | None = None, html: str | None = None) -> Any:
+        try:
+            d = self.dashboards.save(title, ctx.get("project_id"), format, mode, bindings, views, html, author="assistant")
+        except ValueError as e:
+            return {"error": f"Dashboard not saved: {e}"}
+        if self.chat_files is not None:
+            self.chat_files.record(ctx.get("conversation_id"), "note", d["id"], d["title"], "created", ctx.get("message_id"))
+        return _scrub_strings({"saved": d["title"], "doc_id": d["id"], "dashboard": {"id": d["id"], "title": d["title"]},
+                               "note": "Saved in the Dashboards folder. Change it later with doc_edit on this doc id."})
+    R("dashboard_save", ToolSpec("dashboard_save", (
+        "Save a dashboard the user wants to keep: a chart or a page of numbers that stays current. Prefer format 'spec': "
+        "`views` is 1-12 of {kind: 'chart'|'interactive', spec} using the same JSON as the chart / interactive fences, and a spec "
+        "whose \"data\" is \"$name\" gets binding `name`'s rows when it opens. Use `bindings` (references) instead of pasting data: "
+        "{name, source: 'doc', doc: <title or id>} reads a doc (JSON array, JSON {rows}, or its first markdown table); "
+        "{name, source: 'health', metric, days?, provider?} reads health readings (provider e.g. 'coros'). "
+        "mode 'live' (default) re-reads on every open; 'snapshot' freezes the data now. "
+        "Use format 'html' only for a layout the spec cannot express: `html` with {{name}} (a table of the rows) and "
+        "{{name.field}} (the last row's value) placeholders; no scripts."),
+        _obj({"title": {"type": "string"}, "format": {"type": "string", "enum": ["spec", "html"]}, "mode": {"type": "string", "enum": ["live", "snapshot"]},
+              "bindings": {"type": "array", "items": {"type": "object"}}, "views": {"type": "array", "items": {"type": "object"}},
+              "html": {"type": "string"}}, ["title"]),
+        dashboard_save, "dashboards", "writes"))
+
+    async def dashboard_open(ctx: dict[str, Any], name: str) -> Any:
+        d = _board(ctx, name)
+        if not d:
+            return _no_board(name)
+        try:
+            r = self.dashboards.render(d)
+        except ValueError as e:
+            return _scrub_strings({"error": f"The dashboard file is invalid: {e}", "doc_id": d["id"], "hint": "fix it with doc_edit"})
+        bad = "; ".join(f"{f['binding']}: {f['error']}" + (" (showing the last good data)" if f["lastGoodAt"] else "") for f in r["failed"])
+        return _scrub_strings({"dashboard": {"id": d["id"], "title": d["title"]},
+                               "summary": f"{d['title']} ({r['mode']}, {r['format']}), updated {r['updatedAt']}."
+                                          + (f" Problems with bindings: {bad}." if bad else "")
+                                          + f" It is shown to the user above. To change it, use doc_edit on doc id {d['id']}."})
+    R("dashboard_open", ToolSpec("dashboard_open", "Show a saved dashboard inline, by title or id.",
+        _obj({"name": {"type": "string"}}, ["name"]), dashboard_open, "dashboards"))
+
+    async def dashboard_pin(ctx: dict[str, Any], name: str, project: str | None = None) -> Any:
+        d = _board(ctx, name)
+        if not d:
+            return _no_board(name)
+        want, pid = (project or "").strip(), None
+        if want and want.lower() not in ("personal", "null", "none"):
+            ps = Projects(self.docs.db).list()
+            hit = next((p for p in ps if want in (p["id"], p["name"]) or p["name"].lower() == want.lower()), None)
+            if not hit:
+                return _scrub_strings({"error": f"No project matching '{want}'", "projects": [p["name"] for p in ps][:10]})
+            pid = hit["id"]
+        self.dashboards.pin(d["id"], pid)
+        return _scrub_strings({"doc_id": d["id"], "title": d["title"], "scope": "project" if pid else "personal",
+                               "note": "Moved to that scope's Dashboards folder."})
+    R("dashboard_pin", ToolSpec("dashboard_pin", "Move a saved dashboard into a project's Dashboards folder, or to Personal (project empty or 'personal').",
+        _obj({"name": {"type": "string", "description": "Dashboard title or doc id"},
+              "project": {"type": "string", "description": "Project name or id; empty or 'personal' for Personal"}}, ["name"]),
+        dashboard_pin, "dashboards", "writes"))
 
 
 Toolbox._register_docs = _register_docs  # type: ignore[attr-defined]

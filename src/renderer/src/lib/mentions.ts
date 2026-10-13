@@ -26,16 +26,18 @@ export function detectMention(value: string, caret: number): { start: number; qu
   return query.length > 40 ? null : { start, query }
 }
 
-/** The rows of the `@` menu for the draft (at most `max`), or null when it should be closed. Picking one writes `@name ` over what was typed. */
-export function mentionItems(text: string, caret: number, agents: MentionAgent[], max = 8, chats: MentionChat[] = []): MentionItem[] | null {
+/** The rows of the `@` menu (agents, chats, saved dashboards: the last two are named by the same slug) for the draft (at most `max`), or null when it should be closed. Picking one writes `@name ` over what was typed. */
+export function mentionItems(text: string, caret: number, agents: MentionAgent[], max = 8, chats: MentionChat[] = [], dashboards: { id: string; title: string }[] = []): MentionItem[] | null {
   const hit = detectMention(text, caret)
   if (!hit) return null
   const rows = filterCommands(agents.map((a) => ({ a, label: a.name, keywords: a.description.split(/\s+/).filter(Boolean) })), hit.query).slice(0, max)
   const rest = text.slice(caret).replace(/^ /, '')
   const chatRows = filterCommands(chats.map((c) => ({ c, label: chatSlug(c.title), keywords: c.title.toLowerCase().split(/\s+/).filter(Boolean) })), hit.query)
+  const dashRows = filterCommands(dashboards.map((d) => ({ d, label: chatSlug(d.title), keywords: d.title.toLowerCase().split(/\s+/).filter(Boolean) })), hit.query)
   const items = [
     ...rows.map(({ a }) => ({ key: `agent:${a.name}`, label: `@${a.name}`, hint: a.description.slice(0, 48), insert: `${text.slice(0, hit.start)}@${a.name} ${rest}` })),
     ...chatRows.map(({ c, label }) => ({ key: `chat:${c.id}`, label: `@${label}`, hint: `Chat · ${c.title}`.slice(0, 48), insert: `${text.slice(0, hit.start)}@${label} ${rest}` })),
+    ...dashRows.map(({ d, label }) => ({ key: `dashboard:${d.id}`, label: `@${label}`, hint: `Dashboard · ${d.title}`.slice(0, 48), insert: `${text.slice(0, hit.start)}@${label} ${rest}` })),
   ].slice(0, max)
   return items.length ? items : null
 }

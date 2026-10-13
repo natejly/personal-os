@@ -6,6 +6,8 @@ import type { DocRevision, RunTapeEvent, ToolEvent, Verification } from '@shared
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import DiffView from './DiffView'
+import DashboardView from './DashboardView'
+import { dashboardOf } from '../lib/dashboards'
 import ActionPlanCard from './ActionPlanCard'
 import RenderBoundary from './RenderBoundary'
 import ApprovalRules from './ApprovalRules'
@@ -314,6 +316,8 @@ function Row({ render }: { render: () => JSX.Element }): JSX.Element {
   return render()
 }
 
+const DASHBOARD_TOOLS = new Set(['dashboard_save', 'dashboard_open', 'dashboard_pin'])
+
 const hasCard = (t: ToolEvent): boolean => t.name !== 'propose_plan' && !(QUESTION_TOOLS.has(t.name) && !!t.pending && !!t.needs_approval) && !!TOOL_CARDS[t.name]
 
 /** `browserSession`: set on the transcript's latest reply that used the browser; its last browser card offers the viewer. */
@@ -373,6 +377,7 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
         {t.show && !t.pending && !t.error && (
           <button className="link small" onClick={() => useStore.getState().openShow(conversationId, t.show!)}>Open in side panel</button>
         )}
+        {DASHBOARD_TOOLS.has(t.name) && !t.pending && !t.error && dashboardOf(t) && <DashboardView id={dashboardOf(t)!.id} chat={conversationId} />}
         {t.name === 'doc_edit' && !t.pending && !t.error && t.result_preview && <DocEditDiff preview={t.result_preview} />}
         {t.name === 'desk_start' && !t.pending && !t.error && /"desk_id":\s*"([^"]+)"/.test(t.result_preview ?? '') && (
           <button className="link small" onClick={() => {

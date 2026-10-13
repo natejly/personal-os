@@ -6,7 +6,7 @@ import {
 import { parseJsonLoose } from '../lib/chartRepair'
 import { AlertCircle, BarChart3, Check, Code2, Copy, Table2 } from '../icons'
 import { applyTransforms, isIsoDateColumn, fmtIsoDate, BRUSH_ABOVE, MAX_ROWS } from '../lib/chartTransforms'
-import OpenInPanel from './ShowButton'
+import OpenInPanel, { SaveDashboard } from './ShowButton'
 
 /**
  * Renders a ```chart fenced block: a compact JSON spec the model writes (see RENDER_HINT in the backend).
@@ -214,6 +214,7 @@ export function ChartTools({ view, setView, source, chartIcon, kind, children }:
       <button className={`icon-btn ghost ${view === 'source' ? 'on' : ''}`} title="Spec source" onClick={() => setView('source')}><Code2 size={13} /></button>
       {children}
       {kind && <OpenInPanel kind={kind} source={source} />}
+      {kind && <SaveDashboard kind={kind} source={source} />}
       <button className="icon-btn ghost" title="Copy spec" onClick={copy}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>
     </div>
   )

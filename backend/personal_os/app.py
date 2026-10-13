@@ -1916,7 +1916,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         convos.update(conv_id, {"model": body.model})
     # Auto: the model for this turn is chosen from the message (router.py). The chat keeps `auto`; the reply row and
     # the trace record what was used. An explicit pick for a regenerated variant arrives as body.model and wins.
-    routed: tuple[str, str] | None = None
+    routed: tuple[str, str, bool] | None = None
     if router.wanted(model, body.model or "", cfg):
         msgs_ = conv["messages"]
         last_user = next((m for m in reversed(msgs_) if _said(m)), None)
@@ -1929,6 +1929,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             plan_mode=((desks.get(str(conv["settings"].get("deskId") or ""), with_outputs=False) or {}).get("autonomy") == "plan"),
             fast_model=str(cfg.get("fastModel") or ""), default_model=str(cfg.get("defaultModel") or ""))
         model = routed[0]
+    # A routed short turn on the chat's own model skips the thinking pass: effort "none" (reasoning_effort "none").
+    turn_effort = "none" if routed and routed[2] else str(conv["settings"].get("effort") or "default")
     user_msg_id: str | None = None  # the user message this turn answers: what a learned memory cites
     regen_am: dict[str, Any] | None = None  # set when a regenerate superseded the trailing answer
     regen_done: list[dict[str, Any]] = []  # the write calls that superseded answer already made
@@ -2338,7 +2340,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # The connectors a child may be given (granted, connected, past the agent's list); it decides each call itself (Subagents._exec_mcp).
         tool_ctx.update(mcp_modes=dict(mcp_modes), mcp_schemas={s["function"]["name"]: s for s in mcp_schemas})
         tool_ctx.update(modes=modes, run=run, stop=stop, depth=0, agent_run_id=run.run_id if run else "", model=model,
-                        effort=str(conv["settings"].get("effort") or "default"))
+                        effort=turn_effort)
 
         delegation_forced = False  # set once the reply's own tool use has to turn into delegating (see the round loop)
 
@@ -2663,7 +2665,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 streamed = False
                 _capture("auto")
                 stream = llm.stream_chat(cfg, model, messages, tool_schemas or None,
-                                         effort=str(conv["settings"].get("effort") or "default"),
+                                         effort=turn_effort,
                                          fast=bool(conv["settings"].get("fast")),
                                          cancel=_stream_cancel(stop, steers, run))
                 try:
@@ -2862,7 +2864,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 buf.append("\n")
                 yield "delta", {"id": am["id"], "text": "\n"}
             llm.usage_context.set({**_ucx, "round": _round})
-            span = tracer.start("llm", model, {"round": _round, "effort": str(conv["settings"].get("effort") or "default"), "final": True, "messages": len(messages), "tools": len(tool_schemas)})
+            span = tracer.start("llm", model, {"round": _round, "effort": turn_effort, "final": True, "messages": len(messages), "tools": len(tool_schemas)})
             yield "span", {"message_id": am["id"], "span": span}
             start, fin = len(buf), {}
             llm.stream_deadline.set(time.monotonic() + FINAL_ROUND_SECONDS)
@@ -2870,7 +2872,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # backends reject that when no tool list is sent. "none" is the portable way to say "answer, do not call".
             _capture("none")
             async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
-                                            effort=str(conv["settings"].get("effort") or "default"), tool_choice="none",
+                                            effort=turn_effort, tool_choice="none",
                                             fast=bool(conv["settings"].get("fast")),
                                             cancel=_stream_cancel(stop, steers, run)):
                 if stop.is_set():
@@ -3006,7 +3008,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 messages.append({"role": "system", "content": _note})
             _reinject_plan()  # last message in the context, after the previous round's tool results
             llm.usage_context.set({**_ucx, "round": _round})
-            lspan = tracer.start("llm", model, {"round": _round, "effort": str(conv["settings"].get("effort") or "default"), "messages": len(messages), "tools": len(tool_schemas)})
+            lspan = tracer.start("llm", model, {"round": _round, "effort": turn_effort, "messages": len(messages), "tools": len(tool_schemas)})
             round_span = lspan  # the tool calls below nest under it
             yield "span", {"message_id": am["id"], "span": lspan}
             first_token: int | None = None
@@ -3044,7 +3046,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tracer.end(lspan, {"finish_reason": "overflow"}, error="Context overflow; compacted and retrying")
                     yield "span", {"message_id": am["id"], "span": lspan}
                     yield "span", {"message_id": am["id"], "span": ev["span"]}
-                    lspan = tracer.start("llm", model, {"round": _round, "effort": str(conv["settings"].get("effort") or "default"), "messages": len(messages), "tools": len(tool_schemas)})
+                    lspan = tracer.start("llm", model, {"round": _round, "effort": turn_effort, "messages": len(messages), "tools": len(tool_schemas)})
                     round_span = lspan
                     yield "span", {"message_id": am["id"], "span": lspan}
                 elif ev["type"] == "reasoning":

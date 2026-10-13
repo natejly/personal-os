@@ -372,7 +372,7 @@ export default function SettingsModal(): JSX.Element {
               <h3>Model</h3>
               <Sec id="provider"><ProviderSettings draft={draft} settings={settings} patch={patch} models={models} /></Sec>
               <label className="toggle-row plain">
-                <span className="toggle-text"><b>Use the fast model for short messages</b><small>Long, analytical or tool-heavy messages still use the chat model.</small></span>
+                <span className="toggle-text"><b>Use the fast model for short messages</b><small>Short, simple messages answer without the thinking pass (or on the fast model if one is set). Long, analytical or tool-heavy messages use the chat model as usual.</small></span>
                 <input type="checkbox" checked={!!draft.autoRoute} onChange={(e) => patch({ autoRoute: e.target.checked })} /><span className="switch" />
               </label>
               <div className="setting-row">

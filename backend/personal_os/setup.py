@@ -63,8 +63,11 @@ def _error_text(r: httpx.Response) -> str:
 # Providers whose address is the user's own: a saved key is only reused for the address it was saved with.
 _OWN_ADDRESS = ("custom", "litellm", "ollama")
 CHECK_TIMEOUT = 10
+# The probe reply from a server on the user's own machine may first have to load the model into memory.
+LOCAL_PROBE_TIMEOUT = 90
 LIST_TIMEOUT = 8
 LIST_TTL = 60
+_SWITCH_RESET = ("modelHigh", "modelMedium", "modelLow", "retrievalRerankModel", "visionModel", "imageModel")
 # (provider, base) -> (fetched at, ids). Only successful listings are kept; tests clear it.
 _models_cache: dict[tuple[str, str], tuple[float, list[str]]] = {}
 
@@ -92,9 +95,9 @@ def _parse_models(r: httpx.Response) -> list[str] | None:
         return None
 
 
-def _unreachable(base: str, e: Exception) -> str:
+def _unreachable(base: str, e: Exception, local: bool = False) -> str:
     if isinstance(e, httpx.TimeoutException):
-        return f"{base} took too long to answer."
+        return f"{base} took too long to answer." + (" The model may still be loading: try again in a minute." if local else "")
     return f"Couldn't reach {base} — is it running?"
 
 
@@ -108,6 +111,7 @@ async def test_connection(body: SetupIn, stored: dict[str, Any] | None = None, s
         return fail("Enter a base URL first.")
     key = _resolve_key(body, stored, secrets)
     headers = _headers(key)
+    local = body.provider in _OWN_ADDRESS
     t0 = time.time()
     models: list[str] | None = None
     try:
@@ -128,11 +132,12 @@ async def test_connection(body: SetupIn, stored: dict[str, Any] | None = None, s
             # length and the timeout would read as a bad key. Newer OpenAI models refuse max_tokens; the others ignore or require it, so try it first.
             chat = {"model": model, "messages": [{"role": "user", "content": "Reply with: ok"}], "stream": False}
             url = providers.endpoint(base, "/chat/completions")
-            r = await client.post(url, headers=headers, json={**chat, "max_tokens": 1})
+            wait = httpx.Timeout(CHECK_TIMEOUT, read=LOCAL_PROBE_TIMEOUT) if local else CHECK_TIMEOUT
+            r = await client.post(url, headers=headers, json={**chat, "max_tokens": 1}, timeout=wait)
             if r.status_code == 400 and "max_completion_tokens" in r.text:
-                r = await client.post(url, headers=headers, json={**chat, "max_completion_tokens": 16})
+                r = await client.post(url, headers=headers, json={**chat, "max_completion_tokens": 16}, timeout=wait)
     except (httpx.TransportError, httpx.InvalidURL, ValueError) as e:
-        return fail(_unreachable(base, e))
+        return fail(_unreachable(base, e, local))
     if r.status_code in (401, 403):
         return fail(f"That key was rejected ({r.status_code}).")
     if r.status_code == 404 and unlisted:
@@ -219,6 +224,10 @@ def router(get_settings: Callable[[], dict[str, Any]], set_settings: Callable[[d
         # background call. Empty means "use the default model".
         patch = {"provider": body.provider, "baseUrl": base, "apiKey": key, "defaultModel": model,
                  "extractionModel": "", "fastModel": "", "onboardedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        # A switch to another provider resets every other model field the same way: blank follows the new provider's
+        # tiers and rerank default, and search uses its embedding model (none where it has no embeddings route).
+        if providers.effective(get_settings()) != body.provider:
+            patch.update({k: "" for k in _SWITCH_RESET}, embeddingModel=preset.get("embeddingModel", ""))
         # No key for the endpoint the saved key belongs to means "unchanged", as in PUT /settings; an empty
         # value would delete it from the secret store. A different endpoint never inherits the old key.
         if not key and _same_base(base, get_settings().get("baseUrl")):

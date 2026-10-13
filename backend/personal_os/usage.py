@@ -7,6 +7,7 @@ unknown, never $0); nothing is guessed.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from datetime import datetime, timedelta
@@ -56,6 +57,9 @@ def price_key(model: str) -> str:
     return s.replace(".", "p") if s not in FIREWORKS_PRICES and s.replace(".", "p") in FIREWORKS_PRICES else s
 
 
+_background: set[asyncio.Task[None]] = set()  # strong refs, so a background refresh is not collected mid-flight
+
+
 class Pricing:
     """Per-token prices, cached from the proxy and merged with user overrides."""
 
@@ -69,6 +73,17 @@ class Pricing:
     def caps(self, model: str) -> dict[str, Any]:
         """{mode?, reasoning?, max_input_tokens?, max_output_tokens?} the proxy (or the Anthropic Models API) reports for a model; {} when unknown."""
         return dict(self._caps.get(model) or {})
+
+    async def ensure(self, settings: dict[str, Any]) -> None:
+        """refresh() before a reply. Only a base with no table yet is waited for (its caps may set max_tokens); a stale
+        table refreshes in the background, so the first token does not wait on a price fetch."""
+        if self._base and self._base == str(settings.get("baseUrl") or "").rstrip("/"):
+            if time.time() - self._fetched >= PRICE_TTL:
+                task = asyncio.create_task(self.refresh(settings))
+                _background.add(task)
+                task.add_done_callback(_background.discard)
+            return
+        await self.refresh(settings)
 
     async def refresh(self, settings: dict[str, Any], force: bool = False) -> None:
         base = str(settings.get("baseUrl") or "").rstrip("/")

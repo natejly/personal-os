@@ -10,11 +10,12 @@ It closes when:
   - the key or base URL changes (a new fingerprint has no entry; PUT /settings also calls reset());
   - the user resets it (POST /provider/auth/reset);
   - COOLDOWN_S passes: then ONE request goes through as a probe. Success closes it; another rejection restarts
-    the cooldown.
+    the cooldown; any other outcome (429, 5xx, a network error, Stop) lets the next request probe.
 
 Only a key rejection counts: 401, a 400 from a LiteLLM proxy that does not know the key, or a 403 whose message
 says the key is invalid or missing. A 403 for a model the account cannot use, 429, 5xx and network errors never
-count; those keep llm's retry with backoff. This is a circuit breaker for a dead key, not a budget: nothing here
+count; those keep llm's retry with backoff. Nor does a LiteLLM proxy passing on its upstream provider's rejection
+(see upstream()): the Settings key is fine, and the proxy's other models still work. This is a circuit breaker for a dead key, not a budget: nothing here
 limits how many runs or rounds a working key may make.
 
 State lives in memory and resets on restart, which costs at most FAILS_TO_OPEN failed requests.
@@ -105,16 +106,40 @@ def check(settings: dict[str, Any]) -> str | None:
         return msg
     s = _state.get(_id(settings))
     if s and s.get("open_at") is not None:
-        s["open_at"] = clock()
+        s["probe_from"], s["open_at"] = s["open_at"], clock()
     return None
 
 
+def inconclusive(settings: dict[str, Any]) -> None:
+    """After a request that neither passed nor had its key rejected (429, 5xx, a network error, Stop). If it was the
+    probe, the expired cooldown is put back so the next request probes again, instead of a fresh cooldown blocking a
+    key that may already work."""
+    s = _state.get(_id(settings))
+    if s and "probe_from" in s:
+        s["open_at"] = s.pop("probe_from")
+
+
+_UPSTREAM = re.compile(r"\b([a-z][a-z0-9_]*?)exception\b")
+
+
+def upstream(settings: dict[str, Any], body: str) -> str | None:
+    """The upstream provider a LiteLLM proxy names in an auth error it passed through (`Fireworks_aiException - ...`),
+    or None. That rejection is of a key in the proxy's own config, not the key in Settings."""
+    if providers.effective(settings) != "litellm":
+        return None
+    m = next((m for m in _UPSTREAM.finditer(str(body or "").lower()) if m.group(1) not in ("proxy", "")), None)
+    return m.group(1) if m else None
+
+
 def failure(settings: dict[str, Any], status: int | None, body: str) -> None:
-    """After a rejected request. Ignores anything that is not a key rejection."""
-    if not is_key_rejection(status, body):
+    """After a rejected request. Anything that is not a rejection of this key only settles a pending probe."""
+    if not is_key_rejection(status, body) or upstream(settings, body):
+        inconclusive(settings)
         return
     t, k = clock(), _id(settings)
     s = _state.get(k)
+    if s is not None:
+        s.pop("probe_from", None)
     if s is None or (s.get("open_at") is None and t - s["first"] > WINDOW_S):
         s = _state[k] = {"fails": 0, "first": t, "open_at": None}
     s["fails"] += 1

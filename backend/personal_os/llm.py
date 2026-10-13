@@ -10,6 +10,7 @@ import random
 import re
 import time
 import uuid
+import weakref
 from contextvars import ContextVar
 from typing import Any, AsyncIterator, Callable
 
@@ -344,6 +345,35 @@ RETRY_CAP_S = 30.0
 RETRY_AFTER_MAX_S = 60.0
 CONNECT_TIMEOUT_S = 10.0
 DEFAULT_IDLE_S = float(LLM_IDLE_SECONDS)
+# How long a stream may wait for response headers. A hosted provider answers with headers at once and thinks afterwards,
+# so a silent header wait is a stuck replica: retry it long before the between-chunk idle limit. A local server (Ollama)
+# may hold its headers while it loads the model or reads a long prompt, and a LiteLLM proxy may hold them until the
+# upstream's first chunk (minutes for a model that thinks without streaming it), so those keep the idle limit.
+FIRST_BYTE_S = 60.0
+
+_clients: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, tuple[Any, httpx.AsyncClient]]" = weakref.WeakKeyDictionary()
+
+
+def _client() -> httpx.AsyncClient:
+    """One keep-alive client per event loop, so a tool loop does not pay a TCP and TLS handshake per round; timeouts go
+    per request. Rebuilt when httpx.AsyncClient was swapped (tests put in a mock transport) or the client was closed."""
+    loop = asyncio.get_running_loop()
+    made = _clients.get(loop)
+    if made is None or made[0] is not httpx.AsyncClient or made[1].is_closed:
+        made = _clients[loop] = (httpx.AsyncClient, httpx.AsyncClient(timeout=httpx.Timeout(CONNECT_TIMEOUT_S, read=DEFAULT_IDLE_S + 5, write=30)))
+    return made[1]
+
+
+async def aclose() -> None:
+    """Close this loop's shared client (app shutdown)."""
+    made = _clients.pop(asyncio.get_running_loop(), None)
+    if made is not None:
+        await made[1].aclose()
+
+
+def _first_byte_s(settings: dict[str, Any]) -> float | None:
+    """The header-wait limit for a stream, or None to leave it to the idle limit (a local server or a proxy)."""
+    return None if providers.effective(settings) in ("ollama", "custom", "litellm") else min(FIRST_BYTE_S, _idle_s(settings))
 
 
 def parse_retry_after(value: str | None, now: float | None = None) -> float | None:
@@ -547,6 +577,10 @@ def describe_http_error(status: int, reason: str, body: str, retried: int = 0, r
         return f"The provider says you are out of quota or credit ({status}). Check billing with the provider, or pick another model. {detail}".strip()
     if kind == "overflow":
         return f"This conversation is too long for the model ({status}). Compact it or start a new chat. {detail}".strip()
+    if kind == "unsupported_param" and re.search(r"does not support (tools|tool[ _]?(calling|use)|function)", detail, re.I):
+        return f"This model cannot call tools ({status}), and chats and agents send them every turn. Pick a model that supports tool calling. {detail}".strip()
+    if kind == "unsupported_param" and re.search(r"does not support (images?|vision|image input)", detail, re.I):
+        return f"This model cannot read images ({status}). Remove the picture or pick a model that reads images. {detail}".strip()
     if kind == "unsupported_param":
         return f"The model rejected a request option ({status}). Set effort to Default, turn off Fast, or pick another model. {detail}".strip()
     if kind == "content_filter":
@@ -598,11 +632,15 @@ class _Aborted(Exception):
         self.reason = reason
 
 
-async def _race(aw: Any, cancel: asyncio.Event | None, deadline_at: float | None) -> Any:
-    """Await `aw`, but give up the moment `cancel` is set or `deadline_at` (a time.monotonic() value) passes."""
+async def _race(aw: Any, cancel: asyncio.Event | None, deadline_at: float | None, limit: float | None = None) -> Any:
+    """Await `aw`, but give up the moment `cancel` is set or `deadline_at` (a time.monotonic() value) passes. `limit`
+    seconds without an answer raise httpx.ReadTimeout instead: a silence worth retrying, not a Stop or the deadline."""
     task = asyncio.ensure_future(aw)
     waiter = asyncio.ensure_future(cancel.wait()) if cancel is not None else None
     left = None if deadline_at is None else max(deadline_at - time.monotonic(), 0.0)
+    by_limit = limit is not None and (left is None or limit < left)
+    if by_limit:
+        left = limit
     try:
         await asyncio.wait({task, *([waiter] if waiter is not None else [])}, timeout=left, return_when=asyncio.FIRST_COMPLETED)
         if task.done():
@@ -610,6 +648,8 @@ async def _race(aw: Any, cancel: asyncio.Event | None, deadline_at: float | None
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await task
+        if by_limit and not (cancel is not None and cancel.is_set()):
+            raise httpx.ReadTimeout(f"no response headers in {limit:g}s")
         raise _Aborted("cancelled" if cancel is not None and cancel.is_set() else "timeout")
     except asyncio.CancelledError:
         task.cancel()
@@ -659,6 +699,15 @@ def _learn_cap(settings: dict[str, Any], model: str, effort: str) -> None:
             log.exception("model caps listener failed")
 
 
+# Optional fields ('service_tier', 'user') a provider rejected for a model, as 'base|model|field'. In memory only: a
+# restart costs one failed request per field, and a provider that starts accepting one is picked up again.
+_rejected_fields: set[str] = set()
+
+
+def _field_ok(settings: dict[str, Any], model: Any, field: str) -> bool:
+    return f"{_caps_key(settings.get('baseUrl'), str(model or ''))}|{field}" not in _rejected_fields
+
+
 _EFFORT_MSG = ("reasoning_effort", "reasoning effort", "does not support thinking", "does not support reasoning")
 
 
@@ -696,7 +745,8 @@ def _retry_event(attempt: int, retries: int, delay: float, reason: str, status: 
 
 async def _send_attempts(client: httpx.AsyncClient, settings: dict[str, Any], body: dict[str, Any], *, stream: bool,
                          cancel: asyncio.Event | None = None, deadline_at: float | None = None,
-                         attempt: int = 0) -> AsyncIterator[dict[str, Any]]:
+                         attempt: int = 0, timeout: httpx.Timeout | None = None,
+                         first_byte: float | None = None) -> AsyncIterator[dict[str, Any]]:
     """POST the completion request, retrying 429/5xx/connection failures. Yields a `retry` dict just before each
     backoff (see `_retry_event`) and ends with {"type": "response", "response", "cm", "attempt"}: the response, the
     stream context or None, and the retries used. Every response of a retried attempt is closed before its `retry` is
@@ -711,31 +761,46 @@ async def _send_attempts(client: httpx.AsyncClient, settings: dict[str, Any], bo
     what was dropped.
 
     A key the provider already rejected fails here before any request (auth_breaker), with kind "auth" and no status.
+
+    `timeout` is the per-request httpx timeout. `first_byte` bounds a stream's wait for response headers; a header
+    wait that runs out is retried without the session-affinity id, so the retry can land on another replica. A
+    non-streamed call whose answer times out is not retried: the provider is still generating, and billing, it.
     """
     retries = _retries(settings)
     url = _url(settings, "/chat/completions", body.get("model"))
     if (held := auth_breaker.check(settings)) is not None:
         raise LLMError(held, kind="auth")
-    stepped = dropped = False
+    stepped = dropped = no_affinity = False
     sent_effort = body.get("reasoning_effort")
+    kw: dict[str, Any] = {} if timeout is None else {"timeout": timeout}
     while True:
         if cancel is not None and cancel.is_set():
             raise _Aborted("cancelled")
-        cm = client.stream("POST", url, headers=_headers(settings), json=body) if stream else None
+        headers = _headers(settings)
+        if no_affinity:
+            headers.pop("x-session-affinity", None)
+        cm = client.stream("POST", url, headers=headers, json=body, **kw) if stream else None
         try:
             if cm is not None:
-                r = await _race(cm.__aenter__(), cancel, deadline_at)
+                r = await _race(cm.__aenter__(), cancel, deadline_at, first_byte)
                 if r.status_code >= 400:
                     await _race(r.aread(), cancel, deadline_at)
             else:
-                r = await _race(client.post(url, headers=_headers(settings), json=body), cancel, deadline_at)
+                r = await _race(client.post(url, headers=headers, json=body, **kw), cancel, deadline_at)
         except _Aborted:
             await _close_cm(cm)
+            auth_breaker.inconclusive(settings)
             raise
         except (httpx.TransportError, httpx.ProtocolError) as e:
             await _close_cm(cm)
+            auth_breaker.inconclusive(settings)
             if cancel is not None and cancel.is_set():
                 raise _Aborted("cancelled") from e
+            if isinstance(e, httpx.ReadTimeout):
+                if not stream:
+                    raise LLMError("The model provider took too long to answer. Try again, or pick a faster model.", kind="timeout") from e
+                no_affinity = True
+                body.pop("user", None)
             delay = retry_delay(attempt + 1)
             if attempt >= retries or (deadline_at is not None and time.monotonic() + delay >= deadline_at):
                 raise LLMError(describe_transport_error(e, attempt), kind="transport") from e
@@ -764,6 +829,8 @@ async def _send_attempts(client: httpx.AsyncClient, settings: dict[str, Any], bo
         if field:
             dropped = dropped or field == "reasoning_effort"
             body.pop(field, None)
+            if field != "reasoning_effort":
+                _rejected_fields.add(f"{_caps_key(settings.get('baseUrl'), str(body.get('model') or ''))}|{field}")
             log.warning("provider rejected %s; resending without it", field)
             continue
         too_long = retry_after is not None and retry_after > RETRY_AFTER_MAX_S
@@ -776,14 +843,17 @@ async def _send_attempts(client: httpx.AsyncClient, settings: dict[str, Any], bo
                 if not await _backoff(delay, cancel):
                     raise _Aborted("cancelled")
                 continue
+        if kind == "auth" and (up := auth_breaker.upstream(settings, r.text)):
+            raise LLMError(f"The proxy's upstream key for {up} was rejected ({r.status_code}). Fix it in the proxy's config or "
+                           f"environment, not in Settings. {_provider_message(r.text)}".strip(), kind, r.status_code)
         raise _provider_error(describe_http_error(r.status_code, r.reason_phrase, r.text, attempt, retry_after, kind), kind, r.status_code, r.text)
 
 
 async def _send_with_retry(client: httpx.AsyncClient, settings: dict[str, Any], body: dict[str, Any], *, stream: bool,
                            cancel: asyncio.Event | None = None, deadline_at: float | None = None,
-                           attempt: int = 0) -> tuple[httpx.Response, Any, int]:
+                           attempt: int = 0, timeout: httpx.Timeout | None = None) -> tuple[httpx.Response, Any, int]:
     """`_send_attempts` drained: (response, stream context or None, retries used), for callers with no use for the retry events."""
-    async for ev in _send_attempts(client, settings, body, stream=stream, cancel=cancel, deadline_at=deadline_at, attempt=attempt):
+    async for ev in _send_attempts(client, settings, body, stream=stream, cancel=cancel, deadline_at=deadline_at, attempt=attempt, timeout=timeout):
         if ev["type"] == "response":
             return ev["response"], ev["cm"], ev["attempt"]
     raise RuntimeError("unreachable: _send_attempts always ends with a response")
@@ -805,7 +875,7 @@ def _affinity_ok(settings: dict[str, Any]) -> bool:
 
 def _with_affinity(settings: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
     """`user` carries the same id in the body: the proxy passes it to Fireworks, which also routes on it."""
-    if (sid := session_affinity.get()) and _affinity_ok(settings):
+    if (sid := session_affinity.get()) and _affinity_ok(settings) and _field_ok(settings, body.get("model"), "user"):
         body["user"] = sid
     return body
 
@@ -875,15 +945,22 @@ def vision_flag(model: str) -> bool | None:
     return _VISION_FLAGS.get(model)
 
 
-def _prompt_chars(messages: list[dict[str, Any]]) -> int:
-    """Characters of prompt for the usage estimate. Image parts count as nothing: a base64 picture is megabytes of
-    characters but a few hundred tokens, and the provider's own usage figure replaces this estimate when it sends one."""
-    slim = [
-        {**m, "content": [p for p in m["content"] if not (isinstance(p, dict) and p.get("type") == "image_url")]}
-        if isinstance(m.get("content"), list) else m
-        for m in messages
-    ]
-    return len(json.dumps(slim))
+IMAGE_PROMPT_CHARS = 4_000  # about 1,000 tokens a picture, at the 4-characters-a-token estimate
+
+
+def _prompt_chars(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> int:
+    """Characters of prompt for the usage estimate, tool schemas included. An image part counts IMAGE_PROMPT_CHARS, not
+    its length: a base64 picture is megabytes of characters but around a thousand tokens. The provider's own usage
+    figure replaces this estimate when it sends one."""
+    images = 0
+    slim = []
+    for m in messages:
+        if isinstance(m.get("content"), list):
+            parts = [p for p in m["content"] if not (isinstance(p, dict) and p.get("type") == "image_url")]
+            images += len(m["content"]) - len(parts)
+            m = {**m, "content": parts}
+        slim.append(m)
+    return len(json.dumps(slim)) + images * IMAGE_PROMPT_CHARS + (len(json.dumps(tools)) if tools else 0)
 
 
 # Kimi K3 always thinks and accepts only low, high, and max. Omitting the field is max, and
@@ -1113,7 +1190,7 @@ async def stream_chat(
     wired = effort_param(model, effort, caps=caps_lookup(model), base_url=settings.get("baseUrl"))
     if wired:
         body["reasoning_effort"] = wired
-    if fast and supports_service_tier(settings):
+    if fast and supports_service_tier(settings) and _field_ok(settings, model, "service_tier"):
         body["service_tier"] = "priority"
     if cap := output_cap(settings, model):
         body["max_tokens"] = cap
@@ -1140,130 +1217,139 @@ async def stream_chat(
     announced = False  # a retry event is on screen until the next response arrives
     sent = True  # False when Stop or the deadline ended the call before any response arrived
     dropped = ""
-    # read= bounds the wait for response headers (and backs up a chunk); the per-chunk idle limit is enforced below.
-    async with httpx.AsyncClient(timeout=httpx.Timeout(CONNECT_TIMEOUT_S, read=idle + 5, write=30, pool=CONNECT_TIMEOUT_S)) as client:
-        while True:
-            # Per-attempt state: a re-issued request must not inherit anything from the one it replaces.
-            calls, by_index, last_idx = {}, {}, 0
-            finish, usage = None, None
-            out_chars = reason_chars = 0
-            saw_done = False
-            splitter = ThinkSplitter()
-            emitted = False  # the first content, reasoning or tool-call fragment ends the right to retry
-            fail: tuple[str, bool, str | None, str] | None = None  # (message, retryable, kind, body)
+    p_chars = _prompt_chars(messages, tools)
+    # read= backs up the header wait (first_byte) and a chunk; the per-chunk idle limit is enforced below.
+    timeout = httpx.Timeout(CONNECT_TIMEOUT_S, read=idle + 5, write=30, pool=CONNECT_TIMEOUT_S)
+    first_byte = _first_byte_s(settings)
+    client = _client()
+    while True:
+        # Per-attempt state: a re-issued request must not inherit anything from the one it replaces.
+        calls, by_index, last_idx = {}, {}, 0
+        finish, usage = None, None
+        out_chars = reason_chars = 0
+        saw_done = False
+        splitter = ThinkSplitter()
+        emitted = False  # the first content, reasoning or tool-call fragment ends the right to retry
+        fail: tuple[str, bool, str | None, str] | None = None  # (message, retryable, kind, body)
+        try:
+            r = cm = None
+            async for sev in _send_attempts(client, settings, body, stream=True, cancel=cancel, deadline_at=deadline_at, attempt=attempt,
+                                            timeout=timeout, first_byte=first_byte):
+                if sev["type"] == "retry":
+                    announced = True
+                    yield sev
+                else:
+                    r, cm, attempt = sev["response"], sev["cm"], sev["attempt"]
+            if announced:
+                announced = False
+                yield {"type": "retry", "attempt": 0}  # the clear: a slow first token must not keep saying "retrying"
+        except _Aborted as a:
+            cancelled, timed_out, sent = a.reason == "cancelled", a.reason != "cancelled", False
+            break
+        if wired and "reasoning_effort" not in body:
+            dropped = wired
+        try:
+            # Closes the socket from a second task so a read blocked on the next token returns at once.
+            abort = asyncio.create_task(_close_when(cancel, r)) if cancel is not None else None
             try:
-                r = cm = None
-                async for sev in _send_attempts(client, settings, body, stream=True, cancel=cancel, deadline_at=deadline_at, attempt=attempt):
-                    if sev["type"] == "retry":
-                        announced = True
-                        yield sev
-                    else:
-                        r, cm, attempt = sev["response"], sev["cm"], sev["attempt"]
-                if announced:
-                    announced = False
-                    yield {"type": "retry", "attempt": 0}  # the clear: a slow first token must not keep saying "retrying"
-            except _Aborted as a:
-                cancelled, timed_out, sent = a.reason == "cancelled", a.reason != "cancelled", False
-                break
-            if wired and "reasoning_effort" not in body:
-                dropped = wired
-            try:
-                # Closes the socket from a second task so a read blocked on the next token returns at once.
-                abort = asyncio.create_task(_close_when(cancel, r)) if cancel is not None else None
-                try:
-                    lines = r.aiter_lines().__aiter__()
-                    while True:
-                        left = idle if deadline_at is None else min(idle, deadline_at - time.monotonic())
-                        try:
-                            line = await asyncio.wait_for(lines.__anext__(), max(left, 0.01))
-                        except StopAsyncIteration:
+                lines = r.aiter_lines().__aiter__()
+                while True:
+                    left = idle if deadline_at is None else min(idle, deadline_at - time.monotonic())
+                    try:
+                        line = await asyncio.wait_for(lines.__anext__(), max(left, 0.01))
+                    except StopAsyncIteration:
+                        break
+                    except asyncio.TimeoutError:
+                        if deadline_at is not None and time.monotonic() >= deadline_at:
+                            timed_out = True
                             break
-                        except asyncio.TimeoutError:
-                            if deadline_at is not None and time.monotonic() >= deadline_at:
-                                timed_out = True
-                                break
-                            raise LLMError(f"The provider stopped responding: no data for {int(idle)}s mid-reply. Try again.", kind="timeout") from None
-                        if cancel is not None and cancel.is_set():
-                            cancelled = True
-                            break
-                        line = line.strip()
-                        if not line.startswith("data:"):
-                            continue
-                        data = line[5:].strip()
-                        if data == "[DONE]":
-                            saw_done = True
-                            break
-                        try:
-                            obj = json.loads(data)
-                        except ValueError:
-                            continue
-                        if obj.get("error"):
-                            err = obj["error"]
-                            body_s = json.dumps({"error": err})
-                            text, retryable = _frame_error(err)
-                            # The frame's own code stands in for the status, so a relayed 429 is `rate_limit`, not `bad_request`.
-                            kind_e = classify_error(_frame_status(err), body_s)
-                            fail = (text, retryable and kind_e not in _PERMANENT_KINDS, kind_e, body_s)
-                            break
-                        if isinstance(obj.get("usage"), dict):
-                            usage = parse_usage(obj["usage"])
-                        choice = (obj.get("choices") or [{}])[0]
-                        delta = choice.get("delta") or {}
-                        reason = _reason_text(delta)
-                        if reason:
-                            emitted = True
-                            reason_chars += len(reason)
-                            reason_buf.append(reason)
-                            yield {"type": "reasoning", "text": reason}
-                        for kind_p, piece in splitter.feed(_content_text(delta)):
-                            emitted = emitted or bool(piece)
-                            if kind_p == "reasoning":
-                                reason_chars += len(piece)
-                                reason_buf.append(piece)
-                            else:
-                                out_chars += len(piece)
-                            yield {"type": kind_p, "text": piece}
-                        for tc in delta.get("tool_calls") or []:
-                            emitted = True
-                            last_idx = _add_fragment(calls, by_index, tc, last_idx, known)
-                        if choice.get("finish_reason"):
-                            finish = choice["finish_reason"]
-                except asyncio.CancelledError:
-                    raise
-                except Exception as e:
-                    if cancel is None or not cancel.is_set():
-                        if not isinstance(e, httpx.HTTPError):
-                            raise
-                        fail = (describe_transport_error(e), True, "transport", "")
-                    else:
+                        where = " mid-reply" if emitted else " before replying"
+                        fail = (f"The provider stopped responding: no data for {int(idle)}s{where}. Try again.", True, "timeout", "")
+                        break
+                    if cancel is not None and cancel.is_set():
                         cancelled = True
-                finally:
-                    if abort is not None:
-                        abort.cancel()
-                        with contextlib.suppress(asyncio.CancelledError, Exception):
-                            await abort
-            finally:
-                await _close_cm(cm)
-            if cancel is not None and cancel.is_set():
-                cancelled, fail = True, None
-            if fail is None and not (cancelled or timed_out) and not emitted and finish is None and usage is None:
-                fail = ("The provider returned an empty reply. Try again, or pick another model.", True, "server", "")
-            if fail is None or cancelled or timed_out:
-                break
-            message, retryable, kind_f, body_f = fail
-            delay = retry_delay(attempt + 1)
-            if not emitted and retryable and attempt < retries and (deadline_at is None or time.monotonic() + delay < deadline_at):
-                attempt += 1
-                log.warning("provider failed before the first token (%s); retry %d/%d in %.1fs", message, attempt, retries, delay)
-                announced = True
-                yield _retry_event(attempt, retries, delay, "connection" if kind_f == "transport" else "provider_error", None)
-                if not await _backoff(delay, cancel):
+                        break
+                    line = line.strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        saw_done = True
+                        break
+                    try:
+                        obj = json.loads(data)
+                    except ValueError:
+                        continue
+                    if obj.get("error"):
+                        err = obj["error"]
+                        body_s = json.dumps({"error": err})
+                        text, retryable = _frame_error(err)
+                        # The frame's own code stands in for the status, so a relayed 429 is `rate_limit`, not `bad_request`.
+                        kind_e = classify_error(_frame_status(err), body_s)
+                        fail = (text, retryable and kind_e not in _PERMANENT_KINDS, kind_e, body_s)
+                        break
+                    if isinstance(obj.get("usage"), dict):
+                        usage = parse_usage(obj["usage"])
+                    choice = (obj.get("choices") or [{}])[0]
+                    delta = choice.get("delta") or {}
+                    reason = _reason_text(delta)
+                    if reason:
+                        emitted = True
+                        reason_chars += len(reason)
+                        reason_buf.append(reason)
+                        yield {"type": "reasoning", "text": reason}
+                    for kind_p, piece in splitter.feed(_content_text(delta)):
+                        emitted = emitted or bool(piece)
+                        if kind_p == "reasoning":
+                            reason_chars += len(piece)
+                            reason_buf.append(piece)
+                        else:
+                            out_chars += len(piece)
+                        yield {"type": kind_p, "text": piece}
+                    for tc in delta.get("tool_calls") or []:
+                        emitted = True
+                        last_idx = _add_fragment(calls, by_index, tc, last_idx, known)
+                    if choice.get("finish_reason"):
+                        finish = choice["finish_reason"]
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                if cancel is None or not cancel.is_set():
+                    if not isinstance(e, httpx.HTTPError):
+                        raise
+                    fail = (describe_transport_error(e), True, "transport", "")
+                else:
                     cancelled = True
-                    break
-                continue
-            # Nothing is re-issued once a token reached the caller: the reply stays what it was and says it was cut off.
-            message += (f" Retried {attempt} time{'s' if attempt != 1 else ''}." if attempt else "") + (" The reply was cut off." if emitted else "")
-            raise _provider_error(message, kind_f, None, body_f)
+            finally:
+                if abort is not None:
+                    abort.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await abort
+        finally:
+            await _close_cm(cm)
+        if cancel is not None and cancel.is_set():
+            cancelled, fail = True, None
+        if fail is None and not (cancelled or timed_out) and not emitted and finish is None and usage is None:
+            fail = ("The provider returned an empty reply. Try again, or pick another model.", True, "server", "")
+        if fail is None or cancelled or timed_out:
+            break
+        message, retryable, kind_f, body_f = fail
+        delay = retry_delay(attempt + 1)
+        if not emitted and retryable and attempt < retries and (deadline_at is None or time.monotonic() + delay < deadline_at):
+            attempt += 1
+            log.warning("provider failed before the first token (%s); retry %d/%d in %.1fs", message, attempt, retries, delay)
+            announced = True
+            yield _retry_event(attempt, retries, delay, "connection" if kind_f == "transport" else "provider_error", None)
+            if not await _backoff(delay, cancel):
+                cancelled = True
+                break
+            continue
+        # Nothing is re-issued once a token reached the caller: the reply stays what it was and says it was cut off.
+        message += (f" Retried {attempt} time{'s' if attempt != 1 else ''}." if attempt else "") + (" The reply was cut off." if emitted else "")
+        if emitted or usage:  # the provider bills what it generated before the failure
+            _emit_usage(model, kind, usage, int((time.time() - t0) * 1000), p_chars,
+                        out_chars + reason_chars + sum(len(c["arguments"]) for c in calls.values()))
+        raise _provider_error(message, kind_f, None, body_f)
     for kind_p, piece in splitter.flush():  # a tag-like tail held back at the end of the stream
         if kind_p == "reasoning":
             reason_chars += len(piece)
@@ -1284,7 +1370,7 @@ async def stream_chat(
     tool_calls = _finish_calls(calls)
     # Reasoning is billed as completion tokens, so it counts toward cost and the run meter. A call Stop or the deadline
     # ended before any response is not billed at all: the estimate would count a prompt nobody answered.
-    p_chars, c_chars = (len(json.dumps(messages)) if sent else 0), out_chars + reason_chars + sum(len(c["arguments"]) for c in tool_calls)
+    p_chars, c_chars = (p_chars if sent else 0), out_chars + reason_chars + sum(len(c["arguments"]) for c in tool_calls)
     if sent:
         _emit_usage(model, kind, usage, int((time.time() - t0) * 1000), p_chars, c_chars)
     # usage_est is always present: this route often omits `usage` on streamed replies, and the meter cannot run on None.
@@ -1387,15 +1473,27 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
     if cap := output_cap(settings, model):
         body["max_tokens"] = cap
     _with_affinity(settings, body)
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=CONNECT_TIMEOUT_S)) as client:
-        try:
-            r, _, _ = await _send_with_retry(client, settings, body, stream=False, cancel=cancel, deadline_at=deadline)
-        except _Aborted as a:
-            if a.reason == "cancelled":
-                raise LLMError("Stopped.", kind="cancelled") from None
-            raise LLMError("The model provider took too long.", kind="timeout") from None
-    data = r.json()
-    text = strip_think(_content_text(data["choices"][0]["message"]))
+    # A reasoning helper on a long input can think for minutes before it answers, so the wait is the stream idle limit.
+    timeout = httpx.Timeout(CONNECT_TIMEOUT_S, read=_idle_s(settings), write=30, pool=CONNECT_TIMEOUT_S)
+    try:
+        r, _, _ = await _send_with_retry(_client(), settings, body, stream=False, cancel=cancel, deadline_at=deadline, timeout=timeout)
+    except _Aborted as a:
+        if a.reason == "cancelled":
+            raise LLMError("Stopped.", kind="cancelled") from None
+        raise LLMError("The model provider took too long.", kind="timeout") from None
+    try:
+        data = r.json()
+    except ValueError:
+        raise LLMError(f"The provider sent a reply that is not JSON ({r.status_code}). Try again.", kind="server") from None
+    choices = data.get("choices") if isinstance(data, dict) else None
+    if not (isinstance(choices, list) and choices and isinstance(choices[0], dict)):
+        # An OpenAI-compatible gateway may answer 200 with an error object or no choices (a filtered completion).
+        err = data.get("error") if isinstance(data, dict) else None
+        if err:
+            body_s = json.dumps({"error": err})
+            raise _provider_error(_frame_error(err)[0], classify_error(_frame_status(err), body_s), None, body_s)
+        raise LLMError("The provider returned an empty reply. Try again, or pick another model.", kind="server")
+    text = strip_think(_content_text(choices[0].get("message") or {}))
     _emit_usage(model, kind, parse_usage(data["usage"]) if isinstance(data.get("usage"), dict) else None, int((time.time() - t0) * 1000), _prompt_chars(messages), len(text))
     return text
 

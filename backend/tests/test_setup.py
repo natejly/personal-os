@@ -87,7 +87,7 @@ class StatusTests(unittest.TestCase):
     def test_providers_route(self) -> None:
         ps = client.get("/setup/providers").json()["providers"]
         self.assertEqual(len(ps), 7)
-        self.assertEqual(set(ps[0]), {"id", "name", "baseUrl", "needsKey", "keyUrl", "defaultModel", "models", "note", "rerankModel", "tiers"})
+        self.assertEqual(set(ps[0]), {"id", "name", "baseUrl", "needsKey", "keyUrl", "defaultModel", "models", "note", "rerankModel", "embeddingModel", "tiers"})
 
     def test_requires_token(self) -> None:
         self.assertEqual(TestClient(app).get("/setup/status").status_code, 401)
@@ -212,6 +212,19 @@ class CompleteTests(unittest.TestCase):
         r = client.post("/setup/complete", json={"provider": "ollama", "baseUrl": "", "apiKey": None, "model": "llama3.2"})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["baseUrl"], "http://localhost:11434/v1")
+
+    def test_switching_provider_resets_the_other_model_fields(self) -> None:
+        old = {"modelHigh": "ember-1", "retrievalRerankModel": "qwen3-reranker-8b", "visionModel": "glm-5.3", "embeddingModel": "qwen3-embedding-8b"}
+        db.set_settings({"provider": "litellm", "baseUrl": "http://localhost:4000", **old})
+        body = {"provider": "litellm", "baseUrl": "http://localhost:4000", "apiKey": None, "model": "kimi-k3"}
+        self.assertEqual(client.post("/setup/complete", json=body).status_code, 200)
+        self.assertEqual({k: db.get_settings()[k] for k in old}, old)  # same provider: kept
+        r = client.post("/setup/complete", json={"provider": "fireworks", "baseUrl": "", "apiKey": "fw-1", "model": "accounts/fireworks/models/kimi-k3"})
+        self.assertEqual(r.status_code, 200)
+        s = db.get_settings()
+        self.assertEqual((s["modelHigh"], s["retrievalRerankModel"], s["visionModel"]), ("", "", ""))
+        self.assertEqual(s["embeddingModel"], "accounts/fireworks/models/qwen3-embedding-8b")
+        db.set_settings({**{k: "" for k in old}, "embeddingModel": llm.DEFAULT_SETTINGS["embeddingModel"]})
 
     def test_keyless_rerun_keeps_saved_key_for_same_endpoint(self) -> None:
         db.set_settings({"provider": "litellm", "baseUrl": "http://localhost:4000", "apiKey": "sk-proxy"})

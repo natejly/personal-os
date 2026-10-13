@@ -94,6 +94,7 @@ def test_a_worker_owns_its_jobs_and_says_who_stopped_it(monkeypatch: pytest.Monk
         assert killed == [wid]
         assert row["status"] == "interrupted" and row["error"] == "Stopped by the user."
         assert mgr.info(row)["status"] == "stopped"
+        assert row["input"].get("wake_delivered") == 1, "a worker the user stopped does not wake the front agent"
     asyncio.run(go())
 
 
@@ -214,3 +215,22 @@ def test_briefs_ask_for_locations_isolation_and_a_structured_report() -> None:
     assert "Short table" in W.render_brief({"goal": "x", "report_format": "Short table"})
     assert "git worktree" in W.WORKER_PROMPT and "shell_poll with wait_s" in W.WORKER_PROMPT
     assert "verify" in appmod.toolbox.specs["delegate"].description and "absolute paths" in W.FRONT_AGENT_HINT
+
+
+def test_stop_gives_an_in_flight_write_its_grace(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+    monkeypatch.setattr(limits, "STOP_GRACE_SECONDS", 0.2)
+
+    async def go() -> None:
+        def child(writing: int) -> Any:
+            return SimpleNamespace(finished=asyncio.Event(), halt_reason=None, cancel=asyncio.Event(), writing=writing,
+                                   task_obj=asyncio.ensure_future(asyncio.sleep(5)))
+        reading, writing = child(0), child(1)
+        sub.halt(reading, "stopped")
+        sub.halt(writing, "stopped")
+        await asyncio.sleep(0.05)
+        assert reading.task_obj.cancelled(), "a child not mid-write is cancelled at once"
+        assert not writing.task_obj.done() and writing.halt_reason == "stopped", "a write in flight is not cut off"
+        await asyncio.sleep(0.3)
+        assert writing.task_obj.cancelled(), "past the grace it is cancelled"
+    asyncio.run(go())

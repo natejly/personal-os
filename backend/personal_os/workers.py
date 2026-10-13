@@ -38,6 +38,7 @@ from .working import escape_tags
 
 log = logging.getLogger(__name__)
 
+QUIET_STOPS = ("tool", "ui")  # stops that never wake the front agent (see Workers.stop)
 FRONT_TOOLS = ("delegate", "message_worker", "check_worker", "stop_worker", "resume_worker")
 SPAWN_TOOLS = ("agent_spawn", "agent_wait", "agent_stop")
 # What a reply may still use once it has to hand work on (delegation_forced): the hand-off tools, the task list, and the two
@@ -416,10 +417,11 @@ class Workers:
         if self.store is not None:
             self.store.mark_input(ch.id, exit_reason=ch.exit_reason, tainted=bool(ch.ctx.get("tainted")),
                                   taint_sources=list(ch.ctx.get("taint_sources") or []), attachments=list(ch.ctx.get("reply_attachments") or []),
-                                  **({"wake_delivered": 1} if by == "tool" else {}))
+                                  report=strip_no_reply(self.report_text({"run_id": ch.id}))[:4000],  # the list reads this, never the transcript
+                                  **({"wake_delivered": 1} if by in QUIET_STOPS else {}))
         self._emit(ch.conversation_id, self.info_of(ch))
         self.pump()
-        if self.on_end is not None and not self.closing and by != "tool" and ch.conversation_id:
+        if self.on_end is not None and not self.closing and by not in QUIET_STOPS and ch.conversation_id:
             try:
                 res = self.on_end(ch.conversation_id)
                 if asyncio.iscoroutine(res):
@@ -466,8 +468,7 @@ class Workers:
                 "depth": int(inp.get("depth") or 1), "cost": round(float(cost), 6) if cost is not None else None,
                 # the face: a Library agent keeps its name; a resumed worker keeps the id it started as
                 "agent": str(inp.get("role") or ""), "origin": str(inp.get("origin") or row["run_id"]),
-                # ponytail: capped here, and the list recomputes it per poll; a per-worker report route is the upgrade
-                "report": strip_no_reply(self.report_text(row))[:4000] if ended else ""}  # the wake turn still reads the raw text
+                "report": (inp["report"] if "report" in inp else strip_no_reply(self.report_text(row))[:4000]) if ended else ""}  # the wake turn still reads the raw text
 
     def info_of(self, ch: Child) -> dict[str, Any]:
         return self.info(self.row(ch.id) or {"run_id": ch.id, "input": {"conversation_id": ch.conversation_id}, "status": "running"})
@@ -523,7 +524,8 @@ class Workers:
     STOPPED_BY = {"ui": "Stopped by the user.", "tool": "Stopped by the assistant (stop_worker)."}
 
     async def stop(self, conversation_id: str | None, worker_id: str, by: str = "ui", why: str = "") -> dict[str, Any]:
-        """Stop a worker and everything it started. `by` 'tool' (the front agent did it, and knows) suppresses its wake.
+        """Stop a worker and everything it started. `by` 'tool' or 'ui' suppresses its wake: whoever stopped it already knows,
+        and a wake turn would invite the front agent to resume what the user just stopped.
         `why` (else who stopped it) is what its run row's error says."""
         row = self._mine(worker_id, conversation_id)
         if row is None:
@@ -532,7 +534,7 @@ class Workers:
         if ch is not None and not ch.finished.is_set():
             self.stopped[ch.id] = by
             ch.error = ch.error or why or self.STOPPED_BY.get(by) or "Stopped."
-            if by == "tool":
+            if by in QUIET_STOPS:
                 self.store.mark_input(ch.id, wake_delivered=1)
             if ch.state == "queued":
                 try:

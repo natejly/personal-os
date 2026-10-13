@@ -475,9 +475,10 @@ class Conversations:
             # Every saved reply goes through here: check its [n] against the full excerpts (adding quote/support in
             # place, so the 'done' event carries them too), then save a trimmed copy. The live refs keep their full
             # text, so a second finish on the same ledger (a parked card, a steer's next segment) checks the same.
-            from .context import cite_check, cite_slim
+            from .context import cite_check
             cite_check(content, context_used["chunks"])
-            context_used = cite_slim(context_used)
+        from .context import cite_slim
+        context_used = cite_slim(context_used)
         with self.db.tx() as c:
             c.execute(
                 "UPDATE messages SET content=?, error=?, context_used=?, tool_events=?, trace=?, reasoning=?, "

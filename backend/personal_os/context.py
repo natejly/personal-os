@@ -108,12 +108,19 @@ def cite_ref(h: dict[str, Any], n: int) -> dict[str, Any]:
 CITE_TEXT_KEEP = 400  # what a saved citation keeps of its chunk (repos.finish_message saves cite_slim)
 
 
+PROMPT_KEYS = ("system_prompt", "stable_system", "volatile_blocks")  # live-only: request_log keeps the exact request
+
+
 def cite_slim(used: dict[str, Any] | None) -> dict[str, Any] | None:
-    """The copy a streamed event carries (and the run tape journals): excerpts trimmed as the saved row will be.
-    The live dict always keeps the full text, so every cite_check on it sees whole excerpts."""
-    if not used or not used.get("chunks"):
+    """The copy a streamed event carries, the run tape journals and the messages row saves: excerpts trimmed and the
+    assembled prompt dropped (tens of KB a turn, never read back). The live dict keeps both, so every cite_check on it
+    sees whole excerpts and later rounds can rebuild the prompt."""
+    if not used:
         return used
-    return {**used, "chunks": [{**r, "text": str(r.get("text") or "")[:CITE_TEXT_KEEP]} for r in used["chunks"]]}
+    out = {k: v for k, v in used.items() if k not in PROMPT_KEYS}
+    if used.get("chunks"):
+        out["chunks"] = [{**r, "text": str(r.get("text") or "")[:CITE_TEXT_KEEP]} for r in used["chunks"]]
+    return out
 _STOP = frozenset("a an and are as at be been but by can did do does for from had has have he her his i if in into is it its "
                   "me my no not of on or our she so than that the their them then there these they this to was we were what "
                   "when which who will with would you your".split())

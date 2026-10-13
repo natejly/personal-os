@@ -61,7 +61,8 @@ export interface ContextUsed {
   tools_deferred?: number
   /** The workspace map block of the prompt. Null or absent when it is off. */
   map?: WorkspaceMapUsed | null
-  system_prompt: string
+  /** Context previews only: a saved reply drops it (its Exact request shows the prompt it was sent). */
+  system_prompt?: string
   tokens_estimate: number
 }
 

@@ -484,6 +484,7 @@ async def _snapshot_after(run: Run) -> None:
 
 
 bus.after_hooks.append(_snapshot_after)
+bus.after_hooks.append(lambda run: subagent_mgr.end_of_run(run))
 app.include_router(backups.router(db.data_dir))
 # Supportability: GET /diagnostics, POST /maintenance/sweep, and the daily retention sweep (retention.py).
 retention = RetentionWorker(db, settings)
@@ -3743,6 +3744,7 @@ async def _run_job(run: Run, body: ChatIn) -> None:
                 raise RuntimeError(f"This scheduled run was stopped after {int(JOB_IDLE_SECONDS // 60)} minutes with no model or tool activity.")
     except asyncio.CancelledError:
         task.cancel()
+        await asyncio.gather(task, return_exceptions=True)  # its own cancel handler settles the message and ends its shell jobs
         raise
 
 

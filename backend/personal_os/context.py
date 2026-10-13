@@ -303,8 +303,7 @@ def build_context(
                 used["profile"] = [{"id": m["id"], "content": m["content"], "project_id": m["project_id"], "pinned": bool(m["pinned"])}
                                    for m, _ in rows[:len(rows) - n]]
 
-    map_at = len(parts)  # the workspace map goes here, once retrieval has shown how much room it has
-    retrieved = {"memories": 0, "graph": 0, "chunks": 0}  # estimated tokens of the blocks retrieval added this turn
+    map_at = len(parts)  # the workspace map goes here, right after the standing preferences
 
     if page:
         block = page_block(page)
@@ -329,7 +328,6 @@ def build_context(
                 lines.append(_omitted(n))
                 trimmed["memories"] = n
             volatile.append(head + "\n".join(lines))
-            retrieved["memories"] = estimate_tokens(volatile[-1])
             used["memories"] = [{"id": m["id"], "content": m["content"], "project_id": m["project_id"]} for m in mems]
 
     if conv_settings.get("useGraph", True):
@@ -346,7 +344,6 @@ def build_context(
                 if n:
                     kept.append(_omitted(n))
                 volatile.append(head + "\n".join(kept))
-                retrieved["graph"] = estimate_tokens(volatile[-1])
                 ids = {i for e in edges for i in (e["source_id"], e["target_id"])}
                 # The user's node and value nodes are listed too, so the drawer can label an edge's ends; "kind" marks them.
                 used["nodes"] = [{"id": x["id"], "label": x["label"], "type": x["type"],
@@ -397,7 +394,6 @@ def build_context(
                 blocks.append(_omitted(n))
                 trimmed["chunks"] = n
             volatile.append(head + "\n\n".join(blocks))
-            retrieved["chunks"] = estimate_tokens(volatile[-1])
             used["chunks"] += [cite_ref(h, i) for i, h in enumerate(hits, first)]
 
     # Procedural memory. Only skills the user approved by hand are ever injected, and the block says so
@@ -451,13 +447,13 @@ def build_context(
         from . import context_map
 
         try:
-            cap, shrunk = context_map.cap_tokens(shares, retrieved)
-            text, info = context_map.build_stable(db, project_id=project_id, switches=context_map.resolve_switches(settings, conv_settings), cap=cap)
+            text, info = context_map.build_stable(db, project_id=project_id, switches=context_map.resolve_switches(settings, conv_settings),
+                                                  cap=context_map.cap_tokens(shares))
         except Exception:  # noqa: BLE001 - the map is an aid: a failed read leaves the prompt without it
-            text, info, shrunk = "", {}, False
+            text, info = "", {}
         if text:
             parts.insert(map_at, text)
-            used["map"] = context_map.used_stable(text, info, shrunk)
+            used["map"] = context_map.used_stable(text, info)
             if info.get("trimmed"):
                 trimmed["map"] = sum(info["trimmed"].values())
 

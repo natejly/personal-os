@@ -1476,6 +1476,8 @@ export interface Settings {
   modelLow?: string
   /** Model for workers the chat starts; empty means the chat model. An agent definition's own model wins. */
   workerModel?: string
+  /** Reasoning effort of workers' rounds; 'chat' follows the chat's own. Default 'medium'. */
+  workerEffort?: 'low' | 'medium' | 'high' | 'chat'
   autoLearn: boolean
   /** New uploads and Rebuild index write a model-made context blurb per chunk (one call each). */
   contextualChunks?: boolean

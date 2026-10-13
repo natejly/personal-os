@@ -119,6 +119,15 @@ WORKER_CORE = ("shell_run", "shell_poll", "run_python", "web_search", "fetch_url
                "search_tool_results", "read_document", "search_documents", "doc_read", "gmail_search", "gmail_read")
 
 
+WORKER_EFFORTS = ("low", "medium", "high")
+
+
+def worker_effort(cfg: dict[str, Any], chat_effort: Any) -> Any:
+    """Reasoning effort for a worker's rounds: the workerEffort setting, or the chat's own when it says 'chat'."""
+    set_ = str(cfg.get("workerEffort") or "medium")
+    return set_ if set_ in WORKER_EFFORTS else chat_effort
+
+
 def _one_line(text: Any, limit: int = 200) -> str:
     """One line. Pinned notes and folder paths sit in the system prompt, so a newline cannot open a section."""
     return " ".join(str(text or "").replace("\r", " ").split())[:limit]
@@ -913,12 +922,13 @@ class Subagents:
         kw: dict[str, Any] = {"cancel": ch.cancel}
         if final:
             kw["tool_choice"] = "none"
-        if ch.ctx.get("effort") and ch.ctx["effort"] != "default":
-            kw["effort"] = ch.ctx["effort"]
+        effort = worker_effort(cfg, ch.ctx.get("effort"))
+        if effort and effort != "default":
+            kw["effort"] = effort
         buf: list[str] = []
         end: dict[str, Any] = {}
         tracer = Tracer()
-        lspan = tracer.start("llm", ch.model, {"round": ch.rounds, "effort": str(ch.ctx.get("effort") or "default"), "messages": len(ch.messages),
+        lspan = tracer.start("llm", ch.model, {"round": ch.rounds, "effort": str(effort or "default"), "messages": len(ch.messages),
                                                "tools": len(schemas), "worker": True, "kind": ch.kind, "role": ch.role.name, **({"final": True} if final else {})})
         self._emit(ch, "span", {"span": lspan})
         first_token: int | None = None

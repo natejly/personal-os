@@ -109,7 +109,7 @@ class MigrationTests(unittest.TestCase):
         was = migrations.latest()
         migrations.MIGRATIONS.append((was + 1, "boom", boom))
         try:
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, rf"migration {was + 1} \(boom\) failed .*RuntimeError: nope"):
                 Database(self.d)
         finally:
             migrations.MIGRATIONS.pop()

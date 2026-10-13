@@ -679,8 +679,10 @@ def run(c: sqlite3.Connection) -> list[int]:
             c.execute(f"PRAGMA user_version = {int(version)}")  # PRAGMA takes no bound parameters
             c.execute("INSERT OR REPLACE INTO schema_migrations VALUES(?,?,?)", (version, name, time.time()))
             c.commit()
-        except Exception:
+        except Exception as e:
             c.rollback()
-            raise
+            # One line, last on stderr: it is what the app's "backend failed to start" screen shows.
+            raise RuntimeError(f"Database migration {version} ({name}) failed and was rolled back, so your data is unchanged "
+                               f"(the premigrate copy in the backups folder holds it too): {type(e).__name__}: {e}") from e
         done.append(version)
     return done

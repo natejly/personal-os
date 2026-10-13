@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { learnedText, readDocMode, adoptServerDoc, flushDocOnUnload, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, setSettingsGuard, PAGE_AGENT_DRAFT, type ChatSession } from './store'
+import { learnedText, readDocMode, adoptServerDoc, flushDocOnUnload, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, setSettingsGuard, patchDocRow, PAGE_AGENT_DRAFT, type ChatSession } from './store'
 import { insertIntoComposer } from './lib/composerInsert'
 import { getDraft } from './lib/drafts'
 import { ApiError } from './lib/apiError'
@@ -1461,6 +1461,17 @@ test('a slower memories request for the previous scope does not overwrite the ne
     api.memories.list = real
     useStore.setState({ dataScope: 'all', memories: [] })
   }
+})
+
+test('a save patches its doc row and keeps the list order', () => {
+  const row = (id: string, updated_at: number, extra = {}) => ({ id, project_id: null, title: id, folder: '', starred: 0, pinned: 0, created_at: 0, updated_at, words: 0, ...extra })
+  const docs = [row('pinned', 1, { pinned: 1 }), row('a', 5), row('b', 3)]
+  const out = patchDocRow(docs as never, { ...row('b', 9), title: 'B!', words: 2, tags: ['x'], content: 'hi #x' } as never)
+  assert.deepEqual(out.map((d) => d.id), ['pinned', 'b', 'a'])
+  assert.equal(out[1].title, 'B!')
+  assert.deepEqual(out[1].tags, ['x'])
+  assert.equal(out[1].preview, 'hi #x')
+  assert.equal(out[1].size, 5)
 })
 
 // A bare useStore() subscribes to every set(), and patchSession runs once per streamed token, so the

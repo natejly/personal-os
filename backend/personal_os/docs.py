@@ -484,6 +484,7 @@ class Docs:
                 "SELECT * FROM doc_revisions WHERE doc_id=? AND status='pending' ORDER BY created_at", (id,)).fetchall()]
         _parse_typography(d)
         d["words"] = word_count(d["content"])
+        d["tags"] = sorted(extract_tags(d["content"]))  # as list() reports them, so a saved doc can patch its row
         d["pending"] = [self._rev_view(r, d["content"]) for r in pending]  # type: ignore[arg-type]
         return d
 

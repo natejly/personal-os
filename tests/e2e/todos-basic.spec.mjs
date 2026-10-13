@@ -4,7 +4,7 @@ import { openTodos, addBox, dayStr, ignoreErrs, row } from './helpers/todos.mjs'
 test('open from the sidebar row and menu shortcut; add, reject blank, no duplicate on double Enter', async ({ grain }) => {
   const { page } = grain
   await openTodos(page)
-  await expect(page.getByText('Nothing open')).toBeVisible()
+  await expect(page.getByText('All clear')).toBeVisible()
   await addBox(page).fill('   ')
   // The Add button only appears once there is something to add.
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0)

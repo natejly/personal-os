@@ -12,6 +12,7 @@ import { useProjectFileCount } from '../lib/useChatFiles'
 import { PROJECT_SECTION_LABEL as L } from '../lib/projectTabs'
 import { fenced, lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
+import { fmtAgo } from '../lib/deskFiles'
 
 export default function ProjectView(): JSX.Element {
   const id = useStore((s) => s.projectViewId)!
@@ -93,7 +94,7 @@ export default function ProjectView(): JSX.Element {
                   {...dragProps({ kind: 'conversation', id: c.id, label: c.title, projectId: id })}>
                   <MessageSquare size={14} />
                   <span className="chat-row-title"><ChatPulse conv={c} />{c.title}</span>
-                  <span className="muted small">{c.model} · {new Date(c.updated_at * 1000).toLocaleDateString()}</span>
+                  <span className="muted small">{c.model} · {fmtAgo(c.updated_at)}</span>
                   <button className="icon-btn ghost danger" aria-label={`Delete chat: ${c.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={13} /></button>
                 </div>
               ))}

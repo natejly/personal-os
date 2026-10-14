@@ -8,6 +8,9 @@
  * Loaded globally (main.tsx) and by popouts (PopoutSurface.tsx). Tune live in docs/motion-playground.html. */
 :root {
   --dur-press: 90ms;
+  /* Buttons only: a quicker sink and return than the shared press/spring tokens. */
+  --dur-btn-press: 50ms;
+  --dur-btn-release: 150ms;
   --dur-hover: 120ms;
   --dur-snap: 180ms;
   --dur-spring: 360ms;
@@ -28,7 +31,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   :root {
-    --dur-press: 0.01ms; --dur-hover: 0.01ms; --dur-snap: 0.01ms; --dur-spring: 0.01ms; --dur-window: 0.01ms;
+    --dur-press: 0.01ms; --dur-hover: 0.01ms; --dur-snap: 0.01ms; --dur-spring: 0.01ms; --dur-window: 0.01ms; --dur-btn-press: 0.01ms; --dur-btn-release: 0.01ms;
     --press-sink: 0px; --press-grow: 0px;
   }
 }

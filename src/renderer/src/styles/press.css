@@ -1,8 +1,8 @@
 /* Button press: a whole button sinks on press (fast), and returns on the spring. Loaded after
    styles.css. Excludes segmented cells (the pill moves instead), popout chrome and drag regions. */
-.icon-btn, .ghost-btn, .primary-btn { transition: transform var(--dur-spring) var(--spring-snappy), background-color var(--dur-hover), color var(--dur-hover); }
+.icon-btn, .ghost-btn, .primary-btn { transition: transform var(--dur-btn-release) var(--spring-snappy), background-color var(--dur-hover), color var(--dur-hover); }
 .icon-btn:active:not(:disabled), .ghost-btn:active:not(:disabled), .primary-btn:active:not(:disabled) {
-  transform: translateY(var(--press-sink)); transition-duration: var(--dur-press), var(--dur-hover), var(--dur-hover); transition-timing-function: var(--ease-out);
+  transform: translateY(var(--press-sink)); transition-duration: var(--dur-btn-press), var(--dur-hover), var(--dur-hover); transition-timing-function: var(--ease-out);
 }
 .seg > button:active, .popout-actions button:active, .drag button:active { transform: none; }
 

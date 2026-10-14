@@ -2,7 +2,6 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type K
 import { createPortal } from 'react-dom'
 import { Check, RotateCcw } from '../icons'
 import { DEFAULT_EFFORT, type Effort } from '@shared/types'
-import { api } from '../lib/api'
 import { modelChoices, modelLabel, showsEffort } from '../lib/modelLabel'
 import { pickerVisible } from '../lib/pickerModels'
 import { useStore } from '../store'
@@ -39,8 +38,8 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
   const models = useStore((s) => s.models)
   const fastModel = useStore((s) => s.settings.fastModel)
   const pickerModels = useStore((s) => s.settings.pickerModels)
-  const activeProvider = useStore((s) => s.settings.provider)
-  const [names, setNames] = useState<Record<string, string>>({})
+  const providers = useStore((s) => s.settings.providers)
+  const names = useMemo(() => Object.fromEntries((providers ?? []).map((p) => [p.id, p.name])), [providers])
   const modelsError = useStore((s) => s.modelsError)
   const loadModels = useStore((s) => s.loadModels)
   const [retrying, setRetrying] = useState(false)
@@ -60,14 +59,15 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
     const ids = visible.map((m) => m.id)
     if (model && model !== 'auto' && !ids.includes(model)) ids.unshift(model)
     const owner = new Map(models.map((m) => [m.id, m.provider ?? '']))
-    // Grouped by provider, the active one first. The sort is stable, so names stay alphabetical inside a group.
-    const rank = (id: string): number => ((owner.get(id) ?? '') === activeProvider ? 0 : 1)
+    // Grouped by provider in the order they were added. The sort is stable, so names stay alphabetical inside a group.
+    const order = (providers ?? []).map((p) => p.id)
+    const rank = (g: string): number => { const i = order.indexOf(g); return i < 0 ? order.length : i }
     const rows = modelChoices(ids, query, model)
       .map((id) => ({ id, label: modelLabel(id), group: owner.get(id) ?? '' }))
-      .sort((a, b) => rank(a.id) - rank(b.id) || (a.group === b.group ? 0 : a.group < b.group ? -1 : 1))
+      .sort((a, b) => rank(a.group) - rank(b.group))
     // Auto sits first once a fast model is set (or when the chat is already on it).
     return (fastModel || model === 'auto') && 'auto'.includes(query.trim().toLowerCase()) ? [{ id: 'auto', label: 'Auto', group: '' }, ...rows] : rows
-  }, [models, model, query, fastModel, pickerModels, activeProvider])
+  }, [models, model, query, fastModel, pickerModels, providers])
   // A header per provider only when more than one has rows.
   const grouped = new Set(options.filter((o) => o.id !== 'auto').map((o) => o.group)).size > 1
 
@@ -82,7 +82,6 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
     setQuery('')
     setEditing(null)
     if (modelsError || models.length === 0) void loadModels()
-    if (!Object.keys(names).length) api.setup.providers().then((r) => setNames(Object.fromEntries(r.providers.map((p) => [p.id, p.name])))).catch(() => undefined)
     const t = window.setTimeout(() => searchRef.current?.focus(), 0)
     return () => window.clearTimeout(t)
   }, [open])

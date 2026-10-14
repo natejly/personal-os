@@ -1,31 +1,47 @@
-import { RotateCcw } from '../../icons'
+import { Fragment } from 'react'
 import { useStore } from '../../store'
 import { RESPONSE_STYLES, RESPONSE_STYLE_TEXT_MAX } from '../../lib/responseStyle'
-import ProviderSettings from '../ProviderSettings'
+import { embeddingLocked } from '../../lib/pickerModels'
+import { MODEL_FIELDS } from '../../lib/providerModels'
+import ProvidersSettings from '../ProvidersSettings'
 import ModelsSettings from '../ModelsSettings'
+import ModelSelect from '../ModelSelect'
 import ModelDuels from '../ModelDuels'
 import Switch from './Switch'
 import { Sec, type TabProps } from './shared'
+import type { Settings } from '@shared/types'
 
-export default function ModelTab({ draft, patch, onRunSetup }: TabProps & { onRunSetup: () => void }): JSX.Element {
+export default function ModelTab({ draft, patch, onProvidersChanged }: TabProps & { onProvidersChanged: () => Promise<void> }): JSX.Element {
   const settings = useStore((s) => s.settings)
   const models = useStore((s) => s.models)
   return (
     <section>
       <h3>Models</h3>
-      <Sec id="provider">
-        <h4>Chat model</h4>
-        <p className="muted small">Where your chats are answered, and which model answers them.</p>
-        <ProviderSettings draft={draft} settings={settings} patch={patch} models={models} />
+      <Sec id="provider"><ProvidersSettings onChanged={onProvidersChanged} /></Sec>
+      <Sec id="models">
+        <h4>Models</h4>
+        <p className="muted small">Every model from a provider with a key. Leave a tier empty to use its provider's default.</p>
+        {MODEL_FIELDS.map((f) => {
+          const locked = f.key === 'embeddingModel' && embeddingLocked(settings)
+          return (
+            <Fragment key={f.key}>
+              <label className="setting-row"><span className="toggle-text"><b>{f.label}</b>{(f.help || locked) && <small>{locked ? 'Fixed: the search index is built with it.' : f.help}</small>}</span>
+                <ModelSelect kind={f.kind} label={f.label} blank={f.blank} disabled={locked} value={draft[f.key] ?? ''} onChange={(v) => patch({ [f.key]: v })} />
+              </label>
+              {f.key === 'workerModel' && (
+                <label className="setting-row"><span className="toggle-text"><b>Worker effort</b><small>How hard workers think. Medium is faster and cheaper; Same as chat follows the chat's effort.</small></span>
+                  <select value={draft.workerEffort ?? 'medium'} onChange={(e) => patch({ workerEffort: e.target.value as Settings['workerEffort'] })}>
+                    <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="chat">Same as chat</option>
+                  </select>
+                </label>
+              )}
+            </Fragment>
+          )
+        })}
       </Sec>
-      <Sec id="keys"><ModelsSettings settings={settings} models={models} pickerModels={draft.pickerModels} setPickerModels={(pickerModels) => patch({ pickerModels })} /></Sec>
+      <Sec id="picker"><ModelsSettings settings={settings} models={models} pickerModels={draft.pickerModels} setPickerModels={(pickerModels) => patch({ pickerModels })} /></Sec>
       <h4>Fast replies</h4>
       <Switch title="Use the fast model for short messages" help="Short, simple messages answer without the thinking pass (or on the fast model if one is set). Long, analytical or tool-heavy messages use the chat model as usual." checked={!!draft.autoRoute} onChange={(autoRoute) => patch({ autoRoute })} />
-      <h4>Setup</h4>
-      <div className="setting-row">
-        <span className="toggle-text"><b>Run setup again</b><small>Walks through choosing a provider and model from the start.</small></span>
-        <button className="ghost-btn" type="button" onClick={onRunSetup}><RotateCcw size={14} /> Run setup</button>
-      </div>
       <Sec id="assistant">
         <h4>Assistant</h4>
         <p className="muted small">How the assistant writes and what it does on its own.</p>

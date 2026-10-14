@@ -1246,10 +1246,6 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .accent-swatch.on { border-color: var(--text); }
 .accent-swatch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .input-row { display: flex; gap: 6px; align-items: center; }
-.test-row { display: flex; align-items: center; gap: 10px; margin: -4px 0 14px; font-size: 13px; }
-.test-msg.ok { color: var(--ok); }
-.test-msg.fail { color: var(--danger); }
-.model-prompt { color: var(--warn); font-size: 12px; }
 /* Pinned to the bottom of the scroller, so Save/Cancel is always reachable. */
 .modal footer {
   display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px;
@@ -1323,13 +1319,19 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .settings-pane .setting-row > input, .settings-pane .setting-row > select { width: auto; min-width: 160px; }
 .models-tab { display: flex; flex-direction: column; gap: 14px; }
 .models-tab > * { margin: 0; }
-/* Key rows: input, Save and Remove sit in the same columns on every row; a row with no saved key leaves the Remove slot empty. */
-.settings-pane .key-row { padding: 12px; align-items: center; }
-.key-row .input-row { display: grid; grid-template-columns: 220px 64px 84px; gap: 6px; align-items: center; }
-.key-row .input-row > * { min-width: 0; width: 100%; box-sizing: border-box; }
+/* Providers: one row per provider, its inline edit line and error under it. */
+.prov-item { padding: 10px 12px; }
+.prov-row { display: flex; align-items: center; gap: 12px; }
+.prov-row > .toggle-text { flex: 1; min-width: 0; }
+.prov-row > .toggle-text small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prov-edit { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.prov-edit > input { flex: 1; min-width: 0; }
+.prov-edit > .muted { flex: 1; }
+.prov-err { margin: 6px 0 0; font-size: 12px; color: var(--danger); }
+.prov-add { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; }
+.prov-add > * { margin: 0; }
 .settings-pane .setting-row.models-filter > input { flex: 1; min-width: 0; width: auto; }
-.settings-pane .models-filter > input, .settings-pane .models-filter > button,
-.settings-pane .key-row .input-row > * { height: 34px; }
+.settings-pane .models-filter > input, .settings-pane .models-filter > button { height: 34px; }
 .settings-pane input[type=time]:not(.modal-free *) { min-width: 136px; }
 .settings-pane input[type=number]:not(.modal-free *) { width: 96px; min-width: 0; font-variant-numeric: tabular-nums; }
 .settings-pane .button-row { display: flex; flex-wrap: wrap; gap: 8px; }

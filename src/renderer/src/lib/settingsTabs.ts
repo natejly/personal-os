@@ -27,9 +27,9 @@ export function resolveTab(id: string): { tab: SettingsTab; group?: AdvancedGrou
 /** One findable block of settings: the tab it lives on, its anchor id (`sec-<sec>` in the pane) and the words people type for it. */
 export interface SettingsEntry { tab: SettingsTab; sec: string; title: string; keys: string }
 export const SETTINGS_INDEX: readonly SettingsEntry[] = [
-  { tab: 'model', sec: 'provider', title: 'Provider and model', keys: 'api key base url openai fireworks ollama litellm default model fast model setup' },
+  { tab: 'model', sec: 'provider', title: 'Providers', keys: 'provider add key api key verify replace remove address base url openai anthropic fireworks openrouter ollama litellm custom setup' },
+  { tab: 'model', sec: 'models', title: 'Models', keys: 'chat model default tier high medium low worker embedding search rerank vision image fast model' },
   { tab: 'model', sec: 'assistant', title: 'Assistant behaviour', keys: 'standing instructions system prompt reply style tone titles follow-up suggestions selection toolbar compact summarize' },
-  { tab: 'model', sec: 'keys', title: 'API keys', keys: 'provider key openai anthropic fireworks openrouter remove saved' },
   { tab: 'model', sec: 'picker', title: 'Models in the picker', keys: 'composer model menu choose show hide checkbox reset suggested' },
   { tab: 'usage', sec: 'usage', title: 'Usage and cost', keys: 'tokens spend price billing calls' },
   { tab: 'permissions', sec: 'mode', title: 'Permission mode', keys: 'auto manual allow everything approvals ask risky reviewer' },

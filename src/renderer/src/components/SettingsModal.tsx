@@ -4,12 +4,10 @@ import { useShallow } from 'zustand/react/shallow'
 import { useStore, setSettingsGuard } from '../store'
 import { modeOf, MODES } from '../lib/permissionMode'
 import { resolveTab, searchSettings, type SettingsTab } from '../lib/settingsTabs'
-import { useOnboarding } from './onboarding/onboardingStore'
 import { api } from '../lib/api'
 import { useModal } from '../lib/useModal'
 import { applyAppearance } from '../lib/appearance'
 import { modelLabel } from '../lib/modelLabel'
-import { chatRows } from '../lib/pickerModels'
 import type { Settings } from '@shared/types'
 import ModelTab from './settings/ModelTab'
 import UsageTab from './settings/UsageTab'
@@ -46,13 +44,12 @@ const TABS: { id: Tab; label: string; icon: Icon }[] = [
  */
 export default function SettingsModal(): JSX.Element {
   const settings = useStore((s) => s.settings)
-  const models = useStore((s) => s.models)
   const view = useStore((s) => s.view)
   const { saveSettings, setSettingsOpen, setView, toast } = useStore(useShallow((s) => ({ saveSettings: s.saveSettings, setSettingsOpen: s.setSettingsOpen, setView: s.setView, toast: s.toast })))
   const [draft, setDraft] = useState<Settings>(settings)
   const [saving, setSaving] = useState(false)
   // Set while the footer asks whether to throw the draft away; it remembers what the answer leads to.
-  const [pending, setPending] = useState<'close' | 'setup' | null>(null)
+  const [pending, setPending] = useState<'close' | null>(null)
   const { shortcuts, apply: applyShortcuts } = useShortcuts()
   const storeTab = useStore((s) => s.settingsTab)
   const storeGroup = useStore((s) => s.settingsGroup)
@@ -123,14 +120,14 @@ export default function SettingsModal(): JSX.Element {
     setDraft((d) => ({ ...d, ...p }))
   }
 
-  /** Reset the onboarding stamp, then show the wizard over the app. The modal's draft is dropped with it. */
-  const rerunSetup = async (): Promise<void> => {
-    try {
-      await useOnboarding.getState().rerun()
-      setSettingsOpen(false)
-    } catch (e) {
-      toast((e as Error).message, 'error')
-    }
+  /** A provider was added, changed or removed (saved at once by its own routes): take the new settings and models, keeping any edit still unsaved. */
+  const providersChanged = async (): Promise<void> => {
+    const fresh = await api.settings.get()
+    useStore.setState({ settings: fresh })
+    void useStore.getState().loadModels()
+    const old = base.current as unknown as Record<string, unknown>
+    base.current = fresh
+    setDraft((d) => Object.fromEntries(Object.entries(fresh).map(([k, v]) => [k, JSON.stringify((d as unknown as Record<string, unknown>)[k]) === JSON.stringify(old[k]) ? v : (d as unknown as Record<string, unknown>)[k]])) as unknown as Settings)
   }
   // Every way out (X, Escape, the backdrop, Cancel) comes through here, so a changed draft is never
   // dropped without the footer asking first.
@@ -144,10 +141,8 @@ export default function SettingsModal(): JSX.Element {
     return () => setSettingsGuard(null)
   }, [dirty])
   const discard = (): void => {
-    const then = pending
     setPending(null)
-    if (then === 'setup') void rerunSetup()
-    else setSettingsOpen(false)
+    setSettingsOpen(false)
   }
   const { titleId, backdrop, modal } = useModal(requestClose)
   // The question's buttons unmount with it; park focus on the dialog so the next Tab starts inside it.
@@ -253,7 +248,7 @@ export default function SettingsModal(): JSX.Element {
             )}
           </div>
           <div className="settings-pane" id="settings-pane" role="tabpanel" aria-labelledby={`settings-tab-${tab}`}>
-            {tab === 'model' && <ModelTab {...tabProps} onRunSetup={() => (dirty ? setPending('setup') : void rerunSetup())} />}
+            {tab === 'model' && <ModelTab {...tabProps} onProvidersChanged={providersChanged} />}
             {tab === 'usage' && <UsageTab />}
             {tab === 'permissions' && <PermissionsTab {...tabProps} />}
             {tab === 'integrations' && <IntegrationsTab {...tabProps} onSaveCreds={saveGoogleCreds} />}
@@ -263,9 +258,6 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'sidebar' && <SidebarTab {...tabProps} />}
             {tab === 'system' && <SystemTab />}
             {tab === 'advanced' && <AdvancedTab {...tabProps} {...gp} />}
-
-            {/* Outside the tabs: the model fields of several sections list from it. */}
-            <datalist id="model-options">{chatRows(models).map((m) => <option key={m.id} value={m.id} label={m.provider ? `${m.id} — ${m.provider}` : undefined} />)}</datalist>
           </div>
         </div>
 

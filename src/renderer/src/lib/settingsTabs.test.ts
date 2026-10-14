@@ -36,3 +36,8 @@ test('the Telegram bot section is found by "bot" and "texting"', () => {
     assert.equal(hit.title, 'Telegram bot')
   }
 })
+
+test('providers and models are found by what people type', () => {
+  assert.ok(searchSettings('api key').some((e) => e.sec === 'provider'))
+  assert.ok(searchSettings('rerank').some((e) => e.sec === 'models'))
+})

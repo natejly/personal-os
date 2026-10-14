@@ -62,16 +62,16 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
   await setToggle(field(page, 'Hold outgoing email so I can undo'), false)
   // Model
   await tabBtn(page, 'Model').click()
-  await field(page, 'Chat model').fill('mock-chat-2')
-  await field(page, 'Low tier').fill('mock-chat-2')
+  await field(page, 'Chat model').selectOption('custom/mock-chat-2')
+  await field(page, 'Low tier').selectOption('custom/mock-chat-2')
   await save(page)
 
   const check = async () => {
     const s = await api('/settings')
     expect(s).toMatchObject({
       chatNotify: false, notifyJobs: false, systemPrompt: 'Always answer in haiku.', dictationChord: 'Control+Alt+K', devTools: true,
-      autoLearn: false, autoTitle: false, learnStyle: false, modelLow: 'mock-chat-2',
-      docEditMode: 'apply', searxngUrl: 'http://localhost:8080', defaultModel: 'mock-chat-2'
+      autoLearn: false, autoTitle: false, learnStyle: false, modelLow: 'custom/mock-chat-2',
+      docEditMode: 'apply', searxngUrl: 'http://localhost:8080', defaultModel: 'custom/mock-chat-2'
     })
     expect(s.gmailSendHold.enabled).toBe(false)
   }
@@ -85,7 +85,7 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
   await openAdvanced(p2, 'Approvals')
   await expect(dialog(p2).getByRole('button', { name: 'Full agentic editing', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await tabBtn(p2, 'Model').click()
-  await expect(field(p2, 'Chat model')).toHaveValue('mock-chat-2')
+  await expect(field(p2, 'Chat model')).toHaveValue('custom/mock-chat-2')
   await closeSettings(p2)
   noErrors(grain)
 })
@@ -159,37 +159,34 @@ async function closeDirty(page) {
   await expect(dialog(page)).toHaveCount(0)
 }
 
-test('empty model and garbage base URL do not break the modal or the app', async ({ grain }) => {
+test('a provider with a garbage address is refused inline and the app stays alive', async ({ grain }) => {
   const { page, api } = grain
-  await openSettings(page, 'Model')
-  await field(page, 'Chat model').fill('')
-  await field(page, 'Provider address').fill('not a url ::: %%')
-  const known = (e) => /status of (50[0-9]|422)/.test(e) // the unreachable provider's 502 on /models, the refused address's 422
-  await dialog(page).getByRole('button', { name: /Test connection/ }).click()
-  await expect(dialog(page).locator('.test-msg')).toBeVisible({ timeout: 20_000 })
-  await expect(dialog(page).locator('.test-msg')).toHaveClass(/fail/)
-  await dialog(page).getByRole('button', { name: 'Save', exact: true }).click()
-  // Whatever the backend decided, the app is still alive and the settings route answers.
-  await page.waitForTimeout(500)
-  const s = await api('/settings')
-  expect(typeof s.defaultModel).toBe('string')
-  expect(typeof s.baseUrl).toBe('string')
-  if (await dialog(page).count()) await closeDirty(page)
-  // The app still renders and can be reopened.
-  await openSettings(page, 'Model')
+  await openSettings(page, 'Models')
+  const before = (await api('/providers')).providers.length
+  const known = (e) => /status of (50[0-9]|422)/.test(e) // the unreachable provider's 502, the refused address's 422
+  await dialog(page).getByRole('button', { name: 'Add provider' }).click()
+  await dialog(page).getByLabel('Provider', { exact: true }).selectOption('custom')
+  await dialog(page).getByLabel('Provider address').fill('not a url ::: %%')
+  await dialog(page).getByRole('textbox', { name: /API key/ }).fill('k')
+  await dialog(page).getByRole('button', { name: 'Verify & add' }).click()
+  await expect(dialog(page).getByRole('alert').first()).toBeVisible({ timeout: 20_000 })
+  // Nothing was stored, the form keeps what was typed, and the settings route still answers.
+  expect((await api('/providers')).providers.length).toBe(before)
+  await expect(dialog(page).getByLabel('Provider address')).toHaveValue('not a url ::: %%')
+  expect(typeof (await api('/settings')).defaultModel).toBe('string')
+  await closeDirty(page)
+  await openSettings(page, 'Models')
   await closeDirty(page)
   expect(grain.consoleErrors.filter((e) => !benign(e) && !known(e))).toEqual([])
 })
 
-test('model list comes from the provider and leaves the embedding model out of chat choices', async ({ grain }) => {
+test('model pickers list every model from the providers with a key and leave the embedding model out of chat choices', async ({ grain }) => {
   const { page } = grain
-  await openSettings(page, 'Model')
-  await expect(tabBtn(page, 'Model')).toBeVisible()
-  await expect.poll(async () => page.locator('#model-options option').evaluateAll((os) => os.map((o) => o.value))).toEqual(expect.arrayContaining(['mock-chat', 'mock-chat-2']))
-  const values = await page.locator('#model-options option').evaluateAll((os) => os.map((o) => o.value))
-  expect(values).not.toContain('mock-embed')
-  await dialog(page).getByRole('button', { name: /Test connection/ }).click()
-  await expect(dialog(page).locator('.test-msg.ok')).toContainText(/Connected/, { timeout: 20_000 })
+  await openSettings(page, 'Models')
+  const options = (label) => field(page, label).locator('option').evaluateAll((os) => os.map((o) => o.value))
+  await expect.poll(() => options('Chat model')).toEqual(expect.arrayContaining(['custom/mock-chat', 'custom/mock-chat-2']))
+  expect(await options('Chat model')).not.toContain('custom/mock-embed')
+  expect(await options('Search model')).toContain('mock-embed')
   await closeSettings(page)
   noErrors(grain)
 })

@@ -41,7 +41,7 @@ export const panel = (page) => page.locator('.desk-panel')
 /** The chat's side panel (the header button opens it, desk or not), on `tab` (Files, Changes or Review). */
 export async function openPanel(page, tab) {
   if (!(await panel(page).count())) await page.getByRole('button', { name: 'Workspace panel', exact: true }).click()
-  if (tab) await panel(page).locator('.desk-tabs').getByRole('button', { name: new RegExp('^' + tab) }).click()
+  if (tab) await panel(page).locator('.desk-card-head', { hasText: new RegExp('^' + tab) }).click()
 }
 /** Turn autonomy on for an existing chat over the API (the composer has no per-chat switch): `level` is plan, ask or propose. */
 export async function turnOn(grain, chatId, level = 'propose') {

@@ -12,7 +12,7 @@ export const anyStop = (page) => page.getByRole('button', { name: /^Stop/ })
 export async function openContextPanel(page) {
   const btn = page.getByRole('button', { name: 'Workspace panel', exact: true })
   if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click()
-  await page.locator('.desk-tabs button', { hasText: /^Context$/ }).click()
+  await page.getByTestId('desk-tab-context').click()
 }
 
 export async function newChat(page) {

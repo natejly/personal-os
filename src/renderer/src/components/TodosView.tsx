@@ -4,7 +4,7 @@ import { Plus, ListChecks, RefreshCw, Bookmark, X, ChevronDown, KanbanSquare, Li
 import type { TodoFilter, TodoRepeat } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore, type Scope } from '../store'
-import TodoItem from './TodoItem'
+import TodoItem, { justCompleted } from './TodoItem'
 import ScopeSelect from './ScopeSelect'
 import SmartTextarea from './SmartTextarea'
 import { localDay } from './CalendarWeek'
@@ -139,8 +139,9 @@ export default function TodosView(): JSX.Element {
     const key = `${scope}|${sort}|${list}|${tag}`
     const prev = prevKey.current === key ? prevOpen.current : []
     prevKey.current = key
-    const gone = loaded && !showDone && !board ? prev.filter((t) => !ids.has(t.id)).map((t) => ({ todo: t, label: labelOf(t), at: prev.filter((p) => labelOf(p) === labelOf(t)).indexOf(t) })) : []
+    const gone = loaded && !showDone && !board ? prev.filter((t) => !ids.has(t.id) && justCompleted.has(t.id)).map((t) => ({ todo: t, label: labelOf(t), at: prev.filter((p) => labelOf(p) === labelOf(t)).indexOf(t) })) : []
     if (gone.length) setGhosts((g) => [...g, ...gone.filter((x) => !g.some((y) => y.todo.id === x.todo.id))])
+    for (const t of prev) if (!ids.has(t.id)) justCompleted.delete(t.id)
     prevOpen.current = open
   }) // eslint-disable-line react-hooks/exhaustive-deps
   const listLabel = list === null ? 'all lists' : list || DEFAULT_LIST

@@ -43,6 +43,9 @@ export async function scheduleTodo(todo: Todo, start?: string): Promise<Todo> {
 // A transparent date input only focuses its mm/dd/yyyy segments on click; ask for the calendar popup.
 const openPicker = (e: { currentTarget: HTMLInputElement }): void => { try { e.currentTarget.showPicker() } catch { /* needs a user gesture */ } }
 
+/** Ids just ticked off here: the list folds those away, but drops a deleted row without ceremony. */
+export const justCompleted = new Set<string>()
+
 function TodoItem({ todo, showProject = true, compact = false, depth = 0, onTag }: { todo: Todo; showProject?: boolean; compact?: boolean; depth?: number; onTag?: (tag: string) => void }): JSX.Element {
   const updateTodo = useStore((s) => s.updateTodo)
   const deleteTodo = useStore((s) => s.deleteTodo)
@@ -80,7 +83,7 @@ function TodoItem({ todo, showProject = true, compact = false, depth = 0, onTag 
   const drag = dragProps({ kind: 'todo', id: todo.id, label: todo.title, projectId: todo.project_id })
   return (
     <div className={`todo ${todo.done ? 'done' : ''} p${todo.priority} ${compact ? 'compact' : ''}`} style={depth ? { marginLeft: depth * 20 } : undefined} {...(editing ? {} : drag)}>
-      <button className="todo-check" onClick={() => void updateTodo(todo.id, { done: !todo.done })} title={todo.done ? 'Reopen' : 'Complete'} aria-label={`${todo.done ? 'Reopen' : 'Complete'}: ${todo.title}`}>
+      <button className="todo-check" onClick={() => { if (!todo.done) justCompleted.add(todo.id); void updateTodo(todo.id, { done: !todo.done }) }} title={todo.done ? 'Reopen' : 'Complete'} aria-label={`${todo.done ? 'Reopen' : 'Complete'}: ${todo.title}`}>
         <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 6.5l2.5 2.5 4.5-5.5" pathLength="1" /></svg>
       </button>
       <div className="todo-main">

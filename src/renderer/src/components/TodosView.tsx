@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSlidingPill } from "../lib/useSlidingPill"
 import { useShallow } from 'zustand/react/shallow'
 import { Plus, ListChecks, RefreshCw, Bookmark, X, ChevronDown, KanbanSquare, List, SlidersHorizontal, Pencil, Trash2, Inbox, Layers } from '../icons'
 import type { TodoFilter, TodoRepeat } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore, type Scope } from '../store'
-import TodoItem from './TodoItem'
+import TodoItem, { justCompleted } from './TodoItem'
 import ScopeSelect from './ScopeSelect'
 import SmartTextarea from './SmartTextarea'
 import { localDay } from './CalendarWeek'
@@ -17,6 +17,18 @@ import { clearHandoff, peekHandoff } from '../lib/handoff'
 import SidebarToggle from './SidebarToggle'
 import { rowButton } from '../lib/rowButton'
 import ErrorState from './ErrorState'
+
+type Todo = ReturnType<typeof useStore.getState>['todos'][number]
+/** A just-completed row that has left the data: it shows the finished state, then folds shut and removes itself. */
+function LeavingTodo({ todo, onGone }: { todo: Todo; onGone: () => void }): JSX.Element {
+  const [done, setDone] = useState(false)
+  useEffect(() => { const r = requestAnimationFrame(() => setDone(true)); return () => cancelAnimationFrame(r) }, [])
+  return (
+    <div className="todo-fold" aria-hidden="true" onAnimationEnd={onGone}>
+      <TodoItem todo={{ ...todo, done: done ? 1 : 0 } as Todo} depth={0} />
+    </div>
+  )
+}
 
 /** The unlisted todos are the default list; this is what it is called in the rail. */
 const DEFAULT_LIST = 'Todos'
@@ -119,6 +131,21 @@ export default function TodosView(): JSX.Element {
   const upcoming = open.filter((t) => t.due && !overdue.includes(t) && !today.includes(t))
   const someday = open.filter((t) => !t.due)
   const done = shown.filter((t) => t.done)
+  // Open rows that vanish from the list (completed, with Show done off) linger as ghosts in their old spot while they fold away.
+  const labelOf = (t: Todo): string => sort === 'urgency' ? 'By urgency' : !t.due ? 'Someday' : t.due === todayKey ? 'Today' : new Date(t.due + 'T00:00:00') < new Date(new Date().toDateString()) ? 'Overdue' : 'Upcoming'
+  const prevOpen = useRef<Todo[]>([])
+  const prevKey = useRef('')
+  const [ghosts, setGhosts] = useState<{ todo: Todo; label: string; at: number }[]>([])
+  useEffect(() => {
+    const ids = new Set(todos.map((t) => t.id))
+    const key = `${scope}|${sort}|${list}|${tag}`
+    const prev = prevKey.current === key ? prevOpen.current : []
+    prevKey.current = key
+    const gone = loaded && !showDone && !board ? prev.filter((t) => !ids.has(t.id) && justCompleted.has(t.id)).map((t) => ({ todo: t, label: labelOf(t), at: prev.filter((p) => labelOf(p) === labelOf(t)).indexOf(t) })) : []
+    if (gone.length) setGhosts((g) => [...g, ...gone.filter((x) => !g.some((y) => y.todo.id === x.todo.id))])
+    for (const t of prev) if (!ids.has(t.id)) justCompleted.delete(t.id)
+    prevOpen.current = open
+  }) // eslint-disable-line react-hooks/exhaustive-deps
   const listLabel = list === null ? 'all lists' : list || DEFAULT_LIST
   const openCount = (name: string): number => todos.filter((t) => !t.done && (t.list_name ?? '') === name).length
 
@@ -151,13 +178,18 @@ export default function TodosView(): JSX.Element {
   }
   // A plain function, not a component: a component declared here would be a new type every render and
   // remount every TodoItem, losing an open title edit or date picker whenever the list refreshes.
-  const section = (label: string, items: typeof todos): JSX.Element | null =>
-    items.length ? (
+  const section = (label: string, items: typeof todos): JSX.Element | null => {
+    const mine = ghosts.filter((g) => g.label === label)
+    if (!items.length && !mine.length) return null
+    const rows: JSX.Element[] = items.map((t) => <TodoItem key={t.id} todo={t} depth={depthOf(t, items)} onTag={setTag} />)
+    for (const g of mine) rows.splice(Math.min(g.at, rows.length), 0, <LeavingTodo key={g.todo.id} todo={g.todo} onGone={() => setGhosts((x) => x.filter((y) => y !== g))} />)
+    return (
       <section className="todo-section">
         <h4 className="section-h">{label} <span>{items.length}</span></h4>
-        {items.map((t) => <TodoItem key={t.id} todo={t} depth={depthOf(t, items)} onTag={setTag} />)}
+        {rows}
       </section>
-    ) : null
+    )
+  }
 
   // Rail rows hold their own buttons, so they are divs that act as buttons rather than nested buttons.
   const railRow = (name: string | null, label: string, icon: JSX.Element, count: number | null): JSX.Element => (

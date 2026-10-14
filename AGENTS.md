@@ -85,28 +85,19 @@ bundled Python and does not need this venv at all, only `uv` and `npm install`.)
 
 Grain needs one model provider to do anything.
 
-- **Dev (path b):** configure it in `.env`. The lowest-friction option is to skip the
-  LiteLLM proxy and point straight at a provider's OpenAI-compatible endpoint:
+- **Dev (path b):** add it in the app.
 
   ```bash
-  cp .env.example .env
+  cp .env.example .env   # optional: Google client, Fireworks key for the LiteLLM proxy
   ```
 
-  Then edit `.env`:
-
-  ```
-  PERSONAL_OS_BASE_URL=https://api.fireworks.ai/inference
-  PERSONAL_OS_API_KEY=fw_your_key_here
-  PERSONAL_OS_DEFAULT_MODEL=accounts/fireworks/models/kimi-k3
-  ```
-
-  Any OpenAI-compatible endpoint works: OpenAI, OpenRouter, a local Ollama on
-  `http://localhost:11434/v1`, or a LiteLLM proxy. `backend/personal_os/providers.py` is the
-  list the setup wizard offers.
+  Models are not configured in `.env`. Start the app and add a provider in
+  Settings → Models (or the first-run wizard): pick a preset or paste any OpenAI-compatible
+  address, add its key, and Grain verifies it before saving. `backend/personal_os/providers.py`
+  is the preset list.
 - **Packaged (path a):** nothing to edit. **`.env` is read in development only.** A packaged
   build sets `PERSONAL_OS_PACKAGED=1`, which skips `.env` loading entirely
-  (`backend/personal_os/__main__.py`) and env-seeding of settings
-  (`backend/personal_os/app.py`). The first-run wizard asks for the provider and key; have
+  (`backend/personal_os/__main__.py`). The first-run wizard asks for the provider and key; have
   the key ready.
 
 Google Workspace (Mail, Calendar, Tasks, Docs) needs your own OAuth client of type

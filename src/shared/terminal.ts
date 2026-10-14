@@ -47,7 +47,7 @@ export function pickArgv(a: { agent: unknown; external_id?: unknown; session_id?
  * the backend token, the app's own and provider API keys, and any name that looks like a secret.
  */
 const SECRET_NAME = /TOKEN|SECRET|API_KEY|PASSWORD|CREDENTIAL/i
-const GRAIN_VARS = new Set(['PERSONAL_OS_AUTH_TOKEN', 'PERSONAL_OS_API_KEY', 'ANTHROPIC_API_KEY', 'FIREWORKS_API_KEY', 'BRAVE_API_KEY', 'FIRECRAWL_API_KEY', 'PERPLEXITY_API_KEY'])
+const GRAIN_VARS = new Set(['PERSONAL_OS_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'FIREWORKS_API_KEY', 'BRAVE_API_KEY', 'FIRECRAWL_API_KEY', 'PERPLEXITY_API_KEY'])
 export function scrubEnv(env: Record<string, string | undefined>): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(env)) {

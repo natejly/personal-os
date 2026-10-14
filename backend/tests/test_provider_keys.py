@@ -144,17 +144,17 @@ def test_migrate_infers_provider_from_base_url_alone() -> None:
     assert provider_keys.load(db.secrets) == {"fireworks": FW_KEY}
 
 
-def test_env_seed_then_migrate(monkeypatch: pytest.MonkeyPatch) -> None:
-    from personal_os import app as app_mod
-    monkeypatch.delenv("PERSONAL_OS_PACKAGED", raising=False)
-    monkeypatch.setenv("PERSONAL_OS_BASE_URL", OAI)
-    monkeypatch.setenv("PERSONAL_OS_API_KEY", OAI_KEY)
-    with db.tx() as c:
-        c.execute("DELETE FROM settings WHERE key IN ('baseUrl','apiKey')")
-    db.secrets.delete("apiKey")
-    app_mod._seed_settings_from_env()
-    provider_keys.migrate(db)
-    assert provider_keys.load(db.secrets) == {"openai": OAI_KEY}
+def test_env_provider_vars_do_not_seed_settings(tmp_path: Path) -> None:
+    """The old PERSONAL_OS_* provider variables are ignored: a fresh install stays unconfigured until a provider is added."""
+    import subprocess
+    env = {**os.environ, "PERSONAL_OS_DATA_DIR": str(tmp_path), "PERSONAL_OS_BASE_URL": OAI, "PERSONAL_OS_API_KEY": OAI_KEY,
+           "PERSONAL_OS_DEFAULT_MODEL": "gpt-x", "PERSONAL_OS_EXTRACTION_MODEL": "gpt-y", "PERSONAL_OS_TEST_CHILD": "1"}
+    env.pop("PERSONAL_OS_PACKAGED", None)
+    code = ("from personal_os.app import db; s = db.get_settings(); "
+            "print(sorted(k for k in ('baseUrl','apiKey','defaultModel','extractionModel') if s.get(k)))")
+    out = subprocess.run([sys.executable, "-c", code], env=env, cwd=Path(__file__).resolve().parents[1],
+                         capture_output=True, text=True, timeout=120)
+    assert out.stdout.strip().endswith("[]"), out.stdout + out.stderr
 
 
 def test_legacy_plaintext_sqlite_key_still_moves_to_the_store_and_blanks() -> None:

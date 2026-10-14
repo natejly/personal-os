@@ -295,27 +295,6 @@ def queue_style_relearn(project_id: str | None, model: str | None = None) -> Non
         learner.submit_style(project_id, cfg, model or cfg.get("defaultModel") or "")
 
 
-ENV_SEED = {
-    "baseUrl": "PERSONAL_OS_BASE_URL",
-    "apiKey": "PERSONAL_OS_API_KEY",
-    "defaultModel": "PERSONAL_OS_DEFAULT_MODEL",
-    "extractionModel": "PERSONAL_OS_EXTRACTION_MODEL",
-}
-
-
-def _seed_settings_from_env() -> None:
-    """First launch: take provider defaults from the environment (.env) if nothing is stored yet.
-
-    Dev only. The packaged app (Electron sets PERSONAL_OS_PACKAGED) starts empty and onboards instead."""
-    if os.environ.get("PERSONAL_OS_PACKAGED"):
-        return
-    stored = db.get_settings()
-    patch = {k: os.environ[v] for k, v in ENV_SEED.items() if k not in stored and os.environ.get(v)}
-    if patch:
-        db.set_settings(patch)
-
-
-_seed_settings_from_env()
 provider_keys.migrate(db)
 provider_route.set_key_source(lambda: provider_keys.load(db.secrets))  # keys reach route() here, never via settings
 

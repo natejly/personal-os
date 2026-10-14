@@ -100,7 +100,7 @@ export default function Onboarding(): JSX.Element {
 
         {state.step === 'welcome' && (
           <>
-            <p className="ob-lead">Chat, files, calendar, mail and tasks in one place, with an assistant that works across all of it.</p>
+            <p className="ob-lead">Chat, files, notes and projects in one place, with an assistant that works across all of it. Lists, Calendar, Mail, Health and Canvases are off to start; turn them on in Settings → Sidebar.</p>
             <p className="ob-privacy"><Lock size={13} /> Your data is stored on this Mac. Your messages, the context Grain adds to them (memories, files, mail and calendar the assistant reads) and background learning go to the AI provider you choose. Web search and page reading use outside services.</p>
             <p className="muted">Most providers need an API key. Local models do not.</p>
           </>

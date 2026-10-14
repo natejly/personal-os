@@ -806,6 +806,7 @@ def test_a_child_never_holds_the_email_tools() -> None:
     """Workers cannot send mail at all, under any permission mode: only the front chat's gmail_send reaches the user's email card."""
     check({"gmail_send", "gmail_draft"} <= sa.CHILD_BLOCK, "mail is blocked for every child, whatever its definition names")
     reset(permissionMode="allow_all")
+    appmod.db.set_settings({"hiddenViews": []})  # a fresh install has Mail off
     google_ok = appmod.toolbox._google_ok
     appmod.toolbox._google_ok = lambda: True  # type: ignore[method-assign]  # the mail tools would be offered if a child could hold them
     try:

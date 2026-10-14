@@ -353,7 +353,7 @@ def ensure_embedding_model(local: bool = True) -> None:
         db.set_settings({"embeddingModel": model})
 
 
-_MODULES_DEFAULT = 5
+_MODULES_DEFAULT = 6
 # Stamp 4 shows these once: agent work waits for review there (desks, skill and workflow approvals), and a hidden row
 # meant the user could not find work the assistant had already handed back.
 _SHOWN_AT_4 = ("library", "cowork")
@@ -370,6 +370,10 @@ def _seed_hidden_modules() -> None:
     )
     if current < 4:
         hidden = [v for v in hidden if v not in _SHOWN_AT_4]
+    if current == 0 and "hiddenViews" not in stored:
+        with db.tx() as c:  # a first boot starts lean; an install that already has chats keeps every view it had
+            if not c.execute("SELECT 1 FROM conversations LIMIT 1").fetchone():
+                hidden = list(llm.LEAN_OFF_VIEWS)
     widgets = dict(stored["homeWidgets"]) if isinstance(stored.get("homeWidgets"), dict) else {}
     db.set_settings({"hiddenViews": hidden, "homeWidgets": widgets, "modulesDefault": _MODULES_DEFAULT})
 
@@ -1670,7 +1674,8 @@ def _map_status_block(used: dict[str, Any], conv_settings: dict[str, Any], cfg: 
     if not context_map.map_on(conv_settings) or not (any(s["function"]["name"] == "context_map" for s in tool_schemas) or "context_map" in held_back):
         return ""
     text, info = context_map.build_volatile(db, project_id=project_id, switches=context_map.resolve_switches(cfg, conv_settings),
-                                            google=google, mcp_store=mcp_store, nonce=nonce)
+                                            google=google, mcp_store=mcp_store, nonce=nonce,
+                                            hidden=cfg.get("hiddenViews") or ())
     if not text:
         return ""
     base = used.get("map") or {"tokens": 0, "shrunk": False, "hash": "", "sections": {}, "volatile": None, "text": ""}
@@ -8065,9 +8070,10 @@ def _home_calendar() -> list[dict[str, Any]]:
 @app.get("/dashboard")
 async def dashboard() -> dict[str, Any]:
     st = google.status()
+    cfg = settings()
     out: dict[str, Any] = {
         "google": st,
-        **{k: v for m in modules for k, v in m.today().items()},
+        **{k: v for m in modules if m.enabled() for k, v in m.today().items()},
         "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
         "recent_memories": memories.list(ALL)[:6],
         "recent_conversations": convos.list(ALL)[:6],
@@ -8082,9 +8088,11 @@ async def dashboard() -> dict[str, Any]:
 
         # Not `jobs`: that name is the scheduled-job repo at module scope.
         fetches = []
-        if st["connected"]:
-            fetches += [fetch("calendar", _home_calendar), fetch("gmail", google.gmail_search, "is:unread in:inbox newer_than:14d", 10)]
-        if st["connected"]:
+        if llm.view_on(cfg, "calendar"):
+            fetches.append(fetch("calendar", _home_calendar))
+        if llm.view_on(cfg, "mail"):
+            fetches.append(fetch("gmail", google.gmail_search, "is:unread in:inbox newer_than:14d", 10))
+        if llm.view_on(cfg, "todos"):
             fetches.append(fetch("tasks", google.tasks_list, "@default", False))
         # Drive is a newer scope; before the user reconnects, skip the call instead of
         # surfacing a 403 — the card reads missing_scopes and offers Reconnect.
@@ -8102,25 +8110,27 @@ async def dashboard() -> dict[str, Any]:
 async def _internal_data() -> dict[str, Any]:
     """What the recap sees of the app and of Google."""
     st = google.status()
+    cfg = settings()
     out: dict[str, Any] = {
-        "todos": todos.list("__all__", include_done=False),
+        "todos": todos.list("__all__", include_done=False) if llm.view_on(cfg, "todos") else [],
         "memories": memories.list(ALL)[:40],
         "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
         "calendar": [], "gmail": [], "tasks": [], "drive": [],
         # "google_connected" is read by the recap facts as "mail and calendar are available".
         "google_connected": bool(st["connected"]),
     }
-    if st["connected"]:
+    if st["connected"] and llm.view_on(cfg, "calendar"):
         try:
             # Team and shared calendars hold most of the day; read every visible one, as the agent tool does.
             out["calendar"] = json_safe(await asyncio.to_thread(google.calendar_events, 3, calendar_ids=["all"]))
         except Exception as e:  # noqa: BLE001
             out["calendar_error"] = str(e)
+    if st["connected"] and llm.view_on(cfg, "mail"):
         try:
             out["gmail"] = json_safe(await asyncio.to_thread(google.gmail_search, "is:unread in:inbox newer_than:14d", 15))
         except Exception as e:  # noqa: BLE001
             out["gmail_error"] = str(e)
-    if st["connected"]:
+    if st["connected"] and llm.view_on(cfg, "todos"):
         try:
             out["tasks"] = json_safe(await asyncio.to_thread(google.tasks_list, "@default", False))
         except Exception as e:  # noqa: BLE001
@@ -8148,22 +8158,25 @@ async def recap(force: bool = False) -> dict[str, Any]:
     facts = {
         "recent_chats": [{"title": c["title"], "project_id": c["project_id"]} for c in recent_convs],
         "recent_memories": [m["content"] for m in memories.list(ALL) if m["created_at"] >= since][:15],
-        "open_todos": [{"title": t["title"], "due": t["due"], "priority": t["priority"]} for t in todos.list("__all__")[:20]],
-        "todo_stats": todos.stats(),
         "projects": [{"name": p["name"], **projects.stats(p["id"])} for p in projects.list()],
     }
+    if llm.view_on(cfg, "todos"):
+        facts["open_todos"] = [{"title": t["title"], "due": t["due"], "priority": t["priority"]} for t in todos.list("__all__")[:20]]
+        facts["todo_stats"] = todos.stats()
     internal = await _internal_data()
     # A fresh install with Google off has nothing to recap: no model call, and nothing cached, so the
     # first chat, todo or Google sign-in today gets a real recap instead of this empty one.
-    if not internal["google_connected"] and not any(facts[k] for k in ("recent_chats", "recent_memories", "open_todos", "projects")):
+    if not internal["google_connected"] and not any(facts.get(k) for k in ("recent_chats", "recent_memories", "open_todos", "projects")):
         return {"day": day, "content": "", "cached": False}
     # An empty list reads as "nothing on" to the model; a source Grain cannot see must say so instead.
     unseen = "not connected (unknown; Google is not connected in Settings)"
-    facts["calendar_next_3_days"] = (unseen if not internal["google_connected"] else
-                                     f"unavailable: {internal['calendar_error']}" if internal.get("calendar_error") else internal.get("calendar"))
-    facts["unread_mail"] = (unseen if not internal["google_connected"] else
-                            f"unavailable: {internal['gmail_error']}" if internal.get("gmail_error") else
-                            [{"from": m["from"], "subject": m["subject"]} for m in (internal.get("gmail") or [])][:10])
+    if llm.view_on(cfg, "calendar"):
+        facts["calendar_next_3_days"] = (unseen if not internal["google_connected"] else
+                                         f"unavailable: {internal['calendar_error']}" if internal.get("calendar_error") else internal.get("calendar"))
+    if llm.view_on(cfg, "mail"):
+        facts["unread_mail"] = (unseen if not internal["google_connected"] else
+                                f"unavailable: {internal['gmail_error']}" if internal.get("gmail_error") else
+                                [{"from": m["from"], "subject": m["subject"]} for m in (internal.get("gmail") or [])][:10])
     try:
         content = await generate_recap(cfg, providers.tier_model(cfg, "medium"), facts)
     except Exception as e:  # noqa: BLE001

@@ -26,6 +26,7 @@ from personal_os import app as appmod  # noqa: E402
 from personal_os import llm  # noqa: E402
 
 client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
+appmod.db.set_settings({"hiddenViews": []})  # a fresh install has Lists, Calendar and Mail off
 
 ROUNDS: list[Any] = []
 SEEN: list[list[dict[str, Any]]] = []  # the messages each model call was given

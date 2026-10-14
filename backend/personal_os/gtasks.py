@@ -132,7 +132,7 @@ class TasksSync:
                 except asyncio.TimeoutError:
                     pass
                 self._event.clear()
-                if self.config()["enabled"]:
+                if self.config()["enabled"] and "todos" not in (self.get_settings().get("hiddenViews") or ()):
                     await asyncio.to_thread(self.sync_once)
             except asyncio.CancelledError:
                 raise

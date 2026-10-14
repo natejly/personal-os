@@ -49,6 +49,8 @@ class ToolTests(unittest.TestCase):
             self.assertEqual(toolbox.specs[n].group, "todos")
         self.assertEqual(toolbox.specs["todo_list"].danger, "safe")
         self.assertEqual(toolbox.specs["todo_delete"].danger, "writes")
+        from personal_os import app as appmod
+        appmod.db.set_settings({"hiddenViews": []})  # a fresh install starts with Lists off
         self.assertTrue(all(toolbox.available(n) for n in TODO_TOOLS))
 
     def test_toolbox_without_modules_has_no_todo_tools(self) -> None:
@@ -164,7 +166,7 @@ class ModulesStampTests(unittest.TestCase):
         appmod._seed_hidden_modules()
         s = appmod.db.get_settings()
         self.assertEqual(s["hiddenViews"], ["health"])
-        self.assertEqual(s["modulesDefault"], 5)
+        self.assertEqual(s["modulesDefault"], appmod._MODULES_DEFAULT)
         appmod.db.set_settings({"hiddenViews": ["library"]})  # hidden again by the user after the stamp
         appmod._seed_hidden_modules()
         self.assertEqual(appmod.db.get_settings()["hiddenViews"], ["library"])
@@ -176,6 +178,43 @@ class ModulesStampTests(unittest.TestCase):
         s = appmod.db.get_settings()
         self.assertEqual(s["hiddenViews"], [])
         self.assertEqual(s["homeWidgets"], {})
+
+    @staticmethod
+    def _reset(appmod) -> None:  # type: ignore[no-untyped-def]
+        with appmod.db.tx() as c:
+            c.execute("DELETE FROM settings WHERE key IN ('modulesDefault', 'hiddenViews', 'homeWidgets')")
+            c.execute("DELETE FROM conversations")
+
+    def test_first_boot_starts_lean(self) -> None:
+        from personal_os import app as appmod
+        self._reset(appmod)
+        appmod._seed_hidden_modules()
+        self.assertEqual(appmod.db.get_settings()["hiddenViews"], ["todos", "calendar", "mail", "health", "spaces"])
+
+    def test_install_with_chats_keeps_every_view(self) -> None:
+        from personal_os import app as appmod
+        self._reset(appmod)
+        appmod.convos.create(None, "old chat", "")
+        appmod._seed_hidden_modules()
+        self.assertEqual(appmod.db.get_settings()["hiddenViews"], [])
+        self._reset(appmod)
+
+    def test_off_views_take_their_tools_with_them(self) -> None:
+        from personal_os import app as appmod
+        modes = {n: "on" for n in toolbox.specs}
+        names = lambda: {t["function"]["name"] for t in toolbox.schemas(modes)}  # noqa: E731
+        gated = ("health_summary", "todo_list", "todo_add", "calendar_events", "meeting_brief", "gmail_search", "mail_followups",
+                 "schedule_suggest", "space_list")
+        appmod.db.set_settings({"hiddenViews": []})
+        self.assertTrue(set(gated) <= set(toolbox.specs))
+        on = names()
+        self.assertIn("todo_write", on)
+        appmod.db.set_settings({"hiddenViews": ["todos", "calendar", "mail", "health", "spaces"]})
+        off = names()
+        self.assertIn("todo_write", off)  # the working checklist is not Lists
+        self.assertFalse(set(gated) & off)
+        self.assertTrue({"health_summary", "todo_list", "space_list"} <= on)  # the non-Google ones return with the view
+        appmod.db.set_settings({"hiddenViews": []})
 
 
 if __name__ == "__main__":

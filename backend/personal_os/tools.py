@@ -27,7 +27,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from . import duel, egress, labels, limits, mac, osplat, permissions
+from . import duel, egress, labels, limits, llm, mac, osplat, permissions
 from .kinds import is_internal
 from .embed import rrf
 from . import fsx
@@ -868,9 +868,12 @@ class Toolbox:
     def _google_ok(self) -> bool:
         return bool(self.google and self.google.status()["connected"])
 
-    def available(self, name: str, google_ok: bool | None = None) -> bool:
-        """Some tools need an integration to be connected. Pass google_ok to avoid one settings read per google tool."""
+    def available(self, name: str, google_ok: bool | None = None, hidden: list[str] | None = None) -> bool:
+        """Some tools need an integration to be connected, and a view turned off in Settings → Sidebar takes its tools with it.
+        Pass google_ok and hidden to avoid one settings read per tool."""
         spec = self.specs.get(name)
+        if (view := llm.tool_view(name)) and view in (self.settings().get("hiddenViews") or () if hidden is None else hidden):
+            return False
         if spec and spec.group == "google":
             if name.startswith("google_tasks_"):  # two-way sync makes them todos; todo_* is the one way in
                 from .gtasks import DEFAULT_CONFIG as gtasks_default
@@ -940,13 +943,13 @@ class Toolbox:
                 for k, v in tools.items()}
 
     def schemas(self, modes: dict[str, str]) -> list[dict[str, Any]]:
-        gok = self._google_ok()
-        return [s.schema() for n, s in self.specs.items() if modes.get(n) in ("on", "ask") and self.available(n, gok)]
+        gok, hid = self._google_ok(), self.settings().get("hiddenViews") or []
+        return [s.schema() for n, s in self.specs.items() if modes.get(n) in ("on", "ask") and self.available(n, gok, hid)]
 
     def list(self) -> list[dict[str, Any]]:
-        gok = self._google_ok()
+        gok, hid = self._google_ok(), self.settings().get("hiddenViews") or []
         return [{**s.info(), "default_mode": self.default_mode(s), "ask_locked": self.ask_locked(s),
-                 "available": self.available(s.name, gok)} for s in self.specs.values()]
+                 "available": self.available(s.name, gok, hid)} for s in self.specs.values()]
 
     def taints(self, name: str) -> bool:
         """True if this tool's result carries untrusted third-party content."""

@@ -33,6 +33,23 @@ stream_deadline: ContextVar[float | None] = ContextVar("stream_deadline", defaul
 session_affinity: ContextVar[str | None] = ContextVar("session_affinity", default=None)
 
 
+# Views the model-facing side honours: a view in `hiddenViews` is off, so its tools, loops and prompt data stand down.
+# `spaces` is the canvas view's key (the sidebar row it hides is Canvases).
+LEAN_OFF_VIEWS = ["todos", "calendar", "mail", "health", "spaces"]
+TOOL_VIEWS = (("health_", "health"), ("todo_list", "todos"), ("todo_add", "todos"), ("todo_update", "todos"),
+              ("todo_delete", "todos"), ("google_tasks_", "todos"), ("calendar_", "calendar"), ("meeting_brief", "calendar"),
+              ("propose_times_draft", "calendar"), ("schedule_suggest", "calendar"), ("gmail_", "mail"),
+              ("mail_followups", "mail"), ("space_", "spaces"))  # todo_write is the working checklist, not Lists
+
+
+def view_on(settings: dict[str, Any], view: str) -> bool:
+    return view not in (settings.get("hiddenViews") or ())
+
+
+def tool_view(name: str) -> str | None:
+    return next((v for p, v in TOOL_VIEWS if name.startswith(p)), None)
+
+
 def on_usage(fn: UsageListener) -> None:
     _usage_listeners.append(fn)
 
@@ -126,13 +143,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "dictationChord": "Control+Alt+D",
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
     "homeWidgets": {},
-    "hiddenViews": [],
+    "hiddenViews": [],  # a fresh install is seeded lean by app._seed_hidden_modules; an install without the key keeps every view on
     "pickerModels": [],  # model ids the picker lists; [] = every keyed provider's preset models
     # Rows hidden from the sidebar only; they stay reachable everywhere else. Default: only Files, Lists, Calendar, Library, Jobs, Canvases and Projects show.
     "sidebarHidden": ["mail", "health"],
     # {view: "sidebar" | "apps"}; missing = the module's own default placement.
     # Bump when the default-off set changes so existing DBs pick up the change once.
-    "modulesDefault": 5,
+    "modulesDefault": 6,
     "snapshotsEnabled": True,
     # Show traces, the context preview, the full system prompt and OTLP export in the UI. Traces are recorded either way.
     "devTools": False,

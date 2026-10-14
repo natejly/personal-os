@@ -2049,14 +2049,24 @@ textarea.instructions:focus { border-color: var(--accent); }
 .todo-section .todo:hover { background: color-mix(in srgb, var(--text) 5%, var(--bg-elev)); }
 .todo.compact { padding: 5px 6px; background: none; border-radius: 8px; box-shadow: none; }
 .todo.compact:hover { background: var(--hover); }
-.todo.done .todo-title { text-decoration: line-through; color: var(--text-faint); }
-.todo-check { position: relative; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--control-border); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; color: var(--bg); }
+.todo-check { position: relative; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--control-border); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; color: var(--bg); box-shadow: inset 0 0 0 0 var(--ok); transition: box-shadow var(--dur-spring) var(--spring-snappy), border-color var(--dur-snap) var(--ease-out), background-color var(--dur-hover) var(--ease-out), transform var(--dur-press) var(--ease-out); }
 /* Keep the 18px circle, but give it a 24px click/tap target. */
 .todo-check::before { content: ''; position: absolute; top: 50%; left: 50%; width: 24px; height: 24px; transform: translate(-50%, -50%); }
 .todo.p1 .todo-check { border-color: var(--danger); }
 .todo.p3 .todo-check { border-color: var(--text-faint); }
-.todo.done .todo-check { background: var(--ok); border-color: var(--ok); }
 .todo-check:hover { background: var(--hover); }
+/* ---------- Completing: fill springs in from the edge, tick draws itself, title strikes through left to right ---------- */
+.todo-check:active { transform: translateY(var(--press-sink)); }
+.todo.done .todo-check { border-color: var(--ok); box-shadow: inset 0 0 0 9px var(--ok); }
+.todo-check svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset var(--dur-hover) var(--ease-out); }
+.todo.done .todo-check svg { stroke-dashoffset: 0; transition-duration: var(--dur-snap); transition-delay: 40ms; }
+/* The strike is a gradient line that grows, since text-decoration cannot animate. The title hugs its text so the line ends where the words do. */
+.todo-title { align-self: flex-start; max-width: 100%; background: linear-gradient(var(--text-faint), var(--text-faint)) no-repeat 0 55% / 0% 1.5px; transition: background-size var(--dur-snap) var(--ease-out), color var(--dur-snap) var(--ease-out); }
+.todo.done .todo-title { background-size: 100% 1.5px; color: var(--text-faint); }
+/* A completed row leaving the list: it lingers as a ghost, then folds shut (height on a gentle spring) while fading. */
+.todo-fold { display: grid; grid-template-rows: 1fr; pointer-events: none; animation: todo-fold var(--dur-spring) var(--spring-gentle) var(--dur-spring) forwards; }
+.todo-fold > .todo { min-height: 0; overflow: hidden; }
+@keyframes todo-fold { to { grid-template-rows: 0fr; opacity: 0; } }
 .todo-main { flex: 1 1 160px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .todo-title { cursor: text; line-height: 1.4; overflow-wrap: anywhere; }
 /* The edit field's border and padding are pulled back out with negative margins, and it keeps the

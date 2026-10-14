@@ -1,5 +1,5 @@
 import { memo, useRef, useState } from 'react'
-import { Check, Trash2, Calendar, CalendarPlus, ExternalLink, Repeat, ListPlus, Lock } from '../icons'
+import { Trash2, Calendar, CalendarPlus, ExternalLink, Repeat, ListPlus, Lock } from '../icons'
 import { useStore } from '../store'
 import { pimConnected } from '../lib/pim'
 import { api } from '../lib/api'
@@ -81,7 +81,7 @@ function TodoItem({ todo, showProject = true, compact = false, depth = 0, onTag 
   return (
     <div className={`todo ${todo.done ? 'done' : ''} p${todo.priority} ${compact ? 'compact' : ''}`} style={depth ? { marginLeft: depth * 20 } : undefined} {...(editing ? {} : drag)}>
       <button className="todo-check" onClick={() => void updateTodo(todo.id, { done: !todo.done })} title={todo.done ? 'Reopen' : 'Complete'} aria-label={`${todo.done ? 'Reopen' : 'Complete'}: ${todo.title}`}>
-        {todo.done ? <Check size={12} /> : null}
+        <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 6.5l2.5 2.5 4.5-5.5" pathLength="1" /></svg>
       </button>
       <div className="todo-main">
         {editing ? (

@@ -57,7 +57,7 @@ function Column({ name, label, cards, groupBy, onAdd, onMove }: ColProps): JSX.E
           <div key={c.id} data-id={c.id} className="kcard-wrap">
             <div className={`kcard p${c.priority}${c.done ? ' done' : ''}`} {...dragProps({ kind: 'todo', id: c.id, label: c.title, projectId: c.project_id })}>
               <div className="kcard-title">
-                <input type="checkbox" aria-label={`Done: ${c.title}`} checked={!!c.done} onChange={() => toggle(c)} /> {c.title}
+                <input type="checkbox" className="tick" aria-label={`Done: ${c.title}`} checked={!!c.done} onChange={() => toggle(c)} /> {c.title}
               </div>
               <div className="kcard-meta">
                 {c.due && <span className={`tag ${!c.done && dueLabel(c.due).overdue ? 'overdue' : ''}`}><Calendar size={10} />{dueLabel(c.due).label}</span>}

@@ -70,7 +70,14 @@
 /* ---- preview: wikilinks and clickable tasks ---- */
 a.wikilink { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 a.wikilink.unknown { text-decoration-style: dashed; opacity: 0.75; }
-.task-list-item input[type='checkbox'].task-live { cursor: pointer; accent-color: var(--accent-solid); }
+/* Shared checkbox (.tick): a real input, drawn by hand. The box fills on a spring and the tick wipes in left to right. */
+input[type='checkbox'].tick, .task-list-item input[type='checkbox'].task-live { appearance: none; -webkit-appearance: none; position: relative; width: 15px; height: 15px; margin: 0; flex: none; vertical-align: -3px; border: 1.5px solid var(--control-border); border-radius: 4px; background: transparent; box-shadow: inset 0 0 0 0 var(--accent-solid); cursor: pointer; transition: box-shadow var(--dur-spring) var(--spring-snappy), border-color var(--dur-snap) var(--ease-out), transform var(--dur-press) var(--ease-out); }
+input[type='checkbox'].tick:active, .task-list-item input[type='checkbox'].task-live:active { transform: translateY(var(--press-sink)); }
+input[type='checkbox'].tick:checked, .task-list-item input[type='checkbox'].task-live:checked { border-color: var(--accent-solid); box-shadow: inset 0 0 0 9px var(--accent-solid); }
+input[type='checkbox'].tick::after, .task-list-item input[type='checkbox'].task-live::after { content: ''; position: absolute; inset: 0; background: var(--bg); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.5l2.5 2.5 4.5-5.5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 100% 100% no-repeat; clip-path: inset(0 100% 0 0); transition: clip-path var(--dur-hover) var(--ease-out); }
+input[type='checkbox'].tick:checked::after, .task-list-item input[type='checkbox'].task-live:checked::after { clip-path: inset(0); transition-duration: var(--dur-snap); transition-delay: 40ms; }
+input[type='checkbox'].tick:focus-visible, .task-list-item input[type='checkbox'].task-live:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.task-list-item:has(> input.task-live:checked) { color: var(--text-faint); }
 
 /* ---- formatting bar above the editor ---- */
 .fmt-bar { display: flex; align-items: center; gap: 2px; padding: 4px 10px; border-bottom: 1px solid var(--border); flex: 0 0 auto; overflow-x: auto; }

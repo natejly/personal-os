@@ -48,7 +48,7 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   }, [])
   useEffect(() => { if (contextOpen) expand('context') }, [contextOpen])
   useEffect(() => { if (termRequest && freshTermRequest()) expand('terminal') }, [termRequest])
-  useEffect(() => { const r = useStore.getState().deskTabRequest; if (r && Date.now() - r.at < 3000) { useStore.setState({ contextOpen: false }); expand(r.tab) } }, [tracesRequest])
+  useEffect(() => { const r = useStore.getState().deskTabRequest; if (r && Date.now() - r.at < 3000) { useStore.setState({ contextOpen: false, deskPanel: true }); expand(r.tab) } }, [tracesRequest])
   useEffect(() => {
     const esc = (e: KeyboardEvent): void => { if (e.key === 'Escape' && !e.defaultPrevented && !(e.target as HTMLElement | null)?.closest?.('.xterm, input, textarea, [contenteditable]')) onClose() }
     window.addEventListener('keydown', esc)

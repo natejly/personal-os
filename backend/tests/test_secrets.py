@@ -141,10 +141,10 @@ class PermissionTests(unittest.TestCase):
 
 class SettingsRouteTests(unittest.TestCase):
     def tearDown(self) -> None:
-        client.put("/settings", json={"apiKey": None, "braveApiKey": None, "exaApiKey": None, "githubToken": None})
+        client.put("/settings", json={"firecrawlApiKey": None, "braveApiKey": None, "exaApiKey": None, "githubToken": None})
 
     def test_get_never_returns_secret_values(self) -> None:
-        client.put("/settings", json={"apiKey": KEY, "braveApiKey": "BSA-xyz", "exaApiKey": "exa-1", "githubToken": "ghp_zz"})
+        client.put("/settings", json={"firecrawlApiKey": KEY, "braveApiKey": "BSA-xyz", "exaApiKey": "exa-1", "githubToken": "ghp_zz"})
         body = client.get("/settings")
         self.assertNotIn("exa-1", body.text)
         self.assertNotIn("ghp_zz", body.text)
@@ -152,26 +152,26 @@ class SettingsRouteTests(unittest.TestCase):
         self.assertNotIn(KEY, body.text)
         self.assertNotIn("BSA-xyz", body.text)
         j = body.json()
-        self.assertTrue(j["apiKeySet"])
+        self.assertTrue(j["firecrawlApiKeySet"])
         self.assertTrue(j["braveApiKeySet"])
         self.assertFalse(j["googleClientSecretSet"])
-        self.assertEqual(j["apiKey"], "")
+        self.assertEqual(j["firecrawlApiKey"], "")
 
     def test_update_semantics(self) -> None:
         from personal_os.app import settings
-        client.put("/settings", json={"apiKey": KEY})
-        self.assertEqual(settings()["apiKey"], KEY)
-        r = client.put("/settings", json={"apiKey": "", "theme": "light"})  # blank = unchanged
-        self.assertEqual(settings()["apiKey"], KEY)
-        self.assertTrue(r.json()["apiKeySet"])
+        client.put("/settings", json={"firecrawlApiKey": KEY})
+        self.assertEqual(settings()["firecrawlApiKey"], KEY)
+        r = client.put("/settings", json={"firecrawlApiKey": "", "theme": "light"})  # blank = unchanged
+        self.assertEqual(settings()["firecrawlApiKey"], KEY)
+        self.assertTrue(r.json()["firecrawlApiKeySet"])
         client.put("/settings", json={"theme": "dark"})  # absent = unchanged
-        self.assertEqual(settings()["apiKey"], KEY)
-        client.put("/settings", json={"apiKey": "sk-new"})  # replace
-        self.assertEqual(settings()["apiKey"], "sk-new")
-        r = client.put("/settings", json={"apiKey": None})  # null clears
-        self.assertFalse(r.json()["apiKeySet"])
-        self.assertEqual(settings()["apiKey"], "")
-        self.assertEqual(client.put("/settings", json={"apiKey": 5}).status_code, 422)
+        self.assertEqual(settings()["firecrawlApiKey"], KEY)
+        client.put("/settings", json={"firecrawlApiKey": "sk-new"})  # replace
+        self.assertEqual(settings()["firecrawlApiKey"], "sk-new")
+        r = client.put("/settings", json={"firecrawlApiKey": None})  # null clears
+        self.assertFalse(r.json()["firecrawlApiKeySet"])
+        self.assertEqual(settings()["firecrawlApiKey"], "")
+        self.assertEqual(client.put("/settings", json={"firecrawlApiKey": 5}).status_code, 422)
 
 
 if __name__ == "__main__":

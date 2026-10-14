@@ -204,6 +204,8 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
     Object.assign(g, await openApp())
     return g.page
   }
+  /** Point the seeded (custom) provider at another mock server; the backend verifies the address first. */
+  g.repoint = (url) => api('/providers/custom', { method: 'PUT', body: { baseUrl: url } })
   g.close = async () => {
     try { await g.app.close() } catch {}
     await backend.stop()

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { CodingSession, CodingSessionEvent } from '@shared/types'
-import { canAttach, codingNoticeText, defaultTermSession, codingTransition, eventSummary, formatElapsed, isStepEvent, latestActivity, mergeCodingEvents, pathBase, plainExcerpt, splitSessions, termSessions } from './codingSessions'
+import { canAttach, canOpen, codingNoticeText, defaultTermSession, codingTransition, eventSummary, formatElapsed, isStepEvent, latestActivity, mergeCodingEvents, pathBase, plainExcerpt, splitSessions, termSessions } from './codingSessions'
 
 const sess = (over: Partial<CodingSession> = {}): CodingSession => ({
   id: 's1', agent: 'claude', name: 'Fix tests', status: 'working', attention: 'working', detail: null, repo_path: '/r', worktree: '/r/.wt/fix-tests',
@@ -75,6 +75,16 @@ test('canAttach is true only for a claude session with a valid attach id', () =>
   assert.equal(canAttach(sess({ external_id: null })), false)
   assert.equal(canAttach(sess({ external_id: 'ABCDEFGH' })), false)
   assert.equal(canAttach(sess({ agent: 'opencode', external_id: 'ab12cd34' })), false)
+})
+
+test('canOpen is true only for a finished opencode session with a valid session id', () => {
+  const oc = { agent: 'opencode' as const, status: 'done' as const, session_id: 'ses_ee1ad8d25ffeAw2DdV0gMLBAkm' }
+  assert.equal(canOpen(sess(oc)), true)
+  for (const status of ['stopped', 'failed'] as const) assert.equal(canOpen(sess({ ...oc, status })), true)
+  for (const status of ['starting', 'working', 'needs_you'] as const) assert.equal(canOpen(sess({ ...oc, status })), false)
+  assert.equal(canOpen(sess({ ...oc, session_id: null })), false)
+  assert.equal(canOpen(sess({ ...oc, session_id: 'ses_x; rm -rf' })), false)
+  assert.equal(canOpen(sess({ ...oc, agent: 'claude' })), false)
 })
 
 test('termSessions lists the chat\'s own sessions newest first, plus a requested one; outside a chat the newest five', () => {

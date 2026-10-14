@@ -325,7 +325,7 @@ def summary(row: dict[str, Any], tail: int | None = 1500) -> dict[str, Any]:
     out = {"id": row["id"], "agent": row["agent"], "name": row["name"], "status": row["status"],
            "attention": ATTENTION.get(row["status"], "idle"), "detail": row.get("detail"), "repo_path": row["repo_path"],
            "worktree": row["worktree"], "branch": row.get("branch"), "conversation_id": row.get("conversation_id"), "external_id": row.get("external_id"),
-           "model": row.get("model"), "permission_mode": row.get("permission_mode"), "created_at": row["created_at"],
+           "session_id": row.get("session_id"), "model": row.get("model"), "permission_mode": row.get("permission_mode"), "created_at": row["created_at"],
            "updated_at": row["updated_at"], "ended_at": row.get("ended_at"),
            "log_tail": log if tail is None else (log[-tail:] if tail else "")}
     if row["agent"] == "claude" and row["status"] == "needs_you" and row.get("external_id"):

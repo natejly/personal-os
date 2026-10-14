@@ -1,8 +1,8 @@
 /** In-app terminal: pure validation, argv selection, env scrubbing and the PTY hub core (no electron imports). */
 import { randomBytes } from 'crypto'
-import { isAttachId } from './codingAttach'
+import { isAttachId, isOpencodeId } from './codingAttach'
 
-export type TermMode = 'attach' | 'shell'
+export type TermMode = 'attach' | 'shell' | 'opencode'
 export type TermOpenResult = { termId: string; replay: string; fresh: boolean } | { error: string }
 
 export const WRITE_CAP = 64 * 1024
@@ -12,7 +12,7 @@ export const FLUSH_MS = 16
 
 /** Coding session ids are minted by the backend as 16 lowercase hex characters. */
 export const isSessionId = (id: unknown): id is string => typeof id === 'string' && /^[0-9a-f]{16}$/.test(id)
-export const isTermMode = (m: unknown): m is TermMode => m === 'attach' || m === 'shell'
+export const isTermMode = (m: unknown): m is TermMode => m === 'attach' || m === 'shell' || m === 'opencode'
 
 /** Integer in 1..500; anything non-finite falls back to `dflt`. */
 export function clampDim(n: unknown, dflt = 80): number {
@@ -24,12 +24,20 @@ export const defaultShell = (env: Record<string, string | undefined>, platform: 
   (env.SHELL && env.SHELL.startsWith('/') ? env.SHELL : '') || (platform === 'darwin' ? '/bin/zsh' : '/bin/bash')
 
 /** Only `claude` sessions with a valid external id can be attached; a plain shell is allowed for any agent. */
-export function pickArgv(a: { agent: unknown; external_id: unknown; mode: unknown; shell: string; platform?: string }): string[] | { error: string } {
+export function pickArgv(a: { agent: unknown; external_id?: unknown; session_id?: unknown; status?: unknown; worktree?: unknown; mode: unknown; shell: string; platform?: string }): string[] | { error: string } {
   if (a.mode === 'shell') return [a.shell, '-l']
   if (a.mode === 'attach') {
     if (a.agent !== 'claude') return { error: 'Only Claude sessions can be attached' }
     if (!isAttachId(a.external_id)) return { error: 'This session has no attachable id yet' }
     return [a.shell, '-l', '-c', `claude attach ${a.external_id}`]
+  }
+  if (a.mode === 'opencode') {
+    if (a.agent !== 'opencode') return { error: 'Only OpenCode sessions can be opened in OpenCode' }
+    if (!isOpencodeId(a.session_id)) return { error: 'This session has no OpenCode id yet' }
+    if (a.status === 'starting' || a.status === 'working' || a.status === 'needs_you') return { error: 'The session is still running' }
+    if (typeof a.worktree !== 'string' || !a.worktree.startsWith('/')) return { error: 'The session folder does not exist' }
+    // Fixed argv: the login shell only finds `opencode` on PATH; id and folder are positional parameters, never interpolated.
+    return [a.shell, '-l', '-c', 'exec opencode -s "$1" "$2"', 'opencode', a.session_id, a.worktree]
   }
   return { error: 'Unknown terminal mode' }
 }
@@ -69,7 +77,7 @@ export interface Pty {
   resize(cols: number, rows: number): void
   kill(): void
 }
-export interface SessionInfo { agent?: unknown; external_id?: unknown; worktree?: unknown }
+export interface SessionInfo { agent?: unknown; external_id?: unknown; session_id?: unknown; status?: unknown; worktree?: unknown }
 export interface HubDeps {
   spawn: (argv: string[], o: { cwd: string; env: Record<string, string>; cols: number; rows: number }) => Pty
   /** Backend lookup; null when the session does not exist. The only source of agent and cwd. */
@@ -131,7 +139,7 @@ export function createTermHub(deps: HubDeps) {
     const cwd = typeof s.worktree === 'string' ? s.worktree : ''
     if (!cwd.startsWith('/') || !deps.isDirectory(cwd)) return { error: 'The session folder does not exist' }
     const shell = defaultShell(deps.env, deps.platform)
-    let argv = pickArgv({ agent: s.agent, external_id: s.external_id, mode, shell, platform: deps.platform })
+    let argv = pickArgv({ agent: s.agent, external_id: s.external_id, session_id: s.session_id, status: s.status, worktree: s.worktree, mode, shell, platform: deps.platform })
     if (!Array.isArray(argv)) return argv
     const fake = !deps.isPackaged && deps.fakeCmd ? deps.fakeCmd.trim().split(/\s+/).filter(Boolean) : []
     if (fake.length) argv = fake

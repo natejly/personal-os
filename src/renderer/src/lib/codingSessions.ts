@@ -1,5 +1,5 @@
 import type { CodingSession, CodingSessionEvent } from '@shared/types'
-import { isAttachId } from '@shared/codingAttach'
+import { isAttachId, isOpencodeId } from '@shared/codingAttach'
 
 type Status = CodingSession['status']
 
@@ -23,6 +23,9 @@ export const AGENT_LABEL: Record<CodingSession['agent'], string> = { claude: 'Cl
 
 /** Whether `claude attach` can reach this session: a claude session with a valid attach id. */
 export const canAttach = (c: CodingSession): boolean => c.agent === 'claude' && isAttachId(c.external_id)
+
+/** Whether the TUI can open this session: an OpenCode session with a known id and no run in flight (a standalone run holds a private server). */
+export const canOpen = (c: CodingSession): boolean => c.agent === 'opencode' && !codingLive(c.status) && isOpencodeId(c.session_id)
 
 /** The terminal view a picked session opens straight away; null (nothing until asked) when it cannot attach. */
 export const defaultTermMode = (c: CodingSession): 'attach' | null => (canAttach(c) ? 'attach' : null)

@@ -1898,7 +1898,7 @@ export interface CodingSession {
   attention: Attention; detail: string | null; repo_path: string; worktree: string; branch: string | null
   /** The chat that started the session; null for one started outside a chat. */
   conversation_id: string | null
-  external_id: string | null; model: string | null; permission_mode: string | null; log_tail: string
+  external_id: string | null; /** The harness's own id (OpenCode `ses_...`). */ session_id?: string | null; model: string | null; permission_mode: string | null; log_tail: string
   /** `claude attach <id>`, set while a Claude Code session waits on a permission prompt. */
   attach_hint?: string | null
   created_at: number; updated_at: number; ended_at: number | null
@@ -2056,7 +2056,7 @@ export interface GrainApi {
   codingAttach: (externalId: string) => Promise<boolean>
   /** In-app terminal for a coding session (main window only). The backend resolves the session; no command crosses this bridge. */
   termAvailable: () => Promise<boolean>
-  termOpen: (sessionId: string, mode: 'attach' | 'shell', cols: number, rows: number) => Promise<{ termId: string; replay: string; fresh: boolean } | { error: string }>
+  termOpen: (sessionId: string, mode: 'attach' | 'shell' | 'opencode', cols: number, rows: number) => Promise<{ termId: string; replay: string; fresh: boolean } | { error: string }>
   termWrite: (termId: string, data: string) => Promise<boolean>
   termResize: (termId: string, cols: number, rows: number) => Promise<boolean>
   termClose: (termId: string) => Promise<boolean>

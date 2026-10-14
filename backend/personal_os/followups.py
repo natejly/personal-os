@@ -17,12 +17,27 @@ from . import llm, redact
 log = logging.getLogger(__name__)
 
 MAX_FOLLOWUPS = 3
-MAX_LEN = 90
+MAX_LEN = 110
 TIMEOUT_S = 30.0
 _CLIP = 1500
+_HEAD = 400
 
-SYSTEM = ("You suggest what a user might ask next in a chat. Reply with only a JSON array of at most 3 short "
-          "questions or requests (under 12 words each), written as the user would type them. No numbering, no markdown.")
+SYSTEM = (
+    "You write the user's most likely next message in a chat, so the box can pre-fill it. Reply with only a JSON "
+    "array of at most 3 strings (under 15 words each), written in the user's own voice, best first. No numbering, no markdown.\n"
+    "- If the assistant ended with a question, an offer or a choice, the first item answers or accepts it concretely, "
+    "using the specifics from the reply. If it ended 'Want me to draft the reply to Sam?', the first item is "
+    "'Yes, draft it - keep it short and friendly', not 'Can you help with email?'.\n"
+    "- Otherwise the first item digs one level deeper into the most interesting specific point of the reply.\n"
+    "- The other items are different directions that also go deeper.\n"
+    "- Never generic filler such as 'Tell me more', 'Can you explain?' or 'Thanks'. Name the specifics.")
+
+
+def tail_clip(text: str) -> str:
+    """The reply's end is where the question or offer sits: keep it whole, and the opening too when the reply is long."""
+    if len(text) <= _CLIP:
+        return text
+    return text[:_HEAD] + "\n[...]\n" + text[-(_CLIP - _HEAD):]
 
 
 def parse(raw: str) -> list[str]:
@@ -43,7 +58,7 @@ def parse(raw: str) -> list[str]:
 
 async def generate(settings: dict[str, Any], model: str, user_text: str, reply: str) -> list[str]:
     body = (f"The user asked:\n{redact.scrub_command_output(user_text)[:_CLIP]}\n\n"
-            f"The assistant replied:\n{redact.scrub_command_output(reply)[:_CLIP]}")
+            f"The assistant replied:\n{tail_clip(redact.scrub_command_output(reply))}")
     raw = await asyncio.wait_for(
         llm.complete(settings, settings.get("extractionModel") or model,
                      [{"role": "system", "content": SYSTEM}, {"role": "user", "content": body}],

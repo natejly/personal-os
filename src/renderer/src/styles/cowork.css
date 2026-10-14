@@ -5,10 +5,6 @@
  * diff classes the spec names are scoped under .desk-diff for the same reason.
  */
 
-.desk-tabs { flex: none; padding: 6px 16px 0; border-bottom: 1px solid var(--border); }
-/* .dot-badge (docs.css) is absolutely positioned for icon buttons; in a tab it sits inline. */
-.desk-tabs .dot-badge { position: static; display: inline-block; margin-left: 5px; vertical-align: 1px; }
-
 .desk-banner {
   display: flex; gap: 9px; margin: 10px 16px 0; padding: 10px 12px; border-radius: 10px;
   font-size: 13px; background: var(--hover); border: 1px solid var(--border);
@@ -268,17 +264,21 @@
 .desk-inline { display: flex; flex-direction: column; gap: 8px; }
 .desk-inline:empty { display: none; }
 .desk-panel {
-  position: relative; width: var(--desk-panel-w, 460px); max-width: min(60vw, calc(100% - 360px)); flex-shrink: 0; min-height: 0;
-  display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--bg-elev);
+  position: absolute; top: 8px; right: 12px; bottom: 120px; width: min(400px, calc(100% - 24px)); z-index: 8;
+  display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding: 2px; pointer-events: none;
 }
-.desk-panel .desk-tabs { display: flex; align-items: center; padding: 6px 8px 0; }
+.desk-panel > * { pointer-events: auto; }
+.desk-close { position: sticky; top: 0; align-self: flex-end; flex: none; margin-bottom: -6px; z-index: 1; }
+.desk-card { flex: none; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elev); box-shadow: var(--shadow, 0 4px 16px rgb(0 0 0 / 0.14)); overflow: hidden; }
+.desk-card-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 9px 12px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
+.desk-card-head:hover { background: var(--hover); }
+.desk-card-head .count { margin-left: 4px; font-weight: 400; color: var(--text-muted); }
+.desk-card-body { display: flex; flex-direction: column; max-height: 320px; overflow-y: auto; border-top: 1px solid var(--border); }
+.desk-card-body.term { height: 280px; max-height: none; overflow: hidden; }
+.desk-card-body.term > * { flex: 1; height: 100%; min-height: 0; }
 /* Narrower than the old desk pane: the tree sits above the preview rather than beside it. */
 .desk-panel .desk-files { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(120px, 40%) minmax(0, 1fr); }
 .desk-panel .desk-tree { border-right: 0; border-bottom: 1px solid var(--border); }
-/* Below ~1100px the window cannot hold the sidebar, a readable chat and the panel side by side, so the panel floats over the chat. */
-@media (max-width: 1100px) {
-  .desk-panel { position: absolute; inset: 0 0 0 auto; width: min(var(--desk-panel-w, 460px), 100%); max-width: none; z-index: 8; box-shadow: var(--shadow, 0 8px 24px rgb(0 0 0 / 0.18)); }
-}
 
 /* The plain-chat Files tab reuses the chat file rows: section headings and the empty line as in the old popover. */
 .cf-list h4 { margin: 0; padding: 6px 8px 2px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }

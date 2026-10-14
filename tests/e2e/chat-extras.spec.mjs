@@ -84,14 +84,14 @@ test('every chat has a side panel: Files and Changes, and no Review without a de
   await page.getByRole('button', { name: 'Workspace panel', exact: true }).click()
   const panel = page.locator('.desk-panel')
   await expect(panel).toBeVisible()
-  const tabs = panel.locator('.desk-tabs')
-  await expect(tabs.getByRole('button', { name: 'Files' })).toBeVisible()
-  await expect(tabs.getByRole('button', { name: 'Changes' })).toBeVisible()
-  await expect(tabs.getByRole('button', { name: /^Review/ })).toHaveCount(0)
-  await expect(tabs.getByRole('button', { name: 'Context' })).toHaveClass(/active/) // opens on Context
-  await tabs.getByRole('button', { name: 'Files' }).click()
+  const tabs = panel
+  await expect(tabs.getByTestId('desk-tab-files')).toBeVisible()
+  await expect(tabs.getByTestId('desk-tab-changes')).toBeVisible()
+  await expect(tabs.getByTestId('desk-tab-review')).toHaveCount(0)
+  await expect(tabs.getByTestId('desk-tab-context')).toHaveAttribute('aria-expanded', 'true') // opens with Context expanded
+  await tabs.getByTestId('desk-tab-files').click()
   await expect(panel.getByText('No files in this chat yet.')).toBeVisible()
-  await tabs.getByRole('button', { name: 'Changes' }).click()
+  await tabs.getByTestId('desk-tab-changes').click()
   await expect(panel.getByText('No files changed in this chat yet.')).toBeVisible()
   await page.getByRole('button', { name: 'Workspace panel', exact: true }).click()
   await expect(panel).toHaveCount(0)
@@ -110,5 +110,5 @@ test('a multi-step checklist is the Progress card above the composer, not a stat
   await card.getByRole('button', { name: /the steps/ }).click()
   await expect(card.locator('.plan-step')).toHaveCount(2)
   await page.getByRole('button', { name: 'Workspace panel', exact: true }).click()
-  await expect(page.locator('.desk-panel .desk-tabs').getByRole('button', { name: 'Checklist' })).toHaveCount(0)
+  await expect(page.locator('.desk-panel').getByRole('button', { name: 'Checklist' })).toHaveCount(0)
 })

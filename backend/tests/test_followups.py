@@ -133,3 +133,11 @@ def test_a_stopped_reply_gets_none() -> None:
     wait_until(lambda: not any(r["conversation_id"] == cid for r in client.get("/runs").json()), "the run to end")
     time.sleep(0.5)
     assert not last_assistant(cid).get("followups") and "followups" not in STATE["kinds"]
+
+
+def test_tail_clip_keeps_the_closing_question() -> None:
+    reply = "intro " + "x" * 5000 + " Want me to draft the reply to Sam?"
+    out = followups.tail_clip(reply)
+    assert out.startswith("intro") and out.endswith("Sam?") and len(out) <= followups._CLIP + 10
+    assert followups.tail_clip("short?") == "short?"
+    assert followups.parse('Sure: ["Yes, draft it", "Why Sam?"]') == ["Yes, draft it", "Why Sam?"]

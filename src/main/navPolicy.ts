@@ -45,3 +45,8 @@ export function targetsLoopbackService(url: string, serviceUrl: string): boolean
   if (portOf(target) !== portOf(service)) return false
   return target.protocol === 'http:' || target.protocol === 'https:' || target.protocol === 'ws:' || target.protocol === 'wss:'
 }
+
+/** A blocked navigation out of this frame may open in the system browser: HTML previews yes, dashboards no (no exfil by URL). */
+export function opensExternally(frameUrl: string): boolean {
+  return frameUrl.startsWith('grain-preview://') && !frameUrl.startsWith('grain-preview://dash/')
+}

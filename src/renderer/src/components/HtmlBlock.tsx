@@ -11,7 +11,7 @@ import '../styles/htmlFence.css'
  * origin (sandbox allow-scripts, never allow-same-origin) loading the `grain-preview:` scheme, which serves it
  * with its own CSP: scripts run, nothing can connect. Model output is never executed in the app's origin.
  */
-export default function HtmlBlock({ source, streaming }: { source: string; streaming: boolean }): JSX.Element {
+export default function HtmlBlock({ source, streaming, dashboard }: { source: string; streaming: boolean; dashboard?: { data?: Record<string, unknown[]> } }): JSX.Element {
   const [mode, setMode] = useState<'code' | 'preview'>('preview')
   const [id, setId] = useState<string | null>(null)
   const [height, setHeight] = useState<number | undefined>()
@@ -21,9 +21,9 @@ export default function HtmlBlock({ source, streaming }: { source: string; strea
   useEffect(() => {
     if (streaming) return
     let live = true
-    window.os?.previewPut?.(source).then((i) => live && setId(i), () => {})
+    window.os?.previewPut?.(source, dashboard && { dashboard: true, data: dashboard.data }).then((i) => live && setId(i), () => {})
     return () => { live = false }
-  }, [source, streaming])
+  }, [source, streaming, dashboard?.data])
 
   useEffect(() => {
     const onMessage = (e: MessageEvent): void => {
@@ -52,7 +52,7 @@ export default function HtmlBlock({ source, streaming }: { source: string; strea
       {showing === 'code' ? (
         <pre><code>{source}</code></pre>
       ) : (
-        <iframe ref={frame} className="art-fence-frame" title="HTML preview" sandbox={PREVIEW_SANDBOX} src={previewUrl(id!)} style={{ height }} />
+        <iframe ref={frame} className="art-fence-frame" title="HTML preview" sandbox={PREVIEW_SANDBOX} src={previewUrl(id!, !!dashboard)} style={{ height }} />
       )}
     </div>
   )

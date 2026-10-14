@@ -1981,7 +1981,7 @@ export interface GrainApi {
   backendStatus: () => Promise<{ running: boolean; url: string; error: string | null; starting?: boolean }>
   backendToken: () => Promise<string>
   /** Store an HTML fence's source for the preview scheme; returns the id for `previewUrl`. */
-  previewPut: (source: string) => Promise<string>
+  previewPut: (source: string, opts?: { dashboard?: boolean; data?: Record<string, unknown[]> }) => Promise<string>
   /** Supervisor state and restart history; `restartBackend` also works from `failed`. */
   backendInfo: () => Promise<BackendInfo>
   restartBackend: () => Promise<BackendInfo>
@@ -3051,6 +3051,8 @@ export interface DashboardRender {
   mode: 'live' | 'snapshot'
   views: DashboardViewSpec[] | null
   html: string | null
+  /** Binding name to rows; html dashboards only (scripts read it from #grain-data). */
+  data?: Record<string, unknown[]> | null
   updatedAt: string
   failed: { binding: string; error: string; lastGoodAt: string | null }[]
   bindings: { name: string; source: string; label: string }[]

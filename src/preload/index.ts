@@ -11,7 +11,7 @@ function listen<T>(channel: string, cb: (payload: T) => void): () => void {
 const api: GrainApi = {
   backendStatus: () => ipcRenderer.invoke('backend:status'),
   backendToken: () => ipcRenderer.invoke('backend:token'),
-  previewPut: (source) => ipcRenderer.invoke('preview:put', source),
+  previewPut: (source, opts) => ipcRenderer.invoke('preview:put', source, opts),
   backendInfo: () => ipcRenderer.invoke('backend:info'),
   restartBackend: () => ipcRenderer.invoke('backend:restart'),
   onBackendState: (cb) => listen<BackendInfo>('backend:state', cb),

@@ -2920,7 +2920,7 @@ def _register_docs(self: Toolbox) -> None:
         "{name, source: 'health', metric, days?, provider?} reads health readings (provider e.g. 'coros'). "
         "mode 'live' (default) re-reads on every open; 'snapshot' freezes the data now. "
         "Use format 'html' only for a layout the spec cannot express: `html` with {{name}} (a table of the rows) and "
-        "{{name.field}} (the last row's value) placeholders; no scripts."),
+        "{{name.field}} (the last row's value) placeholders. Inline scripts run with no network or external files; they read the rows from the JSON script element id grain-data."),
         _obj({"title": {"type": "string"}, "format": {"type": "string", "enum": ["spec", "html"]}, "mode": {"type": "string", "enum": ["live", "snapshot"]},
               "bindings": {"type": "array", "items": {"type": "object"}}, "views": {"type": "array", "items": {"type": "object"}},
               "html": {"type": "string"}}, ["title"]),

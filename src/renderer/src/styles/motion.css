@@ -12,6 +12,8 @@
   --dur-snap: 180ms;
   --dur-spring: 360ms;
   --dur-window: 320ms;
+  /* Hold-to-confirm for permanent deletes. A safety delay, not motion, so reduced motion keeps it. */
+  --dur-hold: 600ms;
 
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   /* Canvas window motion: decel with no overshoot. */

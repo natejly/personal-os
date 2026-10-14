@@ -150,6 +150,27 @@
       })()
       </script>
     </section>
+    <section>
+      <h2>Hold to confirm</h2>
+      <div class="row"><button class="btn" id="hold" style="position:relative;overflow:hidden">Delete forever<span id="hfill" style="position:absolute;inset:0 auto 0 0;width:0;background:rgba(220,60,60,.3);pointer-events:none;transition:width var(--dur-snap) var(--spring-snappy)"></span></button><span class="hint" id="hmsg">Hold ~600ms. Release early and the fill springs back.</span></div>
+      <script>
+        (() => {
+          const b = document.getElementById('hold'), f = document.getElementById('hfill'), m = document.getElementById('hmsg'); let t;
+          const stop = () => { clearTimeout(t); f.style.transition = ''; f.style.width = '0'; };
+          b.onpointerdown = () => { f.style.transition = 'width 600ms linear'; f.style.width = '100%'; t = setTimeout(() => { m.textContent = 'Deleted!'; stop(); }, 600); };
+          b.onpointerup = b.onpointerleave = stop;
+        })();
+      </script>
+    </section>
+    <section>
+      <h2>Popover</h2>
+      <div class="row"><button class="btn" id="pbtn">Open menu</button></div>
+      <div id="pop" hidden style="margin-top:6px;padding:4px;border:1px solid var(--line);border-radius:10px;width:160px;transform-origin:top left">
+        <div style="padding:6px 8px">Rename</div><div style="padding:6px 8px">Duplicate</div>
+      </div>
+      <style>@keyframes pop-in{from{opacity:0;transform:translateY(-4px) scale(.98)}to{opacity:1;transform:none}} #pop:not([hidden]){animation:pop-in var(--dur-snap) var(--spring-snappy)}</style>
+      <script>pbtn.onclick = () => { pop.hidden = !pop.hidden; };</script>
+    </section>
     <!-- /demos -->
   </div>
 </main>

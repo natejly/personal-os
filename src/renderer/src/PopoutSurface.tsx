@@ -11,6 +11,7 @@ import StatusRing from './canvas/StatusRing'
 // The `.popout*` rules live in canvas.css, which only Canvas.tsx would otherwise pull in.
 import './styles/motion.css'
 import './styles/press.css'
+import './styles/motion-surfaces.css'
 import './styles/canvas.css'
 import { tip } from './lib/tip'
 

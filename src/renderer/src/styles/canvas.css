@@ -290,8 +290,10 @@
 /* `translate`, not `transform`: geometry lives on the standalone property (see rectStyle) so the
    win-open transform animation cannot yank a new window to the plane origin. */
 .win:not(.dragging):not(.resizing) {
-  transition: border-color var(--dur-hover) ease, box-shadow var(--dur-hover) ease, translate var(--dur-snap) var(--spring);
+  transition: border-color var(--dur-hover) ease, box-shadow var(--dur-hover) ease, translate var(--dur-snap) var(--spring), rotate var(--dur-spring) var(--spring-snappy);
 }
+/* A lifted window: the float shadow while it is carried (the lean is written by useDrag as `rotate`). */
+.win.dragging { box-shadow: var(--win-glow), var(--shadow-float); }
 .win.minimized { display: none; }
 /* A chat in blob view has no rectangle: no glass, border, shadow, handles, close glyph, status glyph
    (the creature carries the mood) or move strip -- the creature itself is the drag handle (chat.tsx
@@ -402,7 +404,8 @@
   background: var(--material-thick);
   backdrop-filter: var(--material-blur);
   box-shadow: var(--shadow-float);
-  animation: zone-in var(--dur-hover) var(--spring);
+  animation: pop-in var(--dur-snap) var(--spring-snappy);
+  transform-origin: top left;
   /* A long list (recent chats, boards) scrolls; submenus are siblings, so they are never clipped by it. */
   max-height: calc(100vh - 16px);
   overflow-y: auto;

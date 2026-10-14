@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ChevronRight, FileText, Folder, FolderOpen, FolderPlus, MoreHorizontal, Pin, Plus, Search, Sparkles, Star,
+  ChevronRight, FileText, LayoutDashboard, Folder, FolderOpen, FolderPlus, MoreHorizontal, Pin, Plus, Search, Sparkles, Star,
   Trash2, User
 } from '../icons'
 import type { Doc } from '@shared/types'
 import { useStore } from '../store'
+import { isDashboardDoc } from '../lib/dashboards'
 import type { DocHit } from '../lib/api'
 import {
   buildGroups, canDropDoc, canDropFolder, flattenGroups, folderKey, groupShutKey, joinPath, nameOf,
@@ -248,7 +249,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
       }}
       onDragEnd={endDrag}
     >
-      <FileText size={13} className="doc-row-icon" />
+      {isDashboardDoc(d) ? <LayoutDashboard size={13} className="doc-row-icon" /> : <FileText size={13} className="doc-row-icon" />}
       <span className="doc-row-main">
         <span className="doc-row-title">
           <span className="doc-row-name">{d.title || 'Untitled'}</span>

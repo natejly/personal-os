@@ -54,6 +54,7 @@ class Dashboards(unittest.TestCase):
     def test_save_is_a_doc_with_references_only(self) -> None:
         made = mk("Calories")
         self.assertEqual(made["folder"], "Dashboards")
+        self.assertEqual({x["id"]: x["kind"] for x in docs.list()}[made["id"]], "dashboard")
         d = docs.get(made["id"])
         self.assertEqual(d["folder"], "Dashboards")
         env = json.loads(d["content"])

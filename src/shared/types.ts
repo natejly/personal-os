@@ -2387,6 +2387,8 @@ export interface Doc {
   /** List rows carry a preview and a pending count; a fetched doc carries the body and the pending revisions. */
   preview?: string
   size?: number
+  /** List rows only: "dashboard" for a saved-dashboard envelope. */
+  kind?: 'doc' | 'dashboard'
   content?: string
   pending?: number | DocRevision[]
   /** This doc's own type; null or absent follows Settings → docTypography. */

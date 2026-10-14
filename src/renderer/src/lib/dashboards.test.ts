@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { dashboardOf, dashboardShowItem, failureLines, fmtStamp, isDashboardContent, stampText } from './dashboards'
+import { dashboardOf, dashboardShowItem, failureLines, fmtStamp, isDashboardContent, isDashboardDoc, stampText } from './dashboards'
 
 test('isDashboardContent detects the envelope only', () => {
   assert.equal(isDashboardContent('{"grainDashboard":1,"format":"spec"}'), true)
@@ -8,6 +8,13 @@ test('isDashboardContent detects the envelope only', () => {
   assert.equal(isDashboardContent('{"other":1}'), false)
   assert.equal(isDashboardContent('# Notes'), false)
   assert.equal(isDashboardContent('{broken'), false)
+})
+
+test('isDashboardDoc reads the list row kind', () => {
+  assert.equal(isDashboardDoc({ kind: 'dashboard' }), true)
+  assert.equal(isDashboardDoc({ kind: 'doc' }), false)
+  assert.equal(isDashboardDoc({}), false)
+  assert.equal(isDashboardDoc(null), false)
 })
 
 test('stamps use a 12-hour clock and the mode wording', () => {

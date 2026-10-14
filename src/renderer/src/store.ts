@@ -211,7 +211,7 @@ export interface State {
   refreshCodingSessions: () => Promise<void>
   /** The last "open a terminal on this coding session" request; `n` makes a repeat of the same one a new request. DeskPanel shows its Terminal tab and TerminalPane starts `mode`. */
   terminalRequest: { sessionId: string; mode: 'attach' | 'shell' | null; n: number; at: number } | null
-  openTerminal: (sessionId: string, mode: 'attach' | 'shell' | null) => void
+  openTerminal: (sessionId: string, mode?: 'attach' | 'shell' | null) => void
   /** Set by the side-panel chord: the Terminal tab shows even with no coding session. */
   terminalTab: boolean
   /** A request to bring a side-panel tab forward (Traces from a reply's trace chip). */
@@ -1872,7 +1872,7 @@ export const useStore = create<State>((set, get) => {
     terminalTab: false,
     deskTabRequest: null,
     togglePanelContext: () => set((s) => (s.contextOpen ? { contextOpen: false, deskPanel: false } : { contextOpen: true, terminalTab: true })),
-    openTerminal: (sessionId, mode) => set((st) => ({ terminalRequest: { sessionId, mode, n: (st.terminalRequest?.n ?? 0) + 1, at: Date.now() }, contextOpen: false })),
+    openTerminal: (sessionId, mode = null) => set((st) => ({ terminalRequest: { sessionId, mode, n: (st.terminalRequest?.n ?? 0) + 1, at: Date.now() }, contextOpen: false })),
     inboxOpen: false,
     jobsFocusId: null,
     openJobs: (jobId) => {

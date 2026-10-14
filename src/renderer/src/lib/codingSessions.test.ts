@@ -1,11 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { CodingSession, CodingSessionEvent } from '@shared/types'
-import { canAttach, codingNoticeText, defaultTermMode, defaultTermSession, codingTransition, eventSummary, formatElapsed, isStepEvent, latestActivity, mergeCodingEvents, pathBase, plainExcerpt, splitSessions } from './codingSessions'
+import { canAttach, codingNoticeText, defaultTermSession, codingTransition, eventSummary, formatElapsed, isStepEvent, latestActivity, mergeCodingEvents, pathBase, plainExcerpt, splitSessions, termSessions } from './codingSessions'
 
 const sess = (over: Partial<CodingSession> = {}): CodingSession => ({
   id: 's1', agent: 'claude', name: 'Fix tests', status: 'working', attention: 'working', detail: null, repo_path: '/r', worktree: '/r/.wt/fix-tests',
-  branch: null, external_id: null, model: null, permission_mode: null, log_tail: '', created_at: 100, updated_at: 100, ended_at: null, ...over
+  branch: null, conversation_id: null, external_id: null, model: null, permission_mode: null, log_tail: '', created_at: 100, updated_at: 100, ended_at: null, ...over
 })
 const ev = (seq: number, over: Partial<CodingSessionEvent> = {}): CodingSessionEvent => ({
   id: seq, session_id: 's1', seq, ts: '2026-01-01T00:00:00Z', kind: 'text', text: `e${seq}`, tool: null, data: null, ...over
@@ -70,12 +70,19 @@ test('splitSessions puts live (and blocked) first and caps the settled ones', ()
   assert.deepEqual(recent.map((c) => c.id), ['d'])
 })
 
-test('defaultTermMode attaches only a claude session with a valid attach id', () => {
-  assert.equal(defaultTermMode(sess({ external_id: 'ab12cd34' })), 'attach')
+test('canAttach is true only for a claude session with a valid attach id', () => {
   assert.equal(canAttach(sess({ external_id: 'ab12cd34' })), true)
-  assert.equal(defaultTermMode(sess({ external_id: null })), null)
-  assert.equal(defaultTermMode(sess({ external_id: 'ABCDEFGH' })), null)
-  assert.equal(defaultTermMode(sess({ agent: 'opencode', external_id: 'ab12cd34' })), null)
+  assert.equal(canAttach(sess({ external_id: null })), false)
+  assert.equal(canAttach(sess({ external_id: 'ABCDEFGH' })), false)
+  assert.equal(canAttach(sess({ agent: 'opencode', external_id: 'ab12cd34' })), false)
+})
+
+test('termSessions lists the chat\'s own sessions newest first, plus a requested one; outside a chat the newest five', () => {
+  const all = [1, 2, 3, 4, 5, 6, 7].map((n) => sess({ id: `s${n}`, created_at: n, conversation_id: n % 2 ? 'c1' : 'c2' }))
+  assert.deepEqual(termSessions(all, 'c1').map((c) => c.id), ['s7', 's5', 's3', 's1'])
+  assert.deepEqual(termSessions(all, 'c1', 's2').map((c) => c.id), ['s7', 's5', 's3', 's2', 's1'])
+  assert.deepEqual(termSessions(all, 'none'), [])
+  assert.deepEqual(termSessions(all).map((c) => c.id), ['s7', 's6', 's5', 's4', 's3'])
 })
 
 test('defaultTermSession prefers the newest attachable session, else the first', () => {

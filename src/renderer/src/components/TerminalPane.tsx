@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
 import { useStore } from '../store'
-import { AGENT_LABEL, canAttach, codingDot, codingStatusLabel, defaultTermMode, defaultTermSession } from '../lib/codingSessions'
+import { AGENT_LABEL, canAttach, codingDot, codingStatusLabel, defaultTermMode, defaultTermSession, termSessions } from '../lib/codingSessions'
 import { endEntry, ensureEntry, getEntry, refit, startEntry, useTermEntries, type TermMode } from '../lib/termRegistry'
+import { CodingTimeline } from './CodingTimeline'
 
 // The last openTerminal request this pane acted on, so remounting the pane does not replay it.
 let handled = 0
@@ -15,10 +16,10 @@ let last: { id: string; mode: TermMode | null } | null = null
  * in lib/termRegistry, not in this component, so closing the panel or switching tab only detaches their DOM; the PTYs and
  * their screens are still there when it comes back.
  */
-export default function TerminalPane(): JSX.Element {
+export default function TerminalPane({ conversationId }: { conversationId?: string }): JSX.Element {
   const sessions = useStore((s) => s.codingSessions)
   const request = useStore((s) => s.terminalRequest)
-  const rows = Object.values(sessions).sort((a, b) => b.created_at - a.created_at).slice(0, 20)
+  const rows = termSessions(Object.values(sessions), conversationId, request?.sessionId)
   const kept = last && rows.some((c) => c.id === last!.id) ? last : null
   const [sessionId, setSessionId] = useState<string | null>(request?.sessionId ?? kept?.id ?? defaultTermSession(rows)?.id ?? null)
   const [mode, setMode] = useState<TermMode | null>(kept?.mode ?? null)
@@ -79,7 +80,7 @@ export default function TerminalPane(): JSX.Element {
 
   return (
     <div className="desk-pane term-pane" data-testid="term-pane">
-      <div className="term-chips">
+      {rows.length > 1 && <div className="term-chips">
         {rows.map((c) => (
           <button key={c.id} type="button" className={`term-chip${c.id === sessionId ? ' on' : ''}`} data-testid={`term-chip-${c.id}`} title={c.worktree}
             onClick={() => pick(c.id)}>
@@ -88,7 +89,7 @@ export default function TerminalPane(): JSX.Element {
             <span className="term-chip-branch">{c.branch ?? c.name}</span>
           </button>
         ))}
-      </div>
+      </div>}
       {selected && (
         <div className="term-actions">
           {canAttach(selected) && <button type="button" className="ghost-btn sm" data-testid="term-attach" onClick={() => start(selected.id, 'attach')}>Attach</button>}
@@ -98,7 +99,8 @@ export default function TerminalPane(): JSX.Element {
         </div>
       )}
       <div className="term-view" data-testid="term-view" ref={viewRef} style={shown ? undefined : { display: 'none' }} />
-      {!shown && <p className="muted small">{selected ? (canAttach(selected) ? 'Attach to the session or open a shell in its worktree.' : 'Open a shell in its worktree.') : 'Pick a coding session.'}</p>}
+      {selected && !shown && (canAttach(selected) ? <p className="muted small">Attach to the session or open a shell in its worktree.</p> : <CodingTimeline id={selected.id} />)}
+      {!selected && <p className="muted small">Pick a coding session.</p>}
     </div>
   )
 }

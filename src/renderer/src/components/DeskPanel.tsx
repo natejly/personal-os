@@ -9,6 +9,7 @@ import { ChatFilesList } from './ChatFilesPanel'
 import { useStore } from '../store'
 import ContextDrawer from './ContextDrawer'
 import { useTermAvailable } from '../lib/termRegistry'
+import { termSessions } from '../lib/codingSessions'
 import TerminalPane from './TerminalPane'
 import TracesPane from './TracesPane'
 
@@ -31,7 +32,7 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   useEffect(() => { if (desk?.status === 'review') setTab('review') }, [desk?.id, desk?.status])
   const contextOpen = useStore((s) => s.contextOpen)
   const termOk = useTermAvailable()
-  const hasCoding = useStore((s) => Object.keys(s.codingSessions).length > 0)
+  const hasCoding = useStore((s) => termSessions(Object.values(s.codingSessions), conversationId).length > 0)
   const termTab = useStore((s) => s.terminalTab)
   const tracesRequest = useStore((s) => s.deskTabRequest?.n)
   const termRequest = useStore((s) => s.terminalRequest?.n)
@@ -60,7 +61,7 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
         ? <><ChatFilesList conversationId={id} layout="above" /><h4 className="cf-ws">Workspace</h4><DeskFiles desk={desk} /></>
         : <ChatFilesList conversationId={id} />)}
       {tab === 'changes' && <div className="desk-pane scroll"><DeskChanges desk={desk ?? undefined} conversationId={id} /></div>}
-      {tab === 'terminal' && <TerminalPane />}
+      {tab === 'terminal' && <TerminalPane conversationId={conversationId} />}
       {tab === 'traces' && <TracesPane conversationId={conversationId} />}
       {tab === 'review' && desk && <div className="desk-pane scroll"><DeskReview desk={desk} /></div>}
     </aside>

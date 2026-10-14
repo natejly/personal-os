@@ -1896,6 +1896,8 @@ export interface CodingSession {
   id: string; agent: 'claude' | 'opencode' | 'pi'; name: string
   status: 'starting' | 'working' | 'needs_you' | 'blocked' | 'done' | 'stopped' | 'failed'
   attention: Attention; detail: string | null; repo_path: string; worktree: string; branch: string | null
+  /** The chat that started the session; null for one started outside a chat. */
+  conversation_id: string | null
   external_id: string | null; model: string | null; permission_mode: string | null; log_tail: string
   /** `claude attach <id>`, set while a Claude Code session waits on a permission prompt. */
   attach_hint?: string | null
@@ -2071,8 +2073,8 @@ export interface GrainApi {
     list: () => Promise<AgentBrowserSession[]>
     show: (session: string) => Promise<void>
     hide: (session: string) => Promise<void>
-    /** Live JPEG frames after each action and at most every ~1.5 s while subscribed; returns the unsubscribe. */
-    subscribe: (session: string, cb: (frame: AgentBrowserFrame) => void) => () => void
+    /** Live JPEG frames after each action and every ~1.5 s while the browser is busy or just was; `onState` hears active/idle/ended/error. Returns the unsubscribe. */
+    subscribe: (session: string, cb: (frame: AgentBrowserFrame) => void, onState?: (state: AgentBrowserLiveState) => void) => () => void
     /** Sites with cookies saved in the agent browser (sign-ins from handoffs; page fetches share the same store). */
     signIns: () => Promise<AgentBrowserSignIn[]>
     /** Forgets one site's cookies and storage, or with no domain everything, closing open agent browsers first. */
@@ -2095,10 +2097,26 @@ export interface AgentBrowserSession {
   visible: boolean
 }
 
+/** The element the assistant is acting on, in page CSS px. Never carries typed text. */
+export interface AgentBrowserMark {
+  action: 'click' | 'type' | 'select' | 'press'
+  label: string
+  box: { x: number; y: number; width: number; height: number }
+  viewport: { width: number; height: number }
+}
+
 export interface AgentBrowserFrame {
   dataUrl: string
   url: string
   title: string
+  at: number
+  mark?: AgentBrowserMark
+}
+
+export interface AgentBrowserLiveState {
+  session: string
+  state: 'active' | 'idle' | 'ended' | 'error'
+  reason?: string
   at: number
 }
 

@@ -34,10 +34,16 @@ export function useStop(id: string): { stop: () => Promise<void>; busy: boolean 
   return { stop, busy }
 }
 
+/** Opens the side panel's Terminal tab on a session: its attached terminal, or its live activity when it cannot attach. */
+export function ShowSession({ id, cls = 'sm' }: { id: string; cls?: 'sm' | 'xs' }): JSX.Element | null {
+  const openTerminal = useStore((s) => s.openTerminal)
+  const termOk = useTermAvailable()
+  return termOk ? <button type="button" className={`ghost-btn ${cls}`} onClick={() => openTerminal(id)}>Show coding session</button> : null
+}
+
 /** A Claude Code session blocked on an answer: it can only be answered in its own session, so offer Terminal on a click. */
 export function NeedsYou({ c, compact }: { c: CodingSession; compact?: boolean }): JSX.Element | null {
   const toast = useStore((s) => s.toast)
-  const openTerminal = useStore((s) => s.openTerminal)
   const termOk = useTermAvailable()
   if (c.status !== 'needs_you' || c.agent !== 'claude' || !c.external_id) return null
   const open = (): void => {
@@ -50,7 +56,6 @@ export function NeedsYou({ c, compact }: { c: CodingSession; compact?: boolean }
   ) : null
   const buttons = (
     <>
-      {termOk && <button type="button" className="ghost-btn sm" onClick={() => openTerminal(c.id, 'attach')}>Open terminal</button>}
       {external && (termOk
         ? <button type="button" className="ghost-btn xs" onClick={open}>Open in external Terminal</button>
         : <button type="button" className="ghost-btn sm" onClick={open}>Open in Terminal</button>)}
@@ -79,8 +84,6 @@ export function NeedsYou({ c, compact }: { c: CodingSession; compact?: boolean }
 export function CodingSessionView({ session: c }: { session: CodingSession }): JSX.Element {
   const { stop, busy } = useStop(c.id)
   const [log, setLog] = useState(false)
-  const openTerminal = useStore((s) => s.openTerminal)
-  const termOk = useTermAvailable()
   return (
     <div className="coding-session">
       <div className="tc-statusrow">
@@ -90,7 +93,7 @@ export function CodingSessionView({ session: c }: { session: CodingSession }): J
         {codingStoppable(c.status) && (
           <button type="button" className="ghost-btn sm" disabled={busy} onClick={() => void stop()}>Stop</button>
         )}
-        {termOk && <button type="button" className="ghost-btn sm" onClick={() => openTerminal(c.id, null)}>Terminal</button>}
+        <ShowSession id={c.id} />
         {c.log_tail && (
           <button type="button" className="tc-more" aria-expanded={log} onClick={() => setLog((o) => !o)}>{log ? 'Hide log' : 'Log'}</button>
         )}
@@ -143,6 +146,7 @@ function CodingListRows({ rows }: { rows: CodingSession[] }): JSX.Element {
             <span className={`inbox-dot ${codingDot(c.status)}`} role="img" aria-label={codingStatusLabel(c.status)} title={codingStatusLabel(c.status)} />
             <span className="coding-name">{c.name}</span>
             <span className="tc-muted">{AGENT_LABEL[c.agent]} · {codingStatusLabel(c.status)}</span>
+            <ShowSession id={c.id} cls="xs" />
           </li>
         )
       })}

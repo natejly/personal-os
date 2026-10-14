@@ -135,6 +135,17 @@ class Dashboards(unittest.TestCase):
         call("dashboard_pin", {"name": "Calories", "project": "personal"}, project_id=pid)
         self.assertIsNone(docs.get(id)["project_id"])
 
+    def test_project_list_holds_only_its_pinned_dashboards(self) -> None:
+        pid = client.post("/projects", json={"name": "Jobs"}).json()["id"]
+        other = client.post("/projects", json={"name": "Other"}).json()["id"]
+        pinned, loose, elsewhere = mk("Applications")["id"], mk("Loose")["id"], mk("Away")["id"]
+        client.post(f"/saved-dashboards/{pinned}/pin", json={"project_id": pid})
+        client.post(f"/saved-dashboards/{elsewhere}/pin", json={"project_id": other})
+        rows = client.get(f"/saved-dashboards?project_id={pid}").json()
+        self.assertEqual([(r["id"], r["title"], r["mode"]) for r in rows], [(pinned, "Applications", "live")])
+        self.assertNotIn(loose, [r["id"] for r in rows])
+        self.assertEqual(client.get("/saved-dashboards?project_id=nope").json(), [])
+
     def test_tools_open_and_mention(self) -> None:
         saved = call("dashboard_save", {"title": "Tool Board", "bindings": [{"name": "food", "source": "doc", "doc": "Food Log"}],
                                         "views": [{"kind": "chart", "spec": SPEC}]})

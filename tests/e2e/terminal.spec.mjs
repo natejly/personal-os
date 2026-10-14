@@ -10,10 +10,10 @@ process.env.GRAIN_TERM_FAKE_CMD = '/bin/cat'
 
 const SID = '0123456789abcdef'
 // A coding session row straight in the isolated database; no agent process is ever started.
-const seedSession = (grain, worktree) => {
+const seedSession = (grain, worktree, convo = null) => {
   const now = Date.now() / 1000
   const q = (s) => `'${String(s).replace(/'/g, "''")}'`
-  execFileSync('sqlite3', [join(grain.dataDir, 'personal-os.db'), `INSERT INTO coding_sessions(id, agent, external_id, session_id, repo_path, worktree, branch, conversation_id, desk_id, run_id, name, prompt, model, permission_mode, status, detail, log_tail, created_at, updated_at, ended_at, base_sha) VALUES(${q(SID)},'claude','ab12cd34',NULL,${q(worktree)},${q(worktree)},NULL,NULL,NULL,NULL,'Terminal test','do it',NULL,NULL,'stopped',NULL,'',${now},${now},${now},NULL);`])
+  execFileSync('sqlite3', [join(grain.dataDir, 'personal-os.db'), `INSERT INTO coding_sessions(id, agent, external_id, session_id, repo_path, worktree, branch, conversation_id, desk_id, run_id, name, prompt, model, permission_mode, status, detail, log_tail, created_at, updated_at, ended_at, base_sha) VALUES(${q(SID)},'claude','ab12cd34',NULL,${q(worktree)},${q(worktree)},NULL,${convo ? q(convo) : 'NULL'},NULL,NULL,'Terminal test','do it',NULL,NULL,'stopped',NULL,'',${now},${now},${now},NULL);`])
 }
 // The Workspace panel needs a saved chat, so send one message first.
 const openPanel = async (page) => {
@@ -23,6 +23,16 @@ const openPanel = async (page) => {
   const btn = page.getByRole('button', { name: 'Workspace panel' })
   await expect(btn).toBeEnabled()
   if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click()
+  await expect(page.locator('.desk-panel')).toBeVisible()
+}
+// Seeds the session into the chat now open (the Terminal tab lists a chat's own sessions) and reopens the panel so it loads it.
+const seedInChat = async (grain, page, worktree) => {
+  const convo = execFileSync('sqlite3', [join(grain.dataDir, 'personal-os.db'), 'SELECT id FROM conversations ORDER BY updated_at DESC LIMIT 1;']).toString().trim()
+  seedSession(grain, worktree, convo)
+  const btn = page.getByRole('button', { name: 'Workspace panel' })
+  await btn.click()
+  await expect(page.locator('.desk-panel')).toHaveCount(0)
+  await btn.click()
   await expect(page.locator('.desk-panel')).toBeVisible()
 }
 const rowsText = (page) => page.locator('.xterm-rows').first().innerText()
@@ -38,15 +48,15 @@ test('the Terminal tab is hidden while there are no coding sessions', async ({ g
 test('Terminal: shell in the worktree echoes typed text, survives a tab switch, shows the exit line and End drops the view', async ({ grain }) => {
   const wt = realpathSync(mkdtempSync(join(tmpdir(), 'grain-e2e-term-')))
   try {
-    seedSession(grain, wt)
-    const p = await grain.relaunch()
+    const p = grain.page
     await openPanel(p)
+    await seedInChat(grain, p, wt)
     const tab = p.getByTestId('desk-tab-terminal')
     await expect(tab).toBeVisible()
     await tab.click()
-    await expect(p.getByTestId(`term-chip-${SID}`)).toBeVisible()
+    // the chat has one session: no chip row, and opening the tab attaches with no click; only the shown view's DOM is mounted
+    await expect(p.getByTestId(`term-chip-${SID}`)).toHaveCount(0)
     await expect(p.getByTestId('term-attach')).toBeVisible()
-    // opening the tab attaches to the newest attachable session with no click; only the shown view's DOM is mounted
     await expect(p.locator('.xterm-rows')).toHaveCount(1)
     await expect(p.locator('.xterm-rows').first()).toBeVisible()
     await p.getByTestId('term-shell').click()
@@ -84,14 +94,13 @@ test('Terminal: shell in the worktree echoes typed text, survives a tab switch, 
   }
 })
 
-test('Terminal: picking an attachable session shows the attached view without pressing Attach', async ({ grain }) => {
+test('Terminal: the attachable session of a chat session shows the attached view', async ({ grain }) => {
   const wt = realpathSync(mkdtempSync(join(tmpdir(), 'grain-e2e-term-')))
   try {
-    seedSession(grain, wt)
-    const p = await grain.relaunch()
+    const p = grain.page
     await openPanel(p)
+    await seedInChat(grain, p, wt)
     await p.getByTestId('desk-tab-terminal').click()
-    await p.getByTestId(`term-chip-${SID}`).click()
     await expect(p.locator('.xterm-rows').first()).toBeVisible()
     expect(realErrors(grain)).toEqual([])
   } finally {
@@ -102,9 +111,9 @@ test('Terminal: picking an attachable session shows the attached view without pr
 test('Terminal: opening the tab attaches to the newest attachable session with no click', async ({ grain }) => {
   const wt = realpathSync(mkdtempSync(join(tmpdir(), 'grain-e2e-term-')))
   try {
-    seedSession(grain, wt)
-    const p = await grain.relaunch()
+    const p = grain.page
     await openPanel(p)
+    await seedInChat(grain, p, wt)
     await p.getByTestId('desk-tab-terminal').click()
     await expect(p.locator('.xterm-rows').first()).toBeVisible()
     expect(realErrors(grain)).toEqual([])

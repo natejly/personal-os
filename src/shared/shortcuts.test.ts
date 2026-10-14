@@ -15,7 +15,7 @@ test('every menu and window entry has an action; display-only entries have none'
 })
 
 test('no two menu accelerators collide', () => {
-  const keys = inMenu.map((s) => s.keys.replace('Shift+CmdOrCtrl', 'CmdOrCtrl+Shift'))
+  const keys = inMenu.filter((s) => s.keys).map((s) => s.keys.replace('Shift+CmdOrCtrl', 'CmdOrCtrl+Shift'))
   assert.equal(new Set(keys).size, keys.length)
 })
 

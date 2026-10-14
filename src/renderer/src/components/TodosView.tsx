@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSlidingPill } from "../lib/useSlidingPill"
 import { useShallow } from 'zustand/react/shallow'
 import { Plus, ListChecks, RefreshCw, Bookmark, X, ChevronDown, KanbanSquare, List, SlidersHorizontal, Pencil, Trash2, Inbox, Layers } from '../icons'
 import type { TodoFilter, TodoRepeat } from '@shared/types'
@@ -21,6 +22,7 @@ import ErrorState from './ErrorState'
 const DEFAULT_LIST = 'Todos'
 
 export default function TodosView(): JSX.Element {
+  const viewPill = useSlidingPill<HTMLDivElement>()
   const todos = useStore((s) => s.todos)
   const tasksSync = useStore((s) => s.tasksSync)
   const googleConnected = useStore((s) => !!s.google?.connected)
@@ -195,7 +197,7 @@ export default function TodosView(): JSX.Element {
             <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as 'due' | 'urgency')}><option value="due">Sort: Due</option><option value="urgency">Sort: Urgency</option></select>
             <ChevronDown size={14} />
           </label>
-          <div className="seg" role="group" aria-label="View">
+          <div className="seg pill-group" ref={viewPill} role="group" aria-label="View">
             <button className={`icon-btn${board ? '' : ' on'}`} aria-pressed={!board} title="List view" aria-label="List view" onClick={() => setView('list')}><List size={14} /></button>
             <button className={`icon-btn${board ? ' on' : ''}`} aria-pressed={board} title="Board view" aria-label="Board view" onClick={() => setView('board')}><KanbanSquare size={14} /></button>
           </div>

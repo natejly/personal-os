@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSlidingPill } from "../lib/useSlidingPill"
 import { ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, Files, Plus, Folder, FolderKanban, ChevronRight, Bell } from '../icons'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
@@ -87,6 +88,7 @@ const NAV_SHORTCUT: Partial<Record<string, string>> = {
 const NAV_MODULES = MODULES.filter((m) => m.nav && m.view)
 
 export default function Sidebar(): JSX.Element {
+  const navPill = useSlidingPill<HTMLElement>()
   const conversations = useStore((s) => s.conversations)
   const projects = useStore((s) => s.projects)
   const focusedId = useStore((s) => s.focusedConversationId)
@@ -305,7 +307,7 @@ export default function Sidebar(): JSX.Element {
       {/* One scroller for nav, projects, and chats. The chat list used to be the only part
           that scrolled, so with a few projects open it was squeezed to a sliver at the bottom. */}
       <div className="sidebar-scroll">
-      <nav className="nav">
+      <nav className="nav pill-group" ref={navPill}>
         {[...TOP, ...navEntries()]
           .filter((n) => (n.view ? !rowHidden(settings, n.view) : inCanvas)).map(navItem)}
         {/* Hidden views leave no trace otherwise; this is the way back to them. */}

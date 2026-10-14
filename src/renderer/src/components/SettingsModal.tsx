@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useSlidingPill } from "../lib/useSlidingPill"
 import { X, Search, Plug, Cpu, Bot, Palette, ShieldCheck, SlidersHorizontal, KeyRound, Gauge, Brain, PanelLeft, type Icon } from '../icons'
 import { useShallow } from 'zustand/react/shallow'
 import { useStore, setSettingsGuard } from '../store'
@@ -45,6 +46,7 @@ const TABS: { id: Tab; label: string; icon: Icon }[] = [
  * (key rows, pairing, voice, planner, grants, System access, Usage prices).
  */
 export default function SettingsModal(): JSX.Element {
+  const tabsPill = useSlidingPill<HTMLElement>()
   const settings = useStore((s) => s.settings)
   const models = useStore((s) => s.models)
   const view = useStore((s) => s.view)
@@ -239,7 +241,7 @@ export default function SettingsModal(): JSX.Element {
                 )) : <p className="muted small">No settings match.</p>}
               </div>
             ) : (
-              <nav className="settings-tabs" role="tablist" aria-orientation="vertical" aria-label="Settings sections" onKeyDown={onTabKey}>
+              <nav className="settings-tabs pill-group" ref={tabsPill} role="tablist" aria-orientation="vertical" aria-label="Settings sections" onKeyDown={onTabKey}>
                 {TABS.map(({ id, label, icon: Icon }) => {
                   const hint = hintOf(id)
                   return (

@@ -1,4 +1,5 @@
 import { modelLabel } from '../lib/modelLabel'
+import { useSlidingPill } from "../lib/useSlidingPill"
 import { useEffect, useMemo, useState } from 'react'
 import { X, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, ShieldAlert, MonitorDot, PenLine } from '../icons'
 import { ToolOverrides } from './ToolPermissions'
@@ -209,6 +210,7 @@ function ContextUsedView({ ctx, messageId }: { ctx: ContextUsed; messageId?: str
 
 /** `embedded`: the body only, as a tab of the chat's side panel (no drawer chrome, closed by the panel). */
 export default function ContextDrawer({ conversationId, embedded }: { conversationId?: string; embedded?: boolean }): JSX.Element {
+  const tabsPill = useSlidingPill<HTMLDivElement>()
   const convo = useConversation(conversationId)
   const draftProjectId = useStore((s) => s.draftProjectId)
   const settings = useStore((s) => s.settings)
@@ -310,7 +312,7 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
         })()}
       </section>
 
-      <div className="ctx-tabs">
+      <div className="ctx-tabs pill-group" ref={tabsPill}>
         <button className={tab === 'last' ? 'active' : ''} onClick={() => setTab('last')}>Last reply</button>
         {devTools && <button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')}><Eye size={12} /> Preview</button>}
       </div>

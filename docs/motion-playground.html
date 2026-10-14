@@ -105,6 +105,24 @@
       </div>
       <div class="hint">Fill springs in, tick draws left to right, title strikes through. The app also folds a finished row shut.</div>
     </section>
+    <section>
+      <h2>Send</h2>
+      <style>
+        .sd{width:28px;height:28px;border-radius:50%;border:0;background:#4a6cf7;color:#fff;transition:transform var(--dur-press) var(--ease-out)}
+        .sd:active{transform:translateY(var(--press-sink))}
+        .sd i{display:block;font-style:normal;transition:transform var(--dur-press) var(--ease-out)}
+        .sd:active i{transform:translateY(-2px)}
+        .sd i.launch{animation:sdl var(--dur-spring) var(--spring-snappy)}
+        @keyframes sdl{35%{transform:translateY(-5px)}}
+        .bub{display:inline-block;margin-left:12px;padding:6px 12px;border-radius:12px;background:#e8ecff;animation:sdr var(--dur-spring) var(--spring-snappy) backwards}
+        @keyframes sdr{from{opacity:0;transform:translateY(10px)}}
+      </style>
+      <div class="row"><button class="sd" id="sd"><i>&uarr;</i></button><span id="sdout"></span></div>
+      <script>
+        sd.onclick=()=>{const i=sd.firstChild;i.classList.remove('launch');void i.offsetWidth;i.classList.add('launch');sdout.innerHTML='<span class="bub">hello</span>'}
+      </script>
+      <div class="hint">Arrow launches on the spring; the new bubble rises in.</div>
+    </section>
     <!-- /demos -->
   </div>
 </main>

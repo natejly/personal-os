@@ -1153,6 +1153,16 @@ kbd {
 .send:hover:not(:disabled) { background: var(--accent-solid-hover); }
 .send:disabled { opacity: 0.35; cursor: default; }
 .composer-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+/* Motion: send. The button sinks on press; the arrow nudges up, and launches (travel and return) when a send happens. */
+.send { transition: background 0.15s, opacity 0.15s, transform var(--dur-press) var(--ease-out); }
+.send:active:not(:disabled) { transform: translateY(var(--press-sink)); }
+.send-icon { display: flex; transition: transform var(--dur-press) var(--ease-out); }
+.send:active:not(:disabled) .send-icon { transform: translateY(-2px); }
+.send-icon.launch { animation: send-launch var(--dur-spring) var(--spring-snappy); }
+@keyframes send-launch { 0% { transform: translateY(0); } 35% { transform: translateY(-5px); } 100% { transform: translateY(0); } }
+/* The optimistic bubble exists only from the moment of a send, so animating its mount never replays history. */
+.msg.user.pending { animation: msg-rise var(--dur-spring) var(--spring-snappy) backwards; }
+@keyframes msg-rise { from { opacity: 0; transform: translateY(10px); } }
 .send.stop { background: var(--text); color: var(--bg); }
 .send.stop:hover:not(:disabled) { background: var(--text-muted); }
 .send.stop:disabled { opacity: 0.7; }

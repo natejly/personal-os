@@ -83,6 +83,8 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     startAutonomy({ autonomousByDefault: st.settings.autonomousByDefault, mainComposer: newChat, agent: st.draftChatSettings.agent })
   /** A steer that would decline an open card, waiting on the user's yes. `item` when it came from the tray. */
   const [confirm, setConfirm] = useState<{ item?: QueuedItem } | null>(null)
+  // Bumped on every send: re-keys the arrow so its launch animation restarts on rapid sends.
+  const [launch, setLaunch] = useState(0)
   useEffect(() => { if (!cardPending) setConfirm(null) }, [cardPending])
 
   useEffect(() => { box.current?.querySelector('textarea')?.focus() }, [activeId])
@@ -388,6 +390,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
    */
   const submit = (mod = false): void => {
     if (!canSend) return
+    setLaunch((n) => n + 1)
     // A built-in the UI handles ("/compact", "/skills") runs now, never queued: it is not a message for the reply.
     // A chat working autonomously sends straight to its desk, which steers the live turn or wakes the next.
     const action = queueId && !deskBound && !clientCommand(text) && !scheduleForm(text) ? enterAction({ busy: streaming && !stopping, mod, cardPending, desk }) : 'send'
@@ -544,7 +547,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
               {stopping ? <Loader2 size={14} className="spin" /> : <Square size={14} />}
             </button>
           )}
-          <button className="send" title={sendLabel} aria-label={streaming ? sendLabel : 'Send'} disabled={!canSend} onClick={() => submit()}><ArrowUp size={16} /></button>
+          <button className="send" title={sendLabel} aria-label={streaming ? sendLabel : 'Send'} disabled={!canSend} onClick={() => submit()}><span key={launch} className={launch ? 'send-icon launch' : 'send-icon'}><ArrowUp size={16} /></span></button>
         </div>
       </div>
       <div className="composer-footer">

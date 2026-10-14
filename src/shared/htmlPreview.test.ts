@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert'
-import { clampPreviewHeight, PREVIEW_FRAME_CSP, PREVIEW_HEIGHT_MESSAGE, PREVIEW_MAX_HEIGHT, PREVIEW_MIN_HEIGHT, previewUrl, wrapPreviewDoc } from './htmlPreview'
+import { clampPreviewHeight, PREVIEW_FRAME_CSP, PREVIEW_HEIGHT_MESSAGE, PREVIEW_MAX_HEIGHT, PREVIEW_MIN_HEIGHT, previewUrl, wrapPreviewDoc, DASHBOARD_FRAME_CSP, wrapDashboardDoc } from './htmlPreview'
 
 test('the frame CSP lets inline and https scripts run but allows no connection, frame or local origin', () => {
   const dir = (name: string): string => PREVIEW_FRAME_CSP.split(';').map((s) => s.trim()).find((s) => s.startsWith(name + ' ')) ?? ''
@@ -43,4 +43,23 @@ test('wrapPreviewDoc keeps a full document, with the reporter first and one doct
   assert.ok(out.indexOf(PREVIEW_HEIGHT_MESSAGE) < out.indexOf('<title>'))
   assert.ok(out.includes('<script>document.title="drawn"</script>'))
   assert.equal((out.match(/<body/g) ?? []).length, 1, 'no second body is added around a full document')
+})
+
+test('the dashboard CSP has no network at all and its URL uses the dash host', () => {
+  assert.ok(!DASHBOARD_FRAME_CSP.includes('https:') && !DASHBOARD_FRAME_CSP.includes('http:'))
+  assert.ok(DASHBOARD_FRAME_CSP.includes("connect-src 'none'"))
+  assert.ok(DASHBOARD_FRAME_CSP.includes("script-src 'unsafe-inline' 'unsafe-eval';"))
+  assert.equal(previewUrl('abc', true), 'grain-preview://dash/abc')
+})
+
+test('wrapDashboardDoc puts reporter, RTC kill and data ahead of the page and cannot be closed from the data', () => {
+  const evil = { a: [{ k: '</script><img src=x onerror=alert(1)>\u2028' }] }
+  const out = wrapDashboardDoc('<p id="p">hi</p>', evil)
+  const at = (s: string): number => out.indexOf(s)
+  assert.ok(at(PREVIEW_HEIGHT_MESSAGE) < at('RTCPeerConnection') && at('RTCPeerConnection') < at('id="grain-data"') && at('id="grain-data"') < at('<p id="p">'))
+  assert.ok(!out.includes('</script><img'))
+  assert.equal((out.match(/<\/script>/g) ?? []).length, 3, 'reporter, RTC kill and data only')
+  const text = out.match(/id="grain-data">([\s\S]*?)<\/script>/)![1]
+  assert.deepEqual(JSON.parse(text), evil)
+  assert.ok(!wrapDashboardDoc('<p>x</p>').includes('grain-data'))
 })

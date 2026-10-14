@@ -1,6 +1,6 @@
 import { shell } from 'electron'
 import { mainFrameNavigationAllowed } from './appUrl'
-import { frameNavigationAllowed } from './navPolicy'
+import { frameNavigationAllowed, opensExternally } from './navPolicy'
 
 const openExternal = (url: string): void => {
   if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
@@ -25,8 +25,8 @@ export function guardNavigation(contents: Electron.WebContents): void {
     if (details.isMainFrame) return // the main frame is handled by will-navigate
     if (frameNavigationAllowed(details.url, process.env.ELECTRON_RENDERER_URL)) return
     details.preventDefault()
-    // A link clicked inside an HTML preview leaves the frame for the system browser.
-    if (details.frame?.url.startsWith('grain-preview://')) openExternal(details.url)
+    // A link clicked inside an HTML preview leaves the frame for the system browser (never from a dashboard).
+    if (opensExternally(details.frame?.url ?? '')) openExternal(details.url)
   })
   contents.setWindowOpenHandler(({ url }) => {
     openExternal(url)

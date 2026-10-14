@@ -23,7 +23,10 @@ Its content is a JSON envelope; `saved_dashboards.py` owns the format.
   `data` is `"$name"` gets that binding's rows when it opens. Inline data works too.
 - `html`: an `html` string for layouts a spec cannot express. The app fills it on every open: `{{name}}` becomes a table of
   the binding's rows, `{{name.field}}` the escaped value of `field` in its last row, anything unknown becomes empty.
-  Scripts do not run in the preview, so do not add any.
+  Inline scripts run, in an isolated frame: no network, no app storage or cookies, no navigation away. The bound rows are
+  JSON in `<script type="application/json" id="grain-data">` (`{ name: rows }`), so a script reads
+  `JSON.parse(document.getElementById('grain-data').textContent)`. External scripts, styles, images and fonts do not
+  load, so inline everything; links do not open.
 
 ## Bindings
 

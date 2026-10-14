@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { frameNavigationAllowed, targetsLoopbackService } from './navPolicy'
+import { frameNavigationAllowed, opensExternally, targetsLoopbackService } from './navPolicy'
 
 const BACKEND = 'http://127.0.0.1:8765'
 const RENDERER = 'http://localhost:5173'
@@ -53,4 +53,11 @@ test('a loopback service is recognised in any spelling of 127/8, but not a LAN h
   assert.equal(targetsLoopbackService('http://127.0.0.1:3000/', BACKEND), false)
   assert.equal(targetsLoopbackService('http://192.168.1.1/', BACKEND), false)
   assert.equal(targetsLoopbackService('http://127.0.0.1:80/', 'http://127.0.0.1/'), true)
+})
+
+test('a link in an HTML preview opens externally, one from a dashboard frame never does', () => {
+  assert.equal(opensExternally('grain-preview://doc/abc'), true)
+  assert.equal(opensExternally('grain-preview://dash/abc'), false)
+  assert.equal(opensExternally('http://localhost:5173/'), false)
+  assert.equal(frameNavigationAllowed('grain-preview://dash/abc', RENDERER), true)
 })

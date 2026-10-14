@@ -79,6 +79,14 @@ class Dashboards(unittest.TestCase):
         self.assertIn("<td>&lt;b&gt;x&lt;/b&gt;</td>", h)
         self.assertIsNone(render(made["id"])["views"])
 
+    def test_html_render_returns_data_by_binding_live_and_snapshot(self) -> None:
+        for mode in ("live", "snapshot"):
+            made = client.post("/saved-dashboards", json={
+                "title": f"Page {mode}", "format": "html", "mode": mode, "html": "<p>x</p>",
+                "bindings": [{"name": "food", "source": "doc", "doc": "Food Log"}]}).json()
+            self.assertEqual(render(made["id"])["data"], {"food": [{"date": "2026-10-01", "kcal": 1800}, {"date": "2026-10-02", "kcal": 2000.5}]})
+        self.assertIsNone(render(mk("Calories")["id"])["data"])
+
     def test_live_refresh_and_failed_binding_fallback(self) -> None:
         id = mk("Calories")["id"]
         first = render(id)

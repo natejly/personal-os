@@ -48,7 +48,7 @@ export default function DashboardView({ id, chat }: { id: string; chat?: string 
         </header>
         {err && <div className="chart-err"><AlertCircle size={14} /> {err}</div>}
         {fails.length > 0 && <div className="chart-err" role="alert"><AlertCircle size={14} /> {fails.map((l) => <div key={l}>{l}</div>)}</div>}
-        {r.html != null && <HtmlBlock source={r.html} streaming={false} />}
+        {r.html != null && <HtmlBlock source={r.html} streaming={false} dashboard={{ data: r.data ?? undefined }} />}
         {r.views?.map((v, i) => {
           const src = JSON.stringify(v.spec)
           return v.kind === 'interactive' ? <InteractiveBlock key={i} source={src} streaming={false} /> : <ChartBlock key={i} source={src} streaming={false} />

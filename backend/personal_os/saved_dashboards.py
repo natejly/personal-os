@@ -237,6 +237,7 @@ class SavedDashboards:
                       if isinstance(v["spec"].get("data"), str) else v["spec"]} for v in env["views"]]
         return {"id": d["id"], "title": d["title"], "project_id": d["project_id"], "format": env["format"], "mode": env["mode"],
                 "views": views, "html": fill_html(env["html"], data) if env["format"] == "html" else None,
+                "data": data if env["format"] == "html" else None,
                 "updatedAt": env["snapshot"]["savedAt"] if snap else _iso(), "failed": failed,
                 "bindings": [{"name": b["name"], "source": b["source"], "label": label(b)} for b in env["bindings"]]}
 

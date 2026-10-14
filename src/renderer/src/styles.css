@@ -1539,9 +1539,20 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .toggle-text { flex: 1; display: flex; flex-direction: column; }
 .toggle-text small { color: var(--text-faint); font-size: 11px; }
 .switch { width: 32px; height: 18px; border-radius: 9px; background: var(--control-border); position: relative; flex-shrink: 0; transition: background 0.15s; }
-.switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+.switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 7px; background: #fff;
+  transition: left var(--sw-travel) var(--sw-spring), width var(--sw-stretch) ease-out; }
+/* Tuning: travel is a spring with one small overshoot; stretch is how far the pressed knob grows (px). */
+.switch { --sw-travel: 360ms; --sw-stretch: 140ms; --sw-grow: 5px;
+  --sw-spring: linear(0, 0.28, 0.62, 0.88, 1.04, 1.07, 1.04, 1.01, 0.995, 1); transition: background 0.2s; }
+/* The checkbox is hidden, so the press lands on the wrapping label. Width (not scaleX) keeps the ends round:
+   an off knob grows right, an on knob grows left with its right edge pinned. Release (the real change) does the travel. */
+label:active > input:not(:disabled) + .switch::after { width: calc(14px + var(--sw-grow)); }
+label:active > input:not(:disabled):checked + .switch::after { left: calc(16px - var(--sw-grow)); }
+@media (prefers-reduced-motion: reduce) {
+  .switch { --sw-travel: 0.01ms; --sw-stretch: 0.01ms; --sw-grow: 0px; transition-duration: 0.01ms; }
+}
 .toggle-row input:checked + .switch { background: var(--accent-solid); }
-.toggle-row input:checked + .switch::after { transform: translateX(14px); }
+.toggle-row input:checked + .switch::after { left: 16px; }
 .toggle-row.plain { margin-bottom: 12px; }
 .ctx-tabs { display: flex; gap: 4px; padding: 10px 14px 0; }
 .ctx-tabs button { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 6px; font-size: 12px; color: var(--text-muted); }
@@ -1668,7 +1679,7 @@ button.tag:disabled { cursor: default; }
 .toggle-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); white-space: nowrap; position: relative; }
 .toggle-inline input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
 .toggle-inline input:checked + .switch { background: var(--accent-solid); }
-.toggle-inline input:checked + .switch::after { transform: translateX(14px); }
+.toggle-inline input:checked + .switch::after { left: 16px; }
 .toggle-inline input:focus-visible + .switch { outline: 2px solid var(--accent); outline-offset: 2px; }
 .style-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .style-lines h5 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
@@ -2283,7 +2294,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .switch-wrap { display: inline-flex; align-items: center; flex-shrink: 0; }
 .switch-wrap input { position: absolute; opacity: 0; width: 0; height: 0; }
 .switch-wrap input:checked + .switch { background: var(--accent-solid); }
-.switch-wrap input:checked + .switch::after { transform: translateX(14px); }
+.switch-wrap input:checked + .switch::after { left: 16px; }
 .switch-wrap input:focus-visible + .switch { outline: 2px solid var(--accent); outline-offset: 2px; }
 .mcp-detail { margin: 0 10px 8px; font-size: 11.5px; }
 .mcp-body { display: flex; flex-direction: column; gap: 10px; padding: 0 10px 10px; border-top: 1px solid var(--border); padding-top: 10px; }

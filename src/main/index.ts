@@ -253,7 +253,7 @@ function buildMenu(): void {
         item('chat-search'),
         { type: 'separator' },
         item('toggle-sidebar'),
-        // ⌘I is Quick chat (the page agent); the chat's side panel has a menu item and a title-bar button but no chord.
+        // ⌘I is Quick chat (the page agent), or the Context panel while a chat is showing; the renderer routes it by view.
         item('toggle-desk'),
         item('page-agent'),
         item('panel-context'),

@@ -68,11 +68,21 @@ test('one toggle-context action toggles the context panel once', () => {
 })
 
 test('one page-agent action toggles the page agent once', () => {
+  useStore.setState({ view: 'todos' })
   const before = useStore.getState().pageAgentOpen
   fire('page-agent')
   assert.equal(useStore.getState().pageAgentOpen, !before)
   fire('page-agent')
   assert.equal(useStore.getState().pageAgentOpen, before)
+})
+
+test('in a chat the page-agent chord (⌘I) toggles the Context panel instead of Quick chat', () => {
+  useStore.setState({ view: 'chat', contextOpen: false, pageAgentOpen: false })
+  fire('page-agent')
+  assert.equal(useStore.getState().contextOpen, true)
+  assert.equal(useStore.getState().pageAgentOpen, false)
+  fire('page-agent')
+  assert.equal(useStore.getState().contextOpen, false)
 })
 
 test('toggle-desk (⌘I) opens the side panel, then closes it whichever flag opened it', () => {
@@ -273,7 +283,7 @@ test('the Quick chat button and the Page Agent menu item are the same toggle', (
   assert.equal(useStore.getState().pageAgentOpen, was)
 })
 
-test('⌘I is the Quick chat chord; the side panel toggle has none', async () => {
+test('⌘I is one chord, registered once, on the page-agent action (the renderer routes it by view)', async () => {
   const { SHORTCUTS } = await import('@shared/shortcuts')
   assert.deepEqual(SHORTCUTS.filter((s) => s.keys === 'CmdOrCtrl+I').map((s) => s.action), ['page-agent'])
 })

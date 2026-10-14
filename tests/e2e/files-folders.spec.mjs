@@ -1,12 +1,13 @@
 import { test, expect } from './fixtures.mjs'
-import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, smallWindow, patient, relaunch, newDoc, drag, editDoc } from './helpers/files.mjs'
+import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, smallWindow, patient, relaunch, newDoc, treeMenu, drag, editDoc } from './helpers/files.mjs'
 test.describe.configure({ timeout: 300_000 })
 test.beforeEach(({ grain }) => patient(grain))
 
 
 const folderRow = (page, name) => page.locator('.doc-folder-row', { has: page.locator('.doc-folder-name', { hasText: new RegExp('^' + name + '$') }) })
 const newFolderAtRoot = async (page, name) => {
-  await page.getByRole('button', { name: 'New folder in Personal' }).click()
+  await treeMenu(page)
+  await page.getByRole('menuitem', { name: 'New folder…' }).click()
   await page.getByPlaceholder('Folder name').fill(name)
   await page.keyboard.press('Enter')
 }
@@ -36,13 +37,15 @@ test('folders: create, nest 5 deep, rename, persist across relaunch', async ({ g
   expect((await g.api('/docs/folders')).map((f) => f.path)).toContain('L1/L2/Mid/L4/L5')
   // escape on a draft makes nothing
   const before = (await g.api('/docs/folders')).length
-  await page.getByRole('button', { name: 'New folder in Personal' }).click()
+  await treeMenu(page)
+  await page.getByRole('menuitem', { name: 'New folder…' }).click()
   await page.getByPlaceholder('Folder name').fill('ghost')
   await page.keyboard.press('Escape')
   await expect(folderRow(page, 'ghost')).toHaveCount(0)
   expect((await g.api('/docs/folders')).length).toBe(before)
   // blank name makes nothing
-  await page.getByRole('button', { name: 'New folder in Personal' }).click()
+  await treeMenu(page)
+  await page.getByRole('menuitem', { name: 'New folder…' }).click()
   await page.keyboard.press('Enter')
   expect((await g.api('/docs/folders')).length).toBe(before)
   // relaunch: tree identical

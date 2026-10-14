@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   FileText, Files, PanelRight, X, Columns2, Eye, Pencil, MessageSquarePlus, Type,
-  Sparkles, FolderTree, SlidersHorizontal, Code2, LayoutDashboard
+  Sparkles, FolderTree, SlidersHorizontal, Code2, Plus
 } from '../icons'
-import { flushDocOnUnload, restoreDocTabs, useStore, type FilesSection } from '../store'
+import { flushDocOnUnload, useStore } from '../store'
 import { api, type DocHit } from '../lib/api'
 import type { Doc, DocTypography } from '@shared/types'
 import MarkdownEditor from './MarkdownEditor'
@@ -22,7 +22,6 @@ import DocOutline from '../features/notes/DocOutline'
 import FormatBar from '../features/notes/FormatBar'
 import ExportMenu from '../features/notes/ExportMenu'
 import { expandTemplate, userTemplates } from '../features/notes/templates'
-import NewDocMenu from '../features/notes/NewDocMenu'
 import type { MarkdownEditorHandle } from '../features/notes/handle'
 import type { SlashCommand } from '../features/notes/slash'
 import { toggleTaskAt } from '../features/notes/tasks'
@@ -34,12 +33,11 @@ import '../styles/docs.css'
 import AppSwitcher from './AppSwitcher'
 import DocumentsView from './DocumentsView'
 import DashboardView from './DashboardView'
-import { isDashboardContent, isDashboardDoc } from '../lib/dashboards'
+import { isDashboardContent } from '../lib/dashboards'
 import ArtifactsView from './ArtifactsView'
 import ScopeSelect from './ScopeSelect'
 import SidebarToggle from './SidebarToggle'
-
-const SECTIONS: [FilesSection, string][] = [['notes', 'Notes'], ['uploads', 'Uploads'], ['artifacts', 'Artifacts']]
+import { tip } from '../lib/tip'
 
 const PANEL_KEY = 'grain.docs.panel'
 const readPanel = (): PanelState => {
@@ -82,15 +80,14 @@ export default function DocsView(): JSX.Element {
   const activeDoc = useStore((s) => s.activeDoc)
   const docDraft = useStore((s) => s.docDraft)
   const docTitleDraft = useStore((s) => s.docTitleDraft)
-  const docTabs = useStore((s) => s.docTabs)
   const docRevisions = useStore((s) => s.docRevisions)
   const docMode = useStore((s) => s.docMode)
   const docSaving = useStore((s) => s.docSaving)
   const docFocusId = useStore((s) => s.docFocusId)
   const section = useStore((s) => s.filesSection)
   const libraryScope = useStore((s) => s.libraryScope)
-  const { openFiles, setLibraryScope } = useStore(useShallow((s) => ({ openFiles: s.openFiles, setLibraryScope: s.setLibraryScope })))
-  const { refreshDocs, openDoc, closeDocTab, createDoc, editDoc, editDocTitle, flushDoc, setDocMode, acceptRevision, rejectRevision, restoreRevision, openDailyNote, setDocTypography } = useStore(useShallow((s) => ({ refreshDocs: s.refreshDocs, openDoc: s.openDoc, closeDocTab: s.closeDocTab, createDoc: s.createDoc, editDoc: s.editDoc, editDocTitle: s.editDocTitle, flushDoc: s.flushDoc, setDocMode: s.setDocMode, acceptRevision: s.acceptRevision, rejectRevision: s.rejectRevision, restoreRevision: s.restoreRevision, openDailyNote: s.openDailyNote, setDocTypography: s.setDocTypography })))
+  const setLibraryScope = useStore((s) => s.setLibraryScope)
+  const { refreshDocs, openDoc, createDoc, editDoc, editDocTitle, flushDoc, setDocMode, acceptRevision, rejectRevision, restoreRevision, openDailyNote, setDocTypography } = useStore(useShallow((s) => ({ refreshDocs: s.refreshDocs, openDoc: s.openDoc, createDoc: s.createDoc, editDoc: s.editDoc, editDocTitle: s.editDocTitle, flushDoc: s.flushDoc, setDocMode: s.setDocMode, acceptRevision: s.acceptRevision, rejectRevision: s.rejectRevision, restoreRevision: s.restoreRevision, openDailyNote: s.openDailyNote, setDocTypography: s.setDocTypography })))
   const globalType = useStore((s) => s.settings.docTypography)
 
   const [query, setQuery] = useState('')
@@ -143,8 +140,7 @@ export default function DocsView(): JSX.Element {
   const renderRoot = useCallback(() => previewRef.current, [])
 
   useEffect(() => { void refreshDocs() }, [refreshDocs])
-  useEffect(() => { void restoreDocTabs() }, [])
-  // The narrowed list lives here, not in the store: tabs, folders, links and templates read the full `docs`.
+  // The narrowed list lives here, not in the store: folders, links and templates read the full `docs`.
   const [matches, setMatches] = useState<Doc[] | null>(null)
   // Re-asked when `docs` changes too, so a doc deleted or renamed mid-search leaves the list. The last
   // answer stays up while the next loads, rather than flashing "No matches." on every keystroke.
@@ -182,10 +178,6 @@ export default function DocsView(): JSX.Element {
   const title = docTitleDraft ?? activeDoc?.title ?? ''
   const pending = activeDoc?.pending ?? []
   const applied = useMemo(() => docRevisions.filter((r) => r.status !== 'pending'), [docRevisions])
-  const tabDocs = useMemo(
-    () => docTabs.map((id) => docs.find((d) => d.id === id) ?? (activeDoc?.id === id ? activeDoc : null)).filter(Boolean) as Doc[],
-    [docTabs, docs, activeDoc]
-  )
   const scope = activeDoc ? scopeOf(activeDoc) : ''
   const projectName = projects.find((p) => p.id === scope)?.name
   // A doc just made by New or Today's note opens in Edit and gets the caret, at its end, so typing can
@@ -305,59 +297,42 @@ export default function DocsView(): JSX.Element {
     <main className="page docs-page">
       <header className="page-header drag">
         <SidebarToggle />
-        {section === 'notes' && <button
+        <button
           className={`icon-btn no-drag ${treeOpen ? 'on' : ''}`} title={treeOpen ? 'Hide file tree' : 'Show file tree'}
           aria-label="Toggle file tree" aria-pressed={treeOpen} onClick={() => setTreeOpen(!treeOpen)}
-        ><FolderTree size={16} /></button>}
+        ><FolderTree size={16} /></button>
         <h2><Files size={16} /> Files</h2>
-        <div className="seg no-drag" role="tablist" aria-label="Files section">
-          {SECTIONS.map(([k, label]) => (
-            <button key={k} role="tab" aria-selected={section === k} className={section === k ? 'on' : ''} onClick={() => openFiles(k)}>{label}</button>
-          ))}
-        </div>
         <div className="no-drag header-right">
-          {section === 'notes' && <NewDocMenu onCreate={(t) => void createDoc(t)} onDaily={() => void openDailyNote()} />}
           {section === 'uploads' && <ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} />}
         </div>
         <AppSwitcher />
       </header>
 
-      {section === 'uploads' && <DocumentsView embedded />}
-      {section === 'artifacts' && <ArtifactsView />}
-      {section === 'notes' && <div className={`docs-body ${treeOpen ? '' : 'tree-hidden'}`}>
+      <div className={`docs-body ${treeOpen ? '' : 'tree-hidden'}`}>
         {/* Both side panels scroll, so their handles live on the body, pinned to the column edges. */}
         {treeOpen && (
           <>
             <aside className="docs-side">
-              <DocTree hits={hits} docs={query.trim() ? (matches ?? docs) : docs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery} />
+              <DocTree hits={hits} docs={query.trim() ? (matches ?? docs) : docs} activeId={section === 'notes' ? activeDoc?.id ?? null : null} query={query} onQuery={setQuery} section={section} />
             </aside>
             <ResizeHandle id="docs-tree-w" defaultSize={240} min={170} max={480} grows="right" onCollapse={() => setTreeOpen(false)} label="File tree width" className="docs-tree-edge" />
           </>
         )}
-        {activeDoc && panelOpen && !showDash && (
+        {section === 'notes' && activeDoc && panelOpen && !showDash && (
           <ResizeHandle id="docs-history-w" defaultSize={380} min={280} max={720} grows="left" onCollapse={() => setPanel({ ...panel, open: false })} label="Side panel width" className="docs-history-edge" />
         )}
 
-        {!activeDoc ? (
+        {section === 'uploads' ? <section className="docs-main"><DocumentsView embedded /></section>
+          : section === 'artifacts' ? <section className="docs-main"><ArtifactsView /></section>
+          : !activeDoc ? (
           <section className="empty-state">
             <FileText size={28} />
             <h2>Nothing open</h2>
             <p>{treeOpen ? 'Pick a file on the left, or start a new one.' : 'Show the file tree to pick a file, or start a new one.'}</p>
-            <NewDocMenu onCreate={(t) => void createDoc(t)} onDaily={() => void openDailyNote()} />
+            <button className="ghost-btn" title={tip('New file', 'new-note')} onClick={() => void createDoc({})}><Plus size={13} /> New file</button>
           </section>
         ) : (
           <section className="docs-main">
-            {tabDocs.length > 1 && (
-              <div className="doc-tabs">
-                {tabDocs.map((d) => (
-                  <button key={d.id} className={`doc-tab ${d.id === activeDoc.id ? 'active' : ''}`} onClick={() => void openDoc(d.id)}>
-                    {isDashboardDoc(d) ? <LayoutDashboard size={11} /> : <FileText size={11} />}{d.title || 'Untitled'}
-                    <span className="tab-x" role="button" title="Close tab" aria-label={`Close ${d.title || 'Untitled'}`} onClick={(e) => { e.stopPropagation(); void closeDocTab(d.id) }}><X size={11} /></span>
-                  </button>
-                ))}
-              </div>
-            )}
-
             <div className="doc-toolbar">
               <input
                 className="doc-title-input"
@@ -465,7 +440,7 @@ export default function DocsView(): JSX.Element {
           </section>
         )}
 
-        {activeDoc && panelOpen && !showDash && (
+        {section === 'notes' && activeDoc && panelOpen && !showDash && (
           <aside className="docs-history">
             <header className="docs-panel-tabs" role="tablist">
               {PANEL_TABS.map((t) => (
@@ -499,7 +474,7 @@ export default function DocsView(): JSX.Element {
             )}
           </aside>
         )}
-      </div>}
+      </div>
     </main>
   )
 }

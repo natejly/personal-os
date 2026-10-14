@@ -269,14 +269,13 @@ test('a doc whose save failed is not navigated away from, so the draft survives'
   docs.save = async () => { throw new Error('offline') }
   docs.get = async () => { opened++; return docFull({ id: 'd2' }) }
   try {
-    useStore.setState({ activeDoc: docFull({}) as never, docTabs: ['d1'], docDraft: 'unsaved', docTitleDraft: null, toasts: [] })
+    useStore.setState({ activeDoc: docFull({}) as never, docDraft: 'unsaved', docTitleDraft: null, toasts: [] })
     await useStore.getState().openDoc('d2')
-    await useStore.getState().closeDocTab('d1')
+    await useStore.getState().closeDoc('d1')
     const st = useStore.getState()
     assert.equal(opened, 0)
     assert.equal(st.activeDoc?.id, 'd1')
     assert.equal(st.docDraft, 'unsaved')
-    assert.deepEqual(st.docTabs, ['d1'])
   } finally {
     Object.assign(docs, orig)
   }
@@ -289,7 +288,7 @@ test('opening a doc at a cited line leaves the jump for the editor', async () =>
   docs.get = async () => docFull({ id: 'd2' })
   docs.revisions = async () => []
   try {
-    useStore.setState({ activeDoc: null, docTabs: [], docDraft: null, docTitleDraft: null, docJump: null })
+    useStore.setState({ activeDoc: null, docDraft: null, docTitleDraft: null, docJump: null })
     await useStore.getState().openDoc('d2', { line: 7 })
     const st = useStore.getState()
     assert.equal(st.activeDoc?.id, 'd2')
@@ -378,7 +377,7 @@ test('an untitled doc takes its title from the first heading, and keeps followin
   }
 })
 
-test('closing the last tab or re-opening the active doc saves the buffered draft first', async () => {
+test('closing the doc or re-opening the active doc saves the buffered draft first', async () => {
   const docs = api.docs as unknown as Stubs
   const orig = { ...docs }
   const sent: unknown[] = []
@@ -387,10 +386,10 @@ test('closing the last tab or re-opening the active doc saves the buffered draft
   docs.list = async () => []
   docs.revisions = async () => []
   try {
-    useStore.setState({ activeDoc: docFull({}) as never, docTabs: ['d1'], docDraft: 'typed', docTitleDraft: null })
+    useStore.setState({ activeDoc: docFull({}) as never, docDraft: 'typed', docTitleDraft: null })
     await useStore.getState().openDoc('d1')
     useStore.setState({ docDraft: 'closing' })
-    await useStore.getState().closeDocTab('d1')
+    await useStore.getState().closeDoc('d1')
     assert.deepEqual(sent, ['typed', 'closing'])
     assert.equal(useStore.getState().activeDoc, null)
   } finally {
@@ -1191,7 +1190,7 @@ test('opening a doc swaps the page agent thread to the chat bound to that doc', 
   const conv = (id: string, docId?: string) => ({ id, title: id, project_id: null, model: null, settings: docId ? { docId } : {}, created_at: 0, updated_at: 0 })
   try {
     const sessions = { a1: session({ conversation: conv('a1', 'dA') as never }), b1: session({ conversation: conv('b1', 'dB') as never }) } as never
-    useStore.setState({ activeDoc: null, docTabs: [], docDraft: null, docTitleDraft: null, sessions, conversations: [conv('x'), conv('a1', 'dA'), conv('b1', 'dB')] as never, pageAgentId: 'x' })
+    useStore.setState({ activeDoc: null, docDraft: null, docTitleDraft: null, sessions, conversations: [conv('x'), conv('a1', 'dA'), conv('b1', 'dB')] as never, pageAgentId: 'x' })
     await useStore.getState().openDoc('dA')
     assert.equal(useStore.getState().pageAgentId, 'a1')
     await useStore.getState().openDoc('dB')

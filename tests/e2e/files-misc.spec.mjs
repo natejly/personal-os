@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, patient, relaunch, newDoc, editDoc } from './helpers/files.mjs'
+import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, patient, relaunch, newDoc, section, editDoc } from './helpers/files.mjs'
 
 test.describe.configure({ timeout: 300_000 })
 test.beforeEach(({ grain }) => patient(grain))
@@ -8,30 +8,28 @@ const open = async (page, title) => {
   await page.locator('.doc-row', { hasText: title }).last().click()
   await expect(titleBox(page)).toHaveValue(title)
 }
-const tab = (page, name) => page.getByRole('tab', { name, exact: true })
 // 1x1 transparent PNG
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
 
-test('Notes / Uploads sections switch; scope select only on Uploads', async ({ grain: g }) => {
+test('Uploads and Artifacts open from the tree; scope select only on Uploads', async ({ grain: g }) => {
   const { page } = g
   await openFiles(page)
-  await expect(tab(page, 'Notes')).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByTitle('Filter by project')).toHaveCount(0)
-  await tab(page, 'Uploads').click()
+  await section(page, 'Uploads')
   await expect(page.getByText('No uploads yet')).toBeVisible()
   await expect(page.getByTitle('Filter by project')).toBeVisible()
-  await tab(page, 'Notes').click()
+  await section(page, 'Artifacts')
+  await expect(page.getByTitle('Filter by project')).toHaveCount(0)
+  // hammer the rows
+  for (let i = 0; i < 6; i++) for (const n of ['Uploads', 'Artifacts']) await section(page, n)
   await expect(page.getByPlaceholder('Search files')).toBeVisible()
-  // hammer the tabs
-  for (let i = 0; i < 6; i++) for (const n of ['Uploads', 'Notes']) await tab(page, n).click()
-  await expect(tab(page, 'Notes')).toHaveAttribute('aria-selected', 'true')
   expect(errorsOf(g)).toEqual([])
 })
 
 test('uploads: pick a file, view its text, pin, delete + undo, drop a file, unreadable file warns', async ({ grain: g }) => {
   const { page } = g
   await openFiles(page)
-  await tab(page, 'Uploads').click()
+  await section(page, 'Uploads')
   await page.locator('#doc-upload-input').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('alpha bravo charlie\n'.repeat(50)) })
   const card = page.locator('.doc-card', { hasText: 'notes.txt' })
   await expect(card).toBeVisible()
@@ -70,7 +68,7 @@ test('scope select: personal vs project uploads', async ({ grain: g }) => {
   await page.reload()
   patient(g)
   await openFiles(page)
-  await tab(page, 'Uploads').click()
+  await section(page, 'Uploads')
   const sel = page.getByTitle('Filter by project').locator('select')
   await expect(sel.locator('option')).toHaveText(['All', 'Personal only', 'Scope Project'])
   await sel.selectOption('personal')
@@ -87,7 +85,6 @@ test('scope select: personal vs project uploads', async ({ grain: g }) => {
   await expect(page.locator('.doc-card', { hasText: 'mine.txt' })).toBeVisible()
   await expect(page.locator('.doc-card', { hasText: 'proj.txt' })).toHaveCount(0)
   // Notes tree: a project group exists and a file made in it lives there
-  await tab(page, 'Notes').click()
   await page.getByRole('button', { name: 'New file in Scope Project' }).click()
   await expect.poll(async () => (await g.api('/docs')).filter((d) => d.project_id === proj.id).length).toBe(1)
   expect(errorsOf(g)).toEqual([])
@@ -265,10 +262,11 @@ test('history tab lists saves and restoring a version brings the text back', asy
   expect(errorsOf(g)).toEqual([])
 })
 
-test('rapid double-click on New creates two distinct docs and keeps the UI consistent', async ({ grain: g }) => {
+test('two rapid New file clicks creates two distinct docs and keeps the UI consistent', async ({ grain: g }) => {
   const { page } = g
   await openFiles(page)
-  await newDoc(page).dblclick()
+  await newDoc(page)
+  await newDoc(page)
   await expect.poll(async () => (await g.api('/docs')).length).toBe(2)
   const ids = new Set((await g.api('/docs')).map((d) => d.id))
   expect(ids.size).toBe(2)
@@ -279,7 +277,7 @@ test('rapid double-click on New creates two distinct docs and keeps the UI consi
 test('backend goes away mid-typing: the text stays on screen, save failure is reported', async ({ grain: g }) => {
   const { page } = g
   await openFiles(page)
-  await newDoc(page).click()
+  await newDoc(page)
   await body(page).click()
   await page.keyboard.insertText('first part ')
   await waitSaved(page)

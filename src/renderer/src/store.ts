@@ -355,7 +355,6 @@ export interface State {
   docs: Doc[]
   activeDoc: FullDoc | null
   /** Ids of the docs open as tabs, most recent last. */
-  docTabs: string[]
   docRevisions: DocRevision[]
   /** Folders of the Files tree, nested by path inside a scope. Server-owned, so an empty one survives a reload. */
   docFolders: DocFolder[]
@@ -613,7 +612,7 @@ export interface State {
   /** A line DocsView still has to jump to in `docId`; it clears this once it has. */
   docJump: { docId: string; line: number } | null
   /** Refuses (with a toast) while the open doc holds edits its last save could not write. */
-  closeDocTab: (id: string) => Promise<void>
+  closeDoc: (id: string) => Promise<void>
   createDoc: (d?: { title?: string; content?: string; project_id?: string | null; folder?: string }) => Promise<void>
   /** Retitle the open doc as it is typed, on the same debounce as the body. */
   editDocTitle: (title: string) => void
@@ -692,6 +691,8 @@ let flushChain: Promise<void> = Promise.resolve()
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+/** The doc the user last asked for, so a slower fetch for an earlier one cannot clobber it. */
+let wantedDoc = ''
 /** Bumped by every local job write, so a slower list read that started before it cannot put the old list back. */
 let jobsEdits = 0
 /** What a doc save would send: each field only when it differs from the saved copy. */
@@ -1555,7 +1556,7 @@ export const useStore = create<State>((set, get) => {
         case 'tool_result':
           if (ev.data.name === 'doc_delete') {
             const open = get().activeDoc
-            get().refreshDocs().then(() => { if (open && !get().docs.some((d) => d.id === open.id)) { set({ docDraft: null, docTitleDraft: null }); void get().closeDocTab(open.id) } }).catch(() => undefined)
+            get().refreshDocs().then(() => { if (open && !get().docs.some((d) => d.id === open.id)) { set({ docDraft: null, docTitleDraft: null }); void get().closeDoc(open.id) } }).catch(() => undefined)
           }
           if (ev.data.name === 'permissions_update' && !ev.data.error) void api.settings.get().then((st) => set({ settings: st })).catch(() => undefined) // the approved change is live: refresh the pill and Settings
           if (ev.data.name === 'doc_create' || ev.data.name === 'doc_edit') { get().refreshDocs().catch(() => undefined); void get().refreshDocsPending() }
@@ -1899,7 +1900,6 @@ export const useStore = create<State>((set, get) => {
     dataScope: 'all',
     docs: [],
     activeDoc: null,
-    docTabs: [],
     docRevisions: [],
     docFolders: [],
     expandedFolders: readExpanded(),
@@ -2794,11 +2794,12 @@ export const useStore = create<State>((set, get) => {
       // A draft the flush could not save (a 409) is the user's to keep or Reload; a refetch would drop it.
       const cur = get()
       if (cur.activeDoc?.id === id && (cur.docDraft !== null || cur.docTitleDraft !== null)) return set({ view: 'docs', filesSection: 'notes' })
-      set((st) => ({ view: 'docs', filesSection: 'notes', docTabs: st.docTabs.includes(id) ? st.docTabs : [...st.docTabs, id] }))
+      wantedDoc = id
+      set({ view: 'docs', filesSection: 'notes' })
       try {
         const doc = await api.docs.get(id)
         // A slower fetch must not clobber a doc the user has since switched away from.
-        if (get().docTabs.includes(id)) {
+        if (wantedDoc === id) {
           // The doc's chat comes with it: the newest conversation bound to this doc, else a fresh thread.
           const bound = get().conversations.find((c) => c.settings?.docId === id)
           set({ activeDoc: doc, docDraft: null, docTitleDraft: null, pageAgentId: bound?.id ?? null })
@@ -2809,19 +2810,12 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
       }
     },
-    closeDocTab: async (id) => {
-      if (get().activeDoc?.id === id) {
-        await get().flushDoc()
-        if (docUnsaved()) return
-      }
-      const st = get()
-      const tabs = st.docTabs.filter((t) => t !== id)
-      set({ docTabs: tabs })
-      if (st.activeDoc?.id === id) {
-        const next = tabs[tabs.length - 1]
-        if (next) void get().openDoc(next)
-        else set({ activeDoc: null, docDraft: null, docTitleDraft: null, docRevisions: [] })
-      }
+    closeDoc: async (id) => {
+      if (get().activeDoc?.id !== id) return
+      await get().flushDoc()
+      if (docUnsaved()) return
+      wantedDoc = ''
+      set({ activeDoc: null, docDraft: null, docTitleDraft: null, docRevisions: [] })
     },
     createDoc: async (d = {}) => {
       try {
@@ -2829,14 +2823,14 @@ export const useStore = create<State>((set, get) => {
         await Promise.all([get().refreshDocs(), get().refreshDocFolders()])
         // Unfold the group and folder chain it landed in, so a new doc is always on screen.
         get().expandTo(doc.project_id ?? '', doc.folder)
-        set((st) => ({
+        wantedDoc = doc.id
+        set({
           view: 'docs',
           filesSection: 'notes',
-          docTabs: st.docTabs.includes(doc.id) ? st.docTabs : [...st.docTabs, doc.id],
           activeDoc: doc,
           docDraft: null,
           docFocusId: doc.id
-        }))
+        })
         void get().refreshDocRevisions(doc.id)
       } catch (e) {
         get().toast((e as Error).message, 'error')
@@ -2999,7 +2993,7 @@ export const useStore = create<State>((set, get) => {
         const open = get().activeDoc
         if (open && deleteDocs && !get().docs.some((d) => d.id === open.id)) {
           set({ docDraft: null, docTitleDraft: null })  // nothing left to save them into
-          void get().closeDocTab(open.id)
+          void get().closeDoc(open.id)
         }
         else if (open) void get().openDoc(open.id)
       } catch (e) {
@@ -3026,7 +3020,7 @@ export const useStore = create<State>((set, get) => {
       if (get().activeDoc?.id === id) await get().flushDoc()
       await api.docs.delete(id)
       if (get().activeDoc?.id === id) set({ docDraft: null, docTitleDraft: null })  // nothing left to save them into
-      await get().closeDocTab(id)
+      await get().closeDoc(id)
       await Promise.all([get().refreshDocs(), get().refreshDocsPending()])
       get().offerUndo(title ? `“${title}”` : 'file', [{ type: 'doc', id }])
     },
@@ -3797,26 +3791,6 @@ export const flushDocOnUnload = (): void => {
     headers: { 'Content-Type': 'application/json', ...(getToken() ? { 'X-Personal-OS-Token': getToken() } : {}) },
     body: JSON.stringify({ ...edits, base_updated_at: doc.updated_at })
   }).catch(() => undefined)
-}
-
-// Open doc tabs survive a reload: written whenever the tabs or the active doc change.
-const DOC_TABS_KEY = 'grain.docTabs'
-useStore.subscribe((s, prev) => {
-  if (s.docTabs === prev.docTabs && s.activeDoc?.id === prev.activeDoc?.id) return
-  try { localStorage.setItem(DOC_TABS_KEY, JSON.stringify({ tabs: s.docTabs, active: s.activeDoc?.id ?? null })) } catch { /* private window */ }
-})
-
-/** Reopens the tabs saved by the subscriber above, dropping any doc that no longer exists. */
-export const restoreDocTabs = async (): Promise<void> => {
-  if (useStore.getState().docTabs.length) return
-  let saved: { tabs?: unknown; active?: unknown }
-  try { saved = JSON.parse(localStorage.getItem(DOC_TABS_KEY) ?? '{}') } catch { return }
-  if (!Array.isArray(saved.tabs) || !saved.tabs.length) return
-  const live = new Set((await api.docs.list('all', '').catch(() => [] as Doc[])).map((d) => d.id))
-  const tabs = saved.tabs.filter((t): t is string => typeof t === 'string' && live.has(t))
-  if (!tabs.length || useStore.getState().docTabs.length) return
-  useStore.setState({ docTabs: tabs })
-  await useStore.getState().openDoc(typeof saved.active === 'string' && tabs.includes(saved.active) ? saved.active : tabs[tabs.length - 1])
 }
 
 /**

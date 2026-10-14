@@ -319,7 +319,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   return (
     <div className={`msg ${message.role}`} data-message-id={message.id} aria-busy={streaming || undefined}>
       {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a face, and each thread its own. */}
-      {!isUser && <div className="avatar face-avatar"><Face name={face?.name ?? message.conversation_id} hue={face?.hue} tone={face?.tone} status={streaming ? 'streaming' : message.error ? 'error' : undefined} /></div>}
+      {!isUser && <div className="avatar face-avatar"><Face name={face?.name ?? message.conversation_id} hue={face?.hue} tone={face?.tone} status={streaming ? 'streaming' : message.error ? 'error' : undefined} calm={message.outcome === 'stopped'} /></div>}
       <div className="bubble">
         {isUser ? (
           editing ? (

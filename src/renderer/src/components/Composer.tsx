@@ -88,6 +88,14 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   useEffect(() => { if (!cardPending) setConfirm(null) }, [cardPending])
 
   useEffect(() => { box.current?.querySelector('textarea')?.focus() }, [activeId])
+  // While the user types, the chat's faces look down toward the composer (styles.css `[data-typing]`); an empty box or a pause lets go.
+  useEffect(() => {
+    const host = box.current?.closest('.chat-main')
+    if (!host || !text || !box.current?.contains(document.activeElement)) { host?.removeAttribute('data-typing'); return }
+    host.setAttribute('data-typing', '')
+    const t = setTimeout(() => host.removeAttribute('data-typing'), 1500)
+    return () => { clearTimeout(t); host.removeAttribute('data-typing') }
+  }, [text])
 
   // The '/' menu: built-ins (lib/slashCommands.ts) beside the saved commands, read once per mount. Picking one
   // types `/name `; a built-in the UI handles runs on send, the rest the backend fills when the turn goes to the

@@ -1538,19 +1538,13 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .toggle-icon { color: var(--text-muted); }
 .toggle-text { flex: 1; display: flex; flex-direction: column; }
 .toggle-text small { color: var(--text-faint); font-size: 11px; }
-.switch { width: 32px; height: 18px; border-radius: 9px; background: var(--control-border); position: relative; flex-shrink: 0; transition: background 0.15s; }
+.switch { width: 32px; height: 18px; border-radius: 9px; background: var(--control-border); position: relative; flex-shrink: 0; transition: background var(--dur-snap); }
 .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 7px; background: #fff;
-  transition: left var(--sw-travel) var(--sw-spring), width var(--sw-stretch) ease-out; }
-/* Tuning: travel is a spring with one small overshoot; stretch is how far the pressed knob grows (px). */
-.switch { --sw-travel: 360ms; --sw-stretch: 140ms; --sw-grow: 5px;
-  --sw-spring: linear(0, 0.28, 0.62, 0.88, 1.04, 1.07, 1.04, 1.01, 0.995, 1); transition: background 0.2s; }
+  transition: left var(--dur-spring) var(--spring-snappy), width var(--dur-press) var(--ease-out); }
 /* The checkbox is hidden, so the press lands on the wrapping label. Width (not scaleX) keeps the ends round:
    an off knob grows right, an on knob grows left with its right edge pinned. Release (the real change) does the travel. */
-label:active > input:not(:disabled) + .switch::after { width: calc(14px + var(--sw-grow)); }
-label:active > input:not(:disabled):checked + .switch::after { left: calc(16px - var(--sw-grow)); }
-@media (prefers-reduced-motion: reduce) {
-  .switch { --sw-travel: 0.01ms; --sw-stretch: 0.01ms; --sw-grow: 0px; transition-duration: 0.01ms; }
-}
+label:active > input:not(:disabled) + .switch::after { width: calc(14px + var(--press-grow)); }
+label:active > input:not(:disabled):checked + .switch::after { left: calc(16px - var(--press-grow)); }
 .toggle-row input:checked + .switch { background: var(--accent-solid); }
 .toggle-row input:checked + .switch::after { left: 16px; }
 .toggle-row.plain { margin-bottom: 12px; }

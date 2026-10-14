@@ -12,6 +12,7 @@ import { installFileDropGuard } from './lib/fileDrop'
 import { useStore } from './store'
 import { clampZoom } from './lib/zoom'
 import './styles.css'
+import './styles/motion.css'
 import 'highlight.js/styles/github-dark-dimmed.css'
 
 /**

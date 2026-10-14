@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Motion playground</title>
+<link rel="stylesheet" href="../src/renderer/src/styles/motion.css">
+<style>
+  :root { color-scheme: light dark; --bg: #f6f5f2; --card: #fff; --text: #1f1e1c; --muted: #7a776f; --line: #dcd9d2; --accent: #c2410c; --off: #cfccc4; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1b1a18; --card: #262522; --text: #ece9e2; --muted: #98948a; --line: #3a3835; --accent: #f08a4b; --off: #4a4743; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; background: var(--bg); color: var(--text); font: 13px/1.4 -apple-system, system-ui, sans-serif; }
+  h1 { font-size: 16px; margin: 0 0 16px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+  main { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .tok { display: grid; grid-template-columns: 110px 1fr 60px; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .tok code { font-size: 11px; } .tok output { font-size: 11px; color: var(--muted); text-align: right; }
+  .tok.wide { grid-template-columns: 110px 1fr; } .tok.wide input { width: 100%; font: 10px ui-monospace, monospace; }
+  button.copy { margin-top: 8px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; }
+  .demos { display: grid; gap: 16px; }
+  .row { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+  .hint { color: var(--muted); font-size: 11px; margin-top: 8px; }
+
+  /* Demos below read only from the motion tokens. */
+  label.sw { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  label.sw input, label.cb input { position: absolute; opacity: 0; pointer-events: none; }
+  .switch { width: 32px; height: 18px; border-radius: 9px; background: var(--off); position: relative; transition: background var(--dur-snap); }
+  .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 7px; background: #fff;
+    transition: left var(--dur-spring) var(--spring-snappy), width var(--dur-press) var(--ease-out); }
+  label:active > input:not(:disabled) + .switch::after { width: calc(14px + var(--press-grow)); }
+  label:active > input:not(:disabled):checked + .switch::after { left: calc(16px - var(--press-grow)); }
+  input:checked + .switch { background: var(--accent); }
+  input:checked + .switch::after { left: 16px; }
+
+  .btn { padding: 7px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; font: inherit;
+    box-shadow: 0 1px 0 var(--line); transform: translateY(0);
+    transition: transform var(--dur-press) var(--ease-out), box-shadow var(--dur-press) var(--ease-out), background var(--dur-hover); }
+  .btn:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
+  .btn:active { transform: translateY(var(--press-sink)); box-shadow: 0 0 0 var(--line); }
+
+  label.cb { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .box { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--off); position: relative; background: transparent;
+    transition: background var(--dur-snap), border-color var(--dur-snap), border-radius var(--dur-press); }
+  .box::after { content: ''; position: absolute; left: 5px; top: 1px; width: 5px; height: 10px; border: solid #fff; border-width: 0 2px 2px 0;
+    transform: rotate(45deg); clip-path: inset(0 100% 100% 0); transition: clip-path var(--dur-spring) var(--spring-snappy); }
+  input:checked + .box { background: var(--accent); border-color: var(--accent); }
+  input:checked + .box::after { clip-path: inset(0 0 0 0); }
+  label:active > input + .box { border-radius: 7px; }
+
+  .pills { position: relative; display: inline-flex; padding: 3px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
+  .pills button { position: relative; z-index: 1; border: 0; background: none; color: var(--text); padding: 5px 14px; cursor: pointer; font: inherit; border-radius: 999px; }
+  .pills .pill { position: absolute; z-index: 0; top: 3px; bottom: 3px; left: 3px; width: 0; border-radius: 999px; background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,.2);
+    transition: left var(--dur-spring) var(--spring-snappy), width var(--dur-spring) var(--spring-snappy); }
+</style>
+</head>
+<body>
+<h1>Motion playground</h1>
+<main>
+  <section id="tokens">
+    <h2>Tokens</h2>
+    <div id="sliders"></div>
+    <button class="copy" id="copy">Copy CSS</button>
+    <div class="hint">Sliders set the var on :root live. Reduced-motion in your OS collapses durations to ~0.</div>
+  </section>
+
+  <div class="demos">
+    <!-- demos -->
+    <section>
+      <h2>Switch</h2>
+      <div class="row">
+        <label class="sw"><input type="checkbox"><span class="switch"></span> Notifications</label>
+        <label class="sw"><input type="checkbox" checked><span class="switch"></span> On</label>
+      </div>
+      <div class="hint">Press stretches the knob, release travels on the spring.</div>
+    </section>
+    <section>
+      <h2>Button press</h2>
+      <div class="row"><button class="btn">Save</button><button class="btn">Archive</button></div>
+    </section>
+    <section>
+      <h2>Checkbox</h2>
+      <div class="row"><label class="cb"><input type="checkbox"><span class="box"></span> Remember me</label></div>
+    </section>
+    <section>
+      <h2>Sliding pill</h2>
+      <div class="pills" id="pills"><span class="pill"></span><button>Day</button><button>Week</button><button>Month</button></div>
+    </section>
+    <!-- /demos -->
+  </div>
+</main>
+<script>
+  const root = document.documentElement.style;
+  // [name, min, max, step, unit]; unit '' = number token, 'str' = free text (easings)
+  const num = [['--dur-press',0,400,5,'ms'],['--dur-hover',0,400,5,'ms'],['--dur-snap',0,600,5,'ms'],['--dur-spring',0,800,10,'ms'],['--dur-window',0,800,10,'ms'],['--press-sink',0,4,0.5,'px'],['--press-grow',0,12,0.5,'px']];
+  const str = ['--ease-out','--spring','--spring-snappy','--spring-bouncy','--spring-gentle'];
+  const cs = getComputedStyle(document.documentElement);
+  const val = n => cs.getPropertyValue(n).trim();
+  const box = document.getElementById('sliders');
+  const tokens = [...num.map(t => t[0]), ...str];
+  const dirty = new Set();
+  num.forEach(([n, min, max, step, u]) => {
+    const row = document.createElement('div'); row.className = 'tok';
+    const cur = parseFloat(val(n)) || 0;
+    row.innerHTML = `<code>${n}</code><input type="range" min="${min}" max="${max}" step="${step}" value="${cur}"><output>${cur}${u}</output>`;
+    const [, r, o] = row.children;
+    r.oninput = () => { root.setProperty(n, r.value + u); o.textContent = r.value + u; dirty.add(n); };
+    box.append(row);
+  });
+  str.forEach(n => {
+    const row = document.createElement('div'); row.className = 'tok wide';
+    row.innerHTML = `<code>${n}</code><input type="text" value="${val(n)}" spellcheck="false">`;
+    row.children[1].oninput = e => { root.setProperty(n, e.target.value); dirty.add(n); };
+    box.append(row);
+  });
+  document.getElementById('copy').onclick = e => {
+    const css = ':root {\n' + tokens.map(n => `  ${n}: ${root.getPropertyValue(n).trim() || val(n)};`).join('\n') + '\n}';
+    navigator.clipboard.writeText(css).then(() => { e.target.textContent = 'Copied'; setTimeout(() => e.target.textContent = 'Copy CSS', 1200); });
+  };
+  // sliding pill: the pill's left/width follow the active button
+  const pills = document.getElementById('pills'), pill = pills.querySelector('.pill');
+  const place = b => { pill.style.left = b.offsetLeft + 'px'; pill.style.width = b.offsetWidth + 'px'; };
+  pills.querySelectorAll('button').forEach(b => b.onclick = () => place(b));
+  place(pills.querySelector('button'));
+</script>
+</body>
+</html>

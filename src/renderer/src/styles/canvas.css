@@ -26,10 +26,6 @@
   /* Hairline only: the old blurred drop shadows cast onto adjacent windows, reading as a highlight. */
   --shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.35);
   --shadow-focused: 0 0 0 0.5px rgba(0, 0, 0, 0.5);
-  --spring: cubic-bezier(0.32, 0.72, 0, 1);
-  --dur-window: 320ms;
-  --dur-snap: 180ms;
-  --dur-hover: 120ms;
   --grid-dot: rgba(255, 255, 255, 0.22);
   --guide: var(--accent);
   --zone-fill: color-mix(in srgb, var(--accent) 12%, transparent);

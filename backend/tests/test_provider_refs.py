@@ -116,10 +116,13 @@ def test_tiers_follow_the_chat_models_provider() -> None:
     on_proxy = {**CFG, "defaultModel": "litellm/kimi-k3"}
     assert providers.tier_model(on_proxy, "low") == "litellm/deepseek-v4-flash"
     assert providers.tier_model({**CFG, "modelLow": "anthropic/x"}, "low") == "anthropic/x"  # a saved ref wins
-    # a chat provider with no tiers (a plain custom server) borrows the first usable provider that has them
+    # a chat provider with no tiers (a plain custom server) keeps background work on the chat model, never another provider
     custom = {"providers": [{"id": "custom", "kind": "custom", "name": "Custom", "baseUrl": "http://h"}, *ENTRIES], "defaultModel": "custom/m"}
     provider_route.set_key_source(lambda: {"anthropic": "k"})
-    assert providers.tier_model(custom, "medium") == "anthropic/claude-sonnet-5-5"
+    assert [providers.tier_model(custom, t) for t in providers.TIERS] == ["custom/m"] * 3
+    assert providers.tier_model({**custom, "modelLow": "anthropic/claude-haiku-5-5"}, "low") == "anthropic/claude-haiku-5-5"  # a saved ref wins
+    ollama = {"providers": [providers.new_entry("ollama"), *ENTRIES], "defaultModel": "ollama/llama3.2"}
+    assert providers.tier_model(ollama, "high") == "ollama/llama3.2"
     assert providers.default_model({"providers": ENTRIES}) == "anthropic/claude-sonnet-5-5"
     assert providers.rerank_model({"providers": ENTRIES}) == "litellm/qwen3-reranker-8b"  # the proxy needs no key
     assert providers.rerank_model({"providers": ENTRIES[:1]}) == ""
@@ -164,3 +167,18 @@ def test_canon_makes_refs_from_bare_ids() -> None:
     assert c("something-else") == "fireworks/something-else" and c("") == "" and c("auto") == "auto"
     assert c("fireworks/x") == "fireworks/x"
     assert provider_route.canon("anything", [{"id": "custom", "kind": "custom"}], "custom") == "custom/anything"  # your own server owns all
+
+
+def test_a_ref_to_a_removed_provider_raises_instead_of_rerouting() -> None:
+    for ref in ("openai/gpt-6.1-sol", "custom-2/m", "ollama/llama3.2"):  # none of them is configured
+        with pytest.raises(llm.LLMError, match="was on a provider that's been removed. Pick another model in Settings → Models."):
+            provider_route.resolve(CFG, ref)
+    with pytest.raises(llm.LLMError, match="was on a provider"):
+        provider_route.resolve({"providers": [ENTRIES[1]]}, "anthropic/claude-x")  # hand-saved, anthropic not configured
+    # openrouter's own slashes stay inside its model name
+    cfg = {"providers": [providers.new_entry("openrouter")]}
+    provider_route.set_key_source(lambda: {"openrouter": "k"})
+    got, model = provider_route.resolve(cfg, "openrouter/anthropic/claude-x")
+    assert (got["providerId"], model) == ("openrouter", "anthropic/claude-x")
+    # a bare id with no such head keeps the legacy fallback
+    assert provider_route.resolve(cfg, "mystery")[0]["providerId"] == "openrouter"

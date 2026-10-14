@@ -112,19 +112,20 @@ def _usable(settings: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def tier_model(settings: dict[str, Any], tier: str) -> str:
-    """The model for a tier: the saved one, else the default for it of the provider the chat model runs on (then of the
-    first usable provider that has tiers), else the chat model. With a provider list the answer is a "<provider>/<model>" ref."""
+    """The model for a tier: the saved one, else the default for it of the provider the chat model runs on, else the chat
+    model itself, so background work never leaves the chat's provider (a plain custom server has no tiers). With a
+    provider list the answer is a "<provider>/<model>" ref."""
     saved = str(settings.get(TIER_KEYS[tier]) or "").strip()
     if saved:
         return saved
     if settings.get("providers"):
         use = _usable(settings)
-        chat = str(settings.get("defaultModel") or "").strip()
+        chat = str(settings.get("defaultModel") or "").strip() or default_model(settings)
         pid, _ = split_ref(chat, {e["id"] for e in use})
-        for e in sorted(use, key=lambda e: e["id"] != pid):  # the chat model's provider first, the rest in list order
-            if (m := TIER_DEFAULTS.get(e["kind"], {}).get(tier)):
-                return make_ref(e["id"], m)
-        return chat or default_model(settings)
+        e = next((x for x in use if x["id"] == pid), None) or (use[0] if use and not pid else None)
+        if e and (m := TIER_DEFAULTS.get(e["kind"], {}).get(tier)):
+            return make_ref(e["id"], m)
+        return chat
     p = get(effective(settings))
     return (TIER_DEFAULTS.get(p["id"], {}).get(tier) if p else None) or str(settings.get("defaultModel") or (p or {}).get("defaultModel") or "")
 

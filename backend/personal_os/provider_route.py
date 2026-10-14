@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from typing import Any, Awaitable, Callable
 
@@ -94,12 +95,18 @@ def canon(model: str, ents: list[dict[str, Any]], active_id: str | None) -> str:
     return providers.make_ref(owner, model) if owner else model
 
 
-def _unavailable(settings: dict[str, Any], pid: str | None) -> Exception:
+def _known_head(ref: str) -> bool:
+    """A ref whose head names a provider id Grain could have issued (a preset id, or custom-N) with a model after it."""
+    head, sep, rest = ref.partition("/")
+    return bool(sep and rest and (head in providers.BY_ID or re.fullmatch(r"custom-\d+", head)))
+
+
+def _unavailable(settings: dict[str, Any], pid: str | None, ref: str = "") -> Exception:
     from .llm import LLMError  # llm imports this module
     ents = entries(settings)
     e = next((x for x in ents if x["id"] == pid), None) or (ents[0] if ents else None)
     if pid and not any(x["id"] == pid for x in ents):
-        return LLMError(f"The provider {pid} was removed. Pick another model in Settings → Models.")
+        return LLMError(f"{ref or pid} was on a provider that's been removed. Pick another model in Settings → Models.")
     if not e:
         return LLMError("Add a provider in Settings → Models.")
     return LLMError(f"Add a key for {e.get('name') or e['id']} in Settings → Models.")
@@ -115,6 +122,8 @@ def resolve(settings: dict[str, Any], ref: str | None) -> tuple[dict[str, Any], 
     pid, model = providers.split_ref(ref, {e["id"] for e in entries(settings)})
     if pid:
         e = next((u for u in use if u["id"] == pid), None)
+    elif _known_head(ref):
+        raise _unavailable(settings, ref.partition("/")[0], ref)
     else:
         e = next((u for u in use if _owns(u, ref)), use[0] if use else None)
     if e is None:

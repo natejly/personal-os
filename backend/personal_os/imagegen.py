@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from . import blobs as blob_store, llm, redact
+from . import blobs as blob_store, llm, provider_route, redact
 from .extract_text import safe_upload_name
 
 TIMEOUT_S = 180.0
@@ -43,7 +43,7 @@ async def _fetch(client: httpx.AsyncClient, item: dict[str, Any]) -> bytes:
 
 async def generate(settings: dict[str, Any], prompt: str, size: str, n: int) -> list[bytes]:
     """Image bytes, one per picture. Raises llm.LLMError with a message fit to show."""
-    model = str(settings.get("imageModel") or "").strip()
+    settings, model = provider_route.resolve(settings, str(settings.get("imageModel") or "").strip())
     body = {"model": model, "prompt": prompt, "n": n, "size": size, "response_format": "b64_json"}
     async with httpx.AsyncClient(timeout=TIMEOUT_S) as client:
         try:

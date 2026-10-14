@@ -29,7 +29,7 @@ async def rerank_scores(settings: dict[str, Any], model: str, query: str, docs: 
     """[(doc index, score)] best first from {baseUrl}/v1/rerank; None when that route is absent; raises otherwise.
 
     Accepts both reply shapes: `data` (one provider) and `results` (the other, and the proxy)."""
-    settings = provider_route.route(settings, model)
+    settings, model = provider_route.resolve(settings, model)
     payload: dict[str, Any] = {"model": model, "query": query, "documents": docs, "return_documents": False}
     if top_n:
         payload["top_n"] = top_n

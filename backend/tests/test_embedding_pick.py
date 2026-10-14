@@ -14,14 +14,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi import HTTPException  # noqa: E402
 
-from personal_os import app as appmod, migrations, provider_route, query_expand  # noqa: E402
+from personal_os import app as appmod, migrations, provider_route, providers, query_expand  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.memory_index import MemoryIndex  # noqa: E402
 from personal_os.repos import Graph, Memories  # noqa: E402
 
-FW = {"provider": "fireworks", "baseUrl": "https://api.fireworks.ai/inference/v1"}
-OA = {"provider": "openai", "baseUrl": "https://api.openai.com/v1"}
-AN = {"provider": "anthropic", "baseUrl": "https://api.anthropic.com/v1"}
+def _p(*kinds: str) -> dict:
+    """A settings dict whose provider list holds these kinds, in order (the id is the kind)."""
+    return {"providers": [providers.new_entry(k) for k in kinds]}
+
+
+FW, OA, AN = _p("fireworks"), _p("openai"), _p("anthropic", "openai", "fireworks")
 
 
 def _keys(**k: str) -> None:
@@ -30,16 +33,16 @@ def _keys(**k: str) -> None:
 
 def test_auto_pick_by_keyed_provider() -> None:
     _keys(fireworks="k")
-    assert provider_route.first_embedding({**FW, "apiKey": "k"}) == "qwen3-embedding-8b"
+    assert provider_route.first_embedding(FW) == "qwen3-embedding-8b"
     _keys(openai="k")
-    assert provider_route.first_embedding({**OA, "apiKey": "k"}) == "text-embedding-3-small"
-    _keys(anthropic="k", openai="k2")  # the active provider has none: another keyed one serves
-    assert provider_route.first_embedding({**AN, "apiKey": "k"}) == "text-embedding-3-small"
+    assert provider_route.first_embedding(OA) == "text-embedding-3-small"
+    _keys(anthropic="k", openai="k2")  # anthropic serves none: the next keyed provider does
+    assert provider_route.first_embedding(AN) == "text-embedding-3-small"
     _keys(anthropic="k")
-    assert provider_route.first_embedding({**AN, "apiKey": "k"}) == ""
-    assert not provider_route.can_embed({**AN, "apiKey": "k"}, "qwen3-embedding-8b")
+    assert provider_route.first_embedding(AN) == ""
+    assert not provider_route.can_embed(AN, "qwen3-embedding-8b")
     _keys(anthropic="k", fireworks="k2")
-    assert provider_route.can_embed({**AN, "apiKey": "k"}, "qwen3-embedding-8b")
+    assert provider_route.can_embed(AN, "qwen3-embedding-8b")
 
 
 def test_local_provider_picks_a_listed_embedding_model() -> None:
@@ -49,10 +52,11 @@ def test_local_provider_picks_a_listed_embedding_model() -> None:
     async def broken(_cfg: dict) -> list[dict]:
         raise RuntimeError("down")
 
-    ollama = {"provider": "ollama", "baseUrl": "http://localhost:11434/v1"}
+    ollama = _p("ollama")
     assert asyncio.run(provider_route.local_embedding(ollama, lister)) == "nomic-embed"
     assert asyncio.run(provider_route.local_embedding(ollama, broken)) == ""
-    assert asyncio.run(provider_route.local_embedding({**FW}, lister)) == ""
+    _keys(fireworks="k")
+    assert asyncio.run(provider_route.local_embedding(FW, lister)) == ""
 
 
 def test_ensure_saves_once_and_never_overrides() -> None:

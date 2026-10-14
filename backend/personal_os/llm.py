@@ -85,6 +85,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "defaultModel": "",
     # Preset id from providers.py, or None to infer it from baseUrl. onboardedAt is the ISO time setup finished.
     "provider": None,
+    # The configured providers: [{id, kind, name, baseUrl, models?}]. Read-only over PUT /settings (POST /providers owns it);
+    # keys live in the providerKeys secret. A model is "<provider id>/<model>"; see provider_route.resolve.
+    "providers": [],
     "onboardedAt": None,
     "systemPrompt": (
         "You are the assistant inside the user's personal AI OS. Be direct, concise and useful. Context (memories, graph, "
@@ -874,7 +877,8 @@ def _with_affinity(settings: dict[str, Any], body: dict[str, Any]) -> dict[str, 
 
 # Ids that name a non-chat model when the proxy reports no `mode` for them: a conservative
 # pattern, since the picker still shows whatever model the chat already uses.
-_NON_CHAT_ID = ((re.compile(r"embed|rerank", re.I), "embedding"), (re.compile(r"whisper|tts", re.I), "audio"),
+_NON_CHAT_ID = ((re.compile(r"rerank", re.I), "rerank"), (re.compile(r"embed", re.I), "embedding"),
+                (re.compile(r"dall-e|gpt-image|imagen|flux|stable-diffusion|sdxl", re.I), "image_generation"), (re.compile(r"whisper|tts", re.I), "audio"),
                 (re.compile(r"moderation", re.I), "moderation"))
 
 
@@ -981,7 +985,7 @@ ANTHROPIC_FALLBACK_CAP = 64_000  # when the Models API cap is unknown (e.g. a ro
 
 def requires_max_tokens(settings: dict[str, Any]) -> bool:
     """Only the Anthropic API refuses a request without max_tokens. Nothing else gets the field."""
-    return providers.infer(settings.get("baseUrl")) == "anthropic"
+    return providers.effective(settings) == "anthropic"
 
 
 def output_cap(settings: dict[str, Any], model: str) -> int | None:
@@ -1222,7 +1226,7 @@ async def stream_chat(
     under the one `llmRetries` cap) until the first content, reasoning or tool-call fragment; never after. `end` carries
     `effort_dropped` (the value) when the provider rejected reasoning_effort and the request went without it.
     """
-    settings = provider_route.route(settings, model)
+    settings, model = provider_route.resolve(settings, model)
     body: dict[str, Any] = {"model": model, "messages": wire_messages(model, messages), "stream": True, "stream_options": {"include_usage": True}}
     # Only sent when the model accepts it. A missing field is not neutral: Kimi K3 reads it as max,
     # and a model that does not support the field rejects the whole request.
@@ -1587,7 +1591,7 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
     `cancel` (Stop) and `deadline` (a time.monotonic() value) end the call early as an LLMError of kind 'cancelled' /
     'timeout'; neither is read from a context var, so a call made after a run's deadline has passed is unaffected.
     """
-    settings = provider_route.route(settings, model)
+    settings, model = provider_route.resolve(settings, model)
     t0 = time.time()
     body: dict[str, Any] = {"model": model, "messages": wire_messages(model, messages), "stream": False}
     wired = effort_param(model, effort, caps=caps_lookup(model), base_url=settings.get("baseUrl"))

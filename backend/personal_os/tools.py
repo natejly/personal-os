@@ -2420,13 +2420,15 @@ def _register_google(self: Toolbox) -> None:
                               expected="Uploads document ids or readable file paths on this Mac, 25 MB in total")
 
     async def gmail_draft(ctx: dict[str, Any], to: str, subject: str, body: str, reply_to_message_id: str | None = None,
-                          attachments: list[str] | None = None, cc: str | None = None, bcc: str | None = None) -> Any:
+                          attachments: list[str] | None = None, cc: str | None = None, bcc: str | None = None,
+                          thread_id: str | None = None) -> Any:
         got = await _attachments(ctx, attachments)
         if isinstance(got, dict):
             return got
+        reply_to_message_id = reply_to_message_id or (await run(g.gmail_thread_last_id, thread_id) if thread_id else None)
         return _mail_shown(await run(lambda: g.gmail_draft(to, subject, body, reply_to_message_id, **outbox_mod.extras(got[1], cc, bcc))))
     R("gmail_draft", ToolSpec("gmail_draft", "Create a Gmail draft (never sends). Prefer this over gmail_send unless the user explicitly asked to send. Files can be attached (25 MB in total).",
-        _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "reply_to_message_id": {"type": "string"}, "attachments": _ATTACH_PARAM,
+        _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "reply_to_message_id": {"type": "string"}, "thread_id": {"type": "string"}, "attachments": _ATTACH_PARAM,
               "cc": _ADDR_PARAM, "bcc": _ADDR_PARAM}, ["to", "subject", "body"]), gmail_draft, "google", "external",
         examples=[{"to": "mira@example.com", "subject": "Invoice 42", "body": "Hi Mira,\n\nAttached is invoice 42.\n\nThanks", "attachments": ["<document id>"]},
                   {"to": "team@example.com", "subject": "Re: sprint review", "body": "Works for me.", "reply_to_message_id": "18f2c1a9b7e4d0aa"}]))
@@ -2456,10 +2458,12 @@ def _register_google(self: Toolbox) -> None:
 
     async def gmail_send(ctx: dict[str, Any], to: str, subject: str, body: str, reply_to_message_id: str | None = None,
                          as_draft: bool = False, attachments: list[str] | None = None, cc: str | None = None,
-                         bcc: str | None = None) -> Any:
+                         bcc: str | None = None, thread_id: str | None = None) -> Any:
         got = await _attachments(ctx, attachments)
         if isinstance(got, dict):
             return got
+        # A thread id (as gmail_search returns it) means "reply to the newest message in that thread".
+        reply_to_message_id = reply_to_message_id or (await run(g.gmail_thread_last_id, thread_id) if thread_id else None)
         ids, items = got
         if as_draft:
             # The user chose "Save as draft" on the approval card: the same email, written to Drafts and never sent.
@@ -2469,8 +2473,8 @@ def _register_google(self: Toolbox) -> None:
             return _mail_shown(await run(lambda: g.gmail_send(to, subject, body, reply_to_message_id, **outbox_mod.extras(items, cc, bcc))))
         row = await run(self.outbox.queue, to, subject, body, reply_to_message_id, "assistant", ctx.get("conversation_id"), ids, cc, bcc)
         return outbox_mod.queued_result(row)
-    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it. Pass reply_to_message_id to answer an existing message in its thread. Files can be attached (25 MB in total), with optional cc and bcc. Unless Allow everything is on, the user reviews and edits the email on a card first, and only their Send click sends it, so an approved send may differ from what you wrote: the result says what was finally sent, or that it was discarded or saved as a draft. Leave as_draft unset: the user sets it on the card.",
-        _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "reply_to_message_id": {"type": "string"},
+    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it. Pass reply_to_message_id (or thread_id, to answer the newest message of that thread) to reply in the thread. Files can be attached (25 MB in total), with optional cc and bcc. Unless Allow everything is on, the user reviews and edits the email on a card first, and only their Send click sends it, so an approved send may differ from what you wrote: the result says what was finally sent, or that it was discarded or saved as a draft. Leave as_draft unset: the user sets it on the card.",
+        _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "reply_to_message_id": {"type": "string"}, "thread_id": {"type": "string"},
               "as_draft": {"type": "boolean", "default": False}, "attachments": _ATTACH_PARAM, "cc": _ADDR_PARAM, "bcc": _ADDR_PARAM}, ["to", "subject", "body"]), gmail_send, "google", "external",
         examples=[{"to": "mira@example.com", "subject": "Running late", "body": "I will be 10 minutes late."},
                   {"to": "mira@example.com", "subject": "Invoice 42", "body": "Attached.", "attachments": ["~/Documents/invoice-42.pdf"]}]))

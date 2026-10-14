@@ -339,6 +339,18 @@ class ToolTests(Base):
             with self.assertRaises(mail_edits.ApprovalEditError):
                 mail_edits._clean({**args, "attachments": bad}, allow_draft_flag=True)
 
+    def test_thread_id_replies_in_that_thread_and_survives_the_held_send(self) -> None:
+        self.server.messages["orig"] = {"id": "orig", "threadId": "t1", "internalDate": 5, "labelIds": [],
+                                        "payload": {"headers": [{"name": "Message-ID", "value": "<m1@x>"}]}}
+        out = asyncio.run(self.tools.specs["gmail_send"].fn({}, "a@example.com", "Re: x", "ok", thread_id="t1"))
+        self.assertEqual(out["status"], "holding")
+        row = self.box.get(out["queued"])
+        self.assertEqual(row["reply_to_message_id"], "orig")  # what the approval replay and the hold carry
+        sent = self.g.gmail_send("a@example.com", "Re: x", "ok", row["reply_to_message_id"])
+        self.assertEqual(sent["thread_id"], "t1")
+        self.assertEqual(_parsed(self.server.messages[sent["sent"]]["raw"])["In-Reply-To"], "<m1@x>")
+        self.assertIn("thread_id", self.tools.specs["gmail_send"].parameters["properties"])
+
     def test_send_queues_with_the_file_and_sends_nothing_yet(self) -> None:
         a = self.upload("one.pdf")
         out = asyncio.run(self.tools.specs["gmail_send"].fn({}, "a@example.com", "Hi", "body", None, False, [a]))

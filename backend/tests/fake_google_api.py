@@ -259,6 +259,15 @@ class _GmailDrafts:
         return _Call(lambda: self.s.read_draft(id))
 
 
+class _GmailThreads:
+    def __init__(self, s: FakeServer):
+        self.s = s
+
+    def get(self, userId: str, id: str, **_: Any) -> _Call:
+        return _Call(lambda: {"id": id, "messages": [{"id": m["id"], "internalDate": m.get("internalDate", 0)}
+                                                     for m in self.s.messages.values() if m.get("threadId") == id]})
+
+
 class _GmailUsers:
     def __init__(self, s: FakeServer):
         self.s = s
@@ -268,6 +277,9 @@ class _GmailUsers:
 
     def drafts(self) -> _GmailDrafts:
         return _GmailDrafts(self.s)
+
+    def threads(self) -> _GmailThreads:
+        return _GmailThreads(self.s)
 
 
 class _Gmail:

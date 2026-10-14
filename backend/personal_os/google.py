@@ -1072,6 +1072,14 @@ class Google:
         headers = {"in_reply_to": mid, "references": f"{h.get('references', '')} {mid}".strip()} if mid else {}
         return orig.get("threadId"), headers
 
+    def gmail_thread_last_id(self, thread_id: str) -> str:
+        """The newest message of a thread: the one a reply to the thread answers."""
+        t = self._svc("gmail", "v1").users().threads().get(userId="me", id=thread_id, format="minimal").execute()
+        msgs = sorted(t.get("messages") or [], key=lambda m: int(m.get("internalDate") or 0))
+        if not msgs:
+            raise ValueError(f"thread {thread_id} has no messages")
+        return msgs[-1]["id"]
+
     @invalidates("gmail")
     @_forgets_gmail_lists
     def gmail_draft(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None,

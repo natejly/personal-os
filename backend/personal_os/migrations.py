@@ -695,6 +695,40 @@ def _learn_pending(c: sqlite3.Connection) -> None:
               "project_id TEXT, user_message_id TEXT, user_only INTEGER NOT NULL DEFAULT 0, created_at REAL NOT NULL)")
 
 
+def _provider_refs(c: sqlite3.Connection) -> None:
+    """Models carry their provider: "<provider id>/<model>". Writes the `providers` list from the stored provider and
+    address, turns every saved chat, tier, worker, vision, image, rerank and auto-review model into a ref (a bare id goes
+    to the provider that owns it, see provider_route.canon), and drops extractionModel and fastModel (they follow the low
+    and medium tier now; a value the active provider owns moves into a tier that was blank). embeddingModel stays a bare id:
+    the vectors are keyed by it. provider and baseUrl stay for the startup hook (provider_keys.migrate), which holds the keys."""
+    from . import permissions, provider_route, providers
+    stored = {k: permissions._json(v) for k, v in c.execute("SELECT key, value FROM settings")}
+    if isinstance(stored.get("providers"), list):
+        return
+    active = providers.effective(stored)
+    ents = [providers.new_entry(active, str(stored.get("baseUrl") or ""))] if active else []
+    aid = ents[0]["id"] if ents else None
+    if not ents:  # a fresh install has nothing to convert; its first provider is added through /providers
+        return
+    put = lambda k, v: c.execute("INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)", (k, json.dumps(v)))  # noqa: E731
+    put("providers", ents)
+    canon = lambda m: provider_route.canon(str(m or ""), ents, aid)  # noqa: E731
+    for k in provider_route.REF_SETTINGS:
+        if isinstance(stored.get(k), str) and stored[k].strip() and canon(stored[k]) != stored[k]:
+            put(k, canon(stored[k]))
+    for legacy, tier in (("extractionModel", "low"), ("fastModel", "medium")):
+        value = str(stored.get(legacy) or "").strip()
+        key = providers.TIER_KEYS[tier]
+        if value and not str(stored.get(key) or "").strip() and canon(value).startswith(f"{aid}/"):
+            put(key, canon(value))
+        c.execute("DELETE FROM settings WHERE key = ?", (legacy,))
+    perm = stored.get(permissions.KEY)
+    if isinstance(perm, dict) and str(perm.get("autoReviewModel") or "").strip():
+        put(permissions.KEY, {**perm, "autoReviewModel": canon(perm["autoReviewModel"])})
+    if str(stored.get("autoReviewModel") or "").strip():
+        put("autoReviewModel", canon(stored["autoReviewModel"]))
+
+
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
     (2, "messages_fts", _messages_fts),
@@ -740,6 +774,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (42, "tiers_replace_legacy_models", _tiers_replace_legacy_models),
     (43, "learn_pending", _learn_pending),
     (44, "dashboard_binding_cache", _dashboard_binding_cache),
+    (45, "provider_refs", _provider_refs),
 ]
 
 

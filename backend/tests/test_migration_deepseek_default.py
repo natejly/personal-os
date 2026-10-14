@@ -73,7 +73,8 @@ def test_upgraded_fireworks_install_moves_to_deepseek_high() -> None:
     s = _settings(con)
     assert not {"defaultModel", "modelHigh", "extractionModel", "fastModel"} & set(s)
     assert s["embeddingModel"] == "accounts/fireworks/models/qwen3-embedding-8b"
-    assert s["retrievalRerankModel"] == "x-reranker" and s["visionModel"] == "some-vl" and s["uiZoom"] == 110
+    # migration 45 turns the saved rerank and vision models into refs
+    assert s["retrievalRerankModel"] == "fireworks/x-reranker" and s["visionModel"] == "fireworks/some-vl" and s["uiZoom"] == 110
     assert con.execute("SELECT value FROM settings WHERE key = 'permissions'").fetchone() == perms_before
     rows = {r[0]: (r[1], json.loads(r[2])) for r in con.execute("SELECT id, model, settings FROM conversations")}
     assert rows["a"] == (DS, {})
@@ -93,5 +94,5 @@ def test_other_provider_keeps_its_saved_models() -> None:
     con.commit()
     migrations.run(con)
     s = _settings(con)
-    assert s["defaultModel"] == "gpt-5" and s["modelLow"] == "gpt-5-nano"
+    assert s["defaultModel"] == "openai/gpt-5" and s["modelLow"] == "openai/gpt-5-nano"  # kept, now as refs (migration 45)
     con.close()

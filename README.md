@@ -155,7 +155,7 @@ To do it yourself, you need Node 20, [uv](https://docs.astral.sh/uv/) and a mode
 ```bash
 npm install
 cd backend && uv venv && uv pip install -e . && cd ..
-cp .env.example .env          # paste your key
+cp .env.example .env          # optional: Google client, Fireworks key for the LiteLLM proxy
 ./scripts/dev.sh              # LiteLLM + backend + Electron
 ```
 

@@ -1,10 +1,11 @@
-"""Per-provider API keys: switching provider keeps each key, /settings never shows them, /setup/test and
-/setup/models resolve the right key and report failures plainly.
+"""Per-provider API keys: kept in one secret by provider id, never shown by /settings, filed at startup from an old
+single-provider install, and used by the connection probe, which reports failures plainly.
 
 Run: python backend/tests/test_provider_keys.py
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
@@ -33,91 +34,29 @@ FW_KEY, OAI_KEY = "fw-test-key", "oai-test-key"
 def clean():  # type: ignore[no-untyped-def]
     def reset() -> None:
         db.secrets.delete(provider_keys.SECRET)
-        db.set_settings({"provider": None, "baseUrl": "", "apiKey": "", "defaultModel": "", "onboardedAt": None})
+        db.set_settings({"apiKey": ""})
+        with db.tx() as c:
+            c.execute("DELETE FROM settings WHERE key IN ('providers','provider','baseUrl','defaultModel','onboardedAt')")
     reset()
-    setup._models_cache.clear()
     yield
     setup._transport = None
     reset()
 
 
-def put(**patch):  # type: ignore[no-untyped-def]
-    r = client.put("/settings", json=patch)
-    assert r.status_code == 200, r.text
-    return r.json()
-
-
-def active() -> tuple[str | None, str, str]:
-    s = db.get_settings()
-    return s.get("provider"), s.get("baseUrl", ""), s.get("apiKey", "")
-
-
-def start_on_fireworks() -> None:
-    put(provider="fireworks", baseUrl=FW, apiKey=FW_KEY)
-
-
-# ---- switching ----
-def test_switch_stashes_old_key_and_clears_active() -> None:
-    start_on_fireworks()
-    assert provider_keys.load(db.secrets) == {"fireworks": FW_KEY}
-    out = put(provider="openai")
-    assert active() == ("openai", OAI, "")  # base filled from the preset, no Fireworks key sent to OpenAI
-    assert out["apiKeySet"] is False and out["providerKeysSet"] == {"fireworks": True}
-
-
-def test_switch_loads_saved_key_for_target() -> None:
-    start_on_fireworks()
-    put(provider="openai", apiKey=OAI_KEY)
-    assert active() == ("openai", OAI, OAI_KEY)
-    assert provider_keys.load(db.secrets) == {"fireworks": FW_KEY, "openai": OAI_KEY}  # the old key was stashed too
-
-
-def test_round_trip_needs_no_repaste() -> None:
-    start_on_fireworks()
-    put(provider="openai", apiKey=OAI_KEY)
-    put(provider="fireworks")
-    assert active() == ("fireworks", FW, FW_KEY)
-    put(provider="openai")
-    assert active() == ("openai", OAI, OAI_KEY)
-
-
-def test_explicit_base_wins_over_preset() -> None:
-    start_on_fireworks()
-    put(provider="custom", baseUrl="http://my-box:8080")
-    assert active()[1] == "http://my-box:8080"
-
-
-def test_blank_key_is_unchanged_and_null_removes_both() -> None:
-    start_on_fireworks()
-    put(apiKey="")
-    assert active()[2] == FW_KEY
-    out = put(apiKey=None)
-    assert active()[2] == "" and provider_keys.load(db.secrets) == {}
-    assert out["providerKeysSet"] == {}
-
-
-def test_remove_keeps_other_providers_keys() -> None:
-    start_on_fireworks()
-    put(provider="openai", apiKey=OAI_KEY)
-    put(apiKey=None)
-    assert provider_keys.load(db.secrets) == {"fireworks": FW_KEY}
-
-
-def test_put_settings_cannot_touch_provider_keys() -> None:
-    start_on_fireworks()
-    put(providerKeys={"fireworks": "evil"}, providerKeysSet={"x": True})
-    assert provider_keys.load(db.secrets) == {"fireworks": FW_KEY}
-
-
-# ---- what the renderer can see ----
 def test_settings_never_expose_key_values() -> None:
-    start_on_fireworks()
-    put(provider="openai", apiKey=OAI_KEY)
+    provider_keys.save(db.secrets, {"fireworks": FW_KEY, "openai": OAI_KEY})
+    db.set_settings({"providers": [providers.new_entry("fireworks"), providers.new_entry("openai")]})
     body = client.get("/settings").text
     assert FW_KEY not in body and OAI_KEY not in body
     out = json.loads(body)
     assert out["providerKeysSet"] == {"fireworks": True, "openai": True}
-    assert out["apiKey"] == "" and out["apiKeySet"] is True and out["provider"] == "openai"
+    assert out["apiKey"] == "" and out["apiKeySet"] is True and out["provider"] == "fireworks"
+
+
+def test_put_settings_cannot_touch_provider_keys() -> None:
+    provider_keys.save(db.secrets, {"fireworks": FW_KEY})
+    client.put("/settings", json={"providerKeys": {"fireworks": "evil"}, "providerKeysSet": {"x": True}, "apiKey": "evil"})
+    assert provider_keys.load(db.secrets) == {"fireworks": FW_KEY} and not db.get_settings().get("apiKey")
 
 
 def test_provider_keys_are_redacted_from_logs() -> None:
@@ -126,35 +65,35 @@ def test_provider_keys_are_redacted_from_logs() -> None:
     assert "fw-only-in-the-blob-1" not in logs.redact("sent fw-only-in-the-blob-1 upstream")
 
 
-# ---- startup migration ----
+# ---- startup step ----
 def test_migrate_seeds_active_provider() -> None:
     db.set_settings({"provider": "openai", "baseUrl": OAI, "apiKey": OAI_KEY})
     assert provider_keys.load(db.secrets) == {}
     provider_keys.migrate(db)
     assert provider_keys.load(db.secrets) == {"openai": OAI_KEY}
+    s = db.get_settings()
+    assert [e["id"] for e in s["providers"]] == ["openai"] and not s.get("apiKey") and "provider" not in s
     provider_keys.migrate(db)  # idempotent, and it never overwrites a key already saved
-    db.set_settings({"apiKey": "other"})
-    provider_keys.migrate(db)
     assert provider_keys.load(db.secrets) == {"openai": OAI_KEY}
 
 
 def test_migrate_infers_provider_from_base_url_alone() -> None:
-    db.set_settings({"baseUrl": FW, "apiKey": FW_KEY})  # env seed: a base and a key, no provider
+    db.set_settings({"baseUrl": FW, "apiKey": FW_KEY})  # a base and a key, no provider
     provider_keys.migrate(db)
     assert provider_keys.load(db.secrets) == {"fireworks": FW_KEY}
 
 
-def test_env_seed_then_migrate(monkeypatch: pytest.MonkeyPatch) -> None:
-    from personal_os import app as app_mod
-    monkeypatch.delenv("PERSONAL_OS_PACKAGED", raising=False)
-    monkeypatch.setenv("PERSONAL_OS_BASE_URL", OAI)
-    monkeypatch.setenv("PERSONAL_OS_API_KEY", OAI_KEY)
-    with db.tx() as c:
-        c.execute("DELETE FROM settings WHERE key IN ('baseUrl','apiKey')")
-    db.secrets.delete("apiKey")
-    app_mod._seed_settings_from_env()
-    provider_keys.migrate(db)
-    assert provider_keys.load(db.secrets) == {"openai": OAI_KEY}
+def test_env_provider_vars_do_not_seed_settings(tmp_path: Path) -> None:
+    """The old PERSONAL_OS_* provider variables are ignored: a fresh install stays unconfigured until a provider is added."""
+    import subprocess
+    env = {**os.environ, "PERSONAL_OS_DATA_DIR": str(tmp_path), "PERSONAL_OS_BASE_URL": OAI, "PERSONAL_OS_API_KEY": OAI_KEY,
+           "PERSONAL_OS_DEFAULT_MODEL": "gpt-x", "PERSONAL_OS_EXTRACTION_MODEL": "gpt-y", "PERSONAL_OS_TEST_CHILD": "1"}
+    env.pop("PERSONAL_OS_PACKAGED", None)
+    code = ("from personal_os.app import db; s = db.get_settings(); "
+            "print(sorted(k for k in ('baseUrl','apiKey','defaultModel','extractionModel') if s.get(k)))")
+    out = subprocess.run([sys.executable, "-c", code], env=env, cwd=Path(__file__).resolve().parents[1],
+                         capture_output=True, text=True, timeout=120)
+    assert out.stdout.strip().endswith("[]"), out.stdout + out.stderr
 
 
 def test_legacy_plaintext_sqlite_key_still_moves_to_the_store_and_blanks() -> None:
@@ -168,36 +107,32 @@ def test_legacy_plaintext_sqlite_key_still_moves_to_the_store_and_blanks() -> No
     with fresh.tx() as c:
         assert json.loads(c.execute("SELECT value FROM settings WHERE key='apiKey'").fetchone()["value"]) == ""
     provider_keys.migrate(fresh)
-    assert provider_keys.saved_for(fresh.secrets) == {"fireworks": True}
+    assert provider_keys.saved_for(fresh.secrets) == {"fireworks": True} and not fresh.secrets.get("apiKey")
 
 
 def test_live_install_survives_upgrade_untouched() -> None:
-    """The key already in the secret store, a blank SQLite row, provider fireworks: nothing the user set changes."""
+    """The key already in the secret store, a blank SQLite row, provider fireworks: the key and the models carry over."""
     d = Path(tempfile.mkdtemp(prefix="live-"))
     first = Database(d)
     first.secrets.set("apiKey", FW_KEY)
-    rows = {"provider": "fireworks", "baseUrl": FW, "apiKey": "",
-            "defaultModel": "accounts/fireworks/models/ember-1",
-            "extractionModel": "accounts/fireworks/models/deepseek-v4p1-flash",
+    rows = {"provider": "fireworks", "baseUrl": FW, "apiKey": "", "defaultModel": "accounts/fireworks/models/ember-1",
             "embeddingModel": "accounts/fireworks/models/qwen3-embedding-8b"}
     with first.tx() as c:
+        c.execute("DELETE FROM settings WHERE key = 'providers'")
         for k, v in rows.items():
             c.execute("INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, json.dumps(v)))
     upgraded = Database(d)  # a restart on the new build
+    import sqlite3
+    migrations_con = sqlite3.connect(next(d.glob("*.db")))
+    from personal_os import migrations
+    migrations._provider_refs(migrations_con)
+    migrations_con.commit()
     provider_keys.migrate(upgraded)
     got = upgraded.get_settings()
-    assert got["apiKey"] == FW_KEY
-    for k, v in rows.items():
-        if k != "apiKey":
-            assert got[k] == v
-    assert provider_keys.saved_for(upgraded.secrets) == {"fireworks": True}
-    # and the upgraded install can switch away and come back with no re-paste
-    patch = provider_keys.apply(upgraded, {"provider": "openai"})
-    assert patch == {"provider": "openai", "apiKey": None, "baseUrl": OAI}
-    upgraded.set_settings(patch)
-    assert upgraded.get_settings()["apiKey"] == ""
-    upgraded.set_settings(provider_keys.apply(upgraded, {"provider": "fireworks"}))
-    assert upgraded.get_settings()["apiKey"] == FW_KEY
+    assert provider_keys.load(upgraded.secrets) == {"fireworks": FW_KEY} and not got.get("apiKey")
+    assert got["defaultModel"] == "fireworks/accounts/fireworks/models/ember-1"
+    assert got["embeddingModel"] == rows["embeddingModel"]  # vectors are keyed by it: left bare
+    assert [e["id"] for e in got["providers"]] == ["fireworks"]
 
 
 def test_bad_json_blob_reads_as_empty() -> None:
@@ -207,7 +142,7 @@ def test_bad_json_blob_reads_as_empty() -> None:
     assert provider_keys.load(db.secrets) == {}
 
 
-# ---- /setup/test and /setup/models ----
+# ---- the connection probe ----
 def mock(handler) -> list[httpx.Request]:  # type: ignore[no-untyped-def]
     seen: list[httpx.Request] = []
 
@@ -226,7 +161,7 @@ def listing(req: httpx.Request) -> httpx.Response:
 
 def check(**kw):  # type: ignore[no-untyped-def]
     body = {"provider": "openai", "baseUrl": OAI, "apiKey": OAI_KEY, "model": "", **kw}
-    return client.post("/setup/test", json=body).json()
+    return asyncio.run(setup.test_connection(setup.SetupIn(**body), db.secrets))
 
 
 def test_test_without_model_lists_models_only() -> None:
@@ -294,162 +229,17 @@ def test_test_other_http_error_keeps_excerpt() -> None:
     assert check()["error"] == "The provider returned 500: boom"
 
 
-def test_resolve_key_uses_saved_key_for_the_provider() -> None:
-    start_on_fireworks()
-    put(provider="openai", apiKey=OAI_KEY)  # active is now openai; fireworks is saved
+def test_resolve_key_uses_the_key_saved_under_the_provider_id() -> None:
+    provider_keys.save(db.secrets, {"fireworks": FW_KEY})
     seen = mock(listing)
-    # fixed preset address: its saved key is used though it is not the active provider
     check(provider="fireworks", baseUrl=FW, apiKey=None)
     assert seen[0].headers["authorization"] == f"Bearer {FW_KEY}"
-    # a typed key always wins
     seen.clear()
-    check(provider="fireworks", baseUrl=FW, apiKey="typed-key")
+    check(provider="fireworks", baseUrl=FW, apiKey="typed-key")  # a typed key always wins
     assert seen[0].headers["authorization"] == "Bearer typed-key"
-
-
-def test_a_key_never_travels_to_another_server() -> None:
-    start_on_fireworks()
-    seen = mock(listing)
-    check(provider="fireworks", baseUrl="http://elsewhere:9/v1", apiKey=None)
-    check(provider="custom", baseUrl="http://elsewhere:9/v1", apiKey="")
-    check(provider="openai", baseUrl=OAI, apiKey=None)  # nothing saved for OpenAI, the active key is Fireworks'
-    assert all("authorization" not in q.headers for q in seen)
-
-
-def test_custom_provider_reuses_active_key_for_the_stored_base_only() -> None:
-    put(provider="custom", baseUrl="http://box:8080/v1", apiKey="box-key")
-    seen = mock(listing)
-    check(provider="custom", baseUrl="http://box:8080/v1/", apiKey=None)
-    assert seen[0].headers["authorization"] == "Bearer box-key"
     seen.clear()
-    check(provider="custom", baseUrl="http://other:8080/v1", apiKey=None)
+    check(provider="openai", baseUrl=OAI, apiKey=None)  # nothing saved for OpenAI: no header, never Fireworks' key
     assert "authorization" not in seen[0].headers
-
-
-def models(**kw):  # type: ignore[no-untyped-def]
-    body = {"provider": "openai", "baseUrl": OAI, "apiKey": OAI_KEY, **kw}
-    return client.post("/setup/models", json=body).json()
-
-
-def test_models_route_lists_and_caches_for_a_minute() -> None:
-    seen = mock(listing)
-    assert models() == {"models": ["a", "b"], "error": None}
-    assert models() == {"models": ["a", "b"], "error": None}
-    assert len(seen) == 1  # second answer came from the cache
-    models(baseUrl="http://box:8080/v1", provider="custom")
-    assert len(seen) == 2  # another (provider, base) is its own entry
-    setup._models_cache[("openai", OAI)] = (setup._models_cache[("openai", OAI)][0] - setup.LIST_TTL - 1, ["a", "b"])
-    models()
-    assert len(seen) == 3  # an expired entry is fetched again
-
-
-def test_models_route_does_not_cache_failures() -> None:
-    mock(lambda req: httpx.Response(401, json={}))
-    assert models()["error"] == "That key was rejected (401)."
-    seen = mock(listing)
-    assert models()["models"] == ["a", "b"]
-    assert len(seen) == 1
-
-
-def test_models_route_error_texts() -> None:
-    mock(lambda req: httpx.Response(404, json={}))
-    assert models() == {"models": None, "error": "This server does not list its models."}
-
-    def slow(req: httpx.Request) -> httpx.Response:
-        raise httpx.ReadTimeout("slow")
-    mock(slow)
-    assert models()["error"] == f"{OAI} took too long to answer."
-    assert models(baseUrl="")["error"] == "Enter a base URL first."
-
-
-def test_models_route_skips_the_call_when_a_keyed_provider_has_no_key() -> None:
-    seen = mock(listing)
-    assert models(apiKey=None) == {"models": None, "error": None}
-    assert seen == []
-    # a keyless provider is asked anyway
-    assert models(provider="ollama", baseUrl="http://localhost:11434/v1", apiKey=None)["models"] == ["a", "b"]
-
-
-def test_models_route_uses_the_saved_key() -> None:
-    start_on_fireworks()
-    seen = mock(listing)
-    models(provider="fireworks", baseUrl=FW, apiKey=None)
-    assert seen[0].headers["authorization"] == f"Bearer {FW_KEY}"
-
-
-# ---- the setup wizard goes through the same path ----
-def test_setup_complete_switch_and_return() -> None:
-    start_on_fireworks()
-    r = client.post("/setup/complete", json={"provider": "openai", "baseUrl": OAI, "apiKey": OAI_KEY, "model": "gpt-5-mini"})
-    assert r.status_code == 200
-    assert provider_keys.load(db.secrets) == {"fireworks": FW_KEY, "openai": OAI_KEY}
-    # the wizard on a provider with no key anywhere clears the active key rather than sending OpenAI's elsewhere
-    r = client.post("/setup/complete", json={"provider": "ollama", "baseUrl": "", "apiKey": None, "model": "llama3.2"})
-    assert r.status_code == 200
-    assert active() == ("ollama", "http://localhost:11434/v1", "")
-    assert provider_keys.load(db.secrets) == {"fireworks": FW_KEY, "openai": OAI_KEY}
-
-
-BAD_ADDRESSES = ["http://localhost:11x34/v1", "http://localhost:99999/v1", "http://[::1/v1", "http://host:abc", "http://host:-1"]
-
-
-@pytest.mark.parametrize("bad", BAD_ADDRESSES)
-def test_a_stored_malformed_address_never_breaks_settings_setup_or_startup(bad: str) -> None:
-    db.set_settings({"baseUrl": bad})  # what an install that saved one before the check still holds
-    assert providers.infer(bad) == "custom"
-    provider_keys.migrate(db)  # runs at import
-    assert client.get("/settings").status_code == 200
-    assert client.put("/settings", json={"autonomousByDefault": True}).status_code == 200
-    assert client.get("/setup/status").status_code == 200
-    # The address can be corrected afterwards.
-    assert client.put("/settings", json={"baseUrl": FW}).status_code == 200
-    assert client.get("/settings").json()["baseUrl"] == FW
-
-
-@pytest.mark.parametrize("bad", BAD_ADDRESSES + ["javascript:alert(1)", "ftp://host/v1", "localhost:4000"])
-def test_a_malformed_address_is_refused_and_changes_nothing(bad: str) -> None:
-    db.set_settings({"baseUrl": FW})
-    assert client.put("/settings", json={"baseUrl": bad}).status_code == 422
-    assert client.get("/settings").json()["baseUrl"] == FW
-    done = client.post("/setup/complete", json={"provider": "custom", "baseUrl": bad, "model": "m"})
-    assert done.status_code == 422
-    assert client.get("/settings").json()["baseUrl"] == FW and not db.get_settings().get("onboardedAt")
-
-
-def test_an_empty_address_and_the_known_providers_are_still_accepted() -> None:
-    assert client.put("/settings", json={"baseUrl": ""}).status_code == 200
-    assert client.put("/settings", json={"baseUrl": "http://localhost:11434/v1", "provider": "ollama"}).status_code == 200
-    assert client.put("/settings", json={"provider": None}).status_code == 200
-
-
-@pytest.mark.parametrize("bad", [5, "bogus", ["openai"]])
-def test_an_unknown_provider_is_refused_and_changes_nothing(bad: object) -> None:
-    db.set_settings({"provider": "openai"})
-    assert client.put("/settings", json={"provider": bad}).status_code == 422
-    assert db.get_settings()["provider"] == "openai"
-
-
-# ---- onboarding: rerun, blank keys, listing auth, Ollama hints ----
-def complete(**kw):  # type: ignore[no-untyped-def]
-    body = {"provider": "fireworks", "baseUrl": FW, "apiKey": None, "model": "m", **kw}
-    return client.post("/setup/complete", json=body)
-
-
-def test_rerun_with_a_blank_key_keeps_the_saved_one() -> None:
-    start_on_fireworks()
-    assert complete().status_code == 200
-    assert active() == ("fireworks", FW, FW_KEY)
-
-
-def test_blank_key_switch_back_restores_that_providers_key() -> None:
-    start_on_fireworks()
-    put(provider="openai", apiKey=OAI_KEY)
-    assert complete().status_code == 200  # Fireworks' saved key, no paste
-    assert active() == ("fireworks", FW, FW_KEY)
-
-
-def test_blank_key_with_nothing_saved_is_still_refused() -> None:
-    assert complete(provider="openai", baseUrl=OAI).status_code == 422
 
 
 def test_listing_401_lets_the_chat_probe_decide() -> None:
@@ -459,9 +249,7 @@ def test_listing_401_lets_the_chat_probe_decide() -> None:
 
 def test_blank_key_401_asks_for_a_key() -> None:
     mock(lambda req: httpx.Response(401, json={}))
-    lite = {"provider": "litellm", "baseUrl": "http://localhost:4000", "apiKey": ""}
-    assert check(**lite, model="m")["error"] == "This server needs an API key."
-    assert models(**lite)["error"] == "This server needs an API key."
+    assert check(provider="litellm", baseUrl="http://localhost:4000", apiKey="", model="m")["error"] == "This server needs an API key."
 
 
 def test_ollama_hints() -> None:
@@ -475,3 +263,12 @@ def test_ollama_hints() -> None:
         raise httpx.ConnectError("refused")
     mock(refused)
     assert "ollama.com/download" in check(provider="ollama", baseUrl=base, apiKey="")["error"]
+
+
+@pytest.mark.parametrize("bad", ["http://localhost:11x34/v1", "http://localhost:99999/v1", "http://[::1/v1", "http://host:abc"])
+def test_a_stored_malformed_address_never_breaks_settings_or_startup(bad: str) -> None:
+    db.set_settings({"baseUrl": bad})  # what an install that saved one before the check still holds
+    assert providers.infer(bad) == "custom"
+    provider_keys.migrate(db)
+    assert client.get("/settings").status_code == 200
+    assert client.get("/setup/status").status_code == 200

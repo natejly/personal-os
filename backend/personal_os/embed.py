@@ -73,7 +73,10 @@ async def embed_texts(settings: dict[str, Any], texts: list[str], model: str | N
     name = model or str(settings.get("embeddingModel") or "")
     if not name:
         raise EmbedError("no embedding model configured")
-    settings = provider_route.route(settings, name)
+    try:
+        settings = provider_route.route(settings, name)
+    except llm.LLMError as e:  # no usable provider serves it
+        raise EmbedError(str(e)) from e
     out: list[list[float]] = []
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:

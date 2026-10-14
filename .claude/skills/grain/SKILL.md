@@ -100,7 +100,7 @@ PERSONAL_OS_DATA_DIR="$HOME/Library/Application Support/Grain-dev/data" ./script
 
   Sign in to Google again in the dev window. Mail, calendar and task writes from dev still hit the real Google account. Use the real data dir only with the packaged app quit.
 - **Never run Electron in the foreground** (`dev.sh`, `npm run dev`, the packaged app): it blocks until quit. Start it in the background with output to a log, poll `/health` (the port is `PERSONAL_OS_PORT`, default 8765 in dev.sh) and the log, and kill what you started. Packaged build: `open -g dist/mac-arm64/Grain.app` (`-g` keeps focus).
-- **LiteLLM** on :4000 is shared: dev.sh starts it only when `FIREWORKS_API_KEY` is set and nothing answers on :4000, otherwise it reuses it. `.env` seeds first-launch settings; `litellm.yaml` lists models.
+- **LiteLLM** on :4000 is shared: dev.sh starts it only when `FIREWORKS_API_KEY` is set and nothing answers on :4000, otherwise it reuses it. Add providers in Settings → Models (`.env` no longer seeds settings); `litellm.yaml` lists the proxy's models.
 - **Logs**: `~/Library/Logs/Grain/` when packaged (`backend.log` inside), `<userData>/logs` in dev (`src/main/index.ts`). `PERSONAL_OS_LOG_DIR` overrides it.
 - **Scripts** (`package.json`): `npm run typecheck`, `npm test` (esbuild + node:test on `*.test.ts`), `npm run build`, `npm run package` (see [docs/releasing.md](../../../docs/releasing.md)).
 - **Backend tests** are script-style, one process per file. From `backend/`:

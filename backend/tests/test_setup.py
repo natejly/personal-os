@@ -1,9 +1,10 @@
-"""Provider presets and the /setup routes.
+"""Provider presets, the first-run status and the connection probe.
 
 Run: python backend/tests/test_setup.py
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import tempfile
@@ -16,7 +17,7 @@ os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="setup-"))
 import httpx  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os import llm, providers, setup  # noqa: E402
+from personal_os import llm, provider_keys, providers, setup  # noqa: E402
 from personal_os.app import AUTH_TOKEN, app, db  # noqa: E402
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
@@ -24,7 +25,7 @@ client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 
 def _clear() -> None:
     db.secrets.delete("providerKeys")  # a key saved by an earlier test would satisfy a later "needs a key" check
-    db.set_settings({"baseUrl": "", "apiKey": "", "provider": None, "onboardedAt": None, "defaultModel": "", "extractionModel": ""})
+    db.set_settings({"providers": [], "onboardedAt": None, "defaultModel": ""})
 
 
 class RegistryTests(unittest.TestCase):
@@ -69,26 +70,34 @@ class StatusTests(unittest.TestCase):
         s = client.get("/setup/status").json()
         self.assertTrue(s["needsOnboarding"])
         self.assertFalse(s["hasApiKey"])
-        self.assertIsNone(s["provider"])
+        self.assertEqual(s["providers"], [])
         self.assertIsNone(s["onboardedAt"])
+        self.assertEqual(set(s), {"needsOnboarding", "hasApiKey", "providers", "googleConnected", "onboardedAt"})
 
-    def test_existing_key_or_litellm_or_onboarded_does_not(self) -> None:
-        db.set_settings({"baseUrl": "https://api.openai.com/v1", "apiKey": "sk-x"})
+    def test_a_usable_provider_or_the_stamp_skips_the_wizard(self) -> None:
+        db.set_settings({"providers": [providers.new_entry("openai")]})
+        self.assertTrue(client.get("/setup/status").json()["needsOnboarding"])  # listed, but no key yet
+        provider_keys.save(db.secrets, {"openai": "sk-x"})
         s = client.get("/setup/status").json()
         self.assertFalse(s["needsOnboarding"])
-        self.assertEqual(s["provider"], "openai")
-        db.set_settings({"baseUrl": "http://localhost:4000", "apiKey": ""})
-        s = client.get("/setup/status").json()
-        self.assertFalse(s["needsOnboarding"])
-        self.assertEqual(s["provider"], "litellm")
+        self.assertTrue(s["hasApiKey"])
+        self.assertEqual(s["providers"], ["openai"])
         _clear()
-        db.set_settings({"provider": "ollama", "baseUrl": "http://localhost:11434/v1", "onboardedAt": "2026-10-01T00:00:00+00:00"})
+        db.set_settings({"providers": [providers.new_entry("litellm")]})  # a proxy needs no key
+        s = client.get("/setup/status").json()
+        self.assertEqual((s["needsOnboarding"], s["hasApiKey"], s["providers"]), (False, False, ["litellm"]))
+        _clear()
+        db.set_settings({"onboardedAt": "2026-10-01T00:00:00+00:00"})
         self.assertFalse(client.get("/setup/status").json()["needsOnboarding"])
 
-    def test_providers_route(self) -> None:
-        ps = client.get("/setup/providers").json()["providers"]
-        self.assertEqual(len(ps), 7)
-        self.assertEqual(set(ps[0]), {"id", "name", "baseUrl", "needsKey", "keyUrl", "defaultModel", "models", "note", "rerankModel", "tiers"})
+    def test_reset_clears_the_stamp(self) -> None:
+        db.set_settings({"onboardedAt": "2026-10-01T00:00:00+00:00"})
+        self.assertIsNone(client.post("/setup/reset").json()["onboardedAt"])
+
+    def test_retired_routes_are_gone(self) -> None:
+        for method, path in (("get", "/setup/providers"), ("post", "/setup/test"), ("post", "/setup/models"), ("post", "/setup/complete")):
+            self.assertIn(getattr(client, method)(path).status_code, (404, 405), path)
+        self.assertEqual(client.put("/provider-keys/openai", json={"apiKey": "x"}).status_code, 404)
 
     def test_requires_token(self) -> None:
         self.assertEqual(TestClient(app).get("/setup/status").status_code, 401)
@@ -98,13 +107,13 @@ def _mock(handler):  # type: ignore[no-untyped-def]
     setup._transport = httpx.MockTransport(handler)
 
 
-class TestRouteTests(unittest.TestCase):
+class ProbeTests(unittest.TestCase):
     def tearDown(self) -> None:
         setup._transport = None
 
     def _post(self, **kw):  # type: ignore[no-untyped-def]
         body = {"provider": "openai", "baseUrl": "https://api.openai.com/v1", "apiKey": "sk-x", "model": "gpt-5-mini", **kw}
-        return client.post("/setup/test", json=body).json()
+        return asyncio.run(setup.test_connection(setup.SetupIn(**body), db.secrets))
 
     def test_success(self) -> None:
         def h(req: httpx.Request) -> httpx.Response:
@@ -158,8 +167,8 @@ class TestRouteTests(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertEqual(r["error"], "Model nope not found.")
 
-    def test_blank_key_uses_saved_key_only_for_saved_host(self) -> None:
-        db.set_settings({"baseUrl": "https://api.openai.com/v1/", "apiKey": "sk-saved"})
+    def test_blank_key_uses_the_key_saved_for_the_provider(self) -> None:
+        provider_keys.save(db.secrets, {"openai": "sk-saved"})
         seen: list[str | None] = []
 
         def h(req: httpx.Request) -> httpx.Response:
@@ -170,85 +179,13 @@ class TestRouteTests(unittest.TestCase):
             self.assertTrue(self._post(apiKey="")["ok"])
             self.assertEqual(set(seen), {"Bearer sk-saved"})
             seen.clear()
-            self._post(apiKey=None, baseUrl="http://elsewhere:9/v1")
+            self._post(apiKey=None, provider="anthropic")  # another provider id: that one's (absent) key
             self.assertEqual(set(seen), {None})
         finally:
             _clear()
 
     def test_missing_fields_never_500(self) -> None:
         self.assertFalse(self._post(baseUrl="")["ok"])
-
-
-class CompleteTests(unittest.TestCase):
-    def setUp(self) -> None:
-        _clear()
-
-    def tearDown(self) -> None:
-        _clear()
-
-    def test_complete_persists_and_stamps_then_reset_clears(self) -> None:
-        db.set_settings({"extractionModel": "deepseek-v4-flash",
-                         "retrievalRerankModel": "accounts/fireworks/models/qwen3-reranker-8b"})
-        r = client.post("/setup/complete", json={"provider": "openai", "baseUrl": "https://api.openai.com/v1", "apiKey": " sk-1 ", "model": "gpt-5-mini"})
-        self.assertEqual(r.status_code, 200)
-        s = r.json()
-        self.assertFalse(s["needsOnboarding"])
-        self.assertTrue(s["hasApiKey"])
-        self.assertEqual((s["provider"], s["model"]), ("openai", "gpt-5-mini"))
-        self.assertTrue(s["onboardedAt"])
-        stored = db.get_settings()
-        self.assertEqual((stored["apiKey"], stored["extractionModel"]), ("sk-1", ""))
-        self.assertEqual((stored["embeddingModel"], stored["retrievalRerankModel"]), ("text-embedding-3-small", ""))  # picked from the new key
-        s = client.post("/setup/reset").json()
-        self.assertIsNone(s["onboardedAt"])
-        self.assertEqual(s["provider"], "openai")
-
-    def test_validation(self) -> None:
-        for body in ({"provider": "nope", "baseUrl": "x", "model": "m"},
-                     {"provider": "openai", "baseUrl": "", "apiKey": None, "model": "m"},
-                     {"provider": "openai", "baseUrl": "https://api.openai.com/v1", "apiKey": "", "model": ""},
-                     {"provider": "custom", "baseUrl": "", "model": "m"}):
-            self.assertEqual(client.post("/setup/complete", json=body).status_code, 422, body)
-        self.assertIsNone(db.get_settings().get("onboardedAt"))
-
-    def test_keyless_provider(self) -> None:
-        r = client.post("/setup/complete", json={"provider": "ollama", "baseUrl": "", "apiKey": None, "model": "llama3.2"})
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json()["baseUrl"], "http://localhost:11434/v1")
-
-    def test_switching_provider_resets_the_other_model_fields(self) -> None:
-        old = {"modelHigh": "ember-1", "retrievalRerankModel": "qwen3-reranker-8b", "visionModel": "glm-5.3", "embeddingModel": "qwen3-embedding-8b"}
-        db.set_settings({"provider": "litellm", "baseUrl": "http://localhost:4000", **old})
-        body = {"provider": "litellm", "baseUrl": "http://localhost:4000", "apiKey": None, "model": "kimi-k3"}
-        self.assertEqual(client.post("/setup/complete", json=body).status_code, 200)
-        self.assertEqual({k: db.get_settings()[k] for k in old}, old)  # same provider: kept
-        r = client.post("/setup/complete", json={"provider": "fireworks", "baseUrl": "", "apiKey": "fw-1", "model": "accounts/fireworks/models/kimi-k3"})
-        self.assertEqual(r.status_code, 200)
-        s = db.get_settings()
-        self.assertEqual((s["modelHigh"], s["retrievalRerankModel"], s["visionModel"]), ("", "", ""))
-        db.set_settings({**{k: "" for k in old}, "embeddingModel": llm.DEFAULT_SETTINGS["embeddingModel"]})
-
-    def test_keyless_rerun_keeps_saved_key_for_same_endpoint(self) -> None:
-        db.set_settings({"provider": "litellm", "baseUrl": "http://localhost:4000", "apiKey": "sk-proxy"})
-        seen: list[str | None] = []
-
-        def h(req: httpx.Request) -> httpx.Response:
-            seen.append(req.headers.get("authorization"))
-            return httpx.Response(200, json={"data": [], "choices": []})
-        _mock(h)
-        try:
-            body = {"provider": "litellm", "baseUrl": "http://localhost:4000/", "apiKey": None, "model": "kimi-k3"}
-            self.assertTrue(client.post("/setup/test", json=body).json()["ok"])
-            self.assertEqual(set(seen), {"Bearer sk-proxy"})
-            seen.clear()
-            client.post("/setup/test", json={**body, "baseUrl": "http://other:4000"})
-            self.assertEqual(set(seen), {None})
-        finally:
-            setup._transport = None
-        self.assertEqual(client.post("/setup/complete", json=body).status_code, 200)
-        self.assertEqual(db.get_settings()["apiKey"], "sk-proxy")
-        client.post("/setup/complete", json={**body, "provider": "custom", "baseUrl": "http://other:8080"})
-        self.assertEqual(db.get_settings()["apiKey"], "")
 
 
 if __name__ == "__main__":

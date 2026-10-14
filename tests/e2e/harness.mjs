@@ -44,10 +44,6 @@ export function spawnBackend({ port, dataDir, token, llmUrl, llmKey, extraEnv = 
     GRAIN_SECRETS_BACKEND: 'file',
     PERSONAL_OS_AUTH_TOKEN: token,
     PERSONAL_OS_DATA_DIR: dataDir,
-    PERSONAL_OS_BASE_URL: llmUrl,
-    PERSONAL_OS_API_KEY: llmKey,
-    PERSONAL_OS_DEFAULT_MODEL: process.env.E2E_LLM === 'real' ? (dotenv().PERSONAL_OS_DEFAULT_MODEL || '') : 'mock-chat',
-    PERSONAL_OS_EXTRACTION_MODEL: process.env.E2E_LLM === 'real' ? (dotenv().PERSONAL_OS_EXTRACTION_MODEL || '') : 'mock-chat',
     PERSONAL_OS_LOG_DIR: join(dataDir, '..', 'logs'),
     PERSONAL_OS_PARENT_WATCH: '1',
     // e2e backends never call the live web provider (the backend's dotenv loader uses setdefault, so an empty value also blocks a key from a .env file).
@@ -85,6 +81,22 @@ export async function waitHealthy(backend, { tries = Number(process.env.E2E_BACK
   throw new Error(`${what} never became healthy:\n` + backend.log().slice(-3000))
 }
 
+/**
+ * Add the e2e model provider through the product's own route (a backend no longer seeds one from the environment)
+ * and make its model the default. Mock mode: a custom endpoint serving mock-chat. E2E_LLM=real: the LiteLLM proxy
+ * from .env, model E2E_MODEL (default deepseek-v4-flash).
+ */
+export async function seedProvider(backend, token, { llmUrl, llmKey, real = process.env.E2E_LLM === 'real' }) {
+  const model = real ? (process.env.E2E_MODEL || 'deepseek-v4-flash') : 'mock-chat'
+  const kind = real ? 'litellm' : 'custom'
+  const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+  const add = await fetch(backend.url + '/providers', { method: 'POST', headers: h, body: JSON.stringify({ kind, baseUrl: llmUrl, apiKey: llmKey || null, model }) })
+  const added = await add.json().catch(() => ({}))
+  if (!add.ok || !added.ok) throw new Error(`seeding the e2e provider failed: ${add.status} ${JSON.stringify(added).slice(0, 300)}`)
+  const put = await fetch(backend.url + '/settings', { method: 'PUT', headers: h, body: JSON.stringify({ defaultModel: `${kind}/${model}` }) })
+  if (!put.ok) throw new Error(`PUT /settings after seeding the provider: ${put.status}`)
+}
+
 export async function startBackend({ llmUrl, llmKey, dataDir, token, extraEnv = {}, entry }) {
   return waitHealthy(spawnBackend({ port: await freePort(), dataDir, token, llmUrl, llmKey, extraEnv, entry }))
 }
@@ -109,8 +121,8 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
   let llmUrl, llmKey
   if (process.env.E2E_LLM === 'real') {
     const e = dotenv()
-    llmUrl = e.PERSONAL_OS_BASE_URL || `http://localhost:${e.LITELLM_PORT || 4000}`
-    llmKey = e.LITELLM_MASTER_KEY || e.PERSONAL_OS_API_KEY || ''
+    llmUrl = `http://localhost:${e.LITELLM_PORT || 4000}`
+    llmKey = e.LITELLM_MASTER_KEY || ''
   } else {
     llm = await startMockLLM()
     llmUrl = llm.url
@@ -144,6 +156,7 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
   }
   // Skip the first-run wizard and seed anything the test wants before the renderer loads.
   try {
+    await seedProvider(backend, token, { llmUrl, llmKey })
     // The suite never runs permissionMode 'auto' (the shipped default): the mock cannot answer the safety reviewer. pytest covers it.
     await api('/settings', { method: 'PUT', body: { onboardedAt: new Date().toISOString(), autonomousByDefault: false, permissionMode: 'manual', ...settings } })
     if (beforeApp) await beforeApp({ api, backend, dataDir })
@@ -191,6 +204,8 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
     Object.assign(g, await openApp())
     return g.page
   }
+  /** Point the seeded (custom) provider at another mock server; the backend verifies the address first. */
+  g.repoint = (url) => api('/providers/custom', { method: 'PUT', body: { baseUrl: url } })
   g.close = async () => {
     try { await g.app.close() } catch {}
     await backend.stop()

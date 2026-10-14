@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 
-export type TermMode = 'attach' | 'shell'
+export type TermMode = 'attach' | 'shell' | 'opencode'
 export type TermState = 'opening' | 'live' | 'exited'
 
 /** One terminal view: its xterm instance, the element it lives in, and the PTY (in the main process) behind it. */
@@ -86,7 +86,7 @@ function subscribeOnce(): void {
     if (!e) return
     e.termId = null
     e.state = 'exited'
-    e.term.write(`\r\n\x1b[2m${e.mode === 'attach' ? '[session detached - press Enter to reattach]' : '[shell exited]'}\x1b[0m\r\n`)
+    e.term.write(`\r\n\x1b[2m${e.mode === 'attach' ? '[session detached - press Enter to reattach]' : e.mode === 'opencode' ? '[OpenCode exited]' : '[shell exited]'}\x1b[0m\r\n`)
     emit()
   })
 }

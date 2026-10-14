@@ -41,6 +41,14 @@ function rig(over: Partial<HubDeps> = {}, session: SessionInfo | null = { agent:
 }
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
+test('pickArgv opencode mode runs a fixed argv with the id and folder as parameters', () => {
+  const ok = { agent: 'opencode', session_id: 'ses_ee1ad8d25ffeAw2DdV0gMLBAkm', status: 'done', worktree: '/w t', mode: 'opencode', shell: '/bin/zsh' }
+  assert.deepEqual(pickArgv(ok), ['/bin/zsh', '-l', '-c', 'exec opencode -s "$1" "$2"', 'opencode', 'ses_ee1ad8d25ffeAw2DdV0gMLBAkm', '/w t'])
+  for (const bad of [{ agent: 'claude' }, { session_id: 'ses_a b' }, { session_id: null }, { status: 'working' }, { worktree: 'rel' }]) {
+    assert.ok('error' in (pickArgv({ ...ok, ...bad }) as object), JSON.stringify(bad))
+  }
+})
+
 test('session id validation is strict', () => {
   assert.ok(isSessionId(SID))
   for (const bad of ['', 'A1B2C3D4E5F60718', 'a1b2c3d4', SID + '0', '../etc/passwd', `${SID}/x`, `${SID}\n`, 5, null, undefined, {}]) {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
 import { useStore } from '../store'
-import { AGENT_LABEL, canAttach, codingDot, codingStatusLabel, defaultTermMode, defaultTermSession, termSessions } from '../lib/codingSessions'
+import { AGENT_LABEL, canAttach, canOpen, codingDot, codingLive, codingStatusLabel, defaultTermMode, defaultTermSession, termSessions } from '../lib/codingSessions'
 import { endEntry, ensureEntry, getEntry, refit, startEntry, useTermEntries, type TermMode } from '../lib/termRegistry'
 import { CodingTimeline } from './CodingTimeline'
 import ShellJobs from './ShellJobs'
@@ -63,7 +63,7 @@ export default function TerminalPane({ conversationId }: { conversationId?: stri
 
   // The mode on screen: the one picked, else whichever view of this session already exists.
   const have = (m: TermMode): boolean => !!sessionId && entries.some((e) => e.sessionId === sessionId && e.mode === m)
-  const shownMode: TermMode | null = mode && have(mode) ? mode : have('attach') ? 'attach' : have('shell') ? 'shell' : null
+  const shownMode: TermMode | null = mode && have(mode) ? mode : have('attach') ? 'attach' : have('opencode') ? 'opencode' : have('shell') ? 'shell' : null
   const shown = sessionId && shownMode ? getEntry(sessionId, shownMode) ?? null : null
 
   // Mount the shown view's DOM; every other one stays detached but alive in the registry.
@@ -95,13 +95,17 @@ export default function TerminalPane({ conversationId }: { conversationId?: stri
       {selected && (
         <div className="term-actions">
           {canAttach(selected) && <button type="button" className="ghost-btn sm" data-testid="term-attach" onClick={() => start(selected.id, 'attach')}>Attach</button>}
+          {canOpen(selected) && <button type="button" className="ghost-btn sm" data-testid="term-opencode" onClick={() => start(selected.id, 'opencode')}>Open in OpenCode</button>}
           <button type="button" className="ghost-btn sm" data-testid="term-shell" onClick={() => start(selected.id, 'shell')}>Shell in worktree</button>
           <span className="spacer" />
           {shown && <button type="button" className="ghost-btn sm" data-testid="term-end" disabled={shown.state === 'opening'} onClick={() => { endEntry(shown); setMode(null) }}>End</button>}
         </div>
       )}
       <div className="term-view" data-testid="term-view" ref={viewRef} style={shown ? undefined : { display: 'none' }} />
-      {selected && !shown && (canAttach(selected) ? <p className="muted small">Attach to the session or open a shell in its worktree.</p> : <CodingTimeline id={selected.id} />)}
+      {selected && !shown && (canAttach(selected) ? <p className="muted small">Attach to the session or open a shell in its worktree.</p> : <>
+        {selected.agent === 'opencode' && codingLive(selected.status) && <p className="muted small">OpenCode can open this session once the run finishes.</p>}
+        <CodingTimeline id={selected.id} />
+      </>)}
       {!selected && <p className="muted small">No coding session in this chat yet. Running shell commands show above.</p>}
     </div>
   )

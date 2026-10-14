@@ -15,11 +15,6 @@
 /* Resolved plan cards settle: colour and fade ride the gentle spring when the class flips. */
 .aplan { transition: background-color var(--dur-spring) var(--spring-gentle), border-color var(--dur-spring) var(--spring-gentle), opacity var(--dur-spring) var(--spring-gentle); }
 
-/* Buttons on a card sink a pixel while pressed. */
-.approval button:active:not(:disabled),
-.aplan button:active:not(:disabled),
-.tc-card button:active:not(:disabled) { transform: translateY(var(--press-sink)); }
-
 /* The outcome wash (SettleWash): sits over a row that just stopped waiting, then fades. */
 .tool-event:has(> .settle-wash) { position: relative; }
 .settle-wash {

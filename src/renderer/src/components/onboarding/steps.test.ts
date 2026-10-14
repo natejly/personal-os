@@ -43,11 +43,12 @@ test('picking resets the key; editing invalidates the test', () => {
   let s = reduce(initialState(), { type: 'pick', provider: fw })
   s = reduce(s, { type: 'field', patch: { apiKey: 'secret' } })
   s = reduce(s, { type: 'test', test: { state: 'fail', error: 'x' } })
-  s = reduce(s, { type: 'field', patch: { apiKey: 'other' } })
+  s = reduce(s, { type: 'field', patch: { apiKey: 'other', model: 'm2' } })
   assert.equal(s.test.state, 'idle')
   assert.equal(reduce(s, { type: 'pick', provider: fw }), s, 're-picking the same provider keeps what was typed')
   s = reduce(s, { type: 'pick', provider: ol })
   assert.equal(s.apiKey, '')
+  assert.equal(s.model, '')
   assert.equal(s.baseUrl, ol.baseUrl)
 })
 

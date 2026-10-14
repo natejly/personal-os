@@ -20,6 +20,8 @@ export interface WizardState {
   providerId: string | null
   baseUrl: string
   apiKey: string
+  /** Optional model id, for a custom server that cannot list its models. */
+  model: string
   /** The key step's check of the provider: nothing is saved unless it passes. */
   test: { state: 'idle' | 'testing' | 'fail'; error?: string }
 }
@@ -28,14 +30,14 @@ export type WizardAction =
   | { type: 'next' }
   | { type: 'back' }
   | { type: 'pick'; provider: ProviderPreset }
-  | { type: 'field'; patch: Partial<Pick<WizardState, 'baseUrl' | 'apiKey'>> }
+  | { type: 'field'; patch: Partial<Pick<WizardState, 'baseUrl' | 'apiKey' | 'model'>> }
   | { type: 'test'; test: WizardState['test'] }
 
 /** Providers where the user, not us, decides where the endpoint lives. */
 const EDITABLE_BASE = new Set(['litellm', 'custom', 'ollama'])
 export const showsBaseUrl = (providerId: string | null): boolean => !!providerId && EDITABLE_BASE.has(providerId)
 
-export const initialState = (): WizardState => ({ step: 'welcome', providerId: null, baseUrl: '', apiKey: '', test: { state: 'idle' } })
+export const initialState = (): WizardState => ({ step: 'welcome', providerId: null, baseUrl: '', apiKey: '', model: '', test: { state: 'idle' } })
 
 /** What the current step still lacks, or null when the user may go on. */
 export function stepBlocker(s: WizardState, provider: ProviderPreset | undefined): string | null {
@@ -52,7 +54,7 @@ export function reduce(s: WizardState, a: WizardAction, provider?: ProviderPrese
     case 'pick':
       // Switching provider drops the old key: it belongs to the other service.
       if (a.provider.id === s.providerId) return s
-      return { ...s, providerId: a.provider.id, baseUrl: a.provider.baseUrl, apiKey: '', test: { state: 'idle' } }
+      return { ...s, providerId: a.provider.id, baseUrl: a.provider.baseUrl, apiKey: '', model: '', test: { state: 'idle' } }
     case 'field':
       // Any edit invalidates a previous test: it vouched for different inputs.
       return { ...s, ...a.patch, test: { state: 'idle' } }

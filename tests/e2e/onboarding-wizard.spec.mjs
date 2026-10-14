@@ -36,9 +36,10 @@ test('first run: wizard connects on the key step, finishes, and never returns af
     await w.getByRole('radio', { name: /Custom/ }).click()
     await cont(page).click()
 
-    // key: the address is required; there is no model field, the provider's own list supplies the models
+    // key: the address is required; the model id is optional (only for servers that cannot list models)
     await expect(w.getByRole('heading', { name: 'Connect your account' })).toBeVisible()
-    await expect(w.getByLabel('Model')).toHaveCount(0)
+    await expect(w.getByLabel('Model id (optional)')).toBeVisible()
+    await w.getByLabel('Model id (optional)').fill('mock-chat-2')
     await w.getByLabel('Provider address').fill('')
     await expect(cont(page)).toBeDisabled()
     await expect(w.getByText('Enter the base URL to continue.')).toBeVisible()

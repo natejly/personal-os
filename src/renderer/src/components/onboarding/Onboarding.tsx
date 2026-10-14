@@ -49,7 +49,7 @@ export default function Onboarding(): JSX.Element {
     const me = ++run.current
     dispatch({ type: 'test', test: { state: 'testing' } })
     try {
-      const r = await api.providers.add({ kind: provider.id, ...(showsBaseUrl(provider.id) ? { baseUrl: state.baseUrl.trim() } : {}), apiKey: state.apiKey.trim() || null })
+      const r = await api.providers.add({ kind: provider.id, ...(showsBaseUrl(provider.id) ? { baseUrl: state.baseUrl.trim() } : {}), apiKey: state.apiKey.trim() || null, ...(provider.id === 'custom' && state.model.trim() ? { model: state.model.trim() } : {}) })
       if (me !== run.current) return
       if (!r.ok) return dispatch({ type: 'test', test: { state: 'fail', error: r.error } })
       // The backend persisted the provider and the default model; pull them into the store.
@@ -60,7 +60,7 @@ export default function Onboarding(): JSX.Element {
     } catch (e) {
       if (me === run.current) dispatch({ type: 'test', test: { state: 'fail', error: `Could not connect: ${(e as Error).message}` } })
     }
-  }, [provider, state.baseUrl, state.apiKey, dispatch])
+  }, [provider, state.baseUrl, state.apiKey, state.model, dispatch])
 
   const finish = (): void => {
     useStore.getState().newChat()
@@ -86,7 +86,7 @@ export default function Onboarding(): JSX.Element {
   }
 
   const stepIndex = STEPS.indexOf(state.step)
-  const field = (patch: Partial<Pick<WizardState, 'baseUrl' | 'apiKey'>>): void => dispatch({ type: 'field', patch })
+  const field = (patch: Partial<Pick<WizardState, 'baseUrl' | 'apiKey' | 'model'>>): void => dispatch({ type: 'field', patch })
 
   return (
     <div className="onboarding" ref={root} role="dialog" aria-modal="true" aria-labelledby="ob-title" onKeyDown={onKeyDown}>
@@ -135,6 +135,7 @@ export default function Onboarding(): JSX.Element {
               providers={providers ?? []} provider={provider} providerId={provider.id}
               baseUrl={state.baseUrl} onBaseUrl={(v) => field({ baseUrl: v })}
               apiKey={state.apiKey} onApiKey={(v) => field({ apiKey: v })}
+              model={state.model} onModel={(v) => field({ model: v })}
             />
             {state.test.state === 'fail' && <p className="ob-error" role="alert">{state.test.error}</p>}
             <p className="muted small"><Lock size={11} /> Your key is stored on this Mac only.</p>

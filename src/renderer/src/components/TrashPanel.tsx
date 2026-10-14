@@ -46,7 +46,7 @@ export default function TrashPanel(): JSX.Element {
     try { await api.trash.purge(type, id) } catch (e) { toast((e as Error).message, 'error') }
     await load()
   }
-  // The confirm step is holding the button (HoldButton), not a dialog.
+  // The confirm step is holding the button (HoldButton); the keyboard gets a confirm() dialog instead.
   const forever = (it: TrashItem): void => { void purge(it.type, it.id) }
   const empty = async (): Promise<void> => {
     if (!list) return
@@ -69,13 +69,13 @@ export default function TrashPanel(): JSX.Element {
               <span className="trash-title" title={it.title}>{it.title}</span>
               <small>{detail(it)}</small>
               <button className="ghost-btn sm" onClick={() => void restore(it)}><RotateCcw size={13} /> Restore</button>
-              <HoldButton className="icon-btn sm danger" aria-label={`Delete ${it.title} forever`} title={it.type === 'project' ? 'Hold to delete forever (its chats, memories and uploads go too)' : 'Hold to delete forever'} onConfirm={() => forever(it)}><Trash2 size={13} /></HoldButton>
+              <HoldButton className="icon-btn sm danger" aria-label={`Delete ${it.title} forever`} title={it.type === 'project' ? 'Hold to delete forever (its chats, memories and uploads go too)' : 'Hold to delete forever'} confirmText={`Delete “${it.title}” forever? This cannot be undone.${it.type === 'project' ? ' Its chats, memories and uploads go with it.' : ''}`} onConfirm={() => forever(it)}><Trash2 size={13} /></HoldButton>
             </div>
           ))}
         </div>
       ))}
       {list && list.total > 0 && (
-        <div className="button-row"><HoldButton className="ghost-btn danger" title="Hold to permanently delete everything in the trash" onConfirm={() => void empty()}><Trash2 size={14} /> Empty trash</HoldButton></div>
+        <div className="button-row"><HoldButton className="ghost-btn danger" title="Hold to permanently delete everything in the trash" confirmText={`Permanently delete all ${list.total} item${list.total === 1 ? '' : 's'} in the trash? This cannot be undone.`} onConfirm={() => void empty()}><Trash2 size={14} /> Empty trash</HoldButton></div>
       )}
     </section>
   )

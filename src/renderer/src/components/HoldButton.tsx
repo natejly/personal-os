@@ -3,10 +3,12 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 /**
  * A button for actions that permanently delete data. A pointer must hold it for --dur-hold while a
  * fill grows across it; letting go early cancels and the fill springs back. Enter / Space (a click
- * with no pointer, detail 0) confirms at once, so the keyboard path is never slowed.
+ * with no pointer, detail 0) cannot hold, so it asks with a native confirm() first.
  */
-export function HoldButton({ onConfirm, className = '', children, ...rest }: {
+export function HoldButton({ onConfirm, confirmText, className = '', children, ...rest }: {
   onConfirm: () => void
+  /** Asked via confirm() when the button is activated from the keyboard. */
+  confirmText: string
   className?: string
   children: ReactNode
   title?: string
@@ -33,7 +35,7 @@ export function HoldButton({ onConfirm, className = '', children, ...rest }: {
       onPointerUp={cancel}
       onPointerLeave={cancel}
       onPointerCancel={cancel}
-      onClick={(e) => { if (e.detail === 0) onConfirm() }}
+      onClick={(e) => { if (e.detail === 0 && confirm(confirmText)) onConfirm() }}
       {...rest}
     >
       {children}

@@ -12,6 +12,9 @@ export function isDashboardContent(content: string): boolean {
   } catch { return false }
 }
 
+/** True for a doc list row the backend marked as a saved dashboard. */
+export const isDashboardDoc = (d: { kind?: string } | null | undefined): boolean => d?.kind === 'dashboard'
+
 /** "Oct 13, 3:42 PM" in the 12-hour clock; empty for an unparseable value. */
 export function fmtStamp(iso: string | number | null | undefined): string {
   if (iso === null || iso === undefined || iso === '') return ''

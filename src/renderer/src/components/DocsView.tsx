@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   FileText, Files, PanelRight, X, Columns2, Eye, Pencil, MessageSquarePlus, Type,
-  Sparkles, FolderTree, SlidersHorizontal, Code2
+  Sparkles, FolderTree, SlidersHorizontal, Code2, LayoutDashboard
 } from '../icons'
 import { flushDocOnUnload, restoreDocTabs, useStore, type FilesSection } from '../store'
 import { api, type DocHit } from '../lib/api'
@@ -34,7 +34,7 @@ import '../styles/docs.css'
 import AppSwitcher from './AppSwitcher'
 import DocumentsView from './DocumentsView'
 import DashboardView from './DashboardView'
-import { isDashboardContent } from '../lib/dashboards'
+import { isDashboardContent, isDashboardDoc } from '../lib/dashboards'
 import ArtifactsView from './ArtifactsView'
 import ScopeSelect from './ScopeSelect'
 import SidebarToggle from './SidebarToggle'
@@ -334,7 +334,7 @@ export default function DocsView(): JSX.Element {
             <ResizeHandle id="docs-tree-w" defaultSize={240} min={170} max={480} grows="right" onCollapse={() => setTreeOpen(false)} label="File tree width" className="docs-tree-edge" />
           </>
         )}
-        {activeDoc && panelOpen && (
+        {activeDoc && panelOpen && !showDash && (
           <ResizeHandle id="docs-history-w" defaultSize={380} min={280} max={720} grows="left" onCollapse={() => setPanel({ ...panel, open: false })} label="Side panel width" className="docs-history-edge" />
         )}
 
@@ -351,7 +351,7 @@ export default function DocsView(): JSX.Element {
               <div className="doc-tabs">
                 {tabDocs.map((d) => (
                   <button key={d.id} className={`doc-tab ${d.id === activeDoc.id ? 'active' : ''}`} onClick={() => void openDoc(d.id)}>
-                    <FileText size={11} />{d.title || 'Untitled'}
+                    {isDashboardDoc(d) ? <LayoutDashboard size={11} /> : <FileText size={11} />}{d.title || 'Untitled'}
                     <span className="tab-x" role="button" title="Close tab" aria-label={`Close ${d.title || 'Untitled'}`} onClick={(e) => { e.stopPropagation(); void closeDocTab(d.id) }}><X size={11} /></span>
                   </button>
                 ))}
@@ -370,22 +370,22 @@ export default function DocsView(): JSX.Element {
               />
               {(docSaving || dirty) && <span className="doc-save-state" title={docSaving ? 'Saving…' : 'Unsaved changes'} aria-label="Unsaved changes" />}
               <span className="spacer" />
-              <div className="seg">
+              {!showDash && <div className="seg">
                 <button className={docMode === 'edit' ? 'on' : ''} title="Editor only" onClick={() => setDocMode('edit')}><Pencil size={13} /></button>
                 <button className={docMode === 'split' ? 'on' : ''} title="Editor and preview" onClick={() => setDocMode('split')}><Columns2 size={13} /></button>
                 <button className={docMode === 'preview' ? 'on' : ''} title="Preview only" onClick={() => setDocMode('preview')}><Eye size={13} /></button>
-              </div>
-              {showEditor && (
+              </div>}
+              {!showDash && showEditor && (
                 <button className="icon-btn ghost" title="Comment on the selected text" aria-label="Comment on the selected text" onClick={() => {
                   const h = editor.current
                   const sel = h?.getSelection()
                   if (h && sel && sel.end > sel.start) commentOn(makeAnchor(h.getText(), sel.start, sel.end))
                 }}><MessageSquarePlus size={14} /></button>
               )}
-              <ViewMenu icon={<Type size={14} />} title="Font" className="doc-type-menu">
+              {!showDash && <ViewMenu icon={<Type size={14} />} title="Font" className="doc-type-menu">
                 <TypographyControls value={type} onChange={patchType} onReset={activeDoc.typography ? () => void setDocTypography(activeDoc.id, null) : undefined} />
-              </ViewMenu>
-              {showEditor && (
+              </ViewMenu>}
+              {!showDash && showEditor && (
                 <ViewMenu>
                   <button role="menuitemcheckbox" aria-checked={writeFlags.focus} className="notes-menu-row" title="Dim all but the current paragraph" onClick={() => toggleFlag('focus')}>{writeFlags.focus ? '✓ ' : ''}Focus mode</button>
                   <button role="menuitemcheckbox" aria-checked={writeFlags.typewriter} className="notes-menu-row" title="Keep the caret line mid-height" onClick={() => toggleFlag('typewriter')}>{writeFlags.typewriter ? '✓ ' : ''}Typewriter scrolling</button>
@@ -393,14 +393,14 @@ export default function DocsView(): JSX.Element {
                 </ViewMenu>
               )}
               {isDash && <button className={`icon-btn ghost ${showDash ? '' : 'on'}`} title={showDash ? 'Show source' : 'Show dashboard'} aria-label="Toggle dashboard source" aria-pressed={!showDash} onClick={() => setRawDocId(showDash ? activeDoc.id : null)}><Code2 size={14} /></button>}
-              <ExportMenu title={title} content={body} projectId={activeDoc.project_id ?? null} />
+              {!showDash && <ExportMenu title={title} content={body} projectId={activeDoc.project_id ?? null} />}
               {/* One toggle for the whole panel; the tab strip inside picks what it shows. The dot
                   keeps counting assistant edits waiting for review, whatever tab is open. */}
-              <button className={`icon-btn ghost ${panelOpen ? 'on' : ''}`} title={panelOpen ? 'Hide side panel' : 'Show outline, comments, links and history'}
+              {!showDash && <button className={`icon-btn ghost ${panelOpen ? 'on' : ''}`} title={panelOpen ? 'Hide side panel' : 'Show outline, comments, links and history'}
                 aria-label="Toggle side panel" aria-pressed={panelOpen} onClick={() => setPanel({ ...panel, open: !panelOpen })}>
                 <PanelRight size={14} />
                 {pending.length > 0 && <span className="dot-badge">{pending.length}</span>}
-              </button>
+              </button>}
             </div>
 
             {pending.length > 0 && !historyOpen && (
@@ -416,8 +416,8 @@ export default function DocsView(): JSX.Element {
               </div>
             )}
 
-            {showEditor && <FormatBar editor={editor} />}
-            {showDash ? <div className="docs-render reading"><DashboardView id={activeDoc.id} /></div> : <div className={`doc-panes ${docMode}`} style={typeStyle}>
+            {!showDash && showEditor && <FormatBar editor={editor} />}
+            {showDash ? <div className="docs-render reading" style={{ paddingInline: 22 }}><DashboardView id={activeDoc.id} /></div> : <div className={`doc-panes ${docMode}`} style={typeStyle}>
               {docMode === 'split' && (
                 <ResizeHandle id="doc-split" unit="%" defaultSize={50} min={20} max={80} grows="right" label="Editor and preview split" className="doc-split-edge" />
               )}
@@ -461,11 +461,11 @@ export default function DocsView(): JSX.Element {
                 </div>
               )}
             </div>}
-            <DocCommentFab fab={comments.fab} onComment={() => { if (comments.fab) commentOn(comments.fab.anchor) }} />
+            {!showDash && <DocCommentFab fab={comments.fab} onComment={() => { if (comments.fab) commentOn(comments.fab.anchor) }} />}
           </section>
         )}
 
-        {activeDoc && panelOpen && (
+        {activeDoc && panelOpen && !showDash && (
           <aside className="docs-history">
             <header className="docs-panel-tabs" role="tablist">
               {PANEL_TABS.map((t) => (

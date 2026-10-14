@@ -205,6 +205,7 @@ def title_from_body(body: str, fallback: str = "Sticky note", limit: int = 60) -
 
 # The folder daily notes live in (personal tree), and the shape of a wiki link: [[Title]] or [[Title|alias]].
 DAILY_FOLDER = "Daily"
+_DASHBOARD_BODY = re.compile(r'^\s*\{\s*"grainDashboard"\s*:\s*1\b')  # saved-dashboard envelope; saved_dashboards.py writes the marker first
 _WIKI_LINK = re.compile(r"\[\[([^\[\]|]*?)(?:\|[^\[\]]*)?\]\]")
 
 
@@ -480,7 +481,7 @@ class Docs:
             tl = d.pop("tag_list")
             d["tags"] = sorted(tl.split("\n")) if tl else []
             body = d.pop("content") or ""  # the list shows a preview; bodies stay out of the payload
-            out.append({**d, "preview": body[:240], "words": word_count(body)})
+            out.append({**d, "preview": body[:240], "words": word_count(body), "kind": "dashboard" if _DASHBOARD_BODY.match(body) else "doc"})
         return out
 
     def get(self, id: str) -> dict[str, Any] | None:

@@ -1,7 +1,7 @@
 import { modelLabel } from '../lib/modelLabel'
 import { useSlidingPill } from "../lib/useSlidingPill"
 import { useEffect, useMemo, useState } from 'react'
-import { X, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, ShieldAlert, MonitorDot, PenLine } from '../icons'
+import { X, ChevronRight, ChevronDown, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, ShieldAlert, MonitorDot, PenLine } from '../icons'
 import { ToolOverrides } from './ToolPermissions'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
 import { api } from '../lib/api'
@@ -12,6 +12,7 @@ import { fmtCost, usageLine } from '../lib/chatMeta'
 import { compactNow } from '../lib/compact'
 import { humanizeTaintSources } from '../lib/taintSources'
 import { tip } from '../lib/tip'
+import { contextBreakdown, fmtTok } from '../lib/contextBreakdown'
 
 /** The hint is a tooltip on the row; `fix` is a link to the Settings tab that turns this source on, kept visible beside the label. */
 function Toggle({ label, hint, value, onChange, icon, disabled, fix }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element; disabled?: boolean; fix?: { label: string; open: () => void } }): JSX.Element {
@@ -26,7 +27,43 @@ function Toggle({ label, hint, value, onChange, icon, disabled, fix }: { label: 
 }
 
 /** Replayed history against the model window, with manual compaction and the summary it produced. */
-function ContextMeterView({ conversationId, refreshKey }: { conversationId: string; refreshKey: string }): JSX.Element | null {
+const USAGE_COLORS = ['#5b8def', '#d9693f', '#3fa37a', '#d9a13f', '#9a8fd0', '#c9708f', '#4fb0c6']
+
+/** The side panel's Context card: percent of the window used, a segmented bar, one row per category, then each group's detail unfolding. */
+function UsageBreakdown({ meter, ctx, messageId }: { meter: ContextMeter; ctx: ContextUsed | null; messageId?: string }): JSX.Element {
+  const [open, setOpen] = useState<string | null>(null)
+  const b = contextBreakdown(meter, ctx)
+  const pct = (n: number): string => `${+((n / b.window) * 100).toFixed(1)}%`
+  const details = b.slices.filter((x) => x.count > 0)
+  return (
+    <div className="ctx-usage-card">
+      <div className="ctx-usage-head"><b>{Math.round(b.pct)}% used</b><span className="muted">{fmtTok(b.used)} / {fmtTok(b.window)}</span></div>
+      <div className="ctx-seg" role="img" aria-label={`${Math.round(b.pct)}% of the context window used`}>
+        {b.slices.map((x, i) => <span key={x.key} style={{ width: `${(x.tokens / b.window) * 100}%`, background: USAGE_COLORS[i % USAGE_COLORS.length] }} />)}
+      </div>
+      <ul className="ctx-rows">
+        {b.slices.map((x, i) => (
+          <li key={x.key}><i style={{ background: USAGE_COLORS[i % USAGE_COLORS.length] }} /><span>{x.label}</span><span className="muted">{fmtTok(x.tokens)}</span><span>{pct(x.tokens)}</span></li>
+        ))}
+        <li><i className="free" /><span>Free space</span><span className="muted">{fmtTok(b.free)}</span><span>{pct(b.free)}</span></li>
+      </ul>
+      {ctx && (details.length > 0 || ctx.page || messageId) && (
+        <div className="ctx-groups">
+          {[...details.map((x) => ({ key: x.key, label: x.label, n: String(x.count) })), ...(ctx.page ? [{ key: 'page', label: 'Page', n: '' }] : []), ...(messageId ? [{ key: 'request', label: 'Exact request', n: '' }] : [])].map((x) => (
+            <div key={x.key}>
+              <button className="ctx-group-head" aria-expanded={open === x.key} onClick={() => setOpen(open === x.key ? null : x.key)}>
+                {open === x.key ? <ChevronDown size={12} /> : <ChevronRight size={12} />}<span>{x.label}</span><span className="muted">{x.n}</span>
+              </button>
+              {open === x.key && (x.key === 'request' && messageId ? <ExactRequest messageId={messageId} /> : <ContextUsedView ctx={ctx} only={x.key} />)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ContextMeterView({ conversationId, refreshKey, embedded, ctx, messageId }: { conversationId: string; refreshKey: string; embedded?: boolean; ctx?: ContextUsed | null; messageId?: string }): JSX.Element | null {
   const [meter, setMeter] = useState<ContextMeter | null>(null)
   const [spent, setSpent] = useState<ConversationUsage | null>(null)
   const [busy, setBusy] = useState(false)
@@ -55,10 +92,12 @@ function ContextMeterView({ conversationId, refreshKey }: { conversationId: stri
   }
   return (
     <section className="ctx-section">
-      <h4>Context window</h4>
-      <div className="ctx-meter" title={`${Math.round(meter.compact_at * 100)}% triggers automatic compaction`}>
-        <div className={`ctx-meter-fill ${frac >= meter.compact_at ? 'hot' : ''}`} style={{ width: `${frac * 100}%` }} />
-      </div>
+      {embedded ? <UsageBreakdown meter={meter} ctx={ctx ?? null} messageId={messageId} /> : <>
+        <h4>Context window</h4>
+        <div className="ctx-meter" title={`${Math.round(meter.compact_at * 100)}% triggers automatic compaction`}>
+          <div className={`ctx-meter-fill ${frac >= meter.compact_at ? 'hot' : ''}`} style={{ width: `${frac * 100}%` }} />
+        </div>
+      </>}
       <div className="ctx-meta">
         <span>~{meter.estimated_tokens.toLocaleString()} of {meter.window.toLocaleString()} tokens</span>
         {focus === null && <button className="ghost-btn xs" disabled={busy} onClick={() => setFocus('')}>{busy ? 'compacting…' : 'Compact now'}</button>}
@@ -115,7 +154,8 @@ function ExactRequest({ messageId }: { messageId: string }): JSX.Element {
   )
 }
 
-function ContextUsedView({ ctx, messageId }: { ctx: ContextUsed; messageId?: string }): JSX.Element {
+function ContextUsedView({ ctx, messageId, only }: { ctx: ContextUsed; messageId?: string; only?: string }): JSX.Element {
+  const g = (k: string): boolean => !only || only === k
   const openMemory = useStore((s) => s.openMemory)
   const openFiles = useStore((s) => s.openFiles)
   const memories = useStore((s) => s.memories)
@@ -126,42 +166,42 @@ function ContextUsedView({ ctx, messageId }: { ctx: ContextUsed; messageId?: str
     || Boolean(ctx.map) || Boolean(ctx.page) || Boolean(ctx.style) || (ctx.pinned?.length ?? 0) > 0
   return (
     <div className="ctx-used">
-      <div className="ctx-meta">
+      {!only && <div className="ctx-meta">
         ~{ctx.tokens_estimate} tokens of context
         {ctx.trimmed && Object.keys(ctx.trimmed).length > 0 && <span className="muted"> · trimmed {Object.entries(ctx.trimmed).map(([k, n]) => `${k} ${n}`).join(', ')}</span>}
         {(ctx.tools_deferred ?? 0) > 0 && <span className="muted" title="Held out of the request until the assistant searches for them"> · {ctx.tools_deferred} tools loaded on demand</span>}
         {devTools && ctx.system_prompt && <button className="link" onClick={() => setShowPrompt((v) => !v)}>{showPrompt ? 'hide' : 'view full system prompt'}</button>}
-      </div>
-      {devTools && showPrompt && <pre className="ctx-prompt">{ctx.system_prompt}</pre>}
-      {messageId && <ExactRequest messageId={messageId} />}
-      {!has && <p className="muted">Nothing from memory, graph, or files was relevant.</p>}
-      {ctx.page && (
+      </div>}
+      {!only && devTools && showPrompt && <pre className="ctx-prompt">{ctx.system_prompt}</pre>}
+      {!only && messageId && <ExactRequest messageId={messageId} />}
+      {!only && !has && <p className="muted">Nothing from memory, graph, or files was relevant.</p>}
+      {g('page') && ctx.page && (
         <section>
           <h5><MonitorDot size={12} /> Page — {ctx.page.label}</h5>
           {ctx.page.selection && <div className="chunk-preview"><b>selection:</b> {ctx.page.selection}</div>}
           <pre className="ctx-prompt">{ctx.page.detail}</pre>
         </section>
       )}
-      {ctx.style && (
+      {g('style') && ctx.style && (
         <section>
           <h5><PenLine size={12} /> Writing style {ctx.style.project_id ? '(project voice)' : '(your voice)'} <button className="link" onClick={() => openMemory('style')}>edit</button></h5>
           <p className="muted small">{ctx.style.summary}</p>
           <ul>{ctx.style.guidelines.map((g) => <li key={g}>{g}</li>)}</ul>
         </section>
       )}
-      {(ctx.profile?.length ?? 0) > 0 && (
+      {g('memory') && (ctx.profile?.length ?? 0) > 0 && (
         <section>
           <h5><Brain size={12} /> Standing preferences ({ctx.profile!.length}) <button className="link" onClick={() => openMemory('list')}>edit</button></h5>
           <ul>{ctx.profile!.map((m) => <li key={m.id} className={memories.some((x) => x.id === m.id) ? '' : 'stale'}>{m.project_id ? '' : <Globe size={10} />} {m.content}</li>)}</ul>
         </section>
       )}
-      {ctx.memories.length > 0 && (
+      {g('memory') && ctx.memories.length > 0 && (
         <section>
           <h5><Brain size={12} /> Memories ({ctx.memories.length}) <button className="link" onClick={() => openMemory('list')}>edit</button></h5>
           <ul>{ctx.memories.map((m) => <li key={m.id} className={memories.some((x) => x.id === m.id) ? '' : 'stale'}>{m.project_id ? '' : <Globe size={10} />} {m.content}</li>)}</ul>
         </section>
       )}
-      {ctx.nodes.length > 0 && (
+      {g('graph') && ctx.nodes.length > 0 && (
         <section>
           <h5><Share2 size={12} /> Graph ({ctx.nodes.filter((n) => !n.kind).length} entit{ctx.nodes.filter((n) => !n.kind).length === 1 ? 'y' : 'ies'}, {ctx.edges.length} relation{ctx.edges.length === 1 ? '' : 's'}) <button className="link" onClick={() => openMemory('graph')}>edit</button></h5>
           <ul>
@@ -174,13 +214,13 @@ function ContextUsedView({ ctx, messageId }: { ctx: ContextUsed; messageId?: str
           </ul>
         </section>
       )}
-      {(ctx.skills?.length ?? 0) > 0 && (
+      {g('skills') && (ctx.skills?.length ?? 0) > 0 && (
         <section>
           <h5><GraduationCap size={12} /> Skills ({ctx.skills?.length}) <button className="link" onClick={() => { useStore.getState().setLibraryTab('skills'); useStore.getState().setView('library') }}>review</button></h5>
           <ul>{ctx.skills?.map((s) => <li key={s.id}><b>{s.name}</b>{s.description ? ` — ${s.description}` : ''}</li>)}</ul>
         </section>
       )}
-      {ctx.map && (
+      {g('map') && ctx.map && (
         <section>
           <h5><Share2 size={12} /> Workspace map (~{ctx.map.tokens} tokens{ctx.map.shrunk ? ', shortened' : ''})</h5>
           {Object.keys(ctx.map.sections).length > 0 && <p className="muted small">{Object.entries(ctx.map.sections).map(([k, n]) => `${k} ${n}`).join(' · ')}</p>}
@@ -191,13 +231,13 @@ function ContextUsedView({ ctx, messageId }: { ctx: ContextUsed; messageId?: str
           </details>
         </section>
       )}
-      {(ctx.pinned?.length ?? 0) > 0 && (
+      {g('files') && (ctx.pinned?.length ?? 0) > 0 && (
         <section>
           <h5><FileText size={12} /> Pinned ({ctx.pinned!.length})</h5>
           <ul>{ctx.pinned!.map((p) => <li key={p.document_id}><b>{p.name}</b></li>)}</ul>
         </section>
       )}
-      {ctx.chunks.length > 0 && (
+      {g('files') && ctx.chunks.length > 0 && (
         <section>
           <h5><FileText size={12} /> Uploads ({ctx.chunks.length} excerpt{ctx.chunks.length === 1 ? '' : 's'}) <button className="link" onClick={() => openFiles('uploads')}>Files</button></h5>
           <ul>{ctx.chunks.map((c, i) => <li key={c.chunk_id ?? c.url ?? `${c.n ?? i}`}><button className="link" title={c.source === 'web' ? c.url : 'Open the passage in its source'} onClick={() => openCite(c, setViewing)}>{c.n ? `[${c.n}] ` : ''}<b>{c.source === 'web' ? citeLabel(c) : c.name}</b>{c.idx != null ? ` · chunk ${c.idx + 1}` : ''}</button><div className="chunk-preview">{c.text}</div></li>)}</ul>
@@ -272,7 +312,7 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
         </div>
       </section>
 
-      {convo && <ContextMeterView conversationId={convo.id} refreshKey={`${convo.messages?.length ?? 0}:${streamingMessageId ?? ''}`} />}
+      {convo && <ContextMeterView conversationId={convo.id} refreshKey={`${convo.messages?.length ?? 0}:${streamingMessageId ?? ''}`} embedded={embedded} ctx={lastCtx?.ctx} messageId={lastCtx?.id} />}
 
       <section className="ctx-section">
         <h4>{convo ? 'This chat uses' : 'New chats use'}</h4>
@@ -312,13 +352,13 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
         })()}
       </section>
 
-      <div className="ctx-tabs pill-group" ref={tabsPill}>
+      {(!embedded || devTools) && <div className="ctx-tabs pill-group" ref={tabsPill}>
         <button className={tab === 'last' ? 'active' : ''} onClick={() => setTab('last')}>Last reply</button>
         {devTools && <button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')}><Eye size={12} /> Preview</button>}
-      </div>
+      </div>}
 
       {tab === 'last' ? (
-        lastCtx ? <ContextUsedView ctx={lastCtx.ctx} messageId={lastCtx.id} /> : <p className="muted ctx-empty">Send a message to see its context.</p>
+        embedded && convo ? null : lastCtx ? <ContextUsedView ctx={lastCtx.ctx} messageId={lastCtx.id} /> : <p className="muted ctx-empty">Send a message to see its context.</p>
       ) : (
         <div className="ctx-preview">
           <input placeholder="Draft a message…" value={query} onChange={(e) => setQuery(e.target.value)} />

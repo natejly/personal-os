@@ -77,6 +77,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const markDeskSeen = useStore((s) => s.markDeskSeen)
   const deskPanel = useStore((s) => s.deskPanel)
   const setDeskPanel = useStore((s) => s.setDeskPanel)
+  const panelOn = !conversationId && (deskPanel || contextOpen) // the full-window Workspace column; it also hosts the step card and workers
   // openTerminal (a coding session row or card) asks for the side panel's Terminal tab.
   const termRequest = useStore((s) => s.terminalRequest?.n)
   useEffect(() => { if (termRequest && !conversationId) setDeskPanel(true) }, [termRequest, conversationId])
@@ -212,13 +213,13 @@ export default function ChatView({ conversationId }: { conversationId?: string }
               <ArrowDown size={13} /> Jump to latest{unseen > 0 && <span className="jump-count">{unseen > 99 ? '99+' : unseen}</span>}
             </button>
           )}
-          <WorkersPanel conversationId={conversationId} />
-          <ProgressCard conversationId={conversationId} desk={desk} />
+          {panelOn ? null : <><WorkersPanel conversationId={conversationId} />
+          <ProgressCard conversationId={conversationId} desk={desk} /></>}
           <Composer conversationId={conversationId} footer={<ChatControls conversationId={conversationId} />} />
         </div>
         {showing && <ShowPanel conversationId={showKey} />}
         {/* Full-window: Context is a tab of the side panel (a context request opens it). Quick chats keep the drawer, whose handle sits on the chat body, pinned to the drawer's left edge. */}
-        {!conversationId && (deskPanel || contextOpen) && <DeskPanel key={convo?.id ?? ''} desk={desk} conversationId={convo?.id} onClose={() => { setDeskPanel(false); if (contextOpen) toggleContext() }} />}
+        {panelOn && <DeskPanel key={convo?.id ?? ''} desk={desk} conversationId={convo?.id} onClose={() => { setDeskPanel(false); if (contextOpen) toggleContext() }} />}
         {conversationId && contextOpen && <ResizeHandle id="context-drawer-w" defaultSize={340} min={260} max={640} grows="left" onCollapse={toggleContext} label="Context panel width" className="ctx-edge" />}
         {conversationId && contextOpen && <ContextDrawer conversationId={conversationId} />}
       </div>

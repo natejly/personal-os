@@ -13,7 +13,7 @@ if [ ! -x backend/.venv/bin/python ]; then
   (cd backend && uv venv --quiet .venv && uv pip install --quiet -e .)
 fi
 
-if [ -n "${FIREWORKS_API_KEY:-}" ] && [[ "${PERSONAL_OS_BASE_URL:-http://localhost:4000}" == http://localhost:${LITELLM_PORT:-4000}* ]]; then
+if [ -n "${FIREWORKS_API_KEY:-}" ]; then
   if ! curl -sf "http://localhost:${LITELLM_PORT:-4000}/health/liveliness" >/dev/null 2>&1; then
     echo "» Starting LiteLLM proxy on :${LITELLM_PORT:-4000}"
     ./scripts/litellm.sh & PIDS+=($!)

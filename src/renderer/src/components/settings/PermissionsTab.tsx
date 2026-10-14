@@ -1,3 +1,4 @@
+import ModelSelect from '../ModelSelect'
 import { ShieldAlert } from '../../icons'
 import { modeOf } from '../../lib/permissionMode'
 import { AlwaysAsk, ToolGlobalToggles } from '../ToolPermissions'
@@ -33,7 +34,7 @@ export default function PermissionsTab({ draft, patch }: TabProps): JSX.Element 
         <details className="modal-free">
           <summary>Reviewer model: {draft.autoReviewModel ? draft.autoReviewModel : 'automatic'}</summary>
           <label><span className="toggle-text"><b>Reviewer model</b><small>Empty means automatic: the fast model, else the helper model, else the chat model.</small></span>
-            <input list="model-options" value={draft.autoReviewModel ?? ''} onChange={(e) => patch({ autoReviewModel: e.target.value })} placeholder="Automatic" spellCheck={false} />
+            <ModelSelect kind="chat" label="Reviewer model" blank="Automatic" value={draft.autoReviewModel ?? ''} onChange={(autoReviewModel) => patch({ autoReviewModel })} />
           </label>
         </details>
       )}

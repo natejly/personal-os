@@ -128,7 +128,14 @@ interface Session {
   zone: Zone | null
   zoneAt: number
   zoneTimer: ReturnType<typeof setTimeout> | null
+  /** move only: the smoothed lean in degrees, and the x it was measured from; `calm` skips it (reduced motion) */
+  tilt: number
+  lastX: number
+  calm: boolean
 }
+
+/** A dragged window leans into its horizontal speed, up to this many degrees. */
+const MAX_TILT = 2
 
 let live: Session | null = null
 
@@ -161,6 +168,15 @@ const frame = (): void => {
   const armed = s.op === 'move' && !s.mods.meta && s.zone && Date.now() - s.zoneAt >= EDGE_HOLD_MS ? s.zone : null
   s.preview = armed ? zoneRect(armed, s.ctx.view, s.natural) : null
   applyRect(s.node, s.rect)
+  if (s.op === 'move' && !s.calm) {
+    // Lean with the per-frame x speed, eased so a jittery pointer or a snap does not flick the window.
+    const target = Math.max(-MAX_TILT, Math.min(MAX_TILT, (s.rect.x - s.lastX) * 0.4))
+    s.lastX = s.rect.x
+    s.tilt += (target - s.tilt) * 0.2
+    s.node.style.rotate = `${s.tilt.toFixed(2)}deg`
+    // The pointer may have stopped: keep easing back to flat on the same loop until it has.
+    if (Math.abs(s.tilt) > 0.02) schedule(frame)
+  }
   publish({
     windowId: s.windowId,
     mode: s.op,
@@ -190,6 +206,7 @@ const finish = (commit: boolean): void => {
   teardown(s)
   const rect = commit ? s.preview ?? s.rect : s.start
   applyRect(s.node, rect)
+  s.node.style.rotate = '' // .win's transition settles it flat once the dragging class goes
   publish(IDLE)
   const st = useCanvas.getState()
   st.setInteracting(false)
@@ -274,7 +291,10 @@ const begin = (e: ReactPointerEvent, win: CanvasWindow, o: DragOptions, handle: 
     preview: null,
     zone: null,
     zoneAt: 0,
-    zoneTimer: null
+    zoneTimer: null,
+    tilt: 0,
+    lastX: start.x,
+    calm: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
   }
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)

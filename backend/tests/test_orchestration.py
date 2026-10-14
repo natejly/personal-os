@@ -1006,7 +1006,14 @@ def test_the_new_default_model_does_not_skip_onboarding() -> None:
     from personal_os import setup
     fresh = {**llm.DEFAULT_SETTINGS}
     assert setup.status_of(fresh, False)["needsOnboarding"] is True, "a model name alone is not a configured provider"
-    assert setup.status_of({**fresh, "apiKey": "sk-x"}, False)["needsOnboarding"] is False
+    from personal_os import provider_route, providers
+    provider_route.set_key_source(lambda: {"openai": "sk-x"})
+    try:
+        keyed = {**fresh, "providers": [providers.new_entry("openai")]}
+        assert setup.status_of(keyed, False)["needsOnboarding"] is False
+        assert setup.status_of({**keyed, "providers": [providers.new_entry("anthropic")]}, False)["needsOnboarding"] is True  # no key
+    finally:
+        provider_route.set_key_source(lambda: {})
 
 
 def test_orchestration_settings_defaults_and_ranges() -> None:

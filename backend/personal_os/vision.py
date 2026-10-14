@@ -18,7 +18,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from . import blobs, llm, mac, redact
+from . import blobs, llm, mac, providers, redact
 
 MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_EDGE = 1568                 # long edge sent to the model
@@ -74,7 +74,7 @@ def model_for(settings: dict[str, Any], chat_model: str | None) -> str | None:
     model = (chat_model or "").strip()
     if not model:
         return None
-    flag = llm.vision_flag(model)
+    flag = llm.vision_flag(providers.bare(model, settings))
     if flag is not None:
         return model if flag else None
     return model if _name_reads_images(model) else None

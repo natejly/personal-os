@@ -29,6 +29,7 @@ import { planOfCall } from '../lib/planDigest'
 import '../styles/cowork.css'
 import '../styles/docs.css'
 import Face from './Face'
+import { SettleWash } from './SettleWash'
 import { reviewLine, reviewTitle } from '../lib/approvalHistory'
 
 const ICONS: Record<string, JSX.Element> = {
@@ -350,6 +351,7 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
     const d = describeCall(t.name, t.arguments)
     return (
       <div className={`tool-event ${t.pending ? 'pending' : ''} ${t.pending && t.needs_approval ? 'awaiting' : ''} ${t.error ? 'error' : ''}`}>
+        <SettleWash awaiting={!!t.pending && !!t.needs_approval} denied={t.approval === 'deny'} />
         <button className="tool-head" title={tools.find((x) => x.name === t.name)?.description || t.name} aria-expanded={!!open[t.id]} onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
           <ChevronRight size={12} className={open[t.id] ? 'rot90' : ''} />
           <StatusDot event={t} />

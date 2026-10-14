@@ -49,7 +49,8 @@ async function slowStreamingProvider(upstream) {
 async function deskChat(grain, content) {
   const { page, api } = grain
   const slow = await slowStreamingProvider(grain.llm.url.replace(/\/v1\/?$/, ''))
-  await api('/settings', { method: 'PUT', body: { autonomousByDefault: true, baseUrl: slow.url } })
+  await api('/settings', { method: 'PUT', body: { autonomousByDefault: true } })
+  await grain.repoint(slow.url)
   await page.reload()
   await page.waitForSelector('.sidebar')
   await newChat(page)

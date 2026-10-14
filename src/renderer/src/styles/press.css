@@ -1,0 +1,23 @@
+/* Button press: a whole button sinks on press (fast), and returns on the spring. Loaded after
+   styles.css. Excludes segmented cells (the pill moves instead), popout chrome and drag regions. */
+.icon-btn, .ghost-btn, .primary-btn { transition: transform var(--dur-btn-release) var(--spring-snappy), background-color var(--dur-hover), color var(--dur-hover); }
+.icon-btn:active:not(:disabled), .ghost-btn:active:not(:disabled), .primary-btn:active:not(:disabled) {
+  transform: translateY(var(--press-sink)); transition-duration: var(--dur-btn-press), var(--dur-hover), var(--dur-hover); transition-timing-function: var(--ease-out);
+}
+.seg > button:active, .popout-actions button:active, .drag button:active { transform: none; }
+
+/* Sliding selection pill: opt in with class "pill-group" + useSlidingPill(). One ::before is the
+   highlight; the selected child goes transparent so the pill shows through. --pill-bg and
+   --pill-r tune it per group. data-pill="ready" (set a frame after first paint) turns on motion. */
+.pill-group { position: relative; }
+.pill-group::before {
+  content: ''; position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none;
+  width: var(--pill-w, 0); height: var(--pill-h, 0); opacity: var(--pill-o, 0);
+  transform: translate(var(--pill-x, 0), var(--pill-y, 0));
+  background: var(--pill-bg, var(--active)); border-radius: var(--pill-r, 6px);
+}
+.pill-group[data-pill='ready']::before { transition: transform var(--dur-spring) var(--spring-snappy), width var(--dur-spring) var(--spring-snappy), height var(--dur-spring) var(--spring-snappy), opacity var(--dur-hover); }
+.pill-group > button { position: relative; z-index: 1; }
+.pill-group > button:is(.active, .on, [aria-pressed='true']) { background: transparent; }
+.settings-tabs.pill-group { --pill-bg: var(--hover); --pill-r: 8px; }
+.seg.pill-group { --pill-r: 0; }

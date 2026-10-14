@@ -1,4 +1,4 @@
-"""Per-model provider routing, the multi-provider /models listing, PUT /provider-keys, the embedding lock."""
+"""Per-model provider routing by "<provider>/<model>" ref, the multi-provider /models listing, the embedding lock."""
 from __future__ import annotations
 
 import asyncio
@@ -29,8 +29,10 @@ MSG_JSON = {"content": [{"type": "text", "text": "ok"}], "stop_reason": "end_tur
 
 FW, AN, OAI = (providers.get(p)["baseUrl"] for p in ("fireworks", "anthropic", "openai"))
 FW_KEY, AN_KEY = "fw-key-1", "an-key-1"
-FW_CFG = {"provider": "fireworks", "baseUrl": FW, "apiKey": FW_KEY}
-AN_CFG = {"provider": "anthropic", "baseUrl": AN, "apiKey": AN_KEY}
+ENTRIES = [providers.new_entry(k) for k in ("fireworks", "anthropic", "openai")]
+FW_CFG = {"providers": ENTRIES}
+AN_CFG = {"providers": [ENTRIES[1], ENTRIES[0], ENTRIES[2]]}
+EMBED_FW = "qwen3-embedding-8b"
 
 
 @pytest.fixture(autouse=True)
@@ -77,66 +79,70 @@ def seen(monkeypatch):  # type: ignore[no-untyped-def]
     return calls
 
 
-# ---- route() ----
-def test_active_model_unchanged() -> None:
-    assert provider_route.route(FW_CFG, "accounts/fireworks/models/ember-1") is FW_CFG
+# ---- resolve() ----
+def test_ref_goes_to_its_provider() -> None:
+    got, model = provider_route.resolve(FW_CFG, "fireworks/accounts/fireworks/models/ember-1")
+    assert (got["provider"], got["baseUrl"], got["apiKey"], model) == ("fireworks", FW, FW_KEY, "accounts/fireworks/models/ember-1")
 
 
-def test_claude_routes_to_anthropic_with_its_key() -> None:
-    got = provider_route.route(FW_CFG, "claude-opus-5-5")
-    assert (got["provider"], got["baseUrl"], got["apiKey"]) == ("anthropic", AN, AN_KEY)
+def test_bare_claude_goes_to_anthropic_with_its_key() -> None:
+    got, model = provider_route.resolve(FW_CFG, "claude-opus-5-5")
+    assert (got["provider"], got["baseUrl"], got["apiKey"], model) == ("anthropic", AN, AN_KEY, "claude-opus-5-5")
 
 
-def test_no_key_no_route() -> None:
+def test_unkeyed_provider_is_an_error_not_a_silent_fallback() -> None:
     provider_route.set_key_source(lambda: {"fireworks": FW_KEY})
-    assert provider_route.route(FW_CFG, "claude-opus-5-5") is FW_CFG
+    with pytest.raises(llm.LLMError, match="Add a key for Anthropic"):
+        provider_route.resolve(FW_CFG, "anthropic/claude-opus-5-5")
 
 
-def test_active_wins_on_collision() -> None:
+def test_collision_follows_the_prefix_not_the_listing() -> None:
     provider_route._live["fireworks"] = {"claude-sonnet-5-5"}
-    assert provider_route.route(FW_CFG, "claude-sonnet-5-5") is FW_CFG
+    assert provider_route.resolve(FW_CFG, "anthropic/claude-sonnet-5-5")[0]["provider"] == "anthropic"
+    assert provider_route.resolve(FW_CFG, "claude-sonnet-5-5")[0]["provider"] == "fireworks"  # a bare id: first usable owner
 
 
-def test_embedding_default_routes_to_fireworks_both_spellings() -> None:
-    for m in ("qwen3-embedding-8b", "accounts/fireworks/models/qwen3-embedding-8b"):
+def test_embedding_default_resolves_to_fireworks_both_spellings() -> None:
+    for m in (EMBED_FW, "accounts/fireworks/models/qwen3-embedding-8b"):
         got = provider_route.route(AN_CFG, m)
         assert (got["provider"], got["apiKey"]) == ("fireworks", FW_KEY), m
 
 
-def test_local_active_never_routes() -> None:
-    cfg = {"provider": "litellm", "baseUrl": "http://localhost:4000", "apiKey": ""}
-    assert provider_route.route(cfg, "claude-opus-5-5") is cfg
+def test_bare_unknown_name_goes_to_the_first_usable() -> None:
+    cfg = {"providers": [providers.new_entry("litellm"), ENTRIES[1]]}
+    assert provider_route.resolve(cfg, "claude-opus-5-5")[0]["providerId"] == "anthropic"  # an owner of the name wins
+    assert provider_route.resolve(cfg, "mystery-model")[0]["providerId"] == "litellm"  # nobody owns it: the first usable
 
 
 # ---- calls ----
 def test_embed_goes_to_fireworks_while_anthropic_active(seen) -> None:  # type: ignore[no-untyped-def]
-    asyncio.run(embed.embed_texts(AN_CFG, ["x"], "qwen3-embedding-8b"))
+    asyncio.run(embed.embed_texts(AN_CFG, ["x"], EMBED_FW))
     assert str(seen[0].url).startswith(FW) and seen[0].headers["authorization"] == f"Bearer {FW_KEY}"
 
 
 def test_complete_routed_to_anthropic_sends_key_url_and_max_tokens(seen) -> None:  # type: ignore[no-untyped-def]
-    assert asyncio.run(llm.complete(FW_CFG, "claude-opus-5-5", [{"role": "user", "content": "hi"}])) == "ok"
+    assert asyncio.run(llm.complete(FW_CFG, "anthropic/claude-opus-5-5", [{"role": "user", "content": "hi"}])) == "ok"
     req = seen[0]
     assert str(req.url).startswith("https://api.anthropic.com/v1/") and req.headers["x-api-key"] == AN_KEY
     assert json.loads(req.content)["max_tokens"] == llm.ANTHROPIC_FALLBACK_CAP
 
 
 def test_high_tier_model_from_another_provider(seen) -> None:  # type: ignore[no-untyped-def]
-    cfg = {**FW_CFG, "modelHigh": "claude-opus-5-5"}
+    cfg = {**FW_CFG, "modelHigh": "anthropic/claude-opus-5-5"}
     asyncio.run(llm.complete(cfg, providers.tier_model(cfg, "high"), [{"role": "user", "content": "hi"}]))
     assert "api.anthropic.com" in str(seen[0].url) and "max_tokens" in json.loads(seen[0].content)
 
 
 def test_stream_routed_to_anthropic(seen) -> None:  # type: ignore[no-untyped-def]
     async def run() -> None:
-        async for _ in llm.stream_chat(FW_CFG, "claude-sonnet-5-5", [{"role": "user", "content": "hi"}]):
+        async for _ in llm.stream_chat(FW_CFG, "anthropic/claude-sonnet-5-5", [{"role": "user", "content": "hi"}]):
             pass
     asyncio.run(run())
     assert "api.anthropic.com" in str(seen[0].url) and json.loads(seen[0].content)["max_tokens"] > 0
 
 
 def test_unrouted_fireworks_call_has_no_max_tokens(seen) -> None:  # type: ignore[no-untyped-def]
-    asyncio.run(llm.complete(FW_CFG, "accounts/fireworks/models/ember-1", [{"role": "user", "content": "hi"}]))
+    asyncio.run(llm.complete(FW_CFG, "fireworks/accounts/fireworks/models/ember-1", [{"role": "user", "content": "hi"}]))
     assert str(seen[0].url).startswith(FW) and "max_tokens" not in json.loads(seen[0].content)
 
 
@@ -145,43 +151,24 @@ def test_models_merge_tag_and_survive_a_failing_provider(seen) -> None:  # type:
     provider_route.set_key_source(lambda: {"fireworks": FW_KEY, "anthropic": AN_KEY, "openai": "oai"})
     rows = asyncio.run(provider_route.all_models(FW_CFG, llm.list_models))
     by = {r["id"]: r for r in rows}
-    assert by["accounts/fireworks/models/ember-1"]["provider"] == "fireworks" and by["accounts/fireworks/models/ember-1"]["preset"]
-    assert "preset" not in by["accounts/fireworks/models/other"]
-    assert by["claude-sonnet-5-5"]["provider"] == "anthropic" and "preset" not in by["claude-zeta"]
-    assert by["gpt-6.1-sol"]["provider"] == "openai" and by["gpt-6.1-sol"]["preset"]  # openai listing 500: preset rows
-    assert by["text-embedding-3-small"]["mode"] == "embedding"
+    ember = by["fireworks/accounts/fireworks/models/ember-1"]
+    assert ember["provider"] == "fireworks" and ember["preset"] and ember["model"] == "accounts/fireworks/models/ember-1"
+    assert "preset" not in by["fireworks/accounts/fireworks/models/other"]
+    assert by["anthropic/claude-sonnet-5-5"]["provider"] == "anthropic" and "preset" not in by["anthropic/claude-zeta"]
+    assert by["openai/gpt-6.1-sol"]["provider"] == "openai" and by["openai/gpt-6.1-sol"]["preset"]  # openai listing 500: preset rows
+    assert by["openai/text-embedding-3-small"]["mode"] == "embedding"
     assert len(rows) == len(by)
 
 
-# ---- PUT /provider-keys ----
 @pytest.fixture
 def clean():  # type: ignore[no-untyped-def]
     def reset() -> None:
-        db.secrets.delete(provider_keys.SECRET)
-        db.set_settings({"provider": "fireworks", "baseUrl": FW, "apiKey": "", "embeddingModel": ""})
+        db.set_settings({"embeddingModel": ""})
         with db.tx() as c:
             c.execute("DELETE FROM memory_vectors")
     reset()
     yield
     reset()
-
-
-def test_provider_key_save_remove_validate(clean) -> None:  # type: ignore[no-untyped-def]
-    r = client.put("/provider-keys/anthropic", json={"apiKey": "sk-secret-123"})
-    assert r.json() == {"providerKeysSet": {"anthropic": True}}
-    assert provider_keys.load(db.secrets)["anthropic"] == "sk-secret-123"
-    assert "sk-secret-123" not in client.get("/settings").text
-    assert client.put("/provider-keys/anthropic", json={"apiKey": "  "}).status_code == 422
-    assert client.put("/provider-keys/ollama", json={"apiKey": "x"}).status_code == 422
-    assert client.put("/provider-keys/nope", json={"apiKey": "x"}).status_code == 422
-    assert client.put("/provider-keys/anthropic", json={"apiKey": None}).json() == {"providerKeysSet": {}}
-
-
-def test_active_provider_key_updates_active_secret(clean) -> None:  # type: ignore[no-untyped-def]
-    client.put("/provider-keys/fireworks", json={"apiKey": "fw-new"})
-    assert db.get_settings()["apiKey"] == "fw-new" and provider_keys.load(db.secrets)["fireworks"] == "fw-new"
-    client.put("/provider-keys/fireworks", json={"apiKey": None})
-    assert not db.get_settings().get("apiKey")
 
 
 def test_picker_models_setting_round_trips(clean) -> None:  # type: ignore[no-untyped-def]
@@ -200,9 +187,7 @@ def test_embedding_lock(clean) -> None:  # type: ignore[no-untyped-def]
         c.execute("INSERT OR REPLACE INTO memory_vectors(memory_id,model,dim,vec,content_hash,updated_at) VALUES('lk','m1',1,x'00','h',1)")
     r = client.put("/settings", json={"embeddingModel": "m2"})
     assert r.status_code == 409 and "locked" in r.json()["detail"]
-    client.put("/settings", json={"provider": "anthropic"})  # a provider switch leaves it alone
     assert db.get_settings()["embeddingModel"] == "m1"
-    client.put("/settings", json={"provider": "fireworks"})
 
 
 def test_startup_pin_from_existing_vectors(clean) -> None:  # type: ignore[no-untyped-def]

@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import { CalendarDays, ChevronDown, Plus } from '../../icons'
+import { CalendarDays, FolderPlus, Plus } from '../../icons'
 import { TEMPLATES, expandTemplate, userTemplates } from './templates'
 import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import '../../styles/notes.css'
 import { tip } from '../../lib/tip'
 
-/** A split "New" button: the main half makes a blank doc, the chevron opens templates and today's daily note. */
-export default function NewDocMenu({ onCreate, onDaily }: {
+/** The tree header's "+": a menu of new file, new folder, today's daily note and templates. */
+export default function NewDocMenu({ onCreate, onDaily, onFolder }: {
   onCreate: (t: { title: string; content: string }) => void
   onDaily: () => void
+  onFolder: () => void
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   const mine = userTemplates(useStore((s) => s.docs))
@@ -43,12 +44,13 @@ export default function NewDocMenu({ onCreate, onDaily }: {
 
   return (
     <div className="newdoc" ref={root}>
-      <button className="newdoc-main ghost-btn" title={tip('New file', 'new-note')} onClick={() => make('blank')}><Plus size={13} /> New</button>
-      <button className="newdoc-chev ghost-btn" aria-haspopup="menu" aria-expanded={open} aria-label="New from template" onClick={() => setOpen((o) => !o)}>
-        <ChevronDown size={12} />
+      <button className="icon-btn ghost" title={tip('New', 'new-note')} aria-label="New" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <Plus size={14} />
       </button>
       {open && (
         <div className="notes-menu" role="menu">
+          <button role="menuitem" className="notes-menu-row" onClick={() => make('blank')}><Plus size={13} /> New file</button>
+          <button role="menuitem" className="notes-menu-row" onClick={() => { setOpen(false); onFolder() }}><FolderPlus size={13} /> New folder…</button>
           <button role="menuitem" className="notes-menu-row" title={tip("Today's file", 'daily-note')} onClick={() => { setOpen(false); onDaily() }}>
             <CalendarDays size={13} /> Today's file
           </button>

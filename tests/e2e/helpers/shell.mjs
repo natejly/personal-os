@@ -80,7 +80,7 @@ export const ALL_VIEWS_ON = { hiddenViews: [], sidebarHidden: [] }  // every row
 import { _electron as electron } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
-import { startBackend } from '../harness.mjs'
+import { startBackend, seedProvider } from '../harness.mjs'
 import { startMockLLM } from '../mockllm.mjs'
 
 /**
@@ -98,6 +98,7 @@ export async function launchSupervised({ settings = {} } = {}) {
   const llm = await startMockLLM()
   const seedToken = 'seed-' + Math.random().toString(36).slice(2)
   const seed = await startBackend({ llmUrl: llm.url, llmKey: 'mock-key', dataDir, token: seedToken })
+  await seedProvider(seed, seedToken, { llmUrl: llm.url, llmKey: 'mock-key', real: false })
   await fetch(seed.url + '/settings', { method: 'PUT', headers: { Authorization: `Bearer ${seedToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ onboardedAt: new Date().toISOString(), ...settings }) })
   await seed.stop()
   const env = {
@@ -105,10 +106,6 @@ export async function launchSupervised({ settings = {} } = {}) {
     GRAIN_USER_DATA: profile,
     ...(process.env.E2E_FOREGROUND ? {} : { GRAIN_E2E_BACKGROUND: '1' }),
     GRAIN_SECRETS_BACKEND: 'file',
-    PERSONAL_OS_BASE_URL: llm.url,
-    PERSONAL_OS_API_KEY: 'mock-key',
-    PERSONAL_OS_DEFAULT_MODEL: 'mock-chat',
-    PERSONAL_OS_EXTRACTION_MODEL: 'mock-chat',
     FIRECRAWL_API_KEY: '', // e2e never calls the live web provider
     PYTHONPATH: join(ROOT, 'backend')
   }

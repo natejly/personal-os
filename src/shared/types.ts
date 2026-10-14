@@ -1477,10 +1477,12 @@ export interface Settings {
   apiKey: string
   /** The backend never returns secret values: apiKey etc. arrive blank and these say whether one is saved. */
   apiKeySet?: boolean
-  /** Set (the message) while the provider has rejected the saved key and requests are paused; empty otherwise. Computed, never saved. */
-  providerAuthBlocked?: string
-  /** The provider preset in use (a /setup/providers id); null or missing means the address was typed by hand. */
+  /** Provider id to the message, for each provider that has rejected its key and is paused. Empty when none. Computed, never saved. */
+  providerAuthBlocked?: Record<string, string>
+  /** Compatibility: the first usable provider's kind. Read-only; the providers list is the source of truth. */
   provider?: string | null
+  /** The providers added in Settings → Models, in list order. Read-only here: changed through /providers. */
+  providers?: Pick<ProviderEntry, 'id' | 'kind' | 'name' | 'baseUrl'>[]
   /** ISO time the setup wizard last finished; null until then. */
   onboardedAt?: string | null
   /** Which providers have a key saved. Never the keys. Missing on an older backend. */
@@ -1777,11 +1779,48 @@ export interface UsageReport {
 
 export type UsagePeriod = 'today' | 'week' | 'month'
 
-export interface ModelInfo {
+/** A provider Grain knows how to talk to (GET /providers `presets`). */
+export interface ProviderPreset {
   id: string
+  name: string
+  baseUrl: string
+  needsKey: boolean
+  keyUrl: string | null
+  defaultModel: string
+  models: string[]
+  /** The provider's default model per tier; absent when it has none. */
+  tiers?: Partial<Record<'high' | 'medium' | 'low', string>>
+  /** The provider's default reranker; absent when it has no rerank route. */
+  rerankModel?: string
+  note: string | null
+}
+
+/** A provider the user added (GET /providers `providers`). */
+export interface ProviderEntry {
+  id: string
+  kind: string
+  name: string
+  baseUrl: string
+  needsKey: boolean
+  hasKey: boolean
+  status: 'ok' | 'blocked' | 'nokey'
+  statusMessage?: string
+  modelCount?: number
+}
+
+/** The answer to adding a provider, replacing its key or changing its address. A failed check stores nothing. */
+export type ProviderResult =
+  | { ok: true; provider: ProviderEntry; models: string[] | null; latencyMs: number }
+  | { ok: false; error: string; latencyMs: null; models: null }
+
+export interface ModelInfo {
+  /** `<providerId>/<model>`: what a model setting stores. */
+  id: string
+  /** The model's own id on its provider. */
+  model: string
   mode?: string | null
   reasoning?: boolean | null
-  /** The provider that owns this model (a /setup/providers id). Missing on an older backend. */
+  /** The provider that owns this model (a provider id). */
   provider?: string
   /** The id is one of its provider's suggested models. */
   preset?: boolean

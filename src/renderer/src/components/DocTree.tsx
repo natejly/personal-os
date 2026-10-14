@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ChevronRight, FileText, LayoutDashboard, Folder, FolderOpen, FolderPlus, MoreHorizontal, Pin, Plus, Search, Sparkles, Star,
-  Trash2, User
+  ChevronRight, FileText, LayoutDashboard, Folder, FolderOpen, MoreHorizontal, Pin, Plus, Search, Sparkles, Star,
+  Trash2, Upload, User, Package
 } from '../icons'
 import type { Doc } from '@shared/types'
-import { useStore } from '../store'
+import { useStore, type FilesSection } from '../store'
+import NewDocMenu from '../features/notes/NewDocMenu'
 import { isDashboardDoc } from '../lib/dashboards'
 import type { DocHit } from '../lib/api'
 import {
@@ -41,6 +42,7 @@ interface Props {
   activeId: string | null
   query: string
   onQuery: (q: string) => void
+  section: FilesSection
 }
 
 /**
@@ -56,7 +58,7 @@ function markWords(text: string, query: string): React.ReactNode {
   return text.split(re).map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part))
 }
 
-export default function DocTree({ hits, docs, activeId, query, onQuery }: Props): JSX.Element {
+export default function DocTree({ hits, docs, activeId, query, onQuery, section }: Props): JSX.Element {
   const folders = useStore((s) => s.docFolders)
   const projects = useStore((s) => s.projects)
   const expandedList = useStore((s) => s.expandedFolders)
@@ -69,6 +71,8 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
   const openSettings = useStore((s) => s.openSettings)
   const moveDoc = useStore((s) => s.moveDoc)
   const createDoc = useStore((s) => s.createDoc)
+  const openDailyNote = useStore((s) => s.openDailyNote)
+  const openFiles = useStore((s) => s.openFiles)
   const openDoc = useStore((s) => s.openDoc)
   const deleteDoc = useStore((s) => s.deleteDoc)
   const setDocStar = useStore((s) => s.setDocStar)
@@ -414,8 +418,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
     <div className="doc-tree" onMouseDown={() => menu && setMenu(null)}>
       <div className="doc-tree-head">
         <label className="search mini"><Search size={12} /><input placeholder="Search files" value={query} onChange={(e) => onQuery(e.target.value)} /></label>
-        <button className="icon-btn ghost" title="New folder in Personal" aria-label="New folder in Personal"
-          onClick={() => newFolder('', '')}><FolderPlus size={14} /></button>
+        <NewDocMenu onCreate={(t) => void createDoc(t)} onDaily={() => void openDailyNote()} onFolder={() => newFolder('', '')} />
       </div>
 
       {allTags.current.length > 0 && (
@@ -448,6 +451,12 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
         </>}
 
       {!searching && <div className="doc-tree-tail" aria-hidden />}
+      {!searching && (['uploads', 'artifacts'] as const).map((k) => (
+        <div key={k} className={`doc-row ${section === k ? 'active' : ''}`} {...rowButton(() => openFiles(k))}>
+          {k === 'uploads' ? <Upload size={13} className="doc-row-icon" /> : <Package size={13} className="doc-row-icon" />}
+          <span className="doc-row-main"><span className="doc-row-title">{k === 'uploads' ? 'Uploads' : 'Artifacts'}</span></span>
+        </div>
+      ))}
       {!searching && (
         <div className="doc-row" role="button" tabIndex={0} onClick={() => openSettings('data')}
           onKeyDown={(e) => { if (e.key === 'Enter') openSettings('data') }}>

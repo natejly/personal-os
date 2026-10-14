@@ -417,7 +417,11 @@ class DiagnosticsRoute(unittest.TestCase):
         from personal_os.app import AUTH_TOKEN, app
 
         c = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
-        c.put("/settings", json={"apiKey": "sk-diag-secret-abcdefghijkl", "braveApiKey": "BSA-secret-abcdefghijkl"})
+        from personal_os import provider_keys, providers
+        from personal_os.app import db
+        db.set_settings({"providers": [providers.new_entry("openai")]})
+        provider_keys.save(db.secrets, {"openai": "sk-diag-secret-abcdefghijkl"})
+        c.put("/settings", json={"braveApiKey": "BSA-secret-abcdefghijkl"})
         try:
             r = c.get("/diagnostics")
             self.assertEqual(r.status_code, 200)
@@ -434,7 +438,9 @@ class DiagnosticsRoute(unittest.TestCase):
             self.assertEqual(c.post("/maintenance/sweep").status_code, 200)
             self.assertIsNotNone(c.get("/diagnostics").json()["retention_last_sweep"])
         finally:
-            c.put("/settings", json={"apiKey": "", "braveApiKey": ""})
+            c.put("/settings", json={"braveApiKey": ""})
+            db.set_settings({"providers": []})
+            provider_keys.save(db.secrets, {})
 
     def test_requires_the_token(self) -> None:
         from fastapi.testclient import TestClient

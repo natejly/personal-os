@@ -78,12 +78,12 @@ def is_key_rejection(status: int | None, body: str) -> bool:
 
 
 def on_change(fn: Callable[[dict[str, Any]], None]) -> None:
-    """fn({"provider", "open", "message"}) when a breaker opens or closes (once per transition, not per run)."""
+    """fn({"provider" (the provider id), "open", "message"}) when a breaker opens or closes (once per transition, not per run)."""
     _listeners.append(fn)
 
 
 def _emit(settings: dict[str, Any], is_open: bool) -> None:
-    ev = {"provider": provider_name(settings), "open": is_open, "message": message(settings) if is_open else ""}
+    ev = {"provider": settings.get("providerId") or provider_name(settings), "open": is_open, "message": message(settings) if is_open else ""}
     for fn in list(_listeners):
         try:
             fn(ev)

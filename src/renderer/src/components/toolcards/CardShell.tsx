@@ -5,6 +5,7 @@ import { changedKeys, wasEdited } from '../../lib/toolDisplay'
 import { RawDetails, ResultBlock, StatusChip, StatusDot } from './parts'
 import type { ToolCardProps } from './registry'
 import './toolcards.css'
+import { SettleWash } from '../SettleWash'
 
 /**
  * The chrome every dedicated card shares: header (icon, title, subject, status), the card's own body, the result,
@@ -56,6 +57,7 @@ export default function CardShell({ event, pending, decide, rules, icon, title, 
         if (pending && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send(true) }
       }}
     >
+      <SettleWash awaiting={!!pending} denied={event.approval === 'deny'} />
       <header className="tc-head">
         <StatusDot event={event} />
         <span className="tc-icon">{icon}</span>

@@ -80,6 +80,7 @@ from .filesnap import FileSnapshots, router as filesnap_router
 from .extundo import ExternalUndo, router as extundo_router
 from .snapshots import Snapshots, available as snapshots_available, router as snapshots_router
 from .outbox import Outbox, extras as mail_extras, router as outbox_router
+from .providers_routes import router as providers_router
 from .setup import router as setup_router
 from .reliability import router as reliability_router, secret_values
 from .retention import RetentionWorker
@@ -295,27 +296,6 @@ def queue_style_relearn(project_id: str | None, model: str | None = None) -> Non
         learner.submit_style(project_id, cfg, model or cfg.get("defaultModel") or "")
 
 
-ENV_SEED = {
-    "baseUrl": "PERSONAL_OS_BASE_URL",
-    "apiKey": "PERSONAL_OS_API_KEY",
-    "defaultModel": "PERSONAL_OS_DEFAULT_MODEL",
-    "extractionModel": "PERSONAL_OS_EXTRACTION_MODEL",
-}
-
-
-def _seed_settings_from_env() -> None:
-    """First launch: take provider defaults from the environment (.env) if nothing is stored yet.
-
-    Dev only. The packaged app (Electron sets PERSONAL_OS_PACKAGED) starts empty and onboards instead."""
-    if os.environ.get("PERSONAL_OS_PACKAGED"):
-        return
-    stored = db.get_settings()
-    patch = {k: os.environ[v] for k, v in ENV_SEED.items() if k not in stored and os.environ.get(v)}
-    if patch:
-        db.set_settings(patch)
-
-
-_seed_settings_from_env()
 provider_keys.migrate(db)
 provider_route.set_key_source(lambda: provider_keys.load(db.secrets))  # keys reach route() here, never via settings
 
@@ -397,13 +377,6 @@ def _seed_hidden_modules() -> None:
 _seed_hidden_modules()
 
 
-def set_settings_via_provider(patch: dict[str, Any]) -> None:
-    """db.set_settings for a patch that may switch provider or change the API key (see provider_keys.apply)."""
-    db.set_settings(provider_keys.apply(db, patch))
-    if {"provider", "baseUrl", "apiKey"} & patch.keys():
-        ensure_embedding_model()
-
-
 def settings() -> dict[str, Any]:
     """Defaults < stored rows, with the permissions store (permissions.py) both nested under `permissions` and flattened
     to the top level, so a reader that still does cfg.get("tools") sees the same value as permissions.get(cfg, "tools")."""
@@ -411,6 +384,11 @@ def settings() -> dict[str, Any]:
     perms = permissions.load(stored)
     out = {**llm.DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if k not in permissions.KEYS},
            **perms, permissions.KEY: {"version": permissions.VERSION, **perms}}
+    if out.get("providers"):
+        # The first usable provider stands in for the old single "active" one, for readers that still want a baseUrl and key
+        # (speech to text, usage import, setup cards); a model's own provider is resolved per call (provider_route.resolve).
+        first = next(iter(provider_route.usable(out)), None)
+        out.update(provider=first["kind"] if first else None, baseUrl=first["baseUrl"] if first else "", apiKey=first["apiKey"] if first else "")
     if not out.get("defaultModel"):  # nothing saved: the provider's chat default (a saved model always wins)
         out["defaultModel"] = providers.default_model(out)
     # The legacy helper and fast knobs are the low and medium tiers (providers.TASK_TIERS); a stored value still wins.
@@ -427,7 +405,8 @@ jobs = Jobs(db)
 proposals = Proposals(db)
 recaps = Recaps(db)
 google = Google(settings, db.set_settings, cache_dir=db.data_dir)
-app.include_router(setup_router(settings, set_settings_via_provider, lambda: google.status()["connected"], db.secrets))
+app.include_router(setup_router(settings, db.set_settings, lambda: google.status()["connected"]))
+app.include_router(providers_router(db.get_settings, db.set_settings, db.secrets, ensure_embedding_model))
 # sid/wsid are defined further down, so the module context looks them up late.
 modules: list[Module] = build_modules(ModuleContext(
     db=db, settings=settings, set_settings=db.set_settings, google=google,
@@ -930,7 +909,10 @@ def health() -> dict[str, Any]:
 PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "modelCaps", "telegramState"}
 # Readable through /settings, but only writable through its own route: a plain PUT would replace the
 # whole nested dict and silently drop the signal switches and exclusion lists.
-SETTINGS_READ_ONLY = {"googleTasksSync", "voice"}
+SETTINGS_READ_ONLY = {"googleTasksSync", "voice",
+                      # Providers and their keys change only through /providers, where a key is verified before it is saved;
+                      # provider, baseUrl and apiKey are the computed stand-ins for the first usable one (see settings()).
+                      "providers", "provider", "baseUrl", "apiKey"}
 
 
 def public_settings() -> dict[str, Any]:
@@ -943,7 +925,10 @@ def public_settings() -> dict[str, Any]:
     # computed, never stored: no embedding model any provider with a key serves, so search is by keywords only
     out["embeddingKeywordOnly"] = out.get("retrievalMode") != "bm25" and not provider_route.can_embed(settings(), out.get("embeddingModel") or "")
     out["providerKeysSet"] = provider_keys.saved_for(db.secrets)  # which providers have a saved key, never the keys
-    out["providerAuthBlocked"] = auth_breaker.blocked(settings()) or ""  # computed, never stored: the active key was rejected
+    use = provider_route.usable(out)
+    out["apiKeySet"] = any(e["apiKey"] for e in use)  # computed: some provider has a key (the compat apiKey is the first usable one's)
+    # computed, never stored: {provider id: message} for each provider whose key was rejected
+    out["providerAuthBlocked"] = {e["id"]: m for e in use if (m := auth_breaker.blocked(provider_route.overlay(out, e)))}
     out["firecrawlEnvKey"] = bool(os.environ.get("FIRECRAWL_API_KEY", "").strip())  # computed, never stored: the key came from the environment
     out["secretsKeychain"], out["secretsReason"] = db.secrets.status()  # computed, never stored: false = keys sit unencrypted in the data folder
     out["snapshotsAvailable"] = snapshots_available()  # computed, never stored: folder snapshots need a version-control binary
@@ -1010,13 +995,6 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             # (A secret takes null to clear it; its own check below.)
             # Stored as given, a wrong-typed value (tools: "x", systemPrompt: null) 500s every route that reads it.
             raise HTTPException(422, f"{k} must be a {type(d).__name__}")
-        elif k == "baseUrl":
-            try:
-                clean[k] = providers.check_base_url(v)
-            except ValueError as e:
-                raise HTTPException(422, str(e)) from e
-        elif k == "provider" and v is not None and (not isinstance(v, str) or not providers.get(v)):
-            raise HTTPException(422, f"Unknown provider {v!r}")
         elif k == "retrievalMode" and v not in ("hybrid", "bm25"):
             raise HTTPException(422, "retrievalMode must be 'hybrid' or 'bm25'")
         elif k == "docTypography":
@@ -1029,9 +1007,7 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, f"{k} must be a string or null")
     if perm:
         permissions.save(db, perm)
-    set_settings_via_provider(clean)
-    if {"apiKey", "baseUrl", "provider"} & clean.keys():
-        auth_breaker.reset()  # a new key or endpoint gets a fresh start, whatever the old one's record
+    db.set_settings(clean)
     if "telegramEnabled" in clean and _loop is not None and not _loop.is_closed():
         asyncio.run_coroutine_threadsafe(telegram_bridge.reconcile(), _loop)  # a sync route runs in the threadpool
     if "workerMaxConcurrent" in clean and _loop is not None and not _loop.is_closed():
@@ -1059,34 +1035,6 @@ async def models() -> list[dict[str, Any]]:
         return await provider_route.all_models(cfg, llm.list_models)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, str(e)) from e
-
-
-class ProviderKeyIn(BaseModel):
-    apiKey: str | None
-
-
-@app.put("/provider-keys/{provider_id}")
-def put_provider_key(provider_id: str, body: ProviderKeyIn) -> dict[str, Any]:
-    """Save (string) or remove (null) one provider's key. The active provider's key is also the active `apiKey`."""
-    p = providers.get(provider_id)
-    if not p or not p["needsKey"]:
-        raise HTTPException(422, f"Unknown or keyless provider {provider_id!r}")
-    key = body.apiKey.strip() if body.apiKey is not None else None
-    if key == "":
-        raise HTTPException(422, "apiKey must not be blank; send null to remove it")
-    old = provider_keys.load(db.secrets).get(provider_id)
-    if providers.effective(db.get_settings()) == provider_id:
-        set_settings_via_provider({"apiKey": key})  # apply() keeps the map and the active secret together
-    else:
-        keys = provider_keys.load(db.secrets)
-        keys.pop(provider_id, None) if key is None else keys.__setitem__(provider_id, key)
-        provider_keys.save(db.secrets, keys)
-        ensure_embedding_model()
-    provider_route.invalidate(provider_id)
-    for k in (old, key):
-        if k:
-            auth_breaker.reset({"baseUrl": p["baseUrl"], "apiKey": k})
-    return {"providerKeysSet": provider_keys.saved_for(db.secrets)}
 
 
 # ---------------- projects ----------------

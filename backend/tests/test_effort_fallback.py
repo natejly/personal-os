@@ -20,7 +20,8 @@ import httpx  # noqa: E402
 from personal_os import llm  # noqa: E402
 from personal_os.usage import Pricing  # noqa: E402
 
-SETTINGS = {"baseUrl": "http://proxy.test/v1", "apiKey": "k"}
+SETTINGS = {"baseUrl": "http://proxy.test/v1", "apiKey": "k",
+            "providers": [{"id": "custom", "kind": "custom", "name": "Custom", "baseUrl": "http://proxy.test/v1"}]}
 INFO = {"data": [
     {"model_name": "embedder", "model_info": {"mode": "embedding"}},
     {"model_name": "plain", "model_info": {"mode": "chat", "supports_reasoning": False, "input_cost_per_token": 1e-6}},
@@ -113,8 +114,8 @@ def test_models_route_refreshes_caps_first(monkeypatch: Any) -> None:
     _patch_http(monkeypatch)
     monkeypatch.setattr(app_module, "settings", lambda: {**llm.DEFAULT_SETTINGS, **SETTINGS})
     client = TestClient(app_module.app, headers={"X-Personal-OS-Token": app_module.AUTH_TOKEN})
-    rows = {r["id"]: r for r in client.get("/models").json()}
+    rows = {r["model"]: r for r in client.get("/models").json()}
     assert rows["plain"]["reasoning"] is False and rows["embedder"]["mode"] == "embedding"
-    assert rows["whisper-1"]["mode"] == "audio" and rows["mystery"] == {"id": "mystery", "provider": "custom"}
+    assert rows["whisper-1"]["mode"] == "audio" and rows["mystery"] == {"id": "custom/mystery", "model": "mystery", "provider": "custom"}
     # The hook app.py wired is the same object the route just filled.
     assert llm.caps_lookup("thinker") == {"mode": "chat", "reasoning": True, "max_input_tokens": 1000}

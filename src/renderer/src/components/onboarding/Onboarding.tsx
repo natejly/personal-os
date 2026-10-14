@@ -4,8 +4,9 @@ import GrainLogo from '../GrainLogo'
 import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import { useOnboarding } from './onboardingStore'
-import { STEPS, initialState, modelOptions, reduce, stepBlocker, type ProviderInfo, type WizardAction, type WizardState } from './steps'
+import { STEPS, initialState, reduce, showsBaseUrl, stepBlocker, type WizardAction, type WizardState } from './steps'
 import ProviderForm from '../ProviderForm'
+import type { ProviderPreset } from '@shared/types'
 import './onboarding.css'
 
 const TITLES: Record<WizardState['step'], string> = {
@@ -17,12 +18,12 @@ const TITLES: Record<WizardState['step'], string> = {
 
 /** Full-window first-run flow. Rendered by App while the onboarding store says so. */
 export default function Onboarding(): JSX.Element {
-  const [providers, setProviders] = useState<ProviderInfo[] | null>(null)
+  const [providers, setProviders] = useState<ProviderPreset[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const root = useRef<HTMLDivElement>(null)
   const closeWizard = useOnboarding((s) => s.closeWizard)
   const [state, rawDispatch] = useReducer(
-    (s: WizardState, a: WizardAction & { provider_?: ProviderInfo }) => reduce(s, a, a.provider_),
+    (s: WizardState, a: WizardAction & { provider_?: ProviderPreset }) => reduce(s, a, a.provider_),
     undefined,
     initialState
   )
@@ -31,13 +32,7 @@ export default function Onboarding(): JSX.Element {
   const dispatch = useCallback((a: WizardAction) => rawDispatch({ ...a, provider_: provider }), [provider])
 
   useEffect(() => {
-    api.setup.providers().then(async (r) => {
-      setProviders(r.providers)
-      // On "Run setup again", start from what is configured now. A fresh install has no provider yet.
-      const st = await api.setup.status().catch(() => null)
-      const p = r.providers.find((x) => x.id === st?.provider)
-      if (st && p) rawDispatch({ type: 'seed', provider: p, baseUrl: st.baseUrl || p.baseUrl, model: st.model || p.defaultModel })
-    }).catch((e: Error) => setLoadError(e.message))
+    api.providers.list().then((r) => setProviders(r.presets)).catch((e: Error) => setLoadError(e.message))
   }, [])
 
   // Focus follows the step: the first input if there is one, else the heading.
@@ -46,23 +41,21 @@ export default function Onboarding(): JSX.Element {
     el?.focus()
   }, [state.step, providers])
 
-  // Continue on the key step: test the connection, and only when it works save it and move on.
+  // Continue on the key step: the backend checks the provider and saves it only when it works.
   // A counter drops the verdict of a run the user has already left.
   const run = useRef(0)
   const submit = useCallback(async (): Promise<void> => {
     if (!provider) return
     const me = ++run.current
-    const body = { provider: provider.id, baseUrl: state.baseUrl.trim(), apiKey: state.apiKey.trim() || null, model: state.model.trim() }
     dispatch({ type: 'test', test: { state: 'testing' } })
     try {
-      const r = await api.setup.test(body)
+      const r = await api.providers.add({ kind: provider.id, ...(showsBaseUrl(provider.id) ? { baseUrl: state.baseUrl.trim() } : {}), apiKey: state.apiKey.trim() || null, ...(provider.id === 'custom' && state.model.trim() ? { model: state.model.trim() } : {}) })
       if (me !== run.current) return
-      if (!r.ok) return dispatch({ type: 'test', test: { state: 'fail', error: r.error ?? 'The connection failed.', models: r.models ?? undefined } })
-      await api.setup.complete(body)
-      // The backend persisted through the normal settings path; pull it into the store rather than re-PUT it.
+      if (!r.ok) return dispatch({ type: 'test', test: { state: 'fail', error: r.error } })
+      // The backend persisted the provider and the default model; pull them into the store.
       useStore.setState({ settings: await api.settings.get() })
       void useStore.getState().loadModels()
-      dispatch({ type: 'test', test: { state: 'idle', models: r.models ?? undefined } })
+      dispatch({ type: 'test', test: { state: 'idle' } })
       dispatch({ type: 'next' })
     } catch (e) {
       if (me === run.current) dispatch({ type: 'test', test: { state: 'fail', error: `Could not connect: ${(e as Error).message}` } })
@@ -142,9 +135,8 @@ export default function Onboarding(): JSX.Element {
               providers={providers ?? []} provider={provider} providerId={provider.id}
               baseUrl={state.baseUrl} onBaseUrl={(v) => field({ baseUrl: v })}
               apiKey={state.apiKey} onApiKey={(v) => field({ apiKey: v })}
-              model={state.model} onModel={(v) => field({ model: v })} modelListId="ob-models"
+              model={state.model} onModel={(v) => field({ model: v })}
             />
-            <datalist id="ob-models">{modelOptions(provider, state.test.models).map((m) => <option key={m} value={m} />)}</datalist>
             {state.test.state === 'fail' && <p className="ob-error" role="alert">{state.test.error}</p>}
             <p className="muted small"><Lock size={11} /> Your key is stored on this Mac only.</p>
           </>

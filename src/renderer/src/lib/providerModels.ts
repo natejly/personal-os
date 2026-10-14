@@ -1,65 +1,17 @@
-import type { ModelInfo, Settings } from '@shared/types'
-import type { ProviderInfo } from '../components/onboarding/steps'
+/** Which models a model setting may choose from. */
+export type PickKind = 'chat' | 'embedding' | 'rerank' | 'image'
 
-/** The last path segment of a model id: `accounts/fireworks/models/ember-1` is `ember-1`. */
-export const baseName = (id: string): string => id.slice(id.lastIndexOf('/') + 1)
-
-/** Providers that route to whatever the user runs, so their ids are not a fixed catalogue. */
-const OPEN = new Set(['custom', 'litellm', 'ollama'])
-
-/**
- * The id to use for the same model on another provider. `live` is that provider's own model list when known.
- * A model with no counterpart on a catalogued provider becomes its default (chat) or empty (anything else),
- * so a Fireworks id is never sent to a server that has no such model.
- */
-export function remapModel(id: string, to: ProviderInfo, live?: string[], field: 'chat' | 'other' = 'other'): string {
-  if (!id) return ''
-  const candidates = [...(live ?? []), ...to.models]
-  if (candidates.includes(id)) return id
-  const name = baseName(id).toLowerCase()
-  const same = candidates.find((c) => baseName(c).toLowerCase() === name)
-  if (same) return same
-  if (!to.models.length || OPEN.has(to.id)) return id.includes('/') ? baseName(id) : id
-  return field === 'chat' ? to.defaultModel : ''
-}
-
-/** The model fields of Settings, in the order the Model tab shows them. */
+/** The model fields of Settings, in the order the Model tab shows them. `blank` is the empty option's label. */
 export const MODEL_FIELDS = [
-  { key: 'defaultModel', label: 'Chat model', field: 'chat' },
-  { key: 'modelHigh', label: 'High tier', tier: 'high' },
-  { key: 'modelMedium', label: 'Medium tier', tier: 'medium' },
-  { key: 'modelLow', label: 'Low tier', tier: 'low' },
-  { key: 'workerModel', label: 'Default worker model' },
-  { key: 'embeddingModel', label: 'Search model' },
-  { key: 'retrievalRerankModel', label: 'Rerank model' },
-  { key: 'visionModel', label: 'Vision model' },
-  { key: 'imageModel', label: 'Image model' }
+  { key: 'defaultModel', label: 'Chat model', kind: 'chat', blank: '', help: '' },
+  { key: 'modelHigh', label: 'High tier', kind: 'chat', blank: 'Provider default', help: 'Drafting skills and agents.', tier: 'high' },
+  { key: 'modelMedium', label: 'Medium tier', kind: 'chat', blank: 'Provider default', help: 'Auto-review of tool calls, summaries and recaps, memory tidy-ups, and short messages under Auto.', tier: 'medium' },
+  { key: 'modelLow', label: 'Low tier', kind: 'chat', blank: 'Provider default', help: 'Titles, memories, follow-ups and other background learning.', tier: 'low' },
+  { key: 'workerModel', label: 'Default worker model', kind: 'chat', blank: 'Same as chat', help: "Model for workers the chat starts. An agent's own model still wins." },
+  { key: 'embeddingModel', label: 'Search model', kind: 'embedding', blank: 'None: keyword search', help: 'Chosen for you from your providers. Once the search index is built it is fixed; before that you can change it.' },
+  { key: 'retrievalRerankModel', label: 'Rerank model', kind: 'rerank', blank: 'Provider default', help: 'Reorders memory and document search results by relevance.' },
+  { key: 'visionModel', label: 'Vision model', kind: 'chat', blank: 'Same as chat', help: 'Reads pictures. Empty uses the chat model when it can read images; otherwise pictures are read with OCR only.' },
+  { key: 'imageModel', label: 'Image model', kind: 'image', blank: 'Not set', help: 'Used when the assistant makes an image. The provider must offer an OpenAI-compatible images endpoint.' }
 ] as const
 
 export type ModelKey = (typeof MODEL_FIELDS)[number]['key']
-
-/** The edits that move every model field to provider `to`, and the labels of fields that had a value and lost it. */
-export function remapSettings(
-  draft: Partial<Pick<Settings, ModelKey>>,
-  to: ProviderInfo,
-  live?: string[],
-  /** When given, a model whose own provider still has a saved key keeps routing there and is left as it is. */
-  routing?: { models: ModelInfo[]; keys?: Record<string, boolean> }
-): { patch: Partial<Settings>; cleared: string[] } {
-  const patch: Record<string, string> = {}
-  const cleared: string[] = []
-  const owned = (id: string): boolean => {
-    const p = routing?.models.find((m) => m.id === id)?.provider
-    return !!p && !!routing?.keys?.[p]
-  }
-  for (const f of MODEL_FIELDS) {
-    const before = draft[f.key] ?? ''
-    // The search model is fixed once set (its vectors fill the index), so it is never rewritten.
-    if (f.key === 'embeddingModel' && before) continue
-    if (owned(before)) continue
-    const after = remapModel(before, to, live, 'field' in f ? f.field : 'other')
-    if (after !== before) patch[f.key] = after
-    if (before && !after) cleared.push(f.label)
-  }
-  return { patch: patch as Partial<Settings>, cleared }
-}

@@ -128,7 +128,11 @@ class Pricing:
 
     def caps(self, model: str) -> dict[str, Any]:
         """{mode?, reasoning?, max_input_tokens?, max_output_tokens?} the proxy (or the Anthropic Models API) reports for a model; {} when unknown."""
-        return dict(self._caps.get(model) or self._routed.get(model) or {})
+        # A "<provider>/<model>" ref is looked up whole first (a model name may hold slashes), then without its provider.
+        for m in (model, model.partition("/")[2]):
+            if m and (found := self._caps.get(m) or self._routed.get(m)):
+                return dict(found)
+        return {}
 
     async def ensure(self, settings: dict[str, Any]) -> None:
         """refresh() before a reply. Only a base with no table yet is waited for (its caps may set max_tokens); a stale

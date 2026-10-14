@@ -1,0 +1,38 @@
+/* Motion for surfaces: approval cards, hold-to-confirm, popovers and menus. Tokens only (motion.css).
+ * Loaded after motion.css by main.tsx and PopoutSurface.tsx. The window tilt lives in canvas.css / useDrag.ts. */
+
+/* ---- popovers and menus: spring out of the opener (.win-menu in canvas.css, .preset-pop in spaces.css).
+   Containers only, so the small scale never touches text or a round control. ---- */
+@keyframes pop-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
+
+/* ---- approval cards: rise once on mount. Keyed by tool-call id, so a re-render never replays it. ---- */
+@keyframes card-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.tool-event.awaiting,
+.approval:not(.tool-event.awaiting > .approval),
+.aplan:not(.tool-event.awaiting > .aplan) {
+  animation: card-rise var(--dur-spring) var(--spring-snappy);
+}
+/* Resolved plan cards settle: colour and fade ride the gentle spring when the class flips. */
+.aplan { transition: background-color var(--dur-spring) var(--spring-gentle), border-color var(--dur-spring) var(--spring-gentle), opacity var(--dur-spring) var(--spring-gentle); }
+
+/* The outcome wash (SettleWash): sits over a row that just stopped waiting, then fades. */
+.tool-event:has(> .settle-wash) { position: relative; }
+.settle-wash {
+  position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  animation: settle-wash var(--dur-spring) var(--spring-gentle) forwards;
+}
+.settle-wash.allow { --wash: var(--ok, #2e9d5b); }
+.settle-wash.deny { --wash: var(--danger, #d64545); }
+@keyframes settle-wash {
+  from { background: color-mix(in srgb, var(--wash) 22%, transparent); }
+  to { background: color-mix(in srgb, var(--wash) 0%, transparent); }
+}
+
+/* ---- hold to confirm (HoldButton): a fill grows across the button while it is held ---- */
+.hold-btn { position: relative; overflow: hidden; }
+.hold-btn::after {
+  content: ''; position: absolute; inset: 0 auto 0 0; width: 0; pointer-events: none;
+  background: color-mix(in srgb, var(--danger, #d64545) 30%, transparent);
+  transition: width var(--dur-snap) var(--spring-snappy);
+}
+.hold-btn.holding::after { width: 100%; transition: width var(--dur-hold) linear; }

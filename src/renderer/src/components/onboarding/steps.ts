@@ -1,39 +1,18 @@
 /** Pure logic of the first-run wizard: which step is next, what a step needs, what a provider changes. */
 
+import type { ProviderPreset } from '@shared/types'
+
 export type StepId = 'welcome' | 'provider' | 'key' | 'done'
 export const STEPS: StepId[] = ['welcome', 'provider', 'key', 'done']
 
-/** Mirrors GET /setup/providers. */
-export interface ProviderInfo {
-  id: string
-  name: string
-  baseUrl: string
-  needsKey: boolean
-  keyUrl: string | null
-  defaultModel: string
-  models: string[]
-  /** The provider's default model per tier; absent when it has none. */
-  tiers?: Partial<Record<'high' | 'medium' | 'low', string>>
-  /** The provider's default reranker; absent when it has no rerank route. */
-  rerankModel?: string
-  note: string | null
-}
-
+/** Mirrors GET /setup/status. */
 export interface SetupStatus {
   needsOnboarding: boolean
   hasApiKey: boolean
-  provider: string | null
-  baseUrl: string
-  model: string
+  /** Ids of the providers added so far. */
+  providers: string[]
   googleConnected: boolean
   onboardedAt: string | null
-}
-
-export interface SetupTestResult {
-  ok: boolean
-  error: string | null
-  latencyMs: number | null
-  models: string[] | null
 }
 
 export interface WizardState {
@@ -41,19 +20,18 @@ export interface WizardState {
   providerId: string | null
   baseUrl: string
   apiKey: string
+  /** Optional model id, for a custom server that cannot list its models. */
   model: string
-  /** The key step's connection test. `models` is whatever the provider listed. */
-  test: { state: 'idle' | 'testing' | 'fail'; error?: string; latencyMs?: number; models?: string[] }
+  /** The key step's check of the provider: nothing is saved unless it passes. */
+  test: { state: 'idle' | 'testing' | 'fail'; error?: string }
 }
 
 export type WizardAction =
   | { type: 'next' }
   | { type: 'back' }
-  | { type: 'pick'; provider: ProviderInfo }
+  | { type: 'pick'; provider: ProviderPreset }
   | { type: 'field'; patch: Partial<Pick<WizardState, 'baseUrl' | 'apiKey' | 'model'>> }
   | { type: 'test'; test: WizardState['test'] }
-  /** The configured setup, applied only while the user has not picked anything yet. */
-  | { type: 'seed'; provider: ProviderInfo; baseUrl: string; model: string }
 
 /** Providers where the user, not us, decides where the endpoint lives. */
 const EDITABLE_BASE = new Set(['litellm', 'custom', 'ollama'])
@@ -62,24 +40,21 @@ export const showsBaseUrl = (providerId: string | null): boolean => !!providerId
 export const initialState = (): WizardState => ({ step: 'welcome', providerId: null, baseUrl: '', apiKey: '', model: '', test: { state: 'idle' } })
 
 /** What the current step still lacks, or null when the user may go on. */
-export function stepBlocker(s: WizardState, provider: ProviderInfo | undefined): string | null {
+export function stepBlocker(s: WizardState, provider: ProviderPreset | undefined): string | null {
   if (s.step === 'provider' && !s.providerId) return 'Choose a provider to continue.'
   if (s.step === 'key') {
     if (provider?.needsKey && !s.apiKey.trim()) return 'Paste your API key to continue.'
     if (showsBaseUrl(s.providerId) && !s.baseUrl.trim()) return 'Enter the base URL to continue.'
-    if (!s.model.trim()) return 'Pick or type a model to continue.'
   }
   return null
 }
 
-export function reduce(s: WizardState, a: WizardAction, provider?: ProviderInfo): WizardState {
+export function reduce(s: WizardState, a: WizardAction, provider?: ProviderPreset): WizardState {
   switch (a.type) {
     case 'pick':
-      // Switching provider drops the old key and model: they belong to the other service.
+      // Switching provider drops the old key: it belongs to the other service.
       if (a.provider.id === s.providerId) return s
-      return { ...s, providerId: a.provider.id, baseUrl: a.provider.baseUrl, apiKey: '', model: a.provider.defaultModel, test: { state: 'idle' } }
-    case 'seed':
-      return s.providerId ? s : { ...s, providerId: a.provider.id, baseUrl: a.baseUrl, model: a.model }
+      return { ...s, providerId: a.provider.id, baseUrl: a.provider.baseUrl, apiKey: '', model: '', test: { state: 'idle' } }
     case 'field':
       // Any edit invalidates a previous test: it vouched for different inputs.
       return { ...s, ...a.patch, test: { state: 'idle' } }
@@ -97,14 +72,6 @@ export function reduce(s: WizardState, a: WizardAction, provider?: ProviderInfo)
       return { ...s, step: STEPS[i - 1], test: { state: 'idle' } }
     }
   }
-}
-
-/** The model list for the dropdown: the provider's own, topped up with whatever the test discovered. */
-export function modelOptions(provider: ProviderInfo | undefined, discovered?: string[]): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const m of [...(provider?.models ?? []), ...(discovered ?? [])]) if (m && !seen.has(m)) { seen.add(m); out.push(m) }
-  return out
 }
 
 /** Chats offered on the empty screen right after setup. Google ones are left out until it is connected: they would only error. */

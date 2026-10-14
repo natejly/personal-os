@@ -81,25 +81,74 @@ TIERS = ("high", "medium", "low")
 TIER_KEYS = {"high": "modelHigh", "medium": "modelMedium", "low": "modelLow"}
 
 
+def new_entry(kind: str, base_url: str = "", name: str = "", pid: str = "") -> dict[str, Any]:
+    """A `providers` list entry for a preset kind. Only custom, litellm and ollama keep an address of their own."""
+    p = BY_ID[kind]
+    own = kind in ("custom", "litellm", "ollama") and base_url.strip()
+    return {"id": pid or kind, "kind": kind, "name": name.strip() or p["name"], "baseUrl": base_url.strip() if own else p["baseUrl"]}
+
+
+def split_ref(ref: str, ids: Any) -> tuple[str | None, str]:
+    """"<providerId>/<model>" -> (providerId, model). Split on the first "/" only when the head is a configured provider
+    id, so openrouter's own "anthropic/..." names and fireworks' "accounts/..." stay whole. No such head: (None, ref)."""
+    head, sep, rest = ref.partition("/")
+    return (head, rest) if sep and head in ids and rest else (None, ref)
+
+
+def make_ref(provider_id: str, model: str) -> str:
+    return f"{provider_id}/{model}" if model else ""
+
+
+def bare(ref: str, settings: dict[str, Any] | None = None) -> str:
+    """The model name a provider knows, from a ref. Without a provider list in `settings` (a legacy dict) the ref is
+    returned as is."""
+    entries = (settings or {}).get("providers")
+    return split_ref(ref, {e.get("id") for e in entries if isinstance(e, dict)})[1] if entries else ref
+
+
+def _usable(settings: dict[str, Any]) -> list[dict[str, Any]]:
+    from . import provider_route  # provider_route imports this module
+    return provider_route.usable(settings)
+
+
 def tier_model(settings: dict[str, Any], tier: str) -> str:
-    """The model for a tier: the saved one, else the active provider's default for it, else the chat model."""
+    """The model for a tier: the saved one, else the default for it of the provider the chat model runs on, else the chat
+    model itself, so background work never leaves the chat's provider (a plain custom server has no tiers). With a
+    provider list the answer is a "<provider>/<model>" ref."""
     saved = str(settings.get(TIER_KEYS[tier]) or "").strip()
     if saved:
         return saved
+    if settings.get("providers"):
+        use = _usable(settings)
+        chat = str(settings.get("defaultModel") or "").strip() or default_model(settings)
+        pid, _ = split_ref(chat, {e["id"] for e in use})
+        e = next((x for x in use if x["id"] == pid), None) or (use[0] if use and not pid else None)
+        if e and (m := TIER_DEFAULTS.get(e["kind"], {}).get(tier)):
+            return make_ref(e["id"], m)
+        return chat
     p = get(effective(settings))
     return (TIER_DEFAULTS.get(p["id"], {}).get(tier) if p else None) or str(settings.get("defaultModel") or (p or {}).get("defaultModel") or "")
 
 
 def default_model(settings: dict[str, Any]) -> str:
-    """The chat model when none is saved: the active provider's defaultModel, which is deliberately not its high tier."""
+    """The chat model when none is saved: with a provider list, the first usable provider's defaultModel as a ref; else
+    the active provider's, which is deliberately not its high tier."""
+    if settings.get("providers"):
+        e = next(iter(_usable(settings)), None)
+        return make_ref(e["id"], str((get(e["kind"]) or {}).get("defaultModel") or "")) if e else ""
     p = get(effective(settings))
     return str(p.get("defaultModel") or "") if p else ""
 
 
 def rerank_model(settings: dict[str, Any]) -> str:
-    """The saved rerank model, else the active provider's default; blank = reranking is skipped."""
+    """The saved rerank model, else the first usable provider's default (a ref when there is a provider list); blank =
+    reranking is skipped."""
     saved = str(settings.get("retrievalRerankModel") or "").strip()
-    return saved or (get(effective(settings)) or {}).get("rerankModel", "")
+    if saved:
+        return saved
+    if settings.get("providers"):
+        return next((make_ref(e["id"], m) for e in _usable(settings) if (m := (get(e["kind"]) or {}).get("rerankModel"))), "")
+    return (get(effective(settings)) or {}).get("rerankModel", "")
 
 
 def _hostport(url: str) -> str:

@@ -28,23 +28,15 @@ export function togglePicker(models: ModelInfo[], pickerModels: string[] | undef
   return on ? [...rest, id] : rest
 }
 
-/** Rows grouped by provider, the active provider first, the rest in order of first appearance. */
-export function groupByProvider<T extends { provider?: string }>(rows: T[], active?: string | null): { provider: string; rows: T[] }[] {
+/** Rows grouped by provider, in order of first appearance (the backend lists providers in the order they were added). */
+export function groupByProvider<T extends { provider?: string }>(rows: T[]): { provider: string; rows: T[] }[] {
   const groups = new Map<string, T[]>()
   for (const r of rows) {
     const p = r.provider ?? ''
     groups.set(p, [...(groups.get(p) ?? []), r])
   }
-  const out = [...groups].map(([provider, rs]) => ({ provider, rows: rs }))
-  return [...out.filter((g) => g.provider === active), ...out.filter((g) => g.provider !== active)]
+  return [...groups].map(([provider, rs]) => ({ provider, rows: rs }))
 }
 
 /** The search model is fixed once vectors exist for it (the backend reports it): they would no longer match. */
 export const embeddingLocked = (s: { embeddingLocked?: boolean }): boolean => !!s.embeddingLocked
-
-/** Embedding rows from providers that have a key, suggested ones first. */
-export function embeddingRows(models: ModelInfo[], keys: Record<string, boolean> | undefined): ModelInfo[] {
-  return models
-    .filter((m) => m.mode === 'embedding' && (!m.provider || keys?.[m.provider]))
-    .sort((a, b) => Number(!!b.preset) - Number(!!a.preset))
-}

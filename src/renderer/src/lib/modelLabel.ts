@@ -5,9 +5,17 @@
  */
 const ROUTE = /^(?:[\w.-]+\/)?accounts\/[^/]+\/(?:models|routers)\//
 
+/** A model setting is `<providerId>/<model>`; these are the ids a provider can have (custom endpoints are custom, custom-2, ...). */
+const PROVIDER_HEAD = /^(anthropic|fireworks|openai|openrouter|litellm|ollama|custom(?:-\d+)?)\//
+
+/** The provider id a ref starts with, or '' for a bare model id. */
+export function providerHead(id: string): string {
+  return PROVIDER_HEAD.exec(id)?.[1] ?? ''
+}
+
 export function modelLabel(id: string): string {
   if (id === 'auto') return 'Auto'
-  return id.replace(ROUTE, '')
+  return id.replace(PROVIDER_HEAD, '').replace(ROUTE, '')
 }
 
 /** Prefer the id the user already picked, then a bare alias, then the shorter path. */
@@ -24,11 +32,12 @@ function prefer(a: string, b: string, selected: string): string {
 export function modelChoices(ids: string[], query: string, selected: string): string[] {
   const q = query.trim().toLowerCase()
   const matched = ids.filter((id) => !q || modelLabel(id).toLowerCase().includes(q) || id.toLowerCase().includes(q))
+  // One row per short name within a provider: the same model on two providers stays two rows.
   const byLabel = new Map<string, string>()
   for (const id of matched) {
-    const label = modelLabel(id)
-    const prev = byLabel.get(label)
-    byLabel.set(label, prev ? prefer(prev, id, selected) : id)
+    const key = `${providerHead(id)}|${modelLabel(id)}`
+    const prev = byLabel.get(key)
+    byLabel.set(key, prev ? prefer(prev, id, selected) : id)
   }
   return [...byLabel.values()].sort((a, b) => modelLabel(a).localeCompare(modelLabel(b)) || a.localeCompare(b))
 }
@@ -45,10 +54,7 @@ export function showsEffort(models: ModelCaps[], id: string): boolean {
   return models.find((m) => m.id === id)?.reasoning !== false
 }
 
-/** Providers whose key is optional: a finished setup on one of them vouches for a keyless server on the network. */
-const KEY_OPTIONAL = new Set(['ollama', 'litellm', 'custom'])
-
-/** A key is set, the endpoint is local (Ollama, a local proxy), or setup finished on a provider whose key is optional. */
-export function hasModelKey(s: { apiKeySet?: boolean; baseUrl?: string; onboardedAt?: string | null; provider?: string | null }): boolean {
-  return !!s.apiKeySet || (!!s.onboardedAt && KEY_OPTIONAL.has(s.provider ?? '')) || /^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(s.baseUrl ?? '')
+/** At least one provider is set up: it has a key, or needs none. */
+export function hasModelKey(s: { apiKeySet?: boolean; providers?: unknown[] }): boolean {
+  return !!s.apiKeySet || !!s.providers?.length
 }

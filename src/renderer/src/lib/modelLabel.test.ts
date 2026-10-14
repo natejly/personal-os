@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { chatModelIds, hasModelKey, modelChoices, modelLabel, showsEffort } from './modelLabel'
+import { chatModelIds, hasModelKey, modelChoices, modelLabel, providerHead, showsEffort } from './modelLabel'
 
 test('the auto model is labelled Auto', () => {
   assert.equal(modelLabel('auto'), 'Auto')
@@ -11,7 +11,8 @@ test('model labels drop the fireworks routing path', () => {
   assert.equal(modelLabel('fireworks_ai/accounts/fireworks/models/deepseek-v4-pro'), 'deepseek-v4-pro')
   assert.equal(modelLabel('accounts/fireworks/routers/kimi-k3-fast'), 'kimi-k3-fast')
   assert.equal(modelLabel('kimi-k3'), 'kimi-k3')
-  assert.equal(modelLabel('openai/gpt-4o'), 'openai/gpt-4o')
+  // A vendor path that is not a provider id is part of the model name.
+  assert.equal(modelLabel('meta/llama-4'), 'meta/llama-4')
 })
 
 test('choices sort and collapse by the short name, keeping the alias', () => {
@@ -50,11 +51,24 @@ test('showsEffort is false only for an explicit reasoning:false', () => {
   assert.equal(showsEffort(models, 'missing'), true)
 })
 
-test('hasModelKey: a key, a local endpoint, or a finished setup (keyless server on the network)', () => {
+test('hasModelKey: a saved key, or any provider that is set up', () => {
   assert.equal(hasModelKey({ apiKeySet: true }), true)
-  assert.equal(hasModelKey({ baseUrl: 'http://localhost:11434/v1' }), true)
-  assert.equal(hasModelKey({ baseUrl: 'http://192.168.1.20:8000/v1' }), false)
-  assert.equal(hasModelKey({ baseUrl: 'http://192.168.1.20:8000/v1', provider: 'custom', onboardedAt: '2026-10-13T00:00:00+00:00' }), true)
-  // A hosted provider still needs its key: switching to one in Settings without pasting a key brings the banner back.
-  assert.equal(hasModelKey({ baseUrl: 'https://api.openai.com/v1', provider: 'openai', onboardedAt: '2026-10-13T00:00:00+00:00' }), false)
+  assert.equal(hasModelKey({ providers: [{ id: 'ollama' }] }), true)
+  assert.equal(hasModelKey({ providers: [] }), false)
+  assert.equal(hasModelKey({}), false)
+})
+
+test('a ref shows the bare model name, whichever provider it is on', () => {
+  assert.equal(modelLabel('anthropic/claude-sonnet-5-5'), 'claude-sonnet-5-5')
+  assert.equal(modelLabel('ollama/llama3:8b'), 'llama3:8b')
+  assert.equal(modelLabel('custom-2/qwen'), 'qwen')
+  assert.equal(modelLabel('fireworks/accounts/fireworks/models/kimi-k3'), 'kimi-k3')
+  // An OpenRouter model keeps its own vendor path.
+  assert.equal(modelLabel('openrouter/openai/gpt-4o'), 'openai/gpt-4o')
+  assert.equal(providerHead('openrouter/openai/gpt-4o'), 'openrouter')
+  assert.equal(providerHead('gpt-4o'), '')
+})
+
+test('the same model on two providers stays two choices', () => {
+  assert.deepEqual(modelChoices(['anthropic/claude-x', 'litellm/claude-x'], '', ''), ['anthropic/claude-x', 'litellm/claude-x'])
 })

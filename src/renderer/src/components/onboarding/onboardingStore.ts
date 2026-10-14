@@ -11,8 +11,6 @@ interface OnboardingState {
   setFirstPrompts: (on: boolean) => void
   /** Asks the backend whether this install still needs setup. A backend without the route (or an error) means no wizard. */
   check: () => Promise<void>
-  /** Settings → "Run setup again". */
-  rerun: () => Promise<void>
 }
 
 export const useOnboarding = create<OnboardingState>((set) => ({
@@ -24,9 +22,5 @@ export const useOnboarding = create<OnboardingState>((set) => ({
   check: async () => {
     const st = await api.setup.status().catch(() => null)
     if (st?.needsOnboarding) set({ open: true })
-  },
-  rerun: async () => {
-    await api.setup.reset()
-    set({ open: true })
   }
 }))

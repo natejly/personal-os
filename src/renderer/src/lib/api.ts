@@ -11,6 +11,7 @@ import type {
   Doc, DocFolder, FullDoc, DocRevision, DocComment, DocTypography,
   HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
   TrashKind, TrashListing, ChatSearchHit, ChatOutputs,
+  ProviderEntry, ProviderPreset, ProviderResult,
   McpCatalog, McpEffective, McpImportSource, McpRegistryResult, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
   PendingSend, SendHoldConfig, Verification, Verified,
   PermissionGrantResult, VoiceConfig,
@@ -22,9 +23,7 @@ import type { CodingSession, CodingSessionDiff, CodingSessionEvent, DuelWinner, 
 import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
 import { ApiError, detailText } from './apiError'
 import type { ChatRunChanges } from './deskFiles'
-import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
-
-export interface SetupBody { provider: string; baseUrl: string; apiKey: string | null; /** May be '' when only the connection is being checked. */ model: string }
+import type { SetupStatus } from '../components/onboarding/steps'
 /** Day plan settings (modules/planner.py). workDays: 1 = Monday … 7 = Sunday. */
 export interface PlannerConfig { workStart: string; workEnd: string; workDays: number[]; bufferMin: number; minBlockMin: number; maxBlockMin: number; slotStepMin: number; lookaheadDays: number; calendarName: string; busyCalendarIds: string[] }
 /** Reply tracker settings (modules/mailwatch.py). */
@@ -176,24 +175,24 @@ export const api = {
   diagnostics: () => req<Record<string, unknown>>('/diagnostics'),
   settings: {
     get: () => req<Settings>('/settings'),
-    set: (patch: Partial<Settings>) => req<Settings>('/settings', { method: 'PUT', body: json(patch) }),
-    /** Let the next request try a key the provider rejected again (the auth breaker's retry). */
-    retryAuth: () => req<Settings>('/provider/auth/reset', { method: 'POST' })
+    set: (patch: Partial<Settings>) => req<Settings>('/settings', { method: 'PUT', body: json(patch) })
   },
-  /** First-run setup (backend setup routes). `body` is the same for test and complete. */
+  /** First-run state. */
   setup: {
-    status: () => req<SetupStatus>('/setup/status'),
-    providers: () => req<{ providers: ProviderInfo[] }>('/setup/providers'),
-    test: (body: SetupBody) => req<SetupTestResult>('/setup/test', { method: 'POST', body: json(body) }, NO_TIMEOUT),
-    /** The provider's own model list; `models` is null when it could not be read (see `error`). */
-    models: (body: SetupBody) => req<{ models: string[] | null; error: string | null }>('/setup/models', { method: 'POST', body: json(body) }),
-    complete: (body: SetupBody) => req<SetupStatus>('/setup/complete', { method: 'POST', body: json(body) }),
-    reset: () => req<SetupStatus>('/setup/reset', { method: 'POST' })
+    status: () => req<SetupStatus>('/setup/status')
   },
   models: () => req<ModelInfo[]>('/models'),
-  /** One key per provider; null removes it. */
-  providerKeys: {
-    set: (id: string, apiKey: string | null) => req<{ providerKeysSet: Record<string, boolean> }>(`/provider-keys/${encodeURIComponent(id)}`, { method: 'PUT', body: json({ apiKey }) })
+  /**
+   * Providers and their keys. Adding one, replacing a key and changing an address all check the provider first
+   * and answer `ok: false` (HTTP 200, nothing stored) when it refuses; other failures throw.
+   */
+  providers: {
+    list: () => req<{ presets: ProviderPreset[]; providers: ProviderEntry[] }>('/providers'),
+    add: (body: { kind: string; baseUrl?: string; name?: string; apiKey?: string | null; model?: string }) => req<ProviderResult>('/providers', { method: 'POST', body: json(body) }, NO_TIMEOUT),
+    setKey: (id: string, apiKey: string) => req<ProviderResult>(`/providers/${encodeURIComponent(id)}/key`, { method: 'PUT', body: json({ apiKey }) }, NO_TIMEOUT),
+    setAddress: (id: string, baseUrl: string) => req<ProviderResult>(`/providers/${encodeURIComponent(id)}`, { method: 'PUT', body: json({ baseUrl }) }, NO_TIMEOUT),
+    /** `staleSelections` are the model settings that pointed at the removed provider. */
+    remove: (id: string) => req<{ providers: ProviderEntry[]; staleSelections: string[] }>(`/providers/${encodeURIComponent(id)}`, { method: 'DELETE' })
   },
   tools: () => req<{ tools: ToolInfo[]; enabled: Record<string, boolean> }>('/tools'),
   shellJobs: () => req<{ jobs: ShellJobInfo[] }>('/shell/jobs'),

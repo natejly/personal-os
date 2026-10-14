@@ -77,7 +77,8 @@ test('a card raised after the same reply read untrusted content says so, live, w
     { call: { name: 'health_log', args: { metric: 'sleep', value: 7.25, note: 'taint check' } } }
   ])
   try {
-    await api('/settings', { method: 'PUT', body: { toolDeferAbove: 0, baseUrl: llm.url } })
+    await api('/settings', { method: 'PUT', body: { toolDeferAbove: 0 } })
+    await grain.repoint(llm.url)
     await page.reload()
     await page.waitForSelector('.sidebar')
     await newChat(page)

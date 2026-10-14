@@ -53,7 +53,7 @@ export async function scriptLLM(grain) {
   })
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
   const url = `http://127.0.0.1:${server.address().port}`
-  await grain.api('/settings', { method: 'PUT', body: { baseUrl: url } })
+  await grain.repoint(url)
   const orig = grain.close
   grain.close = async () => { server.close(); server.closeAllConnections?.(); await orig() }
   return { url, requests, queue, push: (...steps) => queue.push(...steps), close: () => server.close() }

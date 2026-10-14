@@ -4,6 +4,7 @@ import { useStore } from '../store'
 import { AGENT_LABEL, canAttach, codingDot, codingStatusLabel, defaultTermMode, defaultTermSession, termSessions } from '../lib/codingSessions'
 import { endEntry, ensureEntry, getEntry, refit, startEntry, useTermEntries, type TermMode } from '../lib/termRegistry'
 import { CodingTimeline } from './CodingTimeline'
+import ShellJobs from './ShellJobs'
 
 // The last openTerminal request this pane acted on, so remounting the pane does not replay it.
 let handled = 0
@@ -80,7 +81,8 @@ export default function TerminalPane({ conversationId }: { conversationId?: stri
 
   return (
     <div className="desk-pane term-pane" data-testid="term-pane">
-      {rows.length > 1 && <div className="term-chips">
+      <div className="term-jobs"><ShellJobs /></div>
+      {rows.length > 0 && <div className="term-chips">
         {rows.map((c) => (
           <button key={c.id} type="button" className={`term-chip${c.id === sessionId ? ' on' : ''}`} data-testid={`term-chip-${c.id}`} title={c.worktree}
             onClick={() => pick(c.id)}>
@@ -100,7 +102,7 @@ export default function TerminalPane({ conversationId }: { conversationId?: stri
       )}
       <div className="term-view" data-testid="term-view" ref={viewRef} style={shown ? undefined : { display: 'none' }} />
       {selected && !shown && (canAttach(selected) ? <p className="muted small">Attach to the session or open a shell in its worktree.</p> : <CodingTimeline id={selected.id} />)}
-      {!selected && <p className="muted small">Pick a coding session.</p>}
+      {!selected && <p className="muted small">No coding session in this chat yet. Running shell commands show above.</p>}
     </div>
   )
 }

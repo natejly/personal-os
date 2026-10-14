@@ -9,7 +9,6 @@ import { ChatFilesList } from './ChatFilesPanel'
 import { useStore } from '../store'
 import ContextDrawer from './ContextDrawer'
 import { useTermAvailable } from '../lib/termRegistry'
-import { termSessions } from '../lib/codingSessions'
 import TerminalPane from './TerminalPane'
 import TracesPane from './TracesPane'
 
@@ -21,8 +20,7 @@ const freshTermRequest = (): boolean => Date.now() - (useStore.getState().termin
 
 /**
  * The side panel of a chat, beside the transcript: Files and Changes for every chat, and Review once it has a desk (a chat
- * working autonomously), which comes forward when the desk asks for it. Traces lists the chat's runs. Terminal shows when the app can host terminals and a
- * coding session exists or ⌘T opened the panel; an openTerminal request brings it forward. A running checklist shows as the compact progress card
+ * working autonomously), which comes forward when the desk asks for it. Traces lists the chat's runs. Terminal shows in every chat with an id when the app can host terminals (running shell jobs, the chat's coding sessions and their terminals); an openTerminal request brings it forward. A running checklist shows as the compact progress card
  * above the composer (ProgressCard) and workers as the worker list above the composer. Context is the default tab. Without a desk, Files is the chat's
  * own list. Context (the store's `contextOpen`) is always there and wins while requested; a draft chat with no id has only that tab.
  */
@@ -32,14 +30,12 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   useEffect(() => { if (desk?.status === 'review') setTab('review') }, [desk?.id, desk?.status])
   const contextOpen = useStore((s) => s.contextOpen)
   const termOk = useTermAvailable()
-  const hasCoding = useStore((s) => termSessions(Object.values(s.codingSessions), conversationId).length > 0)
-  const termTab = useStore((s) => s.terminalTab)
   const tracesRequest = useStore((s) => s.deskTabRequest?.n)
   const termRequest = useStore((s) => s.terminalRequest?.n)
   useEffect(() => { void useStore.getState().refreshCodingSessions() }, [])
   useEffect(() => { if (termRequest && freshTermRequest()) setTab('terminal') }, [termRequest])
   useEffect(() => { const r = useStore.getState().deskTabRequest; if (r && Date.now() - r.at < 3000) { useStore.setState({ contextOpen: false }); setTab(r.tab) } }, [tracesRequest])
-  const shown = (k: Tab): boolean => k === 'context' || (!!conversationId && (k === 'files' || k === 'changes')) || (k === 'review' && !!desk) || (k === 'traces' && !!conversationId) || (k === 'terminal' && termOk && (hasCoding || termTab))
+  const shown = (k: Tab): boolean => k === 'context' || (!!conversationId && (k === 'files' || k === 'changes')) || (k === 'review' && !!desk) || (k === 'traces' && !!conversationId) || (k === 'terminal' && termOk && !!conversationId)
   const tabs = TABS.filter((t) => shown(t.key))
   const tab: Tab = contextOpen ? 'context' : shown(picked) ? picked : 'context'
   const pick = (k: Tab): void => { useStore.setState({ contextOpen: k === 'context' }); setTab(k) }

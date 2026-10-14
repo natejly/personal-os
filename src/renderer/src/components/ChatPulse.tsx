@@ -1,4 +1,4 @@
-import { useChatFace, useChatPulse, useUnread } from '../store'
+import { useChatFace, useChatPulse, useIsStopping, useUnread } from '../store'
 import Face from './Face'
 import type { Attention, Conversation, SessionStatus } from '@shared/types'
 import { ATTENTION_LABEL } from '../lib/attention'
@@ -19,10 +19,11 @@ const TITLE: Partial<Record<SessionStatus, string>> = {
 export default function ChatPulse({ conv, size = 14 }: { conv: Pick<Conversation, 'id' | 'settings' | 'project_id'>; size?: number }): JSX.Element {
   const status = useChatPulse(conv.id)
   const unread = useUnread(conv.id)
+  const stopping = useIsStopping(conv.id)
   const face = useChatFace(conv)
   return (
     <>
-      <Face {...face} status={status} size={size} title={TITLE[status]} />
+      <Face {...face} status={status} calm={stopping} size={size} title={TITLE[status]} />
       {status === 'idle' && unread > 0 && <span className="pulse unread" title="Unread reply" />}
     </>
   )

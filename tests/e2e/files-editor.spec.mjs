@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, patient, relaunch, newDoc, menu, editDoc } from './helpers/files.mjs'
+import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, patient, relaunch, newDoc, treeMenu, menu, editDoc } from './helpers/files.mjs'
 
 test.describe.configure({ timeout: 300_000 })
 test.beforeEach(({ grain }) => patient(grain))
@@ -14,7 +14,7 @@ const selectAll = async (page) => { await body(page).click(); await page.keyboar
 test('title follows the first # heading until named by hand; whitespace-only title is ignored', async ({ grain: g }) => {
   const { page } = g
   await openFiles(page)
-  await newDoc(page).click()
+  await newDoc(page)
   await body(page).click()
   await page.keyboard.insertText('# My heading\n\ntext')
   await expect(titleBox(page)).toHaveValue('My heading', { timeout: 20_000 })
@@ -105,7 +105,7 @@ test('daily note: menu chord and New menu both open today, never a duplicate', a
   expect(await menu(g, 'CmdOrCtrl+Shift+D')).toBe(true)
   await expect(titleBox(page)).toHaveValue(iso(), { timeout: 30_000 })
   await expect(body(page)).toHaveValue(/^# \w+, \w+ \d+, \d{4}/)
-  await page.getByRole('button', { name: 'New from template' }).first().click()
+  await treeMenu(page)
   await page.getByRole('menuitem', { name: "Today's file" }).click()
   await menu(g, 'CmdOrCtrl+Shift+D')
   await page.waitForTimeout(1500)
@@ -164,17 +164,17 @@ test('templates: built-in menu, user Templates folder (menu + slash), {{date}} {
   await g.api('/docs/folders', { method: 'POST', body: { path: 'Templates', scope: '' } })
   await mkDoc(g, { title: 'Standup', folder: 'Templates', content: 'Day {{date}} for {{title}}\n\n- {{cursor}}\n\nend' })
   await openFiles(page)
-  await page.getByRole('button', { name: 'New from template' }).first().click()
+  await treeMenu(page)
   await page.getByRole('menuitem', { name: 'Meeting notes' }).click()
   await expect(titleBox(page)).toHaveValue('Meeting ' + iso())
   await expect(body(page)).toHaveValue(/## Agenda[\s\S]*## Action items/)
   // user template via menu
-  await page.getByRole('button', { name: 'New from template' }).first().click()
+  await treeMenu(page)
   await page.getByRole('menuitem', { name: 'Standup' }).click()
   await expect(titleBox(page)).toHaveValue('Standup')
   await expect(body(page)).toHaveValue(new RegExp(`Day ${iso()} for Standup`))
   // slash: Template: Standup
-  await newDoc(page).click()
+  await newDoc(page)
   await expect(titleBox(page)).toHaveValue('Untitled') // the new doc has replaced the one that was open
   await body(page).click()
   await page.keyboard.insertText('/templ')
@@ -241,7 +241,7 @@ test('task checkboxes toggle in the preview and write back to the file', async (
 test('keyboard in the editor: shift-cmd-B/I/E, cmd-K, Tab, list continuation, cmd-S', async ({ grain: g }) => {
   const { page } = g
   await openFiles(page)
-  await newDoc(page).click()
+  await newDoc(page)
   await body(page).click()
   await page.keyboard.insertText('word')
   await selectAll(page)

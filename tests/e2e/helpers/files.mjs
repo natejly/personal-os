@@ -1,7 +1,7 @@
 // Shared helpers for the Files view specs.
 export const openFiles = async (page) => {
   await page.locator('.nav-item', { hasText: 'Files' }).first().click()
-  await page.getByRole('tablist', { name: 'Files section' }).waitFor()
+  await page.getByPlaceholder('Search files').waitFor()
 }
 export const body = (page) => page.locator('textarea.md-input')
 /** Bring the editor up (segmented control, Editor only) unless a doc is already showing it. */
@@ -20,7 +20,12 @@ export const errorsOf = (g) => g.consoleErrors.filter((e) => !benign.test(e))
 // The e2e box is shared and often at load 30+: give every wait more room than the harness default of 15 s.
 export const patient = (g) => { g.page.setDefaultTimeout(60_000) }
 export const relaunch = async (g) => { await g.relaunch(); patient(g); return g.page }
-export const newDoc = (page) => page.locator('.page-header .newdoc-main')
+/** The file tree's "+" menu. */
+export const treeMenu = (page) => page.getByRole('button', { name: 'New', exact: true }).click()
+/** New blank file from the tree's "+" menu. */
+export const newDoc = async (page) => { await treeMenu(page); await page.getByRole('menuitem', { name: 'New file' }).click() }
+/** Open the tree's Uploads or Artifacts section. */
+export const section = (page, name) => page.locator('.doc-tree .doc-row', { hasText: name }).click()
 /** Real pointer drag: press on src, move over dst in steps, release. HTML5 drag-and-drop starts from this in Chromium. */
 export const drag = async (page, src, dst) => {
   const a = await src.boundingBox()

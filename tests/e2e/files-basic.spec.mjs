@@ -7,7 +7,7 @@ test.beforeEach(({ grain }) => patient(grain))
 test('create doc via New button and via palette, title + body autosave survive switching and relaunch', async ({ grain: g }) => {
   let { page } = g
   await openFiles(page)
-  await newDoc(page).click()
+  await newDoc(page)
   await expect(body(page)).toBeVisible()
   await titleBox(page).fill('Alpha note')
   await body(page).click()
@@ -38,7 +38,7 @@ test('create doc via New button and via palette, title + body autosave survive s
 test('typing 2000 chars fast loses no keystrokes, even across a relaunch', async ({ grain: g }) => {
   const { page } = g
   await openFiles(page)
-  await newDoc(page).click()
+  await newDoc(page)
   await body(page).click()
   const text = Array.from({ length: 2000 }, (_, i) => String.fromCharCode(97 + (i % 26))).join('')
   await page.keyboard.type(text, { delay: 0 })
@@ -57,7 +57,7 @@ test('typing 2000 chars fast loses no keystrokes, even across a relaunch', async
 test('unsaved typing is flushed when quitting before the debounce fires', async ({ grain: g }) => {
   const { page } = g
   await openFiles(page)
-  await newDoc(page).click()
+  await newDoc(page)
   await body(page).click()
   await page.keyboard.insertText('quick quit text')
   await relaunch(g)
@@ -90,7 +90,7 @@ test('edit/split/preview modes persist under grain.docMode', async ({ grain: g }
 test('slash menu: each command inserts what it says', async ({ grain: g }) => {
   const { page } = g
   await openFiles(page)
-  await newDoc(page).click()
+  await newDoc(page)
   const cmds = {
     'Heading 1': '# ', 'Heading 2': '## ', 'Heading 3': '### ', 'Bullet list': '- ', 'Numbered list': '1. ', 'To-do': '- [ ] ',
     Quote: '> ', 'Code block': '```\n\n```', Table: '| Column | Column |\n| --- | --- |\n|  |  |', Divider: '---\n', 'Math block': '$$\n\n$$'

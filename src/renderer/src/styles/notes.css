@@ -50,8 +50,6 @@
 
 /* ---- new / export menus ---- */
 .newdoc { position: relative; display: inline-flex; align-items: center; }
-.newdoc-main { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-.newdoc-chev { padding-left: 4px; padding-right: 4px; border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 1px solid var(--border); }
 .notes-menu {
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; min-width: 190px;
   padding: 4px; display: flex; flex-direction: column;

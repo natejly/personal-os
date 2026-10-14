@@ -72,7 +72,7 @@ The sidebar holds your views (Files, Lists, Calendar, Mail, Health, Library, Job
 
 ### Files and notes
 
-- **Files** (`⌘4`) has three sections: **Notes** (your own writing), **Uploads** (any file up to 100 MB, `⌘U`) and **Artifacts** (what the assistant made in any chat, grouped by chat).
+- **Files** (`⌘4`) is a file tree of your own writing, with **Uploads** (any file up to 100 MB, `⌘U`) and **Artifacts** (what the assistant made in any chat, grouped by chat) as rows at its foot.
 - **Notes** support Markdown and LaTeX, a `/` menu, `[[wikilinks]]` and backlinks, an outline, templates, folders, comments, pasted images and full revision history. `⌘⇧N` makes a note, `⌘⇧D` opens today's. Export as PDF from the Export menu.
 - **Edits by the assistant** arrive as diffs you accept or reject. Settings → Permissions can switch that to apply directly (still undoable).
 - **Uploads** are read (text, PDF, Word), indexed and searched. The best excerpts are pulled into replies with citations.

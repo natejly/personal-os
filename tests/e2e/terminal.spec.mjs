@@ -67,8 +67,8 @@ test('Terminal: shell in the worktree echoes typed text, survives a tab switch, 
     await p.keyboard.press('Enter')
     await expect.poll(() => rowsText(p)).toContain('hello-from-e2e')
 
-    // another tab and back: the PTY and its screen are still there
-    await p.getByTestId('desk-tab-context').click()
+    // collapse and back: the PTY and its screen are still there
+    await tab.click() // collapsing the card unmounts the view, not the PTY
     await expect(p.locator('.xterm-rows')).toHaveCount(0)
     await tab.click()
     await expect.poll(() => rowsText(p)).toContain('hello-from-e2e')

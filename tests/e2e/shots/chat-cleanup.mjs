@@ -146,11 +146,11 @@ if (want('desk')) await session('desk', async (g) => {
     await sleep(1500)
     if (!(await page.locator('.desk-panel').count())) await page.locator('.desk-strip').getByRole('button', { name: 'Files, changes and review' }).click()
     await sleep(600)
-    const tabs = page.locator('.desk-panel .desk-tabs button:not(.icon-btn)')
+    const tabs = page.locator('.desk-panel .desk-card-head')
     const n = await tabs.count()
     for (let i = 0; i < n; i++) {
       const label = (await tabs.nth(i).innerText()).trim().split(/\s+/)[0].toLowerCase()
-      await tabs.nth(i).click(); await sleep(700)
+      if ((await tabs.nth(i).getAttribute('aria-expanded')) !== 'true') await tabs.nth(i).click(); await sleep(700)
       await snap(g, `desk-review-${label}`, page, i === 0 ? 'Strip text: ' + (await page.locator('.desk-strip').innerText().catch(() => 'none')) : '')
     }
   })
@@ -212,10 +212,10 @@ if (want('main')) await session('main', async (g) => {
   await attempt('chat-files-popover', async () => {
     await say(page, '!!tool current_time {}'); await settle(page, 30000); await sleep(500)
     await page.getByRole('button', { name: 'Documents in this chat' }).click(); await page.locator('aside.desk-panel').waitFor({ timeout: 10000 }); await sleep(700)
-    const tabs = (await page.locator('aside.desk-panel [role=tab], aside.desk-panel .desk-tabs button').allInnerTexts()).map((t) => t.trim()).filter(Boolean)
+    const tabs = (await page.locator('aside.desk-panel .desk-card-head').allInnerTexts()).map((t) => t.trim()).filter(Boolean)
     await snap(g, 'chat-files-popover', page, 'side panel tabs: ' + tabs.join(' | '))
     await snap(g, 'chat-side-panel-files', page)
-    await page.locator('aside.desk-panel').getByRole('tab', { name: /Changes/ }).or(page.locator('aside.desk-panel .desk-tabs button', { hasText: 'Changes' })).first().click(); await sleep(700)
+    await page.locator('aside.desk-panel .desk-card-head', { hasText: 'Changes' }).first().click(); await sleep(700)
     await snap(g, 'chat-side-panel-changes', page)
     await page.getByRole('button', { name: 'Documents in this chat' }).click(); await sleep(500)
   })

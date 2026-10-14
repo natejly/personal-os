@@ -264,7 +264,7 @@
 .desk-inline { display: flex; flex-direction: column; gap: 8px; }
 .desk-inline:empty { display: none; }
 .desk-panel {
-  position: absolute; top: 8px; right: 12px; bottom: 170px; width: min(400px, calc(100% - 24px)); z-index: 8;
+  position: absolute; top: 8px; right: 12px; bottom: 120px; width: min(400px, calc(100% - 24px)); z-index: 8;
   display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding: 2px; pointer-events: none;
 }
 .desk-panel > * { pointer-events: auto; }

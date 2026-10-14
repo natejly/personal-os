@@ -26,6 +26,7 @@ const freshTermRequest = (): boolean => Date.now() - (useStore.getState().termin
 export default function DeskPanel({ desk, conversationId, onClose }: { desk?: FullDesk | null; conversationId?: string; onClose: () => void }): JSX.Element {
   const id = conversationId ?? '' // '' only on a draft chat, where just the Context card shows
   const [open, setOpen] = useState<Partial<Record<Tab, boolean>>>({ context: true, terminal: freshTermRequest(), review: desk?.status === 'review' })
+  const panel = useRef<HTMLElement>(null)
   const refs = useRef<Partial<Record<Tab, HTMLElement | null>>>({})
   const expand = (k: Tab): void => { setOpen((o) => ({ ...o, [k]: true })); setTimeout(() => refs.current[k]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 50) }
   useEffect(() => { if (desk?.status === 'review') expand('review') }, [desk?.id, desk?.status])
@@ -34,6 +35,17 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   const tracesRequest = useStore((s) => s.deskTabRequest?.n)
   const termRequest = useStore((s) => s.terminalRequest?.n)
   useEffect(() => { void useStore.getState().refreshCodingSessions() }, [])
+  // Stop at the bottom of the transcript, so the column never covers the checklist, workers or composer under it, whatever their height.
+  useEffect(() => {
+    const body = panel.current?.parentElement
+    const msgs = body?.querySelector<HTMLElement>('.chat-main .messages')
+    if (!body || !msgs) return
+    const fit = (): void => { if (panel.current) panel.current.style.bottom = `${Math.max(0, body.getBoundingClientRect().bottom - msgs.getBoundingClientRect().bottom) + 8}px` }
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(msgs); ro.observe(body)
+    return () => ro.disconnect()
+  }, [])
   useEffect(() => { if (contextOpen) expand('context') }, [contextOpen])
   useEffect(() => { if (termRequest && freshTermRequest()) expand('terminal') }, [termRequest])
   useEffect(() => { const r = useStore.getState().deskTabRequest; if (r && Date.now() - r.at < 3000) { useStore.setState({ contextOpen: false }); expand(r.tab) } }, [tracesRequest])
@@ -56,8 +68,8 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
     }
   }
   return (
-    <aside className="desk-panel" aria-label="Workspace">
-      <button className="icon-btn ghost desk-close" title="Close" aria-label="Close the workspace panel" onClick={onClose}><X size={14} /></button>
+    <aside ref={panel} className="desk-panel" aria-label="Workspace">
+      <button className="icon-btn ghost desk-close" title="Close" aria-label="Close workspace" onClick={onClose}><X size={14} /></button>
       {TABS.filter((t) => shown(t.key)).map((t) => (
         <section key={t.key} ref={(el) => { refs.current[t.key] = el }} className="desk-card">
           <button data-testid={`desk-tab-${t.key}`} className={`desk-card-head${open[t.key] ? ' active' : ''}`} aria-expanded={!!open[t.key]} onClick={() => setOpen((o) => ({ ...o, [t.key]: !o[t.key] }))}>

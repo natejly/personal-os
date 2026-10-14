@@ -38,7 +38,8 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   const shown = (k: Tab): boolean => k === 'context' || (!!conversationId && (k === 'files' || k === 'changes')) || (k === 'review' && !!desk) || (k === 'traces' && !!conversationId) || (k === 'terminal' && termOk && !!conversationId)
   const tabs = TABS.filter((t) => shown(t.key))
   const tab: Tab = contextOpen ? 'context' : shown(picked) ? picked : 'context'
-  const pick = (k: Tab): void => { useStore.setState({ contextOpen: k === 'context' }); setTab(k) }
+  // ⌘I opens this panel through contextOpen alone; leaving Context must hand the panel to deskPanel or it unmounts.
+  const pick = (k: Tab): void => { useStore.setState(k === 'context' ? { contextOpen: true } : { contextOpen: false, deskPanel: true }); setTab(k) }
   return (
     <aside className="desk-panel" aria-label="Workspace">
       <ResizeHandle id="desk-panel-w" defaultSize={460} min={320} max={900} keep={360} overlayAt={1100} grows="left" onCollapse={onClose} label="Workspace panel width" className="at-left" />

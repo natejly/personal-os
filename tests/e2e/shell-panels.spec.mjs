@@ -251,3 +251,22 @@ test('pop-out: a space widget pops out to its own window and returns', async ({ 
   await expect.poll(() => app.windows().length, { timeout: 15_000 }).toBe(1)
   expect(grain.consoleErrors).toEqual([])
 })
+
+test('⌘I panel stays open when you switch its tabs or change view', async ({ grain }) => {
+  const { page } = grain
+  // chat: ⌘I opens the side panel on Context; picking another tab must not close it
+  const box = page.getByRole('textbox', { name: 'Message' })
+  await box.fill('!!reply hello')
+  await box.press('Enter')
+  await expect(page.locator('.msg.assistant').last()).toContainText('hello')
+  await menu(grain, 'Page Agent')
+  await expect(page.getByRole('complementary', { name: 'Workspace' })).toBeVisible()
+  await page.getByTestId('desk-tab-files').click()
+  await expect(page.getByRole('complementary', { name: 'Workspace' })).toBeVisible()
+  // elsewhere: the quick-chat panel survives a view switch
+  await navItem(page, 'Lists').click()
+  await menu(grain, 'Page Agent')
+  await expect(panel(page)).toBeVisible()
+  await navItem(page, 'Files').click()
+  await expect(panel(page)).toBeVisible()
+})

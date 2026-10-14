@@ -50,7 +50,7 @@ test('project instructions are saved on blur and reach the system prompt of a ne
   await page.getByRole('heading', { name: 'Lab' }).click() // blur
   await expect.poll(async () => (await api('/projects')).find((x) => x.id === p.id).system_prompt).toContain('COBALTFOX')
 
-  await page.locator('.page-header').getByRole('button', { name: /New chat/ }).click()
+  await page.locator('.project-col').first().getByRole('button', { name: /New chat/ }).click()
   await expect(page.getByText('New chat in Lab')).toBeVisible()
   await send(page, '!!reply ok then')
   await expect(page.locator('.msg.assistant').last()).toContainText('ok then', { timeout: 30_000 })
@@ -159,7 +159,7 @@ test('project view: sections, counts, new chat button, empty state, memory add i
   const mems = await api('/memories?project_id=' + p.id + '&include_global=false')
   expect(mems.map((m) => m.content)).toContain('tabs memory one')
   await expect(page.getByText('No files yet')).toBeVisible()
-  await page.locator('.page-header').getByRole('button', { name: /New chat/ }).click()
+  await page.locator('.project-col').first().getByRole('button', { name: /New chat/ }).click()
   await expect(page.getByText('New chat in Tabs')).toBeVisible()
   clean(grain)
 })

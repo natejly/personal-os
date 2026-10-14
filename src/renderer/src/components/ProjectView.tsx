@@ -79,7 +79,6 @@ export default function ProjectView(): JSX.Element {
         <h2><span className="project-dot" style={{ background: project.color }} />{project.name}</h2>
         <div className="no-drag header-right">
           <button className="ghost-btn" onClick={() => setProjectModal({ mode: 'edit', project })}><Pencil size={13} /> Edit</button>
-          <button className="primary-btn" onClick={() => newChat(id)}><MessageSquarePlus size={14} /> New chat</button>
         </div>
         <AppSwitcher />
       </header>
@@ -88,12 +87,12 @@ export default function ProjectView(): JSX.Element {
         <div className="project-cols">
           <section className="project-sec project-col" aria-label={L.chats}>
             {head(<MessageSquare size={14} />, L.chats, rows.length)}
+            <button className="primary-btn" onClick={() => newChat(id)}><MessageSquarePlus size={14} /> New chat</button>
             {rows.length === 0 && (
               <div className="empty-state">
                 <MessageSquare size={28} />
                 <h2>No chats yet</h2>
                 <p>A chat started here follows this project&apos;s instructions and can use its knowledge and memory.</p>
-                <button className="primary-btn" onClick={() => newChat(id)}><MessageSquarePlus size={14} /> New chat</button>
               </div>
             )}
             <div className="chat-rows">

@@ -23,3 +23,22 @@ test('a shrink clamp that lands at the bottom stays attached', () => {
 test('a sub-pixel scroll jitter is not a move up', () => {
   assert.equal(nextStick(true, { top: 499.5, prevTop: 500, distance: 300 }), true)
 })
+
+test('slow upward scroll never re-attaches', () => {
+  assert.equal(nextStick(true, { top: 499.5 - 0.1, prevTop: 500, distance: 10 }), true)
+  assert.equal(nextStick(true, { top: 499.4, prevTop: 500, distance: 10 }), true)
+  assert.equal(nextStick(false, { top: 499.4, prevTop: 500, distance: 30 }), false)
+  assert.equal(nextStick(false, { top: 499.2, prevTop: 500, distance: 10 }), false)
+})
+
+test('released with no movement stays released', () => {
+  assert.equal(nextStick(false, { top: 500, prevTop: 500, distance: 40 }), false)
+})
+
+test('released, a real downward scroll within ATTACH_PX re-attaches', () => {
+  assert.equal(nextStick(false, { top: 505, prevTop: 500, distance: 40 }), true)
+})
+
+test('released, reaching the bottom re-attaches', () => {
+  assert.equal(nextStick(false, { top: 500, prevTop: 500, distance: 0 }), true)
+})

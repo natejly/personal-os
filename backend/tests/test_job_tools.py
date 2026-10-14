@@ -59,7 +59,7 @@ def _portal():  # type: ignore[no-untyped-def]
     real = llm.stream_chat
     llm.stream_chat = _scripted
     with client:
-        client.put("/settings", json={"autoLearn": False, "baseUrl": ""})
+        client.put("/settings", json={"autoLearn": False, "baseUrl": "", "toolDeferAbove": 0})
         task = getattr(appmod.app.state, "jobs_task", None)
         if task is not None:
             task.get_loop().call_soon_threadsafe(task.cancel)

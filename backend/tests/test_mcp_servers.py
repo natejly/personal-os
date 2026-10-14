@@ -670,6 +670,10 @@ def test_a_token_in_a_doc_id_is_stripped() -> None:
             return {"id": pat, "title": "Notes", "content": "hello\n", "words": 1, "pending": []}
 
         @staticmethod
+        def get(doc_id: str) -> dict[str, Any] | None:
+            return Docs.find("Notes") if doc_id == pat else None
+
+        @staticmethod
         def create(title: str, _content: str, _project: Any, folder: str = "", author: str = "assistant") -> dict[str, Any]:
             seen.append(title)
             return {"id": pat, "title": title, "words": 1, "folder": folder, "project_id": None}
@@ -682,7 +686,12 @@ def test_a_token_in_a_doc_id_is_stripped() -> None:
         def backlinks(_doc_id: str) -> list[dict[str, str]]:
             return []
 
-    tb = Toolbox(None, None, None, lambda: {}, docs=Docs())  # type: ignore[arg-type]
+    class Uploads:  # an unmatched key is also looked up among uploaded files
+        @staticmethod
+        def get(_id: str) -> None:
+            return None
+
+    tb = Toolbox(None, None, Uploads(), lambda: {}, docs=Docs())  # type: ignore[arg-type]
     ctx: dict[str, Any] = {"project_id": None}
     listed = asyncio.run(tb.call("doc_list", {}, ctx))
     assert listed[0]["doc_id"] == "[github-pat]" and listed[0]["title"] == "Notes"
@@ -696,7 +705,7 @@ def test_a_token_in_a_doc_id_is_stripped() -> None:
     edited = asyncio.run(tb.call("doc_edit", {"doc": "Notes", "append": "more\n"}, ctx))
     assert edited["doc_id"] == "[github-pat]" and edited["revision_id"] == "[github-pat]"
     assert edited["status"] == "pending_review" and edited["title"] == "Notes"
-    missing = asyncio.run(tb.call("doc_read", {"doc": pat}, ctx))
+    missing = asyncio.run(tb.call("doc_read", {"doc": f"missing {pat}"}, ctx))
     assert pat not in str(missing) and "[github-pat]" in missing["error"]
 
 

@@ -193,7 +193,9 @@ def test_happy_path() -> None:
     c = conv(cid)
     check(c["title"] == "Trip planning for Lisbon", f"cleaned model title, got {c['title']!r}")
     check(changed_events(cid)[-1]["title"] == c["title"], "conversation_changed was published")
-    kind, prompt, effort, has_deadline = STATE["prompts"][0]
+    titled = [p for p in STATE["prompts"] if p[0] == "title"]  # a recall call may come first when no embedding model is set
+    check(len(titled) == 1, "exactly one title call")
+    kind, prompt, effort, has_deadline = titled[0]
     check(kind == "title" and effort == "low" and has_deadline, "kind title, low effort, deadline")
     check("hello" not in prompt.replace("Help me", ""), "no assistant text in the prompt")
     check(STATE["ctx"][0].get("conversation_id") == cid, "usage context set inside the task")

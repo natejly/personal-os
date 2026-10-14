@@ -44,6 +44,7 @@ async def stub(settings_: dict[str, Any], model: str, messages: list[dict[str, A
 
 
 retriever.complete = stub
+db.set_settings({"embeddingModel": "qwen3-embedding-8b"})  # no default any more; a keyed provider would pick it
 S = {**settings(), "defaultModel": "m"}
 check(S["contextualChunks"] is False, "off by default")
 check(contextualize("T", "H", "x", "B") == "B\nT > H\nx" and contextualize("T", "H", "x") == "T > H\nx", "blurb prefixes ctx")

@@ -21,6 +21,12 @@ from personal_os import embed, llm, provider_keys, provider_route, providers  # 
 from personal_os.app import AUTH_TOKEN, _lock_embedding, _pin_embedding_model, app, db  # noqa: E402
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
+MSG_SSE = ('data: {"type":"message_start","message":{"usage":{"input_tokens":1}}}\n\n'
+           'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}\n\n'
+           'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}\n\n'
+           'data: {"type":"message_stop"}\n\n')  # the Messages API's own events, as the Anthropic provider streams them
+MSG_JSON = {"content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1}}
+
 FW, AN, OAI = (providers.get(p)["baseUrl"] for p in ("fireworks", "anthropic", "openai"))
 FW_KEY, AN_KEY = "fw-key-1", "an-key-1"
 FW_CFG = {"provider": "fireworks", "baseUrl": FW, "apiKey": FW_KEY}
@@ -52,6 +58,10 @@ def seen(monkeypatch):  # type: ignore[no-untyped-def]
                 return httpx.Response(500, text="down")
             return httpx.Response(200, json={"data": [{"id": "accounts/fireworks/models/ember-1"}, {"id": "accounts/fireworks/models/other"}]})
         body = json.loads(req.content or b"{}")
+        if "anthropic" in str(req.url):
+            if body.get("stream"):
+                return httpx.Response(200, content=MSG_SSE.encode(), headers={"content-type": "text/event-stream"})
+            return httpx.Response(200, json=MSG_JSON)
         if body.get("stream"):
             sse = ('data: {"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
             return httpx.Response(200, content=sse.encode(), headers={"content-type": "text/event-stream"})
@@ -107,7 +117,7 @@ def test_embed_goes_to_fireworks_while_anthropic_active(seen) -> None:  # type: 
 def test_complete_routed_to_anthropic_sends_key_url_and_max_tokens(seen) -> None:  # type: ignore[no-untyped-def]
     assert asyncio.run(llm.complete(FW_CFG, "claude-opus-5-5", [{"role": "user", "content": "hi"}])) == "ok"
     req = seen[0]
-    assert str(req.url).startswith("https://api.anthropic.com/v1/") and req.headers["authorization"] == f"Bearer {AN_KEY}"
+    assert str(req.url).startswith("https://api.anthropic.com/v1/") and req.headers["x-api-key"] == AN_KEY
     assert json.loads(req.content)["max_tokens"] == llm.ANTHROPIC_FALLBACK_CAP
 
 

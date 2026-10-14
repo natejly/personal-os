@@ -905,6 +905,28 @@ kbd {
 .face.mo-root:not(.mo-always):not(:hover),
 .face.mo-root:not(.mo-always):not(:hover) * { animation-play-state: paused; }
 .face.mo-root.mo-expr:not(.mo-always):not(:hover) .mo-eye { animation-play-state: running; }
+/* Face reactions (Face.tsx useReaction, Composer typing flag). One-shot CSS animations on the head group and the svg;
+   the eyes move by transition only, so they never fight the idle saccade. Reduced motion keeps the eye position, drops the travel. */
+.face .mo-eyes { transition: fill var(--mo-morph) var(--mo-morph-ease), transform var(--dur-spring) var(--spring-gentle); }
+.chat-main[data-typing] .face .mo-eyes { transform: translateY(3px); }
+.face.fx-down .mo-eyes { transform: translateY(5px); }
+@media (prefers-reduced-motion: no-preference) {
+  .face[class*='fx-squish'] .mo-bob > g:not(.mo-eyes),
+  .face[class*='fx-droop'] .mo-bob > g:not(.mo-eyes) { transform-box: fill-box; transform-origin: 50% 70%; animation-duration: var(--dur-spring); animation-timing-function: var(--ease-out); }
+  .face.fx-squish-0 .mo-bob > g:not(.mo-eyes) { animation-name: face-squish-a; }
+  .face.fx-squish-1 .mo-bob > g:not(.mo-eyes) { animation-name: face-squish-b; }
+  .face.fx-droop-0 .mo-bob > g:not(.mo-eyes) { animation-name: face-sag-a; animation-duration: calc(var(--dur-spring) + var(--dur-snap)); }
+  .face.fx-droop-1 .mo-bob > g:not(.mo-eyes) { animation-name: face-sag-b; animation-duration: calc(var(--dur-spring) + var(--dur-snap)); }
+  .face.fx-hop-0 { animation: face-hop-a var(--dur-spring) var(--ease-out); }
+  .face.fx-hop-1 { animation: face-hop-b var(--dur-spring) var(--ease-out); }
+  /* wider and shorter, then spring back; two copies so a repeat restarts */
+  @keyframes face-squish-a { 30% { transform: scale(1.14, 0.88); animation-timing-function: var(--spring-snappy); } 100% { transform: none; } }
+  @keyframes face-squish-b { 30% { transform: scale(1.14, 0.88); animation-timing-function: var(--spring-snappy); } 100% { transform: none; } }
+  @keyframes face-sag-a { 40% { transform: scale(1.04, 0.93); animation-timing-function: var(--spring-gentle); } 100% { transform: none; } }
+  @keyframes face-sag-b { 40% { transform: scale(1.04, 0.93); animation-timing-function: var(--spring-gentle); } 100% { transform: none; } }
+  @keyframes face-hop-a { 35% { translate: 0 -3px; animation-timing-function: var(--spring-bouncy); } 100% { translate: 0 0; } }
+  @keyframes face-hop-b { 35% { translate: 0 -3px; animation-timing-function: var(--spring-bouncy); } 100% { translate: 0 0; } }
+}
 .bubble { min-width: 0; flex: 1; }
 /* An assistant reply: reasoning, tool rows and cards, then the text. The rhythm is set here so the
    cards share it without sitting inside .markdown, whose element rules would restyle their lists. */

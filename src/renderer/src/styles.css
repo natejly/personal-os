@@ -1811,6 +1811,7 @@ button.tag:disabled { cursor: default; }
 .chat-row-model { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
 @container (max-width: 420px) { .chat-row-model { display: none; } }
 .project-col .empty-state { padding: 24px 12px; }
+.project-col > .primary-btn { margin: 0 0 10px; }
 .project-sec-head { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 13px; font-weight: 600; }
 .project-desc { margin: 0; max-width: 760px; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
 .chat-rows { display: flex; flex-direction: column; gap: 4px; }

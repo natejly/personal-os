@@ -177,7 +177,7 @@
 <script>
   const root = document.documentElement.style;
   // [name, min, max, step, unit]; unit '' = number token, 'str' = free text (easings)
-  const num = [['--dur-press',0,400,5,'ms'],['--dur-btn-press',0,400,5,'ms'],['--dur-btn-release',0,800,10,'ms'],['--dur-hover',0,400,5,'ms'],['--dur-snap',0,600,5,'ms'],['--dur-spring',0,800,10,'ms'],['--dur-window',0,800,10,'ms'],['--press-sink',0,4,0.5,'px'],['--press-grow',0,12,0.5,'px']];
+  const num = [['--dur-press',0,400,5,'ms'],['--dur-btn-press',0,400,5,'ms'],['--dur-btn-release',0,800,10,'ms'],['--dur-btn-launch',0,800,10,'ms'],['--dur-hover',0,400,5,'ms'],['--dur-snap',0,600,5,'ms'],['--dur-spring',0,800,10,'ms'],['--dur-window',0,800,10,'ms'],['--press-sink',0,4,0.5,'px'],['--press-grow',0,12,0.5,'px']];
   const str = ['--ease-out','--spring','--spring-snappy','--spring-bouncy','--spring-gentle'];
   const cs = getComputedStyle(document.documentElement);
   const val = n => cs.getPropertyValue(n).trim();

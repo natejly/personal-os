@@ -10,6 +10,9 @@ import ContextDrawer from './ContextDrawer'
 import { useTermAvailable } from '../lib/termRegistry'
 import TerminalPane from './TerminalPane'
 import TracesPane from './TracesPane'
+import WorkersPanel from './WorkersPanel'
+import ProgressCard from './ProgressCard'
+import { useChatFileCount } from '../lib/useChatFiles'
 
 type Tab = 'context' | 'files' | 'changes' | 'review' | 'traces' | 'terminal'
 const TABS: { key: Tab; label: string }[] = [{ key: 'context', label: 'Context' }, { key: 'files', label: 'Files' }, { key: 'changes', label: 'Changes' }, { key: 'review', label: 'Review' }, { key: 'traces', label: 'Traces' }, { key: 'terminal', label: 'Terminal' }]
@@ -20,7 +23,7 @@ const freshTermRequest = (): boolean => Date.now() - (useStore.getState().termin
 /**
  * The workspace of a chat, a column of floating cards over the transcript's right edge, each collapsing to its header: Files and Changes for every chat, and Review once it has a desk (a chat
  * working autonomously), which comes forward when the desk asks for it. Traces lists the chat's runs. Terminal shows in every chat with an id when the app can host terminals (running shell jobs, the chat's coding sessions and their terminals); an openTerminal request brings it forward. A running checklist shows as the compact progress card
- * above the composer (ProgressCard) and workers as the worker list above the composer. Context starts open. Without a desk, Files is the chat's
+ * above the composer (ProgressCard) and workers as the worker list above the composer. Context starts open. The step card and the workers list lead the column (ChatView leaves them off the composer while it is open). Changes shows once the chat has files or its desk has runs, Review once the desk has outputs or is in review. Without a desk, Files is the chat's
  * own list. Context (the store's `contextOpen`) is always there and wins while requested (it expands); a draft chat with no id has only that card. Requests (context, a desk tab, a terminal, a desk in review) expand their card and scroll it into view.
  */
 export default function DeskPanel({ desk, conversationId, onClose }: { desk?: FullDesk | null; conversationId?: string; onClose: () => void }): JSX.Element {
@@ -32,6 +35,7 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   useEffect(() => { if (desk?.status === 'review') expand('review') }, [desk?.id, desk?.status])
   const contextOpen = useStore((s) => s.contextOpen)
   const termOk = useTermAvailable()
+  const fileCount = useChatFileCount(id)
   const tracesRequest = useStore((s) => s.deskTabRequest?.n)
   const termRequest = useStore((s) => s.terminalRequest?.n)
   useEffect(() => { void useStore.getState().refreshCodingSessions() }, [])
@@ -54,7 +58,7 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
     window.addEventListener('keydown', esc)
     return () => window.removeEventListener('keydown', esc)
   }, [onClose])
-  const shown = (k: Tab): boolean => k === 'context' || (!!conversationId && (k === 'files' || k === 'changes')) || (k === 'review' && !!desk) || (k === 'traces' && !!conversationId) || (k === 'terminal' && termOk && !!conversationId)
+  const shown = (k: Tab): boolean => k === 'context' || (!!conversationId && k === 'files') || (k === 'changes' && !!conversationId && (desk ? desk.runs.length > 0 : fileCount > 0)) || (k === 'review' && !!desk && (desk.outputs.length > 0 || desk.status === 'review')) || (k === 'traces' && !!conversationId) || (k === 'terminal' && termOk && !!conversationId)
   const content = (k: Tab): JSX.Element | null => {
     switch (k) {
       case 'context': return <ContextDrawer conversationId={conversationId} embedded />
@@ -70,6 +74,8 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   return (
     <aside ref={panel} className="desk-panel" aria-label="Workspace">
       <button className="icon-btn ghost desk-close" title="Close" aria-label="Close workspace" onClick={onClose}><X size={14} /></button>
+      <ProgressCard conversationId={conversationId} desk={desk} />
+      <WorkersPanel conversationId={conversationId} />
       {TABS.filter((t) => shown(t.key)).map((t) => (
         <section key={t.key} ref={(el) => { refs.current[t.key] = el }} className="desk-card">
           <button data-testid={`desk-tab-${t.key}`} className={`desk-card-head${open[t.key] ? ' active' : ''}`} aria-expanded={!!open[t.key]} onClick={() => setOpen((o) => ({ ...o, [t.key]: !o[t.key] }))}>

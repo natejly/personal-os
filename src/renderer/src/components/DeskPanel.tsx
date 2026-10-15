@@ -7,8 +7,10 @@ import DeskReview from './DeskReview'
 import { ChatFilesList } from './ChatFilesPanel'
 import { useStore } from '../store'
 import ContextDrawer from './ContextDrawer'
-import { useTermAvailable } from '../lib/termRegistry'
-import TerminalPane from './TerminalPane'
+import { createPortal } from 'react-dom'
+import { ensureEntry, startEntry, useTermAvailable, type TermMode } from '../lib/termRegistry'
+import TerminalPane, { modeFor } from './TerminalPane'
+import TerminalWindow from './TerminalWindow'
 import TracesPane from './TracesPane'
 import WorkersPanel from './WorkersPanel'
 import ProgressCard from './ProgressCard'
@@ -30,6 +32,9 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   const id = conversationId ?? '' // '' only on a draft chat, where just the Context card shows
   const [open, setOpen] = useState<Partial<Record<Tab, boolean>>>({ context: true, terminal: freshTermRequest(), review: desk?.status === 'review' })
   const panel = useRef<HTMLElement>(null)
+  // The session shown in the large terminal window (one at a time); its xterm DOM is mounted there only, never in the card.
+  const [attached, setAttached] = useState<{ id: string; mode: TermMode } | null>(null)
+  const attach = (sid: string, mode: TermMode): void => { void startEntry(ensureEntry(sid, mode)); setAttached({ id: sid, mode }) }
   const refs = useRef<Partial<Record<Tab, HTMLElement | null>>>({})
   const expand = (k: Tab): void => { setOpen((o) => ({ ...o, [k]: true })); setTimeout(() => refs.current[k]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 50) }
   useEffect(() => { if (desk?.status === 'review') expand('review') }, [desk?.id, desk?.status])
@@ -51,10 +56,17 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
     return () => ro.disconnect()
   }, [])
   useEffect(() => { if (contextOpen) expand('context') }, [contextOpen])
-  useEffect(() => { if (termRequest && freshTermRequest()) expand('terminal') }, [termRequest])
+  useEffect(() => {
+    const r = useStore.getState().terminalRequest
+    if (!r || !freshTermRequest()) return
+    expand('terminal')
+    const c = useStore.getState().codingSessions[r.sessionId]
+    attach(r.sessionId, r.mode ?? (c ? modeFor(c) : 'attach'))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [termRequest])
   useEffect(() => { const r = useStore.getState().deskTabRequest; if (r && Date.now() - r.at < 3000) { useStore.setState({ contextOpen: false, deskPanel: true }); expand(r.tab) } }, [tracesRequest])
   useEffect(() => {
-    const esc = (e: KeyboardEvent): void => { if (e.key === 'Escape' && !e.defaultPrevented && !(e.target as HTMLElement | null)?.closest?.('.xterm, input, textarea, [contenteditable]')) onClose() }
+    const esc = (e: KeyboardEvent): void => { if (e.key === 'Escape' && !e.defaultPrevented && !(e.target as HTMLElement | null)?.closest?.('.xterm, .term-window, input, textarea, [contenteditable]')) onClose() }
     window.addEventListener('keydown', esc)
     return () => window.removeEventListener('keydown', esc)
   }, [onClose])
@@ -66,7 +78,7 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
         ? <><ChatFilesList conversationId={id} layout="above" /><h4 className="cf-ws">Workspace</h4><DeskFiles desk={desk} /></>
         : <ChatFilesList conversationId={id} />
       case 'changes': return <div className="desk-pane scroll"><DeskChanges desk={desk ?? undefined} conversationId={id} /></div>
-      case 'terminal': return <TerminalPane conversationId={conversationId} />
+      case 'terminal': return <TerminalPane conversationId={conversationId} attached={attached} onAttach={attach} />
       case 'traces': return <TracesPane conversationId={conversationId} />
       case 'review': return desk ? <div className="desk-pane scroll"><DeskReview desk={desk} /></div> : null
     }
@@ -79,13 +91,14 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
       {TABS.filter((t) => shown(t.key)).map((t) => (
         <section key={t.key} ref={(el) => { refs.current[t.key] = el }} className="desk-card">
           <button data-testid={`desk-tab-${t.key}`} className={`desk-card-head${open[t.key] ? ' active' : ''}`} aria-expanded={!!open[t.key]} onClick={() => setOpen((o) => ({ ...o, [t.key]: !o[t.key] }))}>
-            {open[t.key] ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
             {t.label}
             {t.key === 'review' && desk && desk.outputs.length > 0 && <span className="count">{desk.outputs.length}</span>}
+            {open[t.key] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
           </button>
-          {open[t.key] && <div className={`desk-card-body${t.key === 'terminal' ? ' term' : ''}`}>{content(t.key)}</div>}
+          {open[t.key] && <div className={`desk-card-body`}>{content(t.key)}</div>}
         </section>
       ))}
+      {attached && panel.current?.parentElement && createPortal(<TerminalWindow key={`${attached.id}:${attached.mode}`} sessionId={attached.id} mode={attached.mode} onClose={() => setAttached(null)} />, panel.current.parentElement)}
     </aside>
   )
 }

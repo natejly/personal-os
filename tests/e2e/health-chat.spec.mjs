@@ -51,7 +51,7 @@ test('the page-agent context for Health names today and every metric, so questio
   await reload(page)
   await page.getByRole('button', { name: 'Health', exact: true }).click()
   await expect(page.locator('.hl-tile').first()).toBeVisible()
-  await menu(grain, 'Page Agent')
+  await menu(grain, 'Quick chat (in a chat: Context panel)')
   const box = page.getByRole('textbox', { name: 'Message' }).last()
   await box.fill('how am I doing?')
   await box.press('Enter')

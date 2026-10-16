@@ -21,6 +21,9 @@ from personal_os.repos import Documents  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 
 
+pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="screenshot is a macOS tool: it reports itself unavailable elsewhere")
+
+
 def _png(solid: bool = False, size: tuple[int, int] = (64, 32)) -> bytes:
     im = Image.new("RGB", size, (20, 30, 40))
     if not solid:

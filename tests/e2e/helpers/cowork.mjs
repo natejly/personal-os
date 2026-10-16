@@ -15,6 +15,8 @@ export async function say(page, text) {
 }
 export const resize = (grain, w = 820, h = 520) =>
   grain.app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setSize(w, h), [w, h])
+/** shell_run refuses to run without an OS sandbox, and only macOS has one: tests that need a command to execute skip elsewhere. */
+export const SHELL_SANDBOX = process.platform === 'darwin'
 export const BENIGN = [/Failed to load resource/, /ResizeObserver/]
 export const realErrors = (grain) => grain.consoleErrors.filter((e) => !BENIGN.some((r) => r.test(e)))
 export const pending = (grain) => grain.api('/approvals?status=pending')

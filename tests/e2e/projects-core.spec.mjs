@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { callWith, send, shrink, systemOf, upload } from './helpers/kb.mjs'
+import { callWith, openProjectSection, send, shrink, systemOf, upload } from './helpers/kb.mjs'
 
 const sidebar = (page) => page.locator('.sidebar')
 const clean = (g) => expect(g.consoleErrors.filter((e) => !/favicon|ResizeObserver/.test(e))).toEqual([])
@@ -153,6 +153,7 @@ test('project view: sections, counts, new chat button, empty state, memory add i
   await page.reload()
   await sidebar(page).getByText('Tabs', { exact: true }).click()
   await expect(page.getByText('No chats yet')).toBeVisible()
+  await openProjectSection(page, 'Memory')
   await page.getByPlaceholder(/Remember something in this project/).fill('tabs memory one')
   await page.getByPlaceholder(/Remember something in this project/).press('Enter')
   await expect(page.getByText('tabs memory one')).toBeVisible()

@@ -76,6 +76,7 @@ test.describe('agent tool cards', () => {
 
   test('gmail_send shows an editable send card; approving queues an undoable send, nothing goes out', async ({ grain }) => {
     const { page } = grain
+    await grain.api('/settings', { method: 'PUT', body: { destructiveDefaults: { send: 'ask' } } })  // Manual mode refuses sends unless this lets the card through
     await sendChat(page, '!!tool gmail_send {"to":"dana@example.com","subject":"Draft to send","body":"Hello there"}')
     const card = page.getByRole('region', { name: 'Email to send' })
     await expect(card).toBeVisible()

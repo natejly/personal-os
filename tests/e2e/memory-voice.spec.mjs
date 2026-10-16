@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { callWith, msgText, send, shrink, sleep, systemOf } from './helpers/kb.mjs'
+import { callWith, msgText, openProjectSection, send, shrink, sleep, systemOf } from './helpers/kb.mjs'
 import { openMemory as openMemoryTab } from './helpers/home.mjs'
 
 const clean = (g) => expect(g.consoleErrors.filter((e) => !/favicon|ResizeObserver|502 \(Bad Gateway\)/.test(e))).toEqual([])
@@ -79,7 +79,7 @@ test('the voice is injected only when drafting as the user: normal and email-ish
   expect(systemOf(normal)).not.toContain('GUIDELINEMARK')
   expect(systemOf(normal)).not.toContain('VOICESUM')
   expect(systemOf(normal)).not.toContain('How the user writes')
-  expect(systemOf(normal)).toMatch(/writing_style/) // one-line pointer to the tool, nothing more
+  expect(systemOf(normal)).toContain('call writing_style before drafting') // one-line pointer to the tool, nothing more
   await send(page, 'what is two plus two !!reply four')
   await expect(page.locator('.msg.assistant').last()).toContainText('four', { timeout: 30_000 })
   expect(systemOf(callWith(llm, 'two plus two')[0])).not.toContain('GUIDELINEMARK')
@@ -123,7 +123,7 @@ test('voice off (toggle, per-chat switch, or no profile) injects nothing', async
   await expect(page.locator('.msg.assistant').last()).toContainText('d2', { timeout: 30_000 })
   const sys = systemOf(callWith(llm, 'draft two')[0])
   expect(sys).not.toContain('GUIDELINEMARK')
-  expect(sys).not.toMatch(/writing_style/)
+  expect(sys).not.toContain('call writing_style before drafting')
   clean(grain)
 })
 
@@ -150,6 +150,7 @@ test('a project voice replaces the personal one inside that project; without it 
   expect(casual).not.toContain('LEGALGUIDE')
   // the project's Voice tab says drafts use the personal voice
   await page.locator('.sidebar').getByText('Casual', { exact: true }).first().click()
+  await openProjectSection(page, 'Memory')
   await page.getByRole('button', { name: 'Voice', exact: true }).click()
   await expect(page.getByText(/currently use your personal voice/)).toBeVisible()
   clean(grain)

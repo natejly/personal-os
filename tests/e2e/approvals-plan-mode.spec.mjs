@@ -2,7 +2,7 @@ import { test } from './fixtures.mjs'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { scriptLLM } from './helpers/scriptllm.mjs'
-import { expect, deskChat, openChat, say, homeScratch, rmScratch, pending, realErrors, resize } from './helpers/cowork.mjs'
+import { expect, deskChat, openChat, say, homeScratch, rmScratch, pending, realErrors, resize, SHELL_SANDBOX } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 300_000 })
 
 const touch = (ws, name) => ({ name: 'shell_run', args: { command: `touch ${name}`, cwd: ws } })
@@ -26,6 +26,7 @@ const newChat = async (page, grain, title = 'Plan first chat') => {
 }
 
 test('plan first: a plan card appears, nothing runs before approval, an approved step runs once without a second card', async ({ grain }) => {
+  test.skip(!SHELL_SANDBOX, 'needs shell_run to execute, which only macOS sandboxes')
   const { page } = grain
   const { ws, llm } = await setup(grain)
   try {
@@ -85,6 +86,7 @@ test('plan first: while drafting, a consequential tool is refused, not carded an
 })
 
 test('plan card: edited arguments are what the approval binds; the unedited call asks again', async ({ grain }) => {
+  test.skip(!SHELL_SANDBOX, 'needs shell_run to execute, which only macOS sandboxes')
   const { page } = grain
   const { ws, llm } = await setup(grain)
   try {

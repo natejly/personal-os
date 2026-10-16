@@ -3,12 +3,13 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { scriptLLM } from './helpers/scriptllm.mjs'
 import { restartBackend } from './helpers/restart.mjs'
-import { expect, realErrors, deskStatus, waitStatus, deskChat, openChat, strip, newChat, say, pending, homeScratch, rmScratch, WRITE, DELIVER, DONE, settingsFor } from './helpers/cowork.mjs'
+import { expect, realErrors, deskStatus, waitStatus, deskChat, openChat, strip, newChat, say, pending, homeScratch, rmScratch, WRITE, DELIVER, DONE, settingsFor, SHELL_SANDBOX } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 300_000 })
 
 const card = (page) => page.getByRole('group', { name: 'Run command' })
 
 test('backend gone while a card is on screen: the click fails softly, the card stays, and works once the backend is back', async ({ grain }) => {
+  test.skip(!SHELL_SANDBOX, 'needs shell_run to execute, which only macOS sandboxes')
   const { page } = grain
   const ws = homeScratch()
   try {

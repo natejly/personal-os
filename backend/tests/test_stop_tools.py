@@ -150,7 +150,7 @@ def test_stop_during_a_read_tool_interrupts_it_and_skips_the_rest() -> None:
     assert len(STATE["calls"]) == 1, "no final round after a Stop"
     msg = j("GET", f"/conversations/{cid}")["messages"][-1]
     assert all(not t.get("pending") for t in msg["tool_events"]) and msg["tool_events"][0]["interrupted"] is True
-    j("POST", f"/conversations/{cid}/chat", {"content": "again"})  # not 409: the run is over
+    drain(j("POST", f"/conversations/{cid}/chat", {"content": "again"})["run_id"])  # not 409: the run is over; wait so it cannot take the next test's scripted round
 
 
 def test_a_write_cut_off_by_stop_leaves_its_journal_row_started() -> None:

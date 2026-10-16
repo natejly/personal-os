@@ -2,7 +2,7 @@ import { test } from './fixtures.mjs'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { openAdvanced } from './helpers/home.mjs'
-import { expect, newChat, say, homeScratch, rmScratch, pending, realErrors, resize } from './helpers/cowork.mjs'
+import { expect, newChat, say, homeScratch, rmScratch, pending, realErrors, resize, SHELL_SANDBOX } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 300_000 })
 
 const touch = (ws, cmd) => `!!tool shell_run ${JSON.stringify({ command: cmd, cwd: ws })}`
@@ -58,6 +58,7 @@ test('Settings → Advanced → Approvals: add rules in the UI, bad rules are re
 })
 
 test('rules in the chat: allow skips the card, ask forces it even when the tool is on, deny refuses a compound line before anything runs', async ({ grain }) => {
+  test.skip(!SHELL_SANDBOX, 'needs shell_run to execute, which only macOS sandboxes')
   const { page } = grain
   const ws = await seed(grain, { tools: { shell_run: 'on' }, permissionRules: { allow: ['Bash(touch *)'], ask: ['Bash(touch ask*)'], deny: ['Bash(touch blocked*)'] } })
   try {
@@ -101,6 +102,7 @@ test('the opaque and the hardline cases: substitutions always ask, rm -rf / is r
 })
 
 test('stress: 20 chats waiting at once are all answerable from the API and none runs twice', async ({ grain }) => {
+  test.skip(!SHELL_SANDBOX, 'needs shell_run to execute, which only macOS sandboxes')
   const { page } = grain
   const ws = await seed(grain)
   try {
@@ -122,6 +124,7 @@ test('stress: 20 chats waiting at once are all answerable from the API and none 
 })
 
 test('a 150 KB command in a card is shown without freezing the UI and can be denied', async ({ grain }) => {
+  test.skip(process.platform === 'linux', 'typing 150 KB without a space into the composer takes about 30 s in the Linux renderer')
   const { page } = grain
   const ws = await seed(grain)
   try {

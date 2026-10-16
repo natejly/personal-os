@@ -742,6 +742,23 @@ test('Stop sets stopping once, a second press joins the first, and a failure han
   }
 })
 
+test('a plan read that answers after a plan event does not overwrite the newer steps', async () => {
+  const real = api.plan.get
+  let answer: (v: unknown) => void = () => undefined
+  api.plan.get = (() => new Promise((r) => { answer = r })) as never
+  try {
+    useStore.setState({ plans: {} } as never)
+    const read = useStore.getState().loadPlan('c1')
+    const steps = [{ id: 's1', text: 'first', status: 'pending', note: '' }]
+    useStore.setState({ plans: { c1: steps } } as never)
+    answer({ conversation_id: 'c1', steps: [], updated_at: null })
+    await read
+    assert.deepEqual(useStore.getState().plans.c1, steps)
+  } finally {
+    api.plan.get = real
+  }
+})
+
 test('setView back to the chat clears what finished while it was away', () => {
   useStore.setState({ view: 'docs', focusedConversationId: 'c9', sessions: { c9: session({ unread: 2, streaming: null }) } as never })
   useStore.getState().setView('chat')

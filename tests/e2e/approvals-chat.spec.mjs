@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 test.describe.configure({ timeout: 300_000 })
 import { openAdvanced } from './helpers/home.mjs'
-import { expect, newChat, say, homeScratch, rmScratch, pending, realErrors, resize } from './helpers/cowork.mjs'
+import { expect, newChat, say, homeScratch, rmScratch, pending, realErrors, resize, SHELL_SANDBOX } from './helpers/cowork.mjs'
 
 // shell_run is `ask` by default and `touch` is not on the read-only list, so it always gets a card.
 const touch = (ws, name, extra = '') => `!!tool shell_run {"command":"touch ${name}","cwd":"${ws}"${extra}}`
@@ -17,6 +17,7 @@ async function setup(grain, extra = {}) {
 const waitPending = (grain, n = 1) => expect.poll(async () => (await pending(grain)).length, { timeout: 60_000 }).toBe(n)
 
 test('approval card shows the command; Allow runs it', async ({ grain }) => {
+  test.skip(!SHELL_SANDBOX, 'needs shell_run to execute, which only macOS sandboxes')
   const { page } = grain
   const ws = await setup(grain)
   try {
@@ -65,6 +66,7 @@ test('Deny records a rejection and nothing runs; Deny with a note reaches the mo
 })
 
 test('always allow in this chat: grant listed in Settings, next call runs without a card, revoke brings the card back', async ({ grain }) => {
+  test.skip(!SHELL_SANDBOX, 'needs shell_run to execute, which only macOS sandboxes')
   const { page } = grain
   const ws = await setup(grain)
   try {
@@ -96,6 +98,7 @@ test('always allow in this chat: grant listed in Settings, next call runs withou
 })
 
 test('always allow with a saved rule: rule appears in settings and skips the card', async ({ grain }) => {
+  test.skip(!SHELL_SANDBOX, 'needs shell_run to execute, which only macOS sandboxes')
   const { page } = grain
   const ws = await setup(grain)
   try {
@@ -113,6 +116,7 @@ test('always allow with a saved rule: rule appears in settings and skips the car
 })
 
 test('deny rules win over allow rules', async ({ grain }) => {
+  test.skip(!SHELL_SANDBOX, 'needs shell_run to execute, which only macOS sandboxes')
   const { page } = grain
   const ws = await setup(grain, { permissionRules: { allow: ['Bash(touch *)'], ask: [], deny: ['Bash(touch blocked*)'] } })
   try {
@@ -153,6 +157,7 @@ test('a forced approval is never bypassed by allow rules or chat grants', async 
 })
 
 test('two chats pending at once are answered independently, at 820x520', async ({ grain }) => {
+  test.skip(!SHELL_SANDBOX, 'needs shell_run to execute, which only macOS sandboxes')
   const { page } = grain
   const ws = await setup(grain)
   try {
@@ -182,6 +187,7 @@ test('two chats pending at once are answered independently, at 820x520', async (
 })
 
 test('a pending approval survives relaunch: card is still there and the decision is recorded once', async ({ grain }) => {
+  test.skip(!SHELL_SANDBOX, 'needs shell_run to execute, which only macOS sandboxes')
   let { page } = grain
   const ws = await setup(grain)
   try {
@@ -203,6 +209,7 @@ test('a pending approval survives relaunch: card is still there and the decision
 })
 
 test('the first decision on a card wins; a second one is refused', async ({ grain }) => {
+  test.skip(!SHELL_SANDBOX, 'needs shell_run to execute, which only macOS sandboxes')
   const { page } = grain
   const ws = await setup(grain)
   try {

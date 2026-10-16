@@ -11,7 +11,8 @@ const session = (over = {}) => ({
 })
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' }
 
-test('the Coding sessions list shows a stubbed session; Stop posts to /stop and the row follows', async ({ grain }) => {
+// Quarantined: the Coding sessions section left the Context card with the Terminal card (terminal.spec.mjs covers the rows); there is no Stop or log to drive here now.
+test.fixme('the Coding sessions list shows a stubbed session; Stop posts to /stop and the row follows', async ({ grain }) => {
   const { page, backend } = grain
   let row = session()
   const posts = []

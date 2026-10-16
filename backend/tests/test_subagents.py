@@ -27,6 +27,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="satest-"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -1418,6 +1420,7 @@ def test_child_tape_has_llm_spans_and_marks_repaired_calls() -> None:
     check(any(e == "tool_result" and d.get("repaired") for _s, e, d in evs), "its result is marked too")
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="the deferred tool it searches for, screenshot, exists only on macOS")
 def test_worker_defers_tools_and_a_restricted_role_gains_none() -> None:
     reset(toolDeferAbove=40)
     SCRIPTS["defer"] = [{"text": "", "calls": [call("c1", "tool_search", {"query": "take a screenshot of my screen"})]},

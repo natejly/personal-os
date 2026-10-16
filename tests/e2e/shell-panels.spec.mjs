@@ -8,7 +8,7 @@ const lastCallText = (llm) => JSON.stringify(llm.calls[llm.calls.length - 1] ?? 
 async function askPageAgent(grain, text = '!!reply noted') {
   const { page, llm } = grain
   const before = llm.calls.length
-  if (!(await panel(page).count())) await menu(grain, 'Page Agent')
+  if (!(await panel(page).count())) await menu(grain, 'Quick chat (in a chat: Context panel)')
   await expect(panel(page)).toBeVisible()
   const box = panel(page).getByRole('textbox').first()
   await box.fill(text)
@@ -66,7 +66,7 @@ test('page agent: width resizes with the handle and persists; hints send on clic
   await page.reload()
   await page.waitForSelector('.sidebar')
   await navItem(page, 'Lists').click()
-  await menu(grain, 'Page Agent')
+  await menu(grain, 'Quick chat (in a chat: Context panel)')
   const w = () => panel(page).evaluate((e) => Math.round(e.getBoundingClientRect().width))
   await expect.poll(w).toBe(380)
   const h = page.getByRole('separator', { name: 'Page agent width' })
@@ -250,13 +250,13 @@ test('⌘I panel stays open when you switch its tabs or change view', async ({ g
   await box.fill('!!reply hello')
   await box.press('Enter')
   await expect(page.locator('.msg.assistant').last()).toContainText('hello')
-  await menu(grain, 'Page Agent')
+  await menu(grain, 'Quick chat (in a chat: Context panel)')
   await expect(page.getByRole('complementary', { name: 'Workspace' })).toBeVisible()
   await page.getByTestId('desk-tab-files').click()
   await expect(page.getByRole('complementary', { name: 'Workspace' })).toBeVisible()
   // elsewhere: the quick-chat panel survives a view switch
   await navItem(page, 'Lists').click()
-  await menu(grain, 'Page Agent')
+  await menu(grain, 'Quick chat (in a chat: Context panel)')
   await expect(panel(page)).toBeVisible()
   await navItem(page, 'Files').click()
   await expect(panel(page)).toBeVisible()

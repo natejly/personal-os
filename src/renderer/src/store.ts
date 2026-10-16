@@ -3077,8 +3077,10 @@ export const useStore = create<State>((set, get) => {
     },
 
     loadPlan: async (conversationId) => {
+      const before = get().plans[conversationId]
       const plan = await api.plan.get(conversationId).catch(() => null)
-      if (plan) set((s) => ({ plans: { ...s.plans, [conversationId]: plan.steps } }))
+      // A plan event or an edit that landed while this read was in flight is newer than what it returns.
+      if (plan && get().plans[conversationId] === before) set((s) => ({ plans: { ...s.plans, [conversationId]: plan.steps } }))
     },
     setPlanSteps: async (conversationId, steps) => {
       // Optimistic: ticking a step off must feel like a checkbox, and the model reads the stored plan

@@ -68,6 +68,21 @@ def _vol(c: dict[str, Any]) -> str:
     return "\n".join(str(m["content"]) for m in c["messages"][1:] if m["role"] == "system" and str(m["content"]).startswith(VOLATILE_HEADER))
 
 
+GOLDEN = Path(__file__).parent / "golden" / "chat_prefix.txt"
+
+
+def test_chat_prefix_matches_golden(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The stable system prompt of a fixed chat on a fresh database, byte for byte. Runs first: later tests add memories.
+
+    A change here busts every provider's prompt cache for every chat. If it is intended, replace the golden file with the new prefix.
+    """
+    _setup()
+    monkeypatch.setattr(llm, "stream_chat", _fake)
+    cid = appmod.convos.create(None, "Golden", "test-model")["id"]
+    prefix = _turn(cid, content="hello there")["messages"][0]["content"]
+    assert prefix.encode() == GOLDEN.read_bytes(), f"the stable prefix changed; compare with {GOLDEN}"
+
+
 def test_chat_prefix_stable_across_turns(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     _setup()
     monkeypatch.setattr(llm, "stream_chat", _fake)

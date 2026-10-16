@@ -16,6 +16,12 @@ export async function openContextPanel(page) {
   if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click()
 }
 
+/** Unfold one group (Memories, Files, ...) of the Context card's usage breakdown. */
+export async function openContextGroup(page, label) {
+  const head = page.locator('.ctx-group-head').filter({ hasText: label })
+  if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click()
+}
+
 export async function newChat(page) {
   await page.getByRole('button', { name: /New chat/ }).first().click()
 }

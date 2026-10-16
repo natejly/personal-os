@@ -340,7 +340,7 @@ test('Open in Mail hands the assistant email to the compose window and denies th
   const fd = new FormData()
   fd.append('file', new Blob(['quarterly numbers']), 'numbers.txt')
   const doc = await (await fetch(`${grain.backend.url}/documents`, { method: 'POST', headers: { Authorization: `Bearer ${grain.token}` }, body: fd })).json()
-  await grain.api('/settings', { method: 'PUT', body: { toolDeferAbove: 0, tools: { gmail_send: 'ask' } } })
+  await grain.api('/settings', { method: 'PUT', body: { toolDeferAbove: 0, tools: { gmail_send: 'ask' }, destructiveDefaults: { send: 'ask' } } })  // Manual mode refuses sends unless this lets the card through
   await page.reload()
   await newChat(page)
   await say(page, '!!tool gmail_send ' + JSON.stringify({ to: 'ann@example.com', bcc: 'bo@example.com', subject: 'Numbers', body: 'Numbers attached.', attachments: [doc.id] }), { wait: false })

@@ -45,6 +45,9 @@ def call(tb: Toolbox, name: str, ctx: dict[str, Any], **args: Any) -> Any:
     return asyncio.run(tb.call(name, args, ctx))
 
 
+needs_sandbox = pytest.mark.skipif(sys.platform != "darwin", reason="shell_run refuses to run without an OS sandbox, and only macOS has one")
+
+
 def refused(out: Any) -> bool:
     return isinstance(out, dict) and "coding_session_start" in str(out.get("error") or "")
 
@@ -273,6 +276,7 @@ def gitrepo(home: Path) -> Path:
     return r
 
 
+@needs_sandbox
 def test_script_writing_a_repo_is_reverted_and_refused(home: Path, gitrepo: Path, tmp_path: Path) -> None:
     tb, _ = make(tmp_path)
     cmd = f"python3 {home}/notes/w.py {gitrepo}"
@@ -286,6 +290,7 @@ def test_script_writing_a_repo_is_reverted_and_refused(home: Path, gitrepo: Path
     assert (gitrepo / "node_modules/pkg.js").exists()  # gitignored: not a source edit
 
 
+@needs_sandbox
 def test_heredoc_from_outside_the_repo_is_caught(home: Path, gitrepo: Path, tmp_path: Path) -> None:
     tb, _ = make(tmp_path)
     cmd = f"cd {gitrepo} && python3 - <<'PY'\nimport pathlib\npathlib.Path('src/a.py').write_text('')\nPY"
@@ -294,6 +299,7 @@ def test_heredoc_from_outside_the_repo_is_caught(home: Path, gitrepo: Path, tmp_
     assert (gitrepo / "src/a.py").read_text() == "x = 1\n"
 
 
+@needs_sandbox
 def test_guard_skips_reads_tests_builds_and_setting_off(home: Path, gitrepo: Path, tmp_path: Path) -> None:
     tb, _ = make(tmp_path)
     ctx = {"conversation_id": "c-guard3"}

@@ -37,11 +37,12 @@ const seedInChat = async (grain, page, worktree) => {
 }
 const rowsText = (page) => page.locator('.xterm-rows').first().innerText()
 
-test('the Terminal tab is hidden while there are no coding sessions', async ({ grain }) => {
+test('the Terminal card says so while the chat has no sessions', async ({ grain }) => {
   const { page } = grain
   await openPanel(page)
   await expect(page.getByTestId('desk-tab-files')).toBeVisible()
-  await expect(page.getByTestId('desk-tab-terminal')).toHaveCount(0)
+  await page.getByTestId('desk-tab-terminal').click()
+  await expect(page.getByText('No terminal sessions in this chat.')).toBeVisible()
   expect(realErrors(grain)).toEqual([])
 })
 

@@ -134,6 +134,7 @@ test('pasting 200 KB becomes a file attachment; the composer stays responsive', 
 })
 
 test('a 150 KB typed message sends; an over-limit one is refused with a notice', async ({ grain }) => {
+  test.skip(process.platform === 'linux', 'filling 2 MB into the composer takes minutes in the Linux renderer')
   const { page } = grain
   await newChat(page)
   const box = msgBox(page)

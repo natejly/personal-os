@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { openContextPanel } from './helpers/chat.mjs'
+import { openContextPanel, openContextGroup } from './helpers/chat.mjs'
 import { openAdvanced, setToggle } from './helpers/home.mjs'
 import { callWith, send, shrink, sleep, systemOf, upload } from './helpers/kb.mjs'
 
@@ -67,6 +67,7 @@ test('context drawer lists the excerpts that were sent, and opens them', async (
   await send(page, 'Tell me about Marrowbone compost !!reply Compost every autumn [1].')
   await expect(page.locator('.msg.assistant').last()).toContainText('Compost every autumn', { timeout: 30_000 })
   await openContextPanel(page)
+  await openContextGroup(page, 'Files')
   const drawer = page.locator('aside, .ctx-drawer, [class*=context]').filter({ hasText: /Uploads \(/ }).last()
   await expect(drawer.getByText(/Uploads \(\d+ excerpt/)).toBeVisible()
   await expect(drawer.getByRole('button', { name: /garden\.txt/ }).first()).toBeVisible()

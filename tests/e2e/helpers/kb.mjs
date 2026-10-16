@@ -36,3 +36,6 @@ export function sqlite(dataDir, sql, params = []) {
   const code = 'import sqlite3,sys,json\nc=sqlite3.connect(sys.argv[1]);c.execute(sys.argv[2],json.loads(sys.argv[3]));c.commit()'
   execFileSync(py, ['-c', code, join(dataDir, file), sql, JSON.stringify(params)])
 }
+
+/** Unfold one of the project page's collapsed sections (Context, Instructions, Memory). */
+export const openProjectSection = (page, name) => page.locator(`.project-page details[aria-label="${name}"] > summary`).click()

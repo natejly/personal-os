@@ -1,9 +1,10 @@
 import { test } from './fixtures.mjs'
 import { scriptLLM } from './helpers/scriptllm.mjs'
-import { expect, realErrors, waitStatus, openChat, deskChat, settingsFor } from './helpers/cowork.mjs'
+import { expect, realErrors, waitStatus, openChat, deskChat, settingsFor, SHELL_SANDBOX } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 300_000 })
 
 test('a chat working autonomously starts a background command; Running lists it with output; Kill stops it', async ({ grain }) => {
+  test.skip(!SHELL_SANDBOX, 'needs shell_run to execute, which only macOS sandboxes')
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [{ name: 'shell_run', args: { command: 'echo job-started; sleep 300', background: true } }] }, { calls: [{ name: 'desk_done', args: { summary: 'started a job' } }] }, { text: 'ok' }, { text: 'final' })

@@ -77,7 +77,7 @@ test('a message with markdown-looking and html text is shown literally in the us
   await expect(users(page).first().locator('strong')).toHaveCount(0)
 })
 
-test('every chat has a side panel: Files and Changes, and no Review without a desk', async ({ grain }) => {
+test('every chat has a side panel: Files, and neither Changes nor Review without changed files or a desk', async ({ grain }) => {
   const { page } = grain
   await newChat(page)
   await sayAndWait(page, '!!tool current_time {}', '')
@@ -86,13 +86,11 @@ test('every chat has a side panel: Files and Changes, and no Review without a de
   await expect(panel).toBeVisible()
   const tabs = panel
   await expect(tabs.getByTestId('desk-tab-files')).toBeVisible()
-  await expect(tabs.getByTestId('desk-tab-changes')).toBeVisible()
+  await expect(tabs.getByTestId('desk-tab-changes')).toHaveCount(0) // shows once the chat has changed files
   await expect(tabs.getByTestId('desk-tab-review')).toHaveCount(0)
   await expect(tabs.getByTestId('desk-tab-context')).toHaveAttribute('aria-expanded', 'true') // opens with Context expanded
   await tabs.getByTestId('desk-tab-files').click()
   await expect(panel.getByText('No files in this chat yet.')).toBeVisible()
-  await tabs.getByTestId('desk-tab-changes').click()
-  await expect(panel.getByText('No files changed in this chat yet.')).toBeVisible()
   await page.getByRole('button', { name: 'Workspace panel', exact: true }).click()
   await expect(panel).toHaveCount(0)
 })

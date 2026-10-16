@@ -71,6 +71,7 @@ test('wikilinks: [[ autocomplete inserts a link, preview click navigates, unknow
 })
 
 test('outline pane follows headings, jumps, and works from preview-only mode', async ({ grain: g }) => {
+  test.skip(process.platform !== 'darwin', 'drives the editor with Command-key chords')
   const { page } = g
   const lines = []
   for (let i = 1; i <= 12; i++) lines.push(`## Section ${i}`, '', ...Array.from({ length: 8 }, (_, k) => `para ${i}.${k}`), '')
@@ -239,6 +240,7 @@ test('task checkboxes toggle in the preview and write back to the file', async (
 })
 
 test('keyboard in the editor: shift-cmd-B/I/E, cmd-K, Tab, list continuation, cmd-S', async ({ grain: g }) => {
+  test.skip(process.platform !== 'darwin', 'drives the editor with Command-key chords')
   const { page } = g
   await openFiles(page)
   await newDoc(page)

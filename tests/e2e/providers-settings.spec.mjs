@@ -27,7 +27,7 @@ const options = (page, label) => dialog(page).getByLabel(label).first().locator(
 async function openAdd(page, { url, key, name = 'Second server' }) {
   await dialog(page).getByRole('button', { name: 'Add provider' }).click()
   await dialog(page).getByLabel('Provider', { exact: true }).selectOption('custom')
-  await dialog(page).getByLabel('Name').fill(name)
+  await dialog(page).getByLabel('Name', { exact: true }).fill(name)
   await dialog(page).getByLabel('Provider address').fill(url)
   await dialog(page).getByRole('textbox', { name: /API key/ }).fill(key)
 }

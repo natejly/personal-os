@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { send, shrink } from './helpers/kb.mjs'
+import { openProjectSection, send, shrink } from './helpers/kb.mjs'
 import { openMemory as openMemoryTab } from './helpers/home.mjs'
 
 const pane = (page) => page.locator('.knowledge-body')
@@ -80,10 +80,11 @@ test('everything at 820x520: project modal, project view tabs, memory panel, voi
   await page.keyboard.press('Escape')
   await page.locator('.sidebar').getByText('Tiny', { exact: true }).click()
   for (const sec of ['Chats', 'Files', 'Context', 'Instructions', 'Memory']) {
-    await page.locator('.project-page').getByRole('region', { name: sec }).scrollIntoViewIfNeeded()
+    await page.locator(`.project-page [aria-label="${sec}"]`).scrollIntoViewIfNeeded()
     const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
     expect(over).toBeLessThanOrEqual(1)
   }
+  await openProjectSection(page, 'Memory')
   for (const mode of ['Graph', 'Voice', 'List']) {
     await page.getByRole('button', { name: mode, exact: true }).click()
     const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)

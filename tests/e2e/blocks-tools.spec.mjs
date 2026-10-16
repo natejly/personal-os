@@ -117,24 +117,17 @@ test.describe('calendar card', () => {
 })
 
 test.describe('trace, diff and outcomes', () => {
-  test('the trace opens for a reply with tool events and exports OTLP JSON', async ({ grain }) => {
+  test('the trace opens in the side panel for a reply with tool events', async ({ grain }) => {
     const page = await start(grain, { devTools: true })
     await say(page, '!!tool current_time {}')
     const chip = page.getByTitle(/Execution trace/)
     await expect(chip).toBeVisible({ timeout: 20_000 })
     await chip.click()
-    const trace = page.locator('.trace', { has: page.locator('.trace-summary') })
-    await expect(trace).toBeVisible()
-    await expect(trace.locator('.trace-row').first()).toBeVisible()
-    await expect(trace.locator('.trace-summary')).toContainText(/tool/)
-    await trace.locator('.trace-head').first().click()
-    await expect(trace.locator('.trace-meta').first()).toBeVisible()
-    await page.evaluate(() => { window.__dl = []; HTMLAnchorElement.prototype.click = function () { window.__dl.push(this.download) } })
-    await trace.getByRole('button', { name: 'Export OTLP JSON' }).click()
-    await expect.poll(() => page.evaluate(() => window.__dl[0])).toMatch(/^grain-trace-.*\.otlp\.json$/)
-    const msg = (await grain.api(`/conversations/${(await grain.api('/conversations'))[0].id}`)).messages.find((m) => m.role === 'assistant')
-    const otlp = await grain.api(`/messages/${msg.id}/otlp`).catch(() => null)
-    if (otlp) expect(JSON.stringify(otlp)).toContain('resourceSpans')
+    const pane = page.getByTestId('traces-pane')
+    await expect(pane.locator('.traces-round').first()).toBeVisible()
+    await expect(pane.locator('.traces-tool').first()).toContainText('current time')
+    await pane.locator('.traces-tool summary').first().click()
+    await expect(pane.locator('.trace-meta').first()).toBeVisible()
   })
 
   test('a doc_edit shows its diff in the chat with no card in front of it; Accept applies it, Reject leaves the doc alone', async ({ grain }) => {

@@ -118,6 +118,8 @@ class RouteTests(unittest.TestCase):
 
 class DashboardTests(unittest.TestCase):
     def test_dashboard_keeps_todo_keys(self) -> None:
+        from personal_os import app as appmod
+        appmod.db.set_settings({"hiddenViews": []})  # a fresh install starts with Lists off, and then the dashboard omits todos
         t = client.post("/todos", json={"title": "dash todo"}).json()
         try:
             d = client.get("/dashboard").json()

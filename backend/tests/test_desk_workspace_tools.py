@@ -391,6 +391,7 @@ def test_a_script_copy_of_a_download_stays_untrusted(box: Box, monkeypatch: pyte
     assert "hello from the web" in got["text"] and box.ctx["tainted"] is True
 
 
+@needs_seatbelt
 def test_a_shell_copy_of_a_download_stays_untrusted(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
     url = "https://example.com/note.txt"
     body = b"hello from the web\n"
@@ -412,6 +413,7 @@ def test_a_shell_copy_of_a_download_stays_untrusted(box: Box, monkeypatch: pytes
     assert "not-for-the-shell" not in (denied.get("output") or "")
 
 
+@needs_seatbelt
 def test_renaming_a_download_keeps_it_untrusted(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
     url = "https://example.com/note.txt"
     body = b"hello from the web\n"

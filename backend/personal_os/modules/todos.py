@@ -85,6 +85,7 @@ class TasksSyncIn(BaseModel):
 
 class TodosModule(Module):
     key = "todos"
+    view = "todos"
     label = "Todos"
 
     def __init__(self, ctx: ModuleContext) -> None:

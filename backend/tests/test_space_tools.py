@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from personal_os import app as appmod  # noqa: E402
 
 tb, cv = appmod.toolbox, appmod.canvases
+appmod.db.set_settings({"hiddenViews": []})  # a fresh install has Canvases off
 
 
 def call(name, **a):  # type: ignore[no-untyped-def]

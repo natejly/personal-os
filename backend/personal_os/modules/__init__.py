@@ -44,6 +44,10 @@ class ModuleContext:
 class Module:
     key: str = ""
     label: str = ""
+    view: str = ""  # the sidebar view that turns this module on or off; "" = always on
+
+    def enabled(self) -> bool:
+        return not self.view or self.view not in (self.ctx.settings().get("hiddenViews") or ())
 
     def __init__(self, ctx: ModuleContext) -> None:
         self.ctx = ctx

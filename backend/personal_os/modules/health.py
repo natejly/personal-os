@@ -93,6 +93,7 @@ def _fmt(m: dict[str, Any], v: float | None) -> str | None:
 
 class HealthModule(Module):
     key = "health"
+    view = "health"
     label = "Health"
 
     def __init__(self, ctx: ModuleContext) -> None:
@@ -244,7 +245,7 @@ class HealthModule(Module):
         """Re-sync approved, enabled sources every few hours. A failure is recorded on the source."""
         await asyncio.sleep(60)  # let connectors come up first
         while True:
-            for s in self.sources.list():
+            for s in self.sources.list() if self.enabled() else ():
                 due = not s["last_sync_at"] or time.time() - s["last_sync_at"] > AUTO_SYNC_EVERY
                 if s["enabled"] and s["pinned"] and due and s["id"] not in self._syncing:
                     self._syncing.add(s["id"])

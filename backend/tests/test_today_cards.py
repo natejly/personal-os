@@ -19,13 +19,14 @@ os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="todaycard
 from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import todo_rules  # noqa: E402
-from personal_os.app import AUTH_TOKEN, app, google, modules  # noqa: E402
+from personal_os.app import AUTH_TOKEN, app, db, google, modules  # noqa: E402
 from personal_os.modules import get  # noqa: E402
 from personal_os.modules.mailwatch import MailWatchModule  # noqa: E402
 from personal_os.modules.planner import PlannerModule  # noqa: E402
 from personal_os.modules.todos import TodosModule  # noqa: E402
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
+db.set_settings({"hiddenViews": []})  # a fresh install has Lists, Calendar and Mail off
 NOW = datetime(2026, 10, 5, 8, 0)  # a Monday
 todos_mod = get(modules, "todos", TodosModule)
 planner_mod = get(modules, "planner", PlannerModule)

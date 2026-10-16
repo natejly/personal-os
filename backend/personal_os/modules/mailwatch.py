@@ -48,6 +48,7 @@ def _clock() -> datetime:
 
 class MailWatchModule(Module):
     key = "mailwatch"
+    view = "mail"
     label = "Mail watch"
 
     def __init__(self, ctx: ModuleContext, llm_fn: Callable[[list[dict[str, str]]], Any] | None = None,

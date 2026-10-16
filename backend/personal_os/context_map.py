@@ -363,7 +363,7 @@ def _event_start(ev: dict[str, Any]) -> dt.datetime | None:
 
 
 def build_volatile(db: Any, *, project_id: str | None, switches: dict[str, bool], google: Any = None, mcp_store: Any = None,
-                   nonce: str | None = None) -> tuple[str, dict[str, Any]]:
+                   nonce: str | None = None, hidden: Any = ()) -> tuple[str, dict[str, Any]]:
     """(text, info) for the per-turn block: source freshness, open todos, the next calendar events, what waits on the user, running
     workers. Times are absolute here (the block is not in the cached prefix). Calendar titles are untrusted and sit in a fence
     keyed by `nonce`."""
@@ -372,7 +372,7 @@ def build_volatile(db: Any, *, project_id: str | None, switches: dict[str, bool]
     isolated = bool(project_id) and bool(_safe(lambda: is_isolated(db, project_id)))
     if switches.get("sources"):
         lines: list[str] = []
-        if google is not None:
+        if google is not None and not {"calendar", "mail"} <= set(hidden):
             def g() -> str | None:
                 st = google.status()
                 if st.get("connected") and not st.get("needs_reauth"):
@@ -401,10 +401,10 @@ def build_volatile(db: Any, *, project_id: str | None, switches: dict[str, bool]
         def count(sql: str, a: Any = ()) -> int:
             with db.tx() as c:
                 return int(c.execute(sql, a).fetchone()[0])
-        todos = _safe(lambda: count(f"SELECT COUNT(*) FROM todos WHERE done=0 AND deleted_at IS NULL AND {where}", args))
+        todos = None if "todos" in hidden else _safe(lambda: count(f"SELECT COUNT(*) FROM todos WHERE done=0 AND deleted_at IS NULL AND {where}", args))
         if todos is not None:
             lines.append(f"Open todos: {todos}")
-        if google is not None and not isolated:
+        if google is not None and not isolated and "calendar" not in hidden:
             def ev() -> str | None:
                 now = dt.datetime.now().astimezone()
                 evs = [(s, e) for e in (google.calendar_saved(7) or []) if (s := _event_start(e)) is not None and s >= now]

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { Canvas, CanvasWindow, SnapMode, WidgetKind, WindowLayout, WindowState } from '@shared/types'
 import { api, getBase, getToken } from '../lib/api'
 import { useStore } from '../store'
+import { viewHidden } from '../moduleToggles'
 import { clampOpacity, nextOpacity } from './opacity'
 import { GAP } from './layout'
 import { tidyLayout, visibleRect, zoneRect, type Point, type Size, type Viewport } from './snapping'
@@ -352,7 +353,11 @@ export const useCanvas = create<CanvasState>((set, get) => {
     const inCanvas = useStore.getState().view === 'canvas'
     if (action === 'close-window') return inCanvas && s.focusedWindowId ? void s.closeFocused() : window.os.closeSelf()
     if (action === 'minimize-window') return inCanvas && s.focusedWindowId ? void s.minimizeFocused() : window.os.minimizeSelf()
-    // These three work from anywhere: they navigate into the canvas.
+    // These three work from anywhere: they navigate into the canvas, unless Canvases is turned off in Settings → Sidebar.
+    if ((action === 'canvas:toggle' || action === 'canvas:new-space' || action.startsWith('canvas:space:')) && viewHidden(useStore.getState().settings, 'spaces')) {
+      const app = useStore.getState()
+      return app.toast('Canvases are turned off', 'info', { label: 'Turn on', run: () => app.openSettings('sidebar') })
+    }
     if (action === 'canvas:toggle') return void s.toggleCanvas()
     if (action === 'canvas:new-space') return void s.newSpace()
     if (action.startsWith('canvas:space:')) {

@@ -169,6 +169,8 @@ class RouteTests(unittest.TestCase):
             client.delete(f"/health/metrics/{m['key']}")
 
     def test_dashboard_carries_health(self) -> None:
+        from personal_os.app import db
+        db.set_settings({"hiddenViews": []})  # a fresh install has Health off
         d = client.get("/dashboard").json()
         self.assertIn("sleep", [m["key"] for m in d["health"]])
 

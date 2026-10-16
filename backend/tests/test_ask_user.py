@@ -25,6 +25,7 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import app as appmod  # noqa: E402
+appmod.db.set_settings({"hiddenViews": []})  # a fresh install has the PIM views off
 from personal_os import llm, permrules  # noqa: E402
 
 client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})

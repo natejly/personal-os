@@ -58,6 +58,7 @@ def focus_change(b: dict[str, Any], calendar_id: str) -> dict[str, Any]:
 
 class PlannerModule(Module):
     key = "planner"
+    view = "calendar"
     label = "Planner"
 
     def __init__(self, ctx: ModuleContext, clock: Callable[[], datetime] = datetime.now) -> None:

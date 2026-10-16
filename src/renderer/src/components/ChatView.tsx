@@ -61,6 +61,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const send = useStore((s) => s.send)
   const showFirstPrompts = useOnboarding((s) => s.firstPrompts && !conversationId)
   const pimOn = useStore(pimConnected)
+  const hiddenViews = useStore((s) => s.settings.hiddenViews)
   const setFirstPrompts = useOnboarding((s) => s.setFirstPrompts)
   // The chips are for the first empty chat only; once any conversation is open they are spent.
   useEffect(() => { if (conversationId) setFirstPrompts(false) }, [conversationId, setFirstPrompts])
@@ -181,7 +182,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {!conversationId && !project && <DailyRecap />}
                 {showFirstPrompts && (
                   <div className="ob-first-prompts" role="group" aria-label="Things to try">
-                    {firstPrompts(pimOn).map((t) => <button key={t} className="ghost-btn" onClick={() => { setFirstPrompts(false); void send(t, conversationId) }}>{t}</button>)}
+                    {firstPrompts(pimOn, hiddenViews).map((t) => <button key={t} className="ghost-btn" onClick={() => { setFirstPrompts(false); void send(t, conversationId) }}>{t}</button>)}
                   </div>
                 )}
               </div>

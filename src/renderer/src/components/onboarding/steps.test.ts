@@ -67,4 +67,5 @@ test('first prompts only name Google surfaces once Google is connected', () => {
   const off = firstPrompts(false).join(' ')
   assert.ok(!/calendar|mail/i.test(off), off)
   assert.match(firstPrompts(true).join(' '), /calendar/i)
+  assert.ok(!/calendar|mail|todo/i.test(firstPrompts(true, ['calendar', 'mail', 'todos']).join(' ')))
 })

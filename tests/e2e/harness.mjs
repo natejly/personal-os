@@ -105,7 +105,7 @@ export async function startBackend({ llmUrl, llmKey, dataDir, token, extraEnv = 
  * launchApp(): { app, page, api, backend, llm, dataDir, close }.
  *  - api(path, {method, body}) calls the backend with the bearer token and returns parsed JSON (throws on >= 400).
  *  - llm.calls is every chat-completions request body the mock saw (undefined with E2E_LLM=real).
- *  - settings are seeded over {autonomousByDefault:false, permissionMode:'manual'} so the classic chat stays testable;
+ *  - settings are seeded over {autonomousByDefault:false, permissionMode:'manual', hiddenViews:[]} (a fresh install starts with Lists, Calendar, Mail, Health and Canvases off) so the classic chat stays testable;
  *    pass autonomousByDefault:true / permissionMode:'auto' to test the shipped defaults.
  *  - page is the main window; waits until the shell (sidebar) has rendered.
  */
@@ -158,7 +158,7 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
   try {
     await seedProvider(backend, token, { llmUrl, llmKey })
     // The suite never runs permissionMode 'auto' (the shipped default): the mock cannot answer the safety reviewer. pytest covers it.
-    await api('/settings', { method: 'PUT', body: { onboardedAt: new Date().toISOString(), autonomousByDefault: false, permissionMode: 'manual', ...settings } })
+    await api('/settings', { method: 'PUT', body: { onboardedAt: new Date().toISOString(), autonomousByDefault: false, permissionMode: 'manual', hiddenViews: [], ...settings } })
     if (beforeApp) await beforeApp({ api, backend, dataDir })
   } catch (e) { await abandon(e) }
 

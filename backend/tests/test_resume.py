@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import app as appmod  # noqa: E402
+appmod.db.set_settings({"hiddenViews": []})  # a fresh install has the PIM views off
 from personal_os import llm  # noqa: E402
 from personal_os import resume as resume_mod  # noqa: E402
 from personal_os.runs import args_digest  # noqa: E402

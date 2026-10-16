@@ -166,13 +166,17 @@ class ExtensionHost:
     # ---- settings: `ext.<id>.<field>`, typed by the manifest ----
     def setting_type(self, key: str) -> str | None:
         """The declared type of an extension setting key, or None when no loaded extension declares it."""
+        if not key.startswith(SETTING_PREFIX):
+            return None
         ext_id, _, name = key.removeprefix(SETTING_PREFIX).partition(".")
         spec = self.extensions[ext_id].manifest.settings.get(name) if ext_id in self.extensions else None
-        return spec["type"] if key.startswith(SETTING_PREFIX) and spec else None
+        return spec["type"] if spec else None
 
     def check_setting(self, key: str, value: Any) -> Any:
         """The value as it may be stored for a declared extension setting, or ValueError with the reason."""
         kind = self.setting_type(key)
+        if kind is None:
+            raise ValueError(f"{key} is not a declared setting")
         ok = {"string": isinstance(value, str), "secret": value is None or isinstance(value, str),
               "boolean": isinstance(value, bool), "integer": isinstance(value, int) and not isinstance(value, bool),
               "number": isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)}[kind]

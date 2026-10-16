@@ -987,10 +987,10 @@ toolbox.permission_store = _store_permissions
 HOST_LIST_SETTINGS = set(permissions.HOST_LISTS)
 
 
-def _settings_changed(before: dict[str, Any], written: list[str], perm: dict[str, Any], secrets: list[str]) -> None:
+def _settings_changed(before: dict[str, Any], written: list[str], secrets: set[str]) -> None:
     """Fire settings.changed with the keys whose value differs. A secret's key is listed but its values never leave the store."""
     after = db.get_settings()
-    keys = [k for k in (*written, *(permissions.KEY if perm else ()), *secrets) if k in secrets or before.get(k) != after.get(k)]
+    keys = [k for k in dict.fromkeys(written) if k in secrets or before.get(k) != after.get(k)]
     if keys:
         host.fire("settings.changed", {"keys": keys, "old": {k: before.get(k) for k in keys if k not in secrets},
                                        "new": {k: after.get(k) for k in keys if k not in secrets}})
@@ -1047,7 +1047,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             db.secrets.set(k, v)
         else:
             db.secrets.delete(k)
-    _settings_changed(before, [*clean, *ext_values], perm, [*ext_secrets, *(k for k in SECRET_SETTINGS if k in clean)])
+    _settings_changed(before, [*clean, *ext_values, *ext_secrets, *([permissions.KEY] if perm else [])],
+                      {*ext_secrets, *(k for k in SECRET_SETTINGS if k in clean)})
     if "hiddenViews" in clean:
         host.refresh_enabled()
     if "telegramEnabled" in clean and _loop is not None and not _loop.is_closed():
@@ -1417,9 +1418,11 @@ async def delete_project(id: str) -> dict[str, Any]:
     for c in (*convos.list(id, include_jobs=True, include_desks=True), *convos.list(id, include_jobs=True, include_desks=True, archived=True)):
         stopped += bool(bus.stop(c["id"]))
         await workers_mgr.stop_conversation(c["id"])  # its background workers end with it, unannounced
+    existed = projects.get(id) is not None
     trash.trash("project", id)  # its chats, memories and uploads go to the trash; docs and todos are demoted to personal
     canvases.delete_windows_for("project", id)  # ref_id has no foreign key: a deleted referent's windows are swept here
-    host.fire("project.deleted", {"id": id})
+    if existed:
+        host.fire("project.deleted", {"id": id})
     return {"ok": True, "stopped": stopped}
 
 

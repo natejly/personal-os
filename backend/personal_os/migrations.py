@@ -851,6 +851,8 @@ def sql_steps(folder: Path) -> list[tuple[int, str, Step]]:
     steps: list[tuple[int, str, Step]] = []
     for f in sorted(folder.glob("*.sql")):
         number, _, name = f.stem.partition("_")
+        if not number.isdigit():
+            raise ValueError(f"migration file {f.name} must be named NNNN_name.sql")
         steps.append((int(number), name, _sql_step(f.read_text("utf-8"))))
     return steps
 
@@ -863,6 +865,8 @@ def _sql_step(script: str) -> Step:
             if sqlite3.complete_statement(statement):
                 c.execute(statement)
                 statement = ""
+        if statement.strip():
+            raise ValueError(f"the last statement has no terminating semicolon: {statement.strip()[:60]!r}")
     return step
 
 

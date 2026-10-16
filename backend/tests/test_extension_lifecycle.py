@@ -197,7 +197,7 @@ def test_manifest_settings_and_data_are_validated() -> None:
     assert m.settings["token"] == {"type": "secret"} and m.data["tables"] == ["demo_t"]
     for bad in ({"settings": {"x": {"type": "object"}}}, {"settings": {"x": "string"}}, {"settings": {"a.b": {"type": "string"}}},
                 {"settings": {"x": {"type": "string", "default": "y"}}}, {"data": {"tables": ["Bad Name"]}},
-                {"data": {"migrations": 3}}):
+                {"data": {"migrations": 3}}, {"data": {"migrations": "../x"}}, {"data": {"migrations": "/etc"}}):
         with pytest.raises(ManifestError):
             manifest(**bad)
 
@@ -278,6 +278,23 @@ def test_settings_changed_lists_the_changed_keys_and_never_a_secret_value(demo_e
         assert demo_extension == []
 
 
+def test_settings_changed_lists_each_key_once_and_reports_a_permissions_change(demo_extension: list) -> None:
+    with client() as c:
+        c.put("/settings", json={"braveApiKey": "k-one"})
+        wait_for(lambda: demo_extension)
+        (_, payload), = demo_extension
+        assert payload["keys"] == ["braveApiKey"]
+        demo_extension.clear()
+        mode = c.get("/settings").json()["permissionMode"]
+        other = "manual" if mode != "manual" else "auto"
+        c.put("/settings", json={"permissionMode": other})
+        wait_for(lambda: demo_extension)
+        (_, payload), = demo_extension
+        assert payload["keys"] == ["permissions"]
+        c.put("/settings", json={"permissionMode": mode})
+        appmod.db.secrets.delete("braveApiKey")
+
+
 def test_hiding_a_module_view_fires_ext_changed() -> None:
     mod = next(m for m in appmod.modules if m.view)
     seen: list[Any] = []
@@ -305,6 +322,7 @@ def test_chat_and_project_routes_fire_their_events(demo_extension: list) -> None
         c.delete(f"/conversations/{cid}")
         c.delete(f"/conversations/{cid}")  # already gone: no second event
         c.delete(f"/projects/{pid}")
+        c.delete("/projects/no-such-project")  # never existed: no event
         wait_for(lambda: len(demo_extension) >= 4)
         time.sleep(0.1)
     assert sorted(demo_extension, key=lambda e: e[0]) == sorted([
@@ -375,6 +393,20 @@ def test_sql_files_become_numbered_steps_run_statement_by_statement(tmp_path: Pa
     conn = Database(tmp_path / "data").connect()
     migrations.run_extension(conn, "demo", steps)
     assert [r[0] for r in conn.execute("SELECT x FROM demo_t ORDER BY rowid")] == ["a;b", "c"]
+    conn.close()
+
+
+def test_a_malformed_sql_migration_is_refused(tmp_path: Path) -> None:
+    folder = tmp_path / "migrations"
+    folder.mkdir()
+    (folder / "0001_init.sql").write_text("CREATE TABLE demo_t(x);\nINSERT INTO demo_t VALUES (1)")
+    conn = Database(tmp_path / "data").connect()
+    with pytest.raises(RuntimeError, match="no terminating semicolon"):
+        migrations.run_extension(conn, "demo", migrations.sql_steps(folder))
+    assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'demo_t'").fetchone() is None  # rolled back, not recorded
+    (folder / "readme.sql").write_text("SELECT 1;")
+    with pytest.raises(ValueError, match="NNNN_name.sql"):
+        migrations.sql_steps(folder)
     conn.close()
 
 

@@ -142,7 +142,9 @@ def _settings(raw: dict[str, Any]) -> dict[str, Any]:
 def _data(raw: dict[str, Any]) -> dict[str, Any]:
     data = _object(raw, "data", {"tables", "migrations"})
     _check(all(_TABLE.fullmatch(t) for t in _strings(data, "tables", ())), "data.tables must be table names")
-    _check(isinstance(data.get("migrations", ""), str), "data.migrations must be a folder name")
+    folder = data.get("migrations", "")
+    _check(isinstance(folder, str) and not Path(folder).is_absolute() and ".." not in Path(folder).parts,
+           "data.migrations must be a folder inside the extension")
     return data
 
 

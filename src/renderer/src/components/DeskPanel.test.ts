@@ -21,18 +21,21 @@ const render = (desk?: FullDesk): string => {
 
 const btn = (html: string, key: string): string | undefined => html.match(new RegExp(`<button[^>]*data-testid="desk-tab-${key}"[^>]*>`))?.[0]
 
-test('a live worker and a checklist add no Checklist or Workers tab, and Context is the active tab', () => {
+test('a live worker and a checklist add no Checklist or Workers tab, and Context is the expanded card', () => {
   const html = render()
   assert.equal(btn(html, 'checklist'), undefined)
   assert.equal(btn(html, 'workers'), undefined)
-  assert.match(btn(html, 'context') ?? '', /class="active"/)
+  assert.match(btn(html, 'context') ?? '', /aria-expanded="true"/)
   assert.ok(btn(html, 'context'))
-  assert.ok(btn(html, 'changes'))
+  assert.equal(btn(html, 'changes'), undefined) // no files, no desk runs: nothing to show
+  assert.equal(btn(html, 'review'), undefined)
 })
 
 test('a desk with a started plan shows Review but still no Checklist tab', () => {
-  const desk = { id: 'd1', status: 'running', plan: { status: 'approved' }, outputs: [] } as unknown as FullDesk
+  const desk = { id: 'd1', status: 'running', plan: { status: 'approved', steps: [] }, outputs: [{ id: 'o1' }], runs: [{ run_id: 'r1' }] } as unknown as FullDesk
   const html = render(desk)
+  assert.ok(btn(html, 'changes'))
+  assert.equal(btn(render({ ...desk, outputs: [], runs: [] } as unknown as FullDesk), 'review'), undefined)
   assert.equal(btn(html, 'checklist'), undefined)
   assert.equal(btn(html, 'workers'), undefined)
   assert.ok(btn(html, 'review'))

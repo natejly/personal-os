@@ -38,10 +38,15 @@ export const chatRow = (page, title) => page.locator('.sidebar .convo-item', { h
 export const openChat = async (page, title) => { await chatRow(page, title).click() }
 export const strip = (page) => page.locator('.desk-strip')
 export const panel = (page) => page.locator('.desk-panel')
+/** Expand a workspace card (a click on an open card would collapse it). */
+export const expandCard = async (page, key) => {
+  const head = page.getByTestId(`desk-tab-${key}`)
+  if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click()
+}
 /** The chat's side panel (the header button opens it, desk or not), on `tab` (Files, Changes or Review). */
 export async function openPanel(page, tab) {
   if (!(await panel(page).count())) await page.getByRole('button', { name: 'Workspace panel', exact: true }).click()
-  if (tab) await panel(page).locator('.desk-tabs').getByRole('button', { name: new RegExp('^' + tab) }).click()
+  if (tab) await expandCard(page, tab.toLowerCase())
 }
 /** Turn autonomy on for an existing chat over the API (the composer has no per-chat switch): `level` is plan, ask or propose. */
 export async function turnOn(grain, chatId, level = 'propose') {

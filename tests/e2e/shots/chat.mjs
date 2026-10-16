@@ -114,11 +114,11 @@ if (want('desk')) await session(async (g) => {
   await attempt('chat-desk-panel', async () => {
     if (!(await page.locator('.desk-panel').count())) await page.locator('.desk-strip').getByRole('button', { name: 'Files, changes and review' }).click()
     await sleep(600)
-    const tabs = page.locator('.desk-panel .desk-tabs button:not(.icon-btn)')
+    const tabs = page.locator('.desk-panel .desk-card-head')
     const n = await tabs.count()
     for (let i = 0; i < n; i++) {
       const label = (await tabs.nth(i).innerText()).trim().split(/\s+/)[0]
-      await tabs.nth(i).click(); await sleep(700)
+      if ((await tabs.nth(i).getAttribute('aria-expanded')) !== 'true') await tabs.nth(i).click(); await sleep(700)
       await snap(g, `chat-desk-panel-${label.toLowerCase()}`)
     }
   })

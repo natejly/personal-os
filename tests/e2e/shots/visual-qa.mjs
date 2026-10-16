@@ -120,7 +120,7 @@ async function surfaces(g) {
       await page.getByRole('button', { name: 'Workspace panel' }).click(); await sleep(800); await shot(g, '07-sidepanel')
       for (const n of ['Context', 'Files', 'Changes', 'Checklist', 'Workers', 'Review']) {
         const t = page.locator('.desk-panel, [aria-label="Workspace panel"]').getByText(n, { exact: true }).first()
-        if (await t.count()) { await t.click({ timeout: 2000 }).catch(() => {}); await sleep(500); await shot(g, '08-sidepanel-' + n.toLowerCase()) }
+        if (await t.count()) { if ((await t.locator('xpath=ancestor-or-self::button').first().getAttribute('aria-expanded').catch(() => null)) !== 'true') await t.click({ timeout: 2000 }).catch(() => {}); await sleep(500); await shot(g, '08-sidepanel-' + n.toLowerCase()) }
       }
       await page.keyboard.press('Escape')
     })

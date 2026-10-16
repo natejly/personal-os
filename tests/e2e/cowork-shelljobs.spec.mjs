@@ -17,8 +17,9 @@ test('a chat working autonomously starts a background command; Running lists it 
 
   // the Running section lives in the context panel of the chat view
   await openChat(page, 'Jobber') // a draft chat has no id, so its side panel is disabled
-  await page.getByRole('button', { name: 'Workspace panel', exact: true }).click() // Context is a tab of the side panel
-  await page.getByTestId('desk-tab-context').click()
+  await page.getByRole('button', { name: 'Workspace panel', exact: true }).click() // Context is a card of the side panel
+  const head = page.getByTestId('desk-tab-context')
+  if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click()
   const running = page.locator('.ctx-section', { hasText: 'Running' })
   await expect(running).toContainText('sleep 300', { timeout: 30_000 })
   await running.getByRole('button', { name: /echo job-started/ }).click()

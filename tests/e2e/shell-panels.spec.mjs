@@ -96,30 +96,21 @@ test('page agent: width resizes with the handle and persists; hints send on clic
   expect(grain.consoleErrors).toEqual([])
 })
 
-test('workspace panel (Context tab) opens, closes and resizes in a chat; width persists', async ({ grain }) => {
+test('workspace panel (Context card) opens and closes in a chat as floating cards', async ({ grain }) => {
   const { page } = grain
   await page.locator('.sidebar .new-chat').click()
   const drawer = page.locator('aside.desk-panel')
   await menu(grain, 'Toggle Context Panel')
   await expect(drawer).toBeVisible()
-  const w = () => drawer.evaluate((e) => Math.round(e.getBoundingClientRect().width))
-  await expect.poll(w).toBe(460)
-  const h = page.getByRole('separator', { name: 'Workspace panel width' })
-  await h.focus()
-  await page.keyboard.press('Shift+ArrowLeft')
-  await expect.poll(w).toBe(460 + 64)
-  // Grows until the cap (900, or what the chat beside it must keep), then stops.
-  for (let i = 0; i < 20; i++) await page.keyboard.press('Shift+ArrowLeft')
-  const widest = await w()
-  expect(widest).toBeGreaterThan(524)
-  expect(widest).toBeLessThanOrEqual(900)
-  for (let i = 0; i < 30; i++) await page.keyboard.press('Shift+ArrowRight')
-  await expect.poll(w).toBe(320)
-  await page.getByRole('button', { name: 'Close the workspace panel' }).click()
+  await expect(page.getByTestId('desk-tab-context')).toHaveAttribute('aria-expanded', 'true')
+  // floats over the chat: fixed width cap, no reflow of the transcript
+  expect(await drawer.evaluate((e) => Math.round(e.getBoundingClientRect().width))).toBeLessThanOrEqual(420)
+  await page.getByTestId('desk-tab-context').click()
+  await expect(page.getByTestId('desk-tab-context')).toHaveAttribute('aria-expanded', 'false')
+  await page.getByRole('button', { name: 'Close workspace' }).click()
   await expect(drawer).toHaveCount(0)
   await menu(grain, 'Toggle Context Panel')
   await expect(drawer).toBeVisible()
-  expect(await page.evaluate(() => localStorage.getItem('grain.pane.desk-panel-w'))).toBe('320')
   await menu(grain, 'Toggle Context Panel')
   await expect(drawer).toHaveCount(0)
   expect(grain.consoleErrors).toEqual([])
@@ -250,4 +241,23 @@ test('pop-out: a space widget pops out to its own window and returns', async ({ 
   await menu(grain, 'Return to Canvas')
   await expect.poll(() => app.windows().length, { timeout: 15_000 }).toBe(1)
   expect(grain.consoleErrors).toEqual([])
+})
+
+test('⌘I panel stays open when you switch its tabs or change view', async ({ grain }) => {
+  const { page } = grain
+  // chat: ⌘I opens the side panel on Context; picking another tab must not close it
+  const box = page.getByRole('textbox', { name: 'Message' })
+  await box.fill('!!reply hello')
+  await box.press('Enter')
+  await expect(page.locator('.msg.assistant').last()).toContainText('hello')
+  await menu(grain, 'Page Agent')
+  await expect(page.getByRole('complementary', { name: 'Workspace' })).toBeVisible()
+  await page.getByTestId('desk-tab-files').click()
+  await expect(page.getByRole('complementary', { name: 'Workspace' })).toBeVisible()
+  // elsewhere: the quick-chat panel survives a view switch
+  await navItem(page, 'Lists').click()
+  await menu(grain, 'Page Agent')
+  await expect(panel(page)).toBeVisible()
+  await navItem(page, 'Files').click()
+  await expect(panel(page)).toBeVisible()
 })

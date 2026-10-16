@@ -41,7 +41,7 @@ test('820x520: a waiting plan, the review panel and a tool-mode card keep their 
   const accept = panel(page).getByRole('button', { name: /Accept selected/ })
   expect(await inWindow(page, accept)).toBe(true)
   expect(await noHScroll(page)).toBe(true)
-  await panel(page).getByRole('button', { name: 'Close the workspace panel' }).click()  // it stays open across chats and would squeeze the next one
+  await panel(page).getByRole('button', { name: 'Close workspace' }).click()  // it stays open across chats and would squeeze the next one
   // ask desk: an autonomous desk follows the permission mode, so its card comes from the written tool's own mode ('ask')
   await grain.api('/settings', { method: 'PUT', body: { ...settingsFor, permissionMode: 'manual', tools: { desk_write_file: 'ask' } } })
   llm.queue.length = 0

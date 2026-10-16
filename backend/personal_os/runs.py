@@ -996,10 +996,7 @@ class RunBus:
             plain = isinstance(e, (KeyError, AttributeError, TypeError, IndexError, AssertionError)) or not str(e).strip()
             run.publish("error", {"message": "Something went wrong while running this reply. Try again." if plain else str(e)})
         finally:
-            try:
-                await self.hooks.emit("run.after", run)
-            except BaseException:  # noqa: BLE001 - a hook must not stop the run from closing
-                log.debug("run.after failed for run %s", run.run_id, exc_info=True)
+            await self.hooks.emit("run.after", run)
             run.end(status)
             self._retired.discard(run)
             self.changed(run)

@@ -106,9 +106,15 @@ class HookBus:
         if hook not in HOOKS:
             raise ValueError(f"unknown hook {hook!r}")
 
+    @staticmethod
+    def _timeout(sub: Subscription, kind: str) -> float | None:
+        """Core handlers were never time-limited; only an explicit budget bounds one."""
+        if sub.timeout_s is not None:
+            return sub.timeout_s
+        return None if sub.owner == "core" else TIMEOUT_S[kind]
+
     async def _invoke(self, sub: Subscription, arg: Any, kind: str) -> Any:
-        timeout = TIMEOUT_S[kind] if sub.timeout_s is None else sub.timeout_s
-        return await asyncio.wait_for(sub.call(arg), timeout)
+        return await asyncio.wait_for(sub.call(arg), self._timeout(sub, kind))
 
     async def _try(self, sub: Subscription, arg: Any, kind: str) -> tuple[bool, Any]:
         try:
@@ -122,13 +128,17 @@ class HookBus:
         self._known(hook)
         return hook in self._subs
 
-    async def emit(self, hook: str, payload: Any = None, *, owner: str | None = None) -> None:
-        """`owner` limits the call to one extension's handlers, for the hooks the host fires one extension at a time."""
+    async def emit(self, hook: str, payload: Any = None, *, owner: str | None = None,
+                   public: Callable[[Any], Any] | None = None) -> None:
+        """`owner` limits the call to one extension's handlers, for the hooks the host fires one extension at a time.
+        `public` builds what every handler but a core one receives in place of `payload`, once and only if there is one."""
         self._known(hook)
         subs = self._subs.get(hook)
         if not subs:
             return
-        await asyncio.gather(*(self._emit_one(s, payload) for s in subs if not s.muted and owner in (None, s.owner)))
+        targets = [s for s in subs if not s.muted and owner in (None, s.owner)]
+        shown = public(payload) if public is not None and any(s.owner != "core" for s in targets) else payload
+        await asyncio.gather(*(self._emit_one(s, payload if s.owner == "core" else shown) for s in targets))
 
     async def _emit_one(self, sub: Subscription, payload: Any) -> None:
         ok, _ = await self._try(sub, payload, "emit")
@@ -137,7 +147,7 @@ class HookBus:
     @staticmethod
     def _settle(sub: Subscription, ok: bool) -> None:
         sub.failures = 0 if ok else sub.failures + 1
-        if sub.failures >= MUTE_AFTER:
+        if sub.failures >= MUTE_AFTER and sub.owner != "core":  # built-in work is retried every time, never switched off
             sub.muted = True
             log.error("hook %s from %s muted after %d consecutive failures", sub.hook, sub.owner, sub.failures)
 
@@ -178,7 +188,7 @@ class HookBus:
 
     async def _finish_async(self, sub: Subscription, awaitable: Any) -> None:
         try:
-            await asyncio.wait_for(awaitable, TIMEOUT_S["emit"] if sub.timeout_s is None else sub.timeout_s)
+            await asyncio.wait_for(awaitable, self._timeout(sub, "emit"))
             ok = True
         except Exception:  # noqa: BLE001
             log.warning("hook %s from %s failed", sub.hook, sub.owner, exc_info=True)
@@ -215,14 +225,18 @@ class HookBus:
         Deny, which stops the chain and is returned as it is."""
         self._known(hook)
         for sub in self._subs.get(hook, ()):
+            if sub.muted:
+                continue
             ok, out = self._call_inline(sub, value)
             if ok and inspect.isawaitable(out):
                 if inspect.iscoroutine(out):
                     out.close()
                 log.warning("hook %s from %s is async and cannot transform a value from synchronous code; skipped", hook, sub.owner)
-            elif isinstance(out, Deny):
+                ok = False
+            self._settle(sub, ok)
+            if isinstance(out, Deny):
                 return out
-            elif ok and out is not None:
+            if ok and out is not None:
                 value = out
         return value
 

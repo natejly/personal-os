@@ -121,6 +121,61 @@ def test_pipe_sync_chains_returns_deny_as_is_and_skips_async_handlers() -> None:
     assert bus.pipe_sync("memory.before_write", {"n": 0}) == Deny("no")
 
 
+def test_a_core_handler_is_never_muted_and_has_no_default_timeout() -> None:
+    bus, calls = HookBus(), []
+
+    def bad(p: Any) -> None:
+        calls.append(p)
+        raise RuntimeError("boom")
+    sub(bus, "memory.written", bad, owner="core")
+    sub(bus, "memory.before_write", bad, owner="core")
+
+    async def slow(p: Any) -> None:
+        await asyncio.sleep(0.05)
+        calls.append("slow")
+    sub(bus, "turn.settled", slow, owner="core")
+
+    async def go() -> None:
+        await bus.emit("turn.settled", 1)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setitem(hooks_mod.TIMEOUT_S, "emit", 0.001)
+        asyncio.run(go())
+    for _ in range(hooks_mod.MUTE_AFTER + 2):
+        bus.emit_sync("memory.written", "p")
+        bus.pipe_sync("memory.before_write", "v")
+    assert calls.count("p") == hooks_mod.MUTE_AFTER + 2 and calls.count("v") == hooks_mod.MUTE_AFTER + 2 and "slow" in calls
+
+
+def test_pipe_sync_mutes_a_handler_that_keeps_failing() -> None:
+    bus, calls = HookBus(), []
+
+    def bad(v: Any) -> None:
+        calls.append(v)
+        raise RuntimeError("boom")
+    sub(bus, "memory.before_write", bad)
+    for _ in range(hooks_mod.MUTE_AFTER + 2):
+        assert bus.pipe_sync("memory.before_write", "v") == "v"
+    assert len(calls) == hooks_mod.MUTE_AFTER
+
+
+def test_emit_sync_times_out_an_async_handler_and_counts_it_as_a_failure() -> None:
+    bus, started = HookBus(), []
+
+    async def hang(p: Any) -> None:
+        started.append(p)
+        await asyncio.sleep(5)
+
+    async def go() -> None:
+        bus.loop = asyncio.get_running_loop()
+        for _ in range(hooks_mod.MUTE_AFTER + 1):
+            bus.emit_sync("subagent.start", "x")
+            await asyncio.sleep(0.05)
+    handle = sub(bus, "subagent.start", hang, timeout_ms=10)
+    asyncio.run(go())
+    assert len(started) == hooks_mod.MUTE_AFTER and bus._subs["subagent.start"][0].muted
+    handle.dispose()
+
+
 # ---- turn.settled and reply.complete through a real chat turn ----
 async def _fake(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], tools: Any = None, **kw: Any) -> Any:
     yield {"type": "delta", "text": "ok then"}
@@ -195,6 +250,37 @@ def test_a_subscriber_receives_the_settled_record_and_can_be_disposed(monkeypatc
     handle.dispose()
     turn(monkeypatch)
     assert len(got) == 1
+
+
+def test_an_extension_subscriber_gets_a_scrubbed_copy_not_the_live_record(monkeypatch: Any) -> None:
+    spy = Spy(monkeypatch)
+    got: list[Any] = []
+    def tamper(s: Any) -> None:
+        got.append(s)
+        s.cfg["autoTitle"] = False
+
+    handle = sub(appmod.host.bus, "turn.settled", tamper)
+    try:
+        turn(monkeypatch, apiKey="sk-live-secret-key", githubToken="gh-secret")
+    finally:
+        handle.dispose()
+    (s,) = got
+    assert not hasattr(s, "tracer") and not hasattr(s, "publish")
+    assert "sk-live-secret-key" not in repr(s.cfg) and "gh-secret" not in repr(s.cfg)
+    assert len(spy.titles) == 1, "the handler's change to its copy of the settings did not reach the built-in title subscriber"
+
+
+def test_without_a_run_the_style_events_are_not_published_but_the_trace_is_stored(monkeypatch: Any) -> None:
+    Spy(monkeypatch)
+    appmod.db.set_settings({"autoLearn": True, "learnStyle": True, "baseUrl": "http://127.0.0.1:9/v1", "provider": "custom"})
+    monkeypatch.setattr(llm, "stream_chat", _fake)
+    cid = appmod.convos.create(None, "New chat", "test-model")["id"]
+
+    async def go() -> list[tuple[str, Any]]:
+        return [ev async for ev in appmod._chat_stream(cid, appmod.ChatIn(content=PROSE), asyncio.Event(), None)]
+    events = asyncio.run(go())
+    assert not any(e == "span" and d["span"]["kind"] == "style" for e, d in events) and not any(e == "style_learned" for e, _ in events)
+    assert any(sp["kind"] == "style" for sp in appmod.convos.get(cid)["messages"][-1]["trace"])
 
 
 def test_a_failing_subscriber_does_not_stop_the_others(monkeypatch: Any) -> None:
@@ -415,9 +501,14 @@ def test_a_handler_cannot_change_an_approval(tmp_path: Path) -> None:
 
 
 # ---- job.fired / job.done ----
-def test_a_fired_job_reports_kind_and_trigger_and_done_reports_the_outcome(monkeypatch: Any) -> None:
+async def _broken(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], tools: Any = None, **kw: Any) -> Any:
+    raise RuntimeError("model down")
+    yield  # pragma: no cover - makes this an async generator
+
+
+def fire_job(monkeypatch: Any, stream: Any) -> tuple[list[tuple[str, Any]], dict[str, Any], str | None]:
     appmod.db.set_settings({"autoLearn": False, "baseUrl": ""})
-    monkeypatch.setattr(llm, "stream_chat", _fake)
+    monkeypatch.setattr(llm, "stream_chat", stream)
     log: list[tuple[str, Any]] = []
     handles = [sub(appmod.host.bus, "job.fired", lambda p: log.append(("fired", p))),
                sub(appmod.host.bus, "job.done", lambda p: log.append(("done", p)))]
@@ -440,8 +531,19 @@ def test_a_fired_job_reports_kind_and_trigger_and_done_reports_the_outcome(monke
     finally:
         for h in handles:
             h.dispose()
+    return log, job, run_id
+
+
+def test_a_fired_job_reports_kind_and_trigger_and_done_reports_the_outcome(monkeypatch: Any) -> None:
+    log, job, run_id = fire_job(monkeypatch, _fake)
     assert log[0] == ("fired", {"job_id": job["id"], "kind": job["kind"], "trigger": "clock"})
     assert log[1] == ("done", {"job_id": job["id"], "run_id": run_id, "outcome": "done"})
+
+
+def test_a_job_that_fails_reports_fired_first_and_done_with_its_outcome(monkeypatch: Any) -> None:
+    log, job, run_id = fire_job(monkeypatch, _broken)
+    assert [name for name, _ in log] == ["fired", "done"]
+    assert log[1][1]["run_id"] == run_id and log[1][1]["outcome"] != "done"
 
 
 def test_a_manual_or_triggered_fire_names_its_trigger() -> None:

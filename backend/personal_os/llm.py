@@ -94,6 +94,7 @@ def _emit_request(model: str, messages: list[dict[str, Any]], tools: list[dict[s
                                         "tool_names": [n for t in tools or [] if (n := (t.get("function") or {}).get("name"))],
                                         "tokens_est": _prompt_chars(messages, tools) // 4})
 
+
 DEFAULT_SETTINGS: dict[str, Any] = {
     # Empty until onboarding (or an upgrade from a stored baseUrl). Nothing here is a model alias that only
     # one provider knows: an unsaved defaultModel is filled per provider (providers.default_model, in app.settings()).

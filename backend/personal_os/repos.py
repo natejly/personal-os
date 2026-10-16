@@ -794,7 +794,7 @@ class Memories:
         return chain
 
     def update(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
-        if patch.get("content") is not None and str(patch["content"]).strip():
+        if self.hooks.active("memory.before_write") and patch.get("content") is not None and str(patch["content"]).strip():
             cur = self.get(id) or {}
             patch = {**patch, "content": self._vet(cur.get("project_id"), patch["content"].strip(),
                                                    patch.get("kind") or cur.get("kind") or "fact", cur.get("source") or "user")}
@@ -818,7 +818,7 @@ class Memories:
         return updated
 
     def delete(self, id: str) -> None:
-        gone = self.get(id)
+        gone = self.get(id) if self.hooks.active("memory.deleted") else None
         with self.db.tx() as c:
             c.execute("DELETE FROM memories WHERE id=?", (id,))
             c.execute("DELETE FROM memories_fts WHERE memory_id=?", (id,))

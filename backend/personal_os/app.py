@@ -4136,7 +4136,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         user_text=user_text, run_user_texts=run_user_texts, reply=text, error=error, stopped=stop.is_set(), gone=gone,
         internal=internal, in_side=in_side, proposal_only=proposal_only(run), desk_id=desk_id, tainted=bool(tool_ctx["tainted"]),
         tool_events=tool_events, used=used, placeholder_title=placeholder_title, tracer=tracer,
-        publish=run.publish if run is not None else lambda event, data: None))
+        publish=run.publish if run is not None else lambda event, data: None),
+        public=lambda s: settled.view_of(s, public_settings))
 
 
 async def _run_chat(run: Run, body: ChatIn) -> None:
@@ -5834,11 +5835,11 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     body = ChatIn(content=prompt)
     run = bus.start(conv["id"], lambda r: _run_job(r, body), input={**fire, "conversation_id": conv["id"]}, kind="job")
     log.info("job %s fired for %s as run %s", job["name"], _stamp(fire["due_at"]), run.run_id)
+    await _job_fired(job, fire)  # before the done callback, so job.done never overtakes job.fired
     # Runs after _drive has ended the run, so the row the renderer then asks about is final. Ids only: the
     # app topic is a doorbell, and what to notify about is decided from rows by GET /inbox/notify.
     if run.task is not None:
         run.task.add_done_callback(lambda _t, rid=run.run_id, jid=job["id"]: _job_finished(rid, jid))
-    await _job_fired(job, fire)
     return run.run_id
 
 

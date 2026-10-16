@@ -6,10 +6,11 @@ stays busy (a second message is a 409) until they return, and anything slow goes
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import copy
+from dataclasses import dataclass, fields
 from typing import Any, Callable
 
-from . import learn, titles
+from . import learn, redact, titles
 from .extensions.hooks import HookBus
 from .learn import LearnJob
 from .style import learn_style_from_exchange, looks_like_prose
@@ -17,7 +18,8 @@ from .trace import Tracer
 
 
 @dataclass
-class Settled:
+class SettledView:
+    """What an extension subscriber receives: copies with secrets out of the settings and the reply scrubbed."""
     conversation_id: str
     message_id: str  # the reply's row
     user_message_id: str | None
@@ -38,8 +40,18 @@ class Settled:
     tool_events: list[dict[str, Any]]
     used: dict[str, Any]  # what went into the context, for the skills the reply followed
     placeholder_title: str | None  # the instant title this turn wrote, to be replaced by a model title
+
+
+@dataclass
+class Settled(SettledView):
+    """The built-in subscribers' record: the live objects they extend and the full settings."""
     tracer: Tracer
     publish: Callable[[str, Any], None]  # the run's event stream
+
+
+def view_of(s: Settled, public_cfg: Callable[[], dict[str, Any]]) -> SettledView:
+    shared = {f.name: copy.deepcopy(getattr(s, f.name)) for f in fields(SettledView) if f.name not in ("cfg", "reply")}
+    return SettledView(cfg=public_cfg(), reply=redact.scrub_command_output(s.reply), **shared)
 
 
 def register(bus: HookBus, *, style: Any, relearn: Callable[[str | None, str], None], learner: Any, skills: Any,
@@ -50,8 +62,8 @@ def register(bus: HookBus, *, style: Any, relearn: Callable[[str | None, str], N
         # goes to the learn worker. The prose check runs before the span, so an ordinary short instruction leaves no
         # trace of a step that did nothing. A tainted chat may still bank the user's own prose: looks_like_prose
         # already rejects pastes and quotes.
-        if not (not s.error and not s.gone and not s.internal and not s.in_side and s.cfg.get("learnStyle", True)
-                and s.conv["settings"].get("autoLearn", True) and looks_like_prose(s.user_text)):
+        if (s.error or s.gone or s.internal or s.in_side or not s.cfg.get("learnStyle", True)
+                or not s.conv["settings"].get("autoLearn", True) or not looks_like_prose(s.user_text)):
             return
         span = s.tracer.start("style", "Learn writing style")
         s.publish("span", {"message_id": s.message_id, "span": span})
@@ -74,10 +86,10 @@ def register(bus: HookBus, *, style: Any, relearn: Callable[[str | None, str], N
         # run never writes to long-term memory: what it found belongs in its report and the inbox. A tainted reply has
         # read someone else's text, so only the user's own words this run are mined (the reply, its tool calls and the
         # procedures it followed could plant that text in later chats).
-        if not (not s.error and s.reply and not s.gone and not s.proposal_only and not s.internal and not s.in_side
-                and (not s.tainted or any(t.strip() for t in s.run_user_texts))  # an attachment-only message has no words to mine
-                and s.cfg.get("autoLearn", True) and s.conv["settings"].get("autoLearn", True)
-                and s.conv["settings"].get("useMemory", True)):  # memory off: nothing written for other chats to read
+        if (s.error or not s.reply or s.gone or s.proposal_only or s.internal or s.in_side
+                or (s.tainted and not any(t.strip() for t in s.run_user_texts))  # an attachment-only message has no words to mine
+                or not s.cfg.get("autoLearn", True) or not s.conv["settings"].get("autoLearn", True)
+                or not s.conv["settings"].get("useMemory", True)):  # memory off: nothing written for other chats to read
             return
         user_only = s.tainted
         learner.submit(LearnJob(
@@ -115,5 +127,7 @@ def register(bus: HookBus, *, style: Any, relearn: Callable[[str | None, str], N
 
     # Style first: auto-learn copies the trace, which then has to hold the style span. Handlers that never suspend
     # finish in the order they were subscribed.
-    for fn in (learn_style, auto_learn, follow_ups, title):
-        bus.subscribe("turn.settled", fn, owner="core", order=0)
+    bus.subscribe("turn.settled", learn_style, owner="core", order=0)
+    bus.subscribe("turn.settled", auto_learn, owner="core", order=0)
+    bus.subscribe("turn.settled", follow_ups, owner="core", order=0)
+    bus.subscribe("turn.settled", title, owner="core", order=0)

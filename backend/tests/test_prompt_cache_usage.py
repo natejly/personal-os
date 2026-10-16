@@ -68,7 +68,7 @@ z = llm.parse_usage({"prompt_tokens": 5, "completion_tokens": 1})
 check(z["cached_tokens"] == 0 and z["cache_write_tokens"] == 0 and z["reasoning_tokens"] == 0, "absent -> zeros")
 check(llm.parse_usage(None)["cached_tokens"] == 0, "None -> zeros")
 seen: list[dict[str, Any]] = []
-llm.on_usage(seen.append)
+llm.bus.subscribe("model.response", seen.append, owner="test", order=0)
 llm._emit_usage("m", "chat", o, 5, 0, 0)
 check(seen[-1]["cached_tokens"] == 800 and seen[-1]["reasoning_tokens"] == 300, "emit carries buckets")
 llm._emit_usage("m", "chat", None, 5, 40, 8)

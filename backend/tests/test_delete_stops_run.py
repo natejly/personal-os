@@ -20,7 +20,7 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import app as appmod  # noqa: E402
-from personal_os import llm  # noqa: E402
+from personal_os import llm, settled  # noqa: E402
 
 client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
 store = appmod.run_store
@@ -45,7 +45,7 @@ async def _scripted(settings: dict[str, Any], model: str, messages: list[dict[st
 
 @pytest.fixture(scope="module", autouse=True)
 def _portal():  # type: ignore[no-untyped-def]
-    real, real_submit, real_style = llm.stream_chat, appmod.learner.submit, appmod.learn_style_from_exchange
+    real, real_submit, real_style = llm.stream_chat, appmod.learner.submit, settled.learn_style_from_exchange
     llm.stream_chat = _scripted
     appmod.learner.submit = lambda job: SUBMITTED.append(job)  # type: ignore[method-assign]
 
@@ -53,11 +53,11 @@ def _portal():  # type: ignore[no-untyped-def]
         STYLED.append(1)
         return None
 
-    appmod.learn_style_from_exchange = _style  # type: ignore[assignment]
+    settled.learn_style_from_exchange = _style  # type: ignore[assignment]
     with client:
         client.put("/settings", json={"autoLearn": True, "learnStyle": True, "baseUrl": ""})
         yield
-    llm.stream_chat, appmod.learner.submit, appmod.learn_style_from_exchange = real, real_submit, real_style
+    llm.stream_chat, appmod.learner.submit, settled.learn_style_from_exchange = real, real_submit, real_style
 
 
 @pytest.fixture(autouse=True)

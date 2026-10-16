@@ -331,6 +331,8 @@ The fail-open default on gating hooks elsewhere is a documented pitfall (section
 
 **Loop guards.** A tool call made by a hook handler carries `via_hook` depth; depth above 2 is refused, and a handler cannot re-trigger its own hook. Any "request another turn" return is capped at one per turn.
 
+**Synchronous call sites.** Repositories and the model layer are not coroutines, and some of their hooks must have run before the call returns (`model.response` writes the usage row, `memory.before_write` can refuse a write). They fire through `emit_sync` / `pipe_sync`: a sync handler runs inline on the calling thread, in order, with no timeout, so it must be quick; an async handler is started on the event loop and not waited for (`pipe_sync` skips it). Failure counting and muting are the same as `emit`. Used by `model.request/response`, `memory.*`, `approval.*` and `subagent.*`.
+
 **`U` marker.** A hook marked `U` depends on the tool-path seam. The seam is a new function `dispatch_tool(ctx, name, args)` that wraps `Toolbox.call` and `_mcp_call`/`_exec_mcp` and is called by all three loops. It is not the full unification of the three loops (shared gate chain and approval wait), which is a larger refactor listed in section 10.
 
 ### 5.1 App and session
@@ -370,9 +372,9 @@ The fail-open default on gating hooks elsewhere is a documented pitfall (section
 
 | Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
 |---|---|---|---|---|---|
-| `model.select` | after the router (`app.py:2018`) | `{model, effort, reason, tier}` | `pipe` `(model, effort)` | one winner chain; unknown model ids rejected; cost guard and alternative routers use this | before_model_resolve (OpenClaw), PreModelSwitch (Claude Code), virtual models (pi) |
-| `model.request` | `_stream_round` before `llm.stream_chat` (`app.py:2771`, `llm.py:1196`) | `{model, message_count, tool_names, tokens_est}` (bodies need `conversation:read`) | observe; v2 may add request headers | `emit` | llm_input (OpenClaw), model_call_started |
-| `model.response` | end of round (`app.py:3185`) | `{usage, finish_reason, latency_ms, cost}` | observe | `emit`; today the sole subscriber is `llm.on_usage` (`llm.py:36`) | llm_output (OpenClaw), provider_stream_event (pi) |
+| `model.select` | `_select_model` in `_chat_stream`, after the router | `{model, effort, reason, tier}`; `reason` is the router's (empty when it did not run), `tier` is `fast` or `default` | `pipe` `(model, effort)` | one winner chain; a model whose provider is not configured is ignored, and so is anything but a `{model, effort}` dict; cost guard and alternative routers use this | before_model_resolve (OpenClaw), PreModelSwitch (Claude Code), virtual models (pi) |
+| `model.request` | `llm.stream_chat` and `llm.complete`, once per call before the first send (retries do not repeat it) | `{model, message_count, tool_names, tokens_est}` (bodies need `conversation:read`) | observe; v2 may add request headers | `emit_sync`: sync handlers run inline on the calling thread, an async one is started on the loop | llm_input (OpenClaw), model_call_started |
+| `model.response` | `llm._emit_usage`, whenever a model call (chat, helper, embedding, image, audio) records its usage | the usage record: `{model, kind, duration_ms, estimated, prompt_tokens, completion_tokens, cached_tokens, cache_write_tokens, reasoning_tokens}` plus `conversation_id`, `project_id`, `tag`, `round` when the caller set them | observe | `emit_sync`, as `model.request`; the core subscriber writes the usage row (`llm.on_usage` is gone) | llm_output (OpenClaw), provider_stream_event (pi) |
 | `text.delta` | `buf.append` / `yield "delta"` (`app.py:3165-3171`) | `{text}` | `pipe` (v2) | strict 5 ms budget; off by default | message_sending (OpenClaw), MessageDisplay (Claude Code, display only) |
 
 ### 5.5 Tool call (the unification-sensitive phase)
@@ -397,28 +399,28 @@ All `U` hooks attach at `dispatch_tool`, which wraps `Toolbox.call` (`tools.py:1
 
 | Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
 |---|---|---|---|---|---|
-| `reply.complete` | `yield "done"` (`app.py:4062`) | `{message_id, text, tool_events, usage, trace, taint, outcome}` | observe | `emit`; carries the full reply | agent_end (pi, OpenClaw), Stop (Claude Code), session.idle (OpenCode) |
-| `turn.settled` | replaces the four hard-coded blocks: style learn (`app.py:4087`), auto-learn (`4114`), follow-ups (`4129`), title (`4133`) | `LearnJob`-like record: `{conversation_id, user_text, reply, tainted, flags}` | none (jobs submit themselves) | `emit`; each subscriber declares its own gate conditions; runs after `done`, off the run | agent_settled (pi), SessionEnd |
+| `reply.complete` | after `done` is yielded, before the run's background jobs end | `{message_id, text, tool_events, usage: {tokens, cost, rounds}, trace, taint: {tainted, sources}, outcome}`, a deep copy with the text credential-scrubbed | observe | `emit`; carries the full reply; not fired for a silent wake turn | agent_end (pi, OpenClaw), Stop (Claude Code), session.idle (OpenCode) |
+| `turn.settled` | after `reply.complete`, on the same task: the four former blocks (style learn, auto-learn, follow-ups, title) are now its built-in subscribers (`settled.py`) | a `Settled` record: ids, the conversation as loaded, settings, model, user text, reply, error/stopped/gone/internal/in-side/proposal-only flags, taint, tool events, the trace and the run's `publish` | none (jobs submit themselves) | `emit`; each subscriber keeps its own gate conditions; slow work goes to a worker, so the chat is busy only as long as the handlers take. Style learning is subscribed first because auto-learn copies the trace it extends | agent_settled (pi), SessionEnd |
 | `turn.continue` | where desk chaining decides (`_should_chain`, `app.py:4288`) | `{reply, desk}` | `RequestTurn(note)` at most once | v2; loop guard mandatory | agent_before_settle `continue:true` (pi), Stop block (Claude Code) |
-| `run.after` | `RunBus.after_hooks` in `_drive` (`runs.py:979-994`; registered `app.py:606-607`) | `Run` | observe | exists today; becomes `emit` | n/a |
-| `subagent.start` / `subagent.stop` | `Subagents._start` (`subagents.py:733`), `_drive` (`909`) | `{child_id, role, parent}` | observe | `emit` | SubagentStart/Stop (Claude Code) |
+| `run.after` | `RunBus._drive`'s `finally`, before the run is closed (the after-snapshot and the child clean-up are its core subscribers) | `Run` | observe | `emit`; the snapshot subscriber has a 120 s budget (`limits.SNAPSHOT_AFTER_MS`), so a closing run still waits for its after-snapshot | n/a |
+| `subagent.start` / `subagent.stop` | `Subagents.begin` (a queued worker starts when it begins running), `Subagents._finish` | `{child_id, role, parent}` | observe | `emit_sync` | SubagentStart/Stop (Claude Code) |
 | `worker.report` | `workers_mod.build_wake` (feeds `_wake_conversation`, `app.py:4609`) | `{worker, summary}` | add note | `collect` | n/a |
 
 ### 5.7 Memory and compaction
 
 | Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
 |---|---|---|---|---|---|
-| `memory.before_write` | `Memories.create/supersede/update` (`repos.py:635/663/768`) | `{content, kind, source, project_id}` | `Deny` / `pipe` content | built-ins and `memory:gate` only. PII or sensitivity filters. Tainted chats can only save user-backed content already (`tools.py:998`). | n/a |
-| `memory.written` / `memory.deleted` | same, after commit | `{memory, source}` | observe | `emit` | n/a |
-| `compaction.before` | `compaction.prepare_history` (`app.py:2164`, `compaction.py:397`) | `{messages, window}` | may supply a summarizer (`REPL`) | one winner; failure = built-in summarizer | PreCompact (Claude Code, can block), compaction entries (pi) |
-| `compaction.after` | `Compactor.compact` end (`compaction.py:230`) | `{summary}` | observe | `emit` | PostCompact, session.compacted |
+| `memory.before_write` | `Memories.create/supersede/update`, before the write | `{content, kind, source, project_id}` | `Deny` / `pipe` content: a handler returns the payload with `content` changed, or `Deny(reason)` | `pipe_sync` (sync handlers only); a denial raises `MemoryRefused` (HTTP 403 on the memory routes); built-ins and `memory:gate` only. PII or sensitivity filters. Tainted chats can only save user-backed content already (`tools.py:998`). | n/a |
+| `memory.written` / `memory.deleted` | `Memories.create/supersede/update` after commit; `delete` and `invalidate` fire `memory.deleted` | `{memory, source}` (`memory` is a copy of the row) | observe | `emit_sync` | n/a |
+| `compaction.before` | `Compactor.compact`, before the summarizer is called | `{messages, window, summary}` | `pipe` over the payload: a handler sets `summary` to replace the built-in summarizer's text | one winner (the last to set `summary`); a failing or empty one changes nothing, so the built-in summarizer runs | PreCompact (Claude Code, can block), compaction entries (pi) |
+| `compaction.after` | `Compactor.compact`, after the summary is saved | `{summary}` | observe | `emit` | PostCompact, session.compacted |
 
 ### 5.8 Approvals
 
 | Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
 |---|---|---|---|---|---|
-| `approval.requested` | `RunStore.open_approval` (`runs.py:381`) | `{call_id, tool, args_digest, run_id}` | observe | `emit`. Used by Telegram and notifiers. Not mutable: first-decision-wins and `args_digest` binding are security invariants. | permission.asked (OpenCode) |
-| `approval.resolved` | `RunStore.decide` (`runs.py:391`) | `{call_id, decision, by}` | observe | `emit` | permission.replied |
+| `approval.requested` | `RunStore.open_approval`, when the card is newly opened | `{call_id, tool, args_digest, run_id}` | observe | `emit_sync`. Used by Telegram and notifiers. Not mutable: first-decision-wins and `args_digest` binding are security invariants. | permission.asked (OpenCode) |
+| `approval.resolved` | `RunStore.decide`, when this call won the decision | `{call_id, decision, by}` | observe | `emit_sync` | permission.replied |
 
 No hook may decide an approval. A channel extension relays the user's decision through the same `POST /approvals/{call_id}` route (`app.py:5542`), exactly as Telegram does now.
 
@@ -426,8 +428,8 @@ No hook may decide an approval. A channel extension relays the user's decision t
 
 | Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
 |---|---|---|---|---|---|
-| `job.fired` | `_launch_job` (`app.py:5804`) | `{job_id, kind, trigger}` | observe | `emit` | heartbeat (OpenClaw) |
-| `job.done` | `_job_ended` (`app.py:5856`) | `{job_id, run_id, outcome}` | observe | `emit` | n/a |
+| `job.fired` | `_launch_job` and `_launch_desk_job`, once the run (or desk) has started | `{job_id, kind, trigger}`; `trigger` is the fire's own (`dir`, `mail`, `calendar`, `clock+dir`), else `manual` or `clock` | observe | `emit` | heartbeat (OpenClaw) |
+| `job.done` | the run task's done callback (`_job_finished`), after the row is final and `job_finished` is on the app topic; desk jobs have no such callback | `{job_id, run_id, outcome}`; `outcome` is the run row's status | observe | `emit` | n/a |
 | `schedule.tick` | manifest `job(every=...)` | `{name}` | none | minimum interval 60 s, visible in dev panel | Raycast interval commands, monitors (Claude Code) |
 | trigger kinds | registration, not a hook | `TriggerAdapter.poll()` | fires `job` | replaces the closed kind set in `jobs.py` | n/a |
 

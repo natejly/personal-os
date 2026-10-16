@@ -99,6 +99,7 @@ MAX_UNZIPPED_BYTES = MAX_UPLOAD_BYTES * 5 // 2  # a docx/xlsx's declared uncompr
 FILE_SNAPSHOT_MAX_BYTES = 5_000_000  # largest file pre-image kept
 FILE_SNAPSHOT_RETAIN_DAYS = 14       # undo history age
 FILE_SNAPSHOT_BUDGET_MB = 200        # disk budget for pre-images
+SNAPSHOT_AFTER_MS = 120_000          # how long a closing run waits for its after-snapshot (run.after)
 RETAIN_USAGE_DAYS = 365              # bookkeeping age: usage rows
 RETAIN_TRACE_DAYS = 60               # bookkeeping age: traces
 RETAIN_TOOL_RESULT_DAYS = 30         # bookkeeping age: stored tool results

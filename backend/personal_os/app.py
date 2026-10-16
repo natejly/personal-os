@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import functools
 import hashlib
 import html
@@ -45,14 +46,14 @@ from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_inde
 from .consolidate import Consolidator
 from . import about_you
 from . import learn, memory_limits, provider_keys, provider_route, providers, query_expand
-from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
+from .learn import MAX_INJECTED_SKILLS, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
 from .graph_backfill import BackfillRunning, GraphBackfill
 from .graph_learn import canonical_type, normalize_predicate
 from .graph_recall import GraphRecall, subgraph as graph_subgraph
 from .memory_index import MemoryIndex
 from .retrieval import Retriever
-from .repos import ALL, Conversations, Documents, Graph, Memories, Projects, is_isolated
+from .repos import ALL, Conversations, Documents, Graph, Memories, MemoryRefused, Projects, is_isolated
 from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .recap import Recaps, generate_recap
 from . import vision
@@ -87,7 +88,7 @@ from .reliability import router as reliability_router, secret_values
 from .retention import RetentionWorker
 from . import limits, resume
 from . import permission_tool, permissions, permrules
-from . import egress
+from . import egress, settled
 from . import sandbox
 from . import shell as shell_tool
 from . import ship as ship_mod
@@ -102,7 +103,7 @@ from .attention import for_job, for_run
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, args_digest
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
-from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
+from .style import WritingStyle
 from .extensions.host import ExtensionHost
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
@@ -117,9 +118,10 @@ log = logging.getLogger("personal_os")
 
 backups.apply_pending_restore(data_dir_from_env())  # a restore staged in Settings → Data swaps in before the file is opened
 db = Database(data_dir_from_env())
+host = ExtensionHost()
 projects = Projects(db)
 convos = Conversations(db)
-memories = Memories(db)
+memories = Memories(db, host.bus)
 graph = Graph(db)
 documents = Documents(db)
 docs = Docs(db)
@@ -155,7 +157,6 @@ def _token_eq(sent: str, expected: str) -> bool:
         return False
 
 
-host = ExtensionHost()
 # `docs_url` is moved off /docs: that prefix belongs to the user's own documents (see docs.py).
 app = FastAPI(title="Grain", version="0.1.0", docs_url="/api-docs", redoc_url=None, lifespan=host.lifespan,
               swagger_ui_oauth2_redirect_url=None)  # its default sits under /docs too
@@ -191,6 +192,11 @@ async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  #
     return JSONResponse({"detail": detail}, status_code=409)
 
 
+@app.exception_handler(MemoryRefused)
+async def _memory_refused(request: Request, exc: Exception) -> JSONResponse:  # type: ignore[override]
+    return JSONResponse({"detail": f"An extension refused to save this memory ({exc})."}, status_code=403)
+
+
 @app.middleware("http")
 async def _require_token(request: Request, call_next):  # type: ignore[no-untyped-def]
     p = request.url.path
@@ -218,8 +224,8 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credenti
 
 # Live runs, one per conversation, each owning its own task. Any number of clients may watch one.
 # Each run is also a row (agent_runs) with its event tape (run_events); the bus is the hot path over it.
-run_store = RunStore(db)
-bus = RunBus(run_store)
+run_store = RunStore(db, host.bus)
+bus = RunBus(run_store, host.bus)
 def _run_changed(run: Run) -> None:
     events.publish("run_state", run.info())  # `events` is bound below; read at call time
     telegram_bridge.on_run_change(run)  # bound near the end of this module; it never raises
@@ -433,7 +439,7 @@ usage = Usage(db)
 pricing = Pricing()
 llm.caps_lookup = pricing.caps
 app.include_router(otel_export.router(db, lambda: settings()))
-compactor = compaction.Compactor(db)
+compactor = compaction.Compactor(db, host.bus)
 app.include_router(compaction.router(compactor, convos, lambda: settings(),
                                      window_fn=lambda cfg, m: compaction.window_for(cfg, m, pricing.caps(m).get("max_input_tokens"))))
 
@@ -495,7 +501,7 @@ def _message_too_long(text: str, cfg: dict[str, Any], model: str = "") -> str | 
 
 
 def _record_usage(ev: dict[str, Any]) -> None:
-    """llm.on_usage listener: persist one row per model call with a best-effort cost."""
+    """model.response subscriber: persist one row per model call with a best-effort cost."""
     try:
         cfg = settings()
         pt, ct = int(ev.get("prompt_tokens") or 0), int(ev.get("completion_tokens") or 0)
@@ -509,8 +515,8 @@ def _record_usage(ev: dict[str, Any]) -> None:
         pass
 
 
-if not any(getattr(f, "__name__", "") == "_record_usage" for f in llm._usage_listeners):
-    llm.on_usage(_record_usage)
+llm.bus = host.bus
+host.bus.subscribe("model.response", _record_usage, owner="core", order=0)
 
 
 def _save_model_caps(caps: dict[str, Any]) -> None:
@@ -592,8 +598,9 @@ async def _snapshot_after(run: Run) -> None:
     await asyncio.to_thread(snaps.finish, run.run_id)
 
 
-bus.after_hooks.append(_snapshot_after)
-bus.after_hooks.append(lambda run: subagent_mgr.end_of_run(run))
+# The run is not closed until its after-snapshot is written, so Undo finds it: the snapshot gets longer than an observer would.
+host.bus.subscribe("run.after", _snapshot_after, owner="core", order=0, timeout_ms=limits.SNAPSHOT_AFTER_MS)
+host.bus.subscribe("run.after", lambda run: subagent_mgr.end_of_run(run), owner="core", order=0)
 app.include_router(backups.router(db.data_dir, host.data_tables))
 # Supportability: GET /diagnostics, POST /maintenance/sweep, and the daily retention sweep (retention.py).
 retention = RetentionWorker(db, settings)
@@ -667,7 +674,7 @@ toolbox.web_cache = WebCache(db)  # fetch_url's response cache
 # same _approvals futures a chat's do.
 agent_defs = AgentDefs(db)
 subagent_mgr = Subagents(run_store, toolbox, settings, defs=agent_defs, results=tool_results, pricing=pricing, memories=memories,
-                         projects=projects, workspace=workspace, approvals=_approvals, skills=skills)
+                         projects=projects, workspace=workspace, approvals=_approvals, skills=skills, hooks=host.bus)
 toolbox.subagents = subagent_mgr
 subagent_mgr.snaps = snaps
 subagent_mgr.connectors = SimpleNamespace(
@@ -1467,6 +1474,10 @@ def _said(m: dict[str, Any]) -> bool:
     return m["role"] == "user" and not is_internal(m)
 
 
+settled.register(host.bus, style=style, relearn=queue_style_relearn, learner=learner, skills=skills, followup_jobs=followup_jobs,
+                 title_jobs=title_jobs, set_trace=convos.set_trace, get_conversation=convos.get, said=_said)
+
+
 @app.get("/conversations/search")
 def search_conversations(q: str = "", limit: int = 20) -> list[dict[str, Any]]:
     """Full-text search over what was said. Declared before `/conversations/{id}` so "search" is not an id."""
@@ -1983,6 +1994,24 @@ def _stream_cancel(stop: asyncio.Event, steers: list[dict[str, Any]] | None, run
     return run.wake
 
 
+async def _select_model(cfg: dict[str, Any], model: str, effort: str, reason: str) -> tuple[str, str]:
+    """model.select: once the router has chosen, extensions may swap the turn's model and effort. A model no
+    configured provider can serve is ignored, so a handler cannot send the turn somewhere it cannot run."""
+    fast, default = str(cfg.get("fastModel") or ""), str(cfg.get("defaultModel") or "")
+    picked = await host.bus.pipe("model.select", {"model": model, "effort": effort, "reason": reason,
+                                                  "tier": "fast" if model == fast and fast != default else "default"})
+    if not isinstance(picked, dict):
+        return model, effort
+    new_model, new_effort = picked.get("model"), picked.get("effort")
+    if isinstance(new_model, str) and new_model and new_model != model:
+        try:
+            provider_route.resolve(cfg, new_model)
+            model = new_model
+        except llm.LLMError:
+            log.warning("model.select chose %r, which no provider serves; keeping %r", new_model, model)
+    return model, new_effort if isinstance(new_effort, str) and new_effort else effort
+
+
 async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: list[dict[str, Any]] | None = None,
                        run: Run | None = None) -> AsyncIterator[tuple[str, Any]]:
     """Yield (event, payload) pairs. The run bus formats them and fans them out; see runs.sse.
@@ -2023,6 +2052,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         model = routed[0]
     # A routed short turn on the chat's own model skips the thinking pass: effort "none" (reasoning_effort "none").
     turn_effort = "none" if routed and routed[2] else str(conv["settings"].get("effort") or "default")
+    model, turn_effort = await _select_model(cfg, model, turn_effort, routed[1] if routed else "")
     user_msg_id: str | None = None  # the user message this turn answers: what a learned memory cites
     regen_am: dict[str, Any] | None = None  # set when a regenerate superseded the trailing answer
     regen_done: list[dict[str, Any]] = []  # the write calls that superseded answer already made
@@ -4084,6 +4114,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
                    "reasoning": reasoning, "outcome": outcome, "error_kind": error_kind, "notice": notice,
                    "attachments": tool_ctx.get("reply_attachments") or None}
+    if not silent and host.bus.active("reply.complete"):
+        await host.bus.emit("reply.complete", copy.deepcopy({
+            "message_id": am["id"], "text": redact.scrub_command_output(text), "tool_events": tool_events,
+            "usage": {"tokens": meter.tokens, "cost": meter.cost, "rounds": meter.rounds}, "trace": tracer.spans,
+            "taint": {"tainted": tool_ctx["tainted"], "sources": tool_ctx["taint_sources"]}, "outcome": outcome}))
     await _end_jobs()  # after the done: _run_chat has marked the run replied, so a steer already gets its 409
     if is_wake:
         workers_mgr.mark_delivered(body.wake.get("ids") or [])  # reached its end (even with an error): the sweep at startup does not repeat it
@@ -4096,76 +4131,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
     # A chat deleted mid-reply is neither mined nor banked: the exchange is the user's to discard.
     gone = convos.get(conv_id, with_messages=False) is None
-
-    # Writing style, from the user's half of the exchange only (style.py). Banking a sample is free;
-    # the re-read is an LLM call, so it goes to the learn worker and reports `style_learned` on the app
-    # topic — the run ends here either way. A failure here is as quiet as a failed memory extraction.
-    # The prose check runs before the span so an ordinary short instruction leaves no trace of a step
-    # that did nothing — and never leaves a span open for the UI to show as still running.
-    # A tainted chat may still bank the user's own prose: only the user's half ever reaches this, and
-    # looks_like_prose already rejects pastes and quotes. The voice profile is injected into later chats.
-    if (not error and not gone and not internal and not in_side and cfg.get("learnStyle", True)
-            and conv["settings"].get("autoLearn", True) and looks_like_prose(user_text)):
-        sspan = tracer.start("style", "Learn writing style")
-        yield "span", {"message_id": am["id"], "span": sspan}
-        try:
-            banked = await learn_style_from_exchange(
-                settings=cfg, style=style, project_id=conv["project_id"], user_text=user_text, model=model,
-            )
-            tracer.end(sspan, {"sample_chars": (banked or {}).get("sample", {}).get("chars", 0)})
-            yield "span", {"message_id": am["id"], "span": sspan}
-            if banked:
-                queue_style_relearn(conv["project_id"], model)
-                # The banked-sample notice only; a refreshed profile arrives on /events.
-                yield "style_learned", {"project_id": conv["project_id"], "profile": None,
-                                        "sample_id": banked["sample"]["id"]}
-        except Exception as e:  # noqa: BLE001
-            tracer.end(sspan, error=str(e))
-            yield "span", {"message_id": am["id"], "span": sspan}
-        convos.set_trace(am["id"], tracer.spans)
-
-    # Auto-learn is another LLM call, and the run owns the conversation for as long as this
-    # generator lives — a second message is a 409 until it returns. So the exchange is handed to the
-    # worker and the run ends here; what the worker learns arrives on the app topic (GET /events).
-    # A scheduled run never writes to long-term memory either way: it is one more model call nobody
-    # asked for, on text the user has not read yet. What it found belongs in its report and the inbox.
-    # A tainted reply has read someone else's text, so only the user's own words this run are mined: the
-    # reply, its tool calls and the procedures it followed are withheld (they could plant that text in later chats).
-    if (not error and text and not gone and not proposal_only(run) and not internal and not in_side  # an internal turn's "user" text is the system's, not the user's words
-            and (not tool_ctx["tainted"] or any(t.strip() for t in run_user_texts))  # an attachment-only message has no words to mine
-            and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True)
-            and conv["settings"].get("useMemory", True)):  # memory off: nothing written for other chats to read
-        user_only = bool(tool_ctx["tainted"])
-        learner.submit(LearnJob(
-            conversation_id=conv_id, message_id=am["id"], project_id=conv["project_id"],
-            user_text="\n\n".join(run_user_texts) if user_only else user_text,
-            assistant_text="" if user_only else text, model=model, settings=cfg,
-            spans=list(tracer.spans), tool_events=[] if user_only else list(tool_events),
-            skills_in_use=[] if user_only else learn.skills_seen(used["skills"], tool_events, skills, conv["project_id"]),
-            user_only=user_only, user_message_id=user_msg_id, learn_graph=bool(conv["settings"].get("useGraph", True)),
-        ))
-
-    # Follow-up chips: after a finished reply only (not an error, a Stop, or an unattended run), off the run.
-    if (not error and text and not gone and not stop.is_set() and not proposal_only(run) and not desk_id and not internal and not in_side
-            and cfg.get("followUps", True)):
-        followup_jobs.spawn(conv_id, am["id"], conv["project_id"], user_text, text, model, cfg)
-
-    # The model title: after the reply, off the run, from the user's typed text only. It replaces the placeholder this
-    # turn wrote, or (once, at RETITLE_AT user turns) an earlier auto title; a title the user typed is never touched.
-    # No taint or autoLearn gate: nothing but the user's own messages reaches the call.
-    if not error and not gone and not internal and not in_side and not proposal_only(run) and cfg.get("autoTitle", True):
-        user_texts = [m["content"] for m in conv["messages"] if _said(m)] + [user_text]
-        fresh = convos.get(conv_id, with_messages=False)
-        fs = (fresh or {}).get("settings") or {}
-        if placeholder_title is not None:
-            if fs.get("titleSource") != "user" and fresh and fresh["title"] == placeholder_title:
-                title_jobs.spawn(conv_id, conv["project_id"], placeholder_title, user_texts, model, cfg, len(user_texts))
-        elif (fresh and fs.get("titleSource") == "auto" and len(user_texts) >= titles.RETITLE_AT
-              and int(fs.get("titleTurns") or 0) < titles.RETITLE_AT):
-            title_jobs.spawn(conv_id, conv["project_id"], fresh["title"], user_texts, model, cfg, len(user_texts))
-        elif fresh and not fs.get("titleSource") and fresh["title"] == titles.placeholder(user_texts[0]):
-            # The first title job failed (model error, shutdown, an errored first turn): retry on a later turn.
-            title_jobs.spawn(conv_id, conv["project_id"], fresh["title"], user_texts, model, cfg, len(user_texts))
+    await host.bus.emit("turn.settled", settled.Settled(
+        conversation_id=conv_id, message_id=am["id"], user_message_id=user_msg_id, conv=conv, cfg=cfg, model=model,
+        user_text=user_text, run_user_texts=run_user_texts, reply=text, error=error, stopped=stop.is_set(), gone=gone,
+        internal=internal, in_side=in_side, proposal_only=proposal_only(run), desk_id=desk_id, tainted=bool(tool_ctx["tainted"]),
+        tool_events=tool_events, used=used, placeholder_title=placeholder_title, tracer=tracer,
+        publish=run.publish if run is not None else lambda event, data: None))
 
 
 async def _run_chat(run: Run, body: ChatIn) -> None:
@@ -5866,8 +5837,21 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     # Runs after _drive has ended the run, so the row the renderer then asks about is final. Ids only: the
     # app topic is a doorbell, and what to notify about is decided from rows by GET /inbox/notify.
     if run.task is not None:
-        run.task.add_done_callback(lambda _t, rid=run.run_id, jid=job["id"]: (_job_ended(rid, jid), events.publish("job_finished", {"run_id": rid, "job_id": jid})))
+        run.task.add_done_callback(lambda _t, rid=run.run_id, jid=job["id"]: _job_finished(rid, jid))
+    await _job_fired(job, fire)
     return run.run_id
+
+
+async def _job_fired(job: dict[str, Any], fire: dict[str, Any]) -> None:
+    await host.bus.emit("job.fired", {"job_id": job["id"], "kind": job["kind"],
+                                      "trigger": fire.get("trigger") or ("manual" if fire.get("manual") else "clock")})
+
+
+def _job_finished(run_id: str, job_id: str) -> None:
+    """The run ended and its row is final: hand it to its chat, ring the app topic, tell the hooks how it went."""
+    _job_ended(run_id, job_id)
+    events.publish("job_finished", {"run_id": run_id, "job_id": job_id})
+    host.fire("job.done", {"job_id": job_id, "run_id": run_id, "outcome": (run_store.get(run_id) or {}).get("status")})
 
 
 _job_wakes: dict[str, list[dict[str, Any]]] = {}  # origin chat -> finished task reports waiting to be handed over (ponytail: lost on restart)
@@ -5947,6 +5931,8 @@ async def _launch_desk_job(job: dict[str, Any], fire: dict[str, Any]) -> str | N
         desks.event(desk_id, "note", f"Scheduled by “{job['name']}”, but {why}. Start it when another desk finishes.",
                     needs_you=True, job_id=job["id"], queued=True)
     log.info("job %s opened desk %s for %s%s", job["name"], desk_id, _stamp(due), "" if run_id else " (not started, at the cap)")
+    if run_id:
+        await _job_fired(job, fire)
     return run_id
 
 

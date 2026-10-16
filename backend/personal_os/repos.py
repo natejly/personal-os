@@ -9,6 +9,7 @@ from typing import Any
 
 from . import blobs
 from .db import Database, new_id, now, row_to_dict
+from .extensions.hooks import Deny, HookBus
 from .migrations import sync_memories_fts
 from .memory_limits import LEXICAL_HITS
 
@@ -606,9 +607,30 @@ class Conversations:
 
 
 # ---------------- Memories ----------------
+class MemoryRefused(ValueError):
+    """A memory.before_write handler refused the write."""
+
+
 class Memories:
-    def __init__(self, db: Database):
+    def __init__(self, db: Database, hooks: HookBus | None = None):
         self.db = db
+        self.hooks = hooks or HookBus()
+
+    def _vet(self, project_id: str | None, content: str, kind: str, source: str) -> str:
+        """memory.before_write: the content to store, as a handler may have rewritten it; raises MemoryRefused when one denies."""
+        vetted = self.hooks.pipe_sync("memory.before_write", {"content": content, "kind": kind, "source": source, "project_id": project_id})
+        if isinstance(vetted, Deny):
+            raise MemoryRefused(vetted.reason)
+        new = vetted.get("content") if isinstance(vetted, dict) else None
+        return new.strip() if isinstance(new, str) and new.strip() else content
+
+    def _deleted(self, row: dict[str, Any] | None) -> None:
+        if row:
+            self.hooks.emit_sync("memory.deleted", {"memory": dict(row), "source": row["source"]})
+
+    def _written(self, row: dict[str, Any] | None) -> None:
+        if row:
+            self.hooks.emit_sync("memory.written", {"memory": dict(row), "source": row["source"]})
 
     def list(self, project_id: str | None, q: str = "", include_global: bool = True, include_invalid: bool = False) -> list[dict[str, Any]]:
         where, args = _scope_clause(project_id, include_global)
@@ -636,7 +658,7 @@ class Memories:
                provenance: dict[str, Any] | None = None, expires_at: float | None = None,
                valid_from: float | None = None) -> dict[str, Any]:
         """`valid_from` is when the fact happened, if known (default: now, when it was learned)."""
-        content = content.strip()
+        content = self._vet(project_id, content.strip(), kind, source)
         prov = provenance or {}
         with self.db.tx() as c:
             # The duplicate check and the insert must be one write: two creates of the same content at once (a
@@ -657,7 +679,9 @@ class Memories:
                  prov.get("conversation_id"), prov.get("message_id"), expires_at),
             )
             c.execute("INSERT INTO memories_fts(content, memory_id) VALUES(?,?)", (content, mid))
-        return self.get(mid)  # type: ignore[return-value]
+        created = self.get(mid)
+        self._written(created)
+        return created  # type: ignore[return-value]
 
     # ---- non-destructive changes: the old row stays as history, only `invalid_at` says it no longer holds ----
     def supersede(self, old_id: str, new_content: str, kind: str | None = None, source: str = "auto",
@@ -676,6 +700,7 @@ class Memories:
         if old["pinned"] and not keep_pinned:
             return self.update(old_id, {"content": new_content, **({"kind": kind} if kind else {}),
                                         **({"expires_at": expires_at} if expires_at is not None else {})})
+        new_content = self._vet(old["project_id"], new_content, kind or old["kind"], source)
         prov = provenance or {}
         mid, t = new_id(), now()
         with self.db.tx() as c:
@@ -688,7 +713,9 @@ class Memories:
             c.execute("INSERT INTO memories_fts(content, memory_id) VALUES(?,?)", (new_content, mid))
             c.execute("UPDATE memories SET invalid_at=?, superseded_by=? WHERE id=?", (t, mid, old_id))
             c.execute("DELETE FROM memories_fts WHERE memory_id=?", (old_id,))
-        return self.get(mid)
+        created = self.get(mid)
+        self._written(created)
+        return created
 
     def supersede_many(self, old_ids: list[str], new_content: str, kind: str | None = None, source: str = "auto",
                        provenance: dict[str, Any] | None = None, expires_at: float | None = None) -> dict[str, Any] | None:
@@ -721,6 +748,7 @@ class Memories:
         with self.db.tx() as c:
             c.execute("UPDATE memories SET invalid_at=? WHERE id=?", (now(), id))
             c.execute("DELETE FROM memories_fts WHERE memory_id=?", (id,))
+        self._deleted(m)
         return self.get(id)
 
     def restore(self, id: str) -> dict[str, Any] | None:
@@ -766,6 +794,10 @@ class Memories:
         return chain
 
     def update(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
+        if patch.get("content") is not None and str(patch["content"]).strip():
+            cur = self.get(id) or {}
+            patch = {**patch, "content": self._vet(cur.get("project_id"), patch["content"].strip(),
+                                                   patch.get("kind") or cur.get("kind") or "fact", cur.get("source") or "user")}
         with self.db.tx() as c:
             if "content" in patch and patch["content"] is not None:
                 if not str(patch["content"]).strip():
@@ -781,12 +813,16 @@ class Memories:
                 c.execute("UPDATE memories SET project_id=? WHERE id=?", (patch["project_id"], id))
             if "expires_at" in patch:  # None clears it
                 c.execute("UPDATE memories SET expires_at=? WHERE id=?", (patch["expires_at"], id))
-        return self.get(id)
+        updated = self.get(id)
+        self._written(updated)
+        return updated
 
     def delete(self, id: str) -> None:
+        gone = self.get(id)
         with self.db.tx() as c:
             c.execute("DELETE FROM memories WHERE id=?", (id,))
             c.execute("DELETE FROM memories_fts WHERE memory_id=?", (id,))
+        self._deleted(gone)
 
     def pinned(self, project_id: str | None) -> list[dict[str, Any]]:
         """Every live pinned memory in scope: a pin is always in context, whatever the query."""

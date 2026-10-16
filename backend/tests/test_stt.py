@@ -8,7 +8,6 @@ Runs under pytest, or directly: python backend/tests/test_stt.py
 """
 from __future__ import annotations
 
-import contextlib
 import sys
 import tempfile
 from pathlib import Path
@@ -220,8 +219,7 @@ def test_proxy_bills_the_audio_length_not_the_wall_clock() -> None:
     # llm.audio_usage; nothing downstream should emit a second row for the same segment.
     data_dir = Path(tempfile.mkdtemp())
     seen: list[dict] = []
-    listener = seen.append
-    llm.on_usage(listener)
+    listener = llm.bus.subscribe("model.response", seen.append, owner="test", order=0)
     try:
         with proxy_replies(200, VERBOSE_JSON, ""), whisper_is(""), speech_is(False):
             stt.transcribe(_wav(), settings=SETTINGS, cfg=CFG, data_dir=data_dir)
@@ -234,10 +232,7 @@ def test_proxy_bills_the_audio_length_not_the_wall_clock() -> None:
             stt.transcribe(_wav(), settings=SETTINGS, cfg=CFG, data_dir=data_dir)
         assert len(seen) == 1, seen
     finally:
-        # on_usage has no matching off_usage; leaving the listener attached would leak into
-        # whatever test file pytest loads next in the same process.
-        with contextlib.suppress(ValueError):
-            llm._usage_listeners.remove(listener)
+        listener.dispose()
 
 
 def test_proxy_404_returns_an_error_and_never_raises() -> None:

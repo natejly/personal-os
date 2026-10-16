@@ -105,7 +105,7 @@ def test_alias_pricing_and_reprice_keeps_known_costs() -> None:
 
 def test_embedding_calls_are_logged() -> None:
     seen: list[dict] = []
-    llm.on_usage(seen.append)
+    listener = llm.bus.subscribe("model.response", seen.append, owner="test", order=0)
 
     def handler(req: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"data": [{"index": 0, "embedding": [0.1, 0.2]}], "usage": {"prompt_tokens": 7, "total_tokens": 7}})
@@ -117,7 +117,7 @@ def test_embedding_calls_are_logged() -> None:
                                             "accounts/fireworks/models/qwen3-embedding-8b"))
     finally:
         embed.httpx.AsyncClient = real  # type: ignore[assignment]
-        llm._usage_listeners.remove(seen.append)
+        listener.dispose()
     assert out == [[0.1, 0.2]]
     rows = [r for r in seen if r["kind"] == "embedding"]
     assert len(rows) == 1 and rows[0]["prompt_tokens"] == 7 and rows[0]["completion_tokens"] == 0 and not rows[0]["estimated"]

@@ -806,12 +806,12 @@ class StreamRetryTests(unittest.TestCase):
         heard: list[dict[str, Any]] = []
         cancel = asyncio.Event()
         cancel.set()
-        llm.on_usage(heard.append)
+        listener = llm.bus.subscribe("model.response", heard.append, owner="test", order=0)
         try:
             with Provider(lambda req: httpx.Response(200, content=sse("ok"))) as p:
                 events = run(collect(cancel=cancel))
         finally:
-            llm._usage_listeners.remove(heard.append)
+            listener.dispose()
         self.assertEqual((p.calls, events[-1]["finish_reason"]), (0, "cancelled"))
         self.assertEqual(events[-1]["usage_est"], {"prompt_tokens": 0, "completion_tokens": 0})
         self.assertEqual(heard, [])

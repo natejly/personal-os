@@ -20,6 +20,7 @@ from PIL import Image  # noqa: E402
 
 from personal_os import imagegen, llm  # noqa: E402
 from personal_os.db import Database  # noqa: E402
+from personal_os.extensions.hooks import HookBus  # noqa: E402
 from personal_os.repos import Documents  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 
@@ -54,7 +55,8 @@ def box(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Box:
 
     real = httpx.AsyncClient
     monkeypatch.setattr(imagegen.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
-    monkeypatch.setattr(llm, "_usage_listeners", [b.usage.append])
+    monkeypatch.setattr(llm, "bus", HookBus())
+    llm.bus.subscribe("model.response", b.usage.append, owner="test", order=0)
     return b
 
 

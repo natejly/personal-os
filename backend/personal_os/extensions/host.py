@@ -130,7 +130,7 @@ class ExtensionHost:
 
     @contextlib.asynccontextmanager
     async def lifespan(self, app: FastAPI) -> AsyncIterator[None]:
-        self._loop = asyncio.get_running_loop()
+        self._loop = self.bus.loop = asyncio.get_running_loop()
         for fn in self._startup:
             await fn()
         try:
@@ -143,6 +143,7 @@ class ExtensionHost:
                     log.exception("shutdown handler %s failed", fn.__name__)
             for task in self._fired:
                 task.cancel()
+            self.bus.close()
 
     # ---- extensions ----
     def add_module(self, module: Module) -> ExtensionScope:

@@ -130,12 +130,12 @@ def test_cut_off_stream_still_records_usage(provider: Any) -> None:
 
     provider(lambda _r: httpx.Response(200, stream=Cut()))
     rows: list[dict[str, Any]] = []
-    llm._usage_listeners.append(rows.append)
+    listener = llm.bus.subscribe("model.response", rows.append, owner="test", order=0)
     try:
         with pytest.raises(llm.LLMError, match="cut off"):
             asyncio.run(_collect())
     finally:
-        llm._usage_listeners.remove(rows.append)
+        listener.dispose()
     assert len(rows) == 1 and rows[0]["completion_tokens"] == len("thinking hard") // 4
 
 

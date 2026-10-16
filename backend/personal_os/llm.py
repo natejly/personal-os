@@ -17,13 +17,14 @@ from typing import Any, AsyncIterator, Callable
 import httpx
 
 from . import anthropic_native, auth_breaker, provider_route, providers
+from .extensions.hooks import HookBus
 from .limits import (VOLATILE_HEADER, CODING_SESSION_MAX_CONCURRENT, COMPACT_AT, COMPACT_AT_TOKENS, COMPACT_KEEP_RECENT, COMPACT_KEEP_TOKENS, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, LLM_IDLE_SECONDS, LLM_RETRIES, MICRO_AT, MICRO_KEEP, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, TOOL_DEFER_ABOVE, WORKER_MAX_CONCURRENT)
 from .permissions import DEFAULTS as PERMISSION_DEFAULTS
 log = logging.getLogger("personal_os.llm")
 
-# Usage accounting. The app registers a listener; callers that know the chat/project set usage_context.
-UsageListener = Callable[[dict[str, Any]], None]
-_usage_listeners: list[UsageListener] = []
+# model.request and model.response fire on this bus (app.py points it at the extension host's). Usage accounting is
+# its subscriber to model.response; callers that know the chat/project set usage_context.
+bus: HookBus = HookBus()
 usage_context: ContextVar[dict[str, Any]] = ContextVar("usage_context", default={})
 # Absolute time.monotonic() by which the current stream must be over; set only around a closing-answer call (a hang
 # bound, not a reply cap). A context var rather than a parameter so every caller of stream_chat keeps its signature.
@@ -48,10 +49,6 @@ def view_on(settings: dict[str, Any], view: str) -> bool:
 
 def tool_view(name: str) -> str | None:
     return next((v for p, v in TOOL_VIEWS if name.startswith(p)), None)
-
-
-def on_usage(fn: UsageListener) -> None:
-    _usage_listeners.append(fn)
 
 
 def parse_usage(raw: dict[str, Any] | None) -> dict[str, Any]:
@@ -88,11 +85,14 @@ def _emit_usage(model: str, kind: str, usage: dict[str, Any] | None, duration_ms
         "reasoning_tokens": 0 if est else int((usage or {}).get("reasoning_tokens") or 0),
         **usage_context.get(),
     }
-    for fn in _usage_listeners:
-        try:
-            fn(rec)
-        except Exception:  # noqa: BLE001 - accounting must never break a reply
-            pass
+    bus.emit_sync("model.response", rec)
+
+
+def _emit_request(model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> None:
+    if bus.active("model.request"):
+        bus.emit_sync("model.request", {"model": model, "message_count": len(messages),
+                                        "tool_names": [n for t in tools or [] if (n := (t.get("function") or {}).get("name"))],
+                                        "tokens_est": _prompt_chars(messages, tools) // 4})
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     # Empty until onboarding (or an upgrade from a stored baseUrl). Nothing here is a model alias that only
@@ -1284,6 +1284,7 @@ async def stream_chat(
     sent = True  # False when Stop or the deadline ended the call before any response arrived
     dropped = ""
     p_chars = _prompt_chars(messages, tools)
+    _emit_request(model, messages, tools)
     # read= backs up the header wait (first_byte) and a chunk; the per-chunk idle limit is enforced below.
     timeout = httpx.Timeout(CONNECT_TIMEOUT_S, read=idle + 5, write=30, pool=CONNECT_TIMEOUT_S)
     first_byte = _first_byte_s(settings)
@@ -1620,6 +1621,7 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
     # A reasoning helper on a long input can think for minutes before it answers, so the wait is the stream idle limit.
     timeout = httpx.Timeout(CONNECT_TIMEOUT_S, read=_idle_s(settings), write=30, pool=CONNECT_TIMEOUT_S)
     with_cache_breakpoints(model, body)
+    _emit_request(model, messages)
     try:
         r, _, _ = await _send_with_retry(_client(), settings, body, stream=False, cancel=cancel, deadline_at=deadline, timeout=timeout)
     except _Aborted as a:

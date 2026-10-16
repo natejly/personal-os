@@ -42,6 +42,7 @@ from typing import Any, Callable
 from . import approval_log, autoreview, coding_route, compaction, context_map, fsx, limits, llm, mac, mcp_search, permissions, permrules, redact
 from .db import new_id, now
 from .dispatch import Contact, dispatch_tool
+from .extensions.hooks import HookBus
 from . import toolcore
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .trace import Tracer, now_ms
@@ -600,8 +601,9 @@ class Subagents:
 
     def __init__(self, store: Any, toolbox: Any, settings_fn: Callable[[], dict[str, Any]], *, defs: AgentDefs | None = None,
                  results: Any = None, pricing: Any = None, memories: Any = None, projects: Any = None, workspace: Any = None,
-                 approvals: dict[str, asyncio.Future] | None = None, skills: Any = None) -> None:
+                 approvals: dict[str, asyncio.Future] | None = None, skills: Any = None, hooks: HookBus | None = None) -> None:
         self.store, self.toolbox, self.settings = store, toolbox, settings_fn
+        self.hooks = hooks or HookBus()  # subagent.start and subagent.stop
         self.defs, self.results, self.pricing, self.memories, self.projects = defs, results, pricing, memories, projects
         self.workspace, self.skills = workspace, skills
         self.approvals = approvals if approvals is not None else {}
@@ -824,6 +826,7 @@ class Subagents:
             self.store.update(ch.id, status="running")
         self.peak = max(self.peak, len(self.running()))
         ch.task_obj = asyncio.create_task(self._drive(ch), name=f"{ch.kind}:{ch.id}")
+        self.hooks.emit_sync("subagent.start", self._hook_payload(ch))
         # A task cancelled before its first step never runs _drive's finally: finish it here, or it stays 'running' forever.
         ch.task_obj.add_done_callback(lambda _t: None if ch.finished.is_set() else asyncio.ensure_future(self._finish(ch)))
         self._ensure_watchdog()
@@ -1593,6 +1596,11 @@ class Subagents:
         self._publish(ch)
         if ch.detached and self.snaps is not None:  # a worker has no reply to close its folder snapshots after it
             asyncio.get_running_loop().run_in_executor(None, self.snaps.finish, ch.id)  # not awaited: a Stop cancelling this task must not skip `finished`
+        self.hooks.emit_sync("subagent.stop", self._hook_payload(ch))
+
+    @staticmethod
+    def _hook_payload(ch: Child) -> dict[str, Any]:
+        return {"child_id": ch.id, "role": ch.role.name, "parent": ch.parent_id}
 
     def report(self, ch: Child) -> dict[str, Any]:
         text = redact.scrub_command_output(ch.text)

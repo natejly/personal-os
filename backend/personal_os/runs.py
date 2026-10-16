@@ -25,6 +25,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Iterable
 from . import approval_log
 from .attention import for_run
 from .db import Database, new_id
+from .extensions.hooks import HookBus
 
 log = logging.getLogger("personal_os")
 
@@ -114,8 +115,9 @@ class RunStore:
     the last FLUSH_S of events.
     """
 
-    def __init__(self, db: Database) -> None:
+    def __init__(self, db: Database, hooks: HookBus | None = None) -> None:
         self.db = db
+        self.hooks = hooks or HookBus()  # approval.requested and approval.resolved
         self._c = db.connect()
         self._lock = threading.Lock()
         self._buf: list[tuple[Any, ...]] = []
@@ -382,10 +384,13 @@ class RunStore:
                       message_id: str | None = None, forced: bool = False, desk_id: str | None = None,
                       danger: str = "external", review: dict[str, Any] | None = None) -> dict[str, Any]:
         """`review` is the review gate's verdict when that is why this card opened; the answer's history row carries it."""
-        self._exec("INSERT INTO approvals(call_id, run_id, conversation_id, message_id, tool, args, args_digest, forced, danger, desk_id, review, status, created_at) "
-                   "VALUES(?,?,?,?,?,?,?,?,?,?,?,'pending',?) ON CONFLICT(call_id) DO NOTHING",
-                   (call_id, run_id, conversation_id, message_id, tool, _dumps(args), args_digest(args), int(forced),
-                    danger, desk_id, _dumps(review) if review else None, time.time()))
+        digest = args_digest(args)
+        opened = self._exec("INSERT INTO approvals(call_id, run_id, conversation_id, message_id, tool, args, args_digest, forced, danger, desk_id, review, status, created_at) "
+                            "VALUES(?,?,?,?,?,?,?,?,?,?,?,'pending',?) ON CONFLICT(call_id) DO NOTHING",
+                            (call_id, run_id, conversation_id, message_id, tool, _dumps(args), digest, int(forced),
+                             danger, desk_id, _dumps(review) if review else None, time.time()))
+        if opened:  # observe only: no hook decides an approval
+            self.hooks.emit_sync("approval.requested", {"call_id": call_id, "tool": tool, "args_digest": digest, "run_id": run_id})
         return self.approval(call_id) or {}
 
     def decide(self, call_id: str, decision: str, by: str = "user", note: str | None = None,
@@ -415,6 +420,7 @@ class RunStore:
                                 conversation_id=row.get("conversation_id"), run_id=row.get("run_id"), desk_id=row.get("desk_id"),
                                 agent=(run or {}).get("kind"), rule=rules if decision == "always_rule" else None,
                                 note=note if by == "user" else f"({by}) {note or ''}", review=row.get("review"), call_id=call_id)
+            self.hooks.emit_sync("approval.resolved", {"call_id": call_id, "decision": decision, "by": by})
         return row
 
     def approval(self, call_id: str) -> dict[str, Any] | None:
@@ -887,14 +893,13 @@ class Topic:
 class RunBus:
     """Holds the latest run per conversation, live or recently finished. With a store, every run is also a row."""
 
-    def __init__(self, store: RunStore | None = None) -> None:
+    def __init__(self, store: RunStore | None = None, hooks: HookBus | None = None) -> None:
         self._runs: dict[str, Run] = {}
         self.store = store
+        self.hooks = hooks or HookBus()  # fires run.after when a run's runner finishes, before the run is closed
         # Runs displaced by a newer one while their auto-learn tail was still open. Only `shutdown`
         # cares: nothing routes to them any more, and the task holds what keeps them alive.
         self._retired: set[Run] = set()
-        # Awaited when a run's runner finishes, before the run is closed (the after-snapshot of a reply).
-        self.after_hooks: list[Callable[[Run], Awaitable[None]]] = []
         # Told whenever a run's answering / status state changes (the app topic's `run_state`).
         self.on_change: Callable[[Run], None] | None = None
 
@@ -991,11 +996,10 @@ class RunBus:
             plain = isinstance(e, (KeyError, AttributeError, TypeError, IndexError, AssertionError)) or not str(e).strip()
             run.publish("error", {"message": "Something went wrong while running this reply. Try again." if plain else str(e)})
         finally:
-            for hook in self.after_hooks:
-                try:
-                    await hook(run)
-                except BaseException:  # noqa: BLE001 - a hook must not stop the run from closing
-                    log.debug("after hook failed for run %s", run.run_id, exc_info=True)
+            try:
+                await self.hooks.emit("run.after", run)
+            except BaseException:  # noqa: BLE001 - a hook must not stop the run from closing
+                log.debug("run.after failed for run %s", run.run_id, exc_info=True)
             run.end(status)
             self._retired.discard(run)
             self.changed(run)

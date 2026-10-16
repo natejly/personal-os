@@ -24,6 +24,13 @@ export function resolveTab(id: string): { tab: SettingsTab; group?: AdvancedGrou
   return LEGACY[id as LegacySettingsTab] ?? { tab: 'model' }
 }
 
+export const DEFAULT_TAB: SettingsTab = 'appearance'
+
+/** The tab to show: `tab` while it is among `available`, otherwise General (an extension's tab can vanish while open). */
+export function shownTab(tab: SettingsTab, available: readonly string[]): SettingsTab {
+  return available.includes(tab) ? tab : DEFAULT_TAB
+}
+
 /** One findable block of settings: the tab it lives on, its anchor id (`sec-<sec>` in the pane) and the words people type for it. */
 export interface SettingsEntry { tab: SettingsTab; sec: string; title: string; keys: string }
 export const SETTINGS_INDEX: readonly SettingsEntry[] = [

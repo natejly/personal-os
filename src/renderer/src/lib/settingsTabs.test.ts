@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveTab, searchSettings } from './settingsTabs'
+import { resolveTab, searchSettings, shownTab } from './settingsTabs'
 
 test('old tab ids map to the new sections', () => {
   assert.deepEqual(resolveTab('models'), { tab: 'model' })
@@ -44,4 +44,9 @@ test('the Telegram bot section is found by "bot" and "texting"', () => {
 test('providers and models are found by what people type', () => {
   assert.ok(searchSettings('api key').some((e) => e.sec === 'provider'))
   assert.ok(searchSettings('rerank').some((e) => e.sec === 'models'))
+})
+
+test('a tab that is no longer available falls back to General', () => {
+  assert.equal(shownTab('ext:health', ['appearance', 'model', 'ext:health']), 'ext:health')
+  assert.equal(shownTab('ext:health', ['appearance', 'model']), 'appearance')
 })

@@ -18,7 +18,3 @@ test('no CSS rule widens the dialog for a single tab', () => {
   assert.match(rule![1], /width:/)
   assert.match(rule![1], /height:/)
 })
-
-test('an extension tab that disappears while open sends the pane back to a built-in tab', () => {
-  assert.match(modal, /if \(!tabs\.some\(\(x\) => x\.id === tab\)\) setTab\('appearance'\)/)
-})

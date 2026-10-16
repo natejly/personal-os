@@ -4,7 +4,7 @@ import { X, Search, Plug, Cpu, Bot, Palette, ShieldCheck, SlidersHorizontal, Key
 import { useShallow } from 'zustand/react/shallow'
 import { useStore, setSettingsGuard } from '../store'
 import { modeOf, MODES } from '../lib/permissionMode'
-import { resolveTab, searchSettings, type SettingsTab } from '../lib/settingsTabs'
+import { resolveTab, searchSettings, shownTab, DEFAULT_TAB, type SettingsTab } from '../lib/settingsTabs'
 import { api } from '../lib/api'
 import { useModal } from '../lib/useModal'
 import { applyAppearance } from '../lib/appearance'
@@ -53,6 +53,7 @@ export default function SettingsModal(): JSX.Element {
   // Sections that extensions contribute, listed while their extension is on.
   const panels = settingsPanels.filter((p) => !viewHidden(settings, p.extension))
   const tabs = [...TABS, ...panels.map((p) => ({ id: p.tab, label: p.label, icon: Package }))]
+  const tabIds = tabs.map((x) => x.id)
   const [draft, setDraft] = useState<Settings>(settings)
   const [saving, setSaving] = useState(false)
   // Set while the footer asks whether to throw the draft away; it remembers what the answer leads to.
@@ -60,7 +61,7 @@ export default function SettingsModal(): JSX.Element {
   const { shortcuts, apply: applyShortcuts } = useShortcuts()
   const storeTab = useStore((s) => s.settingsTab)
   const storeGroup = useStore((s) => s.settingsGroup)
-  const [tab, setTabState] = useState<Tab>(() => { const t = resolveTab(storeTab).tab; return tabs.some((x) => x.id === t) ? t : 'appearance' })
+  const [tab, setTabState] = useState<Tab>(() => shownTab(resolveTab(storeTab).tab, tabIds))
   // The store keeps the shown tab, so openSettings from a toast or a link switches the open modal too.
   const setTab = (t: Tab): void => { setTabState(t); useStore.setState({ settingsTab: t }) }
   // Advanced groups start collapsed; one opens when Settings was asked for a topic inside it.
@@ -89,7 +90,7 @@ export default function SettingsModal(): JSX.Element {
     return () => window.clearTimeout(t)
   }, [jump, tab, openGroups])
   // An extension turned off while its tab is open takes the tab away: fall back to the first one.
-  useEffect(() => { if (!tabs.some((x) => x.id === tab)) setTab('appearance') }, [panels.length])
+  useEffect(() => { if (shownTab(tab, tabIds) !== tab) setTab(DEFAULT_TAB) }, [tab, tabIds.join()])
   useEffect(() => {
     if (tabs.some((x) => x.id === storeTab)) setTabState(storeTab)
     if (storeGroup) setOpenGroups((g) => new Set(g).add(storeGroup))

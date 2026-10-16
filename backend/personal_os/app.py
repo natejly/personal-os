@@ -37,7 +37,7 @@ from . import chatlink, coding_route, duel, fsx, labels, opencode_usage, request
 from .fsx import sensitive_reason
 from . import context_map
 from .dispatch import Contact, dispatch_tool
-from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
+from .context import Block, build_context, cite_slim, compose, context_taints, estimate_tokens, layout_messages, prefix_hash, retrieval_query
 from .drive_backup import DriveBackup
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .kinds import is_internal
@@ -2143,13 +2143,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))  # every context block is a share of it
     # One query embedding for all three, then the three lookups side by side: they all sit before the first token.
     qvec = await _query_vec(rq, cfg, conv["settings"])
-    doc_hits, memory_hits, graph_hits = await asyncio.gather(
-        _doc_hits(conv["project_id"], rq, cfg, conv["settings"], qvec),
-        _memory_hits(conv["project_id"], rq, cfg, conv["settings"], qvec),
-        _graph_hits(conv["project_id"], rq, cfg, conv["settings"], qvec))
+    hits, retrieved = await host.retrieval.gather({"query": rq, "vec": qvec, "project_id": conv["project_id"], "conv_settings": dict(conv["settings"])})
     system, used = build_context(
-        memories=memories, graph=graph, documents=documents, doc_hits=doc_hits,
-        memory_hits=memory_hits, graph_hits=graph_hits,
+        memories=memories, graph=graph, documents=documents, doc_hits=hits["docs"],
+        memory_hits=hits["memory"], graph_hits=hits["graph"],
         project=project, project_id=conv["project_id"], query=user_text, retrieval_text=rq,
         settings=cfg, conv_settings=conv["settings"],
         global_system_prompt="\n\n".join(p for p in (_persona_text(persona), cfg["systemPrompt"]) if p),
@@ -2578,11 +2575,18 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                  coding_route.hint(cfg) if tool_schemas else "")
         inputs_block = _desk_inputs_block() if desk else ""
         map_block = _map_status_block(used, conv["settings"], cfg, conv["project_id"], fence_nonce, tool_schemas, tool_ctx["deferred"])
-        used["volatile_blocks"] = [*used["volatile_blocks"], *([inputs_block] if inputs_block else []), *([map_block] if map_block else []), _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
+        skipped: list[str] = []
+        contributed = await host.bus.collect("context.contribute", {"conversation_id": conv_id, "project_id": conv["project_id"]}, skipped=skipped)
+        if skipped:
+            used["skipped"] = skipped
+        # The date changes daily: keep it out of the cacheable prefix.
+        slots = compose([*(Block(h, "stable") for h in hints), *(Block(b, "volatile") for b in (*used["volatile_blocks"], inputs_block, map_block, _today_hint())),
+                         *retrieved, *contributed], win)
+        used["volatile_blocks"] = slots.volatile
         # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
-        stable = "\n\n".join(p for p in (used["stable_system"], *hints) if p)
-        system = "\n\n".join(p for p in (stable, *used["volatile_blocks"]) if p)
-        used["stable_hash"] = hashlib.sha256(stable.encode()).hexdigest()[:12]
+        stable = "\n\n".join(p for p in (used["stable_system"], *slots.stable) if p)
+        system = "\n\n".join(p for p in (stable, *used["volatile_blocks"], *slots.tail) if p)
+        used["stable_hash"] = prefix_hash(stable, slots.versions)
         cspan["meta"]["stable_hash"] = used["stable_hash"]
         used["system_prompt"] = system
         used["tokens_estimate"] = estimate_tokens(system)
@@ -2613,7 +2617,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         def _assemble(hist: list[dict[str, str]]) -> list[dict[str, Any]]:
             """Everything before this run's own messages: the layout around `hist`, then the parked / resume notes."""
             hist = expand_commands(hist, command_store, skills, _mentionable(), front=front_hint)  # `/name args` turns carry their filled command (commands.py)
-            head = layout_messages(stable, used["volatile_blocks"], hist)
+            head = layout_messages(stable, used["volatile_blocks"], hist, slots.tail)
             if turn_images and (i := max((i for i, m in enumerate(head) if m["role"] == "user"), default=-1)) >= 0:
                 head[i] = {**head[i], "content": [{"type": "text", "text": head[i]["content"]}, *turn_images]}
             return head + [dict(n) for n in run_notes]
@@ -6924,6 +6928,11 @@ async def _graph_hits(project_id: str | None, query: str, cfg: dict[str, Any], c
         return None
 
 
+host.retrieval.register("docs", lambda p: _doc_hits(p["project_id"], p["query"], settings(), p["conv_settings"], p["vec"]))
+host.retrieval.register("memory", lambda p: _memory_hits(p["project_id"], p["query"], settings(), p["conv_settings"], p["vec"]))
+host.retrieval.register("graph", lambda p: _graph_hits(p["project_id"], p["query"], settings(), p["conv_settings"], p["vec"]))
+
+
 @app.post("/context/preview")
 async def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
     cfg = settings()
@@ -6931,11 +6940,11 @@ async def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
     conv_settings = {"useMemory": True, "useGraph": True, "useDocuments": True,
                      "useSkills": True, "useStyle": True, **body.conv_settings}
     qvec = await _query_vec(body.query, cfg, conv_settings)
+    hits, _ = await host.retrieval.gather({"query": body.query, "vec": qvec, "project_id": sid(body.project_id), "conv_settings": conv_settings})
     _, used = build_context(
         memories=memories, graph=graph, documents=documents, project=project,
-        doc_hits=await _doc_hits(sid(body.project_id), body.query, cfg, conv_settings, qvec), project_id=sid(body.project_id),
-        memory_hits=await _memory_hits(sid(body.project_id), body.query, cfg, conv_settings, qvec),
-        graph_hits=await _graph_hits(sid(body.project_id), body.query, cfg, conv_settings, qvec),
+        doc_hits=hits["docs"], project_id=sid(body.project_id),
+        memory_hits=hits["memory"], graph_hits=hits["graph"],
         query=body.query, settings=cfg, conv_settings=conv_settings,
         global_system_prompt=cfg["systemPrompt"], skills=skills, style=style,
         draft=bool(conv_settings.get("draftMode")),

@@ -36,7 +36,8 @@ TOOL_DEFER_ABOVE = 40              # past this many built-in tools, send the cor
 # 3000, 1000, ~1500 for skills) at CONTEXT_WINDOW_FALLBACK to within 4%; the memory code reads them only through context_shares().
 # "map" is the workspace map (context_map.py): about 900 tokens at the fallback window, its stable half riding in the cached prefix.
 CONTEXT_SHARES = {"memories": .012, "graph": .006, "chunks": .016, "pinned": .023,
-                  "profile": .008, "skills": .012, "map": .007}
+                  "profile": .008, "skills": .012, "map": .007,
+                  "extension": .01}  # one extension's context block, unless it asks for another share
 # Workspace map (context_map.py). Item caps for the prompt copy; the context_map tool pages through everything.
 MAP_FILES = 12                     # notes and files listed in the prompt
 MAP_PROJECTS = 8                   # projects listed in the prompt

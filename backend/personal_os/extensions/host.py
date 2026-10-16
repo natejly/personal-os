@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import logging
 import math
 from dataclasses import dataclass, field
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable
 
 from .. import backups, migrations
+from ..context import Block, Contribution, RetrievalSources, Slot
 from .disposables import Disposable, Scope
 from .hooks import HookBus
 from .manifest import Manifest
@@ -26,6 +28,7 @@ Handler = Callable[[], Awaitable[None]]
 
 SETTING_PREFIX = "ext."  # a setting `ext.<id>.<field>` belongs to the extension that declares <field>
 STOP_BUDGET_S = 5.0  # what one extension's app.stop handlers get before they are cancelled
+STABLE_CONTEXT_TIMEOUT_MS = 100  # a stable block reads cached state: it is built in the turn path, before the first token
 
 
 @dataclass
@@ -34,6 +37,7 @@ class ExtensionScope:
     manifest: Manifest
     index: int
     bus: HookBus
+    retrieval: RetrievalSources
     module: Module | None = None  # set for an adapted Module
     root: Path | None = None  # the extension's folder, where data.migrations is looked up
     disposables: Scope = field(default_factory=Scope)
@@ -57,6 +61,22 @@ class ExtensionScope:
             on_failure=declared.get("onFailure", "ask"))
         return self.disposables.add(sub)
 
+    def context(self, fn: Callable[[dict[str, Any]], Any], *, slot: Slot, priority: int | None = None,
+                share: float | None = None) -> Disposable:
+        """Add text to the prompt. `fn` takes {conversation_id, project_id} and returns a Contribution (or None for
+        nothing), sync or async; it runs under the manifest's context.contribute hook entry (a stable block gets 100 ms)."""
+        async def contribute(payload: dict[str, Any]) -> Block | None:
+            if not self.enabled():
+                return None
+            out = await fn(payload) if inspect.iscoroutinefunction(fn) else await asyncio.to_thread(fn, payload)
+            return Block(out.text, slot, self.manifest.id, share, out.version) if isinstance(out, Contribution) else None
+        return self.on("context.contribute", contribute, priority=priority,
+                       timeout_ms=STABLE_CONTEXT_TIMEOUT_MS if slot == "stable" else None)
+
+    def retrieval_source(self, name: str, fn: Callable[[dict[str, Any]], Awaitable[Any]]) -> Disposable:
+        """Add a place a turn's retrieval looks; `fn` takes {query, vec, project_id, conv_settings} and returns a list of {id, text, ref}."""
+        return self.disposables.add(self.retrieval.register(name, fn, owner=self.manifest.id))
+
     async def start(self) -> None:
         if self.module:
             await self.module.start()
@@ -77,6 +97,7 @@ class ExtensionScope:
 class ExtensionHost:
     def __init__(self) -> None:
         self.bus = HookBus()
+        self.retrieval = RetrievalSources()
         self.extensions: dict[str, ExtensionScope] = {}  # in start order
         self._startup: list[Handler] = []
         self._shutdown: list[Handler] = []
@@ -118,7 +139,7 @@ class ExtensionHost:
     def _add(self, manifest: Manifest, module: Module | None = None, root: Path | None = None) -> ExtensionScope:
         if manifest.id in self.extensions:
             raise ValueError(f"duplicate extension id {manifest.id!r}")
-        scope = ExtensionScope(manifest, len(self.extensions), self.bus, module, root)
+        scope = ExtensionScope(manifest, len(self.extensions), self.bus, self.retrieval, module, root)
         self.extensions[manifest.id] = scope
         self._enabled[manifest.id] = scope.enabled()
         return scope

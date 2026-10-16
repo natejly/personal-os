@@ -134,12 +134,15 @@ class HookBus:
             sub.muted = True
             log.error("hook %s from %s muted after %d consecutive failures", sub.hook, sub.owner, sub.failures)
 
-    async def collect(self, hook: str, payload: Any = None) -> list[Any]:
+    async def collect(self, hook: str, payload: Any = None, *, skipped: list[str] | None = None) -> list[Any]:
+        """`skipped` gains the owner of every handler that failed or timed out, for a caller that reports what was dropped."""
         self._known(hook)
         subs = self._subs.get(hook)
         if not subs:
             return []
         done = await asyncio.gather(*(self._try(s, payload, "collect") for s in subs))
+        if skipped is not None:
+            skipped.extend(s.owner for s, (ok, _) in zip(subs, done) if not ok)
         return [r for ok, r in done if ok and r is not None]
 
     async def pipe(self, hook: str, value: Any) -> Any:

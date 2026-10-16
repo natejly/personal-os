@@ -427,6 +427,18 @@ def test_host_migrate_backs_up_once_then_applies_each_extensions_steps(tmp_path:
     assert len(backups.list_backups(db.data_dir)) == 1
 
 
+def test_host_migrate_opens_no_connection_when_nothing_declares_migrations(tmp_path: Path) -> None:
+    class NoConnect:
+        data_dir = tmp_path
+
+        def connect(self) -> None:
+            raise AssertionError("opened a connection")
+
+    host = ExtensionHost()
+    host._add(manifest(id="plain"))
+    host.migrate(NoConnect())  # type: ignore[arg-type]
+
+
 # ---- export include list ----
 def test_export_includes_the_declared_extension_tables(tmp_path: Path) -> None:
     db = Database(tmp_path / "data")

@@ -5,7 +5,6 @@ import asyncio
 import contextlib
 import logging
 import math
-import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable
@@ -42,13 +41,7 @@ class ExtensionScope:
     def enabled(self) -> bool:
         return self.module.enabled() if self.module else self.manifest.enabled is not False
 
-    def migrate(self, c: sqlite3.Connection) -> list[int]:
-        return migrations.run_extension(c, self.manifest.id, self._migration_steps())
-
-    def pending_migrations(self, c: sqlite3.Connection) -> bool:
-        return bool(migrations.pending_extension(c, self.manifest.id, self._migration_steps()))
-
-    def _migration_steps(self) -> list[tuple[int, str, migrations.Step]]:
+    def migration_steps(self) -> list[tuple[int, str, migrations.Step]]:
         folder = self.manifest.data.get("migrations")
         return migrations.sql_steps(self.root / folder) if folder and self.root else []
 
@@ -151,13 +144,16 @@ class ExtensionHost:
     # ---- data ----
     def migrate(self, db: Database) -> None:
         """Apply every extension's pending migrations, after a premigrate backup when there are any."""
+        steps = {s.manifest.id: s.migration_steps() for s in self.extensions.values()}
+        if not any(steps.values()):
+            return  # nothing declares migrations: no connection to open
         with contextlib.closing(db.connect()) as c:
-            todo = [s for s in self.extensions.values() if s.pending_migrations(c)]
+            todo = {ext_id: p for ext_id, st in steps.items() if (p := migrations.pending_extension(c, ext_id, st))}
             if not todo:
                 return
             backups.create(db.data_dir, "premigrate")
-            for scope in todo:
-                scope.migrate(c)
+            for ext_id, pending in todo.items():
+                migrations.run_extension(c, ext_id, pending)
 
     def data_tables(self) -> list[str]:
         """The tables extensions own, for the readable export (a backup copies the whole database file)."""

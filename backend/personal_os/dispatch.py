@@ -37,8 +37,22 @@ async def _observe(bus: HookBus, name: str, args: dict[str, Any], result: Any, e
         await bus.emit("tool.error", {"name": name, "error": redact.scrub_command_output(error)})
     if bus.active("tool.post"):
         await bus.emit("tool.post", {"name": name, "args": _scrub_strings(args),
-                                     "result_preview": redact.scrub_command_output(summarize_result(result)), "error": error,
+                                     "result_preview": redact.scrub_command_output(summarize_result(result)),
+                                     "error": redact.scrub_command_output(error) if error else None,
                                      "duration_ms": int((time.monotonic() - started) * 1000)})
+
+
+class Contact:
+    """A connector call that remembers whether it was made. tool.pre can refuse a call before it reaches the connector,
+    and only a call that did reach it brings back third-party text, so a loop taints on `reached`, not on having tried."""
+
+    def __init__(self, call: Callable[[], Awaitable[Any]]) -> None:
+        self._call = call
+        self.reached = False
+
+    async def __call__(self) -> Any:
+        self.reached = True
+        return await self._call()
 
 
 async def dispatch_tool(toolbox: Toolbox, ctx: dict[str, Any], name: str, args: dict[str, Any], *, call_id: str,

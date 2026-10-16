@@ -447,3 +447,11 @@ def test_tool_post_args_have_credentials_scrubbed() -> None:
     on(box, "tool.post", seen.append)
     go(box, args={"url": "https://u:hunter2@example.com/x"})
     assert "hunter2" not in json.dumps(seen[0]["args"])
+
+
+def test_tool_post_error_is_scrubbed_like_tool_error() -> None:
+    box = fake_toolbox({"error": "401 for Authorization: Bearer sk-ant-abcdefghijklmnopqrstuv"})
+    seen: list[Any] = []
+    on(box, "tool.post", seen.append)
+    go(box)
+    assert "sk-ant-abcdefghijklmnopqrstuv" not in json.dumps(seen[0]["error"])

@@ -28,6 +28,7 @@ The rules the rest of the app relies on:
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -40,7 +41,7 @@ from typing import Any, Callable
 
 from . import approval_log, autoreview, coding_route, compaction, context_map, fsx, limits, llm, mac, mcp_search, permissions, permrules, redact
 from .db import new_id, now
-from .dispatch import dispatch_tool
+from .dispatch import Contact, dispatch_tool
 from . import toolcore
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .trace import Tracer, now_ms
@@ -1401,19 +1402,13 @@ class Subagents:
             if edited:
                 args.clear()
                 args.update(edited)
-        reached = False
-
-        async def contact() -> Any:
-            nonlocal reached
-            reached = True
-            return await con.call(name, args)
-
+        contact = Contact(functools.partial(con.call, name, args))
         ch.touch(in_tool=True)
         try:
             result = await dispatch_tool(self.toolbox, ch.ctx, name, args, call_id=uid, connector=contact)
         finally:
             ch.touch(in_tool=False)
-        if reached:
+        if contact.reached:
             # Whatever a connector said, result or error, is third-party text: the child's run is tainted from here on.
             ch.ctx["tainted"] = True
             ch.ctx.setdefault("taint_sources", []).append(name)

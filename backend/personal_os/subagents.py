@@ -35,7 +35,6 @@ import re
 import secrets
 import time
 from dataclasses import dataclass, field
-from functools import partial
 from pathlib import Path
 from typing import Any, Callable
 
@@ -1402,14 +1401,22 @@ class Subagents:
             if edited:
                 args.clear()
                 args.update(edited)
+        reached = False
+
+        async def contact() -> Any:
+            nonlocal reached
+            reached = True
+            return await con.call(name, args)
+
         ch.touch(in_tool=True)
         try:
-            result = await dispatch_tool(self.toolbox, ch.ctx, name, args, call_id=uid, connector=partial(con.call, name, args))
+            result = await dispatch_tool(self.toolbox, ch.ctx, name, args, call_id=uid, connector=contact)
         finally:
             ch.touch(in_tool=False)
-        # Whatever a connector said, result or error, is third-party text: the child's run is tainted from here on.
-        ch.ctx["tainted"] = True
-        ch.ctx.setdefault("taint_sources", []).append(name)
+        if reached:
+            # Whatever a connector said, result or error, is third-party text: the child's run is tainted from here on.
+            ch.ctx["tainted"] = True
+            ch.ctx.setdefault("taint_sources", []).append(name)
         return decision, result, True
 
     async def _call(self, ch: Child, name: str, args: dict[str, Any], uid: str, spec: ToolSpec) -> Any:

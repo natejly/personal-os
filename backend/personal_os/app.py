@@ -3854,10 +3854,18 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     result, ran = _propose(run, c["name"], args, uid, tool_ctx), True
                 elif mcp_is(c["name"]):
                     inflight = {"id": uid, "name": c["name"], "arguments": args}
+                    contacted = False
+
+                    async def _contact() -> Any:
+                        nonlocal contacted
+                        contacted = True
+                        return await _mcp_call(c["name"], args)
+
                     result, interrupted = await _await_tool(dispatch_tool(toolbox, tool_ctx, c["name"], args, call_id=uid,
-                                                                          connector=functools.partial(_mcp_call, c["name"], args)), stop,
+                                                                          connector=_contact), stop,
                                                             grace=STOP_GRACE_SECONDS if danger in IDEMPOTENT_DANGER else 0.0)
-                    mcp_ran = ran = not interrupted
+                    ran = not interrupted
+                    mcp_ran = contacted and ran
                 elif not asks and (wkey := tools.call_key(c["name"], args)) in warm:
                     # Started with its neighbours; an identical call in the round shares this one run.
                     result = await warm[wkey]

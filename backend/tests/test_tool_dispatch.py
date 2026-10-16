@@ -414,3 +414,36 @@ def test_a_pre_deny_inside_the_journal_is_recorded_as_the_calls_result() -> None
         d.dispose()
     row = appmod.run_store.executed(run.run_id)[0]
     assert "frozen" in out["error"] and row["result"] == out and n["calls"] == 0
+
+
+def test_a_script_call_through_the_tool_bridge_passes_the_gate(tmp_path: Path) -> None:
+    """A worker or workflow run has no bridge_call, so the bridge's own fallback must go through the seam."""
+    from personal_os import toolbridge
+    d = appmod.toolbox.bus.subscribe("tool.pre", lambda ev: Deny("off limits") if ev["name"] == "fs_glob" else None, owner="t", order=0)
+    try:
+        b = toolbridge.Bridge(appmod.toolbox, child_ctx(), ["fs_glob"], {"fs_glob": "on"}, None)
+        out = asyncio.run(b.handle("fs_glob", {"pattern": "*", "root": str(tmp_path)}))
+    finally:
+        d.dispose()
+    assert "off limits" in out["result"]["error"]
+
+
+def test_a_denied_worker_connector_call_does_not_taint_the_run(connector: list[str]) -> None:
+    ctx = child_ctx()
+    appmod.db.set_settings({"permissionMode": "allow_all", "permissionRules": {"allow": [], "ask": [], "deny": []}})
+    d = appmod.toolbox.bus.subscribe("tool.pre", lambda ev: Deny("off limits"), owner="t", order=0)
+    try:
+        ch = SimpleNamespace(ctx=ctx, id="ch", conversation_id=ctx["conversation_id"], message_id=None, desk_id=None, kind="general",
+                             touch=lambda **kw: None)
+        decision, result, ran = asyncio.run(appmod.subagent_mgr._exec_mcp(ch, "u1", SLUG, {}, "on"))
+    finally:
+        d.dispose()
+    assert connector == [] and "off limits" in result["error"] and not ctx["tainted"] and ctx["taint_sources"] == []
+
+
+def test_tool_post_args_have_credentials_scrubbed() -> None:
+    box = fake_toolbox()
+    seen: list[Any] = []
+    on(box, "tool.post", seen.append)
+    go(box, args={"url": "https://u:hunter2@example.com/x"})
+    assert "hunter2" not in json.dumps(seen[0]["args"])

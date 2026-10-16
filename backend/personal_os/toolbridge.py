@@ -23,6 +23,7 @@ import time
 from typing import Any, Awaitable, Callable
 
 from . import autoreview, permrules
+from .dispatch import dispatch_tool
 
 ALLOWED = frozenset({"fs_glob", "fs_grep", "read_local_file", "fs_edit", "search_documents", "web_search", "fetch_url"})
 MAX_SECONDS = 300
@@ -211,11 +212,11 @@ class Bridge:
                     self._paused += time.monotonic() - self._since
             if not allowed:
                 return self._refuse(name, f"the user declined {name}.")
-        # The run's own caller when the lane has one (undo snapshot, idempotency journal), else the toolbox directly.
+        # The run's own caller when the lane has one (undo snapshot, idempotency journal), else the seam directly.
         call = self.ctx.get("bridge_call")
         self.ctx["fs_outside_ok"] = fs_ask  # the user said yes to it above
         try:
-            result = await (call(name, args, self.ctx) if call else self.tb.call(name, args, self.ctx))
+            result = await (call(name, args, self.ctx) if call else dispatch_tool(self.tb, self.ctx, name, args, call_id=f"bridgecall{self.calls}"))
         finally:
             self.ctx["fs_outside_ok"] = False
         if self.tb.taints(name) and not (isinstance(result, dict) and result.get("error")):

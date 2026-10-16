@@ -13,14 +13,14 @@ from typing import Any, Awaitable, Callable
 
 from . import redact
 from .extensions.hooks import Ask, Deny, HookBus
-from .tools import Toolbox, denied, summarize_result, tool_error
+from .tools import Toolbox, _scrub_strings, denied, summarize_result, tool_error
 
-CTX_KEYS = ("run_id", "conversation_id", "project_id", "agent_id")
+_CTX_KEYS = ("run_id", "conversation_id", "project_id", "agent_id")
 
 
 def _hook_ctx(ctx: dict[str, Any]) -> dict[str, Any]:
     """The stable subset of a loop's tool context that a handler may read."""
-    return {**{k: ctx.get(k) for k in CTX_KEYS}, "tainted": bool(ctx.get("tainted"))}
+    return {**{k: ctx.get(k) for k in _CTX_KEYS}, "tainted": bool(ctx.get("tainted"))}
 
 
 def _refused(name: str, verdict: Deny | Ask) -> dict[str, Any]:
@@ -33,10 +33,10 @@ def _refused(name: str, verdict: Deny | Ask) -> dict[str, Any]:
 
 
 async def _observe(bus: HookBus, name: str, args: dict[str, Any], result: Any, error: str | None, started: float) -> None:
-    if error:
+    if error and bus.active("tool.error"):
         await bus.emit("tool.error", {"name": name, "error": redact.scrub_command_output(error)})
     if bus.active("tool.post"):
-        await bus.emit("tool.post", {"name": name, "args": copy.deepcopy(args),
+        await bus.emit("tool.post", {"name": name, "args": _scrub_strings(args),
                                      "result_preview": redact.scrub_command_output(summarize_result(result)), "error": error,
                                      "duration_ms": int((time.monotonic() - started) * 1000)})
 
@@ -64,6 +64,7 @@ async def dispatch_tool(toolbox: Toolbox, ctx: dict[str, Any], name: str, args: 
     error = result.get("error") if isinstance(result, dict) else None
     await _observe(bus, name, args, result, str(error) if error else None, started)
     if bus.active("tool.taint"):
-        for source in [name] if connector is not None else list(ctx.get("taint_sources") or ())[sources_before:]:
+        sources = [name] if connector is not None else list(ctx.get("taint_sources") or ())[sources_before:]
+        for source in sources:
             await bus.emit("tool.taint", {"name": name, "source": source})
     return result

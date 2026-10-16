@@ -13,7 +13,7 @@ from typing import Any, Awaitable, Callable
 
 from . import redact
 from .extensions.hooks import Ask, Deny, HookBus
-from .tools import Toolbox, _scrub_strings, denied, summarize_result, tool_error
+from .tools import Toolbox, scrub_strings, denied, summarize_result, tool_error
 
 _CTX_KEYS = ("run_id", "conversation_id", "project_id", "agent_id")
 
@@ -36,7 +36,7 @@ async def _observe(bus: HookBus, name: str, args: dict[str, Any], result: Any, e
     if error and bus.active("tool.error"):
         await bus.emit("tool.error", {"name": name, "error": redact.scrub_command_output(error)})
     if bus.active("tool.post"):
-        await bus.emit("tool.post", {"name": name, "args": _scrub_strings(args),
+        await bus.emit("tool.post", {"name": name, "args": scrub_strings(args),
                                      "result_preview": redact.scrub_command_output(summarize_result(result)),
                                      "error": redact.scrub_command_output(error) if error else None,
                                      "duration_ms": int((time.monotonic() - started) * 1000)})

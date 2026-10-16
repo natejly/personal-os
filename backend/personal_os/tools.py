@@ -60,14 +60,14 @@ ToolFn = Callable[..., Awaitable[Any]]
 log = logging.getLogger(__name__)
 
 
-def _scrub_strings(value: Any) -> Any:
+def scrub_strings(value: Any) -> Any:
     """Credentials out of every string in a stored note, whatever the field is called."""
     if isinstance(value, str):
         return redact.scrub_command_output(value)
     if isinstance(value, list):
-        return [_scrub_strings(item) for item in value]
+        return [scrub_strings(item) for item in value]
     if isinstance(value, dict):
-        return {(redact.scrub_command_output(key) if isinstance(key, str) else key): _scrub_strings(item)
+        return {(redact.scrub_command_output(key) if isinstance(key, str) else key): scrub_strings(item)
                 for key, item in value.items()}
     return value
 
@@ -1142,7 +1142,7 @@ class Toolbox:
         # reported as a failure, here, so no individual tool can forget to do it.
         res = checked(name, out)
         if item and isinstance(res, dict) and not res.get("error"):
-            res = {**res, "item": _scrub_strings(item)}  # so the reply can name the email, event, task or file, not its id
+            res = {**res, "item": scrub_strings(item)}  # so the reply can name the email, event, task or file, not its id
         if ctx.get("auto_attach"):  # a Telegram chat turn: whatever the agent just made (and the check accepted) rides on the reply
             try:
                 await sendfiles.attach_made(self, ctx, name, res)
@@ -1182,7 +1182,7 @@ class Toolbox:
                      "document_id": None if h.get("source") == "doc" else h["document_id"],
                      "doc_id": h.get("doc_id"), "document": h["name"], "chunk": h["idx"], "section": h.get("heading") or None,
                      "page": h.get("page"), "text": h["text"]} for i, h in enumerate(hits)]
-            return page(_scrub_strings(rows), offset=off, limit=lim, key="results")
+            return page(scrub_strings(rows), offset=off, limit=lim, key="results")
         R("search_documents", ToolSpec("search_documents", "Search the text of uploaded files and Files-editor docs (not memory or web). Excerpts are 'file' (read_document) or 'doc' (doc_read with doc_id). Cite with the excerpt number, like [4].",
             _obj({"query": {"type": "string", "description": "Search terms"}, "limit": {"type": "integer", "default": 8}, "offset": {"type": "integer", "default": 0},
                   "scope": {"type": "string", "enum": ["all", "files", "docs"], "default": "all"},
@@ -1211,14 +1211,14 @@ class Toolbox:
             if end > off:
                 from .context import range_ref
                 out["cite"] = _cite(ctx, range_ref("file", d["name"], text, off, end, document_id=d["id"]))
-            return _scrub_strings(out)
+            return scrub_strings(out)
         R("read_document", ToolSpec("read_document", "Read an uploaded file by id or filename (not a Files doc: doc_read); page with offset. Cite it with its number, like [4].",
             _obj({"document_id": {"type": "string"}, "offset": {"type": "integer", "default": 0}, "length": {"type": "integer", "default": 6000}}, ["document_id"]), read_document, "knowledge",
             examples=[{"document_id": "doc_3f2a91"}, {"document_id": "doc_3f2a91", "offset": 6000}, {"document_id": "doc_3f2a91", "offset": 0, "length": 2000}], taints=True))
 
         async def list_documents(ctx: dict[str, Any], offset: int = 0) -> Any:
             rows = [{"document_id": d["id"], "name": d["name"], "chunks": d["chunk_count"], "scope": "project" if d["project_id"] else "personal"} for d in self.documents.list(ctx["project_id"])]
-            return _scrub_strings(page(rows, offset=offset, limit=50, key="documents"))
+            return scrub_strings(page(rows, offset=offset, limit=50, key="documents"))
         R("list_documents", ToolSpec("list_documents", "List the uploaded files available in this chat's scope.", _obj({"offset": {"type": "integer", "default": 0}}, []), list_documents, "knowledge",
             examples=[{}, {"offset": 50}]))
 
@@ -1290,7 +1290,7 @@ class Toolbox:
                 if conv:
                     row["source"] = {"conversation_id": conv["id"], "title": conv.get("title")}
                 rows.append(row)
-            return _scrub_strings(page(rows, offset=offset, limit=SEARCH_PAGE, key="memories"))
+            return scrub_strings(page(rows, offset=offset, limit=SEARCH_PAGE, key="memories"))
         R("search_memory", ToolSpec("search_memory", (
             "Search what you remember about the user (facts, preferences, past chats), not their files. With kind or since the query may be empty (lists newest). "
             "Set include_chats for 'what did we discuss / decide about X': it also returns matching past conversations "
@@ -1401,7 +1401,7 @@ class Toolbox:
                 rels = [redact.scrub_command_output(
                     f"{by_id[e['source_id']]['label']} -[{e['relation']}]-> {by_id[e['target_id']]['label']}") for e in sub["edges"]]
             ents = [{"id": n["id"], "label": redact.scrub_command_output(str(n["label"] or "")),
-                     "type": n["type"], "properties": _scrub_strings(n["properties"])} for n in sub["nodes"]]
+                     "type": n["type"], "properties": scrub_strings(n["properties"])} for n in sub["nodes"]]
             return {"entities": ents, "relations": rels, "total_entities": len(ents), "total_relations": len(rels),
                     "truncated": len(ents) >= 40}
         R("graph_search", ToolSpec("graph_search", "Find people, projects and other entities in the knowledge graph, with direct relations; free-text facts: search_memory.",
@@ -1504,7 +1504,7 @@ class Toolbox:
                 _allow_url(ctx, row.get("url"))
                 if i >= off and row.get("url"):  # only the rows this page returns get a number, as in search_documents
                     row["cite"] = _cite(ctx, web_ref(str(row["url"]), str(row.get("title") or ""), str(row.get("snippet") or "")))
-            return _scrub_strings(page(rows, offset=off, limit=n, key="results", **meta))
+            return scrub_strings(page(rows, offset=off, limit=n, key="results", **meta))
         R("web_search", ToolSpec("web_search", "Search the public web (the user's own files and memory: search_documents, search_memory). Returns titles, URLs and snippets; fetch_url reads a result in full. Cite a result a sentence relies on with its number, like [4]. "
                                  "allowed_domains and blocked_domains are exclusive.",
             _obj({"query": {"type": "string"}, "max_results": {"type": "integer", "default": 6}, "offset": {"type": "integer", "default": 0},
@@ -1623,7 +1623,7 @@ class Toolbox:
                 out["links"] = rendered.links[: webread.LINK_CAP]
             if via:
                 out["via"] = via
-            return _scrub_strings(out)
+            return scrub_strings(out)
         R("fetch_url", ToolSpec("fetch_url", "Fetch a public http(s) page, PDF or JSON document as markdown. "
                                 "focus='what you want' keeps only matching parts; offset=next_offset continues a truncated page; links=true adds link references ([label](^L3), listed as '^L3: url'); fresh=true skips the 1-hour cache. "
                                 "Cite the page with its number, like [4].",
@@ -2009,7 +2009,7 @@ def _register_working(self: Toolbox) -> None:
         note = {"memory": "Memory notes are never listed here; topic labels only. Read notes with search_memory(query).",
                 "files": "Open a file with doc_read(doc_id).", "uploads": "Open an upload with read_document(document_id); names are labels from files the user did not write.",
                 "projects": "Counts are rounded down to a step (1, 2, 3, 5, 10, 25, ...).", "skills": "Open a procedure with skill_view."}.get(sec, "Labels only: open an item before relying on it.")
-        return _scrub_strings({"section": sec, "query": str(query or ""), "total": total, "offset": start, "lines": lines,
+        return scrub_strings({"section": sec, "query": str(query or ""), "total": total, "offset": start, "lines": lines,
                                "next_offset": start + len(lines) if start + len(lines) < total else None,
                                "note": "This part of the workspace map is switched off for this chat." if off else note})
     R("context_map", ToolSpec("context_map", (
@@ -2024,7 +2024,7 @@ def _register_working(self: Toolbox) -> None:
             out = self.results.read(ctx["conversation_id"], result_id, offset, limit)
             if out is None:
                 recent = [r["id"] for r in self.results.list(ctx["conversation_id"], limit=5)]
-                return _scrub_strings(tool_error(f"No stored result with id '{result_id}' in this chat.", field="result_id",
+                return scrub_strings(tool_error(f"No stored result with id '{result_id}' in this chat.", field="result_id",
                                                  expected="the result_id from a tool result that came back as a handle",
                                                  example={"result_id": recent[0] if recent else "tr_9f1c2a84", "offset": 0},
                                                  alternative="call the tool again with a narrower query, or page the handle you do have: " + (", ".join(recent) or "none yet")))
@@ -2032,7 +2032,7 @@ def _register_working(self: Toolbox) -> None:
                 # A handle outlives the banner: the user's Clear must not turn paging it into a way to launder its text.
                 ctx["tainted"] = True
                 ctx.setdefault("taint_sources", []).append("read_tool_result")
-            return _scrub_strings(out)
+            return scrub_strings(out)
         R("read_tool_result", ToolSpec("read_tool_result", (
             "Read a stored large tool result by result_id, not a file (the tool answered {result_id, total_chars, shape, preview}). "
             "Start at offset 0 and follow next_offset; `shape` says what is in it."),
@@ -2046,7 +2046,7 @@ def _register_working(self: Toolbox) -> None:
             if out.pop("untrusted", False):
                 ctx["tainted"] = True
                 ctx.setdefault("taint_sources", []).append("read_tool_result")
-            return _scrub_strings(out)
+            return scrub_strings(out)
         R("search_tool_results", ToolSpec("search_tool_results", (
             "Keyword search inside earlier large tool results only (not files or web); returns windows with result_id and offset for read_tool_result."),
             _obj({"query": {"type": "string", "description": "keywords"},
@@ -2145,7 +2145,7 @@ def _register_google(self: Toolbox) -> None:
             if names.get(e.get("calendar_id") or ""):
                 b["calendar"] = names[e["calendar_id"]]
             out.append(b)
-        return page(_scrub_strings(out), offset=offset, limit=30, key="events")
+        return page(scrub_strings(out), offset=offset, limit=30, key="events")
     R("calendar_events", ToolSpec("calendar_events", "List Google Calendar events (default: the next 2 days across every calendar the user has checked on in Google, such as work, classes and shared ones). `start` is a local YYYY-MM-DD or YYYY-MM-DDTHH:MM to look from (default now); `days` is the window length. Each event has `calendar` (its name) and `calendar_id`: pass that calendar_id, with the event id, to calendar_get, calendar_update, calendar_delete, calendar_respond or meeting_brief, since event ids belong to one calendar. calendar_id here narrows the list to one calendar; all_calendars also includes hidden and unchecked ones. calendar_get has an event's full details.",
         _obj({"days": {"type": "integer", "default": 2}, "start": {"type": "string"}, "offset": {"type": "integer", "default": 0},
               "calendar_id": {"type": "string", "description": "only this calendar (an id from a previous result)"},
@@ -2153,7 +2153,7 @@ def _register_google(self: Toolbox) -> None:
         examples=[{}, {"days": 7, "all_calendars": True}, {"days": 1, "start": "2026-10-02T09:00"}], taints=True))
 
     async def calendar_get(ctx: dict[str, Any], event_id: str, calendar_id: str = "primary") -> Any:
-        return _scrub_strings(await run(g.calendar_get, event_id, calendar_id))
+        return scrub_strings(await run(g.calendar_get, event_id, calendar_id))
     R("calendar_get", ToolSpec("calendar_get", "One event by id (from calendar_events; pass the calendar_id that row carried): recurrence, reminders, guests and RSVPs, color, visibility.",
         _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id"]), calendar_get, "google",
         examples=[{"event_id": "7abc123def"}], taints=True))
@@ -2171,7 +2171,7 @@ def _register_google(self: Toolbox) -> None:
                 for m in self.memories.list(ctx["project_id"], t)[:5]:
                     seen.setdefault(m["id"], m["content"])
             people.append({"email": mail, "name": name, "notes": list(seen.values())[:5]})
-        return _scrub_strings({"event": {k: e.get(k) for k in ("summary", "start", "end", "location", "description")},
+        return scrub_strings({"event": {k: e.get(k) for k in ("summary", "start", "end", "location", "description")},
                                "people": people})
     R("meeting_brief", ToolSpec("meeting_brief", "Pre-meeting brief for one calendar event (pass the calendar_id its calendar_events row carried): for each guest, what long-term memory holds about them. Read-only. Use before a meeting, or when asked who someone on the invite is.",
         _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id"]), meeting_brief, "google",
@@ -2184,7 +2184,7 @@ def _register_google(self: Toolbox) -> None:
         f = _event_fields({"summary": summary, "start": start, "end": end, "description": description, "location": location, "attendees": attendees,
                            "recurrence": recurrence, "reminder_minutes": reminder_minutes, "color_id": color_id, "visibility": visibility,
                            "busy": busy, "create_meet": create_meet})
-        return _scrub_strings(await _undoable("calendar_create", ctx, {"calendar_id": calendar_id, "send_updates": send_updates},
+        return scrub_strings(await _undoable("calendar_create", ctx, {"calendar_id": calendar_id, "send_updates": send_updates},
                                g.calendar_create, f, calendar_id, send_updates))
     R("calendar_create", ToolSpec("calendar_create", "Create ONE Google Calendar event. To schedule or rearrange anything with guests or more than one event, use calendar_find_time then calendar_propose instead: the user reviews the whole change on a calendar. ISO datetimes (YYYY-MM-DDTHH:MM) in the user's local time, or YYYY-MM-DD for all-day. Supports recurrence (RRULE), reminders, guests, Meet links, color and busy/free. send_updates='all' emails the guests their invites.",
         _obj(dict(_EVENT_PROPS), ["summary", "start"]), calendar_create, "google", "external",
@@ -2200,7 +2200,7 @@ def _register_google(self: Toolbox) -> None:
         f = _event_fields({"summary": summary, "start": start, "end": end, "description": description, "location": location, "attendees": attendees,
                            "recurrence": recurrence, "reminder_minutes": reminder_minutes, "color_id": color_id, "visibility": visibility,
                            "busy": busy, "create_meet": create_meet, "clear_meet": clear_meet})
-        return _scrub_strings(await _undoable("calendar_update", ctx, {"event_id": event_id, "calendar_id": calendar_id, "send_updates": send_updates},
+        return scrub_strings(await _undoable("calendar_update", ctx, {"event_id": event_id, "calendar_id": calendar_id, "send_updates": send_updates},
                                g.calendar_update, event_id, f, calendar_id, send_updates))
     R("calendar_update", ToolSpec("calendar_update", "Edit ONE Google Calendar event by id (pass the calendar_id its calendar_events row carried, or the edit looks on the primary calendar); for moving several events or rescheduling around conflicts use calendar_propose. Only the fields you pass change. `attendees` replaces the whole guest list. For a recurring event, the instance id edits that occurrence and its recurring_event_id (from calendar_get) edits the series.",
         _obj({"event_id": {"type": "string"}, "clear_meet": {"type": "boolean", "description": "remove the Meet link"}, **_EVENT_PROPS}, ["event_id"]), calendar_update, "google", "external",
@@ -2209,14 +2209,14 @@ def _register_google(self: Toolbox) -> None:
                   {"event_id": "7abc123def", "recurrence": []}]))
 
     async def calendar_delete(ctx: dict[str, Any], event_id: str, calendar_id: str = "primary", send_updates: str = "none") -> Any:
-        return _scrub_strings(await _undoable("calendar_delete", ctx, {"event_id": event_id, "calendar_id": calendar_id, "send_updates": send_updates},
+        return scrub_strings(await _undoable("calendar_delete", ctx, {"event_id": event_id, "calendar_id": calendar_id, "send_updates": send_updates},
                                g.calendar_delete, event_id, calendar_id, send_updates))
     R("calendar_delete", ToolSpec("calendar_delete", "Delete a Google Calendar event by id (pass the calendar_id its calendar_events row carried). For a recurring event, the instance id removes that occurrence and its recurring_event_id removes the whole series. Only when the user asked to delete it.",
         _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}, "send_updates": {"type": "string", "enum": ["none", "all", "externalOnly"]}}, ["event_id"]), calendar_delete, "google", "external",
         examples=[{"event_id": "7abc123def"}, {"event_id": "7abc123def", "send_updates": "all"}]))
 
     async def calendar_respond(ctx: dict[str, Any], event_id: str, response: str, calendar_id: str = "primary") -> Any:
-        return _scrub_strings(await _undoable("calendar_respond", ctx, {"event_id": event_id, "calendar_id": calendar_id, "send_updates": "all"},
+        return scrub_strings(await _undoable("calendar_respond", ctx, {"event_id": event_id, "calendar_id": calendar_id, "send_updates": "all"},
                                g.calendar_respond, event_id, response, calendar_id, "all"))
     R("calendar_respond", ToolSpec("calendar_respond", "RSVP to an event the user was invited to (pass the calendar_id its calendar_events row carried): accepted, declined or tentative.",
         _obj({"event_id": {"type": "string"}, "response": {"type": "string", "enum": ["accepted", "declined", "tentative"]}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id", "response"]), calendar_respond, "google", "external",
@@ -2230,7 +2230,7 @@ def _register_google(self: Toolbox) -> None:
 
     async def calendar_free_busy(ctx: dict[str, Any], time_min: str, time_max: str, calendars: list[str] | None = None,
                                  attendees: list[str] | None = None) -> Any:
-        return _scrub_strings(await run(g.calendar_free_busy, time_min, time_max, calendars, attendees))
+        return scrub_strings(await run(g.calendar_free_busy, time_min, time_max, calendars, attendees))
     R("calendar_free_busy", ToolSpec("calendar_free_busy", "Busy ranges between two ISO datetimes from Google's free/busy service, across the calendars the user has checked on (or the `calendars` ids you name) plus any `attendees` emails. Use it to see when people are busy; to find a time, use calendar_find_time.",
         _obj({"time_min": {"type": "string"}, "time_max": {"type": "string"}, "calendars": {"type": "array", "items": {"type": "string"}, "description": "calendar ids; default the calendars checked on"},
               "attendees": {"type": "array", "items": {"type": "string"}, "description": "other people's emails"}}, ["time_min", "time_max"]), calendar_free_busy, "google",
@@ -2282,7 +2282,7 @@ def _register_google(self: Toolbox) -> None:
             note += "No free slot fits; widen the window, shorten the meeting or loosen working_hours."
         if note.strip():
             out["note"] = note.strip()
-        return _scrub_strings(out)
+        return scrub_strings(out)
     R("calendar_find_time", ToolSpec("calendar_find_time", "Find free slots for a meeting: ranked candidates inside working hours (default 9-18 local, weekdays) that avoid the user's events on every calendar they have checked on (declined and 'free' events do not block) and, when given, the attendees' busy time. ALWAYS use this before proposing a time. Then call calendar_propose with the chosen slot.",
         _obj({"duration_minutes": {"type": "integer"}, "window_start": {"type": "string", "description": "ISO datetime or date to search from"},
               "window_end": {"type": "string", "description": "ISO datetime, or a date meaning through the end of that day"},
@@ -2365,7 +2365,7 @@ def _register_google(self: Toolbox) -> None:
     async def gmail_search(ctx: dict[str, Any], query: str = "is:unread in:inbox newer_than:14d", max_results: int = 25, offset: int = 0) -> Any:
         off, n = max(0, int(offset)), max(1, min(int(max_results), 100))
         # One past the page, so page() can tell whether more exist.
-        rows = _scrub_strings(await run(g.gmail_search, query, off + n + 1))
+        rows = scrub_strings(await run(g.gmail_search, query, off + n + 1))
         return page(rows, offset=off, limit=n, key="messages")
     R("gmail_search", ToolSpec("gmail_search", "Search Gmail with Gmail query syntax (e.g. 'from:alice newer_than:7d'). One call returns a page of up to 25 messages (headers and snippets), newest first; narrow the query rather than paging. Use offset (with the same query and max_results, from next_offset) only when has_more is true and you need a deeper look.",
         _obj({"query": {"type": "string", "default": "is:unread in:inbox newer_than:14d"}, "max_results": {"type": "integer", "default": 25}, "offset": {"type": "integer", "default": 0}}, []), gmail_search, "google",
@@ -2373,7 +2373,7 @@ def _register_google(self: Toolbox) -> None:
                   {"query": "has:attachment newer_than:30d", "max_results": 25, "offset": 25}], taints=True))
 
     async def gmail_read(ctx: dict[str, Any], message_id: str) -> Any:
-        return _scrub_strings(await run(g.gmail_get, message_id))
+        return scrub_strings(await run(g.gmail_get, message_id))
     R("gmail_read", ToolSpec("gmail_read", "Read the full body of an email by id (from gmail_search).",
         _obj({"message_id": {"type": "string"}}, ["message_id"]), gmail_read, "google",
         examples=[{"message_id": "18f2c1a9b7e4d0aa"}], taints=True))
@@ -2383,7 +2383,7 @@ def _register_google(self: Toolbox) -> None:
     _ADDR_PARAM = {"type": "string", "description": "Optional address list, same format as `to`"}
 
     def _mail_shown(out: Any) -> Any:
-        return _scrub_strings(out) if isinstance(out, dict) else out
+        return scrub_strings(out) if isinstance(out, dict) else out
 
     def _attach(ctx: dict[str, Any], entries: list[str]) -> list[dict[str, Any]]:
         """Each entry (an Uploads document id, or a file path on this Mac, which is copied into Uploads) as a resolved
@@ -2510,11 +2510,11 @@ def _register_google(self: Toolbox) -> None:
                 return tool_error(redact.scrub_command_output(
                     f"Send '{id}' can no longer be cancelled — it has already gone out."), field="id",
                                   alternative="tell the user it was sent, and offer to send a follow-up")
-            return _scrub_strings({"cancelled": id, "to": row["to"], "subject": row["subject"], "note": "It was never sent."})
+            return scrub_strings({"cancelled": id, "to": row["to"], "subject": row["subject"], "note": "It was never sent."})
         rows = [r for r in await run(self.outbox.list) if own(r)]
 
         def _shown(r: dict[str, Any], **extra: Any) -> dict[str, Any]:
-            return _scrub_strings({"id": r["id"], "to": r["to"], "subject": r["subject"], **extra})
+            return scrub_strings({"id": r["id"], "to": r["to"], "subject": r["subject"], **extra})
 
         waiting = [_shown(r, sends_in_seconds=r["seconds_left"]) for r in rows if r["status"] == "holding"]
         recent = [_shown(r, status=r["status"], verified=r["verified"], error=r.get("error"))
@@ -2530,7 +2530,7 @@ def _register_google(self: Toolbox) -> None:
         if not ids:
             return {"error": "Pass message_id, or message_ids to change several emails in one call."}
         target = ids if message_ids else ids[0]
-        return _scrub_strings(await run(g.gmail_modify, target, mark_read, archive, star))
+        return scrub_strings(await run(g.gmail_modify, target, mark_read, archive, star))
     R("gmail_modify", ToolSpec("gmail_modify", "Mark emails read/unread, star them, or archive them. To change more than one email, pass all their ids in message_ids in ONE call (a single batch request, up to 1000 ids) - never one call per email. Use message_id only for a single email.",
         _obj({"message_id": {"type": "string"}, "message_ids": {"type": "array", "items": {"type": "string"}, "description": "several emails changed together in one request"},
               "mark_read": {"type": "boolean"}, "archive": {"type": "boolean", "default": False}, "star": {"type": "boolean"}}, []), gmail_modify, "google", "external",
@@ -2538,7 +2538,7 @@ def _register_google(self: Toolbox) -> None:
                   {"message_id": "18f2c1a9b7e4d0aa", "mark_read": True}, {"message_id": "18f2c1a9b7e4d0aa", "star": True}]))
 
     def _task_text(row: dict[str, Any]) -> dict[str, Any]:
-        return _scrub_strings(row)
+        return scrub_strings(row)
 
     async def gtasks_list(ctx: dict[str, Any], show_completed: bool = False, offset: int = 0) -> Any:
         rows = await run(g.tasks_list, "@default", show_completed, max(0, int(offset)) + 51)
@@ -2555,12 +2555,12 @@ def _register_google(self: Toolbox) -> None:
         examples=[{"title": "File the tax return", "due": "2026-10-31"}, {"title": "Call the landlord", "notes": "about the boiler"}]))
 
     async def gtasks_complete(ctx: dict[str, Any], task_id: str) -> Any:
-        return _scrub_strings(await _undoable("google_tasks_complete", ctx, {"task_id": task_id}, g.tasks_complete, task_id))
+        return scrub_strings(await _undoable("google_tasks_complete", ctx, {"task_id": task_id}, g.tasks_complete, task_id))
     R("google_tasks_complete", ToolSpec("google_tasks_complete", "Mark a Google Task complete.",
         _obj({"task_id": {"type": "string"}}, ["task_id"]), gtasks_complete, "google", "external", examples=[{"task_id": "MTIzNDU2Nzg5"}]))
 
     def _drive_row(row: dict[str, Any]) -> dict[str, Any]:
-        return _scrub_strings(row)
+        return scrub_strings(row)
 
     async def gdrive_search(ctx: dict[str, Any], query: str = "", max_results: int = 20, offset: int = 0) -> Any:
         off, n = max(0, int(offset)), max(1, min(int(max_results), 50))
@@ -2571,7 +2571,7 @@ def _register_google(self: Toolbox) -> None:
         examples=[{}, {"query": "quarterly report"}, {"query": "invoice", "max_results": 10}], taints=True))
 
     async def gdrive_read(ctx: dict[str, Any], file_id: str, max_chars: int = 8000) -> Any:
-        return _scrub_strings(await run(g.drive_read, file_id, max_chars))
+        return scrub_strings(await run(g.drive_read, file_id, max_chars))
     R("google_drive_read", ToolSpec("google_drive_read", "Read a Drive file's text by id (from google_drive_search). Google Docs export as text, Sheets as CSV; binary files return only a link.",
         _obj({"file_id": {"type": "string"}, "max_chars": {"type": "integer", "default": 8000}}, ["file_id"]), gdrive_read, "google",
         examples=[{"file_id": "1r5tYw3xKj2mN8pQvLsHhGdE0aZcBfXo4"}], taints=True))
@@ -2584,13 +2584,13 @@ def _register_google(self: Toolbox) -> None:
         examples=[{}, {"query": "budget", "kind": "sheet"}, {"query": "notes"}], taints=True))
 
     async def gdocs_read(ctx: dict[str, Any], document_id: str) -> Any:
-        return _scrub_strings(await run(g.docs_get, document_id))
+        return scrub_strings(await run(g.docs_get, document_id))
     R("google_docs_read", ToolSpec("google_docs_read", "Read a Google Doc's text by id (from google_docs_search).",
         _obj({"document_id": {"type": "string"}}, ["document_id"]), gdocs_read, "google",
         examples=[{"document_id": "1aBcD_efGhIJ"}], taints=True))
 
     def _doc_result(out: Any) -> Any:
-        return _scrub_strings(out) if isinstance(out, dict) else out
+        return scrub_strings(out) if isinstance(out, dict) else out
 
     async def gdocs_create(ctx: dict[str, Any], title: str, content: str = "") -> Any:
         return _doc_result(await run(g.docs_create, title, content))
@@ -2605,14 +2605,14 @@ def _register_google(self: Toolbox) -> None:
         examples=[{"document_id": "1aBcD_efGhIJ", "content": "Follow-ups:\n- book the room"}]))
 
     async def gsheets_read(ctx: dict[str, Any], spreadsheet_id: str, range: str | None = None) -> Any:
-        return _scrub_strings(await run(g.sheets_read, spreadsheet_id, range))
+        return scrub_strings(await run(g.sheets_read, spreadsheet_id, range))
     R("google_sheets_read", ToolSpec("google_sheets_read", "Read a Google Sheet by id (from google_docs_search). Default: the first tab; range as A1 notation like 'Sheet1!A1:D50'.",
         _obj({"spreadsheet_id": {"type": "string"}, "range": {"type": "string"}}, ["spreadsheet_id"]), gsheets_read, "google",
         examples=[{"spreadsheet_id": "1aBcD_efGhIJ"}, {"spreadsheet_id": "1aBcD_efGhIJ", "range": "Budget!A1:D50"}], taints=True))
 
     async def gsheets_write(ctx: dict[str, Any], spreadsheet_id: str, range: str, values: list[list[Any]], append: bool = False) -> Any:
         out = await run(g.sheets_write, spreadsheet_id, range, values, append)
-        return _scrub_strings(out) if isinstance(out, dict) else out
+        return scrub_strings(out) if isinstance(out, dict) else out
     R("google_sheets_write", ToolSpec("google_sheets_write", "Write rows to a Google Sheet range (A1 notation). append=true adds rows after the range's data instead of overwriting.",
         _obj({"spreadsheet_id": {"type": "string"}, "range": {"type": "string"}, "values": {"type": "array", "items": {"type": "array"}}, "append": {"type": "boolean", "default": False}}, ["spreadsheet_id", "range", "values"]), gsheets_write, "google", "external",
         examples=[{"spreadsheet_id": "1aBcD_efGhIJ", "range": "Sheet1!A2", "values": [["2026-10-01", "Rent", 1400]]},
@@ -2721,10 +2721,10 @@ def _register_docs(self: Toolbox) -> None:
             out["candidates"] = [{"doc_id": c["id"], "title": c["title"] or ""} for c in cands]
         elif self.documents.get(key):
             out["hint"] = "that id is an uploaded file, not a Files doc: use read_document with it"
-        return _scrub_strings(out)
+        return scrub_strings(out)
 
     async def doc_list(ctx: dict[str, Any], query: str = "") -> Any:
-        return [_scrub_strings({"doc_id": d["id"], "title": d["title"] or "", "words": d["words"],
+        return [scrub_strings({"doc_id": d["id"], "title": d["title"] or "", "words": d["words"],
                                 "scope": "project" if d["project_id"] else "personal",
                                 "pending_edits": d["pending"], "folder": d["folder"] or None})
                 for d in self.docs.list(q=query) if _visible(ctx, d)]
@@ -2733,7 +2733,7 @@ def _register_docs(self: Toolbox) -> None:
 
     async def doc_search(ctx: dict[str, Any], query: str, limit: int = 8) -> Any:
         hits = self.docs.search(query, ctx.get("project_id"), limit=max(1, min(int(limit), 20)))
-        return _scrub_strings({"results": hits, "count": len(hits)})
+        return scrub_strings({"results": hits, "count": len(hits)})
     R("doc_search", ToolSpec("doc_search", "Search Files-editor docs only, a snippet per hit; uploads too: search_documents.",
         _obj({"query": {"type": "string"}, "limit": {"type": "integer", "default": 8}}, ["query"]), doc_search, "docs"))
 
@@ -2755,7 +2755,7 @@ def _register_docs(self: Toolbox) -> None:
             links = [b["title"] for b in (self.docs.backlinks(d["id"]) or []) if _find(ctx, b["id"])][:10]
             if links:
                 out["linked_from"] = links
-        return _scrub_strings(out)
+        return scrub_strings(out)
     R("doc_read", ToolSpec("doc_read", "Read a Files-editor doc by id or title, with line numbers (not uploads: read_document; first page has linked_from). Read before doc_edit, which matches exact text. Page with from_line/to_line. Cite lines you rely on with their number, like [4].",
         _obj({"doc": {"type": "string", "description": "File id or title"}, "from_line": {"type": "integer", "default": 1}, "to_line": {"type": "integer"}}, ["doc"]), doc_read, "docs",
         examples=[{"doc": "Launch plan", "from_line": 1, "to_line": 40}]))
@@ -2766,7 +2766,7 @@ def _register_docs(self: Toolbox) -> None:
         d = self.docs.create(title, content, ctx.get("project_id"), folder=folder, author="assistant")
         if self.chat_files is not None:
             self.chat_files.record(ctx.get("conversation_id"), "note", d["id"], d["title"], "created", ctx.get("message_id"))
-        return _scrub_strings({"created": d["title"], "doc_id": d["id"], "words": d["words"],
+        return scrub_strings({"created": d["title"], "doc_id": d["id"], "words": d["words"],
                 "filed_under": (d["folder"] or "the project's root") if d["project_id"] else (d["folder"] or "Personal"),
                 "note": "Created in Files. The user can undo it from the file's revision history."})
     R("doc_create", ToolSpec("doc_create", "Create a file in Files (markdown, LaTeX as $x$ / $$x$$) for something the user asked you to draft, write up or outline and will keep and edit. Filed under this chat's project, or Personal; `folder` must be a path doc_list has shown.",
@@ -2797,7 +2797,7 @@ def _register_docs(self: Toolbox) -> None:
                     return {"error": f"edits[{i}].find is empty", "hint": "to add text use 'append'; to rewrite the body use 'content'"}
                 hits = new.count(find)
                 if hits != 1:
-                    return _scrub_strings({"error": f"edits[{i}]: 'find' matched {hits} times, need exactly 1",
+                    return scrub_strings({"error": f"edits[{i}]: 'find' matched {hits} times, need exactly 1",
                                            "hint": ("copy the text verbatim from doc_read, including punctuation and capitalisation"
                                                     if hits == 0 else "include a surrounding line so the match is unique"),
                                            "doc_id": d["id"]})
@@ -2815,7 +2815,7 @@ def _register_docs(self: Toolbox) -> None:
                 return {"error": f"Not proposed: the edit would break this dashboard ({e})", "doc_id": d["id"],
                         "hint": "keep the JSON envelope valid; doc_read shows it"}
         if new == body and not retitle:
-            return _scrub_strings({"doc_id": d["id"], "unchanged": True, "note": "The edit produced no change, so nothing was proposed."})
+            return scrub_strings({"doc_id": d["id"], "unchanged": True, "note": "The edit produced no change, so nothing was proposed."})
         rev = self.docs.propose(d["id"], new, summary or "Assistant edit", tool="doc_edit", title_after=retitle)
         if not rev:
             return _missing(ctx, doc)
@@ -2828,11 +2828,11 @@ def _register_docs(self: Toolbox) -> None:
             rev = self.docs.revision(rev["id"]) or rev
             if self.chat_files is not None:
                 self.chat_files.record(ctx.get("conversation_id"), "note", d["id"], applied.get("title") or d["title"], "edited", ctx.get("message_id"))
-            return _scrub_strings({"doc_id": d["id"], "title": applied.get("title") or d["title"], "revision_id": rev["id"],
+            return scrub_strings({"doc_id": d["id"], "title": applied.get("title") or d["title"], "revision_id": rev["id"],
                     "status": "applied", "lines_added": rev["stat"]["added"], "lines_removed": rev["stat"]["removed"],
                     "note": "Written into the file. The user sees the diff in the chat and can undo it from the file's "
                             "history. Tell them what you changed. Do not paste the file back."})
-        return _scrub_strings({"doc_id": d["id"], "title": d["title"], "revision_id": rev["id"], "status": "pending_review",
+        return scrub_strings({"doc_id": d["id"], "title": d["title"], "revision_id": rev["id"], "status": "pending_review",
                 "lines_added": rev["stat"]["added"], "lines_removed": rev["stat"]["removed"],
                 "note": "Not applied yet. The user sees the diff in the chat and accepts or rejects it. "
                         "Tell them what you changed and that it is waiting. Do not paste the file back."})
@@ -2856,7 +2856,7 @@ def _register_docs(self: Toolbox) -> None:
         if not d:
             return _missing(ctx, doc)
         self.trash.trash("doc", d["id"])
-        return _scrub_strings({"deleted": d["title"] or "", "doc_id": d["id"],
+        return scrub_strings({"deleted": d["title"] or "", "doc_id": d["id"],
                                "note": "Moved to the trash; the user can restore it from Settings → Trash for 30 days."})
     spec = ToolSpec("doc_delete", "Trash a file by id or title (restorable 30 days). Use doc_edit for partial changes; delete only when asked to remove the file.",
         _obj({"doc": {"type": "string", "description": "File id or title"}}, ["doc"]), doc_delete, "docs", "writes")
@@ -2881,7 +2881,7 @@ def _register_docs(self: Toolbox) -> None:
         if not d:
             return _missing(ctx, doc)
         rows = self.docs.comments(d["id"], include_resolved) or []
-        return _scrub_strings({"doc_id": d["id"], "title": d["title"], "threads": _thread_view(rows),
+        return scrub_strings({"doc_id": d["id"], "title": d["title"], "threads": _thread_view(rows),
                                "note": "Each thread quotes the passage it is about. Reply in a thread with doc_comment_reply; "
                                        "a change to the text itself goes through doc_edit."})
     R("doc_comments", ToolSpec("doc_comments", "Read the comment threads (author, quoted passage) on a file. Open threads by default. Use when the user asks about or wants comments addressed.",
@@ -2898,7 +2898,7 @@ def _register_docs(self: Toolbox) -> None:
         c = self.docs.add_comment(d["id"], body, author="agent", parent_id=thread_id)
         if not c:
             return {"error": "The reply was empty, so nothing was posted"}
-        return _scrub_strings({"doc_id": d["id"], "thread_id": c["parent_id"], "comment_id": c["id"], "status": "posted",
+        return scrub_strings({"doc_id": d["id"], "thread_id": c["parent_id"], "comment_id": c["id"], "status": "posted",
                                "note": "Posted in the file's comment panel as the assistant. The user resolves the thread themselves."})
     R("doc_comment_reply", ToolSpec("doc_comment_reply", "Reply in a file's comment thread as the assistant. Read it with doc_comments first; answer it or say what you changed. Does not edit the file or resolve the thread.",
         _obj({"thread_id": {"type": "string", "description": "thread_id from doc_comments"}, "body": {"type": "string", "description": "The reply, markdown"}}, ["thread_id", "body"]),
@@ -2909,7 +2909,7 @@ def _register_docs(self: Toolbox) -> None:
         return self.dashboards.find(name, lambda r: _visible(ctx, r))
 
     def _no_board(name: str) -> dict[str, Any]:
-        return _scrub_strings({"error": f"No saved dashboard matching '{name}'", "dashboards": [r["title"] for r in self.dashboards.list()][:10]})
+        return scrub_strings({"error": f"No saved dashboard matching '{name}'", "dashboards": [r["title"] for r in self.dashboards.list()][:10]})
 
     async def dashboard_save(ctx: dict[str, Any], title: str, format: str | None = None, mode: str | None = None,
                              bindings: list[Any] | None = None, views: list[Any] | None = None, html: str | None = None) -> Any:
@@ -2919,7 +2919,7 @@ def _register_docs(self: Toolbox) -> None:
             return {"error": f"Dashboard not saved: {e}"}
         if self.chat_files is not None:
             self.chat_files.record(ctx.get("conversation_id"), "note", d["id"], d["title"], "created", ctx.get("message_id"))
-        return _scrub_strings({"saved": d["title"], "doc_id": d["id"], "dashboard": {"id": d["id"], "title": d["title"]},
+        return scrub_strings({"saved": d["title"], "doc_id": d["id"], "dashboard": {"id": d["id"], "title": d["title"]},
                                "note": "Saved in the Dashboards folder. Change it later with doc_edit on this doc id."})
     R("dashboard_save", ToolSpec("dashboard_save", (
         "Save a dashboard the user wants to keep: a chart or a page of numbers that stays current. Prefer format 'spec': "
@@ -2942,9 +2942,9 @@ def _register_docs(self: Toolbox) -> None:
         try:
             r = self.dashboards.render(d)
         except ValueError as e:
-            return _scrub_strings({"error": f"The dashboard file is invalid: {e}", "doc_id": d["id"], "hint": "fix it with doc_edit"})
+            return scrub_strings({"error": f"The dashboard file is invalid: {e}", "doc_id": d["id"], "hint": "fix it with doc_edit"})
         bad = "; ".join(f"{f['binding']}: {f['error']}" + (" (showing the last good data)" if f["lastGoodAt"] else "") for f in r["failed"])
-        return _scrub_strings({"dashboard": {"id": d["id"], "title": d["title"]},
+        return scrub_strings({"dashboard": {"id": d["id"], "title": d["title"]},
                                "summary": f"{d['title']} ({r['mode']}, {r['format']}), updated {r['updatedAt']}."
                                           + (f" Problems with bindings: {bad}." if bad else "")
                                           + f" It is shown to the user above. To change it, use doc_edit on doc id {d['id']}."})
@@ -2960,10 +2960,10 @@ def _register_docs(self: Toolbox) -> None:
             ps = Projects(self.docs.db).list()
             hit = next((p for p in ps if want in (p["id"], p["name"]) or p["name"].lower() == want.lower()), None)
             if not hit:
-                return _scrub_strings({"error": f"No project matching '{want}'", "projects": [p["name"] for p in ps][:10]})
+                return scrub_strings({"error": f"No project matching '{want}'", "projects": [p["name"] for p in ps][:10]})
             pid = hit["id"]
         self.dashboards.pin(d["id"], pid)
-        return _scrub_strings({"doc_id": d["id"], "title": d["title"], "scope": "project" if pid else "personal",
+        return scrub_strings({"doc_id": d["id"], "title": d["title"], "scope": "project" if pid else "personal",
                                "note": "Moved to that scope's Dashboards folder."})
     R("dashboard_pin", ToolSpec("dashboard_pin", "Move a saved dashboard into a project's Dashboards folder, or to Personal (project empty or 'personal').",
         _obj({"name": {"type": "string", "description": "Dashboard title or doc id"},
@@ -2992,7 +2992,7 @@ def _register_mac(self: Toolbox) -> None:
 
     async def find_files(ctx: dict[str, Any], query: str, name_only: bool = False, folders: list[str] | None = None, limit: int = 20) -> Any:
         try:
-            return _scrub_strings(await mac.mdfind(query, folders=folders, name_only=bool(name_only), limit=limit))
+            return scrub_strings(await mac.mdfind(query, folders=folders, name_only=bool(name_only), limit=limit))
         except mac.LocalPathError as e:
             return tool_error(redact.scrub_command_output(f"find_files: {e}"), field="folders", expected="folders on this Mac, e.g. ~/Downloads",
                               example={"query": "lease agreement", "folders": ["~/Documents"]}, alternative=ALTERNATIVE["find_files"])
@@ -3009,10 +3009,10 @@ def _register_mac(self: Toolbox) -> None:
         try:
             early = fsx.pre_read(self, ctx, path, offset, length)
             if early is not None:
-                return _scrub_strings(early) if isinstance(early, dict) else early
+                return scrub_strings(early) if isinstance(early, dict) else early
             out = await asyncio.to_thread(mac.read_local, path, offset, length)
             fsx.post_read(self, ctx, path, out)
-            return _scrub_strings(out)
+            return scrub_strings(out)
         except mac.LocalPathError as e:
             return tool_error(redact.scrub_command_output(f"read_local_file: {e}"), field="path", expected="a path find_files returned",
                               example={"path": "~/Documents/notes.txt"}, alternative=ALTERNATIVE["read_local_file"])
@@ -3126,14 +3126,14 @@ def _register_mac(self: Toolbox) -> None:
             names = await mac.list_shortcuts(folder)
         except ValueError as e:
             return tool_error(redact.scrub_command_output(f"list_shortcuts: {e}"), field="folder", example={"folder": "Grain"})
-        return _scrub_strings(page(names, limit=100, key="shortcuts"))
+        return scrub_strings(page(names, limit=100, key="shortcuts"))
     R("list_shortcuts", ToolSpec("list_shortcuts", "List the user's Apple Shortcuts by name, optionally only one Shortcuts folder. Use it to get the exact name for run_shortcut.",
         _obj({"folder": {"type": "string"}}, []), list_shortcuts, "mac", examples=[{}, {"folder": "Grain"}]))
 
     async def run_shortcut(ctx: dict[str, Any], name: str, input: str | None = None, timeout: int = 60) -> Any:
         try:
             out = await mac.run_shortcut(name, input, timeout=max(5, min(int(timeout), 300)))
-            return _scrub_strings(out) if isinstance(out, dict) else out
+            return scrub_strings(out) if isinstance(out, dict) else out
         except ValueError as e:
             return tool_error(redact.scrub_command_output(f"run_shortcut: {e}"), field="name", example={"name": "Add to Reading List", "input": "https://example.com"})
     R("run_shortcut", ToolSpec("run_shortcut", "Run one of the user's Apple Shortcuts by exact name, optionally passing text as its input, and return its output. A Shortcut acts with the permissions the user gave it (Messages, Reminders, Home…), so this is how you reach other Mac apps.",
@@ -3152,7 +3152,7 @@ def _register_mac(self: Toolbox) -> None:
                 f"open_page refused {url}: {str(e).replace('fetch_url', 'open_page')}"), field="url",
                 alternative=e.alternative or ALTERNATIVE["open_page"])
         opened = await mac.page_bridge.open_page(cur, max_chars=max_chars, wait_for=wait_for, links=links)
-        return _scrub_strings(opened) if isinstance(opened, dict) else opened
+        return scrub_strings(opened) if isinstance(opened, dict) else opened
     R("open_page", ToolSpec("open_page", "Load a web page in an offscreen browser (its own cookies, separate from the user's) and return its title and visible text. Use it when a page needs JavaScript and fetch_url came back empty. Read-only: it never clicks or fills in forms. wait_for='css selector' waits for that element to appear (lazy pages); links=true also returns up to 40 page links.",
         _obj({"url": {"type": "string"}, "max_chars": {"type": "integer", "default": 20000}, "wait_for": {"type": "string"}, "links": {"type": "boolean", "default": False}}, ["url"]), open_page, "web", "network",
         examples=[{"url": "https://example.com/app/pricing"}], taints=True))
@@ -3237,7 +3237,7 @@ def _register_skills(self: Toolbox) -> None:
         s = self.skills.propose(name, description, procedure, project_id=ctx.get("project_id"),
                                 conversation_id=ctx.get("conversation_id"), source="proposed")
         return {"skill_id": s["id"], "name": redact.scrub_command_output(str(s["name"] or "")), "status": s["status"],
-                "lint": redact.scrub_command_output(skillbuild.lint_summary(findings)), "findings": _scrub_strings(findings),
+                "lint": redact.scrub_command_output(skillbuild.lint_summary(findings)), "findings": scrub_strings(findings),
                 "note": "Saved as a candidate, which is not in use: nothing you write here reaches a later chat until "
                         "the user reads it and approves it in Library → Skills. Tell them it is waiting there, and "
                         "say in one line what it does."}
@@ -3282,7 +3282,7 @@ def _register_skills(self: Toolbox) -> None:
                                        source="proposed")
             return {"skill_id": fork["id"], "status": "candidate", "forked_from": s["id"],
                     "lint": redact.scrub_command_output(skillbuild.lint_summary(findings)),
-                    "findings": _scrub_strings(findings),
+                    "findings": scrub_strings(findings),
                     "note": redact.scrub_command_output(
                         f"“{s['name']}” is approved and in use, so it was not edited. Your version was saved "
                         "beside it as a candidate for the user to compare and approve in Library → Skills. Tell "
@@ -3292,7 +3292,7 @@ def _register_skills(self: Toolbox) -> None:
             return _missing(ctx, skill)
         return {"skill_id": updated["id"], "name": redact.scrub_command_output(str(updated["name"] or "")),
                 "status": updated["status"], "summary": redact.scrub_command_output(str(summary or "")),
-                "lint": redact.scrub_command_output(skillbuild.lint_summary(findings)), "findings": _scrub_strings(findings),
+                "lint": redact.scrub_command_output(skillbuild.lint_summary(findings)), "findings": scrub_strings(findings),
                 "note": "Edited in place; it was already a candidate, so it is still waiting for the user's approval."}
     R("skill_revise", ToolSpec("skill_revise", (
         "Revise one of the user's procedures. A candidate is edited in place. An approved one is never touched: your "
@@ -3412,7 +3412,7 @@ def _register_cowork(self: Toolbox) -> None:
             entries = ws.tree(desk_id, prefix)
         except WorkspaceError as e:
             return _fail("desk_list_files", e)
-        return _scrub_strings(page(entries, offset=offset, limit=limit, key="files"))
+        return scrub_strings(page(entries, offset=offset, limit=limit, key="files"))
     R("desk_list_files", ToolSpec("desk_list_files", "List the desk workspace: outputs/ (the only place a deliverable can live), work/ (scratch), anything else you wrote. Entries carry size and whether changed since the desk started.",
         _obj({"prefix": {"type": "string", "description": "Subdirectory, e.g. 'outputs'"},
               "offset": {"type": "integer", "default": 0}, "limit": {"type": "integer", "default": 50}}, []),
@@ -3472,7 +3472,7 @@ def _register_cowork(self: Toolbox) -> None:
                 return _fail("desk_read_file", e)
             _note_read(ctx, desk_id, path, out)
             _taint_if_fetched(ctx, ws, desk_id, path)
-            return _scrub_strings(out)
+            return scrub_strings(out)
         # Not plain text: PDF, office files, pictures, anything with NULs. extract_text returns a marker when it
         # cannot read a format, which is passed on rather than hidden.
         kind = TEXT_READ_KINDS.get(suffix) or ("image" if suffix in PICTURE_EXT else "binary")
@@ -3488,7 +3488,7 @@ def _register_cowork(self: Toolbox) -> None:
         if kind == "image":
             out["note"] = "This is a picture: use view_image to look at it. The text above is only what could be read off it."
         _taint_if_fetched(ctx, ws, desk_id, path)
-        return _scrub_strings(out)
+        return scrub_strings(out)
     # Deliberately not taints=True: the workspace holds what this agent itself wrote, and marking it
     # untrusted would force every later external step of its own approved plan back to a card.
     R("desk_read_file", ToolSpec("desk_read_file", "Read a file in this desk's workspace by relative path. PDFs and office files (.docx, .xlsx, .pptx) come back as extracted text; for a picture use view_image. Follow next_offset to page a long file.",
@@ -3515,7 +3515,7 @@ def _register_cowork(self: Toolbox) -> None:
             self.fs_reads.note_full(str(ctx.get("conversation_id") or ""), p, p.stat().st_mtime_ns, len(p.read_text(encoding="utf-8", errors="replace")))
         except (WorkspaceError, OSError):
             pass
-        return _scrub_strings(res)
+        return scrub_strings(res)
     R("desk_write_file", ToolSpec("desk_write_file", "Write a text file in the desk workspace. Finished work goes under outputs/ (what the user reviews), the rest under work/. 'create' refuses to overwrite; pass mode='overwrite' or 'append' deliberately.",
         _obj({"path": {"type": "string", "description": "Workspace-relative"},
               "content": {"type": "string"},
@@ -3533,7 +3533,7 @@ def _register_cowork(self: Toolbox) -> None:
             out = dict(ws.trash(desk_id, path))
             if isinstance(out.get("trashed_to"), str):
                 out["trashed_to"] = redact.scrub_command_output(out["trashed_to"])
-            return _scrub_strings(out)
+            return scrub_strings(out)
         except WorkspaceError as e:
             return _fail("desk_trash_file", e)
     R("desk_trash_file", ToolSpec("desk_trash_file", "Move a desk workspace file to .trash/ (never deleted; does not free quota).",
@@ -3575,7 +3575,7 @@ def _register_cowork(self: Toolbox) -> None:
         if marks:  # delivered anyway (a quoted TODO can be legitimate), but the agent is told what a reviewer will see
             out["warning"] = ("The file still contains placeholder text: " + ", ".join(marks)
                               + ". If these are unfinished, fix them and deliver again.")
-        return _scrub_strings(out)
+        return scrub_strings(out)
     R("desk_deliver", ToolSpec("desk_deliver", "Nominate a file under outputs/ as a deliverable, queued for the user's review; rewriting it afterwards sends it back for review. The user chooses what it becomes (editor file, upload, download), and can turn a checklist into todos or a file starting with To: and Subject: lines (then a blank line and the body) into a Gmail draft.",
         _obj({"path": {"type": "string", "description": "A path under outputs/"},
               "title": {"type": "string", "description": "Name shown to the user"},
@@ -3729,7 +3729,7 @@ def _register_cowork(self: Toolbox) -> None:
         suffix = PurePosixPath(saved).suffix.lower()
         hint = ("view_image looks at a picture" if suffix in PICTURE_EXT or ctype.startswith("image/")
                 else "desk_read_file reads it (PDFs and office files come back as extracted text)")
-        return _scrub_strings({"path": saved, "bytes": n, "sha256": h.hexdigest(), "content_type": ctype,
+        return scrub_strings({"path": saved, "bytes": n, "sha256": h.hexdigest(), "content_type": ctype,
                                "url": cur, "redirects": hops, "hint": hint})
     R("desk_fetch_file", ToolSpec("desk_fetch_file", "Download a public http(s) file (max 50 MB) into the desk workspace, never overwriting. Read it with desk_read_file or view_image. Untrusted third-party content.",
         _obj({"url": {"type": "string"}, "path": {"type": "string", "description": "Default work/downloads/<name>"}}, ["url"]),
@@ -3770,7 +3770,7 @@ def _register_reach(self: Toolbox) -> None:
         cap = max(2000, min(int(max_chars), 80000))
         t = out.get("transcript") or ""
         out["transcript"], out["transcript_truncated"] = t[:cap], len(t) > cap
-        return _scrub_strings(out)
+        return scrub_strings(out)
     R("youtube_video", ToolSpec("youtube_video", "Read a YouTube video: title, channel, description and the full transcript "
                                 "(subtitles, else auto captions), stamped [m:ss] about every 30 seconds.",
         _obj({"url": {"type": "string"}, "lang": {"type": "string", "default": "en"}, "max_chars": {"type": "integer", "default": 30000}}, ["url"]),
@@ -3785,7 +3785,7 @@ def _register_reach(self: Toolbox) -> None:
         shown = []
         for row in rows:
             _allow_url(ctx, row.get("url"))
-            shown.append(_scrub_strings(dict(row)))
+            shown.append(scrub_strings(dict(row)))
         return {"results": shown}
     R("youtube_search", ToolSpec("youtube_search", "Search YouTube. Returns video titles, URLs, channels, durations and view counts; "
                                  "call youtube_video to read one.",
@@ -3800,7 +3800,7 @@ def _register_reach(self: Toolbox) -> None:
         shown = []
         for row in rows:
             _allow_url(ctx, row.get("url"))
-            shown.append(_scrub_strings(row))
+            shown.append(scrub_strings(row))
         return {"results": shown}
     R("github_search", ToolSpec("github_search", "Search GitHub. kind: repos (default), issues (issues and PRs) or code. "
                                 "Accepts GitHub search qualifiers such as language:, stars:>, repo:, is:open.",
@@ -3813,7 +3813,7 @@ def _register_reach(self: Toolbox) -> None:
     async def github_read(ctx: dict[str, Any], repo: str, path: str = "", number: int | None = None, ref: str = "",
                           max_chars: int = 20000) -> Any:
         try:
-            return _scrub_strings(await reach.github_read(
+            return scrub_strings(await reach.github_read(
                 repo, path=path, number=number, ref=ref, token=await asyncio.to_thread(reach.gh_token, self.settings()),
                 max_chars=max(2000, min(int(max_chars), 60000))))
         except (reach.ReachError, httpx.HTTPError, ValueError, KeyError) as e:
@@ -3848,7 +3848,7 @@ def _register_reach(self: Toolbox) -> None:
             return failed("read_feed", e)
         for it in out["items"]:
             _allow_url(ctx, it.get("url"))
-        return _scrub_strings(out)
+        return scrub_strings(out)
     R("read_feed", ToolSpec("read_feed", "Read an RSS or Atom feed: the latest items with titles, links, dates and summaries.",
         _obj({"url": {"type": "string"}, "max_items": {"type": "integer", "default": 20}}, ["url"]), read_feed, "web", "network",
         examples=[{"url": "https://hnrss.org/frontpage"}, {"url": "https://simonwillison.net/atom/everything/", "max_items": 10}], taints=True))

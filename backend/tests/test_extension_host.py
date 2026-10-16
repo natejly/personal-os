@@ -36,7 +36,7 @@ def run(coro: Any) -> Any:
 class ManifestTests(unittest.TestCase):
     def test_minimal_manifest_gets_defaults(self) -> None:
         m = Manifest.from_dict(BASE)
-        self.assertEqual((m.kind, m.enabled, m.activation, m.hooks, m.tool_names), ("extension", True, ("startup",), {}, []))
+        self.assertEqual((m.kind, m.enabled, m.activation, m.hooks), ("extension", True, ("startup",), {}))
 
     def test_full_manifest(self) -> None:
         m = Manifest.from_dict(manifest(
@@ -44,7 +44,7 @@ class ManifestTests(unittest.TestCase):
             contributes={"tools": [{"name": "demo_x"}], "routes": {"prefix": "/demo"}},
             hooks={"app.start": {}, "context.contribute": {"timeoutMs": 300, "priority": 10, "onFailure": "deny"}},
             permissions=["db:own", "service:mcp"], data={"tables": ["demo_t"], "migrations": "migrations/"}))
-        self.assertEqual(m.tool_names, ["demo_x"])
+        self.assertEqual(m.contributes["tools"], [{"name": "demo_x"}])
         self.assertEqual(m.hooks["context.contribute"]["timeoutMs"], 300)
         self.assertEqual((m.requires_services, m.provides_services), (("mcp",), ("demo",)))
 
@@ -56,7 +56,7 @@ class ManifestTests(unittest.TestCase):
 
     def test_rejects(self) -> None:
         bad = {
-            "unknown top-level key": manifest(tier="builtin"),
+            "unknown top-level key": manifest(tier="x"),
             "missing id": {k: v for k, v in BASE.items() if k != "id"},
             "bad id": manifest(id="Demo_1"),
             "bad version": manifest(version="1"),
@@ -110,7 +110,7 @@ class DisposableTests(unittest.TestCase):
         self.assertEqual(order, ["last", "first"])
 
 
-def sub(bus: HookBus, hook: str, fn: Any, owner: str = "x", order: tuple[int, int] = (0, 0), **kw: Any) -> Disposable:
+def sub(bus: HookBus, hook: str, fn: Any, owner: str = "x", order: int = 0, **kw: Any) -> Disposable:
     return bus.subscribe(hook, fn, owner=owner, order=order, **kw)
 
 
@@ -214,17 +214,16 @@ class EmitTests(unittest.TestCase):
 
 
 class CollectPipeTests(unittest.TestCase):
-    def test_collect_orders_by_priority_then_tier_then_load_order_and_drops_none_and_failures(self) -> None:
+    def test_collect_orders_by_priority_then_load_order_and_drops_none_and_failures(self) -> None:
         bus = HookBus()
-        sub(bus, "context.contribute", lambda p: "user-a", order=(1, 0))
-        sub(bus, "context.contribute", lambda p: "builtin-late", order=(0, 5))
-        sub(bus, "context.contribute", lambda p: "builtin-early", order=(0, 1))
-        sub(bus, "context.contribute", lambda p: "first", priority=10, order=(2, 9))
+        sub(bus, "context.contribute", lambda p: "late", order=5)
+        sub(bus, "context.contribute", lambda p: "early", order=1)
+        sub(bus, "context.contribute", lambda p: "first", priority=10, order=9)
         sub(bus, "context.contribute", lambda p: None)
         sub(bus, "context.contribute", lambda p: 1 / 0)
         with self.assertLogs("personal_os.extensions.hooks", "WARNING"):
             out = run(bus.collect("context.contribute", {}))
-        self.assertEqual(out, ["first", "builtin-early", "builtin-late", "user-a"])
+        self.assertEqual(out, ["first", "early", "late"])
 
     def test_a_wrapped_async_handler_is_awaited(self) -> None:
         async def handler(tag: str, p: Any) -> str:
@@ -312,7 +311,7 @@ class GateTests(unittest.TestCase):
 class ScopeAndHostTests(unittest.TestCase):
     def test_extension_hooks_must_be_declared_and_are_disposed_with_the_scope(self) -> None:
         host = ExtensionHost()
-        scope = host._add(Manifest.from_dict(manifest(hooks={"chat.created": {"priority": 7, "timeoutMs": 40}})), "builtin")
+        scope = host._add(Manifest.from_dict(manifest(hooks={"chat.created": {"priority": 7, "timeoutMs": 40}})))
         seen: list[Any] = []
         with self.assertRaises(ValueError):
             scope.on("chat.deleted", seen.append)

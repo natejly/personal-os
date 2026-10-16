@@ -58,7 +58,7 @@ class Subscription:
     hook: str
     fn: Callable[[Any], Any]
     owner: str
-    order: tuple[int, int]  # (tier rank, position in load order): the tie-break after priority
+    order: int  # position in load order: the tie-break after priority
     priority: int
     timeout_s: float | None
     on_failure: Literal["ask", "deny"]
@@ -67,7 +67,7 @@ class Subscription:
     muted: bool = field(default=False)
 
     @property
-    def sort_key(self) -> tuple[int, tuple[int, int], int]:
+    def sort_key(self) -> tuple[int, int, int]:
         return (self.priority, self.order, self.seq)
 
     async def call(self, arg: Any) -> Any:
@@ -82,7 +82,7 @@ class HookBus:
         self._subs: dict[str, tuple[Subscription, ...]] = {}
         self._seq = itertools.count()
 
-    def subscribe(self, hook: str, fn: Callable[[Any], Any], *, owner: str, order: tuple[int, int],
+    def subscribe(self, hook: str, fn: Callable[[Any], Any], *, owner: str, order: int,
                   priority: int | None = None, timeout_ms: int | None = None,
                   on_failure: Literal["ask", "deny"] = "ask") -> Disposable:
         self._known(hook)

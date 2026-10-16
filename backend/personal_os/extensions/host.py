@@ -4,7 +4,7 @@ from __future__ import annotations
 import contextlib
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Literal
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable
 
 from .disposables import Disposable, Scope
 from .hooks import HookBus
@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-Tier = Literal["builtin"]  # user-installed tiers arrive with user extension loading
 Handler = Callable[[], Awaitable[None]]
 
 
@@ -25,7 +24,6 @@ Handler = Callable[[], Awaitable[None]]
 class ExtensionScope:
     """One loaded extension: its manifest, and everything it registered, undone together when it stops."""
     manifest: Manifest
-    tier: Tier
     index: int
     bus: HookBus
     module: Module | None = None  # set for an adapted Module
@@ -37,7 +35,7 @@ class ExtensionScope:
             raise ValueError(f"extension {self.manifest.id!r} did not declare hook {hook!r}")
         declared = self.manifest.hooks[hook]
         sub = self.bus.subscribe(
-            hook, fn, owner=self.manifest.id, order=(0, self.index),
+            hook, fn, owner=self.manifest.id, order=self.index,
             priority=declared.get("priority") if priority is None else priority,
             timeout_ms=declared.get("timeoutMs") if timeout_ms is None else timeout_ms,
             on_failure=declared.get("onFailure", "ask"))
@@ -88,12 +86,12 @@ class ExtensionHost:
     def add_module(self, module: Module) -> ExtensionScope:
         """Adapt a Module: it becomes an extension whose start and stop are the module's."""
         manifest = Manifest.from_dict({"id": module.key, "name": module.label, "version": "1.0.0", "apiVersion": 1})
-        return self._add(manifest, "builtin", module)
+        return self._add(manifest, module)
 
-    def _add(self, manifest: Manifest, tier: Tier, module: Module | None = None) -> ExtensionScope:
+    def _add(self, manifest: Manifest, module: Module | None = None) -> ExtensionScope:
         if manifest.id in self.extensions:
             raise ValueError(f"duplicate extension id {manifest.id!r}")
-        scope = ExtensionScope(manifest, tier, len(self.extensions), self.bus, module)
+        scope = ExtensionScope(manifest, len(self.extensions), self.bus, module)
         self.extensions[manifest.id] = scope
         return scope
 

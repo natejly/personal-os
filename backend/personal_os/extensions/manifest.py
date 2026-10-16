@@ -49,10 +49,6 @@ class Manifest:
     settings: dict[str, Any] = field(default_factory=dict)
     data: dict[str, Any] = field(default_factory=dict)
 
-    @property
-    def tool_names(self) -> list[str]:
-        return [t["name"] for t in self.contributes.get("tools", ())]
-
     @classmethod
     def from_dict(cls, raw: Any) -> Manifest:
         if not isinstance(raw, dict):

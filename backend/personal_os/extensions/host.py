@@ -116,8 +116,6 @@ class ExtensionHost:
         self._startup: list[Handler] = []
         self._shutdown: list[Handler] = []
         self._enabled: dict[str, bool] = {}  # what ext.changed last reported, per extension
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._fired: set[asyncio.Task[None]] = set()
 
     # ---- the app's start and stop, in registration order ----
     def on_start(self, fn: Handler) -> Handler:
@@ -130,7 +128,7 @@ class ExtensionHost:
 
     @contextlib.asynccontextmanager
     async def lifespan(self, app: FastAPI) -> AsyncIterator[None]:
-        self._loop = self.bus.loop = asyncio.get_running_loop()
+        self.bus.loop = asyncio.get_running_loop()
         for fn in self._startup:
             await fn()
         try:
@@ -141,8 +139,6 @@ class ExtensionHost:
                     await fn()
                 except Exception:  # noqa: BLE001 - the remaining handlers (outbox, backups, ...) still have to run
                     log.exception("shutdown handler %s failed", fn.__name__)
-            for task in self._fired:
-                task.cancel()
             self.bus.close()
 
     # ---- extensions ----
@@ -160,15 +156,7 @@ class ExtensionHost:
         return scope
 
     def fire(self, hook: str, payload: Any = None) -> None:
-        """Emit from any thread without waiting for the handlers: a sync route runs in the threadpool, and a slow
-        handler must not hold up its response. Before the loop is running (and after it has closed) nothing fires."""
-        if self._loop is not None and not self._loop.is_closed():
-            self._loop.call_soon_threadsafe(self._spawn, hook, payload)
-
-    def _spawn(self, hook: str, payload: Any) -> None:
-        task = asyncio.get_running_loop().create_task(self.bus.emit(hook, payload))
-        self._fired.add(task)  # the loop keeps only a weak reference to a task
-        task.add_done_callback(self._fired.discard)
+        self.bus.fire(hook, payload)
 
     def refresh_enabled(self) -> None:
         """Fire ext.changed for each extension whose enabled state differs from the last one reported."""

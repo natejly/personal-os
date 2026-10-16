@@ -19,7 +19,7 @@ import inspect
 import itertools
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Coroutine, Literal
 
 from .disposables import Disposable
 
@@ -82,8 +82,8 @@ class HookBus:
     def __init__(self) -> None:
         self._subs: dict[str, tuple[Subscription, ...]] = {}
         self._seq = itertools.count()
-        self.loop: asyncio.AbstractEventLoop | None = None  # where emit_sync starts an async handler; set while the app runs
-        self._pending: set[asyncio.Future[None]] = set()
+        self.loop: asyncio.AbstractEventLoop | None = None  # where `start` runs coroutines; set while the app runs
+        self._pending: set[asyncio.Task[None]] = set()
 
     def subscribe(self, hook: str, fn: Callable[[Any], Any], *, owner: str, order: int,
                   priority: int | None = None, timeout_ms: int | None = None,
@@ -151,52 +151,53 @@ class HookBus:
             sub.muted = True
             log.error("hook %s from %s muted after %d consecutive failures", sub.hook, sub.owner, sub.failures)
 
-    @staticmethod
-    def _call_inline(sub: Subscription, arg: Any) -> tuple[bool, Any]:
+    def _inline(self, sub: Subscription, arg: Any) -> tuple[bool, Any]:
+        """Call a handler on the caller's thread. One that answers with an awaitable cannot be waited for here."""
         try:
-            return True, sub.fn(arg)
+            out = sub.fn(arg)
         except Exception:  # noqa: BLE001 - a handler is third-party to the code that fires the hook
             log.warning("hook %s from %s failed", sub.hook, sub.owner, exc_info=True)
             return False, None
+        if inspect.isawaitable(out):
+            if inspect.iscoroutine(out):
+                out.close()
+            log.warning("hook %s from %s is async and cannot run inline from synchronous code; skipped", sub.hook, sub.owner)
+            return False, None
+        return True, out
 
     def emit_sync(self, hook: str, payload: Any = None) -> None:
         """emit for synchronous code on any thread. A sync handler has finished before this returns, in order and without
-        a timeout, so it must be quick. An async handler is started on `loop` and not waited for (dropped when there is none)."""
+        a timeout, so it must be quick. An async one is started on `loop` and not waited for (dropped when there is none)."""
         self._known(hook)
         for sub in self._subs.get(hook, ()):
             if sub.muted:
                 continue
-            ok, out = self._call_inline(sub, payload)
-            if ok and inspect.isawaitable(out):
-                self._start_async(sub, out)
+            if inspect.iscoroutinefunction(sub.fn):
+                self.start(self._emit_one(sub, payload))
             else:
-                self._settle(sub, ok)
+                self._settle(sub, self._inline(sub, payload)[0])
 
-    def _start_async(self, sub: Subscription, awaitable: Any) -> None:
+    def start(self, coro: Coroutine[Any, Any, None]) -> None:
+        """Run a coroutine on `loop` from any thread without waiting for it. Before the loop is set (and after it is
+        closed) nothing runs."""
         loop = self.loop
         if loop is None or loop.is_closed():
-            if inspect.iscoroutine(awaitable):
-                awaitable.close()
-            log.warning("hook %s from %s is async and no event loop is running; skipped", sub.hook, sub.owner)
+            coro.close()
             return
-        loop.call_soon_threadsafe(self._track, self._finish_async(sub, awaitable))
+        loop.call_soon_threadsafe(self._track, coro)
 
-    def _track(self, coro: Any) -> None:
-        task = asyncio.ensure_future(coro)  # the loop keeps only a weak reference to a task
-        self._pending.add(task)
+    def _track(self, coro: Coroutine[Any, Any, None]) -> None:
+        task = asyncio.get_running_loop().create_task(coro)
+        self._pending.add(task)  # the loop keeps only a weak reference to a task
         task.add_done_callback(self._pending.discard)
 
-    async def _finish_async(self, sub: Subscription, awaitable: Any) -> None:
-        try:
-            await asyncio.wait_for(awaitable, self._timeout(sub, "emit"))
-            ok = True
-        except Exception:  # noqa: BLE001
-            log.warning("hook %s from %s failed", sub.hook, sub.owner, exc_info=True)
-            ok = False
-        self._settle(sub, ok)
+    def fire(self, hook: str, payload: Any = None) -> None:
+        """emit from any thread without waiting for the handlers: a sync route runs in the threadpool, and a slow
+        handler must not hold up its response."""
+        self.start(self.emit(hook, payload))
 
     def close(self) -> None:
-        """Cancel the async handlers emit_sync started and stop starting new ones."""
+        """Cancel what `start` began and stop starting more."""
         self.loop = None
         for task in self._pending:
             task.cancel()
@@ -227,12 +228,7 @@ class HookBus:
         for sub in self._subs.get(hook, ()):
             if sub.muted:
                 continue
-            ok, out = self._call_inline(sub, value)
-            if ok and inspect.isawaitable(out):
-                if inspect.iscoroutine(out):
-                    out.close()
-                log.warning("hook %s from %s is async and cannot transform a value from synchronous code; skipped", hook, sub.owner)
-                ok = False
+            ok, out = self._inline(sub, value)
             self._settle(sub, ok)
             if isinstance(out, Deny):
                 return out

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import copy
 import functools
 import hashlib
 import html
@@ -2785,7 +2784,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             try:
                 res = await compactor.compact({**cfg, "compactKeepRecent": min(_int_setting(cfg, "compactKeepRecent", 8), 2)},
                                               providers.tier_model(cfg, "medium"), conv_id, rows, include_untrusted=untrusted,
-                                              complete=compaction.bind_supported(llm.complete, cancel=stop))
+                                              complete=compaction.bind_supported(llm.complete, cancel=stop), window=win)
             except Exception:  # noqa: BLE001 - a summarizer failure leaves the stubs as the only relief
                 log.warning("overflow compaction failed for %s", conv_id, exc_info=True)
                 res = None
@@ -4115,8 +4114,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                    "reasoning": reasoning, "outcome": outcome, "error_kind": error_kind, "notice": notice,
                    "attachments": tool_ctx.get("reply_attachments") or None}
     if not silent and host.bus.active("reply.complete"):
-        await host.bus.emit("reply.complete", copy.deepcopy({
-            "message_id": am["id"], "text": redact.scrub_command_output(text), "tool_events": tool_events,
+        await host.bus.emit("reply.complete", tools.scrub_strings({
+            "message_id": am["id"], "text": text, "tool_events": tool_events,
             "usage": {"tokens": meter.tokens, "cost": meter.cost, "rounds": meter.rounds}, "trace": tracer.spans,
             "taint": {"tainted": tool_ctx["tainted"], "sources": tool_ctx["taint_sources"]}, "outcome": outcome}))
     await _end_jobs()  # after the done: _run_chat has marked the run replied, so a steer already gets its 409
@@ -5839,20 +5838,13 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     # Runs after _drive has ended the run, so the row the renderer then asks about is final. Ids only: the
     # app topic is a doorbell, and what to notify about is decided from rows by GET /inbox/notify.
     if run.task is not None:
-        run.task.add_done_callback(lambda _t, rid=run.run_id, jid=job["id"]: _job_finished(rid, jid))
+        run.task.add_done_callback(lambda _t, rid=run.run_id, jid=job["id"]: (_job_ended(rid, jid), events.publish("job_finished", {"run_id": rid, "job_id": jid})))
     return run.run_id
 
 
 async def _job_fired(job: dict[str, Any], fire: dict[str, Any]) -> None:
     await host.bus.emit("job.fired", {"job_id": job["id"], "kind": job["kind"],
                                       "trigger": fire.get("trigger") or ("manual" if fire.get("manual") else "clock")})
-
-
-def _job_finished(run_id: str, job_id: str) -> None:
-    """The run ended and its row is final: hand it to its chat, ring the app topic, tell the hooks how it went."""
-    _job_ended(run_id, job_id)
-    events.publish("job_finished", {"run_id": run_id, "job_id": job_id})
-    host.fire("job.done", {"job_id": job_id, "run_id": run_id, "outcome": (run_store.get(run_id) or {}).get("status")})
 
 
 _job_wakes: dict[str, list[dict[str, Any]]] = {}  # origin chat -> finished task reports waiting to be handed over (ponytail: lost on restart)
@@ -5864,6 +5856,7 @@ def _job_ended(run_id: str, job_id: str) -> None:
     whether there is anything to say."""
     try:
         row = run_store.get(run_id)
+        host.fire("job.done", {"job_id": job_id, "run_id": run_id, "outcome": (row or {}).get("status")})
         inp = (row or {}).get("input") or {}
         if not row or row.get("status") != "done" or inp.get("dry_run"):
             return

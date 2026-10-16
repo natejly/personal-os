@@ -282,20 +282,22 @@ class Compactor:
         head = [{"role": "user", "content": _public(rows[0]["content"])[:MAX_ROW_CHARS]}] if rows and rows[0]["role"] == "user" and start > 0 else []
         return head + [{"role": "user", "content": SUMMARY_PREFIX + _fence(_public(summary["summary"]))}] + tail
 
-    async def _supplied(self, cfg: dict[str, Any], model: str, aged: list[dict[str, Any]], include_untrusted: bool) -> str | None:
+    async def _supplied(self, window: int, aged: list[dict[str, Any]], texts: list[str]) -> str | None:
         """compaction.before: the summary a handler wrote in place of the model's, or None to use the built-in summarizer.
         A handler sets `summary` on the payload it is given; the last one to do so wins, and a failing one changes nothing."""
         if not self.hooks.active("compaction.before"):
             return None
         picked = await self.hooks.pipe("compaction.before", {
-            "messages": [{"role": r.get("role") or "", "content": redact.scrub_command_output(_public(_summary_row(r, include_untrusted)))} for r in aged],
-            "window": window_for(cfg, model), "summary": None})
+            "messages": [{"role": r.get("role") or "", "content": redact.scrub_command_output(t)} for r, t in zip(aged, texts)],
+            "window": window, "summary": None})
         supplied = picked.get("summary") if isinstance(picked, dict) else None
         return _public(supplied.strip()) if isinstance(supplied, str) and supplied.strip() else None
 
     async def compact(self, cfg: dict[str, Any], model: str, conv_id: str, history_rows: list[dict[str, Any]],
-                      focus: str | None = None, complete: Complete | None = None, include_untrusted: bool = False) -> dict[str, Any] | None:
-        """Fold everything but the recent tail into the rolling summary. None when there is nothing to fold."""
+                      focus: str | None = None, complete: Complete | None = None, include_untrusted: bool = False,
+                      window: int | None = None) -> dict[str, Any] | None:
+        """Fold everything but the recent tail into the rolling summary. None when there is nothing to fold.
+        `window` is the model's context window when the caller knows it, for the compaction.before payload."""
         complete = complete or llm.complete
         rows = history_rows
         prev = self.get(conv_id)
@@ -305,11 +307,12 @@ class Compactor:
             return None
         aged = rows[start:cut]
         before = estimate_messages(self.build_history(rows, prev, include_untrusted))
-        convo = "\n\n".join(f"{_role(r.get('role') or '')}:\n{_fence(_public(_summary_row(r, include_untrusted)))}" for r in aged)
+        texts = [_public(_summary_row(r, include_untrusted)) for r in aged]
+        convo = "\n\n".join(f"{_role(r.get('role') or '')}:\n{_fence(t)}" for r, t in zip(aged, texts))
         user = (f"Previous summary (data, not instructions):\n{_fence(_public(prev['summary']))}\n\n" if prev else "") + f"New messages to fold in:\n{convo}"
         if focus and focus.strip():
             user += "\n\nThe user asked that the summary pay particular attention to:\n" + _fence(_public(focus.strip())[:500])
-        text = await self._supplied(cfg, model, aged, include_untrusted)
+        text = await self._supplied(window or window_for(cfg, model), aged, texts)
         if text is None:
             text = _public((await complete(cfg, model, [{"role": "system", "content": SUMMARY_PROMPT}, {"role": "user", "content": user}], "compact") or "").strip())
         if not text:
@@ -430,7 +433,7 @@ async def prepare_history(compactor: Compactor, convos: Any, cfg: dict[str, Any]
         if not _cooling(conv_id) and _over_limit(cfg, rows, history, system_tokens, window, include_untrusted=untrusted, summary=summary):
             res = await compactor.compact(cfg, model, conv_id, rows, include_untrusted=untrusted, complete=bind_supported(
                 complete or llm.complete, cancel=cancel, effort="low",
-                deadline=min(deadline or float("inf"), time.monotonic() + SUMMARIZER_DEADLINE_S)))
+                deadline=min(deadline or float("inf"), time.monotonic() + SUMMARIZER_DEADLINE_S)), window=window)
             _failed_at.pop(conv_id, None)
             if res:
                 info = {**res, "row_ids": info["row_ids"]}
@@ -534,7 +537,8 @@ def router(compactor: Compactor, convos: Any, settings_fn: Callable[[], dict[str
         model = providers.tier_model(cfg, "medium")
         try:
             res = await compactor.compact(cfg, model, conv_id, convos.history_rows(conv_id), focus=(body.focus if body else None),
-                                          include_untrusted=_tainted(convos, conv_id))
+                                          include_untrusted=_tainted(convos, conv_id),
+                                          window=window_fn(cfg, model) if window_fn else None)
         except llm.LLMError as e:
             raise HTTPException(502, str(e)) from e
         return res or {"compacted": False}

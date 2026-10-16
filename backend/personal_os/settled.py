@@ -6,20 +6,20 @@ stays busy (a second message is a 409) until they return, and anything slow goes
 """
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass, fields
 from typing import Any, Callable
 
-from . import learn, redact, titles
+from . import learn, titles
 from .extensions.hooks import HookBus
 from .learn import LearnJob
 from .style import learn_style_from_exchange, looks_like_prose
+from .tools import scrub_strings
 from .trace import Tracer
 
 
 @dataclass
 class SettledView:
-    """What an extension subscriber receives: copies with secrets out of the settings and the reply scrubbed."""
+    """What an extension subscriber receives: copies with secrets out of the settings and credentials scrubbed from every string."""
     conversation_id: str
     message_id: str  # the reply's row
     user_message_id: str | None
@@ -50,8 +50,8 @@ class Settled(SettledView):
 
 
 def view_of(s: Settled, public_cfg: Callable[[], dict[str, Any]]) -> SettledView:
-    shared = {f.name: copy.deepcopy(getattr(s, f.name)) for f in fields(SettledView) if f.name not in ("cfg", "reply")}
-    return SettledView(cfg=public_cfg(), reply=redact.scrub_command_output(s.reply), **shared)
+    shared = {f.name: scrub_strings(getattr(s, f.name)) for f in fields(SettledView) if f.name != "cfg"}
+    return SettledView(cfg=public_cfg(), **shared)
 
 
 def register(bus: HookBus, *, style: Any, relearn: Callable[[str | None, str], None], learner: Any, skills: Any,

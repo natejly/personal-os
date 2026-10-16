@@ -7,10 +7,12 @@ Run: python -m pytest backend/tests/test_post_turn_hooks.py
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import os
 import sys
 import tempfile
 import time
+import types
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +23,7 @@ import httpx  # noqa: E402
 import pytest  # noqa: E402
 
 from personal_os import app as appmod  # noqa: E402
-from personal_os import compaction, limits, llm  # noqa: E402
+from personal_os import compaction, limits, llm, settled  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.extensions import hooks as hooks_mod  # noqa: E402
 from personal_os.extensions.hooks import Deny, HookBus  # noqa: E402
@@ -268,6 +270,16 @@ def test_an_extension_subscriber_gets_a_scrubbed_copy_not_the_live_record(monkey
     assert not hasattr(s, "tracer") and not hasattr(s, "publish")
     assert "sk-live-secret-key" not in repr(s.cfg) and "gh-secret" not in repr(s.cfg)
     assert len(spy.titles) == 1, "the handler's change to its copy of the settings did not reach the built-in title subscriber"
+
+
+def test_extension_view_scrubs_tool_arguments_and_trace_not_only_the_reply() -> None:
+    secret = "sk-" + "a1b2c3d4e5f6g7h8i9j0k1l2m3n4"
+    fields_ = {f.name: None for f in dataclasses.fields(settled.SettledView)}
+    live = types.SimpleNamespace(**{**fields_, "reply": f"key {secret}", "conv": {"messages": []}, "used": {},
+                                    "tool_events": [{"name": "run_shell", "arguments": {"command": f"curl -H 'Authorization: Bearer {secret}' x"}}]})
+    view = settled.view_of(live, lambda: {})  # type: ignore[arg-type]
+    assert secret not in repr(view)
+    assert view.tool_events is not live.tool_events and view.tool_events[0]["name"] == "run_shell"
 
 
 def test_without_a_run_the_style_events_are_not_published_but_the_trace_is_stored(monkeypatch: Any) -> None:
@@ -517,7 +529,7 @@ def fire_job(monkeypatch: Any, stream: Any) -> tuple[list[tuple[str, Any]], dict
             "fired_at": 1772409600.0, "late_seconds": 0.0, "missed_slots": 0, "late": False}
 
     async def go() -> str | None:
-        appmod.host._loop = asyncio.get_running_loop()
+        appmod.host.bus.loop = asyncio.get_running_loop()
         try:
             run_id = await appmod._launch_job(job, fire)
             run = next(r for r in appmod.bus._runs.values() if r.run_id == run_id)
@@ -525,7 +537,7 @@ def fire_job(monkeypatch: Any, stream: Any) -> tuple[list[tuple[str, Any]], dict
             await asyncio.sleep(0.1)
             return run_id
         finally:
-            appmod.host._loop = None
+            appmod.host.bus.loop = None
     try:
         run_id = asyncio.run(go())
     finally:
@@ -679,6 +691,14 @@ def test_compaction_before_can_supply_the_summary_and_after_reports_it(tmp_path:
     assert after == [{"summary": "my own summary"}]
     assert set(payloads[0]) == {"messages", "window", "summary"} and payloads[0]["summary"] is None
     assert payloads[0]["messages"][0] == {"role": "user", "content": "question 0"} and payloads[0]["window"] > 0
+
+
+def test_compaction_before_gets_the_window_the_caller_knows(tmp_path: Path) -> None:
+    compactor, convos, cid = compaction_fixture(tmp_path)
+    payloads: list[Any] = []
+    sub(compactor.hooks, "compaction.before", lambda p: payloads.append(p) or {**p, "summary": "S"})
+    asyncio.run(compactor.compact({"compactKeepRecent": 4}, "m", cid, convos.history_rows(cid), window=123_456))
+    assert payloads[0]["window"] == 123_456
 
 
 def test_compaction_falls_back_to_the_built_in_summarizer(tmp_path: Path) -> None:

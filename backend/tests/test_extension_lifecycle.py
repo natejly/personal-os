@@ -353,13 +353,13 @@ def test_a_ledger_from_before_extensions_is_rebuilt_with_its_rows(tmp_path: Path
 
 def test_extension_steps_are_ledgered_once_in_order_and_leave_user_version_alone(tmp_path: Path) -> None:
     db = Database(tmp_path)
-    steps = [(2, "second", lambda c: c.execute("INSERT INTO demo_t VALUES('b')")),
-             (1, "init", lambda c: c.execute("CREATE TABLE demo_t(x)"))]
+    steps = [(1, "init", lambda c: c.execute("CREATE TABLE demo_t(x)")),
+             (2, "second", lambda c: c.execute("INSERT INTO demo_t VALUES('b')"))]
     with db.tx() as c:
         version = migrations.current(c)
     conn = db.connect()
-    assert migrations.run_extension(conn, "demo", steps) == [1, 2]
-    assert migrations.run_extension(conn, "demo", steps) == []
+    assert migrations.run_extension(conn, "demo", migrations.pending_extension(conn, "demo", steps)) == [1, 2]
+    assert migrations.pending_extension(conn, "demo", steps) == []
     assert migrations.current(conn) == version
     assert [r for r in ledger(conn) if str(r[0]).startswith("ext:")] == [("ext:demo:1", "init"), ("ext:demo:2", "second")]
     assert migrations.run_extension(conn, "other", [(1, "init", lambda c: c.execute("CREATE TABLE other_t(x)"))]) == [1]
@@ -386,10 +386,11 @@ def test_a_failing_extension_step_rolls_back_and_is_not_recorded(tmp_path: Path)
 def test_sql_files_become_numbered_steps_run_statement_by_statement(tmp_path: Path) -> None:
     folder = tmp_path / "migrations"
     folder.mkdir()
+    (folder / "0010_late.sql").write_text("SELECT 1;")
     (folder / "0002_seed.sql").write_text("INSERT INTO demo_t VALUES ('a;b');\nINSERT INTO demo_t VALUES ('c');\n")
     (folder / "0001_init.sql").write_text("CREATE TABLE demo_t(x);\nCREATE TRIGGER demo_trg AFTER INSERT ON demo_t\nBEGIN\n  SELECT 1;\nEND;\n")
     steps = migrations.sql_steps(folder)
-    assert [(n, name) for n, name, _ in steps] == [(1, "init"), (2, "seed")]
+    assert [(n, name) for n, name, _ in steps] == [(1, "init"), (2, "seed"), (10, "late")]
     conn = Database(tmp_path / "data").connect()
     migrations.run_extension(conn, "demo", steps)
     assert [r[0] for r in conn.execute("SELECT x FROM demo_t ORDER BY rowid")] == ["a;b", "c"]

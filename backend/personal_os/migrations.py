@@ -849,12 +849,12 @@ def run(c: sqlite3.Connection) -> list[int]:
 def sql_steps(folder: Path) -> list[tuple[int, str, Step]]:
     """An extension's migrations: `NNNN_name.sql` files in `folder`, ordered by their number."""
     steps: list[tuple[int, str, Step]] = []
-    for f in sorted(folder.glob("*.sql")):
+    for f in folder.glob("*.sql"):
         number, _, name = f.stem.partition("_")
         if not number.isdigit():
             raise ValueError(f"migration file {f.name} must be named NNNN_name.sql")
         steps.append((int(number), name, _sql_step(f.read_text("utf-8"))))
-    return steps
+    return sorted(steps, key=lambda s: s[0])
 
 
 def _sql_step(script: str) -> Step:
@@ -877,11 +877,11 @@ def pending_extension(c: sqlite3.Connection, ext_id: str, steps: list[tuple[int,
     return [s for s in steps if f"ext:{ext_id}:{s[0]}" not in done]
 
 
-def run_extension(c: sqlite3.Connection, ext_id: str, steps: list[tuple[int, str, Step]]) -> list[int]:
-    """Apply an extension's pending steps in order, each recorded as `ext:<id>:<n>` in the shared ledger; returns the numbers
+def run_extension(c: sqlite3.Connection, ext_id: str, pending: list[tuple[int, str, Step]]) -> list[int]:
+    """Apply an extension's pending steps (see `pending_extension`) in the order given, each recorded as `ext:<id>:<n>` in the shared ledger; returns the numbers
     applied. user_version belongs to the core steps and is not touched."""
     done: list[int] = []
-    for number, name, step in sorted(pending_extension(c, ext_id, steps), key=lambda s: s[0]):
+    for number, name, step in pending:
         try:
             c.execute("BEGIN")
             step(c)

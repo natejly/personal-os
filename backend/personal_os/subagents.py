@@ -35,11 +35,13 @@ import re
 import secrets
 import time
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable
 
 from . import approval_log, autoreview, coding_route, compaction, context_map, fsx, limits, llm, mac, mcp_search, permissions, permrules, redact
 from .db import new_id, now
+from .dispatch import dispatch_tool
 from . import toolcore
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .trace import Tracer, now_ms
@@ -1402,7 +1404,7 @@ class Subagents:
                 args.update(edited)
         ch.touch(in_tool=True)
         try:
-            result = await con.call(name, args)
+            result = await dispatch_tool(self.toolbox, ch.ctx, name, args, call_id=uid, connector=partial(con.call, name, args))
         finally:
             ch.touch(in_tool=False)
         # Whatever a connector said, result or error, is third-party text: the child's run is tainted from here on.
@@ -1412,7 +1414,7 @@ class Subagents:
 
     async def _call(self, ch: Child, name: str, args: dict[str, Any], uid: str, spec: ToolSpec) -> Any:
         async def go() -> Any:
-            return await self.toolbox.call(name, args, ch.ctx)
+            return await dispatch_tool(self.toolbox, ch.ctx, name, args, call_id=uid)
         if spec.danger in ("writes", "external") and self.store is not None:
             ch.writing += 1
             try:

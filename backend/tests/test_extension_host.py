@@ -128,6 +128,16 @@ class EmitTests(unittest.TestCase):
         per_call = run(go())
         self.assertLess(per_call, 0.0001, f"empty-bus emit took {per_call * 1e6:.1f} us")
 
+    def test_active_follows_subscription_and_disposal(self) -> None:
+        bus = HookBus()
+        self.assertFalse(bus.active("tool.pre"))
+        d = sub(bus, "tool.pre", lambda p: None)
+        self.assertTrue(bus.active("tool.pre"))
+        d.dispose()
+        self.assertFalse(bus.active("tool.pre"))
+        with self.assertRaises(ValueError):
+            bus.active("nope")
+
     def test_unknown_hook_is_an_error_everywhere(self) -> None:
         bus = HookBus()
         with self.assertRaises(ValueError):

@@ -114,6 +114,11 @@ class HookBus:
             log.warning("hook %s from %s failed", sub.hook, sub.owner, exc_info=True)
             return False, None
 
+    def active(self, hook: str) -> bool:
+        """Whether anything is subscribed, so a hot path can skip building a payload nobody will read."""
+        self._known(hook)
+        return hook in self._subs
+
     async def emit(self, hook: str, payload: Any = None, *, owner: str | None = None) -> None:
         """`owner` limits the call to one extension's handlers, for the hooks the host fires one extension at a time."""
         self._known(hook)

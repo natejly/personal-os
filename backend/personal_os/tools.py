@@ -28,6 +28,7 @@ from typing import Any, Awaitable, Callable
 import httpx
 
 from . import duel, egress, labels, limits, llm, mac, osplat, permissions
+from .extensions.hooks import HookBus
 from .kinds import is_internal
 from .embed import rrf
 from . import fsx
@@ -773,7 +774,8 @@ class Toolbox:
                  docs: Any = None, outbox: Any = None,
                  work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None,
                  style: Any = None, desks: Any = None, workspace: Any = None, filesnap: Any = None,
-                 conversations: Any = None, extundo: Any = None):
+                 conversations: Any = None, extundo: Any = None, bus: HookBus | None = None):
+        self.bus = bus or HookBus()  # the hooks dispatch_tool fires around every call
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
         self.modules = modules or []  # feature modules (modules/); each registers its own tools
         self.google, self.docs = google, docs

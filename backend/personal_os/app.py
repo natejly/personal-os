@@ -36,6 +36,7 @@ from . import branch_summary, compaction, side_question, followups, otel_export,
 from . import chatlink, coding_route, duel, fsx, labels, opencode_usage, request_log, toolcore
 from .fsx import sensitive_reason
 from . import context_map
+from .dispatch import dispatch_tool
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .drive_backup import DriveBackup
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
@@ -623,7 +624,7 @@ learner.skills, learner.known_tools = skills, lambda: _known_tools()
 toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, docs=docs,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, desks=desks, workspace=workspace, filesnap=filesnap,
-                  conversations=convos, extundo=extundo)
+                  conversations=convos, extundo=extundo, bus=host.bus)
 # Which chat each file belongs to (chat_files.py): triggers record uploads, local writes and coding sessions; these hooks the rest.
 chat_files = ChatFiles(db, toolbox.chat_outputs.root if toolbox.chat_outputs is not None else None)
 app.include_router(chat_files_router(chat_files))
@@ -1879,8 +1880,9 @@ async def _call_tool(run: Run | None, step: int, name: str, args: dict[str, Any]
     if run is not None and snaps.wants(name, args, run.desk_id, ctx.get("settings")):
         await asyncio.to_thread(snaps.before, run.run_id, snaps.roots_for_call(name, args, run.desk_id, ctx.get("settings")))
     if run is None or run.store is None or spec is None or spec.danger not in IDEMPOTENT_DANGER:
-        return await toolbox.call(name, args, ctx)
-    result, replayed = await run.store.call_once(run.run_id, step, name, args, lambda: toolbox.call(name, args, ctx), call_id=call_id,
+        return await dispatch_tool(toolbox, ctx, name, args, call_id=call_id)
+    result, replayed = await run.store.call_once(run.run_id, step, name, args,
+                                                  lambda: dispatch_tool(toolbox, ctx, name, args, call_id=call_id), call_id=call_id,
                                                   inherit=(run.input or {}).get("resume_of"))
     if replayed:
         if isinstance(result, dict):
@@ -3852,7 +3854,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     result, ran = _propose(run, c["name"], args, uid, tool_ctx), True
                 elif mcp_is(c["name"]):
                     inflight = {"id": uid, "name": c["name"], "arguments": args}
-                    result, interrupted = await _await_tool(_mcp_call(c["name"], args), stop,
+                    result, interrupted = await _await_tool(dispatch_tool(toolbox, tool_ctx, c["name"], args, call_id=uid,
+                                                                          connector=functools.partial(_mcp_call, c["name"], args)), stop,
                                                             grace=STOP_GRACE_SECONDS if danger in IDEMPOTENT_DANGER else 0.0)
                     mcp_ran = ran = not interrupted
                 elif not asks and (wkey := tools.call_key(c["name"], args)) in warm:
@@ -6531,8 +6534,9 @@ async def accept_proposal(pid: str, body: ProposalIn | None = None) -> dict[str,
     async def _execute() -> Any:
         # A connector is not a built-in. toolbox.call would report it as unknown and the accept would die.
         if mcp_is(claimed["tool"]):
-            return await _mcp_call(claimed["tool"], claimed["args"])
-        return await toolbox.call(claimed["tool"], claimed["args"], ctx)
+            return await dispatch_tool(toolbox, ctx, claimed["tool"], claimed["args"], call_id=pid,
+                                       connector=functools.partial(_mcp_call, claimed["tool"], claimed["args"]))
+        return await dispatch_tool(toolbox, ctx, claimed["tool"], claimed["args"], call_id=pid)
 
     # call_id is not part of the journal key, so two identical proposals from one run would share it and the second
     # accept would "replay" the first's result without running. A step derived from the proposal id keeps them apart.

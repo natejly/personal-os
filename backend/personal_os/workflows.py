@@ -39,6 +39,7 @@ from typing import Any, Callable
 
 from . import limits, permrules
 from .db import new_id, now
+from .dispatch import dispatch_tool
 from .tools import ASK_LOCKED_DANGER
 
 log = logging.getLogger(__name__)
@@ -935,7 +936,7 @@ class Engine:
         async def go() -> Any:
             ctx["fs_outside_ok"] = fs_ask  # approved above: the user said yes to this credential store or write
             try:
-                return await self.toolbox.call(name, args, ctx)
+                return await dispatch_tool(self.toolbox, ctx, name, args, call_id=uid)
             finally:
                 ctx["fs_outside_ok"] = False
 

@@ -285,3 +285,34 @@ def test_an_extension_retrieval_source_reaches_the_volatile_message(monkeypatch:
     assert '<ext id="src-demo">' in vol and "- WIKI-FACT [r]" in vol
     assert seen[0]["query"] == "tell me" and seen[0]["project_id"] is None and set(seen[0]) == {"query", "vec", "project_id", "conv_settings"}
     assert "WIKI-FACT" not in msgs[0]["content"]
+
+
+def test_a_disabled_extensions_retrieval_source_is_silent() -> None:
+    host = ExtensionHost()
+    s = scope(host)
+
+    async def src(p: Any) -> list[dict[str, Any]]:
+        return [{"id": "1", "text": "found"}]
+    s.retrieval_source("notes", src)
+    assert asyncio.run(host.retrieval.gather({}))[1]
+    s.enabled = lambda: False  # type: ignore[method-assign]
+    assert asyncio.run(host.retrieval.gather({})) == ({}, [])
+
+
+def test_a_partial_of_an_async_handler_and_a_wrong_return_type() -> None:
+    import functools
+    host = ExtensionHost()
+    s = scope(host)
+
+    async def build(prefix: str, p: Any) -> Contribution:
+        return Contribution(prefix)
+    s.context(functools.partial(build, "partial"), slot="tail")
+    s.context(lambda p: "not a contribution", slot="tail")
+    assert collect(host) == [Block("partial", "tail", "demo")]
+
+
+def test_a_slot_or_share_that_cannot_work_is_refused() -> None:
+    s = scope(ExtensionHost())
+    for kw in ({"slot": "versions"}, {"slot": "tail", "share": 0}, {"slot": "tail", "share": -1}, {"slot": "tail", "share": 2}):
+        with pytest.raises(ValueError):
+            s.context(lambda p: None, **kw)

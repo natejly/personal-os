@@ -8,7 +8,7 @@ import logging
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, get_args
 
 from .. import backups, migrations
 from ..context import Block, Contribution, RetrievalSources, Slot
@@ -64,18 +64,32 @@ class ExtensionScope:
     def context(self, fn: Callable[[dict[str, Any]], Any], *, slot: Slot, priority: int | None = None,
                 share: float | None = None) -> Disposable:
         """Add text to the prompt. `fn` takes {conversation_id, project_id} and returns a Contribution (or None for
-        nothing), sync or async; it runs under the manifest's context.contribute hook entry (a stable block gets 100 ms)."""
+        nothing), sync or async; it runs under the manifest's context.contribute hook entry (a stable block gets 100 ms).
+        `share` is a fraction of the context window, in (0, 1]."""
+        if slot not in get_args(Slot):
+            raise ValueError(f"unknown context slot {slot!r}")
+        if share is not None and not 0 < share <= 1:
+            raise ValueError(f"context share must be in (0, 1], got {share!r}")
+
         async def contribute(payload: dict[str, Any]) -> Block | None:
             if not self.enabled():
                 return None
-            out = await fn(payload) if inspect.iscoroutinefunction(fn) else await asyncio.to_thread(fn, payload)
-            return Block(out.text, slot, self.manifest.id, share, out.version) if isinstance(out, Contribution) else None
+            out = await asyncio.to_thread(fn, payload)  # an async fn only builds its coroutine there, whatever kind of callable it is
+            if inspect.isawaitable(out):
+                out = await out
+            if isinstance(out, Contribution):
+                return Block(out.text, slot, self.manifest.id, share, out.version)
+            if out is not None:
+                log.warning("extension %s: context handler returned %s, not a Contribution", self.manifest.id, type(out).__name__)
+            return None
         return self.on("context.contribute", contribute, priority=priority,
                        timeout_ms=STABLE_CONTEXT_TIMEOUT_MS if slot == "stable" else None)
 
     def retrieval_source(self, name: str, fn: Callable[[dict[str, Any]], Awaitable[Any]]) -> Disposable:
         """Add a place a turn's retrieval looks; `fn` takes {query, vec, project_id, conv_settings} and returns a list of {id, text, ref}."""
-        return self.disposables.add(self.retrieval.register(name, fn, owner=self.manifest.id))
+        async def search(payload: dict[str, Any]) -> Any:
+            return await fn(payload) if self.enabled() else None
+        return self.disposables.add(self.retrieval.register(name, search, owner=self.manifest.id))
 
     async def start(self) -> None:
         if self.module:

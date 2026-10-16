@@ -175,10 +175,15 @@ def slots(settings: dict[str, Any], key: str) -> int:
     return int(_pos(settings.get(key))) or worker_slots()
 
 
+def share_tokens(window: int, ratio: float) -> int:
+    """Tokens `ratio` of a `window`-token context comes to, with the window capped at CONTEXT_WINDOW_FALLBACK."""
+    return int(min(window, CONTEXT_WINDOW_FALLBACK) * ratio)
+
+
 def context_shares(window: int) -> dict[str, int]:
     """Tokens each injected context block may take in a `window`-token context. A window past CONTEXT_WINDOW_FALLBACK
     does not buy bigger blocks: they are re-sent (mostly uncached) every turn."""
-    return {k: int(min(window, CONTEXT_WINDOW_FALLBACK) * r) for k, r in CONTEXT_SHARES.items()}
+    return {k: share_tokens(window, r) for k, r in CONTEXT_SHARES.items()}
 
 # Heading of the per-turn retrieval system message (context.layout_messages); llm.py needs it without importing context.
 VOLATILE_HEADER = "## Context for this turn"

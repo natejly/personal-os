@@ -356,8 +356,8 @@ The fail-open default on gating hooks elsewhere is a documented pitfall (section
 
 | Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
 |---|---|---|---|---|---|
-| `context.retrieve` | `asyncio.gather(_doc_hits, _memory_hits, _graph_hits)` (`app.py:2136-2139`) | `{query, vec, project_id}` | list of `{id, text, ref}` (registered as `retrieval_source`, not a free hook) | `collect`; each source already tolerates failure by returning None | n/a |
-| `context.contribute` | `build_context` (`context.py:247`) and the `hints` tuple (`app.py:2560-2574`) | `{conversation, project, turn, budget}` | `Block{text, slot: stable|volatile|tail, share}` | `collect` ordered by priority; fitted by `_fit` (`context.py:49`) to the extension's share; failure drops the block | before_prompt_build (OpenClaw), before_agent_start (pi), additionalContext (Claude Code), heartbeat_prompt_contribution (OpenClaw) |
+| `context.retrieve` | `asyncio.gather(_doc_hits, _memory_hits, _graph_hits)` (`app.py:2136-2139`) | `{query, vec, project_id, conv_settings}` | list of `{id, text, ref}` (registered as `retrieval_source`, not a free hook) | `collect`; each source already tolerates failure by returning None | n/a |
+| `context.contribute` | `build_context` (`context.py:247`) and the `hints` tuple (`app.py:2560-2574`) | `{conversation_id, project_id}` (ids only: a handler reads what it needs, and raw message text is not handed out) | `Block{text, slot: stable|volatile|tail, share}` | `collect` ordered by priority; fitted by `_fit` (`context.py:49`) to the extension's share; failure drops the block | before_prompt_build (OpenClaw), before_agent_start (pi), additionalContext (Claude Code), heartbeat_prompt_contribution (OpenClaw) |
 | `context.history` | after `compaction.prepare_history` (`app.py:2164`) | `{messages}` | `pipe` over the **volatile segment only** | v2. Rewriting the stable prefix is refused. | context (pi) |
 
 **Cache contract.** The stable prefix is byte-identical per chat and is asserted by a golden test (`stable_hash` is already recorded at `app.py:2574`).

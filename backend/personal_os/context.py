@@ -300,7 +300,7 @@ def compose(blocks: list[Block], window: int) -> Slots:
         if not text.strip():
             continue
         if b.owner is not None:
-            tokens = limits.context_shares(window)["extension"] if b.share is None else int(min(window, limits.CONTEXT_WINDOW_FALLBACK) * b.share)
+            tokens = limits.share_tokens(window, limits.CONTEXT_SHARES["extension"] if b.share is None else b.share)
             text = provenance(b.owner, _clip(_public(text), tokens * 4))
             if b.slot == "stable":
                 out.versions.append(f"{b.owner}@{b.version}")
@@ -332,7 +332,7 @@ class RetrievalSources:
         found = list(self._sources.items())
         results = await asyncio.gather(*(self._run(name, owner, fn, payload) for name, (owner, fn) in found))
         core = {name: r for (name, (owner, _)), r in zip(found, results) if owner is None}
-        blocks = [self._block(name, owner, r) for (name, (owner, _)), r in zip(found, results) if owner is not None and r]
+        blocks = (self._block(name, owner, r) for (name, (owner, _)), r in zip(found, results) if owner is not None)
         return core, [b for b in blocks if b]
 
     @staticmethod
@@ -344,9 +344,9 @@ class RetrievalSources:
             return None
 
     @staticmethod
-    def _block(name: str, owner: str, items: list[dict[str, Any]]) -> Block | None:
+    def _block(name: str, owner: str, items: list[dict[str, Any]] | None) -> Block | None:
         lines = [f"- {_one_line(str(i.get('text') or ''))}" + (f" [{_one_line(str(i['ref']), 80)}]" if i.get("ref") else "")
-                 for i in items if isinstance(i, dict) and str(i.get("text") or "").strip()]
+                 for i in items or () if isinstance(i, dict) and str(i.get("text") or "").strip()]
         return Block(f"## {name}\n" + "\n".join(lines), "volatile", owner) if lines else None
 
 

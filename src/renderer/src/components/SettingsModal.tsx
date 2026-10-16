@@ -88,6 +88,8 @@ export default function SettingsModal(): JSX.Element {
     setJump(null)
     return () => window.clearTimeout(t)
   }, [jump, tab, openGroups])
+  // An extension turned off while its tab is open takes the tab away: fall back to the first one.
+  useEffect(() => { if (!tabs.some((x) => x.id === tab)) setTab('appearance') }, [panels.length])
   useEffect(() => {
     if (tabs.some((x) => x.id === storeTab)) setTabState(storeTab)
     if (storeGroup) setOpenGroups((g) => new Set(g).add(storeGroup))

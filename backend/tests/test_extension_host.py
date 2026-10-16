@@ -545,9 +545,18 @@ class BuiltinExtensionTests(unittest.TestCase):
     def test_load_builtin_refuses_tools_the_manifest_does_not_declare(self) -> None:
         real = load_manifest(Path(__file__).resolve().parents[1] / "personal_os" / "extensions" / "health" / "extension.json")
         short = Manifest.from_dict({"id": "health", "name": "Health", "version": "1.0.0", "apiVersion": 1,
-                                    "hooks": dict(real.hooks), "contributes": {"tools": [{"name": "health_log"}]}})
+                                    "hooks": dict(real.hooks), "contributes": {"tools": [{"name": "health_log", "danger": "writes", "group": "health"}]}})
         ctx = ExtensionContext(db=Database(tempfile.mkdtemp(prefix="exthealth-")), hidden_views=lambda: (), services={})
         with mock.patch("personal_os.extensions.host.load_manifest", return_value=short), self.assertRaises(ValueError):
+            ExtensionHost().load_builtin("health", ctx)
+
+    def test_load_builtin_refuses_a_danger_the_code_does_not_register(self) -> None:
+        real = load_manifest(Path(__file__).resolve().parents[1] / "personal_os" / "extensions" / "health" / "extension.json")
+        tools = [{**t, "danger": "safe"} if t["name"] == "health_log" else t for t in real.contributes["tools"]]
+        drifted = Manifest.from_dict({"id": "health", "name": "Health", "version": "1.0.0", "apiVersion": 1,
+                                      "hooks": dict(real.hooks), "contributes": {"tools": tools}})
+        ctx = ExtensionContext(db=Database(tempfile.mkdtemp(prefix="exthealth-")), hidden_views=lambda: (), services={})
+        with mock.patch("personal_os.extensions.host.load_manifest", return_value=drifted), self.assertRaises(ValueError):
             ExtensionHost().load_builtin("health", ctx)
 
 

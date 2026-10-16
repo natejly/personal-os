@@ -86,7 +86,9 @@ class ExtensionScope:
     def enabled(self) -> bool:
         if self.module:
             return self.module.enabled()
-        if self.ctx is None or self.manifest.enabled == "always":
+        if self.manifest.enabled == "always":
+            return True
+        if self.ctx is None:
             return self.manifest.enabled is not False
         return self.manifest.id not in self.ctx.hidden_views()
 
@@ -223,9 +225,10 @@ class ExtensionHost:
         root = Path(__file__).parent / ext_id
         scope = self._add(load_manifest(root / "extension.json"), root=root, ctx=ctx)
         importlib.import_module(f"{__package__}.{ext_id}.extension").activate(scope)
-        declared = {t["name"] for t in scope.manifest.contributes.get("tools", ())}
-        if set(scope.tools) != declared:
-            raise ValueError(f"extension {ext_id!r} registered tools {sorted(scope.tools)}, its manifest declares {sorted(declared)}")
+        declared = {t["name"]: (t.get("danger"), t.get("group")) for t in scope.manifest.contributes.get("tools", ())}
+        registered = {name: (spec.danger, spec.group) for name, spec in scope.tools.items()}
+        if registered != declared:
+            raise ValueError(f"extension {ext_id!r} registered tools {registered}, its manifest declares {declared}")
         return scope
 
     def today(self) -> dict[str, Any]:

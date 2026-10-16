@@ -154,10 +154,10 @@ def _token_eq(sent: str, expected: str) -> bool:
         return False
 
 
-# `docs_url` is moved off /docs: that prefix belongs to the user's own documents (see docs.py).
 host = ExtensionHost()
-app = FastAPI(title="Grain", version="0.1.0", docs_url="/api-docs", redoc_url=None,
-              swagger_ui_oauth2_redirect_url=None, lifespan=host.lifespan)  # its default sits under /docs too
+# `docs_url` is moved off /docs: that prefix belongs to the user's own documents (see docs.py).
+app = FastAPI(title="Grain", version="0.1.0", docs_url="/api-docs", redoc_url=None, lifespan=host.lifespan,
+              swagger_ui_oauth2_redirect_url=None)  # its default sits under /docs too
 
 
 def _json_safe(v: Any) -> Any:

@@ -30,7 +30,7 @@ class ExtensionScope:
     tier: Tier
     index: int
     bus: HookBus
-    module: Module | None = None  # set for an adapted Module; a folder extension's code half arrives with the first port
+    module: Module | None = None  # set for an adapted Module
     disposables: Scope = field(default_factory=Scope)
 
     def on(self, hook: str, fn: Callable[[Any], Any], *, priority: int | None = None, timeout_ms: int | None = None) -> Disposable:
@@ -84,7 +84,10 @@ class ExtensionHost:
             yield
         finally:
             for fn in self._shutdown:
-                await fn()
+                try:
+                    await fn()
+                except Exception:  # noqa: BLE001 - the remaining handlers (outbox, backups, ...) still have to run
+                    log.exception("shutdown handler %s failed", fn.__name__)
 
     # ---- extensions ----
     def add_module(self, module: Module) -> ExtensionScope:
@@ -160,5 +163,9 @@ class ExtensionHost:
             await scope.start()
 
     async def stop(self) -> None:
+        """Stop in reverse start order; one extension failing to stop never keeps the others from stopping."""
         for scope in reversed(list(self.extensions.values())):
-            await scope.stop()
+            try:
+                await scope.stop()
+            except Exception:  # noqa: BLE001
+                log.exception("extension %s failed to stop", scope.manifest.id)

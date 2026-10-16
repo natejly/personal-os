@@ -66,12 +66,12 @@ class Manifest:
         _check(_is_str(raw["name"]), "name must be a non-empty string")
         _check(isinstance(raw["version"], str) and _SEMVER.fullmatch(raw["version"]), "version must be semver")
         api = raw["apiVersion"]
-        _check(isinstance(api, int) and not isinstance(api, bool) and api >= 1, "apiVersion must be a positive integer")
+        _check(_is_int(api) and api >= 1, "apiVersion must be a positive integer")
         if api > API_VERSION:
             raise ManifestError(f"targets apiVersion {api}, this host speaks {API_VERSION}")
         _check(isinstance(raw.get("description", ""), str), "description must be a string")
         _check(raw.get("kind", "extension") in ("extension", "profile"), "kind must be 'extension' or 'profile'")
-        _check(raw.get("enabled", True) in (True, False, "always"), "enabled must be true, false or 'always'")
+        _check(isinstance(raw.get("enabled", True), bool) or raw["enabled"] == "always", "enabled must be true, false or 'always'")
         activation = _strings(raw, "activation", ("startup",))
         _check(all(_ACTIVATION.fullmatch(a) for a in activation), "activation has an unknown event")
         requires, provides = _object(raw, "requires", {"services", "extensions"}), _object(raw, "provides", {"services"})
@@ -99,6 +99,10 @@ def load_manifest(path: Path) -> Manifest:
 def _check(ok: object, message: str) -> None:
     if not ok:
         raise ManifestError(message)
+
+
+def _is_int(v: Any) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
 
 
 def _is_str(v: Any) -> bool:
@@ -132,7 +136,8 @@ def _hooks(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
     for name, opts in hooks.items():
         _check(name in HOOKS, f"hooks declares unknown hook {name!r}")
         _check(isinstance(opts, dict) and set(opts) <= _HOOK_KEYS, f"hooks.{name} takes only {', '.join(sorted(_HOOK_KEYS))}")
-        _check(isinstance(opts.get("priority", 0), int) and isinstance(opts.get("timeoutMs", 1), int)
-               and opts.get("timeoutMs", 1) > 0, f"hooks.{name}: priority and timeoutMs must be integers")
+        _check(_is_int(opts.get("priority", 0)), f"hooks.{name}: priority must be an integer")
+        _check(_is_int(opts.get("timeoutMs", 1)) and opts.get("timeoutMs", 1) > 0,
+               f"hooks.{name}: timeoutMs must be a positive integer")
         _check(opts.get("onFailure", "ask") in ("ask", "deny"), f"hooks.{name}: onFailure may be 'ask' or 'deny', never 'allow'")
     return hooks

@@ -73,7 +73,8 @@ class Subscription:
     async def call(self, arg: Any) -> Any:
         if inspect.iscoroutinefunction(self.fn):
             return await self.fn(arg)
-        return await asyncio.to_thread(self.fn, arg)
+        out = await asyncio.to_thread(self.fn, arg)
+        return await out if inspect.isawaitable(out) else out  # a partial or callable object wrapping an async def
 
 
 class HookBus:

@@ -5,6 +5,7 @@ Run: python backend/tests/test_extension_host.py
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import sys
 import tempfile
@@ -46,6 +47,12 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(m.tool_names, ["demo_x"])
         self.assertEqual(m.hooks["context.contribute"]["timeoutMs"], 300)
         self.assertEqual((m.requires_services, m.provides_services), (("mcp",), ("demo",)))
+
+    def test_booleans_are_not_integers_or_enabled_flags(self) -> None:
+        for bad in (manifest(hooks={"app.start": {"priority": True}}), manifest(hooks={"app.start": {"timeoutMs": True}}),
+                    manifest(enabled=1), manifest(enabled=0)):
+            with self.assertRaises(ManifestError):
+                Manifest.from_dict(bad)
 
     def test_rejects(self) -> None:
         bad = {
@@ -219,6 +226,14 @@ class CollectPipeTests(unittest.TestCase):
             out = run(bus.collect("context.contribute", {}))
         self.assertEqual(out, ["first", "builtin-early", "builtin-late", "user-a"])
 
+    def test_a_wrapped_async_handler_is_awaited(self) -> None:
+        async def handler(tag: str, p: Any) -> str:
+            return f"{tag}:{p}"
+
+        bus = HookBus()
+        sub(bus, "context.contribute", functools.partial(handler, "x"))
+        self.assertEqual(run(bus.collect("context.contribute", 1)), ["x:1"])
+
     def test_collect_timeout_omits_only_the_slow_contribution(self) -> None:
         bus = HookBus()
 
@@ -391,6 +406,46 @@ class ScopeAndHostTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             run(go())
         self.assertEqual(log, ["stopped"])
+
+
+    def test_a_failing_stop_does_not_keep_the_others_from_stopping(self) -> None:
+        host, log = ExtensionHost(), []
+
+        def mod(key: str, fail: bool) -> Any:
+            class M:
+                label = key
+
+                async def start(self) -> None: ...
+
+                async def stop(self) -> None:
+                    log.append(key)
+                    if fail:
+                        raise RuntimeError(key)
+            M.key = key  # type: ignore[attr-defined]
+            return M()
+
+        for k, fail in (("a", False), ("b", True), ("c", False)):
+            host.add_module(mod(k, fail))
+        with self.assertLogs("personal_os.extensions.host", "ERROR"):
+            run(host.stop())
+        self.assertEqual(log, ["c", "b", "a"])
+
+    def test_a_failing_shutdown_handler_does_not_skip_the_later_ones(self) -> None:
+        host, log = ExtensionHost(), []
+
+        async def boom() -> None:
+            raise RuntimeError("boom")
+
+        host.on_stop(boom)
+        host.on_stop(lambda: _append(log, "after"))
+
+        async def go() -> None:
+            async with host.lifespan(None):  # type: ignore[arg-type]
+                pass
+
+        with self.assertLogs("personal_os.extensions.host", "ERROR"):
+            run(go())
+        self.assertEqual(log, ["after"])
 
 
 async def _append(log: list[str], v: str) -> None:

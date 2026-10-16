@@ -102,6 +102,7 @@ from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, 
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
+from .extensions.host import ExtensionHost
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
 from .tools import ASK_LOCKED_DANGER, Toolbox, UrlBlocked, guarded_request, page_title, summarize_result, times_body
@@ -154,8 +155,9 @@ def _token_eq(sent: str, expected: str) -> bool:
 
 
 # `docs_url` is moved off /docs: that prefix belongs to the user's own documents (see docs.py).
+host = ExtensionHost()
 app = FastAPI(title="Grain", version="0.1.0", docs_url="/api-docs", redoc_url=None,
-              swagger_ui_oauth2_redirect_url=None)  # its default sits under /docs too
+              swagger_ui_oauth2_redirect_url=None, lifespan=host.lifespan)  # its default sits under /docs too
 
 
 def _json_safe(v: Any) -> Any:
@@ -418,6 +420,7 @@ modules: list[Module] = build_modules(ModuleContext(
 _todos_module = module_get(modules, "todos", TodosModule)
 todos, tasks_sync = _todos_module.store, _todos_module.tasks_sync
 for _m in modules:
+    host.add_module(_m)
     if (_r := _m.router()) is not None:
         app.include_router(_r)
 # Soft delete: the DELETE routes below move things here, and /trash restores or erases them (trash.py).
@@ -595,7 +598,7 @@ retention = RetentionWorker(db, settings)
 app.include_router(reliability_router(db, settings, retention, lambda: system_access.permissions()))
 
 
-@app.on_event("startup")
+@host.on_start
 async def _reliability_startup() -> None:
     from . import logs
     for v in (AUTH_TOKEN, *secret_values(settings())):
@@ -603,7 +606,7 @@ async def _reliability_startup() -> None:
     retention.start()
 
 
-@app.on_event("shutdown")
+@host.on_stop
 async def _reliability_shutdown() -> None:
     await retention.stop()
 # Working memory that is not the chat: the per-conversation plan, the full tool-result blobs behind
@@ -644,7 +647,7 @@ documents.on_chunks = lambda did, _rows: retriever.schedule(settings, did)
 docs.on_chunks = lambda _did: retriever.schedule_docs(settings)
 
 
-@app.on_event("startup")
+@host.on_start
 async def _start_retrieval() -> None:
     retriever.bind_loop(asyncio.get_running_loop())
     learner.replay()  # exchanges a quit, crash or full queue left in learn_pending
@@ -1306,33 +1309,33 @@ def mcp_clear_grant(slug: str, scope: str = "global", scope_id: str | None = Non
     return mcp_store.effective_mode(slug, scope_id if scope == "project" else None, scope_id if scope == "chat" else None)
 
 
-@app.on_event("startup")
+@host.on_start
 async def _trash_startup() -> None:
     app.state.trash_task = asyncio.create_task(trash.loop(), name="trash-purge")
 
 
-@app.on_event("shutdown")
+@host.on_stop
 async def _trash_shutdown() -> None:
     t = getattr(app.state, "trash_task", None)
     if t:
         t.cancel()
 
 
-@app.on_event("startup")
+@host.on_start
 async def _toolcore_startup() -> None:
     from .subagents import WORKER_CORE
     app.state.toolcore_task = asyncio.create_task(toolcore.loop(
         db, toolcore.schema_chars(toolbox.specs), {"chat": tools.CORE_ORDER, "worker": WORKER_CORE}, tools.DESK_CORE), name="tool-core")
 
 
-@app.on_event("shutdown")
+@host.on_stop
 async def _toolcore_shutdown() -> None:
     t = getattr(app.state, "toolcore_task", None)
     if t:
         t.cancel()
 
 
-@app.on_event("startup")
+@host.on_start
 async def _mcp_startup() -> None:
     """Connect whatever is enabled. A server that will not start becomes a status, not a failed boot."""
     try:
@@ -1341,7 +1344,7 @@ async def _mcp_startup() -> None:
         log.warning("MCP startup failed", exc_info=True)
 
 
-@app.on_event("shutdown")
+@host.on_stop
 async def _mcp_shutdown() -> None:
     # Before anything else tears down: this is what guarantees no child server outlives the app.
     with contextlib.suppress(Exception):
@@ -5000,7 +5003,7 @@ class WorkflowApproveIn(BaseModel):
     plan_digest: str
 
 
-@app.on_event("startup")
+@host.on_start
 async def _recover_workflows() -> None:
     """A workflow run left running died with the last process: it becomes interrupted and Resume continues it."""
     workflow_store.recover()
@@ -5629,7 +5632,7 @@ def evaluate_permission(body: PermissionEvalIn) -> dict[str, Any]:
             "subjects": v.subjects, "suggestions": v.suggestions, "external": v.external}
 
 
-@app.on_event("startup")
+@host.on_start
 async def _recover_runs() -> None:
     """Runs left active by the last process died with it: mark them interrupted and salvage their reply from the tape."""
     recovered = run_store.recover(bus.live_ids())
@@ -5675,7 +5678,7 @@ async def _recover_runs() -> None:
             log.warning("could not restore the superseded answer of conversation %s", cid, exc_info=True)
 
 
-@app.on_event("startup")
+@host.on_start
 async def _workers_startup() -> None:
     """After run recovery: workers that were queued or running when the last process died are interrupted (resumable), their
     cards denied, every ended worker whose report never reached its chat gets its wake, and shell jobs those workers left
@@ -6362,12 +6365,12 @@ codingagents.register(toolbox, coding)
 coding.on_finish = _coding_finished
 
 
-@app.on_event("startup")
+@host.on_start
 async def _coding_watch_startup() -> None:
     app.state.coding_watch = asyncio.create_task(coding.watch(), name="coding-watch")
 
 
-@app.on_event("shutdown")
+@host.on_stop
 async def _coding_watch_shutdown() -> None:
     if t := getattr(app.state, "coding_watch", None):
         t.cancel()
@@ -6724,7 +6727,7 @@ async def jobs_wake() -> dict[str, bool]:
     return {"ok": True}
 
 
-@app.on_event("startup")
+@host.on_start
 async def _jobs_startup() -> None:
     """Seed the shipped jobs once (disabled), arm whatever has no slot, then start the one scheduler loop."""
     try:
@@ -6736,7 +6739,7 @@ async def _jobs_startup() -> None:
     app.state.jobs_task = asyncio.create_task(scheduler.loop(), name="job-scheduler")
 
 
-@app.on_event("shutdown")
+@host.on_stop
 async def _jobs_shutdown() -> None:
     await job_policy.shutdown()
     task = getattr(app.state, "jobs_task", None)
@@ -6747,7 +6750,7 @@ async def _jobs_shutdown() -> None:
 
 
 # ---------------- usage / cost ----------------
-@app.on_event("startup")
+@host.on_start
 async def _opencode_usage_startup() -> None:
     cfg = settings()
 
@@ -7580,7 +7583,7 @@ def artifact_open(id: str) -> dict[str, bool]:
     return _run_open(str(p))
 
 
-@app.on_event("startup")
+@host.on_start
 async def _blobs_startup() -> None:
     """Uploads from before content-addressed storage move once, off the loop and off the boot path."""
     def run() -> None:
@@ -7591,7 +7594,7 @@ async def _blobs_startup() -> None:
     asyncio.get_running_loop().run_in_executor(None, run)
 
 
-@app.on_event("shutdown")
+@host.on_stop
 async def _shutdown() -> None:
     workers_mgr.closing = True  # an ending worker must not start a wake turn into a dying backend
     live = workers_mgr.live()
@@ -7680,12 +7683,12 @@ async def drive_backup_run() -> dict[str, Any]:
     return await asyncio.to_thread(drive_backup.run)
 
 
-@app.on_event("startup")
+@host.on_start
 async def _drive_backup_startup() -> None:
     app.state.drive_backup_task = asyncio.create_task(drive_backup.loop(), name="drive-backup")
 
 
-@app.on_event("shutdown")
+@host.on_stop
 async def _drive_backup_shutdown() -> None:
     task = getattr(app.state, "drive_backup_task", None)
     if task:
@@ -8043,16 +8046,14 @@ def google_tasklists() -> Any:
     return _gcall(google.tasks_lists)
 
 
-@app.on_event("startup")
+@host.on_start
 async def _modules_startup() -> None:
-    for m in modules:
-        await m.start()
+    await host.start()
 
 
-@app.on_event("shutdown")
+@host.on_stop
 async def _modules_shutdown() -> None:
-    for m in modules:
-        await m.stop()
+    await host.stop()
 
 
 def _google_has(status: dict[str, Any], scope_tail: str) -> bool:
@@ -8834,7 +8835,7 @@ def delete_doc_comment(cid: str) -> dict[str, bool]:
 
 
 # ---------------- outbox: the delayed-send worker (outbox.py) ----------------
-@app.on_event("startup")
+@host.on_start
 async def _outbox_startup() -> None:
     """Run the hold timer. The loop's first act is resume(), which decides what a restart does with
     sends that were still waiting — see the outbox.py docstring."""
@@ -8854,7 +8855,7 @@ async def _outbox_startup() -> None:
     app.state.housekeeping_task = asyncio.create_task(housekeeping(), name="startup-housekeeping")
 
 
-@app.on_event("shutdown")
+@host.on_stop
 async def _outbox_shutdown() -> None:
     task = getattr(app.state, "outbox_task", None)
     if task:
@@ -8864,12 +8865,12 @@ async def _outbox_shutdown() -> None:
 
 
 # ---------------- backups: the daily snapshot timer (backups.py) ----------------
-@app.on_event("startup")
+@host.on_start
 async def _backups_startup() -> None:
     app.state.backups_task = asyncio.create_task(backups.Backups(db.data_dir).loop(), name="daily-backup")
 
 
-@app.on_event("shutdown")
+@host.on_stop
 async def _backups_shutdown() -> None:
     task = getattr(app.state, "backups_task", None)
     if task:
@@ -10087,7 +10088,7 @@ def cowork_inbox_seen(event_id: str) -> dict[str, bool]:
 # or the single-use claim. `_wake_desk` is called from there once the decision is recorded.
 
 
-@app.on_event("startup")
+@host.on_start
 async def _cowork_startup() -> None:
     """Recovery must never stop the backend from starting. Every active run becomes `interrupted`,
     every in-flight tool call becomes `unknown`, and every live desk lands in Needs you, where the
@@ -10200,7 +10201,7 @@ async def _telegram_user_update(ctx: dict[str, Any], text: str, atts: list[dict[
 toolbox.user_update = _telegram_user_update  # send_files' live delivery to the phone
 
 
-@app.on_event("startup")
+@host.on_start
 async def _telegram_startup() -> None:
     if settings().get("telegramEnabled") and db.secrets.get(telegram.SECRET_NAME):
         await telegram_bridge.start()

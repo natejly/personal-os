@@ -36,6 +36,15 @@ def _route_set() -> set[tuple[str, str]]:
     return out
 
 
+class HostTests(unittest.TestCase):
+    def test_modules_are_extensions_and_the_app_starts_through_the_lifespan(self) -> None:
+        from personal_os import app as appmod
+        self.assertEqual(list(appmod.host.extensions), [m.key for m in modules])
+        self.assertEqual(app.router.on_startup + app.router.on_shutdown, [])  # no @app.on_event handlers remain
+        with TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN}) as c:  # runs the lifespan
+            self.assertEqual(c.get("/health").status_code, 200)
+
+
 class ToolTests(unittest.TestCase):
     def test_todo_tools_follow_working_memory(self) -> None:
         names = list(toolbox.specs)

@@ -5,7 +5,7 @@ A module is constructed once, with a ModuleContext, after the app's shared servi
 - includes `router()` (if any) on the FastAPI app,
 - passes the list to Toolbox, which calls `register_tools(box)` where the feature's tools used to be
   registered, so tool order is unchanged,
-- awaits `start()` on startup and `stop()` on shutdown,
+- adds each module to the ExtensionHost, which awaits `start()` on startup and `stop()` (in reverse order) on shutdown,
 - merges `today()` into GET /dashboard.
 
 Tables stay where they are declared today (a module-level SCHEMA run by the store class), so a module

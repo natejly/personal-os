@@ -1,0 +1,23 @@
+{
+  "id": "health",
+  "name": "Health",
+  "description": "Sleep, activity and workouts: a metric log, goals and streaks, and connected services synced over MCP.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "kind": "extension",
+  "enabled": false,
+  "activation": ["startup"],
+  "requires": { "services": ["mcp"] },
+  "contributes": {
+    "tools": [
+      { "name": "health_summary", "danger": "safe", "group": "health" },
+      { "name": "health_log", "danger": "writes", "group": "health" },
+      { "name": "health_delete_entry", "danger": "writes", "group": "health" }
+    ],
+    "routes": { "prefix": "/health" },
+    "views": [{ "id": "health", "label": "Health", "icon": "heart" }]
+  },
+  "hooks": { "app.start": {} },
+  "permissions": ["db:own", "service:mcp"],
+  "data": { "tables": ["health_metrics", "health_entries", "health_sources"] }
+}

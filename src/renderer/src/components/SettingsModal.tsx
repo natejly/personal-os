@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useSlidingPill } from "../lib/useSlidingPill"
-import { X, Search, Plug, Cpu, Bot, Palette, ShieldCheck, SlidersHorizontal, KeyRound, Gauge, Brain, PanelLeft, type Icon } from '../icons'
+import { X, Search, Plug, Cpu, Bot, Palette, ShieldCheck, SlidersHorizontal, KeyRound, Gauge, Brain, PanelLeft, Package, type Icon } from '../icons'
 import { useShallow } from 'zustand/react/shallow'
 import { useStore, setSettingsGuard } from '../store'
 import { modeOf, MODES } from '../lib/permissionMode'
@@ -9,6 +9,8 @@ import { api } from '../lib/api'
 import { useModal } from '../lib/useModal'
 import { applyAppearance } from '../lib/appearance'
 import { modelLabel } from '../lib/modelLabel'
+import { settingsPanels } from '../extensions/host'
+import { viewHidden } from '../moduleToggles'
 import type { Settings } from '@shared/types'
 import ModelTab from './settings/ModelTab'
 import UsageTab from './settings/UsageTab'
@@ -48,6 +50,9 @@ export default function SettingsModal(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const view = useStore((s) => s.view)
   const { saveSettings, setSettingsOpen, setView, toast } = useStore(useShallow((s) => ({ saveSettings: s.saveSettings, setSettingsOpen: s.setSettingsOpen, setView: s.setView, toast: s.toast })))
+  // Sections that extensions contribute, listed while their extension is on.
+  const panels = settingsPanels.filter((p) => !viewHidden(settings, p.extension))
+  const tabs = [...TABS, ...panels.map((p) => ({ id: p.tab, label: p.label, icon: Package }))]
   const [draft, setDraft] = useState<Settings>(settings)
   const [saving, setSaving] = useState(false)
   // Set while the footer asks whether to throw the draft away; it remembers what the answer leads to.
@@ -55,7 +60,7 @@ export default function SettingsModal(): JSX.Element {
   const { shortcuts, apply: applyShortcuts } = useShortcuts()
   const storeTab = useStore((s) => s.settingsTab)
   const storeGroup = useStore((s) => s.settingsGroup)
-  const [tab, setTabState] = useState<Tab>(() => { const t = resolveTab(storeTab).tab; return TABS.some((x) => x.id === t) ? t : 'appearance' })
+  const [tab, setTabState] = useState<Tab>(() => { const t = resolveTab(storeTab).tab; return tabs.some((x) => x.id === t) ? t : 'appearance' })
   // The store keeps the shown tab, so openSettings from a toast or a link switches the open modal too.
   const setTab = (t: Tab): void => { setTabState(t); useStore.setState({ settingsTab: t }) }
   // Advanced groups start collapsed; one opens when Settings was asked for a topic inside it.
@@ -84,7 +89,7 @@ export default function SettingsModal(): JSX.Element {
     return () => window.clearTimeout(t)
   }, [jump, tab, openGroups])
   useEffect(() => {
-    if (TABS.some((x) => x.id === storeTab)) setTabState(storeTab)
+    if (tabs.some((x) => x.id === storeTab)) setTabState(storeTab)
     if (storeGroup) setOpenGroups((g) => new Set(g).add(storeGroup))
   }, [storeTab, storeGroup])
   const mode = modeOf(settings)
@@ -196,14 +201,14 @@ export default function SettingsModal(): JSX.Element {
   // Vertical tablist: arrows move and select, Home/End jump to the ends.
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>): void => {
     if ((e.target as HTMLElement).tagName === 'INPUT') return
-    const i = TABS.findIndex((t) => t.id === tab)
-    const next = e.key === 'ArrowDown' ? (i + 1) % TABS.length
-      : e.key === 'ArrowUp' ? (i - 1 + TABS.length) % TABS.length
-        : e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : -1
+    const i = tabs.findIndex((t) => t.id === tab)
+    const next = e.key === 'ArrowDown' ? (i + 1) % tabs.length
+      : e.key === 'ArrowUp' ? (i - 1 + tabs.length) % tabs.length
+        : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : -1
     if (next < 0) return
     e.preventDefault()
-    setTab(TABS[next].id)
-    tabRefs.current[TABS[next].id]?.focus()
+    setTab(tabs[next].id)
+    tabRefs.current[tabs[next].id]?.focus()
   }
   // Escape answers the footer's question with "keep editing" rather than asking it again.
   const onModalKey = (e: KeyboardEvent<HTMLDivElement>): void => {
@@ -237,7 +242,7 @@ export default function SettingsModal(): JSX.Element {
               </div>
             ) : (
               <nav className="settings-tabs pill-group" ref={tabsPill} role="tablist" aria-orientation="vertical" aria-label="Settings sections" onKeyDown={onTabKey}>
-                {TABS.map(({ id, label, icon: Icon }) => {
+                {tabs.map(({ id, label, icon: Icon }) => {
                   const hint = hintOf(id)
                   return (
                     <button key={id} ref={(el) => { tabRefs.current[id] = el }} role="tab" id={`settings-tab-${id}`} aria-controls="settings-pane"
@@ -260,6 +265,7 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'sidebar' && <SidebarTab {...tabProps} />}
             {tab === 'system' && <SystemTab />}
             {tab === 'advanced' && <AdvancedTab {...tabProps} {...gp} />}
+            {panels.map((p) => tab === p.tab && <p.Component key={p.tab} />)}
           </div>
         </div>
 

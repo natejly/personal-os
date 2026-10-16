@@ -1,5 +1,5 @@
-"""Health tracking as a feature module: the metric catalog and reading log (health.py), routes, agent tools,
-and the Today payload. No background loops and no outside service: everything stays in the local db.
+"""Health tracking as a built-in extension: the metric catalog and reading log (health.py), routes, agent tools,
+the Today payload, and the loop that re-syncs connected services over MCP.
 
 Routes live under /health/…; bare GET /health is the app's unauthenticated liveness probe, and the
 auth middleware matches public paths exactly, so these stay token-gated (test_health pins that).
@@ -7,22 +7,19 @@ auth middleware matches public paths exactly, so these stay token-gated (test_he
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import logging
 import time
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import redact
-from ..health import Health, HealthError
-from ..health_sync import PROVIDERS, HealthSources
-from ..tools import ToolSpec, _obj, tool_error
-from . import Module, ModuleContext
+from ... import redact
+from ...health import Health, HealthError
+from ...health_sync import PROVIDERS, HealthSources
+from ...tools import ToolSpec, _obj, tool_error
 
 if TYPE_CHECKING:
-    from ..tools import Toolbox
+    from ..host import ExtensionScope
 
 
 class MetricIn(BaseModel):
@@ -64,7 +61,6 @@ class SourcePatch(BaseModel):
     days_back: int | None = None
 
 
-log = logging.getLogger(__name__)
 AUTO_SYNC_EVERY = 6 * 3600     # an approved, enabled source re-syncs this often in the background
 AUTO_SYNC_TICK = 15 * 60
 
@@ -76,7 +72,7 @@ class EntryPatch(BaseModel):
 
 
 def parse_day_or_none(day: str | None) -> Any:
-    from ..health import parse_day
+    from ...health import parse_day
     return parse_day(day) if day else None
 
 
@@ -91,17 +87,15 @@ def _fmt(m: dict[str, Any], v: float | None) -> str | None:
     return f"{s} {m['unit']}" if m["unit"] else s
 
 
-class HealthModule(Module):
-    key = "health"
-    view = "health"
-    label = "Health"
-
-    def __init__(self, ctx: ModuleContext) -> None:
-        super().__init__(ctx)
-        self.store = Health(ctx.db)
-        self.sources = HealthSources(ctx.db, self.store, ctx.mcp)
-        self._task: asyncio.Task[Any] | None = None
+class HealthExtension:
+    def __init__(self, api: ExtensionScope) -> None:
+        self.api = api
+        self.store = Health(api.db)
+        self.sources = HealthSources(api.db, self.store, self.mcp)
         self._syncing: set[str] = set()
+
+    def mcp(self) -> Any:
+        return self.api.services.get("mcp")
 
     # ---- routes ----
     def router(self) -> APIRouter:
@@ -179,7 +173,7 @@ class HealthModule(Module):
             p = PROVIDERS.get(body.provider)
             if not p:
                 raise HTTPException(400, f"Unknown provider '{body.provider}'")
-            mcp = self.ctx.mcp()
+            mcp = self.mcp()
             if mcp is None:
                 raise HTTPException(503, "Connectors are not available")
             cfg = p.server(body.form)
@@ -220,7 +214,7 @@ class HealthModule(Module):
             if not s:
                 raise HTTPException(404)
             sources.delete(id, keep_data)
-            mcp = self.ctx.mcp()
+            mcp = self.mcp()
             if remove_server and mcp is not None and mcp.store.server(s["server_id"]):
                 mcp.store.delete_server(s["server_id"])
                 if getattr(mcp, "oauth", None):
@@ -231,35 +225,27 @@ class HealthModule(Module):
         return r
 
     # ---- background sync ----
-    async def start(self) -> None:
-        self._task = asyncio.create_task(self._loop(), name="health-sources")
-
-    async def stop(self) -> None:
-        task, self._task = self._task, None
-        if task:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
+    async def start(self, _: Any) -> None:
+        self.api.spawn(self._loop())
 
     async def _loop(self) -> None:
         """Re-sync approved, enabled sources every few hours. A failure is recorded on the source."""
         await asyncio.sleep(60)  # let connectors come up first
         while True:
-            for s in self.sources.list() if self.enabled() else ():
+            for s in self.sources.list() if self.api.enabled() else ():
                 due = not s["last_sync_at"] or time.time() - s["last_sync_at"] > AUTO_SYNC_EVERY
                 if s["enabled"] and s["pinned"] and due and s["id"] not in self._syncing:
                     self._syncing.add(s["id"])
                     try:
                         await self.sources.sync(s["id"])
                     except Exception:  # noqa: BLE001 - one source's failure must not stop the loop
-                        log.warning("health sync %s failed", s["id"], exc_info=True)
+                        self.api.log.warning("health sync %s failed", s["id"], exc_info=True)
                     finally:
                         self._syncing.discard(s["id"])
             await asyncio.sleep(AUTO_SYNC_TICK)
 
     # ---- agent tools ----
-    def register_tools(self, box: Toolbox) -> None:
-        R = box.specs.__setitem__
+    def register_tools(self) -> None:
         store = self.store
 
         def unknown(name: str) -> Any:
@@ -296,7 +282,7 @@ class HealthModule(Module):
                                              for e in store.entries(m["key"], limit=20)]
                 out.append(row)
             return {"days": days, "metrics": out}
-        R("health_summary", ToolSpec("health_summary",
+        self.api.tool(ToolSpec("health_summary",
             "Read the user's health log: each tracked metric (sleep, steps, water, exercise, weight, mood, meds, and any custom ones) with today's value, "
             "the average over the last `days` days versus the period before, goal and streak. Pass `metric` for one metric's daily values and its recent entries (with ids).",
             _obj({"days": {"type": "integer", "default": 7}, "metric": {"type": "string"}, "today": {"type": "string", "description": "the user's local date, YYYY-MM-DD"}}, []),
@@ -312,7 +298,7 @@ class HealthModule(Module):
                 return tool_error(redact.scrub_command_output(str(err)), field="value", expected="a number in the metric's range (scale 1-5, check 1/0)",
                                   example={"metric": redact.scrub_command_output(str(m["key"] or "")), "value": 1 if m["kind"] == "check" else 3})
             return {"id": e["id"], "metric": m["key"], "day": e["day"], "logged": _fmt(m, e["value"])}
-        R("health_log", ToolSpec("health_log",
+        self.api.tool(ToolSpec("health_log",
             "Log a health reading for the user. `metric` is a key or label from health_summary. Values: hours for sleep, a count for steps/water, minutes for exercise, "
             "the metric's unit for weight/heart rate, 1-5 for mood/energy, 1 (yes) or 0 (no) for yes/no metrics like meds. `day` is YYYY-MM-DD and defaults to today; "
             "file last night's sleep under the day the user woke up.",
@@ -329,8 +315,16 @@ class HealthModule(Module):
                                   example={"id": "a1b2c3"}, alternative="health_summary with `metric` to list entry ids")
             store.delete_entry(id)
             return {"deleted": {"metric": e["metric"], "day": e["day"], "value": e["value"]}}
-        R("health_delete_entry", ToolSpec("health_delete_entry", "Delete one logged health reading by id (from health_summary with `metric`). Only when the user asks to remove or correct an entry.",
+        self.api.tool(ToolSpec("health_delete_entry", "Delete one logged health reading by id (from health_summary with `metric`). Only when the user asks to remove or correct an entry.",
             _obj({"id": {"type": "string"}}, ["id"]), health_delete_entry, "health", "writes", examples=[{"id": "a1b2c3"}]))
 
     def today(self) -> dict[str, Any]:
         return {"health": self.store.today()}
+
+
+def activate(api: ExtensionScope) -> None:
+    ext = HealthExtension(api)
+    api.router(ext.router())
+    ext.register_tools()
+    api.on("app.start", ext.start)
+    api.today(ext.today)

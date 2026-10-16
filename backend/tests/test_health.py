@@ -1,4 +1,4 @@
-"""Health tracking (health.py + modules/health.py): daily rollups, goals and streaks, value checks,
+"""Health tracking (health.py + extensions/health): daily rollups, goals and streaks, value checks,
 the routes, the agent tools, and that /health/... stays behind the token even though bare /health is public.
 
 Run: PERSONAL_OS_DATA_DIR=/tmp/x python backend/tests/test_health.py
@@ -18,11 +18,10 @@ os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="healthtes
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os.app import AUTH_TOKEN, app, modules, toolbox  # noqa: E402
+from personal_os import llm  # noqa: E402
+from personal_os.app import AUTH_TOKEN, app, db, host, toolbox  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.health import Health, HealthError, daily_value  # noqa: E402
-from personal_os.modules import get  # noqa: E402
-from personal_os.modules.health import HealthModule  # noqa: E402
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 TODAY = date(2026, 10, 1)
@@ -224,7 +223,7 @@ class ToolTests(unittest.TestCase):
         note = [e for e in s["recent_entries"] if e["id"] == r["id"]][0]["note"]
         self.assertNotIn(pat, note)
         self.assertIn("[github-pat]", note)
-        stored = get(modules, "health", HealthModule).store.entry(r["id"])
+        stored = Health(db).entry(r["id"])
         self.assertIn(pat, stored["note"])
 
     def test_a_token_in_a_metric_label_is_stripped(self) -> None:
@@ -240,8 +239,13 @@ class ToolTests(unittest.TestCase):
         finally:
             client.delete(f"/health/metrics/{m['key']}")
 
-    def test_module_is_registered(self) -> None:
-        self.assertIsInstance(get(modules, "health", HealthModule).store, Health)
+    def test_extension_is_loaded_and_off_on_a_fresh_install(self) -> None:
+        scope = host.extensions["health"]
+        self.assertEqual(scope.manifest.enabled, False)
+        self.assertIn("health", llm.LEAN_OFF_VIEWS)
+        self.assertEqual({t["name"]: (t["danger"], t["group"]) for t in scope.manifest.contributes["tools"]},
+                         {n: (t.danger, t.group) for n, t in scope.tools.items()})
+        self.assertTrue(scope.enabled())  # this test db never hid the view: an existing install keeps what it had
 
 
 if __name__ == "__main__":

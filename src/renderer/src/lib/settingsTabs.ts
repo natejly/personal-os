@@ -1,5 +1,5 @@
 /** The Settings sections, and where the ids older code still passes to openSettings now live. Pure: no store import. */
-export type SettingsTab = 'model' | 'usage' | 'permissions' | 'integrations' | 'agents' | 'memory' | 'appearance' | 'sidebar' | 'system' | 'advanced'
+export type SettingsTab = 'model' | 'usage' | 'permissions' | 'integrations' | 'agents' | 'memory' | 'appearance' | 'sidebar' | 'system' | 'advanced' | `ext:${string}`
 /** Collapsed groups left on the Advanced tab. */
 export type AdvancedGroup = 'data' | 'developer' | 'learning' | 'search' | 'map'
 export type LegacySettingsTab = 'models' | 'workspace' | 'provider' | 'memory' | 'cowork' | 'modules' | 'behavior' | 'data' | 'spending' | 'texting'
@@ -20,7 +20,7 @@ const CURRENT: readonly string[] = ['model', 'usage', 'permissions', 'integratio
 
 /** Any id, current or old, to a section (and the Advanced group to open). An unknown id lands on Model. */
 export function resolveTab(id: string): { tab: SettingsTab; group?: AdvancedGroup } {
-  if (CURRENT.includes(id)) return { tab: id as SettingsTab }
+  if (CURRENT.includes(id) || id.startsWith('ext:')) return { tab: id as SettingsTab }
   return LEGACY[id as LegacySettingsTab] ?? { tab: 'model' }
 }
 

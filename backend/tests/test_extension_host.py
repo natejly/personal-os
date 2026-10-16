@@ -14,12 +14,14 @@ import time
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from personal_os.db import Database  # noqa: E402
 from personal_os.extensions.disposables import Disposable, Scope  # noqa: E402
 from personal_os.extensions.hooks import MUTE_AFTER, Ask, Deny, HookBus  # noqa: E402
-from personal_os.extensions.host import ExtensionHost  # noqa: E402
+from personal_os.extensions.host import ExtensionContext, ExtensionHost  # noqa: E402
 from personal_os.extensions.manifest import ManifestError, Manifest, load_manifest  # noqa: E402
 
 BASE = {"id": "demo", "name": "Demo", "version": "1.0.0", "apiVersion": 1}
@@ -464,6 +466,89 @@ class ScopeAndHostTests(unittest.TestCase):
         with self.assertLogs("personal_os.extensions.host", "ERROR"):
             run(go())
         self.assertEqual(log, ["after"])
+
+
+class BuiltinExtensionTests(unittest.TestCase):
+    def scope(self, hidden: list[str] | None = None, **over: Any) -> Any:
+        ctx = ExtensionContext(db=None, hidden_views=lambda: hidden or (), services={"mcp": lambda: "client"})  # type: ignore[arg-type]
+        return ExtensionHost()._add(Manifest.from_dict(manifest(**over)), ctx=ctx)
+
+    def test_enabled_follows_the_hidden_views_unless_always(self) -> None:
+        hidden = ["demo"]
+        self.assertFalse(self.scope(hidden).enabled())
+        self.assertTrue(self.scope(["other"]).enabled())
+        self.assertTrue(self.scope(hidden, enabled="always").enabled())
+        self.assertFalse(ExtensionHost()._add(Manifest.from_dict(manifest(enabled=False))).enabled())  # no settings: the manifest default
+
+    def test_tool_router_and_today_are_registered_and_disposed_with_the_scope(self) -> None:
+        scope = self.scope()
+        spec = mock.Mock()
+        spec.name = "demo_x"
+        router = object()
+        scope.tool(spec)
+        scope.router(router)
+        scope.today(lambda: {"demo": 1})
+        host = ExtensionHost()
+        host.extensions["demo"] = scope
+        self.assertEqual((scope.tools, scope.routers, host.today()), ({"demo_x": spec}, [router], {"demo": 1}))
+        run(scope.stop())
+        self.assertEqual((scope.tools, scope.routers, host.today()), ({}, [], {}))
+
+    def test_today_skips_a_disabled_extension(self) -> None:
+        host, scope = ExtensionHost(), self.scope(["demo"])
+        scope.today(lambda: {"demo": 1})
+        host.extensions["demo"] = scope
+        self.assertEqual(host.today(), {})
+
+    def test_spawned_tasks_are_cancelled_and_awaited_on_stop(self) -> None:
+        async def go() -> None:
+            scope, done = self.scope(), asyncio.Event()
+
+            async def forever() -> None:
+                try:
+                    await asyncio.sleep(60)
+                finally:
+                    done.set()
+
+            async def quick() -> None:
+                return None
+
+            task = scope.spawn(forever())
+            await scope.spawn(quick())
+            await asyncio.sleep(0)
+            self.assertEqual(scope.tasks, {task})  # a finished task leaves the set
+            await scope.stop()
+            self.assertTrue(done.is_set() and task.cancelled() and not scope.tasks)
+        run(go())
+
+    def test_services_must_be_declared_and_are_looked_up_late(self) -> None:
+        scope = self.scope(requires={"services": ["mcp"]})
+        self.assertEqual(scope.services.get("mcp"), "client")
+        with self.assertRaises(KeyError):
+            self.scope().services.get("mcp")
+
+    def test_load_builtin_activates_health_and_starts_and_stops_its_loop(self) -> None:
+        host = ExtensionHost()
+        ctx = ExtensionContext(db=Database(tempfile.mkdtemp(prefix="exthealth-")), hidden_views=lambda: (), services={"mcp": lambda: None})
+        scope = host.load_builtin("health", ctx)
+        self.assertEqual(list(scope.tools), ["health_summary", "health_log", "health_delete_entry"])
+        self.assertEqual([r.prefix for r in scope.routers], ["/health"])
+        self.assertEqual(list(host.bus._subs), ["app.start"])
+
+        async def go() -> None:
+            await host.start()
+            self.assertEqual(len(scope.tasks), 1)
+            await host.stop()
+            self.assertEqual(scope.tasks, set())
+        run(go())
+
+    def test_load_builtin_refuses_tools_the_manifest_does_not_declare(self) -> None:
+        real = load_manifest(Path(__file__).resolve().parents[1] / "personal_os" / "extensions" / "health" / "extension.json")
+        short = Manifest.from_dict({"id": "health", "name": "Health", "version": "1.0.0", "apiVersion": 1,
+                                    "hooks": dict(real.hooks), "contributes": {"tools": [{"name": "health_log"}]}})
+        ctx = ExtensionContext(db=Database(tempfile.mkdtemp(prefix="exthealth-")), hidden_views=lambda: (), services={})
+        with mock.patch("personal_os.extensions.host.load_manifest", return_value=short), self.assertRaises(ValueError):
+            ExtensionHost().load_builtin("health", ctx)
 
 
 async def _append(log: list[str], v: str) -> None:

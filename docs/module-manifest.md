@@ -16,7 +16,7 @@ pilot because it touches every surface. Built-in only — no runtime loading, no
 | `todos` | `modules/todos.py` — `TodosModule` | `features/todos/module.tsx` |
 | `mailwatch` | `modules/mailwatch.py` — `MailWatchModule` (reply tracker, `mail_followups`) | none (backend only) |
 | `planner` | `modules/planner.py` — `PlannerModule` (time-block suggestions for todos) | none (backend only) |
-| `health` | `modules/health.py` — `HealthModule` | `features/health/module.tsx` |
+| `health` | `extensions/health/extension.py`, a built-in extension loaded by `ExtensionHost.load_builtin` (registered after the modules, so its tools keep their place) | `extensions/health/extension.tsx` (`ui.view`) |
 
 The slices below are the pilot's original work split, kept as the worked example of a port.
 

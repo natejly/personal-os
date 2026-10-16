@@ -12,13 +12,15 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import codingagents, mcp_servers, ship  # noqa: E402
-from personal_os.modules.health import HealthModule
+from personal_os.db import Database  # noqa: E402
+from personal_os.extensions.host import ExtensionContext, ExtensionHost, ExtensionScope  # noqa: E402
 from personal_os.modules.mailwatch import MailWatchModule
 from personal_os.modules.planner import PlannerModule
 from personal_os.modules.todos import TodosModule
@@ -40,10 +42,9 @@ def stub_todos_module() -> TodosModule:
     return m
 
 
-def stub_health_module() -> HealthModule:
-    m = HealthModule.__new__(HealthModule)
-    m.store = Stub()  # type: ignore[assignment]
-    return m
+def health_extension() -> ExtensionScope:
+    host = ExtensionHost()
+    return host.load_builtin("health", ExtensionContext(db=Database(tempfile.mkdtemp(prefix="mcpreserved-")), hidden_views=lambda: (), services={}))
 
 
 def stub_module(cls: Any) -> Any:
@@ -61,8 +62,8 @@ def full_toolbox(google: Any = None) -> Toolbox:
     calls their register() after building the Toolbox), so they are added here the same way.
     """
     tb = Toolbox(Stub(), Stub(), Stub(), lambda: {},  # type: ignore[arg-type]
-                 modules=[stub_todos_module(), stub_health_module(), stub_module(MailWatchModule),
-                          stub_module(PlannerModule)], google=google or Stub(),  # type: ignore[arg-type]
+                 modules=[stub_todos_module(), stub_module(MailWatchModule), stub_module(PlannerModule)],
+                 extensions=[health_extension()], google=google or Stub(),  # type: ignore[arg-type]
                  docs=Stub(), outbox=Stub(), work_plans=Stub(), results=Stub(),
                  skills=Stub(), jobs=Stub(), style=Stub(),
                  desks=Stub(), workspace=Stub())

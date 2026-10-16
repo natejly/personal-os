@@ -23,7 +23,7 @@ import time
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 import httpx
 
@@ -55,6 +55,9 @@ from .jobs import check_watch_dir, local_tz_name, parse_when, valid_cron, valid_
 from .learn import SELF_LABELS, SKILL_STATUSES, induce_skill, run_transcript
 from .repos import Documents, Graph, Memories, Projects, is_isolated
 from .sandbox import WORKSPACE_REPORT_CAP, blocked_note, declared_limits, limits_text, profile_failed, run_python
+
+if TYPE_CHECKING:
+    from .extensions.host import ExtensionScope
 
 ToolFn = Callable[..., Awaitable[Any]]
 log = logging.getLogger(__name__)
@@ -770,7 +773,7 @@ class Toolbox:
     commands: Any = None
     style_relearn: Any = None  # (project_id) -> None: queues a background voice relearn; wired in app.py
 
-    def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], modules: list[Any] | None = None, google: Any = None,
+    def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], modules: list[Any] | None = None, extensions: list[ExtensionScope] | None = None, google: Any = None,
                  docs: Any = None, outbox: Any = None,
                  work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None,
                  style: Any = None, desks: Any = None, workspace: Any = None, filesnap: Any = None,
@@ -778,6 +781,7 @@ class Toolbox:
         self.bus = bus or HookBus()  # the hooks dispatch_tool fires around every call
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
         self.modules = modules or []  # feature modules (modules/); each registers its own tools
+        self.extensions = extensions or []  # built-in extensions (extensions/); their tools follow the modules'
         self.google, self.docs = google, docs
         self.filesnap = filesnap  # pre-image snapshots for local file writes (filesnap.py); None skips them
         self.extundo = extundo  # undo rows for calendar / Google Tasks writes (extundo.py); None skips them
@@ -811,6 +815,8 @@ class Toolbox:
         self._register_working()
         for m in self.modules:
             m.register_tools(self)
+        for e in self.extensions:
+            self.specs.update(e.tools)
         if docs is not None:
             self._register_docs()
         if google is not None:

@@ -103,7 +103,7 @@ from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, 
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .style import WritingStyle
-from .extensions.host import ExtensionHost
+from .extensions.host import ExtensionContext, ExtensionHost
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
 from .tools import ASK_LOCKED_DANGER, Toolbox, UrlBlocked, guarded_request, page_title, summarize_result, times_body
@@ -429,6 +429,9 @@ for _m in modules:
     host.add_module(_m)
     if (_r := _m.router()) is not None:
         app.include_router(_r)
+_ext_ctx = ExtensionContext(db=db, hidden_views=lambda: settings().get("hiddenViews") or (), services={"mcp": lambda: mcp})
+for _r in host.load_builtin("health", _ext_ctx).routers:
+    app.include_router(_r)
 host.migrate(db)
 # Soft delete: the DELETE routes below move things here, and /trash restores or erases them (trash.py).
 trash = Trash(db, todos, docs)
@@ -627,7 +630,7 @@ guide.ensure(skills)  # the built-in "Using Grain" skill: created approved, text
 # Auto-learn may only ever *propose* a skill (a friction fix, or a revised copy of one that failed); the lint it
 # runs is the approval gate's, so a draft that claims authority never even becomes a candidate.
 learner.skills, learner.known_tools = skills, lambda: _known_tools()
-toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, docs=docs,
+toolbox = Toolbox(memories, graph, documents, settings, modules=modules, extensions=list(host.extensions.values()), google=google, docs=docs,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, desks=desks, workspace=workspace, filesnap=filesnap,
                   conversations=convos, extundo=extundo, bus=host.bus)
@@ -8115,6 +8118,7 @@ async def dashboard() -> dict[str, Any]:
     out: dict[str, Any] = {
         "google": st,
         **{k: v for m in modules if m.enabled() for k, v in m.today().items()},
+        **host.today(),
         "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
         "recent_memories": memories.list(ALL)[:6],
         "recent_conversations": convos.list(ALL)[:6],

@@ -16,6 +16,10 @@ test('old tab ids map to the new sections', () => {
   assert.deepEqual(resolveTab('nope'), { tab: 'model' })
 })
 
+test('an extension section resolves to itself', () => {
+  assert.deepEqual(resolveTab('ext:demo:panel'), { tab: 'ext:demo:panel' })
+})
+
 test('behavior and texting land on their new homes', () => {
   assert.deepEqual(resolveTab('behavior'), { tab: 'model' })
   assert.deepEqual(resolveTab('texting'), { tab: 'integrations' })

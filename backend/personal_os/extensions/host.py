@@ -3,24 +3,26 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib
 import inspect
 import logging
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, get_args
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Iterable, get_args
 
 from .. import backups, migrations
 from ..context import Block, Contribution, RetrievalSources, Slot
 from .disposables import Disposable, Scope
 from .hooks import HookBus
-from .manifest import Manifest
+from .manifest import Manifest, load_manifest
 
 if TYPE_CHECKING:
-    from fastapi import FastAPI
+    from fastapi import APIRouter, FastAPI
 
     from ..db import Database
     from ..modules import Module
+    from ..tools import ToolSpec
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +34,26 @@ STABLE_CONTEXT_TIMEOUT_MS = 100  # a stable block reads cached state: it is buil
 
 
 @dataclass
+class ExtensionContext:
+    """What the app lends to the extensions it loads."""
+    db: Database
+    hidden_views: Callable[[], Iterable[str]]  # the views the user turned off: an extension in this list is disabled
+    services: dict[str, Callable[[], Any]]  # looked up late, because some are built after the extensions
+
+
+class Services:
+    """The services an extension declared under `requires`."""
+
+    def __init__(self, declared: tuple[str, ...], lookups: dict[str, Callable[[], Any]]) -> None:
+        self._declared, self._lookups = declared, lookups
+
+    def get(self, name: str) -> Any:
+        if name not in self._declared:
+            raise KeyError(f"service {name!r} is not declared under requires.services")
+        return self._lookups[name]()
+
+
+@dataclass
 class ExtensionScope:
     """One loaded extension: its manifest, and everything it registered, undone together when it stops."""
     manifest: Manifest
@@ -40,10 +62,33 @@ class ExtensionScope:
     retrieval: RetrievalSources
     module: Module | None = None  # set for an adapted Module
     root: Path | None = None  # the extension's folder, where data.migrations is looked up
+    ctx: ExtensionContext | None = None  # set for an extension loaded from its folder
     disposables: Scope = field(default_factory=Scope)
+    tools: dict[str, ToolSpec] = field(default_factory=dict)
+    routers: list[APIRouter] = field(default_factory=list)
+    today_fns: list[Callable[[], dict[str, Any]]] = field(default_factory=list)
+    tasks: set[asyncio.Task[Any]] = field(default_factory=set)
+
+    @property
+    def log(self) -> logging.Logger:
+        return logging.getLogger(f"{__package__}.{self.manifest.id}")
+
+    @property
+    def db(self) -> Database:
+        assert self.ctx is not None
+        return self.ctx.db
+
+    @property
+    def services(self) -> Services:
+        assert self.ctx is not None
+        return Services(self.manifest.requires_services, self.ctx.services)
 
     def enabled(self) -> bool:
-        return self.module.enabled() if self.module else self.manifest.enabled is not False
+        if self.module:
+            return self.module.enabled()
+        if self.ctx is None or self.manifest.enabled == "always":
+            return self.manifest.enabled is not False
+        return self.manifest.id not in self.ctx.hidden_views()
 
     def migration_steps(self) -> list[tuple[int, str, migrations.Step]]:
         folder = self.manifest.data.get("migrations")
@@ -60,6 +105,28 @@ class ExtensionScope:
             timeout_ms=declared.get("timeoutMs") if timeout_ms is None else timeout_ms,
             on_failure=declared.get("onFailure", "ask"))
         return self.disposables.add(sub)
+
+    def tool(self, spec: ToolSpec) -> Disposable:
+        """Offer a tool the manifest declares under contributes.tools; the Toolbox registers it after the modules' tools."""
+        self.tools[spec.name] = spec
+        return self.disposables.add(Disposable(lambda: self.tools.pop(spec.name, None)))
+
+    def router(self, router: APIRouter) -> Disposable:
+        """Add routes. The app includes the router once, when the extension is loaded."""
+        self.routers.append(router)
+        return self.disposables.add(Disposable(lambda: self.routers.remove(router)))
+
+    def today(self, fn: Callable[[], dict[str, Any]]) -> Disposable:
+        """Add keys to the GET /dashboard payload while the extension is enabled; `fn` must be cheap."""
+        self.today_fns.append(fn)
+        return self.disposables.add(Disposable(lambda: self.today_fns.remove(fn)))
+
+    def spawn(self, coro: Awaitable[Any]) -> asyncio.Task[Any]:
+        """Run a background task that is cancelled and awaited when the extension stops."""
+        task = asyncio.ensure_future(coro)
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+        return task
 
     def context(self, fn: Callable[[dict[str, Any]], Any], *, slot: Slot, priority: int | None = None,
                 share: float | None = None) -> Disposable:
@@ -105,6 +172,10 @@ class ExtensionScope:
             if self.module:
                 await self.module.stop()
         finally:
+            tasks = list(self.tasks)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             self.disposables.dispose()
 
 
@@ -147,10 +218,25 @@ class ExtensionHost:
         manifest = Manifest.from_dict({"id": module.key, "name": module.label, "version": "1.0.0", "apiVersion": 1})
         return self._add(manifest, module)
 
-    def _add(self, manifest: Manifest, module: Module | None = None, root: Path | None = None) -> ExtensionScope:
+    def load_builtin(self, ext_id: str, ctx: ExtensionContext) -> ExtensionScope:
+        """Load the built-in extension in this package's `<ext_id>/` folder: read its manifest, then run its `activate(scope)`."""
+        root = Path(__file__).parent / ext_id
+        scope = self._add(load_manifest(root / "extension.json"), root=root, ctx=ctx)
+        importlib.import_module(f"{__package__}.{ext_id}.extension").activate(scope)
+        declared = {t["name"] for t in scope.manifest.contributes.get("tools", ())}
+        if set(scope.tools) != declared:
+            raise ValueError(f"extension {ext_id!r} registered tools {sorted(scope.tools)}, its manifest declares {sorted(declared)}")
+        return scope
+
+    def today(self) -> dict[str, Any]:
+        """The dashboard keys contributed by the enabled extensions."""
+        return {k: v for s in self.extensions.values() if s.enabled() for fn in s.today_fns for k, v in fn().items()}
+
+    def _add(self, manifest: Manifest, module: Module | None = None, root: Path | None = None,
+             ctx: ExtensionContext | None = None) -> ExtensionScope:
         if manifest.id in self.extensions:
             raise ValueError(f"duplicate extension id {manifest.id!r}")
-        scope = ExtensionScope(manifest, len(self.extensions), self.bus, self.retrieval, module, root)
+        scope = ExtensionScope(manifest, len(self.extensions), self.bus, self.retrieval, module, root, ctx)
         self.extensions[manifest.id] = scope
         self._enabled[manifest.id] = scope.enabled()
         return scope

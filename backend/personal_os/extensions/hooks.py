@@ -114,12 +114,13 @@ class HookBus:
             log.warning("hook %s from %s failed", sub.hook, sub.owner, exc_info=True)
             return False, None
 
-    async def emit(self, hook: str, payload: Any = None) -> None:
+    async def emit(self, hook: str, payload: Any = None, *, owner: str | None = None) -> None:
+        """`owner` limits the call to one extension's handlers, for the hooks the host fires one extension at a time."""
         self._known(hook)
         subs = self._subs.get(hook)
         if not subs:
             return
-        await asyncio.gather(*(self._emit_one(s, payload) for s in subs if not s.muted))
+        await asyncio.gather(*(self._emit_one(s, payload) for s in subs if not s.muted and owner in (None, s.owner)))
 
     async def _emit_one(self, sub: Subscription, payload: Any) -> None:
         ok, _ = await self._try(sub, payload, "emit")

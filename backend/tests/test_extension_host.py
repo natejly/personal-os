@@ -329,6 +329,9 @@ class ScopeAndHostTests(unittest.TestCase):
         class M:
             key, label = "mod", "Mod"
 
+            def enabled(self) -> bool:
+                return True
+
             def __init__(self) -> None:
                 self.log: list[str] = []
 
@@ -351,6 +354,9 @@ class ScopeAndHostTests(unittest.TestCase):
         def mod(key: str) -> Any:
             class M:
                 label = key.title()
+
+                def enabled(self) -> bool:
+                    return True
 
                 async def start(self) -> None:
                     log.append(f"+{key}")
@@ -413,6 +419,9 @@ class ScopeAndHostTests(unittest.TestCase):
         def mod(key: str, fail: bool) -> Any:
             class M:
                 label = key
+
+                def enabled(self) -> bool:
+                    return True
 
                 async def start(self) -> None: ...
 

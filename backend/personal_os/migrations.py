@@ -16,6 +16,7 @@ import re
 import sqlite3
 import time
 from bisect import bisect_left, bisect_right
+from pathlib import Path
 from typing import Callable
 
 from .memory_limits import BACKFILL_WINDOW_S
@@ -791,7 +792,21 @@ def pending(c: sqlite3.Connection) -> list[tuple[int, str, Step]]:
     return [m for m in MIGRATIONS if m[0] > have]
 
 
-LEDGER = "CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at REAL NOT NULL)"
+# `version` has no declared type so it keeps the core steps' integers and also takes an extension step's "ext:<id>:<n>".
+LEDGER = "CREATE TABLE IF NOT EXISTS schema_migrations(version PRIMARY KEY, name TEXT NOT NULL, applied_at REAL NOT NULL)"
+
+
+def _open_ledger(c: sqlite3.Connection) -> None:
+    """Create the ledger, or rebuild one from before extensions, whose integer key cannot hold an extension step's id."""
+    c.execute(LEDGER)
+    if c.execute("SELECT type FROM pragma_table_info('schema_migrations') WHERE name = 'version'").fetchone()[0] != "INTEGER":
+        return
+    c.execute("BEGIN")
+    c.execute("ALTER TABLE schema_migrations RENAME TO schema_migrations_old")
+    c.execute(LEDGER)
+    c.execute("INSERT INTO schema_migrations SELECT version, name, applied_at FROM schema_migrations_old")
+    c.execute("DROP TABLE schema_migrations_old")
+    c.commit()
 
 
 def drift(c: sqlite3.Connection) -> list[str]:
@@ -804,7 +819,7 @@ def drift(c: sqlite3.Connection) -> list[str]:
         out.append(f"database schema is version {have}, this build knows up to {latest()}")
     if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'").fetchone():
         names = {v: n for v, n, _ in MIGRATIONS}
-        for v, n in c.execute("SELECT version, name FROM schema_migrations ORDER BY version").fetchall():
+        for v, n in c.execute("SELECT version, name FROM schema_migrations WHERE typeof(version) = 'integer' ORDER BY version").fetchall():
             if names.get(v) != n:
                 out.append(f"step {v} was applied as {n!r}, this build's step {v} is {names.get(v)!r}")
     return out
@@ -814,7 +829,7 @@ def run(c: sqlite3.Connection) -> list[int]:
     """Apply every pending step in order, recording each (version, name) in schema_migrations; returns the versions
     applied. Databases from before the ledger have no rows for their earlier steps: drift() checks what is recorded."""
     done: list[int] = []
-    c.execute(LEDGER)
+    _open_ledger(c)
     for version, name, step in pending(c):
         try:
             c.execute("BEGIN")
@@ -828,4 +843,49 @@ def run(c: sqlite3.Connection) -> list[int]:
             raise RuntimeError(f"Database migration {version} ({name}) failed and was rolled back, so your data is unchanged "
                                f"(the premigrate copy in the backups folder holds it too): {type(e).__name__}: {e}") from e
         done.append(version)
+    return done
+
+
+def sql_steps(folder: Path) -> list[tuple[int, str, Step]]:
+    """An extension's migrations: `NNNN_name.sql` files in `folder`, ordered by their number."""
+    steps: list[tuple[int, str, Step]] = []
+    for f in sorted(folder.glob("*.sql")):
+        number, _, name = f.stem.partition("_")
+        steps.append((int(number), name, _sql_step(f.read_text("utf-8"))))
+    return steps
+
+
+def _sql_step(script: str) -> Step:
+    def step(c: sqlite3.Connection) -> None:
+        statement = ""
+        for line in script.splitlines(keepends=True):  # executescript would commit, and the ledger row has to land with the step
+            statement += line
+            if sqlite3.complete_statement(statement):
+                c.execute(statement)
+                statement = ""
+    return step
+
+
+def pending_extension(c: sqlite3.Connection, ext_id: str, steps: list[tuple[int, str, Step]]) -> list[tuple[int, str, Step]]:
+    """The steps of extension `ext_id` whose ledger id `ext:<id>:<n>` is not recorded yet."""
+    _open_ledger(c)
+    done = {v for (v,) in c.execute("SELECT version FROM schema_migrations WHERE typeof(version) = 'text'")}
+    return [s for s in steps if f"ext:{ext_id}:{s[0]}" not in done]
+
+
+def run_extension(c: sqlite3.Connection, ext_id: str, steps: list[tuple[int, str, Step]]) -> list[int]:
+    """Apply an extension's pending steps in order, each recorded as `ext:<id>:<n>` in the shared ledger; returns the numbers
+    applied. user_version belongs to the core steps and is not touched."""
+    done: list[int] = []
+    for number, name, step in sorted(pending_extension(c, ext_id, steps), key=lambda s: s[0]):
+        try:
+            c.execute("BEGIN")
+            step(c)
+            c.execute("INSERT INTO schema_migrations VALUES(?,?,?)", (f"ext:{ext_id}:{number}", name, time.time()))
+            c.commit()
+        except Exception as e:
+            c.rollback()
+            raise RuntimeError(f"Migration {number} ({name}) of extension {ext_id} failed and was rolled back: "
+                               f"{type(e).__name__}: {e}") from e
+        done.append(number)
     return done

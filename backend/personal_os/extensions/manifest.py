@@ -22,6 +22,9 @@ _TOP_KEYS = {"id", "name", "description", "version", "apiVersion", "kind", "enab
              "contributes", "hooks", "permissions", "settings", "data"}
 _CONTRIBUTES = {"tools", "routes", "views", "slots", "settings", "commands", "keybindings", "theme", "defaults", "layout"}
 _HOOK_KEYS = {"priority", "timeoutMs", "onFailure"}
+SETTING_TYPES = ("string", "number", "integer", "boolean", "secret")  # a secret is a string kept in the secret store
+_FIELD = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
+_TABLE = re.compile(r"[a-z_][a-z0-9_]*")
 _PERMISSIONS = {"db:own", "context:volatile", "conversation:read", "input:rewrite", "hooks:gate", "memory:gate",
                 "prompt:inject", "ui:unsupported-css"}  # plus "service:<name>"
 
@@ -80,7 +83,7 @@ class Manifest:
             requires_services=_strings(requires, "services", ()), requires_extensions=_strings(requires, "extensions", ()),
             provides_services=_strings(provides, "services", ()),
             contributes=_contributes(raw), hooks=_hooks(raw), permissions=permissions,
-            settings=_object(raw, "settings"), data=_object(raw, "data", {"tables", "migrations"}),
+            settings=_settings(raw), data=_data(raw),
         )
 
 
@@ -125,6 +128,22 @@ def _contributes(raw: dict[str, Any]) -> dict[str, Any]:
     _check(isinstance(tools, list) and all(isinstance(t, dict) and _is_str(t.get("name")) for t in tools),
            "contributes.tools must be a list of objects with a name")
     return c
+
+
+def _settings(raw: dict[str, Any]) -> dict[str, Any]:
+    fields = _object(raw, "settings")
+    for name, spec in fields.items():
+        _check(_FIELD.fullmatch(name), f"settings.{name}: the name must match [A-Za-z][A-Za-z0-9_]*")
+        _check(isinstance(spec, dict) and set(spec) == {"type"} and spec["type"] in SETTING_TYPES,
+               f"settings.{name} must be {{\"type\": one of {', '.join(SETTING_TYPES)}}}")
+    return fields
+
+
+def _data(raw: dict[str, Any]) -> dict[str, Any]:
+    data = _object(raw, "data", {"tables", "migrations"})
+    _check(all(_TABLE.fullmatch(t) for t in _strings(data, "tables", ())), "data.tables must be table names")
+    _check(isinstance(data.get("migrations", ""), str), "data.migrations must be a folder name")
+    return data
 
 
 def _hooks(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:

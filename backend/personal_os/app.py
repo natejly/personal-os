@@ -423,6 +423,7 @@ for _m in modules:
     host.add_module(_m)
     if (_r := _m.router()) is not None:
         app.include_router(_r)
+host.migrate(db)
 # Soft delete: the DELETE routes below move things here, and /trash restores or erases them (trash.py).
 trash = Trash(db, todos, docs)
 app.include_router(trash_router(trash))
@@ -592,7 +593,7 @@ async def _snapshot_after(run: Run) -> None:
 
 bus.after_hooks.append(_snapshot_after)
 bus.after_hooks.append(lambda run: subagent_mgr.end_of_run(run))
-app.include_router(backups.router(db.data_dir))
+app.include_router(backups.router(db.data_dir, host.data_tables))
 # Supportability: GET /diagnostics, POST /maintenance/sweep, and the daily retention sweep (retention.py).
 retention = RetentionWorker(db, settings)
 app.include_router(reliability_router(db, settings, retention, lambda: system_access.permissions()))
@@ -928,6 +929,9 @@ def public_settings() -> dict[str, Any]:
     for k in SECRET_SETTINGS:
         out[f"{k}Set"] = bool(out.get(k))
         out[k] = ""
+    for k in host.secret_setting_keys():
+        out[f"{k}Set"] = bool(db.secrets.get(k))
+        out.pop(k, None)
     out["embeddingLocked"] = _embedding_locked()  # computed, never stored: vectors exist for the saved model
     # computed, never stored: no embedding model any provider with a key serves, so search is by keywords only
     out["embeddingKeywordOnly"] = out.get("retrievalMode") != "bm25" and not provider_route.can_embed(settings(), out.get("embeddingModel") or "")
@@ -983,10 +987,32 @@ toolbox.permission_store = _store_permissions
 HOST_LIST_SETTINGS = set(permissions.HOST_LISTS)
 
 
+def _settings_changed(before: dict[str, Any], written: list[str], perm: dict[str, Any], secrets: list[str]) -> None:
+    """Fire settings.changed with the keys whose value differs. A secret's key is listed but its values never leave the store."""
+    after = db.get_settings()
+    keys = [k for k in (*written, *(permissions.KEY if perm else ()), *secrets) if k in secrets or before.get(k) != after.get(k)]
+    if keys:
+        host.fire("settings.changed", {"keys": keys, "old": {k: before.get(k) for k in keys if k not in secrets},
+                                       "new": {k: after.get(k) for k in keys if k not in secrets}})
+
+
 @app.put("/settings")
 def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
     clean = {k: v for k, v in patch.items()
              if k in llm.DEFAULT_SETTINGS and k not in PRIVATE_SETTINGS and k not in SETTINGS_READ_ONLY}
+    ext_values: dict[str, Any] = {}
+    ext_secrets: dict[str, str | None] = {}
+    for k, v in patch.items():
+        if host.setting_type(k) is None:
+            continue
+        try:
+            v = host.check_setting(k, v)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+        if host.setting_type(k) != "secret":
+            ext_values[k] = v
+        elif v != "":  # blank means "unchanged", null clears: the same as the built-in secret keys
+            ext_secrets[k] = v
     # Permission keys go to the one store, nested ({"permissions": {...}}) or top-level as the renderer has always sent
     # them; a top-level key wins, since a client that sends both sends the nested copy it read, unchanged.
     nested = patch.get(permissions.KEY) or {}
@@ -1012,9 +1038,18 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             del clean[k]
         elif k in clean and clean[k] is not None and not isinstance(clean[k], str):
             raise HTTPException(422, f"{k} must be a string or null")
+    before = db.get_settings()
     if perm:
         permissions.save(db, perm)
-    db.set_settings(clean)
+    db.set_settings({**clean, **ext_values})
+    for k, v in ext_secrets.items():
+        if v:
+            db.secrets.set(k, v)
+        else:
+            db.secrets.delete(k)
+    _settings_changed(before, [*clean, *ext_values], perm, [*ext_secrets, *(k for k in SECRET_SETTINGS if k in clean)])
+    if "hiddenViews" in clean:
+        host.refresh_enabled()
     if "telegramEnabled" in clean and _loop is not None and not _loop.is_closed():
         asyncio.run_coroutine_threadsafe(telegram_bridge.reconcile(), _loop)  # a sync route runs in the threadpool
     if "workerMaxConcurrent" in clean and _loop is not None and not _loop.is_closed():
@@ -1358,7 +1393,9 @@ def list_projects() -> list[dict[str, Any]]:
 
 @app.post("/projects")
 def create_project(body: ProjectIn) -> dict[str, Any]:
-    return projects.create(body.name, body.description, body.system_prompt, body.color, body.memory_mode)
+    out = projects.create(body.name, body.description, body.system_prompt, body.color, body.memory_mode)
+    host.fire("project.created", {"id": out["id"]})
+    return out
 
 
 @app.put("/projects/{id}")
@@ -1382,6 +1419,7 @@ async def delete_project(id: str) -> dict[str, Any]:
         await workers_mgr.stop_conversation(c["id"])  # its background workers end with it, unannounced
     trash.trash("project", id)  # its chats, memories and uploads go to the trash; docs and todos are demoted to personal
     canvases.delete_windows_for("project", id)  # ref_id has no foreign key: a deleted referent's windows are swept here
+    host.fire("project.deleted", {"id": id})
     return {"ok": True, "stopped": stopped}
 
 
@@ -1416,6 +1454,7 @@ def create_conversation(body: ConvIn) -> dict[str, Any]:
     out = convos.create(wsid(body.project_id), body.title, body.model or cfg["defaultModel"])
     if cfg.get("responseStyle", "default") != "default":  # the global choice seeds a new chat; the chat owns it from then on
         out = convos.update(out["id"], {"settings": {"responseStyle": cfg["responseStyle"], "responseStyleText": cfg.get("responseStyleText", "")}}) or out
+    host.fire("chat.created", {"id": out["id"], "project_id": out.get("project_id")})
     return out
 
 
@@ -1540,8 +1579,11 @@ async def delete_conversation(id: str) -> dict[str, Any]:
     # tools, waiting on a card or feeding auto-learn. Idempotent: an already-trashed or idle chat answers ok.
     stopped = bus.stop(id)
     await workers_mgr.stop_conversation(id)  # its background workers end with it, unannounced
+    conv = convos.get(id, with_messages=False)
     trash.trash("conversation", id)
     canvases.delete_windows_for("chat", id)
+    if conv:  # a repeat delete, or one for an id that is not there, is not a deletion
+        host.fire("chat.deleted", {"id": id, "project_id": conv["project_id"]})
     return {"ok": True, "stopped": stopped}
 
 

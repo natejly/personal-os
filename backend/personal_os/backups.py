@@ -33,7 +33,7 @@ import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Sequence
 
 from pydantic import BaseModel
 
@@ -391,8 +391,19 @@ def human_export(db_path: Path) -> dict[str, tuple[str, Any]]:
     return {"conversations": ("---\n\n".join(md), convs), "memories": ("".join(mmd), mems), "documents": ("".join(dmd), docs)}
 
 
-def export_zip(data_dir: Path, dest: Path) -> dict[str, Any]:
-    """Write the export archive to `dest` (atomically). Returns {path, size}."""
+def _ext_rows(db_path: Path, tables: Sequence[str]) -> dict[str, list[dict[str, Any]]]:
+    """Every row of each named table that exists in the snapshot (an extension may not have created its tables yet)."""
+    c = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    c.row_factory = sqlite3.Row
+    try:
+        have = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        return {t: _rows(c, f'SELECT * FROM "{t}"') for t in tables if t in have}
+    finally:
+        c.close()
+
+
+def export_zip(data_dir: Path, dest: Path, ext_tables: Sequence[str] = ()) -> dict[str, Any]:
+    """Write the export archive to `dest` (atomically), with the tables extensions own as JSON. Returns {path, size}."""
     data_dir, dest = Path(data_dir), Path(dest)
     src = data_dir / DB_NAME
     with tempfile.TemporaryDirectory(prefix="grain-export-") as td:
@@ -400,20 +411,22 @@ def export_zip(data_dir: Path, dest: Path) -> dict[str, Any]:
         _vacuum_into(src, snap)
         part = dest.with_name(dest.name + ".part")
         try:
-            _write_zip(part, snap, data_dir)
+            _write_zip(part, snap, data_dir, ext_tables)
             os.replace(part, dest)
         finally:
             part.unlink(missing_ok=True)  # only still there when the write failed
     return {"path": str(dest), "size": dest.stat().st_size}
 
 
-def _write_zip(part: Path, snap: Path, data_dir: Path) -> None:
+def _write_zip(part: Path, snap: Path, data_dir: Path, ext_tables: Sequence[str]) -> None:
     with zipfile.ZipFile(part, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("README.txt", _README)
         z.write(snap, "grain.db")
         for base, (md, js) in human_export(snap).items():
             z.writestr(f"export/{base}.md", md)
             z.writestr(f"export/{base}.json", json.dumps(js, indent=2, ensure_ascii=False))
+        for table, rows in _ext_rows(snap, ext_tables).items():
+            z.writestr(f"export/extensions/{table}.json", json.dumps(rows, indent=2, ensure_ascii=False, default=str))
         for sub in ("uploads", "doc_assets", "cowork"):
             up = data_dir / sub
             for f in sorted(up.rglob("*")) if up.exists() else []:
@@ -448,7 +461,7 @@ class ExportIn(BaseModel):
     dest: str
 
 
-def router(data_dir: Path) -> Any:
+def router(data_dir: Path, ext_tables: Callable[[], Sequence[str]] = lambda: ()) -> Any:
     from fastapi import APIRouter, HTTPException
 
     r = APIRouter(prefix="/data", tags=["data"])
@@ -484,6 +497,6 @@ def router(data_dir: Path) -> Any:
         dest = Path(body.dest).expanduser()
         if not dest.is_absolute() or dest.suffix.lower() != ".zip" or not dest.parent.is_dir():
             raise HTTPException(400, "Choose an absolute .zip path in an existing folder")
-        return await asyncio.to_thread(export_zip, data_dir, dest)
+        return await asyncio.to_thread(export_zip, data_dir, dest, ext_tables())
 
     return r

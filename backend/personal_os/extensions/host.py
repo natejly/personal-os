@@ -297,14 +297,17 @@ class ExtensionHost:
         """Load and start the extension in `root` (the dev panel and the dev server). A failure is kept in `failed` and raised."""
         if loaded := next((s for s in self.extensions.values() if s.root == root), None):
             raise ValueError(f"{root} is already loaded as {loaded.manifest.id!r}")
+        scope: ExtensionScope | None = None
         try:
             scope = self.load_folder(root, ctx)
+            self.migrate(ctx.db)
+            await scope.start()
         except Exception as e:
             self.failed[root] = f"{type(e).__name__}: {e}"
+            if scope:
+                await self.unload(scope.manifest.id)
             raise
         self.failed.pop(root, None)
-        self.migrate(ctx.db)
-        await scope.start()
         return scope
 
     async def unload(self, ext_id: str) -> None:

@@ -155,6 +155,19 @@ def test_a_failed_reload_keeps_the_reason_and_drops_the_old_tools(ext: Path) -> 
     assert load(ext).status_code == 200
 
 
+def test_a_failing_start_leaves_nothing_registered_and_a_fixed_folder_loads(ext: Path) -> None:
+    edit(ext, "extension.py", lambda t: t + "\n    api.on('app.start', lambda p: 1 / 0)\n")
+    declare(ext, "app.start")
+    (ext / "migrations" / "0002_bad.sql").write_text("this is not sql;", "utf-8")
+    r = load(ext)
+    assert r.status_code == 400
+    assert "sample" not in appmod.host.extensions and not appmod.host.bus.subscriptions("sample")
+    assert "sample_note" not in appmod.toolbox.specs
+    assert listing()["failed"][0]["path"] == str(ext.resolve())
+    (ext / "migrations" / "0002_bad.sql").unlink()
+    assert load(ext).status_code == 200
+
+
 def test_a_built_in_cannot_be_reloaded_and_keeps_its_tools() -> None:
     tools = list(appmod.host.extensions["health"].tools)
     assert tools and all(t in appmod.toolbox.specs for t in tools)

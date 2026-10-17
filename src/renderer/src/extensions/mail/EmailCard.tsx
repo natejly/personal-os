@@ -10,7 +10,7 @@ import {
   parseMailMessage, parseMailRows, readPreview, recipientsFromArg, recipientsToArg, senderInitial, senderName, shortTime,
   type ComposeDraft, type Recipient, type MailRow
 } from '../../lib/mailCompose'
-import { registerToolCard, type ToolCardProps } from './registry'
+import type { ToolCardProps } from '../../components/toolcards/registry'
 import '../../styles/mailcard.css'
 
 type DocInfo = Pick<Document, 'name' | 'mime' | 'size'>
@@ -590,8 +590,4 @@ function OutboxCard({ event, rules }: ToolCardProps): JSX.Element {
   )
 }
 
-registerToolCard('gmail_send', ComposeCard)
-registerToolCard('gmail_draft', ComposeCard)
-registerToolCard('gmail_outbox', OutboxCard)
-registerToolCard('gmail_search', SearchCard)
-registerToolCard('gmail_read', ReadCard)
+export { ComposeCard, OutboxCard, ReadCard, SearchCard }

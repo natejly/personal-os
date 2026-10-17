@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fake_google_api import FakeGoogle, FakeServer  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+from mail_ext import app_outbox  # noqa: E402
 from personal_os import app as appmod, verify  # noqa: E402
 
 
@@ -25,16 +26,16 @@ class OutboxApiTests(unittest.TestCase):
         self.server = FakeServer()
         self.client = TestClient(appmod.app)
         self.headers = {"X-Personal-OS-Token": appmod.AUTH_TOKEN}
-        self._google = appmod.outbox.google
-        appmod.outbox.google = FakeGoogle(self.server)
+        self._google = app_outbox(appmod).google
+        app_outbox(appmod).google = FakeGoogle(self.server)
         self._delays, self._sleep = verify.MAIL_RETRY_DELAYS, verify.SLEEP
         verify.MAIL_RETRY_DELAYS, verify.SLEEP = (0.0,), lambda s: None
 
     def tearDown(self) -> None:
-        appmod.outbox.google = self._google
+        app_outbox(appmod).google = self._google
         verify.MAIL_RETRY_DELAYS, verify.SLEEP = self._delays, self._sleep
-        for row in appmod.outbox.list():  # leave the shared dev database as it was found
-            appmod.outbox.cancel(row["id"])
+        for row in app_outbox(appmod).list():  # leave the shared dev database as it was found
+            app_outbox(appmod).cancel(row["id"])
 
     def test_the_send_endpoint_queues_and_undo_stops_it(self) -> None:
         r = self.client.post("/integrations/google/gmail/send", headers=self.headers,

@@ -4,7 +4,6 @@ import './TaskCard'
 import './FileCard'
 // --- workstreams add their card import below this line ---
 import './CalendarCard'
-import './EmailCard'
 import './ShellCard'
 import './PythonCard'
 import './BrowserCard'

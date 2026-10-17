@@ -38,9 +38,10 @@ import logging
 import time
 from typing import Any, Callable
 
-from .db import Database, new_id, row_to_dict
-from . import mail_attachments, mail_edits, redact, verify
-from .extensions.google.client import GoogleNotConnected, NotSent
+from ... import mail_attachments, redact, verify
+from ...db import Database, new_id, row_to_dict
+from ..google.client import GoogleNotConnected, NotSent
+from . import edits
 
 log = logging.getLogger(__name__)
 
@@ -129,7 +130,7 @@ class Outbox:
               origin: str = "app", conversation_id: str | None = None,
               attachments: list[str] | None = None, cc: str | None = None, bcc: str | None = None) -> dict[str, Any]:
         """Hold a send. With the hold turned off it goes out immediately, verification and all."""
-        mail_edits.check_send(to, subject, cc, bcc)  # ValueError now, not a failed row 90s later
+        edits.check_send(to, subject, cc, bcc)  # ValueError now, not a failed row 90s later
         ids = list(attachments or [])
         items = self._attachments(ids)  # AttachmentError now too: a bad id or an oversize total never starts a hold
         cfg = self.config()

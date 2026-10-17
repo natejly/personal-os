@@ -18,14 +18,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fake_google_api import FakeGoogle, FakeServer  # noqa: E402
+from mail_ext import mail_tools  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os import app as appmod, approval_edits, mail_edits, verify  # noqa: E402
+from personal_os import app as appmod, approval_edits, verify  # noqa: E402
+from personal_os.extensions.mail import edits as mail_edits  # noqa: E402
 from personal_os.approval_edits import EditError  # noqa: E402
-from personal_os.mail_edits import ApprovalEditError  # noqa: E402
+from personal_os.extensions.mail.edits import ApprovalEditError  # noqa: E402
 from personal_os.db import Database  # noqa: E402
-from personal_os.outbox import Outbox  # noqa: E402
-from personal_os.tools import Toolbox  # noqa: E402
 
 GOOD = {"to": "Mira <mira@example.com>; ana@example.com", "subject": "Hi", "body": "Line one\n\nLine two"}
 
@@ -125,8 +125,8 @@ class ExecutionTests(unittest.TestCase):
         self.db = Database(self.tmp.name)
         self.server = FakeServer()
         self.g = FakeGoogle(self.server)
-        self.box = Outbox(self.db, self.g, lambda: {"gmailSendHold": {"enabled": True, "seconds": 30}}, bounds=(0, 120))
-        self.tools = Toolbox(None, None, None, lambda: {}, google=self.g, outbox=self.box)  # type: ignore[arg-type]
+        self.tools, self.box = mail_tools(self.g, db=self.db, settings={"gmailSendHold": {"enabled": True, "seconds": 30}})
+        self.box.bounds = (0, 120)
         self._d, self._s = verify.MAIL_RETRY_DELAYS, verify.SLEEP
         verify.MAIL_RETRY_DELAYS, verify.SLEEP = (0.0,), lambda s: None
 

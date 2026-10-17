@@ -20,15 +20,14 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import todo_rules  # noqa: E402
 from personal_os.app import AUTH_TOKEN, app, db, google, host, modules, todos  # noqa: E402
+from personal_os.extensions.mail.watch import MailWatch  # noqa: E402
 from personal_os.modules import get  # noqa: E402
-from personal_os.modules.mailwatch import MailWatchModule  # noqa: E402
 from personal_os.modules.planner import PlannerModule  # noqa: E402
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 db.set_settings({"hiddenViews": []})  # a fresh install has Lists, Calendar and Mail off
 NOW = datetime(2026, 10, 5, 8, 0)  # a Monday
 planner_mod = get(modules, "planner", PlannerModule)
-mail_mod = get(modules, "mailwatch", MailWatchModule)
 
 
 def dashboard(tasks: list[dict] | None = None, saved: list | None = None, calendars: list | None = None,
@@ -47,7 +46,7 @@ def dashboard(tasks: list[dict] | None = None, saved: list | None = None, calend
          mock.patch.object(google, "tasks_list", return_value=tasks or []), \
          mock.patch.object(google, "calendar_saved", return_value=saved), \
          mock.patch.object(planner_mod, "clock", lambda: NOW), \
-         mock.patch.object(mail_mod.store, "counts", return_value={"to_reply": 3, "awaiting_reply_overdue": 2}):
+         mock.patch.object(MailWatch, "counts", return_value={"to_reply": 3, "awaiting_reply_overdue": 2}):
         return client.get("/dashboard").json()
 
 
@@ -148,6 +147,17 @@ class TodayCardTests(unittest.TestCase):
         db.set_settings({"hiddenViews": ["calendar"]})
         try:
             self.assertNotIn("calendar", dashboard())
+        finally:
+            db.set_settings({"hiddenViews": []})
+
+    def test_the_mail_cards_ride_the_dashboard_only_while_mail_is_on(self) -> None:
+        d = dashboard()
+        self.assertEqual((d["gmail"], d["mail_watch"]), ([], {"to_reply": 3, "awaiting_reply_overdue": 2}))
+        db.set_settings({"hiddenViews": ["mail"]})
+        try:
+            d = dashboard()
+            self.assertNotIn("gmail", d)
+            self.assertNotIn("mail_watch", d)
         finally:
             db.set_settings({"hiddenViews": []})
 

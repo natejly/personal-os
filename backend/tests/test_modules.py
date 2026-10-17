@@ -39,7 +39,7 @@ def _route_set() -> set[tuple[str, str]]:
 class HostTests(unittest.TestCase):
     def test_modules_and_built_in_extensions_load_and_the_app_starts_through_the_lifespan(self) -> None:
         from personal_os import app as appmod
-        self.assertEqual(list(appmod.host.extensions), ["google", "todos", *(m.key for m in modules), "health", "calendar", "spaces", "lean", "focus", "telegram"])
+        self.assertEqual(list(appmod.host.extensions), ["google", "todos", "mail", *(m.key for m in modules), "health", "calendar", "spaces", "lean", "focus", "telegram"])
         self.assertIs(appmod.google, appmod._ext_ctx.services["google"]())
         self.assertEqual(app.router.on_startup + app.router.on_shutdown, [])  # no @app.on_event handlers remain
         with TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN}) as c:  # runs the lifespan
@@ -65,6 +65,13 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(names[i:i + 10], CALENDAR_TOOLS)
         self.assertEqual(names[i - 1], "dashboard_pin")
         self.assertEqual(names[i + 10], "gmail_search")
+
+    def test_mail_tools_keep_their_place_after_the_calendar_tools_with_the_times_draft_between_draft_and_send(self) -> None:
+        names = list(toolbox.specs)
+        i = names.index("gmail_search")
+        self.assertEqual(names[i - 1:i + 7], ["calendar_propose", "gmail_search", "gmail_read", "gmail_draft", "propose_times_draft", "gmail_send",
+                                              "gmail_outbox", "gmail_modify"])
+        self.assertEqual(names[i + 7], "google_tasks_list")
 
     def test_space_tools_keep_their_place_after_the_google_tools(self) -> None:
         names = list(toolbox.specs)

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { activateExtension, extensionModules, settingsPanels } from './host'
 import { navEntries } from '../shell/nav'
 import { MODULES, moduleForView } from '../shell/registry'
+import { TOOL_CARDS } from '../components/toolcards/registry'
 
 const icon = null as unknown as JSX.Element
 const Component = (() => null) as never
@@ -38,6 +39,13 @@ test('Calendar is registered through its extension with its nav entry and canvas
   const m = moduleForView('calendar')
   assert.ok(m && extensionModules.includes(m) && MODULES.includes(m))
   assert.deepEqual([m.key, m.label, navEntries().find((e) => e.view === 'calendar')?.order, m.view?.optional, m.widget?.kind], ['calendar', 'Calendar', 14, true, 'calendar'])
+})
+
+test('Mail is registered through its extension with its nav entry and the Gmail tool cards', () => {
+  const m = moduleForView('mail')
+  assert.ok(m && extensionModules.includes(m) && MODULES.includes(m))
+  assert.deepEqual([m.key, m.label, navEntries().find((e) => e.view === 'mail')?.order, m.view?.optional], ['mail', 'Mail', 16, true])
+  for (const tool of ['gmail_send', 'gmail_draft', 'gmail_outbox', 'gmail_search', 'gmail_read']) assert.ok(TOOL_CARDS[tool], tool)
 })
 
 test('Health is registered through its extension', () => {

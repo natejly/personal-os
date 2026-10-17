@@ -295,18 +295,17 @@ def test_settings_changed_lists_each_key_once_and_reports_a_permissions_change(d
         appmod.db.secrets.delete("braveApiKey")
 
 
-def test_hiding_a_module_view_fires_ext_changed() -> None:
-    mod = next(m for m in appmod.modules if m.view)
+def test_hiding_a_view_fires_ext_changed() -> None:
     seen: list[Any] = []
     scope = appmod.host._add(declared("ext.changed", ext_id="watch"))
     scope.on("ext.changed", seen.append)
     try:
         with client() as c:
             hidden = list(appmod.settings().get("hiddenViews") or ())
-            now_hidden = [v for v in hidden if v != mod.view] if mod.view in hidden else [*hidden, mod.view]
+            now_hidden = [v for v in hidden if v != "mail"] if "mail" in hidden else [*hidden, "mail"]
             c.put("/settings", json={"hiddenViews": now_hidden})
             wait_for(lambda: seen)
-            assert seen == [{"id": mod.key, "enabled": mod.view not in now_hidden}]
+            assert seen == [{"id": "mail", "enabled": "mail" not in now_hidden}]
             c.put("/settings", json={"hiddenViews": hidden})
     finally:
         scope.disposables.dispose()

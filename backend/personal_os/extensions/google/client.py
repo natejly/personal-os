@@ -13,7 +13,7 @@ Every write here proves itself: after the API call returns, the object is read b
 server and the written fields are compared, and the verdict rides on the result under
 `verification` (see verify.py). A write whose read-back fails or disagrees comes back with
 `verified: False`, which tools.py turns into a tool error and the UI refuses to render as
-success. Gmail sends do not happen here at all any more -- they are queued through outbox.py so
+success. Gmail sends do not happen here at all any more -- they are queued through the mail extension's outbox so
 they can be undone, and the verification runs when the hold expires and the send goes out.
 """
 from __future__ import annotations
@@ -1106,7 +1106,7 @@ class Google:
     def gmail_send(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None,
                    attachments: list[dict[str, Any]] | None = None, cc: str | None = None,
                    bcc: str | None = None) -> dict[str, Any]:
-        """Send now. Callers go through outbox.py instead, which holds the send so it can be undone.
+        """Send now. Callers go through the mail extension's outbox instead, which holds the send so it can be undone.
 
         Anything that fails before messages().send(), or that Gmail answers with a 4xx, is raised
         as NotSent (or GoogleNotConnected, kept as is for the callers that map it): nothing went out.

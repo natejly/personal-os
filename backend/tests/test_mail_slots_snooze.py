@@ -15,15 +15,16 @@ from unittest import mock
 
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="slots-"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os import app as appmod, llm, mailwatch as mw  # noqa: E402
-from personal_os.db import Database  # noqa: E402
+from mail_ext import mail_scope  # noqa: E402
+from personal_os import app as appmod  # noqa: E402
 from personal_os.extensions.calendar import extension as calendar_extension  # noqa: E402
-from personal_os.modules import ModuleContext  # noqa: E402
-from personal_os.modules.mailwatch import MailWatchModule  # noqa: E402
+from personal_os.extensions.mail import watch as mw  # noqa: E402
+from personal_os.extensions.mail.extension import MailExtension  # noqa: E402
 
 NY = "America/New_York"
 # Friday 2026-10-02 09:00 New York (EDT, UTC-4)
@@ -86,9 +87,7 @@ def test_confirm_creates_one_event_and_still_never_sends() -> None:
 def test_snoozed_thread_is_hidden_until_its_time() -> None:
     m = _setup()
     clock = {"now": dt.datetime(2026, 10, 2, 19, 0, tzinfo=dt.timezone.utc)}  # 15:00 New York
-    ctx = ModuleContext(db=Database(tempfile.mkdtemp()), settings=lambda: dict(llm.DEFAULT_SETTINGS), set_settings=lambda _p: None,
-                        google=None, sid=lambda p: p, wsid=lambda p: p)
-    mod = MailWatchModule(ctx, clock=lambda: clock["now"])
+    mod = MailExtension(mail_scope(None), clock=lambda: clock["now"])
     rows = []
     for tid in ("a", "b"):
         t = {"thread_id": tid, "subject": tid, "messages": [{"id": tid, "from": "al@y.com", "to": "me@x.com", "date": "2026-10-01T10:00:00+00:00",

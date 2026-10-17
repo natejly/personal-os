@@ -22,15 +22,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fake_google_api import FakeGoogle, FakeServer, impersonate  # noqa: E402
+from mail_ext import mail_tools  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os import app as appmod, blobs, mail_attachments as ma, mail_edits, verify  # noqa: E402
+from personal_os import app as appmod, blobs, mail_attachments as ma, verify  # noqa: E402
+from personal_os.extensions.mail import edits as mail_edits  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.extensions.google.client import NotSent, _raw_message  # noqa: E402
-from personal_os.outbox import Outbox  # noqa: E402
+from personal_os.extensions.mail.outbox import Outbox  # noqa: E402
 from personal_os.repos import Documents  # noqa: E402
-from personal_os.tools import Toolbox  # noqa: E402
 
 MB = 1024 * 1024
 
@@ -228,7 +229,7 @@ class CcBccTests(Base):
             mail_edits._clean({**args, "bcc": ",".join(f"u{i}@example.com" for i in range(50))}, allow_draft_flag=True)  # 51 in all
 
     def test_tool_schemas_offer_cc_and_bcc(self) -> None:
-        tools = Toolbox(None, None, self.docs, lambda: {}, google=self.g)  # type: ignore[arg-type]
+        tools, _ = mail_tools(self.g, self.docs)
         for name in ("gmail_send", "gmail_draft"):
             self.assertTrue({"cc", "bcc", "attachments"} <= set(tools.specs[name].parameters["properties"]))
 
@@ -322,8 +323,8 @@ class OutboxTests(Base):
 class ToolTests(Base):
     def setUp(self) -> None:
         super().setUp()
-        self.box = Outbox(self.db, self.g, lambda: {"gmailSendHold": {"enabled": True, "seconds": 30}}, bounds=(0, 120), documents=self.docs)
-        self.tools = Toolbox(None, None, self.docs, lambda: {}, google=self.g, outbox=self.box)  # type: ignore[arg-type]
+        self.tools, self.box = mail_tools(self.g, self.docs, self.db, {"gmailSendHold": {"enabled": True, "seconds": 30}})
+        self.box.bounds = (0, 120)
 
     def test_both_tools_are_external_and_take_attachments(self) -> None:
         for name in ("gmail_send", "gmail_draft"):

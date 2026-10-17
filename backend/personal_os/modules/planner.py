@@ -63,7 +63,7 @@ class PlannerModule(Module):
 
     def __init__(self, ctx: ModuleContext, clock: Callable[[], datetime] = datetime.now) -> None:
         super().__init__(ctx)
-        self.todos = Todos(ctx.db)  # same table as the todos module; a second handle is how modules coexist
+        self.todos = Todos(ctx.db)  # same table as the todos extension; a second handle is how modules coexist
         self.clock = clock
 
     def config(self) -> dict[str, Any]:

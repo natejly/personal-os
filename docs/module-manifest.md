@@ -42,6 +42,8 @@ The slices below are the pilot's original work split, kept as the worked example
 
 ## Slices and ownership (exclusive — if you need a change in a file you do not own, put it in your report)
 
+The todos rows below name the pilot's files, which no longer exist: the todos code now lives in the `extensions/todos/` folders (backend and renderer).
+
 ### backend — `TodosModule`
 | Path | Note |
 |---|---|

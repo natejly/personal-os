@@ -10237,7 +10237,10 @@ telegram_bridge = telegram.TelegramBridge(telegram.Deps(
     computer_name=telegram.computer_name,
     call_label=lambda tool, args: labels.for_call(toolbox, tool, args),
 ))
-toolbox.setup_probes.update(telegram=telegram_bridge.paired, mcp=lambda: bool(mcp_store.servers()))  # setup_request's checks
+def _has_health_source() -> bool:
+    with db.tx() as c:
+        return c.execute("SELECT 1 FROM health_sources LIMIT 1").fetchone() is not None
+toolbox.setup_probes.update(telegram=telegram_bridge.paired, mcp=lambda: bool(mcp_store.servers()), health=_has_health_source)  # setup_request's checks
 
 
 async def _telegram_user_update(ctx: dict[str, Any], text: str, atts: list[dict[str, Any]]) -> bool:

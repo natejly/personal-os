@@ -3,9 +3,8 @@ and Today-screen payload, so app.py and tools.py iterate a list instead of namin
 
 A module is constructed once, with a ModuleContext, after the app's shared services exist. app.py then:
 - includes `router()` (if any) on the FastAPI app,
-- passes the list to Toolbox, which calls `register_tools(box)` where the feature's tools used to be
-  registered, so tool order is unchanged,
-- adds each module to the ExtensionHost, which awaits `start()` on startup and `stop()` (in reverse order) on shutdown,
+- adds each module to the ExtensionHost, which registers its tools through Toolbox (in load order),
+  awaits `start()` on startup and `stop()` (in reverse order) on shutdown,
 - merges `today()` into GET /dashboard.
 
 Tables stay where they are declared today (a module-level SCHEMA run by the store class), so a module

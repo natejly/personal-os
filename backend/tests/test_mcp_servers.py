@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from types import SimpleNamespace
 import tempfile
+from types import SimpleNamespace
 from pathlib import Path
 from typing import Any
 

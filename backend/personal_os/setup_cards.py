@@ -23,11 +23,6 @@ TARGETS: dict[str, tuple[str, str, str, str]] = {
 FEATURES = list(TARGETS)
 
 
-def _health(tb: Any) -> bool:
-    mod = next((m for m in tb.modules if getattr(m, "key", "") == "health"), None)
-    return bool(mod and mod.sources.list())
-
-
 def _macos() -> bool:
     from . import macos, osplat
     return osplat.has("screen_recording") and macos.screen_recording_status() == macos.GRANTED
@@ -40,9 +35,8 @@ def status(tb: Any) -> dict[str, bool]:
         "google": lambda: (lambda s: bool(s["connected"]) and not s["needs_reauth"])(tb.google.status()),
         "model_key": lambda: bool(cfg.get("apiKey")),
         "web_search": lambda: bool(firecrawl.key(cfg) or cfg.get("braveApiKey") or cfg.get("tavilyApiKey") or cfg.get("exaApiKey")),
-        "health": lambda: _health(tb),
         "macos": _macos,
-        **getattr(tb, "setup_probes", {}),  # telegram, mcp: wired in app.py, which owns those stores
+        **getattr(tb, "setup_probes", {}),  # telegram, mcp, health: wired in app.py, which owns those stores
     }
     out: dict[str, bool] = {}
     for f in FEATURES:

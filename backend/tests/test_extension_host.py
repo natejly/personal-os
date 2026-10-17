@@ -581,6 +581,13 @@ class BuiltinExtensionTests(unittest.TestCase):
         run(go())
         self.assertFalse({"todos", "tasks_sync"} & set(ctx.services))
 
+    def test_todos_services_stay_provided_when_the_user_hides_lists(self) -> None:
+        ctx = builtin_ctx({"google": lambda: None})
+        ctx.hidden_views = lambda: ("todos",)
+        scope = ExtensionHost().load_builtin("todos", ctx)
+        self.assertFalse(scope.enabled())
+        self.assertTrue({"todos", "tasks_sync"} <= set(ctx.services))
+
     def test_load_builtin_refuses_tools_the_manifest_does_not_declare(self) -> None:
         real = load_manifest(Path(__file__).resolve().parents[1] / "personal_os" / "extensions" / "health" / "extension.json")
         short = Manifest.from_dict({"id": "health", "name": "Health", "version": "1.0.0", "apiVersion": 1,

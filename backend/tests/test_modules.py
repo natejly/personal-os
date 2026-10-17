@@ -80,7 +80,7 @@ class ToolTests(unittest.TestCase):
         cfg["googleTasksSync"] = {"enabled": False}
         self.assertTrue(box.available("google_tasks_list"))
 
-    def test_tools_use_the_modules_store(self) -> None:
+    def test_tools_use_the_extensions_store(self) -> None:
         t = asyncio.run(toolbox.specs["todo_add"].fn({"project_id": None}, title="module tool todo"))
         try:
             self.assertEqual(todos.get(t["id"])["title"], "module tool todo")

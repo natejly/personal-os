@@ -30,7 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import auth_breaker, blobs, system_access, telegram
+from . import auth_breaker, blobs, system_access
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
 from . import branch_summary, compaction, side_question, followups, otel_export, replay_trace, router, thinking_summary, titles
 from . import chatlink, coding_route, duel, fsx, labels, opencode_usage, request_log, toolcore
@@ -103,6 +103,7 @@ from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, 
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .style import WritingStyle
+from .extensions.channels import ChatService
 from .extensions.host import ExtensionContext, ExtensionHost
 from .modules import Module, ModuleContext, build_modules
 from .tools import ASK_LOCKED_DANGER, Toolbox, UrlBlocked, guarded_request, page_title, summarize_result, times_body
@@ -226,7 +227,8 @@ run_store = RunStore(db, host.bus)
 bus = RunBus(run_store, host.bus)
 def _run_changed(run: Run) -> None:
     events.publish("run_state", run.info())  # `events` is bound below; read at call time
-    telegram_bridge.on_run_change(run)  # bound near the end of this module; it never raises
+    for channel in host.channels:
+        channel.on_run_change(run)  # it never raises
     if run.conversation_id in _wake_waiting and not run.answering:
         _schedule_wake(run.conversation_id)  # a worker finished while this reply was being written: its report goes in now
     if run.conversation_id in _coding_waiting and not run.answering:
@@ -686,11 +688,10 @@ subagent_mgr.connectors = SimpleNamespace(
     review_text=lambda slug: _mcp_review_text(slug),
     mode=lambda slug, ctx: mcp_store.effective_mode(slug, ctx.get("project_id"), ctx.get("conversation_id"))["mode"],
     denied=lambda slug: permrules.mcp_denied(slug, subagent_mgr.settings().get("permissionRules")))
-# Workers (workers.py): detached background subagents the chat's delegate tool starts. The callbacks are late-bound:
-# the wake machinery and the Telegram bridge are defined further down.
+# Workers (workers.py): detached background subagents the chat's delegate tool starts. The callback is late-bound:
+# the wake machinery is defined further down.
 workers_mgr = workers_mod.Workers(subagent_mgr, run_store, publish=events.publish, answering=bus.answering,
-                                  on_end=lambda cid: _wake_conversation(cid),
-                                  on_approval=lambda call_id, cid: telegram_bridge.notify_worker_approval(call_id))
+                                  on_end=lambda cid: _wake_conversation(cid))
 toolbox.workers = workers_mgr
 # Workflows (workflows.py) and commands (commands.py): saved definitions, approved by hash before a run starts.
 workflow_store = Workflows(db, lambda: set(toolbox.specs), lambda n: subagent_mgr.role_for(n) is not None)
@@ -1063,8 +1064,6 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
                       {*ext_secrets, *(k for k in SECRET_SETTINGS if k in clean)})
     if "hiddenViews" in clean:
         host.refresh_enabled()
-    if "telegramEnabled" in clean and _loop is not None and not _loop.is_closed():
-        asyncio.run_coroutine_threadsafe(telegram_bridge.reconcile(), _loop)  # a sync route runs in the threadpool
     if "workerMaxConcurrent" in clean and _loop is not None and not _loop.is_closed():
         _loop.call_soon_threadsafe(workers_mgr.pump)  # a raised limit frees slots no worker's ending will report
     if "deskMaxLive" in clean and _loop is not None and not _loop.is_closed():
@@ -1682,11 +1681,6 @@ Besides markdown, the UI renders these fenced blocks inline:
 Maths: inline `$...$`, display `$$` on its own lines; not `\\(` `\\)` or `\\[` `\\]`.
 The `show` tool opens these (plus markdown and Mac files) in a side panel beside the chat."""
 
-# The Texts conversation is answered on the user's phone (telegram.py).
-TELEGRAM_HINT = ("You are talking over Telegram on the user's phone. Reply first in one or two lines, then work. At meaningful milestones send a "
-                 "brief update with send_files (a screenshot when it shows more than words; not every step). Images and files you send_files "
-                 "reach the phone; the final reply may carry them too.")
-
 # Always on, every path (chats, desks, subagents, scheduled jobs, drafts, Telegram): static, so it sits in the cached prefix.
 NO_EMOJI_HINT = "No emoji in replies, documents or messages unless asked."
 
@@ -2260,6 +2254,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         pmode = autoreview.mode_of(cfg)
         skip_permissions = pmode == "allow_all"
         review_cache: dict[Any, Any] = {}  # this reply's reviewer allows, so an identical repeat call is not asked twice
+        channel = host.channels.owner_of(conv_id)  # set when this is the chat of a channel such as Telegram
         tool_ctx: dict[str, Any] = {
             "project_id": conv["project_id"], "conversation_id": conv_id,
             # The definition this chat speaks as: a task scheduled from here keeps running as it (schedule_task).
@@ -2281,8 +2276,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # What desk_deliver/desk_done record an output or a note against, so Accept can name the run
             # that wrote a file instead of guessing with the latest one.
             "run_id": run.run_id if run else None,
-            # A turn in the Telegram chat: what the agent makes rides on the reply without a send_files step (sendfiles.attach_made).
-            "auto_attach": telegram_bridge.is_texts_conversation(conv_id),
+            # A turn in a channel's chat (Telegram): what the agent makes rides on the reply without a send_files step (sendfiles.attach_made).
+            "auto_attach": channel is not None,
         }
         if is_wake and body.wake.get("tainted"):  # the worker read untrusted text; its report carries that into this turn
             tool_ctx["tainted"] = True
@@ -2605,7 +2600,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                  job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
                  PERSONA_FOLDER_HINT.format(path=folder) if folder and not desk and tool_schemas else "",
-                 TELEGRAM_HINT if tool_schemas and telegram_bridge.is_texts_conversation(conv_id) else "",
+                 channel.hint if tool_schemas and channel is not None else "",
                  coding_route.hint(cfg) if tool_schemas else "")
         inputs_block = _desk_inputs_block() if desk else ""
         map_block = _map_status_block(used, conv["settings"], cfg, conv["project_id"], fence_nonce, tool_schemas, tool_ctx["deferred"])
@@ -4571,9 +4566,9 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     if body.wake is not None or body.chat_link is not None:
         raise HTTPException(400, "A wake turn is started by the backend only")
     run = bus.start(id, lambda r: _run_chat(r, body), input=body.model_dump())
-    # Typed in Grain into the Texts chat: it runs as a Telegram turn and shows on the phone. Internal turns (wake, ...) never get here.
-    if body.origin != "telegram" and body.wake is None and body.kind is None and not body.replace_from and telegram_bridge.is_texts_conversation(id):
-        telegram_bridge.from_app(id, run.run_id, body.content or "", atts)
+    # Typed in Grain into a channel's chat (Texts): it runs as a turn of that channel and shows on the phone. Internal turns (wake, ...) never get here.
+    if (channel := host.channels.owner_of(id)) and body.origin != channel.name and body.wake is None and body.kind is None and not body.replace_from:
+        channel.from_app(id, run.run_id, body.content or "", atts)
     return {"run_id": run.run_id, "seq": run.seq}
 
 
@@ -4732,16 +4727,20 @@ toolbox.chat_links = chat_links
 
 
 def _push_wake_reply(text: str, attachments: list[dict[str, Any]] | None = None, conv_id: str | None = None) -> None:
-    """The reply written for a finished worker (and the files it sent), to the phone when telegramPushWorkerResults is on,
-    and into the Telegram chat in Grain when it came from another chat (that chat is the phone's transcript)."""
+    """The reply written for a finished worker (and the files it sent), to each channel that wants it (Telegram: the phone, when
+    telegramPushWorkerResults is on or the chat is its own), and into the channel's chat in Grain when it came from another chat
+    (that chat is the phone's transcript)."""
     text = workers_mod.strip_no_reply(text)
-    if not (settings().get("telegramPushWorkerResults") or telegram_bridge.is_texts_conversation(conv_id)) or not (text or attachments):
+    if not (text or attachments):
         return
-    telegram_bridge.push(text, attachments or None)
-    texts = telegram_bridge.texts_conversation_id()
-    src = convos.get(conv_id, with_messages=False) if conv_id else None
-    if texts and texts != conv_id:
-        _tell_chat(texts, f"Update from “{(src or {}).get('title') or 'a chat'}”:\n\n{text}", attachments or None)
+    for channel in host.channels:
+        if not (channel.wants_worker_results() or channel.is_texts_conversation(conv_id)):
+            continue
+        channel.push(text, attachments or None)
+        texts = channel.texts_conversation_id()
+        src = convos.get(conv_id, with_messages=False) if conv_id else None
+        if texts and texts != conv_id:
+            _tell_chat(texts, f"Update from “{(src or {}).get('title') or 'a chat'}”:\n\n{text}", attachments or None)
 
 
 def _worker_parent_ctx(conv_id: str) -> dict[str, Any]:
@@ -4838,8 +4837,8 @@ async def steer_run(id: str, body: SteerIn) -> dict[str, Any]:
     run.publish("user_message", um)
     run.steers.append(um)
     run.poke()
-    if body.origin != "telegram" and telegram_bridge.is_texts_conversation(id):
-        telegram_bridge.from_app(id, run.run_id, text, attachments)
+    if (channel := host.channels.owner_of(id)) and body.origin != channel.name:
+        channel.from_app(id, run.run_id, text, attachments)
     return {"ok": True, "run_id": run.run_id, "message": um}
 
 
@@ -7652,7 +7651,7 @@ async def _shutdown() -> None:
     await asyncio.gather(*(asyncio.wait_for(coding.stop_owned(r, "Grain was shut down while it was running"), 10) for r in owners),
                          return_exceptions=True)
     coding.closing = True  # past this point a run's teardown leaves its sessions alone (stop_owned)
-    await telegram_bridge.stop()  # before the runs are cancelled: a dying backend must not send "interrupted" replies
+    await host.channels.stop()  # before the runs are cancelled: a dying backend must not send "interrupted" replies
     await toolbox.shell.shutdown()  # first: host shell jobs (SIGTERM then SIGKILL per group) before anything slow can stall exit
     await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there
     await title_jobs.stop()
@@ -10156,18 +10155,14 @@ async def _cowork_startup() -> None:
         log.warning("cowork recovery failed", exc_info=True)
 
 
-# ---------------- Telegram bridge (telegram.py) ----------------
-def _telegram_message_text(message_id: str) -> str | None:
+# ---------------- Channels (extensions/channels.py): the Telegram extension and any other way in from outside the app ----------------
+def _channel_message_text(message_id: str) -> str | None:
     with db.tx() as c:
         r = c.execute("SELECT content FROM messages WHERE id=?", (message_id,)).fetchone()
     return r["content"] if r else None
 
 
-def _telegram_create_conversation() -> str:
-    return create_conversation(ConvIn(title="Telegram"))["id"]
-
-
-def _telegram_message_attachments(message_id: str) -> list[dict[str, Any]]:
+def _channel_message_attachments(message_id: str) -> list[dict[str, Any]]:
     with db.tx() as c:
         r = c.execute("SELECT attachments FROM messages WHERE id=?", (message_id,)).fetchone()
     try:
@@ -10177,17 +10172,17 @@ def _telegram_message_attachments(message_id: str) -> list[dict[str, Any]]:
     return [a for a in atts if isinstance(a, dict)]
 
 
-def _telegram_attachment_path(doc_id: str) -> Path | None:
+def _channel_attachment_path(doc_id: str) -> Path | None:
     d = documents.get(doc_id)
     return blobs.inside_uploads(db.data_dir, d.get("path")) if d else None
 
 
-async def _telegram_store_upload(name: str, mime: str, data: bytes) -> dict[str, Any]:
+async def _channel_store_upload(name: str, mime: str, data: bytes) -> dict[str, Any]:
     row = await asyncio.to_thread(_store_upload, None, name, mime, data)
     return {"id": row["id"], "name": row["name"], "mime": row["mime"], "size": row["size"]}
 
 
-async def _telegram_turn(conv_id: str, text: str, attachment_ids: list[str] | None = None) -> dict[str, Any]:
+async def _channel_turn(conv_id: str, text: str, attachment_ids: list[str] | None = None) -> dict[str, Any]:
     """A message is a new turn, or a steer when a reply is still being written. The two can race, so a 409 tries the other."""
     for _ in range(2):
         try:
@@ -10200,130 +10195,47 @@ async def _telegram_turn(conv_id: str, text: str, attachment_ids: list[str] | No
     raise HTTPException(409, "The conversation is busy")
 
 
-async def _telegram_decide(call_id: str, decision: str) -> dict[str, Any]:
+async def _channel_decide(call_id: str, decision: str) -> dict[str, Any]:
     return await approve_tool_call(call_id, ApprovalIn(decision=decision, via="telegram"))
 
 
-def _telegram_conversation_title(conv_id: str) -> str | None:
+def _channel_conversation_title(conv_id: str) -> str | None:
     row = convos.get(conv_id, with_messages=False)
     return row["title"] if row else None
 
 
-def _telegram_mark_conversation(cid: str, flag: bool) -> None:
+def _channel_mark_conversation(cid: str, flag: bool) -> None:
     convos.update(cid, {"settings": {"telegram": flag}})
     _announce_conversation(cid)  # the sidebar only re-reads a chat on this event
 
 
-telegram_bridge = telegram.TelegramBridge(telegram.Deps(
-    get_settings=settings,
-    load_state=lambda: db.get_settings().get("telegramState") or {},
-    save_state=lambda st: db.set_settings({"telegramState": st}),
-    get_token=lambda: db.secrets.get(telegram.SECRET_NAME),
-    start_turn=_telegram_turn,
+_chat_service = ChatService(
+    start_turn=_channel_turn,
     stop=lambda conv_id: bus.stop(conv_id),
-    decide=_telegram_decide,
+    decide=_channel_decide,
     pending_approvals=lambda: run_store.approvals(status="pending"),
     is_live=lambda call_id: (f := _approvals.get(call_id)) is not None and not f.done(),
+    is_worker_call=workers_mgr.owns_call,
     active_runs=lambda: bus.list(),
-    create_texts_conversation=_telegram_create_conversation,
+    create_conversation=lambda title: create_conversation(ConvIn(title=title))["id"],
     conversation_exists=lambda conv_id: convos.get(conv_id, with_messages=False) is not None,
-    message_text=_telegram_message_text,
-    app_only_tools=frozenset({PLAN_TOOL, *QUESTION_TOOLS}),
-    conversation_title=_telegram_conversation_title,
-    message_attachments=_telegram_message_attachments,
-    attachment_path=_telegram_attachment_path,
-    store_upload=_telegram_store_upload,
-    mark_texts_conversation=_telegram_mark_conversation,
-    computer_name=telegram.computer_name,
+    conversation_title=_channel_conversation_title,
+    mark_conversation=_channel_mark_conversation,
+    message_text=_channel_message_text,
+    message_attachments=_channel_message_attachments,
+    attachment_path=_channel_attachment_path,
+    store_upload=_channel_store_upload,
     call_label=lambda tool, args: labels.for_call(toolbox, tool, args),
-))
-toolbox.setup_probes.update(telegram=telegram_bridge.paired, mcp=lambda: bool(mcp_store.servers()))  # setup_request's checks
+    app_only_tools=frozenset({PLAN_TOOL, *QUESTION_TOOLS}),
+)
+_ext_ctx.services["chat"] = lambda: _chat_service
+for _r in host.load_builtin("telegram", _ext_ctx).routers:
+    app.include_router(_r)
+toolbox.setup_probes.update({**{c.name: c.paired for c in host.channels}, "mcp": lambda: bool(mcp_store.servers())})  # setup_request's checks
 
 
-async def _telegram_user_update(ctx: dict[str, Any], text: str, atts: list[dict[str, Any]]) -> bool:
-    return telegram_bridge.send_update(ctx.get("conversation_id"), text, atts)
+async def _channel_user_update(ctx: dict[str, Any], text: str, atts: list[dict[str, Any]]) -> bool:
+    return any(c.send_update(ctx.get("conversation_id"), text, atts) for c in host.channels)
 
 
-toolbox.user_update = _telegram_user_update  # send_files' live delivery to the phone
-
-
-@host.on_start
-async def _telegram_startup() -> None:
-    if settings().get("telegramEnabled") and db.secrets.get(telegram.SECRET_NAME):
-        await telegram_bridge.start()
-
-
-@app.get("/telegram/status")
-def telegram_status() -> dict[str, Any]:
-    return telegram_bridge.status()
-
-
-class TelegramTokenIn(BaseModel):
-    token: str
-
-
-@app.put("/telegram/token")
-async def telegram_put_token(body: TelegramTokenIn) -> dict[str, Any]:
-    token = body.token.strip()
-    if not telegram.TOKEN_RE.fullmatch(token):
-        raise HTTPException(422, "That does not look like a bot token")
-    try:
-        me = await telegram_bridge.check_token(token)
-    except telegram.TelegramError as e:
-        if e.code in (401, 404):
-            raise HTTPException(400, "Telegram rejected that token") from None
-        raise HTTPException(502, f"Could not reach Telegram: {telegram.sanitize(e.description, token)}") from None
-    db.secrets.set(telegram.SECRET_NAME, token)
-    telegram_bridge.adopt(me)
-    db.set_settings({"telegramEnabled": True})
-    await telegram_bridge.reconcile()
-    return telegram_bridge.status()
-
-
-@app.delete("/telegram/token")
-async def telegram_delete_token() -> dict[str, Any]:
-    await telegram_bridge.stop()
-    db.secrets.delete(telegram.SECRET_NAME)
-    telegram_bridge.clear()
-    return telegram_bridge.status()
-
-
-@app.post("/telegram/pairing")
-def telegram_pairing() -> dict[str, Any]:
-    if not db.secrets.get(telegram.SECRET_NAME):
-        raise HTTPException(400, "Add a bot token first")
-    telegram_bridge.issue_pairing()
-    return telegram_bridge.status()
-
-
-@app.post("/telegram/takeover")
-async def telegram_takeover() -> dict[str, Any]:
-    if not db.secrets.get(telegram.SECRET_NAME):
-        raise HTTPException(400, "Add a bot token first")
-    await telegram_bridge.take_over()
-    return telegram_bridge.status()
-
-
-@app.post("/telegram/unpair")
-def telegram_unpair() -> dict[str, Any]:
-    telegram_bridge.unpair()
-    return telegram_bridge.status()
-
-
-@app.post("/telegram/test")
-async def telegram_test() -> dict[str, Any]:
-    res = await telegram_bridge.send_test()
-    if res.get("error") == "not_paired":
-        raise HTTPException(400, "Pair a Telegram chat first")
-    return res
-
-
-class TelegramEnabledIn(BaseModel):
-    enabled: bool
-
-
-@app.post("/telegram/enabled")
-async def telegram_set_enabled(body: TelegramEnabledIn) -> dict[str, Any]:
-    db.set_settings({"telegramEnabled": body.enabled})
-    await telegram_bridge.reconcile()
-    return telegram_bridge.status()
+toolbox.user_update = _channel_user_update  # send_files' live delivery to the channel's phone

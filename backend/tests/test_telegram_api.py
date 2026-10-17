@@ -28,7 +28,7 @@ from personal_os import llm  # noqa: E402
 from personal_os import telegram as tg  # noqa: E402
 
 client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
-bridge = appmod.telegram_bridge
+bridge = appmod.host.channels["telegram"]
 TOKEN = "123456789:" + "AbC-dEf_GhI" * 3 + "xyz"
 OWNER, BOT = 4242, "grain_test_bot"
 STREAM = {"slow": False}
@@ -352,7 +352,7 @@ def test_the_approval_route_defaults_to_the_user_and_only_accepts_the_telegram_m
 def test_the_bridge_stops_before_the_runs_are_cancelled_on_shutdown() -> None:
     import inspect
     src = inspect.getsource(appmod._shutdown)
-    assert src.index("telegram_bridge.stop()") < src.index("bus.shutdown()")
+    assert src.index("host.channels.stop()") < src.index("bus.shutdown()")
 
 
 def test_the_real_http_caller_is_what_the_app_ships_with() -> None:

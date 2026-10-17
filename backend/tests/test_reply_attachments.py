@@ -201,7 +201,7 @@ def test_the_tool_ctx_flag_is_on_only_in_the_telegram_chat(monkeypatch: pytest.M
         client.put("/settings", json={"autoLearn": False, "learnStyle": False, "baseUrl": ""})
         tg = appmod.convos.create(None, "texts", "claude-sonnet-5-5")["id"]
         plain = appmod.convos.create(None, "plain", "claude-sonnet-5-5")["id"]
-        monkeypatch.setattr(appmod.telegram_bridge, "is_texts_conversation", lambda cid: cid == tg)
+        monkeypatch.setattr(appmod.host.channels["telegram"], "is_texts_conversation", lambda cid: cid == tg)
         for cid in (tg, plain):
             SCRIPT.append("tool")
             _drive(cid)

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Itera
 
 from .. import backups, migrations
 from ..context import Block, Contribution, RetrievalSources, Slot
+from .channels import ChannelAdapter, Channels
 from .disposables import Disposable, Scope
 from .hooks import HookBus
 from .manifest import Manifest, load_manifest
@@ -66,6 +67,7 @@ class ExtensionScope:
     index: int
     bus: HookBus
     retrieval: RetrievalSources
+    channels: Channels
     module: Module | None = None  # set for an adapted Module
     root: Path | None = None  # the extension's folder, where data.migrations is looked up
     ctx: ExtensionContext | None = None  # set for an extension loaded from its folder
@@ -144,6 +146,10 @@ class ExtensionScope:
         services[service] = lambda: impl
         return self.disposables.add(Disposable(lambda: services.pop(service, None)))
 
+    def channel(self, adapter: ChannelAdapter) -> Disposable:
+        """Offer a channel adapter: the app routes its chat, run changes and shutdown through it while the extension runs."""
+        return self.disposables.add(self.channels.register(adapter))
+
     def spawn(self, coro: Awaitable[Any]) -> asyncio.Task[Any]:
         """Run a background task that is cancelled and awaited when the extension stops."""
         task = asyncio.ensure_future(coro)
@@ -206,6 +212,7 @@ class ExtensionHost:
     def __init__(self) -> None:
         self.bus = HookBus()
         self.retrieval = RetrievalSources()
+        self.channels = Channels()
         self.extensions: dict[str, ExtensionScope] = {}  # in start order
         self._startup: list[Handler] = []
         self._shutdown: list[Handler] = []
@@ -260,7 +267,7 @@ class ExtensionHost:
              ctx: ExtensionContext | None = None) -> ExtensionScope:
         if manifest.id in self.extensions:
             raise ValueError(f"duplicate extension id {manifest.id!r}")
-        scope = ExtensionScope(manifest, len(self.extensions), self.bus, self.retrieval, module, root, ctx)
+        scope = ExtensionScope(manifest, len(self.extensions), self.bus, self.retrieval, self.channels, module, root, ctx)
         self.extensions[manifest.id] = scope
         self._enabled[manifest.id] = scope.enabled()
         return scope

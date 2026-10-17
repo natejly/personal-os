@@ -325,12 +325,11 @@ class Workers:
     """The workers of this process: starts, queues, stops and resumes them, and reports changes."""
 
     def __init__(self, sub: Subagents, store: Any, *, publish: Callable[[str, Any], None], answering: Callable[[str], Any] | None = None,
-                 on_end: Callable[[str], Any] | None = None, on_approval: Callable[[str, str], Any] | None = None,
+                 on_end: Callable[[str], Any] | None = None,
                  memory: Callable[[], float | None] = free_memory_fraction) -> None:
         self.sub, self.store, self.publish, self.memory = sub, store, publish, memory
         self.answering = answering or (lambda cid: None)  # conversation id -> the live reply (a Run) or None
         self.on_end = on_end                              # (conversation id) -> awaitable: wake its front agent
-        self.on_approval = on_approval                    # (call id, conversation id): text a card to the phone
         self.queue: deque[Child] = deque()
         self.stopped: dict[str, str] = {}                 # worker id -> who stopped it ('tool' | 'ui')
         sub.on_stall = self._stalled
@@ -634,8 +633,9 @@ class Workers:
         owner = self._owner(str(data.get("id") or ""))
         if owner is not None:
             self._emit(conversation_id, self.info_of(owner))
-        if event == "tool_call" and data.get("needs_approval") and self.on_approval is not None:
-            self.on_approval(str(data.get("id")), conversation_id or "")
+
+    def owns_call(self, call_id: str) -> bool:
+        return self._owner(call_id) is not None
 
     def _owner(self, call_id: str) -> Child | None:
         """The worker a call id (`<child id>:<call>`) belongs to, walking up from a sub-child."""

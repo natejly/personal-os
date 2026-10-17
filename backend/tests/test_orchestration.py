@@ -299,7 +299,7 @@ def test_several_finished_workers_fold_into_one_wake() -> None:
 @pytest.mark.parametrize("reply", ["NO_REPLY", " no_reply. ", ""])
 def test_a_silent_wake_deletes_its_reply_and_pushes_nothing(monkeypatch: pytest.MonkeyPatch, reply: str) -> None:
     pushed: list[str] = []
-    monkeypatch.setattr(appmod.telegram_bridge, "push", lambda t, atts=None: pushed.append(t))
+    monkeypatch.setattr(appmod.host.channels["telegram"], "push", lambda t, atts=None: pushed.append(t))
     appmod.db.set_settings({"telegramPushWorkerResults": True})
     cid = new_conv()
     WORKER["Stale job"] = [{"text": "result nobody needs"}]
@@ -785,8 +785,8 @@ def test_a_workers_external_call_asks_and_is_answered_through_the_approvals_rout
         return {"url": kw.get("url"), "text": "page body"}
 
     monkeypatch.setattr(spec, "fn", fake_fetch)
-    texted: list[tuple[str, str]] = []
-    monkeypatch.setattr(mgr, "on_approval", lambda call_id, cid: texted.append((call_id, cid)))
+    texted: list[str] = []
+    monkeypatch.setattr(appmod.host.channels["telegram"], "notify_worker_approval", texted.append)
     published: list[dict[str, Any]] = []
     real_publish = mgr.publish
     monkeypatch.setattr(mgr, "publish", lambda topic, data: (published.append({"topic": topic, **data}), real_publish(topic, data)))
@@ -804,7 +804,7 @@ def test_a_workers_external_call_asks_and_is_answered_through_the_approvals_rout
     row = store.approval(card["call_id"])
     assert row["status"] == "pending" and row["run_id"] == w["id"] and row["conversation_id"] == cid, "the card is a durable row on the worker's run"
     assert hits == [], "nothing ran before the answer"
-    assert texted == [(card["call_id"], cid)], "the phone is told about the card"
+    assert texted == [card["call_id"]], "the phone is told about the card"
     assert any(p["topic"] == "workers" and p["worker"]["pending_approvals"] for p in published), "and the workers topic carries it"
     assert any(a["call_id"] == card["call_id"] for a in client.get("/approvals").json()), "it is in the global approvals list"
     r = client.post(f"/approvals/{card['call_id']}", json={"decision": decision})
@@ -834,7 +834,7 @@ def test_a_workers_send_tool_is_not_offered_and_never_runs_unasked() -> None:
 @pytest.mark.parametrize("on", [True, False])
 def test_the_wake_reply_is_pushed_to_telegram_only_when_enabled(monkeypatch: pytest.MonkeyPatch, on: bool) -> None:
     pushed: list[str] = []
-    monkeypatch.setattr(appmod.telegram_bridge, "push", lambda t, atts=None: pushed.append(t))
+    monkeypatch.setattr(appmod.host.channels["telegram"], "push", lambda t, atts=None: pushed.append(t))
     appmod.db.set_settings({"telegramPushWorkerResults": on})
     cid = new_conv()
     WORKER["Push job"] = [{"text": "pushed result"}]
@@ -847,7 +847,7 @@ def test_the_wake_reply_is_pushed_to_telegram_only_when_enabled(monkeypatch: pyt
 
 def test_a_failed_wake_reply_is_not_pushed(monkeypatch: pytest.MonkeyPatch) -> None:
     pushed: list[str] = []
-    monkeypatch.setattr(appmod.telegram_bridge, "push", lambda t, atts=None: pushed.append(t))
+    monkeypatch.setattr(appmod.host.channels["telegram"], "push", lambda t, atts=None: pushed.append(t))
     appmod.db.set_settings({"telegramPushWorkerResults": True})
 
     async def boom(*a: Any, **k: Any) -> Any:
@@ -1107,7 +1107,7 @@ def test_no_reply_after_tool_calls_is_still_silent(monkeypatch: pytest.MonkeyPat
     """A wake turn that checks something (a tool round) and then answers NO_REPLY must stay silent: the
     literal marker never lands in the chat or on the phone."""
     pushed: list[str] = []
-    monkeypatch.setattr(appmod.telegram_bridge, "push", lambda t, atts=None: pushed.append(t))
+    monkeypatch.setattr(appmod.host.channels["telegram"], "push", lambda t, atts=None: pushed.append(t))
     appmod.db.set_settings({"telegramPushWorkerResults": True})
     cid = new_conv()
     WORKER["Stale after check"] = [{"text": "old news"}]

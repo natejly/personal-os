@@ -799,6 +799,8 @@ export interface ExtensionCard {
 export interface ExtensionProposal extends ExtensionCard {
   /** Replaces an installed version. */
   update: boolean
+  /** Identifies this proposal; accepting sends it back so that only the version that was shown is installed. */
+  digest: string
   findings: string[]
   changes: { path: string; status: 'added' | 'changed' | 'removed'; diff: string }[]
 }

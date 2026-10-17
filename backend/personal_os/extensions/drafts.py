@@ -9,6 +9,7 @@ the file tools cannot write.
 from __future__ import annotations
 
 import difflib
+import hashlib
 import json
 import logging
 import re
@@ -92,6 +93,11 @@ def _changes(old: Path, new: Path) -> list[dict[str, str]]:
             for rel in sorted(before.keys() | after.keys()) if before.get(rel) != after.get(rel)]
 
 
+def _fingerprint(files: Path, meta: bytes) -> str:
+    """Identifies a proposal: its files and its provenance. Accepting names the one the user was shown."""
+    return digest({**content_hash(files), "\0proposal": hashlib.sha256(meta).hexdigest()})
+
+
 class Drafts:
     def __init__(self, data_dir: Path) -> None:
         self.drafts = Path(data_dir) / mac.EXT_DRAFTS
@@ -133,10 +139,11 @@ class Drafts:
         return self._view(ext_id) if (self._review / ext_id / "proposal.json").is_file() else None
 
     def _view(self, ext_id: str) -> dict[str, Any]:
-        meta = json.loads((self._review / ext_id / "proposal.json").read_text("utf-8"))
+        raw = (self._review / ext_id / "proposal.json").read_bytes()
+        meta = json.loads(raw)
         files = self._review / ext_id / "files"
         return {**_card(load_manifest(files / "extension.json"), meta["tainted"], meta["taintSources"]),
-                "findings": meta["findings"], "update": (self.installed / ext_id).is_dir(),
+                "findings": meta["findings"], "digest": _fingerprint(files, raw), "update": (self.installed / ext_id).is_dir(),
                 "changes": _changes(self.installed / ext_id, files)}
 
     def proposals(self) -> list[dict[str, Any]]:
@@ -148,15 +155,20 @@ class Drafts:
             raise KeyError(ext_id)
         shutil.rmtree(self._review / ext_id)
 
-    def accept(self, ext_id: str) -> None:
-        """Install the proposed snapshot, replacing any earlier version, and pin its hash. The caller has stood the old version down."""
+    def accept(self, ext_id: str, reviewed: str) -> None:
+        """Install the proposed snapshot, replacing any earlier version, and pin its hash. The caller has stood the old version down.
+        Raises DraftError unless the snapshot is the one with the `reviewed` digest: a new proposal may have replaced it since."""
         meta_path = self._review / ext_id / "proposal.json"
         if not meta_path.is_file():
             raise KeyError(ext_id)
-        meta = json.loads(meta_path.read_text("utf-8"))
+        raw = meta_path.read_bytes()
+        meta = json.loads(raw)
         staging = self.installed / f".staging-{ext_id}"
         shutil.rmtree(staging, ignore_errors=True)
         shutil.copytree(self._review / ext_id / "files", staging)
+        if _fingerprint(staging, raw) != reviewed:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise DraftError("the proposal changed after you reviewed it; review it again")
         shutil.rmtree(self.installed / ext_id, ignore_errors=True)
         staging.replace(self.installed / ext_id)
         self._pins.mkdir(exist_ok=True)

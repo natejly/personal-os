@@ -654,7 +654,7 @@ export const api = {
   },
   extensions: {
     list: () => req<ExtensionsReview>('/extensions'),
-    accept: (id: string) => req<ExtensionsReview>(`/extensions/${encodeURIComponent(id)}/accept`, { method: 'POST' }),
+    accept: (id: string, digest: string) => req<ExtensionsReview>(`/extensions/${encodeURIComponent(id)}/accept`, { method: 'POST', body: json({ digest }) }),
     reject: (id: string) => req<ExtensionsReview>(`/extensions/${encodeURIComponent(id)}/reject`, { method: 'POST' }),
     enable: (id: string, grants: string[]) => req<ExtensionsReview>(`/extensions/${encodeURIComponent(id)}/enable`, { method: 'POST', body: json({ grants }) }),
     disable: (id: string) => req<ExtensionsReview>(`/extensions/${encodeURIComponent(id)}/disable`, { method: 'POST' })

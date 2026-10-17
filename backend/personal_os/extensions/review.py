@@ -22,6 +22,10 @@ class EnableIn(BaseModel):
     grants: list[str] = []
 
 
+class AcceptIn(BaseModel):
+    digest: str
+
+
 class Review:
     """What the routes and the app's startup share: the installed extensions are listed in `hiddenViews` while disabled."""
 
@@ -76,11 +80,16 @@ def router(review: Review) -> APIRouter:
         return review.listing()
 
     @r.post("/{ext_id}/accept")
-    async def accept(ext_id: str) -> dict[str, Any]:
-        if review.drafts.proposal(ext_id) is None:
+    async def accept(ext_id: str, body: AcceptIn) -> dict[str, Any]:
+        if (proposal := review.drafts.proposal(ext_id)) is None:
             raise HTTPException(404, "no proposal with that id")
+        if proposal["digest"] != body.digest:
+            raise HTTPException(409, "the proposal changed after you reviewed it; review it again")
         await review.stand_down(ext_id)  # an update drops the installed version back to disabled
-        review.drafts.accept(ext_id)
+        try:
+            review.drafts.accept(ext_id, body.digest)
+        except DraftError as e:
+            raise HTTPException(409, str(e)) from e
         return review.listing()
 
     @r.post("/{ext_id}/reject")

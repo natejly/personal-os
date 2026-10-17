@@ -68,8 +68,11 @@ def propose(ext_id: str = "rl-notes", **ctx: Any) -> Any:
     return on_loop(appmod.toolbox.call("ext_propose", {"id": ext_id}, {"conversation_id": None, "project_id": None, "taint_sources": [], **ctx}))
 
 
-def accept(ext_id: str = "rl-notes") -> Any:
-    return client.post(f"/extensions/{ext_id}/accept")
+def accept(ext_id: str = "rl-notes", digest: str | None = None) -> Any:
+    """Accepts the proposal as listed, unless a digest says which one the user reviewed."""
+    if digest is None:
+        digest = next((p["digest"] for p in client.get("/extensions").json()["proposals"] if p["id"] == ext_id), "")
+    return client.post(f"/extensions/{ext_id}/accept", json={"digest": digest})
 
 
 def enable(ext_id: str = "rl-notes", grants: list[str] | None = None) -> Any:
@@ -172,6 +175,28 @@ def test_accepting_installs_the_reviewed_snapshot_disabled_and_runs_nothing() ->
     card = installed()
     assert card["enabled"] is False and card["changed"] is False and client.get("/extensions").json()["proposals"] == []
     assert accept().status_code == 404
+
+
+def test_accepting_refuses_a_proposal_that_replaced_the_one_reviewed() -> None:
+    root = draft()
+    propose()
+    reviewed = client.get("/extensions").json()["proposals"][0]["digest"]
+    (root / "extension.py").write_text((root / "extension.py").read_text("utf-8") + "\n# second version\n", "utf-8")
+    propose()
+    refused = accept(digest=reviewed)
+    assert refused.status_code == 409 and "changed after you reviewed" in refused.json()["detail"]
+    assert review.drafts.installed_ids() == [] and len(client.get("/extensions").json()["proposals"]) == 1
+    assert accept().status_code == 200
+
+
+def test_the_snapshot_is_checked_against_the_digest_as_it_is_copied() -> None:
+    draft()
+    propose()
+    reviewed = client.get("/extensions").json()["proposals"][0]["digest"]
+    (review.drafts._review / "rl-notes" / "files" / "extension.py").write_text("# swapped\n", "utf-8")
+    with pytest.raises(DraftError, match="changed after you reviewed"):
+        review.drafts.accept("rl-notes", reviewed)
+    assert review.drafts.installed_ids() == [] and not (review.drafts.installed / ".staging-rl-notes").exists()
 
 
 def test_rejecting_drops_the_proposal() -> None:

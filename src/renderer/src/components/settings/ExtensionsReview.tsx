@@ -61,7 +61,7 @@ export default function ExtensionsReview(): JSX.Element {
             </details>
           ))}
           <div className="test-row">
-            <button type="button" className="ghost-btn" onClick={() => act(() => api.extensions.accept(p.id))}>Accept</button>
+            <button type="button" className="ghost-btn" onClick={() => act(() => api.extensions.accept(p.id, p.digest))}>Accept</button>
             <button type="button" className="ghost-btn" onClick={() => act(() => api.extensions.reject(p.id))}>Reject</button>
           </div>
         </details>

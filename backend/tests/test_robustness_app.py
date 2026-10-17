@@ -309,6 +309,7 @@ def test_recap_runs_without_a_key_and_marks_google_unknown(monkeypatch: pytest.M
     new_conv()  # something to recap: an empty day skips the model
     assert client.get("/recap?force=true").json()["content"] == "recap"
     assert "not connected" in seen[0]["calendar_next_3_days"] and "not connected" in seen[0]["unread_mail"]
+    assert "open_todos" in seen[0]  # the todos extension's recap section feeds the model through host.recap_facts()
 
 
 def test_recap_skips_the_model_when_there_is_nothing_to_recap(monkeypatch: pytest.MonkeyPatch) -> None:

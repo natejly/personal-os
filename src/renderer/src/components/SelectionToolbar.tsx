@@ -35,9 +35,9 @@ export default function SelectionToolbar(): JSX.Element | null {
   const [at, setAt] = useState<{ x: number; y: number; quote: string } | null>(null)
 
   useEffect(() => window.os.onMenu((action) => {
-    const found = selectionActions.find((a) => `selection:${a.id}` === action)
+    const found = selectionActions.find((a) => `selection:${a.id}` === action && ownerOn(settings, a.extension))
     if (found) found.run(selectedText())
-  }), [])
+  }), [settings])
 
   useEffect(() => {
     if (!enabled) return setAt(null)

@@ -19,7 +19,6 @@ import { CORE, registerSlot, type SidePanelTabProps } from '../extensions/host'
 import { useSlot } from '../extensions/slot'
 
 // The cards other than Terminal are `sidepanel.tab` slot items. Terminal owns the panel's attach state, so it stays here, last.
-const TERMINAL = { id: 'terminal', label: 'Terminal', Component: undefined, count: undefined }
 
 const ContextTab = ({ conversationId }: SidePanelTabProps): JSX.Element => <ContextDrawer conversationId={conversationId} embedded />
 const FilesTab = ({ conversationId, desk }: SidePanelTabProps): JSX.Element => (desk
@@ -94,22 +93,24 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   }, [onClose])
   const tabProps: SidePanelTabProps = { conversationId, desk, fileCount }
   const slotTabs = useSlot('sidepanel.tab').filter((t) => !t.shown || t.shown(tabProps))
-  const tabs = [...slotTabs, ...(termOk && conversationId ? [TERMINAL] : [])]
+  const tabs = [
+    ...slotTabs.map((t) => ({ id: t.id, label: t.label, count: t.count?.(tabProps), body: <t.Component {...tabProps} /> })),
+    ...(termOk && conversationId ? [{ id: 'terminal', label: 'Terminal', count: undefined, body: <TerminalPane conversationId={conversationId} attached={attached} onAttach={attach} /> }] : [])
+  ]
   return (
     <aside ref={panel} className="desk-panel" aria-label="Workspace">
       <button className="icon-btn ghost desk-close" title="Close" aria-label="Close workspace" onClick={onClose}><X size={14} /></button>
       <ProgressCard conversationId={conversationId} desk={desk} />
       <WorkersPanel conversationId={conversationId} />
       {tabs.map((t) => {
-        const count = t.count?.(tabProps)
         return (
           <section key={t.id} ref={(el) => { refs.current[t.id] = el }} className="desk-card">
             <button data-testid={`desk-tab-${t.id}`} className={`desk-card-head${open[t.id] ? ' active' : ''}`} aria-expanded={!!open[t.id]} onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
               {t.label}
-              {!!count && <span className="count">{count}</span>}
+              {!!t.count && <span className="count">{t.count}</span>}
               {open[t.id] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             </button>
-            {open[t.id] && <div className={`desk-card-body`}>{t.Component ? <t.Component {...tabProps} /> : <TerminalPane conversationId={conversationId} attached={attached} onAttach={attach} />}</div>}
+            {open[t.id] && <div className={`desk-card-body`}>{t.body}</div>}
           </section>
         )
       })}

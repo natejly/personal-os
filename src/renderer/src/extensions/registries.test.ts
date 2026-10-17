@@ -32,7 +32,7 @@ test('a slot keeps its items sorted by order, earlier registration first on a ti
   const b = registerSlot('t', 'message.header', { id: 't-a', order: 10, Component })
   const c = registerSlot('t', 'message.header', { id: 't-c', order: 20, Component })
   assert.deepEqual(ids('message.header'), ['t-a', 't-b', 't-c'])
-  assert.throws(() => registerSlot('t', 'message.header', { id: 't-a', order: 1, Component }), /already has an item/)
+  assert.throws(() => registerSlot('t', 'message.header', { id: 't-a', order: 1, Component }), /already registered/)
   for (const d of [a, b, c]) d.dispose()
   assert.deepEqual(ids('message.header'), [])
 })

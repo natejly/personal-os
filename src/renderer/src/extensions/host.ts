@@ -120,8 +120,12 @@ function add<T>(list: T[], item: T): Disposable {
 }
 
 /** Add to a list whose entries have a unique `id`; a repeat is a bug in the registering code. */
+function assertUnique(list: { id: string }[], what: string, id: string): void {
+  if (list.some((x) => x.id === id)) throw new Error(`${what} "${id}" is already registered`)
+}
+
 function addUnique<T extends { id: string }>(list: T[], what: string, item: T): Disposable {
-  if (list.some((x) => x.id === item.id)) throw new Error(`${what} "${item.id}" is already registered`)
+  assertUnique(list, what, item.id)
   return add(list, item)
 }
 
@@ -131,7 +135,7 @@ export const slotItems = <K extends SlotName>(slot: K): SlotEntry<K>[] => slots[
 export function registerSlot<K extends SlotName>(owner: string, slot: K, item: SlotItem<K>): Disposable {
   const list = slotItems(slot)
   const entry: SlotEntry<K> = Object.assign({}, item, { extension: owner })
-  if (list.some((x) => x.id === entry.id)) throw new Error(`slot ${slot} already has an item "${entry.id}"`)
+  assertUnique(list, `slot ${slot} item`, entry.id)
   const after = list.findIndex((x) => x.order > entry.order)
   list.splice(after < 0 ? list.length : after, 0, entry)
   return { dispose: () => { const i = list.indexOf(entry); if (i >= 0) list.splice(i, 1) } }

@@ -70,6 +70,7 @@ class ManifestTests(unittest.TestCase):
             "unknown contributes key": manifest(contributes={"toolz": []}),
             "tool without a name": manifest(contributes={"tools": [{}]}),
             "slots not a list": manifest(contributes={"slots": {"sidebar.row": {}}}),
+            "slot entry not an object": manifest(contributes={"slots": {"sidebar.row": ["nav"]}}),
             "recap section without an id": manifest(contributes={"slots": {"recap.section": [{"order": 1}]}}),
             "unknown hook": manifest(hooks={"tool.preee": {}}),
             "unknown hook option": manifest(hooks={"app.start": {"retries": 3}}),

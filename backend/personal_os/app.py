@@ -98,7 +98,7 @@ from .commands import expand as expand_command
 from .commands import expand_history as expand_commands
 from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
 from .attention import for_job, for_run
-from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, args_digest
+from .runs import ACTIVE, PROMOTE_STEP, STATUSES, CoreRefused, Run, RunBus, RunStore, Topic, args_digest
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .style import WritingStyle
@@ -2421,8 +2421,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 return False
             bridge_n += 1
             uid = f"{am['id']}:bridge{bridge_n}"
-            run.store.open_approval(uid, run.run_id, name, args, conversation_id=conv_id, message_id=am["id"], forced=forced,
-                                    desk_id=run.desk_id, danger=spec.danger if spec else "external")
+            try:
+                run.store.open_approval(uid, run.run_id, name, args, conversation_id=conv_id, message_id=am["id"], forced=forced,
+                                        desk_id=run.desk_id, danger=spec.danger if spec else "external")
+            except CoreRefused:
+                return False
             if proposal_only(run) or (run.kind in UNATTENDED_KINDS and (
                     pmode != "manual" or permissions.get(cfg, "unattendedApprovals") == "deny")):
                 # Nobody is at the keyboard: refuse with a recorded reason, as the reply loop does, rather than park.
@@ -3578,7 +3581,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # known safe to the reviewer; allow_all lifts every card except the floor (a destructive shell command, a settings change)
                 # and the user's own questions. In manual the floor alone is routed: destructiveDefaults blocks or asks. Refusals, proposals
                 # and approved plan steps are already settled, so they never get here.
-                floor = toolbox.floor_action(c["name"], args, tool_ctx, kind="items" if mcp_is(c["name"]) and (_mcp_event(c["name"]) or {}).get("destructive") else None)
+                floor_hint = "items" if mcp_is(c["name"]) and (_mcp_event(c["name"]) or {}).get("destructive") else None
+                floor = toolbox.floor_action(c["name"], args, tool_ctx, kind=floor_hint)
                 if (pmode != "manual" or floor) and claimed is None and pre is None and not proposing and mode != "off":
                     explicit = explicit_modes.get(c["name"]) if not mcp_is(c["name"]) else ("on" if raw_mode == "on" else None)
                     locked_spec = bool(spec and toolbox.ask_locked(spec))
@@ -3601,7 +3605,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         question=c["name"] in permrules.STILL_ASK or c["name"] == PLAN_TOOL,
                         floor=floor)
                     if rt == "block":
-                        pre = tools.denied(c["name"], permissions.blocked_reason(toolbox.floor_kind(c["name"], args, tool_ctx) or "items"))
+                        pre = tools.denied(c["name"], guards.floor_text(toolbox, tool_ctx, c["name"], args, floor_hint))
                         _log_mode(c["name"], args, uid, "deny", "destructive", "blocked by destructiveDefaults")
                     elif rt == "run":
                         if mode == "ask":
@@ -3625,7 +3629,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if pre is None and mode != "off" and not proposing:
                     # The core has settled on run or card: its guards refuse what they refuse, then an extension may only narrow.
                     why, narrowed = await guards.settle(toolbox, tool_ctx, c["name"], args, danger=danger, mode=mode,
-                                                        kind="items" if mcp_is(c["name"]) and (_mcp_event(c["name"]) or {}).get("destructive") else None)
+                                                        kind=floor_hint)
                     if why:
                         pre = tools.denied(c["name"], why)
                     elif narrowed and mode == "on" and claimed is None:  # an approved plan step is the user's answer to this very call
@@ -3643,9 +3647,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                else "it needs an approval and no one is available to give it in a background run")
                         pre = tools.denied(c["name"], f"refused: {why}")
                         if run.store is not None:
-                            run.store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
-                                                    forced=forced, desk_id=run.desk_id, danger=danger)
-                            run.store.decide(uid, "deny", by="unattended", note=why)
+                            with contextlib.suppress(CoreRefused):  # refused outright: the refusal above stands, no row to record
+                                run.store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
+                                                        forced=forced, desk_id=run.desk_id, danger=danger)
+                                run.store.decide(uid, "deny", by="unattended", note=why)
                 if proposal_only(run) and mode == "ask" and claimed is None and pre is None:
                     # A background run has nobody to answer a card, and only external calls can become proposals.
                     # Opening one here would park the run forever (and every later fire behind it).
@@ -3693,8 +3698,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     store = run.store if run is not None else None
                     mine = False  # whether the row on file is the one this wait opened (a reused id returns the old row)
                     if store is not None:
-                        opened = store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
-                                                     forced=forced, desk_id=run.desk_id, danger=danger, review=review)
+                        try:
+                            opened = store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
+                                                         forced=forced, desk_id=run.desk_id, danger=danger, review=review)
+                        except CoreRefused as refused:  # settle cleared it, so only a context mismatch gets here: a refusal, not a card
+                            opened = None
+                            fut.set_result("deny")
+                            _approval_notes[uid] = str(refused)
                         mine = bool(opened and opened.get("status") == "pending" and opened.get("run_id") == run.run_id
                                     and opened.get("tool") == c["name"] and opened.get("args_digest") == args_digest(args))
                         if not mine:

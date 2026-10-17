@@ -28,6 +28,7 @@ The rules the rest of the app relies on:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import json
 import logging
@@ -45,6 +46,7 @@ from .dispatch import Contact, dispatch_tool
 from .extensions.directives import Directives
 from .extensions.hooks import HookBus
 from . import toolcore
+from .runs import CoreRefused
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .trace import Tracer, now_ms
 from .stuck import POLL_HINT_AFTER, POLL_TOOLS, STUCK_NUDGE, WAITING_TOOLS, StuckDetector, result_digest
@@ -1239,7 +1241,7 @@ class Subagents:
                     fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop"),
                     question=name in permrules.STILL_ASK, floor=floor)
                 if rt == "block":
-                    bad = permissions.blocked_reason(self.toolbox.floor_kind(name, args, ch.ctx))
+                    bad = guards.floor_text(self.toolbox, ch.ctx, name, args)
                 elif rt == "run":
                     if mode == "ask":
                         mode, forced = "on", False
@@ -1275,9 +1277,10 @@ class Subagents:
                 decision = "deny"
                 result = denied(name, unattended)
                 if self.store is not None:
-                    self.store.open_approval(uid, ch.id, name, args, conversation_id=ch.conversation_id, message_id=ch.message_id,
-                                             forced=forced, desk_id=ch.desk_id, danger=spec.danger)
-                    self.store.decide(uid, "deny", by="unattended", note=unattended)
+                    with contextlib.suppress(CoreRefused):  # refused outright: no row to record
+                        self.store.open_approval(uid, ch.id, name, args, conversation_id=ch.conversation_id, message_id=ch.message_id,
+                                                 forced=forced, desk_id=ch.desk_id, danger=spec.danger)
+                        self.store.decide(uid, "deny", by="unattended", note=unattended)
             elif mode == "ask":
                 decision, edited = await self._ask(ch, uid, name, args, forced, spec.danger)
                 if decision == "deny":
@@ -1361,12 +1364,13 @@ class Subagents:
         hard_forced = mode != raw_mode
         hints = con.hints(name)
         decision = "allow"
-        floor = self.toolbox.floor_action(name, args, ch.ctx, kind="items" if hints.get("destructive") else None)
+        kind = "items" if hints.get("destructive") else None
+        floor = self.toolbox.floor_action(name, args, ch.ctx, kind=kind)
         if pmode != "manual" or floor:
             rt = autoreview.connector_route(pmode, mode=mode, raw_mode=raw_mode, hints=hints, hard_forced=hard_forced, tainted=tainted,
                                             floor=floor)
             if rt == "block":
-                return "deny", denied(name, permissions.blocked_reason("items")), False
+                return "deny", denied(name, guards.floor_text(self.toolbox, ch.ctx, name, args, kind)), False
             if rt == "card":
                 mode, hard_forced = "ask", hard_forced or bool(floor)
             if rt == "run":
@@ -1397,9 +1401,10 @@ class Subagents:
         if mode == "ask":
             if unattended := self._unattended(ch, pmode):
                 if self.store is not None:
-                    self.store.open_approval(uid, ch.id, name, args, conversation_id=ch.conversation_id, message_id=ch.message_id,
-                                             forced=hard_forced, desk_id=ch.desk_id, danger="external")
-                    self.store.decide(uid, "deny", by="unattended", note=unattended)
+                    with contextlib.suppress(CoreRefused):  # refused outright: no row to record
+                        self.store.open_approval(uid, ch.id, name, args, conversation_id=ch.conversation_id, message_id=ch.message_id,
+                                                 forced=hard_forced, desk_id=ch.desk_id, danger="external")
+                        self.store.decide(uid, "deny", by="unattended", note=unattended)
                 return "deny", denied(name, unattended), False
             decision, edited = await self._ask(ch, uid, name, args, hard_forced, "external")
             if decision == "deny":
@@ -1502,8 +1507,12 @@ class Subagents:
         self.approvals[uid] = fut
         run = ch.ctx.get("run")
         if self.store is not None:
-            self.store.open_approval(uid, ch.id, name, args, conversation_id=ch.conversation_id, message_id=ch.message_id,
-                                     forced=forced, desk_id=ch.desk_id, danger=danger)
+            try:
+                self.store.open_approval(uid, ch.id, name, args, conversation_id=ch.conversation_id, message_id=ch.message_id,
+                                         forced=forced, desk_id=ch.desk_id, danger=danger)
+            except CoreRefused:
+                self.approvals.pop(uid, None)
+                return "deny", None
             self.store.update(ch.id, status="awaiting_approval")
         if run is not None:
             if run.live:  # an ended parent's row is final

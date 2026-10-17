@@ -147,11 +147,16 @@ def _protected_paths(c: Call) -> str | None:
     return protected_reason(c.toolbox, c.ctx, c.name, c.args)
 
 
+def floor_text(toolbox: Toolbox, ctx: dict[str, Any], name: str, args: dict[str, Any], kind: str | None = None) -> str:
+    """The refusal text for a call the floor blocks."""
+    return permissions.blocked_reason(toolbox.floor_kind(name, args, ctx) or kind or "items")
+
+
 def floor_refusal(toolbox: Toolbox, ctx: dict[str, Any], name: str, args: dict[str, Any], kind: str | None = None) -> str | None:
     """The destructive call the user's destructiveDefaults blocks in Manual mode (Toolbox.floor_action)."""
     if toolbox.floor_action(name, args, ctx, kind) != "block":
         return None
-    return permissions.blocked_reason(toolbox.floor_kind(name, args, ctx) or kind or "items")
+    return floor_text(toolbox, ctx, name, args, kind)
 
 
 def _floor_block(c: Call) -> str | None:

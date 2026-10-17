@@ -242,7 +242,7 @@ PIN = {
     "plan_refusal": "6c85d9ed539305f3",
     "rule_refusal": "0357461af618da1f",
     "protected_reason": "d3658be23894fff2",
-    "floor_refusal": "e4f65ec03f3845a2",
+    "floor_refusal": "fc2574a5faf1ffb6",
 }
 
 
@@ -322,6 +322,23 @@ def test_approval_requested_does_not_fire_for_a_refused_call() -> None:
     finally:
         sub.dispose()
     assert fired == []
+
+
+def test_a_refused_card_becomes_a_denial_in_a_worker_and_a_workflow_step() -> None:
+    appmod.run_store.create("guards-run4", None)
+    child = SimpleNamespace(id="guards-run4", conversation_id=None, message_id=None, desk_id=None, label="w", ctx={})
+    assert asyncio.run(appmod.subagent_mgr._ask(child, "g:6", "shell_run", {"command": "rm -rf /"}, False, "external")) == ("deny", None)
+    assert "g:6" not in appmod.subagent_mgr.approvals
+    run = {"id": "guards-run4", "conversation_id": None}
+    assert asyncio.run(appmod.workflow_engine._ask(run, {}, "g:7", "shell_run", {"command": "rm -rf /"}, False, "external", asyncio.Event())) is False
+    assert appmod.run_store.approval("g:6") is None and appmod.run_store.approval("g:7") is None
+
+
+def test_the_floor_refusal_text_is_one_function() -> None:
+    appmod.db.set_settings({"permissionMode": "manual"})
+    c = ctx()
+    args = {"tag": "x", "destroy": True}
+    assert guards.floor_refusal(appmod.toolbox, c, "guard_probe", args) == guards.floor_text(appmod.toolbox, c, "guard_probe", args)
 
 
 # ---- every loop refuses what the guards refuse ----

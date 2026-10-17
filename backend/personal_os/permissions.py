@@ -187,7 +187,8 @@ def _raised(order: str) -> Callable[[Any, Any], bool]:
 
 def _rules_loosen(old: dict[str, Any], new: dict[str, Any]) -> bool:
     """A removed deny or ask rule, or an added allow rule."""
-    side = lambda d, k: set((d or {}).get(k) or ())  # noqa: E731
+    def side(d: dict[str, Any], k: str) -> set[str]:
+        return set((d or {}).get(k) or ())
     return bool(side(old, "deny") - side(new, "deny") or side(old, "ask") - side(new, "ask") or side(new, "allow") - side(old, "allow"))
 
 

@@ -702,13 +702,7 @@ class Subagents:
         """(the folder a worker holds a lock on, whether it is confined to it). By default a worker may write anywhere on this
         Mac like its parent; it locks the desk workspace so two writers do not collide there. `sub` (agent_spawn's `root`)
         narrows it to one folder and confines it."""
-        desk: Path | None = None
-        desk_id = ctx.get("desk_id")
-        if desk_id and self.workspace is not None:
-            try:
-                desk = Path(self.workspace.desk_root(desk_id)).resolve()
-            except Exception:  # noqa: BLE001 - a malformed id just means no desk root
-                pass
+        desk = fsx.grants_for(self, ctx).desk
         if sub:
             p = Path(os.path.expanduser(sub))
             if not p.is_absolute():

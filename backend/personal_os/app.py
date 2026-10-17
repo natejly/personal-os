@@ -652,7 +652,15 @@ toolbox = Toolbox(memories, graph, documents, settings, extensions=list(host.ext
                   work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, desks=desks, workspace=workspace, filesnap=filesnap,
                   conversations=convos, extundo=extundo, bus=host.bus, prechecks=host.prechecks)
-run_store.core_refusal = lambda tool, args: (r := guards.run_core_guards(toolbox, {"settings": settings()}, tool, args)) and r.reason
+
+
+def _core_refusal(tool: str, args: dict[str, Any], where: dict[str, Any]) -> str | None:
+    """RunStore.open_approval's last look: the core guards, judged from the desk and chat the card belongs to."""
+    refusal = guards.run_core_guards(toolbox, {"settings": settings(), **where}, tool, args)
+    return refusal.reason if refusal else None
+
+
+run_store.core_refusal = _core_refusal
 # Which chat each file belongs to (chat_files.py): triggers record uploads, local writes and coding sessions; these hooks the rest.
 chat_files = ChatFiles(db, toolbox.chat_outputs.root if toolbox.chat_outputs is not None else None)
 app.include_router(chat_files_router(chat_files))
@@ -2495,7 +2503,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # True while a plan is being drafted and nothing consequential may run. 'plan' autonomy starts a
         # desk here; an approved plan ends it, which is why `active_plan` turns it off.
         planning = bool(desk) and autonomy == "plan" and active_plan is None
-        tool_ctx["planning"], tool_ctx["propose_without_run"] = planning, autonomy == "propose" and run is None  # guards.plan_block
+        propose_without_run = autonomy == "propose" and run is None
+        tool_ctx["planning"], tool_ctx["propose_without_run"] = planning, propose_without_run  # guards.plan_block
         # Cards this desk let go of and the user has since answered: told to this turn once, then marked.
         parked_note = ""
         if desk_id:
@@ -3449,8 +3458,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # on the tool_call event so the UI can say "blocked while planning" rather than
                     # "turned off". A propose-only desk never performs an external action: it is filed as a proposal
                     # below (`proposing`), or refused when there is no run to file it under.
-                    blocked_reason = guards.plan_refusal(danger, planning=planning,
-                                                         propose_without_run=autonomy == "propose" and run is None)
+                    blocked_reason = guards.plan_refusal(danger, planning=planning, propose_without_run=propose_without_run)
                     if blocked_reason:
                         mode, forced = "off", True
                     elif (autonomy != "propose" or danger != "external") and plan_voided_by_taint(
@@ -3620,7 +3628,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                                         kind="items" if mcp_is(c["name"]) and (_mcp_event(c["name"]) or {}).get("destructive") else None)
                     if why:
                         pre = tools.denied(c["name"], why)
-                    elif narrowed and mode == "on" and claimed is None:
+                    elif narrowed and mode == "on" and claimed is None:  # an approved plan step is the user's answer to this very call
                         mode, forced = "ask", True
                 # A background run never waits on a card. Manual mode keeps unattendedApprovals; in the other modes a card that
                 # survives routing becomes a proposal when the call can be one, else a recorded refusal.

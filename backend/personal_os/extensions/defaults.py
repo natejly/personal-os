@@ -20,7 +20,6 @@ if TYPE_CHECKING:
 
 KEY = "extDefaults"
 SETTING_OF = {"model": "defaultModel", "effort": "defaultEffort", "theme": "theme"}
-STRICTEST_FIRST = ("manual", "auto", "allow_all")  # permissionMode, by how much runs without a card
 VIEW = "view:"
 PERM = "perm:"  # a key of a permission preset
 DEFAULT_KEYS = ("hiddenViews", *SETTING_OF.values(), permissions.KEY)  # the settings a defaults write can change
@@ -34,10 +33,8 @@ class Change:
 
     @property
     def looser(self) -> bool:
-        if self.key.startswith(PERM):
-            key = self.key.removeprefix(PERM)
-            return bool(permissions.loosening({key: self.was}, {key: self.value}))
-        return self.key == "permissions" and STRICTEST_FIRST.index(self.value) > STRICTEST_FIRST.index(self.was)
+        key = "permissionMode" if self.key == "permissions" else self.key.removeprefix(PERM) if self.key.startswith(PERM) else None
+        return key is not None and bool(permissions.loosening({key: self.was}, {key: self.value}))
 
     def to_dict(self) -> dict[str, Any]:
         return {"key": self.key, "was": self.was, "set": self.value}

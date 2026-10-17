@@ -238,10 +238,9 @@ class Presets:
             if old != new:
                 changes[key] = {"old": old, "new": new, "loosens": loosens}
 
-        before = permissions.overlay(wide, *( [have["project"]] if scope != "global" else []), *([have["chat"]] if scope == "chat" else []))
+        before = permissions.overlay(wide, *_in_force(scope, have))
         after_layers = {**have, scope: {**have.get(scope, {}), **wants}} if scope != "global" else have
-        after = permissions.overlay({**wide, **(wants if scope == "global" else {}), **net},
-                                    *([after_layers["project"]] if scope != "global" else []), *([after_layers["chat"]] if scope == "chat" else []))
+        after = permissions.overlay({**wide, **(wants if scope == "global" else {}), **net}, *_in_force(scope, after_layers))
         for key in (*wants, *net):
             old, new = permissions.get(before, key), permissions.get(after, key)
             note(key, old, new, bool(permissions.loosening({key: old}, {key: new})))
@@ -268,9 +267,9 @@ class Presets:
         wanted = tool_modes(body["tools"], self.toolbox)
         layers = {"global": permissions.get(wide, "tools") or {}, "project": (project or {}).get("tools") or {},
                   "chat": ((conv or {}).get("settings") or {}).get("tools") or {}}
-        old = self.toolbox.effective(layers["global"], layers["project"] if scope != "global" else None, layers["chat"] if scope == "chat" else None)
+        old = self.toolbox.effective(layers["global"], *_in_force(scope, layers))
         layers[scope] = {**layers[scope], **wanted}
-        new = self.toolbox.effective(layers["global"], layers["project"] if scope != "global" else None, layers["chat"] if scope == "chat" else None)
+        new = self.toolbox.effective(layers["global"], *_in_force(scope, layers))
         for name in wanted:
             note(f"tools.{name}", old[name], new[name], permissions.MODE_RANK[new[name]] > permissions.MODE_RANK[old[name]])
 
@@ -288,12 +287,8 @@ class Presets:
         if plan.loosened and confirm != diff["diff_hash"]:
             raise Held(diff)
         body = validate(self.get(preset_id)["body"], rule_check=self.rule_check)
-        before = self.db.get_settings()
         self._write(body, preset_id, scope, scope_id, plan)
         changed = sorted({k.split(".")[0] if k.startswith(("tools.", "connectors.")) else k for k in plan.changes})
-        if scope == "global" and before.get(permissions.KEY) != self.db.get_settings().get(permissions.KEY):
-            self.fire("settings.changed", {"keys": [permissions.KEY], "old": {permissions.KEY: before.get(permissions.KEY)},
-                                           "new": {permissions.KEY: self.db.get_settings().get(permissions.KEY)}})
         self.fire("preset.applied", {"preset_id": preset_id, "scope": scope, "scope_id": scope_id, "changed_keys": changed,
                                      "loosened": plan.loosened, "by": by})
         return diff
@@ -323,6 +318,11 @@ class Presets:
             self.convos.update(scope_id, {"settings": {"permissions": {**have.get("permissions", {}), **wants}, "tools": {**have.get("tools", {}), **tools}}})
         with self.db.tx() as c:
             setting_sources.stamp(c, [*wants, *(["tools"] if tools else [])], source, scope=scope, scope_id=scope_id)
+
+
+def _in_force(scope: str, layers: dict[str, Any]) -> tuple[Any, Any]:
+    """(project layer, chat layer) as they apply at `scope`: None for a layer narrower than the scope."""
+    return (layers["project"] if scope != "global" else None, layers["chat"] if scope == "chat" else None)
 
 
 def _head(body: dict[str, Any]) -> dict[str, Any]:

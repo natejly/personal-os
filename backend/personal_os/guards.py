@@ -18,11 +18,14 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
-from . import mac, permissions, permrules
+from . import fsx, mac, permissions, permrules
 from .mcp_servers import RESERVED_PREFIX
 from .extensions.hooks import Ask, Deny, HookBus
+
+if TYPE_CHECKING:
+    from .tools import Toolbox
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +36,7 @@ TAMPERED = "core guards were modified"
 class Call:
     """One tool call as the guards see it. `roots`/`cwd` say where a relative shell path starts (None: derived from the
     run); `kind` is the destructive category of a call that is not in the toolbox (a connector tool the server calls destructive)."""
-    toolbox: Any
+    toolbox: Toolbox
     ctx: dict[str, Any]
     name: str
     args: dict[str, Any]
@@ -119,14 +122,10 @@ def _deny_rules(c: Call) -> str | None:
     return rule_refusal(c.name, c.args, permissions.get(_settings(c), "permissionRules"), roots=roots, cwd=cwd, hardline=False)
 
 
-def protected_reason(toolbox: Any, ctx: dict[str, Any], name: str, args: dict[str, Any]) -> str | None:
+def protected_reason(toolbox: Toolbox, ctx: dict[str, Any], name: str, args: dict[str, Any]) -> str | None:
     """Why a file tool's path is Grain's own data folder or app (mac.protected_reason); a desk's own workspace sits in there and is fine."""
-    desk: Path | None = None
-    if (did := ctx.get("desk_id")) and getattr(toolbox, "workspace", None) is not None:
-        try:
-            desk = Path(toolbox.workspace.desk_root(did)).resolve()
-        except Exception:  # noqa: BLE001 - a malformed id just means no desk root
-            desk = None
+    grants = fsx.grants_for(toolbox, ctx)
+    desk = grants.desk
     start = mac.home() if name in permrules.HOME_TOOLS or desk is None else desk
     for sub in permrules.subject_for(name, args):
         if sub.kind not in ("Read", "Edit") or not sub.value:
@@ -137,7 +136,7 @@ def protected_reason(toolbox: Any, ctx: dict[str, Any], name: str, args: dict[st
             resolved = p.resolve()
         except (OSError, RuntimeError):
             resolved = p
-        if desk is not None and (resolved == desk or desk in resolved.parents):
+        if grants.in_desk(resolved):
             continue
         if why := mac.protected_reason(p, resolved):
             return f"{sub.value!r}: {why}"
@@ -148,7 +147,7 @@ def _protected_paths(c: Call) -> str | None:
     return protected_reason(c.toolbox, c.ctx, c.name, c.args)
 
 
-def floor_refusal(toolbox: Any, ctx: dict[str, Any], name: str, args: dict[str, Any], kind: str | None = None) -> str | None:
+def floor_refusal(toolbox: Toolbox, ctx: dict[str, Any], name: str, args: dict[str, Any], kind: str | None = None) -> str | None:
     """The destructive call the user's destructiveDefaults blocks in Manual mode (Toolbox.floor_action)."""
     if toolbox.floor_action(name, args, ctx, kind) != "block":
         return None
@@ -170,7 +169,7 @@ CORE_GUARDS: tuple[Guard, ...] = (
 )
 
 
-def run_core_guards(toolbox: Any, ctx: dict[str, Any], name: str, args: dict[str, Any], *, roots: list[str] | None = None,
+def run_core_guards(toolbox: Toolbox, ctx: dict[str, Any], name: str, args: dict[str, Any], *, roots: list[str] | None = None,
                     cwd: str | None = None, kind: str | None = None) -> Refusal | None:
     """The first refusal, in order, or None. Fails closed when the guards were modified."""
     if not sealed():
@@ -193,7 +192,7 @@ async def extension_gate(bus: HookBus, name: str, args: dict[str, Any], *, dange
     return (blocked_by_extension(verdict) if isinstance(verdict, Deny) else None), isinstance(verdict, Ask)
 
 
-async def settle(toolbox: Any, ctx: dict[str, Any], name: str, args: dict[str, Any], *, danger: str, mode: str, roots: list[str] | None = None,
+async def settle(toolbox: Toolbox, ctx: dict[str, Any], name: str, args: dict[str, Any], *, danger: str, mode: str, roots: list[str] | None = None,
                  cwd: str | None = None, kind: str | None = None) -> tuple[str | None, bool]:
     """What a loop does last, once its own chain has settled on run or card: the core guards, then the extension gate.
     -> (the refusal text, whether the call now needs a card). No extension handler runs for a call the core refuses."""

@@ -123,7 +123,7 @@ class RunStore:
     def __init__(self, db: Database, hooks: HookBus | None = None) -> None:
         self.db = db
         self.hooks = hooks or HookBus()  # approval.requested and approval.resolved
-        self.core_refusal: Callable[[str, dict[str, Any]], str | None] | None = None  # set by the app: guards.run_core_guards
+        self.core_refusal: Callable[[str, dict[str, Any], dict[str, Any]], str | None] | None = None  # set by the app: why the core guards refuse a call, given its tool context
         self._c = db.connect()
         self._lock = threading.Lock()
         self._buf: list[tuple[Any, ...]] = []
@@ -390,7 +390,7 @@ class RunStore:
                       message_id: str | None = None, forced: bool = False, desk_id: str | None = None,
                       danger: str = "external", review: dict[str, Any] | None = None) -> dict[str, Any]:
         """`review` is the review gate's verdict when that is why this card opened; the answer's history row carries it."""
-        if self.core_refusal is not None and (why := self.core_refusal(tool, args)):
+        if self.core_refusal is not None and (why := self.core_refusal(tool, args, {"desk_id": desk_id, "conversation_id": conversation_id})):
             raise CoreRefused(f"{tool} is refused by the core guards ({why}); no approval can be opened for it")
         digest = args_digest(args)
         opened = self._exec("INSERT INTO approvals(call_id, run_id, conversation_id, message_id, tool, args, args_digest, forced, danger, desk_id, review, status, created_at) "

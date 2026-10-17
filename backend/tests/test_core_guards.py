@@ -241,8 +241,8 @@ PIN = {
     "floor_block": "82ed412f8b4b40c8",
     "plan_refusal": "6c85d9ed539305f3",
     "rule_refusal": "0357461af618da1f",
-    "protected_reason": "076bea77f9e3190a",
-    "floor_refusal": "495ade90374576f3",
+    "protected_reason": "d3658be23894fff2",
+    "floor_refusal": "e4f65ec03f3845a2",
 }
 
 
@@ -299,6 +299,17 @@ def test_open_approval_refuses_a_call_the_core_refuses() -> None:
     assert appmod.run_store.approval("g:1") is None
     appmod.run_store.open_approval("g:2", run_id, "guard_probe", {})
     assert appmod.run_store.approval("g:2")["status"] == "pending"
+
+
+def test_open_approval_judges_a_call_from_the_desk_it_belongs_to(monkeypatch: pytest.MonkeyPatch) -> None:
+    desk = mac._app_data_dir() / "desk-card"
+    monkeypatch.setattr(appmod.toolbox, "workspace", SimpleNamespace(desk_root=lambda did: desk))
+    appmod.run_store.create("guards-run3", None)
+    args = {"path": str(desk / "a.txt")}
+    with pytest.raises(CoreRefused):
+        appmod.run_store.open_approval("g:4", "guards-run3", "read_local_file", args)
+    appmod.run_store.open_approval("g:5", "guards-run3", "read_local_file", args, desk_id="d")
+    assert appmod.run_store.approval("g:5")["status"] == "pending"
 
 
 def test_approval_requested_does_not_fire_for_a_refused_call() -> None:

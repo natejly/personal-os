@@ -118,10 +118,10 @@ def cmd_config_dump(args: argparse.Namespace) -> int:
     """The settings in force, with the source of each value, read from a data folder with the server stopped or running.
     Opens the database read-only: no migrations, no recovery, nothing written."""
     from ... import config, provider_keys, provider_route
-    from ...db import ReadOnlyDatabase
+    from ...db import ReadOnlyDatabase, data_dir_from_env
     from ...tools import Toolbox
     from ..host import BUILTIN_ROOT
-    data_dir = Path(args.data_dir or os.environ.get("PERSONAL_OS_DATA_DIR") or "./data").expanduser().resolve()
+    data_dir = Path(args.data_dir).expanduser().resolve() if args.data_dir else data_dir_from_env()
     if not (data_dir / "personal-os.db").exists():
         print(f"error: no Grain database in {data_dir}")
         return 1

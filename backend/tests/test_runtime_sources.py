@@ -139,9 +139,15 @@ def go(box: Any, ctx: dict[str, Any], call: Any) -> Any:
     return run(dispatch_tool(box, ctx, "x__demo__look", {"what": "x"}, call_id="c1", connector=call))
 
 
+def bare_toolbox() -> SimpleNamespace:
+    """The few Toolbox members the core guards read, with nothing in the catalog."""
+    return SimpleNamespace(bus=HookBus(), specs={}, settings=dict, proposes=lambda n: False, floor_action=lambda *a, **k: None,
+                           floor_kind=lambda *a, **k: None)
+
+
 def test_a_source_call_taints_and_goes_through_the_tool_hooks(rig: Rig) -> None:
     rig.sources.tools(rig.on)
-    box = SimpleNamespace(bus=HookBus())
+    box = bare_toolbox()
     seen: list[tuple[str, Any]] = []
     for hook in ("tool.pre", "tool.result", "tool.taint", "tool.post"):
         box.bus.subscribe(hook, lambda p, h=hook: seen.append((h, p)), owner="t", order=0)
@@ -153,7 +159,7 @@ def test_a_source_call_taints_and_goes_through_the_tool_hooks(rig: Rig) -> None:
 
 def test_a_tool_pre_deny_keeps_a_source_from_being_contacted(rig: Rig) -> None:
     rig.sources.tools(rig.on)
-    box = SimpleNamespace(bus=HookBus())
+    box = bare_toolbox()
     box.bus.subscribe("tool.pre", lambda p: Deny("off limits"), owner="t", order=0)
     contact = Contact(lambda: rig.sources.call("x__demo__look", {}, {}))
     assert "off limits" in go(box, {}, contact)["error"] and not contact.reached and rig.source.calls == []

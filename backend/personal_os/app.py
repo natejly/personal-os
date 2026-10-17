@@ -3180,6 +3180,33 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if st.detector is not None:
                 st.detector.reset()
 
+        def _clear_old_results() -> tuple[dict[str, Any] | None, int]:
+            """Shrink old tool results to stubs; returns the compact span, if one was made, and the number cleared."""
+            n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), win, float(cfg.get("microAt", 0.25)),
+                                                         at_tokens=limits.MICRO_AT_TOKENS,
+                                                         fixed_tokens=estimate_tokens(json.dumps(st.tool_schemas)) if st.tool_schemas else 0)
+            if not n_cleared:
+                return None, 0
+            mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
+            tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})
+            return mspan, n_cleared
+
+        def _start_llm_span() -> dict[str, Any]:
+            return tracer.start("llm", model, {"round": _round, "effort": turn_effort, "messages": len(messages), "tools": len(st.tool_schemas)})
+
+        def _charge_round(end: dict[str, Any]) -> list[dict[str, Any]]:
+            """The round's tool calls (none for a cancelled one), with the call count, usage and cost booked on the run and the meter."""
+            calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
+            ensure_unique_call_ids(calls, seen_call_ids)
+            if run is not None:
+                run.tool_calls += len(calls)
+            u = end.get("usage") or end.get("usage_est") or {}
+            pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
+            st.meter.add(pt, ct, pricing.cost(cfg, model, pt, ct, int(u.get("cached_tokens") or 0), int(u.get("cache_write_tokens") or 0)))
+            if run is not None:
+                run.budget = st.meter.snapshot()
+            return calls
+
         async def _run_alt_loop(loop: AgentLoop) -> AsyncIterator[tuple[str, Any]]:
             """The turn run by an alternative agent loop (design doc 10.10): the setup above and the finish below are the chat's, and the
             loop is handed only the harness. Its model calls, tool calls and steers go through the same objects and checks as the default's."""
@@ -3227,18 +3254,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     raise ValueError("a model call is made on the list the context builder returned, with its assembled context unchanged")
                 _round += 1
                 st.meter.rounds = _round - 1
-                n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), win, float(cfg.get("microAt", 0.25)),
-                                                             at_tokens=limits.MICRO_AT_TOKENS,
-                                                             fixed_tokens=estimate_tokens(json.dumps(st.tool_schemas)) if st.tool_schemas else 0)
-                if n_cleared:
-                    mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
-                    tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})
+                mspan, _ = _clear_old_results()
+                if mspan:
                     turn_loop.publish(("span", {"message_id": am["id"], "span": mspan}))
                 for _note in toolbox.shell.drain_notes(conv_id):
                     messages.append({"role": "system", "content": _note})
                 _reinject_plan()
                 llm.usage_context.set({**_ucx, "round": _round})
-                lspan = tracer.start("llm", model, {"round": _round, "effort": turn_effort, "messages": len(messages), "tools": len(st.tool_schemas)})
+                lspan = _start_llm_span()
                 turn_loop.publish(("span", {"message_id": am["id"], "span": lspan}))
                 text: list[str] = []
                 end: dict[str, Any] = {}
@@ -3250,7 +3273,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         tracer.end(lspan, {"finish_reason": "overflow"}, error="Context overflow; compacted and retrying")
                         turn_loop.publish(("span", {"message_id": am["id"], "span": lspan}))
                         turn_loop.publish(("span", {"message_id": am["id"], "span": ev["span"]}))
-                        lspan = tracer.start("llm", model, {"round": _round, "effort": turn_effort, "messages": len(messages), "tools": len(st.tool_schemas)})
+                        lspan = _start_llm_span()
                         turn_loop.publish(("span", {"message_id": am["id"], "span": lspan}))
                     elif ev["type"] in ("reasoning", "delta"):
                         first_token = first_token or now_ms()
@@ -3271,15 +3294,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         notice = ev.get("notice") or notice
                     if steers:
                         break
-                calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
-                ensure_unique_call_ids(calls, seen_call_ids)
-                if run is not None:
-                    run.tool_calls += len(calls)
-                u = end.get("usage") or end.get("usage_est") or {}
-                pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
-                st.meter.add(pt, ct, pricing.cost(cfg, model, pt, ct, int(u.get("cached_tokens") or 0), int(u.get("cache_write_tokens") or 0)))
-                if run is not None:
-                    run.budget = st.meter.snapshot()
+                calls = _charge_round(end)
                 tracer.end(lspan, {"finish_reason": end.get("finish_reason"), "usage": end.get("usage"),
                                    "ttft_ms": (first_token - lspan["start"]) if first_token else None,
                                    "output_chars": len("".join(text)), "tool_calls": [c["name"] for c in calls]},
@@ -3368,13 +3383,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # Old tool results shrink to stubs once the context passes a quarter of the window (`microAt`). Earlier
             # turns replay every tool result they stored, so a few briefings grew a chat to 45k tokens a round, and
             # past that size the provider's time to first token is what a tool round costs. Handles stay readable.
-            n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), win,
-                                                         float(cfg.get("microAt", 0.25)),
-                                                         at_tokens=limits.MICRO_AT_TOKENS,
-                                                         fixed_tokens=estimate_tokens(json.dumps(st.tool_schemas)) if st.tool_schemas else 0)
-            if n_cleared:
-                mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
-                tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})
+            mspan, n_cleared = _clear_old_results()
+            if mspan:
                 yield "span", {"message_id": am["id"], "span": mspan}
                 nudge = compaction.memory_nudge(n_cleared, nudged, st.tool_schemas)
                 if nudge:
@@ -3384,7 +3394,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 messages.append({"role": "system", "content": _note})
             _reinject_plan()  # last message in the context, after the previous round's tool results
             llm.usage_context.set({**_ucx, "round": _round})
-            lspan = tracer.start("llm", model, {"round": _round, "effort": turn_effort, "messages": len(messages), "tools": len(st.tool_schemas)})
+            lspan = _start_llm_span()
             round_span = lspan  # the tool calls below nest under it
             yield "span", {"message_id": am["id"], "span": lspan}
             first_token: int | None = None
@@ -3422,7 +3432,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tracer.end(lspan, {"finish_reason": "overflow"}, error="Context overflow; compacted and retrying")
                     yield "span", {"message_id": am["id"], "span": lspan}
                     yield "span", {"message_id": am["id"], "span": ev["span"]}
-                    lspan = tracer.start("llm", model, {"round": _round, "effort": turn_effort, "messages": len(messages), "tools": len(st.tool_schemas)})
+                    lspan = _start_llm_span()
                     round_span = lspan
                     yield "span", {"message_id": am["id"], "span": lspan}
                 elif ev["type"] == "reasoning":
@@ -3448,15 +3458,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     notice = ev.get("notice") or notice
                 if steers:
                     break
-            calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
-            ensure_unique_call_ids(calls, seen_call_ids)
-            if run is not None:
-                run.tool_calls += len(calls)
-            u = end.get("usage") or end.get("usage_est") or {}
-            pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
-            st.meter.add(pt, ct, pricing.cost(cfg, model, pt, ct, int(u.get("cached_tokens") or 0), int(u.get("cache_write_tokens") or 0)))
-            if run is not None:
-                run.budget = st.meter.snapshot()
+            calls = _charge_round(end)
             tracer.end(lspan, {"finish_reason": end.get("finish_reason"), "usage": end.get("usage"),
                                "ttft_ms": (first_token - lspan["start"]) if first_token else None,
                                "output_chars": len("".join(buf[round_start:])), "tool_calls": [c["name"] for c in calls],

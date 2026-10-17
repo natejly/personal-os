@@ -164,12 +164,6 @@ def test_a_built_in_extension_may_provide_the_sandbox(host: ExtensionHost, tmp_p
     assert host.runtime.provider("sandbox.backend", "boxes/box").tier == "built-in"
 
 
-def test_the_loop_slot_takes_no_other_provider_yet(host: ExtensionHost) -> None:
-    from personal_os.runtime.slots import Provider
-    with pytest.raises(ValueError, match="agent.loop"):
-        host.runtime.declare(Provider("a/loop", "agent.loop", "Loop", extension="a"))
-
-
 def test_a_model_clients_kinds_are_checked(host: ExtensionHost, tmp_path: Path) -> None:
     scope = host.load_folder(folder(tmp_path, "acme", [entry("model.client", "c")]), context())
     client = FakeModelClient()

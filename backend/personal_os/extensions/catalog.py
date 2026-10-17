@@ -361,6 +361,27 @@ class PresetAppliedPayload(TypedDict):
     by: str
 
 
+class LoopStep(TypedDict):
+    title: str
+    done_when: str
+
+
+class LoopPlanPayload(TypedDict):
+    """The plan-execute-verify loop parsed and validated its plan. Strings are credential-scrubbed."""
+    run_id: str | None
+    conversation_id: str
+    steps: list[LoopStep]
+
+
+class LoopVerifyPayload(TypedDict):
+    """The plan-execute-verify loop's check of its work came back. Gaps are credential-scrubbed."""
+    run_id: str | None
+    conversation_id: str
+    attempt: int
+    ok: bool
+    gaps: list[str]
+
+
 def _attrs(payload: type) -> Callable[[Any], dict[str, Any]]:
     """The payload dict of an object that carries the payload's keys as attributes."""
     return lambda obj: {key: getattr(obj, key) for key in payload.__annotations__}
@@ -450,4 +471,8 @@ HOOKS: dict[str, HookSpec] = {s.id: s for s in (
              "partial enforcement, wrap or start failure)", "`emit_sync`", "1.0", sync=True),
     HookSpec("preset.applied", "emit", PresetAppliedPayload, "5.14", "`POST /permissions/presets/{id}/apply`, after the write and the "
              "`setting_sources` stamp", "`emit`", "1.0"),
+    HookSpec("loop.plan", "emit", LoopPlanPayload, "5.15", "the plan-execute-verify loop, after the plan is parsed and validated, before the first "
+             "step", "`emit`", "1.0", subscribers="grant", permission=("conversation:read",)),
+    HookSpec("loop.verify", "emit", LoopVerifyPayload, "5.15", "the plan-execute-verify loop, after each verify call", "`emit`", "1.0",
+             subscribers="grant", permission=("conversation:read",)),
 )}

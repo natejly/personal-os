@@ -2,7 +2,7 @@
 
 There are no budgets: nothing caps a reply's rounds, tokens, cost or wall-clock time. A reply, a job, a subagent or a
 desk turn ends when the model stops calling tools, or a stuck breaker fires (REPEAT_LIMIT, TOOL_ERROR_LIMIT, the stuck
-detector, a denial streak), or the user stops it. The only clocks are hang detection (LLM_IDLE_SECONDS for a silent
+detector, a denial streak), or the user stops it. (A turn of an alternative agent loop is also held to LOOP_MODEL_CALLS.) The only clocks are hang detection (LLM_IDLE_SECONDS for a silent
 provider stream, FINAL_ROUND_SECONDS for the closing answer, SUBAGENT_STALE/TOOL_SECONDS for a child, JOB_IDLE_SECONDS
 for an unattended run) and per-request timeouts on tools.
 
@@ -54,6 +54,7 @@ JOB_IDLE_SECONDS = 1800            # an unattended run with no model or tool act
 REPEAT_LIMIT = 5                   # identical tool calls in a row before a reply is stopped
 TOOL_ERROR_LIMIT = 3               # consecutive errors from one tool before the model is told to change approach
 FINAL_ROUND_SECONDS = 90.0         # a closing-answer model call still open after this long is abandoned
+LOOP_MODEL_CALLS = 60              # model calls one turn of an alternative agent loop may make (the default loop has no cap)
 STOP_GRACE_SECONDS = 3.0           # a write that Stop caught mid-call gets this long to report its real outcome before it is cancelled
 REVIEW_TIMEOUT_SECONDS = 30        # a hung reviewer call fails closed (-> an approval card)
 

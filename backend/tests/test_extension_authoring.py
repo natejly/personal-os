@@ -191,6 +191,15 @@ def test_check_forbids_importing_the_app(ext: Path) -> None:
     assert errors(ext) == []
 
 
+def test_check_holds_an_agent_loop_provider_to_the_import_fence(ext: Path) -> None:
+    edit(ext, "extension.py", lambda t: "import gc\n" + t)
+    assert errors(ext) == []  # an ordinary extension may import it
+    set_manifest(ext, permissions=["runtime:loop"], contributes={"runtime": [{"slot": "agent.loop", "id": "mine", "label": "Mine"}]})
+    assert errors(ext) == ["loop-fence"]
+    edit(ext, "extension.py", lambda t: t.replace("import gc\n", ""))
+    assert errors(ext) == []
+
+
 def test_check_needs_an_activate_that_takes_the_api(ext: Path) -> None:
     edit(ext, "extension.py", lambda t: t.replace("def activate(api: Extension)", "def activate()"))
     assert errors(ext) == ["code"]

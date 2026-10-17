@@ -110,6 +110,7 @@ class ToolStep:
         self.st = st
         self.core = app
         self.front, self.load_groups, self.log_mode, self.review_call, self.schemas = front, load_groups, log_mode, review_call, schemas
+        self.accounted: set[str] = set()  # the call ids that went to the journal through here, for the check that nothing went around it
 
     def prepare(self, calls: list[dict[str, Any]], *, text: str, reasoning: str | None, cut: bool) -> dict[str, Any]:
         """Normalise the round's calls in place and return the assistant message that carries them. `cut` says the output limit
@@ -168,6 +169,7 @@ class ToolStep:
                 # Stop skips reads still queued for a slot; reads already running side by side are not interrupted.
                 if st.stop.is_set():
                     return {"error": "Stopped by the user before this call ran; it was not executed."}
+                self.accounted.add(uid)
                 return await core._call_tool(st.run, rnd.n, name, args, ctx, uid)
 
         for c, args in seg:
@@ -797,6 +799,7 @@ class ToolStep:
             else:
                 st.tool_ctx["fs_outside_ok"] = fs_ask  # the user approved this credential-store access or write
                 st.inflight = {"id": uid, "name": c["name"], "arguments": args}
+                self.accounted.add(uid)
                 try:
                     result, interrupted = await core._await_tool(
                         core._call_tool(st.run, rnd.n, c["name"], args, st.tool_ctx, uid), st.stop,

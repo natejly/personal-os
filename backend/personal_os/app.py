@@ -21,7 +21,7 @@ import urllib.parse
 from types import SimpleNamespace
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Any, AsyncIterator, Awaitable, Callable, Literal
+from typing import Annotated, Any, AsyncIterator, Awaitable, Callable, Literal, Sequence
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
@@ -105,6 +105,8 @@ from .extensions.coding.extension import Coding
 from .extensions import devapi, profiles as profile_routes, review as review_routes
 from .runtime import routes as runtime_routes
 from .runtime.sources import SERVER as SOURCE_SERVER, ToolSources, is_source_tool
+from .runtime.harness import ContextBuilder, EventSink, LoopHooks, LoopRun, LoopViolation, ModelCalls, ModelStream, Tools, TurnLimits
+from .runtime.loop_api import LOOP_EVENTS, AgentLoop, AttachmentRef, LoopEvent, LoopHarness, TurnEnded, TurnInput
 from .runtime.tool_step import Round, ToolStep, TurnState
 from .extensions.authoring import skill as author_extension
 from .extensions.drafts import Drafts
@@ -2291,6 +2293,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         if refused := next((r for r in resolutions if r.refused and r.slot == "model.client"), None):
             yield "error", {"message": refused.reason}
             return
+    chosen_loop = host.runtime.alternative("agent.loop")
+    alt_loop: AgentLoop | None = chosen_loop.impl if chosen_loop else None  # chosen once, before the turn starts: a loop is never swapped mid-turn
     # Older messages are folded into a rolling summary when the replay outgrows the window (compaction.py).
     # The window is this model's: the global setting, what the proxy reports, and what an overflow taught us.
     # The summarizer call can take a while. When it is about to run, the reply row is opened first so the transcript
@@ -2540,7 +2544,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             """A script's bridged call through _call_tool, so it gets the undo snapshot and the idempotency journal."""
             nonlocal bridge_n
             bridge_n += 1
-            return _call_tool(run, _round, name, args, ctx, f"{am['id']}:bridgecall{bridge_n}")
+            call_id = f"{am['id']}:bridgecall{bridge_n}"
+            tool_step.accounted.add(call_id)
+            return _call_tool(run, _round, name, args, ctx, call_id)
 
         tool_ctx["bridge_call"] = _bridge_call
         # The same one-shot card, for a tool that has to ask about part of what it was called to do (a browser form
@@ -2768,10 +2774,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # The pictures sent with this turn go to the chat model itself when it reads images; earlier turns replay as text.
         turn_images = await asyncio.to_thread(vision.image_parts, documents, attachments if body.content is not None else None, model)
 
-        def _assemble(hist: list[dict[str, str]]) -> list[dict[str, Any]]:
-            """Everything before this run's own messages: the layout around `hist`, then the parked / resume notes."""
+        def _assemble(hist: list[dict[str, str]], extra_tail: Sequence[str] = ()) -> list[dict[str, Any]]:
+            """Everything before this run's own messages: the layout around `hist`, then the parked / resume notes. `extra_tail` joins the
+            tail blocks, which sit after the history and never in the cached prefix."""
             hist = expand_commands(hist, command_store, skills, _mentionable(), front=front_hint)  # `/name args` turns carry their filled command (commands.py)
-            head = layout_messages(stable, used["volatile_blocks"], hist, slots.tail)
+            head = layout_messages(stable, used["volatile_blocks"], hist, [*slots.tail, *extra_tail])
             if turn_images and (i := max((i for i, m in enumerate(head) if m["role"] == "user"), default=-1)) >= 0:
                 head[i] = {**head[i], "content": [{"type": "text", "text": head[i]["content"]}, *turn_images]}
             return head + [dict(n) for n in run_notes]
@@ -2861,18 +2868,19 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             with contextlib.suppress(Exception):
                 request_log.record(db.data_dir, am["id"], _round, model, messages, st.tool_schemas, tool_choice)
 
-        async def _stream_round() -> AsyncIterator[dict[str, Any]]:
+        async def _stream_round(**options: Any) -> AsyncIterator[dict[str, Any]]:
             """The round's model stream. A provider overflow before anything streamed is recovered once per reply:
             the stream is re-issued over the compacted context and a synthetic `overflow_recovered` event says so.
-            Anything else (a second overflow, one after text arrived) propagates to the reply's error handling."""
+            Anything else (a second overflow, one after text arrived) propagates to the reply's error handling.
+            `options` go to llm.stream_chat (an alternative loop's tool-free call sets tool_choice)."""
             nonlocal overflow_retried
             while True:
                 streamed = False
-                _capture("auto")
+                _capture(options.get("tool_choice", "auto"))
                 stream = llm.stream_chat(cfg, model, messages, st.tool_schemas or None,
                                          effort=turn_effort,
                                          fast=bool(conv["settings"].get("fast")),
-                                         cancel=_stream_cancel(stop, steers, run))
+                                         cancel=_stream_cancel(stop, steers, run), **options)
                 try:
                     async for ev in stream:
                         streamed = streamed or ev["type"] in ("reasoning", "delta")
@@ -3171,6 +3179,148 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             st.tool_errors.clear()
             if st.detector is not None:
                 st.detector.reset()
+
+        async def _run_alt_loop(loop: AgentLoop) -> AsyncIterator[tuple[str, Any]]:
+            """The turn run by an alternative agent loop (design doc 10.10): the setup above and the finish below are the chat's, and the
+            loop is handed only the harness. Its model calls, tool calls and steers go through the same objects and checks as the default's."""
+            open_spans: dict[str, dict[str, Any]] = {}
+            last: dict[str, Any] = {}  # the last model call's text, reasoning, finish and span, which the tool step needs
+            calls_made = ModelCalls(limits.LOOP_MODEL_CALLS)
+
+            def _loop_event(event: LoopEvent) -> tuple[str, Any]:
+                """An event the loop emitted, checked and shaped for the reply: the loop says what happened, the core publishes it."""
+                name, data = event
+                if name not in LOOP_EVENTS:
+                    raise ValueError(f"an agent loop emits {', '.join(sorted(LOOP_EVENTS))} events, not {name!r}")
+                if name == "delta":
+                    buf.append(data["text"])
+                    return "delta", {"id": am["id"], "text": data["text"]}
+                if name == "plan":  # the same panel todo_write feeds; nothing in it is approved by being listed
+                    return "plan", {"conversation_id": conv_id, "steps": work_plans.set(conv_id, data["steps"])["steps"]}
+                if data["open"]:
+                    span = open_spans[data["name"]] = tracer.start("loop", data["name"], data["meta"], parent=cspan)
+                else:
+                    span = tracer.end(open_spans.pop(data["name"]), data["meta"])
+                return "span", {"message_id": am["id"], "span": span}
+
+            turn_loop = LoopRun(loop, _loop_event)
+
+            def _build(extra_tail: Sequence[str]) -> list[dict[str, Any]]:
+                nonlocal base_len
+                head = _assemble(history, extra_tail)
+                messages[:] = head + messages[base_len:]
+                base_len = len(head)
+                return messages
+
+            async def _model(msgs: list[dict[str, Any]], with_tools: bool) -> AsyncIterator[dict[str, Any]]:
+                """One round of the default loop's bookkeeping around a model call: old tool results shrink, finished shell jobs and the
+                plan ride along, the round gets its span and its usage is metered. The loop sees the text and the calls."""
+                nonlocal _round, notice
+                calls_made.spend()
+                if msgs is not messages:
+                    messages[:] = msgs
+                _round += 1
+                st.meter.rounds = _round - 1
+                n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), win, float(cfg.get("microAt", 0.25)),
+                                                             at_tokens=limits.MICRO_AT_TOKENS,
+                                                             fixed_tokens=estimate_tokens(json.dumps(st.tool_schemas)) if st.tool_schemas else 0)
+                if n_cleared:
+                    mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
+                    tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})
+                    turn_loop.publish(("span", {"message_id": am["id"], "span": mspan}))
+                for _note in toolbox.shell.drain_notes(conv_id):
+                    messages.append({"role": "system", "content": _note})
+                _reinject_plan()
+                llm.usage_context.set({**_ucx, "round": _round})
+                lspan = tracer.start("llm", model, {"round": _round, "effort": turn_effort, "messages": len(messages), "tools": len(st.tool_schemas)})
+                turn_loop.publish(("span", {"message_id": am["id"], "span": lspan}))
+                text: list[str] = []
+                end: dict[str, Any] = {}
+                first_token: int | None = None
+                async for ev in _stream_round(**({} if with_tools else {"tool_choice": "none"})):
+                    if stop.is_set():
+                        break
+                    if ev["type"] == "overflow_recovered":
+                        tracer.end(lspan, {"finish_reason": "overflow"}, error="Context overflow; compacted and retrying")
+                        turn_loop.publish(("span", {"message_id": am["id"], "span": lspan}))
+                        turn_loop.publish(("span", {"message_id": am["id"], "span": ev["span"]}))
+                        lspan = tracer.start("llm", model, {"round": _round, "effort": turn_effort, "messages": len(messages), "tools": len(st.tool_schemas)})
+                        turn_loop.publish(("span", {"message_id": am["id"], "span": lspan}))
+                    elif ev["type"] in ("reasoning", "delta"):
+                        first_token = first_token or now_ms()
+                        if ev["type"] == "reasoning":
+                            rbuf.append(ev["text"])
+                            tsum.add(ev["text"])
+                        for line in tsum.take():
+                            turn_loop.publish(("thinking_summary", {"id": am["id"], "text": line}))
+                        if ev["type"] == "delta":
+                            text.append(ev["text"])
+                            yield {"type": "delta", "text": ev["text"]}
+                    elif ev["type"] == "retry":
+                        turn_loop.publish(("status", _retry_status(am["id"], ev)))
+                    else:
+                        end = ev
+                        if ev.get("effort_dropped"):
+                            notice = EFFORT_DROPPED_NOTICE
+                        notice = ev.get("notice") or notice
+                    if steers:
+                        break
+                calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
+                ensure_unique_call_ids(calls, seen_call_ids)
+                if run is not None:
+                    run.tool_calls += len(calls)
+                u = end.get("usage") or end.get("usage_est") or {}
+                pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
+                st.meter.add(pt, ct, pricing.cost(cfg, model, pt, ct, int(u.get("cached_tokens") or 0), int(u.get("cache_write_tokens") or 0)))
+                if run is not None:
+                    run.budget = st.meter.snapshot()
+                tracer.end(lspan, {"finish_reason": end.get("finish_reason"), "usage": end.get("usage"),
+                                   "ttft_ms": (first_token - lspan["start"]) if first_token else None,
+                                   "output_chars": len("".join(text)), "tool_calls": [c["name"] for c in calls]},
+                           error="Stopped by user" if stop.is_set() else None)
+                turn_loop.publish(("span", {"message_id": am["id"], "span": lspan}))
+                finish = "cancelled" if stop.is_set() or (steers and not end) else end.get("finish_reason")  # a steer ended the read before the provider did
+                if finish == "content_filter":
+                    raise llm.LLMError("The provider filtered this reply. Try rephrasing.", kind="content_filter")
+                if finish == "length":
+                    st.partial = "length"
+                last.update(text="".join(text).strip(), reasoning=end.get("reasoning"), finish=finish, span=lspan)
+                yield {"type": "end", "text": last["text"], "tool_calls": calls, "finish_reason": finish}
+
+            async def _tools(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+                messages.append(tool_step.prepare(calls, text=last["text"], reasoning=last["reasoning"], cut=last["finish"] == "length"))
+                first = len(messages)
+                async with contextlib.aclosing(tool_step.run(calls, Round(am, buf, tool_events, tracer, _round, last["span"]))) as step_events:
+                    async for item in step_events:
+                        turn_loop.publish(item)
+                if st.ended:
+                    raise TurnEnded
+                if st.partial == "loop":  # a breaker stopped tool use: the turn closes as the default loop's does, with one tool-free answer
+                    async for item in _final_round():
+                        turn_loop.publish(item)
+                    raise TurnEnded
+                return messages[first:]
+
+            async def _steers() -> list[str]:
+                folded: list[str] = []
+                if steers:
+                    async for item in _fold_steers(folded):
+                        turn_loop.publish(item)
+                return folded
+
+            harness = LoopHarness(ContextBuilder(_build), ModelStream(_model), Tools(_tools), EventSink(turn_loop.emit),
+                                  LoopHooks(host.bus, run.run_id if run else None, conv_id), TurnLimits(loop.bounds, calls_made, stop.is_set, _steers))
+            refs = tuple(AttachmentRef(a["id"], a["name"]) for a in attachments) if body.content is not None else ()
+            turn = TurnInput(conv_id, run.run_id if run else None, user_text, refs, body.origin, bool(body.resume_of), model, turn_effort,
+                             public_settings())
+            async for item in turn_loop.events(turn, harness):
+                yield item
+            for span in open_spans.values():
+                tracer.end(span)
+            if run is not None and run.store is not None and any(r["call_id"] not in tool_step.accounted for r in run.store.executed(run.run_id)):
+                log.critical("agent loop %s ran a tool outside the tool step in run %s", loop.id, run.run_id)
+                raise LoopViolation(f"the agent loop {loop.id!r} ran a tool outside the tool step, so the reply was stopped")
+
     except asyncio.CancelledError:
         if am:
             _active.pop(am["id"], None)
@@ -3190,7 +3340,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         return
 
     try:
-        while True:
+        if alt_loop is not None:
+            async for item in _run_alt_loop(alt_loop):
+                yield item
+            if st.ended:
+                return
+        while alt_loop is None:
             if stop.is_set():
                 break
             if steers:

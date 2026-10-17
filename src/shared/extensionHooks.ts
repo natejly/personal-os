@@ -336,7 +336,28 @@ export interface PresetAppliedPayload {
   by: string
 }
 
-export type HookId = 'app.start' | 'app.stop' | 'settings.changed' | 'chat.created' | 'chat.deleted' | 'project.created' | 'project.deleted' | 'ext.changed' | 'context.contribute' | 'model.select' | 'model.request' | 'model.response' | 'tool.permission' | 'tool.pre' | 'tool.post' | 'tool.result' | 'tool.taint' | 'tool.error' | 'reply.complete' | 'turn.settled' | 'run.after' | 'subagent.start' | 'subagent.stop' | 'memory.before_write' | 'memory.written' | 'memory.deleted' | 'compaction.before' | 'compaction.after' | 'approval.requested' | 'approval.resolved' | 'job.fired' | 'job.done' | 'channel.inbound' | 'channel.outbound' | 'coding.tool.pre' | 'coding.tool.post' | 'runtime.changed' | 'runtime.fallback' | 'sandbox.refused' | 'preset.applied'
+export interface LoopStep {
+  title: string
+  done_when: string
+}
+
+/** The plan-execute-verify loop parsed and validated its plan. Strings are credential-scrubbed. */
+export interface LoopPlanPayload {
+  run_id: string | null
+  conversation_id: string
+  steps: LoopStep[]
+}
+
+/** The plan-execute-verify loop's check of its work came back. Gaps are credential-scrubbed. */
+export interface LoopVerifyPayload {
+  run_id: string | null
+  conversation_id: string
+  attempt: number
+  ok: boolean
+  gaps: string[]
+}
+
+export type HookId = 'app.start' | 'app.stop' | 'settings.changed' | 'chat.created' | 'chat.deleted' | 'project.created' | 'project.deleted' | 'ext.changed' | 'context.contribute' | 'model.select' | 'model.request' | 'model.response' | 'tool.permission' | 'tool.pre' | 'tool.post' | 'tool.result' | 'tool.taint' | 'tool.error' | 'reply.complete' | 'turn.settled' | 'run.after' | 'subagent.start' | 'subagent.stop' | 'memory.before_write' | 'memory.written' | 'memory.deleted' | 'compaction.before' | 'compaction.after' | 'approval.requested' | 'approval.resolved' | 'job.fired' | 'job.done' | 'channel.inbound' | 'channel.outbound' | 'coding.tool.pre' | 'coding.tool.post' | 'runtime.changed' | 'runtime.fallback' | 'sandbox.refused' | 'preset.applied' | 'loop.plan' | 'loop.verify'
 
 /** The payload each hook's handlers receive. */
 export interface HookPayloads {
@@ -380,6 +401,8 @@ export interface HookPayloads {
   'runtime.fallback': RuntimeFallbackPayload
   'sandbox.refused': SandboxRefusedPayload
   'preset.applied': PresetAppliedPayload
+  'loop.plan': LoopPlanPayload
+  'loop.verify': LoopVerifyPayload
 }
 
 /** How the host calls the handlers: emit and collect pass the payload, pipe and gate the current value. */
@@ -424,4 +447,6 @@ export interface HookKinds {
   'runtime.fallback': 'emit'
   'sandbox.refused': 'emit'
   'preset.applied': 'emit'
+  'loop.plan': 'emit'
+  'loop.verify': 'emit'
 }

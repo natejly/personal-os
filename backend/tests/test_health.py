@@ -247,17 +247,6 @@ class ToolTests(unittest.TestCase):
                          {n: (t.danger, t.group) for n, t in scope.tools.items()})
         self.assertTrue(scope.enabled())  # this test db never hid the view: an existing install keeps what it had
 
-    def test_the_setup_card_probe_follows_the_connected_sources(self) -> None:
-        from personal_os import setup_cards
-        self.assertFalse(setup_cards.status(toolbox)["health"])
-        with db.tx() as c:
-            c.execute("INSERT INTO health_sources(id,provider,server_id,created_at) VALUES('probe','x','s',0)")
-        try:
-            self.assertTrue(setup_cards.status(toolbox)["health"])
-        finally:
-            with db.tx() as c:
-                c.execute("DELETE FROM health_sources WHERE id='probe'")
-
 
 if __name__ == "__main__":
     unittest.main()

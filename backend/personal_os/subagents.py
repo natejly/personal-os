@@ -68,7 +68,7 @@ CHILD_BLOCK = frozenset({
     "run_shortcut", "open_page", "gmail_send", "gmail_draft", "gmail_modify", "deep_research",
     # the front agent's hand-off tools (workers.py): a worker reports back, it never delegates sideways
     "delegate", "message_worker", "check_worker", "stop_worker", "resume_worker",
-    "agent_create", "agent_message",
+    "agent_create", "agent_message", "ext_propose",
     "permissions_update",  # a settings change is the user's card on the front chat; a worker has no one to show it to
 })
 # Danger tiers a child never gets. External tools stay: a call that would ask raises the usual card on the parent's

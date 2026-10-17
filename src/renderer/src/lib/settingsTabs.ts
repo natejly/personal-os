@@ -1,7 +1,7 @@
 /** The Settings sections, and where the ids older code still passes to openSettings now live. Pure: no store import. */
 export type SettingsTab = 'model' | 'usage' | 'permissions' | 'integrations' | 'agents' | 'memory' | 'appearance' | 'sidebar' | 'system' | 'advanced' | `ext:${string}`
 /** Collapsed groups left on the Advanced tab. */
-export type AdvancedGroup = 'data' | 'developer' | 'learning' | 'search' | 'map'
+export type AdvancedGroup = 'data' | 'extensions' | 'developer' | 'learning' | 'search' | 'map'
 export type LegacySettingsTab = 'models' | 'workspace' | 'provider' | 'memory' | 'cowork' | 'modules' | 'behavior' | 'data' | 'spending' | 'texting'
 
 const LEGACY: Record<LegacySettingsTab, { tab: SettingsTab; group?: AdvancedGroup }> = {
@@ -63,6 +63,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'sidebar', sec: 'sidebar', title: 'Sidebar rows', keys: 'hide show lists calendar mail health library files spaces projects jobs modules views' },
   { tab: 'system', sec: 'system', title: 'System access', keys: 'macos accessibility screen recording automation folders privacy permission' },
   { tab: 'advanced', sec: 'data', title: 'Data, backups and trash', keys: 'export import backup restore presets archive trash delete diagnostics support logs' },
+  { tab: 'advanced', sec: 'extensions', title: 'Extensions', keys: 'review proposed assistant drafted install enable disable permissions diff accept reject' },
   { tab: 'advanced', sec: 'developer', title: 'Developer tools', keys: 'traces otel telemetry export context preview system prompt debug extensions hooks reload latency' }
 ]
 

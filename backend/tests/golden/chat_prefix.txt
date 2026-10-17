@@ -37,6 +37,7 @@ context: context_map — List what exists in the workspace, search_tool_results 
 dashboards: dashboard_open — Show a saved dashboard inline, dashboard_pin — Move a saved dashboard into, dashboard_save — Save a dashboard the user wants
 deliver: convert_document — Convert a document from one format, doc_guide — A practical guide to producing, render_preview — Render pages of a PDF
 docs: doc_comment_reply — Reply in a file's comment thread, doc_comments — Read the comment threads, doc_create — Create a file in Files, doc_delete — Trash a file by id, doc_list — List the files the user writes, doc_search — Search Files-editor docs only, a snippet
+extensions: ext_propose — Put an extension you drafted
 files: fs_copy — Copy a file or folder, fs_edit — Change a file by replacing exact, fs_glob — List files by name pattern under, fs_grep — Search inside files under a root, fs_mkdir — Create a folder, with any missing, move_local_file — Move or rename a file, read_local_file — Read a file on this Mac, trash_local_file — Move a file or folder, write_local_file — Write a text file
 graph: graph_add — Add a relation, graph_search — Find people, projects and other entities, graph_traverse — Walk the knowledge graph outward
 knowledge: list_documents — List the uploaded files available, read_document — Read an uploaded file by id

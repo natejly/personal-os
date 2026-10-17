@@ -26,10 +26,19 @@ def esbuild() -> str:
     raise FileNotFoundError("esbuild was not found: install it or set GRAIN_ESBUILD to its path")
 
 
+def shipped(root: Path) -> list[Path]:
+    """The files that ship (the tests, the lock and build leftovers do not)."""
+    return [p for p in sorted(root.rglob("*")) if p.is_file() and p.name != LOCK and not NOT_SHIPPED & set(p.relative_to(root).parts)]
+
+
 def content_hash(root: Path) -> dict[str, str]:
-    """sha256 of every file that ships (the tests and build leftovers do not), by path."""
-    files = [p for p in sorted(root.rglob("*")) if p.is_file() and p.name != LOCK and not NOT_SHIPPED & set(p.relative_to(root).parts)]
-    return {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
+    """sha256 of every file that ships, by path."""
+    return {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in shipped(root)}
+
+
+def digest(files: dict[str, str]) -> str:
+    """The one hash of a `content_hash`: what the lock file and an installed extension's pin record."""
+    return hashlib.sha256("".join(f"{path}\0{h}\n" for path, h in files.items()).encode()).hexdigest()
 
 
 def pack(root: Path) -> Path:
@@ -40,7 +49,6 @@ def pack(root: Path) -> Path:
                         *(f"--external:{m}" for m in SHARED), f"--outfile={BUNDLE}", "--log-level=warning"],
                        cwd=root, check=True, capture_output=True, text=True)
     files = content_hash(root)
-    digest = hashlib.sha256("".join(f"{path}\0{h}\n" for path, h in files.items()).encode()).hexdigest()
     lock = root / LOCK
-    lock.write_text(json.dumps({"id": manifest.id, "version": manifest.version, "hash": digest, "declared": declared(manifest), "files": files}, indent=2) + "\n", "utf-8")
+    lock.write_text(json.dumps({"id": manifest.id, "version": manifest.version, "hash": digest(files), "declared": declared(manifest), "files": files}, indent=2) + "\n", "utf-8")
     return lock

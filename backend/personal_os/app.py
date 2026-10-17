@@ -104,7 +104,9 @@ from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .style import WritingStyle
 from .extensions.channels import ChatService
-from .extensions import devapi, profiles as profile_routes
+from .extensions import devapi, profiles as profile_routes, review as review_routes
+from .extensions.authoring import skill as author_extension
+from .extensions.drafts import Drafts
 from .extensions.defaults import Defaults
 from .extensions.host import ExtensionContext, ExtensionHost, builtin_manifest
 from .modules import Module, ModuleContext, build_modules
@@ -623,6 +625,9 @@ host.bus.subscribe("run.after", _snapshot_after, owner="core", order=0, timeout_
 host.bus.subscribe("run.after", lambda run: subagent_mgr.end_of_run(run), owner="core", order=0)
 app.include_router(backups.router(db.data_dir, host.data_tables))
 app.include_router(devapi.router(host, _ext_ctx, lambda: toolbox))
+ext_review = review_routes.Review(Drafts(db.data_dir), host, _ext_ctx, lambda: toolbox)
+app.include_router(review_routes.router(ext_review))
+host.on_start(ext_review.load_installed)
 app.mount("/ext", host.routes)
 # Supportability: GET /diagnostics, POST /maintenance/sweep, and the daily retention sweep (retention.py).
 retention = RetentionWorker(db, settings)
@@ -647,6 +652,7 @@ work_plans = WorkPlans(db)
 tool_results = ToolResults(db)
 skills = Skills(db)
 guide.ensure(skills)  # the built-in "Using Grain" skill: created approved, text refreshed when the bundle changes
+author_extension.ensure(skills)  # the "author-extension" skill: created approved once
 # Auto-learn may only ever *propose* a skill (a friction fix, or a revised copy of one that failed); the lint it
 # runs is the approval gate's, so a draft that claims authority never even becomes a candidate.
 learner.skills, learner.known_tools = skills, lambda: _known_tools()
@@ -658,6 +664,7 @@ toolbox = Toolbox(memories, graph, documents, settings, extensions=list(host.ext
 chat_files = ChatFiles(db, toolbox.chat_outputs.root if toolbox.chat_outputs is not None else None)
 app.include_router(chat_files_router(chat_files))
 toolbox.chat_files = chat_files
+toolbox.ext_drafts = ext_review.drafts  # ext_propose (ext_tools.py)
 saved_dashboards = SavedDashboards(docs)
 toolbox.dashboards = saved_dashboards
 if toolbox.chat_outputs is not None:

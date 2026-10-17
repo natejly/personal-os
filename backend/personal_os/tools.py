@@ -112,7 +112,7 @@ def run_python_intro() -> str:
             "inside the temp working directory (CPU/memory/time limits apply).")
 # Locked whatever the setting says: the call is itself the user's review card.
 # gmail_send: an agent never sends mail on its own. Its card is the user's own editable email: Send, Save as draft or Discard.
-ALWAYS_CARD = frozenset({"calendar_propose", "gmail_send", "agent_create"})
+ALWAYS_CARD = frozenset({"calendar_propose", "gmail_send", "agent_create", "ext_propose"})
 # Tools whose every call is destructive, by category (permissions.DESTRUCTIVE_KINDS): Manual mode refuses or asks per the user's
 # destructiveDefaults, Auto and Allow everything run them as usual. Calls that are only sometimes destructive set ToolSpec.floor.
 # Connectors count only when the server marks the tool destructive (items). gmail_outbox cancel is not here: it unsends, it
@@ -847,6 +847,8 @@ class Toolbox:
         permission_tool.register(self)  # permissions_update: a settings change that is always a card
         from . import agent_tools
         agent_tools.register(self)  # agent_create / agents_list / agent_message
+        from . import ext_tools
+        ext_tools.register(self)  # ext_propose
         from . import research
         research.register(self)  # deep_research: planned fan-out over read-only subagents
         from . import opencode, shell

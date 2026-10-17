@@ -160,7 +160,7 @@ class RoutesTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.dir)
         self.db = Database(self.dir)
         ctx = ExtensionContext(db=self.db, hidden_views=lambda: self.db.get_settings().get("hiddenViews") or (), services={},
-                               settings=self.db.get_settings, set_settings=self.db.set_settings, sid=lambda p: p, wsid=lambda p: p)
+                               settings=self.db.get_settings, set_settings=self.db.set_settings, sid=lambda p: p, wsid=lambda p: p, publish=lambda _n, _d: None)
         self.host, self.changes = ExtensionHost(), []
         self.host.load_builtin("lean", ctx)
         self.host.load_builtin("focus", ctx)
@@ -221,7 +221,7 @@ class ExtensionDefaultsTests(unittest.TestCase):
         db = Database(folder)
         db.set_settings({"hiddenViews": ["demo"]})
         ctx = ExtensionContext(db=db, hidden_views=lambda: db.get_settings().get("hiddenViews") or (), services={},
-                               settings=db.get_settings, set_settings=db.set_settings, sid=lambda p: p, wsid=lambda p: p)
+                               settings=db.get_settings, set_settings=db.set_settings, sid=lambda p: p, wsid=lambda p: p, publish=lambda _n, _d: None)
         host = ExtensionHost()
         host._add(Manifest.from_dict({**BASE, "contributes": {"defaults": {"effort": "low", "permissions": "allow_all"}}}), ctx=ctx)
         db.set_settings({"hiddenViews": []})

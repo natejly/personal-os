@@ -16,7 +16,6 @@ from ..manifest import Manifest, ManifestError, load_manifest
 
 BUILTINS = Path(__file__).parents[1]  # the built-in extensions, one folder each
 CORE_SERVICES = frozenset({"mcp", "google"})  # lent by the app through ExtensionContext.services
-PROFILE_CONTRIBUTES = {"theme", "defaults", "layout"}
 TOOL_NAME = re.compile(r"[a-z][a-z0-9_]*")
 CODE_EXCLUDED = {"tests", "dist", "node_modules", "__pycache__"}
 
@@ -41,7 +40,7 @@ def check(root: Path, previous: Path | None = None) -> list[Finding]:
     others = list(_builtin_manifests(root))
     out = [*_collisions(root, manifest, others), *_requires(manifest, others)]
     if manifest.kind == "profile":
-        return [*out, *_profile(root, manifest)]
+        return out  # the manifest loader already refused any code, hooks or tools a profile carries
     out += _tools(root, manifest)
     out += _code(root, manifest)
     out += _authority_lint(root, manifest)
@@ -89,14 +88,6 @@ def _requires(manifest: Manifest, builtin: list[Manifest]) -> list[Finding]:
     for service in manifest.requires_services:
         if service not in available:
             out.append(Finding("error", "requires", f"required service {service!r} is not provided by the app or a built-in extension"))
-    return out
-
-
-def _profile(root: Path, manifest: Manifest) -> list[Finding]:
-    out = [Finding("error", "profile", f"a profile has no code: remove {f.name}") for f in sorted(root.glob("extension.*")) if f.suffix in (".py", ".tsx")]
-    extra = sorted(set(manifest.contributes) - PROFILE_CONTRIBUTES)
-    if extra or manifest.hooks:
-        out.append(Finding("error", "profile", f"a profile contributes only {', '.join(sorted(PROFILE_CONTRIBUTES))} and subscribes to no hooks"))
     return out
 
 

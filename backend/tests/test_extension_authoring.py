@@ -65,7 +65,7 @@ def set_manifest(root: Path, **over: Any) -> None:
 
 def context() -> ExtensionContext:
     return ExtensionContext(db=Database(Path(tempfile.mkdtemp(prefix="authoring-db-"))), hidden_views=lambda: (), services={},
-                            settings=lambda: {}, set_settings=lambda v: None, sid=lambda p: p, wsid=lambda p: p)
+                            settings=lambda: {}, set_settings=lambda v: None, sid=lambda p: p, wsid=lambda p: p, publish=lambda _n, _d: None)
 
 
 # ---- schemas and generated types ----
@@ -135,7 +135,7 @@ def test_a_profile_may_not_carry_code_or_hooks(work: Path) -> None:
     root = scaffold("quiet", work, profile=True)
     (root / "extension.py").write_text("def activate(api): pass\n", "utf-8")
     set_manifest(root, hooks={"app.start": {}}, contributes={"tools": [{"name": "t"}]})
-    assert errors(root) == ["profile", "profile"]
+    assert errors(root) == ["manifest"]  # the loader refuses it, so there is nothing left to lint
 
 
 # ---- grain ext check ----

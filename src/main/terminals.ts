@@ -1,6 +1,6 @@
 import { app, BrowserWindow } from 'electron'
 import { statSync } from 'fs'
-import { createTermHub, type Pty, type SessionInfo } from '../shared/terminal'
+import { createTermHub, runBridgeCommand, type Pty, type Screen, type SessionInfo, type TermHub } from '../shared/terminal'
 import { backendToken, backendUrl } from './backend'
 import { handle } from './ipc'
 
@@ -17,6 +17,42 @@ function loadPty(): NodePty | null {
     nodePty = null
   }
   return nodePty
+}
+
+/** The subset of @xterm/headless a screen read needs. It is loaded on first use; without it `screen` reads fall back to the last lines. */
+interface HeadlessTerminal {
+  rows: number
+  buffer: { active: { viewportY: number; getLine(y: number): { translateToString(trim: boolean): string } | undefined } }
+  write(d: string, cb?: () => void): void
+  resize(cols: number, rows: number): void
+}
+let headless: { Terminal: new (o: { cols: number; rows: number; allowProposedApi: boolean; scrollback: number }) => HeadlessTerminal } | null | undefined
+function loadHeadless(): typeof headless {
+  if (headless !== undefined) return headless
+  try {
+    headless = require('@xterm/headless')
+  } catch (e) {
+    console.warn('[terminals] @xterm/headless unavailable:', (e as Error).message)
+    headless = null
+  }
+  return headless
+}
+
+function screenOf(cols: number, rows: number): Screen | null {
+  const lib = loadHeadless()
+  if (!lib) return null
+  const term = new lib.Terminal({ cols, rows, allowProposedApi: true, scrollback: 0 })
+  return {
+    write: (d) => term.write(d),
+    resize: (c, r) => term.resize(c, r),
+    // An empty write is answered after everything written before it has been parsed.
+    text: () => new Promise((resolve) => term.write('', () => {
+      const b = term.buffer.active
+      const lines: string[] = []
+      for (let y = 0; y < term.rows; y++) lines.push(b.getLine(b.viewportY + y)?.translateToString(true) ?? '')
+      resolve(lines.join('\n').replace(/\s+$/, ''))
+    }))
+  }
 }
 
 const isDirectory = (p: string): boolean => {
@@ -54,7 +90,8 @@ export function registerTerminals(getMain: () => BrowserWindow | null): void {
     env: process.env,
     platform: process.platform,
     isPackaged: app.isPackaged,
-    fakeCmd: process.env.GRAIN_TERM_FAKE_CMD
+    fakeCmd: process.env.GRAIN_TERM_FAKE_CMD,
+    screen: screenOf
   })
 
   // Pop-outs, the agent browser and quick-ask are windows too; only the main window may drive a terminal.
@@ -80,5 +117,44 @@ export function registerTerminals(getMain: () => BrowserWindow | null): void {
   handle('term:write', (e, termId: unknown, data: unknown) => hub.write(mainId(e), termId, data))
   handle('term:resize', (e, termId: unknown, cols: unknown, rows: unknown) => hub.resize(mainId(e), termId, cols, rows))
   handle('term:close', (e, termId: unknown) => hub.close(mainId(e), termId))
+  // An agent's terminal, opened by the backend: the user takes it over here (the agent can then read it, not type into it), or lets go.
+  handle('term:attach', (e, termId: unknown, cols: unknown, rows: unknown) => {
+    const id = mainId(e)
+    hook(id)
+    return hub.attach(id, termId, cols, rows)
+  })
+  handle('term:detach', (e, termId: unknown) => hub.detach(mainId(e), termId))
   app.on('before-quit', () => hub.killAll())
+  startTermBridge(hub, () => loadPty() !== null)
+}
+
+const BRIDGE_RETRY_MS = 2000
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * Long-polls the backend for terminal commands and answers each, for as long as the app runs. The backend never reaches
+ * into this process: it only queues what an agent asked for, authenticated with the same token as every other request.
+ */
+function startTermBridge(hub: TermHub, ready: () => boolean): void {
+  const call = async (path: string, body?: unknown): Promise<Response> =>
+    fetch(`${backendUrl()}${path}`, {
+      method: 'POST',
+      headers: { 'X-Personal-OS-Token': backendToken(), 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(35_000)
+    })
+  void (async () => {
+    for (;;) {
+      if (!ready()) { await sleep(BRIDGE_RETRY_MS * 5); continue }
+      try {
+        const r = await call('/terminal-bridge/next')
+        if (!r.ok) { await sleep(BRIDGE_RETRY_MS); continue }
+        const { command } = (await r.json()) as { command: ({ id: string } & Record<string, unknown>) | null }
+        if (!command) continue
+        await call('/terminal-bridge/reply', { id: command.id, result: await runBridgeCommand(hub, command) })
+      } catch {
+        await sleep(BRIDGE_RETRY_MS)
+      }
+    }
+  })()
 }

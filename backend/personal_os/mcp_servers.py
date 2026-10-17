@@ -77,6 +77,8 @@ RESERVED_TOOL_NAMES = frozenset({
     "shell_run", "shell_poll", "shell_kill", "opencode_run", "ship_checklist", "ship_status",
     "coding_session_start", "coding_session_list", "coding_session_status", "coding_session_wait", "coding_session_summary", "coding_session_send", "coding_session_stop",
     "coding_session_diff",
+    "terminal_open", "terminal_send", "terminal_read", "terminal_wait_for", "terminal_close",
+    "coding_recipe_list", "coding_recipe_show", "coding_recipe_save", "coding_recipe_run", "coding_recipe_status", "coding_run_structured",
     "screenshot", "send_files",
     "browser_open", "browser_snapshot", "browser_click", "browser_type", "browser_select", "browser_press",
     "browser_scroll", "browser_manage", "browser_handoff",

@@ -8,8 +8,8 @@ import unittest.mock
 from pathlib import Path
 from types import SimpleNamespace
 
-from personal_os import codingagents as ca
-from personal_os import pi
+from personal_os.extensions.coding import sessions as ca
+from personal_os.extensions.coding import pi
 from personal_os.tests.test_codingagents import CodingTestCase
 
 HEADER = {"type": "session", "version": 3, "id": "5a1c0e22-aaaa-bbbb-cccc-1234567890ab", "timestamp": "t", "cwd": "/r"}

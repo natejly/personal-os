@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import migrations  # noqa: E402
 from personal_os.db import Database  # noqa: E402
-from personal_os.opencode_usage import import_usage  # noqa: E402
+from personal_os.extensions.coding.opencode_usage import import_usage  # noqa: E402
 from personal_os.usage import Pricing, Usage  # noqa: E402
 
 M = 1_000_000

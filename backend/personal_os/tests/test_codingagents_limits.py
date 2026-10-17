@@ -16,7 +16,7 @@ import unittest.mock
 from pathlib import Path
 from types import SimpleNamespace
 
-from personal_os import codingagents as ca
+from personal_os.extensions.coding import sessions as ca
 from personal_os import limits, llm, shell
 from personal_os.tests.test_codingagents import SID, CodingTestCase
 

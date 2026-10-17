@@ -76,6 +76,8 @@ const api: GrainApi = {
   termWrite: (termId, data) => ipcRenderer.invoke('term:write', termId, data),
   termResize: (termId, cols, rows) => ipcRenderer.invoke('term:resize', termId, cols, rows),
   termClose: (termId) => ipcRenderer.invoke('term:close', termId),
+  termAttach: (termId, cols, rows) => ipcRenderer.invoke('term:attach', termId, cols, rows),
+  termDetach: (termId) => ipcRenderer.invoke('term:detach', termId),
   onTermData: (cb) => {
     const h = (_e: Electron.IpcRendererEvent, termId: string, data: string): void => cb(termId, data)
     ipcRenderer.on('term:data', h)

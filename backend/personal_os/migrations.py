@@ -175,7 +175,7 @@ def _doc_comments_typography(c: sqlite3.Connection) -> None:
 
 
 def _coding_sessions(c: sqlite3.Connection) -> None:
-    """Coding sessions (codingagents.py): one row per coding agent started on a repo or a fresh worktree of it.
+    """Coding sessions (extensions/coding/sessions.py): one row per coding agent started on a repo or a fresh worktree of it.
     agent: claude | opencode. external_id: claude's short job id, or the opencode job id in the shell registry;
     session_id: claude's full sessionId (what --resume needs) or opencode's own session id when seen.
     status: starting | working | needs_you | blocked | done | stopped | failed."""
@@ -211,7 +211,7 @@ def _coding_session_base(c: sqlite3.Connection) -> None:
 
 
 def _coding_session_events(c: sqlite3.Connection) -> None:
-    """coding_session_events (coding_events.py): the structured live feed of a coding session. seq counts up from 1 per
+    """coding_session_events (extensions/coding/events.py): the structured live feed of a coding session. seq counts up from 1 per
     session; kind: user | text | tool | tool_result | error | status; data is optional JSON."""
     c.execute("""CREATE TABLE IF NOT EXISTS coding_session_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

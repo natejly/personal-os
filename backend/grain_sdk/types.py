@@ -198,6 +198,7 @@ class ToolPrePayloadCtx(TypedDict):
     project_id: str | None
     agent_id: str | None
     tainted: bool
+    desk_id: str | None
 
 
 class ToolPrePayload(TypedDict):
@@ -211,6 +212,7 @@ class ToolPrePayload(TypedDict):
 class ToolPostPayload(TypedDict):
     """A tool call finished."""
     name: str
+    call_id: str
     args: dict[str, Any]
     result_preview: str
     error: str | None
@@ -220,6 +222,7 @@ class ToolPostPayload(TypedDict):
 class ToolResultPayload(TypedDict):
     """A tool's whole result before it is rendered for the model; return the payload with result changed."""
     name: str
+    call_id: str
     result: Any
     tainted: bool
 
@@ -233,6 +236,7 @@ class ToolTaintPayload(TypedDict):
 class ToolErrorPayload(TypedDict):
     """A tool call failed."""
     name: str
+    call_id: str
     error: str
 
 
@@ -292,6 +296,9 @@ class SubagentStartPayload(TypedDict):
     child_id: str
     role: str
     parent: str | None
+    exit_reason: str | None
+    error: str | None
+    detached: bool
 
 
 class SubagentStopPayload(TypedDict):
@@ -299,6 +306,9 @@ class SubagentStopPayload(TypedDict):
     child_id: str
     role: str
     parent: str | None
+    exit_reason: str | None
+    error: str | None
+    detached: bool
 
 
 class WorkerReportPayload(TypedDict):
@@ -413,7 +423,39 @@ class NotifyPayload(TypedDict):
     target: Any
 
 
-HookName = Literal["app.start", "app.stop", "settings.changed", "chat.created", "chat.deleted", "project.created", "project.deleted", "ext.changed", "turn.accept", "turn.start", "input.attachment", "context.contribute", "model.select", "model.request", "model.response", "tools.offer", "tool.permission", "tool.pre", "tool.post", "tool.result", "tool.taint", "tool.error", "reply.complete", "turn.settled", "run.after", "subagent.start", "subagent.stop", "worker.report", "memory.before_write", "memory.written", "memory.deleted", "compaction.before", "compaction.after", "approval.requested", "approval.resolved", "job.fired", "job.done", "schedule.tick", "channel.inbound", "channel.outbound", "file.written", "review.accepted", "notify"]
+class CodingToolPrePayload(TypedDict):
+    """A Claude Code session Grain started is about to run a tool; Deny or Ask only (the stricter of this and Grain's own floor wins)."""
+    session_id: str
+    agent: str
+    tool: str
+    input: dict[str, Any]
+    cwd: str | None
+    worktree: str
+    permission_mode: str | None
+    lifted: bool
+    call_id: str | None
+    conversation_id: str | None
+    run_id: str | None
+
+
+class CodingToolPostPayload(TypedDict):
+    """A Claude Code session Grain started finished a tool call."""
+    session_id: str
+    agent: str
+    tool: str
+    input: dict[str, Any]
+    cwd: str | None
+    worktree: str
+    permission_mode: str | None
+    lifted: bool
+    call_id: str | None
+    conversation_id: str | None
+    run_id: str | None
+    result_preview: str
+    duration_ms: int | None
+
+
+HookName = Literal["app.start", "app.stop", "settings.changed", "chat.created", "chat.deleted", "project.created", "project.deleted", "ext.changed", "turn.accept", "turn.start", "input.attachment", "context.contribute", "model.select", "model.request", "model.response", "tools.offer", "tool.permission", "tool.pre", "tool.post", "tool.result", "tool.taint", "tool.error", "reply.complete", "turn.settled", "run.after", "subagent.start", "subagent.stop", "worker.report", "memory.before_write", "memory.written", "memory.deleted", "compaction.before", "compaction.after", "approval.requested", "approval.resolved", "job.fired", "job.done", "schedule.tick", "channel.inbound", "channel.outbound", "file.written", "review.accepted", "notify", "coding.tool.pre", "coding.tool.post"]
 
 # How the host calls the handlers of each hook: emit and collect pass the payload, pipe and gate the current value.
 HOOK_KINDS: dict[str, Literal["emit", "collect", "pipe", "gate"]] = {
@@ -460,4 +502,6 @@ HOOK_KINDS: dict[str, Literal["emit", "collect", "pipe", "gate"]] = {
     "file.written": "emit",
     "review.accepted": "emit",
     "notify": "emit",
+    "coding.tool.pre": "gate",
+    "coding.tool.post": "emit",
 }

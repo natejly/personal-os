@@ -9,6 +9,9 @@ export const WRITE_CAP = 64 * 1024
 export const MAX_PTYS = 8
 export const RING_CAP = 200 * 1024
 export const FLUSH_MS = 16
+/** Agent terminals (the ones the backend opens for an agent) among MAX_PTYS: two are always left for the user's own. */
+export const AGENT_MAX = 6
+export const AGENT_ID = /^tm_[0-9a-f]{16}$/
 
 /** Coding session ids are minted by the backend as 16 lowercase hex characters. */
 export const isSessionId = (id: unknown): id is string => typeof id === 'string' && /^[0-9a-f]{16}$/.test(id)
@@ -59,16 +62,38 @@ export function scrubEnv(env: Record<string, string | undefined>): Record<string
   return out
 }
 
-/** Keeps the newest `cap` characters. */
+/**
+ * Keeps the newest `cap` characters. `total` counts every character ever pushed, so a position in the output is an integer
+ * (a cursor) and a reader can tell that what it wanted to read has been dropped (`base` is the offset of the oldest kept one).
+ */
 export class Ring {
   private s = ''
+  total = 0
   constructor(private cap = RING_CAP) {}
   push(d: string): void {
+    this.total += d.length
     this.s += d
     if (this.s.length > this.cap) this.s = this.s.slice(this.s.length - this.cap)
   }
   get(): string { return this.s }
+  get base(): number { return this.total - this.s.length }
+  /** Everything from absolute offset `cursor` on, and whether the start of it was already dropped. */
+  since(cursor: number): { text: string; lost: boolean } {
+    const from = Math.min(Math.max(cursor, this.base), this.total)
+    return { text: this.s.slice(from - this.base), lost: cursor < this.base }
+  }
 }
+
+/** What is on a terminal's screen as plain text. A real emulator when one is available, else the ring's last lines. */
+export interface Screen {
+  write(d: string): void
+  resize(cols: number, rows: number): void
+  text(): Promise<string>
+}
+// eslint-disable-next-line no-control-regex
+const ANSI = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]/g
+/** The last `rows` non-empty lines of raw output with control sequences removed: the screen when no emulator is there. */
+export const lastLines = (raw: string, rows: number): string => raw.replace(ANSI, '').split(/\r?\n/).map((l) => l.replace(/^.*\r/, '')).filter((l) => l.trim()).slice(-rows).join('\n')
 
 export interface Pty {
   onData(cb: (d: string) => void): void
@@ -90,9 +115,15 @@ export interface HubDeps {
   /** Test-only command override; honoured only when not packaged. */
   fakeCmd?: string
   newId?: () => string
+  /** A screen emulator for an agent terminal, or null when none is installed (`screen` reads then fall back to the last lines). */
+  screen?: (cols: number, rows: number) => Screen | null
 }
 
-interface Entry { termId: string; key: string; senderId: number; pty: Pty; ring: Ring; pending: string; timer: ReturnType<typeof setTimeout> | null }
+/** What an agent terminal has beyond a user's: no window owns it until the user attaches one, and the agent can see what it did. */
+interface Control { screen: Screen | null; rows: number; exited: boolean; exitCode: number | null; attached: boolean; dirty: boolean }
+interface Entry { termId: string; key: string; senderId: number; pty: Pty; ring: Ring; pending: string; timer: ReturnType<typeof setTimeout> | null; control?: Control }
+
+export interface ControlOpen { terminal_id: unknown; argv: unknown; env: unknown; cwd: unknown; cols: unknown; rows: unknown }
 
 export function createTermHub(deps: HubDeps) {
   const byId = new Map<string, Entry>()
@@ -162,6 +193,98 @@ export function createTermHub(deps: HubDeps) {
     return { termId: e.termId, replay: '', fresh: true }
   }
 
+  const detach = (e: Entry): void => {
+    if (!e.control) return
+    flush(e)
+    e.senderId = 0
+    e.control.attached = false
+  }
+  const agentTerminal = (terminalId: unknown): Entry | null => {
+    const e = typeof terminalId === 'string' ? byId.get(terminalId) : undefined
+    return e?.control ? e : null
+  }
+  const state = (e: Entry, c: Control): Record<string, unknown> => ({ attached: c.attached, dirty: c.dirty, exited: c.exited, exit_code: c.exitCode, cursor: e.ring.total })
+
+  /** Starts an agent's terminal from what the backend sent. Nothing here comes from the renderer. */
+  function controlOpen(a: ControlOpen): { ok: true } | { error: string } {
+    const { terminal_id: id, argv, env, cwd } = a
+    if (typeof id !== 'string' || !AGENT_ID.test(id) || byId.has(id)) return { error: 'Invalid terminal id' }
+    if (!Array.isArray(argv) || !argv.length || !argv.every((x) => typeof x === 'string')) return { error: 'Invalid argv' }
+    if (!(argv[0] as string).startsWith('/')) return { error: 'The program must be an absolute path' }
+    if (typeof cwd !== 'string' || !cwd.startsWith('/') || !deps.isDirectory(cwd)) return { error: 'The folder does not exist' }
+    if (typeof env !== 'object' || env === null) return { error: 'Invalid environment' }
+    if (byId.size >= MAX_PTYS || [...byId.values()].filter((x) => x.control).length >= AGENT_MAX) return { error: 'Too many terminals are open' }
+    const cols = clampDim(a.cols, 120), rows = clampDim(a.rows, 30)
+    let pty: Pty
+    try { pty = deps.spawn(argv as string[], { cwd, env: scrubEnv(env as Record<string, string | undefined>), cols, rows }) } catch { return { error: 'Could not start the terminal' } }
+    const c: Control = { screen: deps.screen?.(cols, rows) ?? null, rows, exited: false, exitCode: null, attached: false, dirty: false }
+    const e: Entry = { termId: id, key: `agent:${id}`, senderId: 0, pty, ring: new Ring(), pending: '', timer: null, control: c }
+    byId.set(id, e)
+    pty.onData((d) => {
+      e.ring.push(d)
+      c.screen?.write(d)
+      if (!e.senderId) return
+      e.pending += d
+      if (!e.timer) e.timer = setTimeout(() => flush(e), FLUSH_MS)
+    })
+    pty.onExit((code) => {
+      flush(e)
+      c.exited = true
+      c.exitCode = code
+      if (e.senderId) deps.send(e.senderId, 'term:exit', { termId: id, code })
+    })
+    return { ok: true }
+  }
+
+  function controlWrite(terminalId: unknown, data: unknown, clearDirty: boolean): Record<string, unknown> {
+    const e = agentTerminal(terminalId)
+    if (!e?.control) return { error: 'No such terminal' }
+    if (typeof data !== 'string' || data.length > WRITE_CAP) return { error: 'Invalid data' }
+    if (e.control.exited) return { error: 'The terminal has exited' }
+    if (e.control.attached) return { blocked: 'attached' }
+    if (e.control.dirty && !clearDirty) return { blocked: 'dirty' }
+    if (clearDirty) e.control.dirty = false
+    e.pty.write(data)
+    return { ok: true, ...state(e, e.control) }
+  }
+
+  async function controlRead(terminalId: unknown, cursor: unknown, maxBytes: unknown, screen: unknown): Promise<Record<string, unknown>> {
+    const e = agentTerminal(terminalId)
+    if (!e?.control) return { error: 'No such terminal' }
+    const { text, lost } = e.ring.since(typeof cursor === 'number' && Number.isFinite(cursor) ? cursor : 0)
+    const cap = typeof maxBytes === 'number' && maxBytes > 0 ? maxBytes : RING_CAP
+    const out: Record<string, unknown> = { text: text.slice(-cap), from_cursor_lost: lost, ...state(e, e.control) }
+    if (screen === true) out.screen = e.control.screen ? await e.control.screen.text() : lastLines(e.ring.get(), e.control.rows)
+    return out
+  }
+
+  function controlStatus(terminalId: unknown): Record<string, unknown> {
+    const e = agentTerminal(terminalId)
+    return e?.control ? { alive: !e.control.exited, ...state(e, e.control) } : { error: 'No such terminal' }
+  }
+
+  function controlClose(terminalId: unknown): Record<string, unknown> {
+    const e = agentTerminal(terminalId)
+    if (!e?.control) return { error: 'No such terminal' }
+    const code = e.control.exitCode
+    drop(e)
+    e.pty.kill()
+    return { closed: true, exit_code: code }
+  }
+
+  /** The user opens an agent's terminal in a window: it is theirs from now on (the agent can read it, not type into it). */
+  function attach(senderId: number, terminalId: unknown, cols: unknown, rows: unknown): TermOpenResult {
+    const e = agentTerminal(terminalId)
+    if (!e?.control) return { error: 'No such terminal' }
+    if (e.control.attached && e.senderId !== senderId) return { error: 'Terminal is open in another window' }
+    e.pending = ''
+    if (e.timer) { clearTimeout(e.timer); e.timer = null }
+    e.senderId = senderId
+    e.control.attached = true
+    if (!e.control.exited) e.pty.resize(clampDim(cols, 80), clampDim(rows, 24))
+    return { termId: e.termId, replay: e.ring.get(), fresh: false }
+  }
+
   return {
     open(senderId: number, sessionId: unknown, mode: unknown, cols: unknown, rows: unknown): Promise<TermOpenResult> {
       if (!isSessionId(sessionId)) return Promise.resolve({ error: 'Invalid session id' })
@@ -178,6 +301,7 @@ export function createTermHub(deps: HubDeps) {
     write(senderId: number, termId: unknown, data: unknown): boolean {
       const e = own(senderId, termId)
       if (!e || typeof data !== 'string' || data.length > WRITE_CAP) return false
+      if (e.control) e.control.dirty = true  // the user typed: the shell's line editor may hold text the agent never saw
       e.pty.write(data)
       return true
     },
@@ -195,11 +319,37 @@ export function createTermHub(deps: HubDeps) {
       return true
     },
     killSender(senderId: number): void {
-      for (const e of [...byId.values()]) if (e.senderId === senderId) { drop(e); e.pty.kill() }
+      for (const e of [...byId.values()]) {
+        if (e.senderId !== senderId) continue
+        if (e.control) detach(e)  // an agent's terminal outlives the window that had it open
+        else { drop(e); e.pty.kill() }
+      }
     },
     killAll(): void {
       for (const e of [...byId.values()]) { drop(e); e.pty.kill() }
     },
-    size: (): number => byId.size
+    size: (): number => byId.size,
+    controlOpen, controlWrite, controlRead, controlStatus, controlClose, attach,
+    detach(senderId: number, terminalId: unknown): boolean {
+      const e = own(senderId, terminalId)
+      if (!e?.control) return false
+      detach(e)
+      return true
+    }
+  }
+}
+
+export type TermHub = ReturnType<typeof createTermHub>
+
+/** One command from the backend's terminal bridge, run on the hub; its answer goes back to the backend as it is. */
+export async function runBridgeCommand(hub: TermHub, cmd: unknown): Promise<Record<string, unknown>> {
+  const c = (typeof cmd === 'object' && cmd !== null ? cmd : {}) as Record<string, unknown>
+  switch (c.type) {
+    case 'open': return hub.controlOpen(c as unknown as ControlOpen)
+    case 'write': return hub.controlWrite(c.terminal_id, c.data, c.clear_dirty === true)
+    case 'read': return hub.controlRead(c.terminal_id, c.cursor, c.max_bytes, c.screen)
+    case 'status': return hub.controlStatus(c.terminal_id)
+    case 'close': return hub.controlClose(c.terminal_id)
+    default: return { error: 'Unknown terminal command' }
   }
 }

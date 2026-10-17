@@ -1,0 +1,51 @@
+{
+  "id": "coding",
+  "name": "Coding",
+  "description": "Coding sessions on a repo with Claude Code, OpenCode or pi, terminals the agent drives, recipes with a verify command, structured headless runs, and a hook bridge for Claude Code's own tool calls.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "kind": "extension",
+  "enabled": true,
+  "activation": ["startup"],
+  "provides": { "services": ["coding"] },
+  "contributes": {
+    "tools": [
+      {"name": "opencode_run", "after": "shell_kill", "danger": "executes", "group": "shell"},
+      {"name": "coding_session_start", "danger": "external", "group": "shell"},
+      {"name": "coding_session_list", "danger": "safe", "group": "shell"},
+      {"name": "coding_session_status", "danger": "safe", "group": "shell"},
+      {"name": "coding_session_wait", "danger": "safe", "group": "shell"},
+      {"name": "coding_session_summary", "danger": "safe", "group": "shell"},
+      {"name": "coding_session_send", "danger": "external", "group": "shell"},
+      {"name": "coding_session_stop", "danger": "executes", "group": "shell"},
+      {"name": "coding_session_diff", "danger": "safe", "group": "shell"},
+      {"name": "terminal_open", "danger": "executes", "group": "shell"},
+      {"name": "terminal_send", "danger": "executes", "group": "shell"},
+      {"name": "terminal_read", "danger": "safe", "group": "shell"},
+      {"name": "terminal_wait_for", "danger": "safe", "group": "shell"},
+      {"name": "terminal_close", "danger": "writes", "group": "shell"},
+      {"name": "coding_recipe_list", "danger": "safe", "group": "shell"},
+      {"name": "coding_recipe_show", "danger": "safe", "group": "shell"},
+      {"name": "coding_recipe_save", "danger": "writes", "group": "shell"},
+      {"name": "coding_recipe_run", "danger": "external", "group": "shell"},
+      {"name": "coding_recipe_status", "danger": "safe", "group": "shell"},
+      {"name": "coding_run_structured", "danger": "external", "group": "shell"}
+    ]
+  },
+  "hooks": {
+    "app.start": {},
+    "chat.deleted": {},
+    "tool.pre": { "timeoutMs": 30000 },
+    "tool.result": {},
+    "tool.error": {},
+    "tool.post": {},
+    "run.after": {},
+    "subagent.stop": {}
+  },
+  "permissions": ["db:own", "hooks:gate", "terminal:control"],
+  "settings": { "structuredBudgetUsd": { "type": "number" } },
+  "data": {
+    "tables": ["coding_sessions", "coding_session_events", "coding_recipes", "coding_recipe_versions", "coding_recipe_runs", "coding_terminals"],
+    "migrations": "migrations/"
+  }
+}

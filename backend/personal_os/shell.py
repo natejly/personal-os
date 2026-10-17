@@ -32,7 +32,7 @@ import signal
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from . import duel, egress, limits, mac, osplat, permissions, permrules, redact, sandbox
 from .db import new_id
@@ -649,7 +649,7 @@ class ShellJobs:
     async def kill_run(self, run_id: str) -> int:
         """End every live job one run started (a worker that ended, however it ended), together. A coding session's
         OpenCode job (conversation `coding:<id>`) is not one of them: it outlives a normal finish, and a stop ends it
-        through codingagents.CodingSessions.stop_owned, which records why."""
+        through the coding extension's CodingSessions.stop_owned, which records why."""
         mine = [j for j in self.jobs.values() if run_id and j.live() and j.run_id == run_id
                 and not (j.conversation_id or "").startswith("coding:")]
         await asyncio.gather(*(self.kill(j) for j in mine), return_exceptions=True)
@@ -769,7 +769,6 @@ def register(tb: Any) -> None:
                     pass
         except ShellError as e:
             return tool_error(_scrub(str(e)))
-        network = bool(permissions.get(s, "shellNetwork"))
         is_allow_all = (ctx.get("permission_mode") or permissions.get(s, "permissionMode")) == "allow_all"
         usable = sandbox_available()
         if not unsandboxed and not usable:
@@ -790,27 +789,10 @@ def register(tb: Any) -> None:
         wrapped = f"trap {shlex.quote('pwd -P >' + shlex.quote(os.path.join(tmp, CWD_FILE)) + ' 2>/dev/null')} EXIT\n{command}"
         argv = [shell_bin, "-c", wrapped]
         env = scrubbed_env(tmp)
-        allowed = egress.allowed_set(permissions.get(s, "shellRegistryAccess"), permissions.get(s, "shellAllowedDomains"),
-                                     permissions.get(s, "allowAllConnections"))
-        proxied = bool(allowed) and not network and not unsandboxed   # the third network mode: only the proxy is reachable
-        token: str | None = None
-        port: int | None = None
-        if proxied:
-            try:
-                port = await jobs.egress.ensure()
-            except OSError as e:
-                log.warning("egress proxy could not start: %s", e)
-                proxied = False  # no proxy means no network, which is the safe fallback
-            else:
-                token = jobs.egress.new_run(allowed)
-                env.update(jobs.egress.env(token))
-        if not unsandboxed:
-            writable = [tmp]  # the profile lets a command write anywhere but the protected places; this is the run's own scratch dir
-            if dr:
-                writable.append(str(dr))  # a desk workspace sits inside the protected data folder and is let back in
-            # A model duel's side (duel.py) may write only its own overlay folder and this scratch dir, never the user's real files.
-            argv = osplat.current().sandbox.wrap(argv, sandbox.shell_profile(writable, network=network, proxy_port=port if proxied else None,
-                                                                             confine=duel.SIDE.get() is not None))
+        writable = [tmp]  # the profile lets a command write anywhere but the protected places; this is the run's own scratch dir
+        if dr:
+            writable.append(str(dr))  # a desk workspace sits inside the protected data folder and is let back in
+        argv, network, proxied, token = await confine(jobs, argv, env, s, writable, unsandboxed=unsandboxed)
         if unsandboxed:  # the approval log has the call; this line is for the backend log (no card under Allow everything)
             log.warning("shell_run unsandboxed in %s (conversation %s): %s", _scrub(str(where)), ctx.get("conversation_id"),
                         _scrub(command)[:500])
@@ -987,7 +969,41 @@ def register(tb: Any) -> None:
                              shell_kill, "shell", "writes", examples=[{"job_id": "a1b2c3"}]))
 
 
-# ---- fixed commands with no model in the loop (ship.py, codingagents.py; `label` names the caller in the job registry) ----
+class Confined(NamedTuple):
+    argv: list[str]
+    network: bool    # the user opened the network
+    proxied: bool    # the third mode: only the allowlist proxy is reachable
+    token: str | None  # the proxy run to revoke when the command ends
+
+
+async def confine(jobs: ShellJobs, argv: list[str], env: dict[str, str], settings: dict[str, Any], writable: list[str], *,
+                  unsandboxed: bool = False) -> Confined:
+    """`argv` under the OS sandbox with the network the user allowed: open, or limited to the allowlist through a proxy
+    (whose address goes into `env`), or off. `writable` are the folders it may write besides what the profile always allows.
+    The one place a shell_run and an agent's terminal get their confinement from. `unsandboxed` leaves the argv alone."""
+    network = bool(permissions.get(settings, "shellNetwork"))
+    allowed = egress.allowed_set(permissions.get(settings, "shellRegistryAccess"), permissions.get(settings, "shellAllowedDomains"),
+                                 permissions.get(settings, "allowAllConnections"))
+    proxied = bool(allowed) and not network and not unsandboxed   # the third network mode: only the proxy is reachable
+    token: str | None = None
+    port: int | None = None
+    if proxied:
+        try:
+            port = await jobs.egress.ensure()
+        except OSError as e:
+            log.warning("egress proxy could not start: %s", e)
+            proxied = False  # no proxy means no network, which is the safe fallback
+        else:
+            token = jobs.egress.new_run(allowed)
+            env.update(jobs.egress.env(token))
+    if not unsandboxed:
+        # A model duel's side (duel.py) may write only its own overlay folder and the scratch dir, never the user's real files.
+        argv = osplat.current().sandbox.wrap(argv, sandbox.shell_profile(writable, network=network, proxy_port=port if proxied else None,
+                                                                         confine=duel.SIDE.get() is not None))
+    return Confined(argv, network, proxied, token)
+
+
+# ---- fixed commands with no model in the loop (ship.py, the coding extension; `label` names the caller in the job registry) ----
 async def run_fixed(jobs: ShellJobs, argv: list[str], cwd: str, settings: dict[str, Any], *, sandboxed: bool,
                     timeout: float, label: str = "ship", extra_env: dict[str, str] | None = None) -> tuple[bool, str]:
     """Run one argv through the shell job registry and wait for it: (exit code 0, scrubbed output).

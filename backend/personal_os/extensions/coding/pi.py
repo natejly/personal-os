@@ -23,7 +23,7 @@ import shutil
 import tempfile
 from typing import Any
 
-from . import osplat, sandbox, shell
+from ... import osplat, sandbox, shell
 
 # npm -g lands in Homebrew's or the system prefix, a user prefix (~/.npm-global), a node version manager's bin, or ~/.local/bin.
 BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "~/.npm-global/bin", "~/.local/bin", "~/.bun/bin", "~/.volta/bin")

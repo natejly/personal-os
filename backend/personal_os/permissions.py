@@ -82,7 +82,7 @@ DEFAULTS: dict[str, Any] = {
     # credential stores, Grain's own data folder and app, PROMPT_WRITES, ask_locked
     # tools, the network-tool taint rule and cancel_send all still ask, and every deny rule and off mode still wins.
     "trustExternalContent": False,
-    # Coding goes to a coding agent (coding_route.py): Grain's own file writers and file-changing shell commands are refused
+    # Coding goes to a coding agent (extensions/coding/route.py): Grain's own file writers and file-changing shell commands are refused
     # inside a git work tree under every permission mode, and the agents are told to use coding_session_start. codingAgent is
     # the default harness for coding_session_start when `agent` is omitted: "opencode", "claude", "pi", or "any" (the first
     # installed of claude, opencode, pi). A code default: nothing to migrate.

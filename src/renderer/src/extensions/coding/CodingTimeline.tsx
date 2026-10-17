@@ -1,16 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { CodingSession, CodingSessionEvent } from '@shared/types'
-import { api } from '../lib/api'
-import { eventSummary, isStepEvent, latestActivity } from '../lib/codingSessions'
-import { nextStick } from '../lib/stickToBottom'
-import { useStore } from '../store'
+import { api } from '../../lib/api'
+import { eventSummary, isStepEvent, latestActivity } from './lib/codingSessions'
+import { nextStick } from '../../lib/stickToBottom'
+import { useStore } from '../../store'
+import { useCoding } from './store'
 
 const NONE: CodingSessionEvent[] = []
 
 /** A session's timeline from the store; loads the backlog once when `load` is set, the event stream keeps it current. */
 export function useCodingEvents(id: string, load = true): CodingSessionEvent[] {
-  const events = useStore((s) => s.codingEvents[id]) ?? NONE
-  const loadEvents = useStore((s) => s.loadCodingEvents)
+  const events = useCoding((s) => s.events[id]) ?? NONE
+  const loadEvents = useCoding((s) => s.loadEvents)
   useEffect(() => { if (load) void loadEvents(id) }, [id, load, loadEvents])
   return events
 }
@@ -72,7 +73,7 @@ export function CodingTimeline({ id }: { id: string }): JSX.Element {
 
 /** Send a follow-up to a finished or stopped session; the session row comes back from the route. */
 export function CodingFollowUp({ c }: { c: CodingSession }): JSX.Element | null {
-  const upsert = useStore((s) => s.upsertCodingSession)
+  const upsert = useCoding((s) => s.upsert)
   const toast = useStore((s) => s.toast)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)

@@ -16,12 +16,14 @@ test('every settings tab opens and renders cleanly', async ({ grain }) => {
     await expect(dialog(page).getByRole('tabpanel')).not.toBeEmpty()
     await page.waitForTimeout(250)
   }
-  // Arrow keys walk the rail.
-  await tabBtn(page, 'Advanced').focus()
+  // Arrow keys walk the rail; the coding extension's section is the last one.
+  const recipes = dialog(page).getByRole('tab', { name: 'Coding recipes' })
+  await recipes.click()
   await page.keyboard.press('ArrowDown')
   await expect(tabBtn(page, 'General')).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('End')
-  await expect(tabBtn(page, 'Advanced')).toHaveAttribute('aria-selected', 'true')
+  await expect(recipes).toHaveAttribute('aria-selected', 'true')
+  await expect(dialog(page).getByRole('tabpanel')).toContainText('A recipe is a coding task')
   await closeSettings(page)
   expect(bad).toEqual([])
   noErrors(grain)

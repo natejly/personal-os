@@ -99,3 +99,4 @@ def register(tb: Any) -> None:
         examples=[{"kind": "tool", "target": "calendar_update", "value": "on"},
                   {"kind": "destructive", "target": "send", "value": "ask"}, {"kind": "mode", "value": "allow_all"}])
     tb.specs[NAME].floor = lambda args, ctx: permissions.SETTINGS_KIND
+    tb.specs[NAME].preview = lambda args: preview(tb, args)

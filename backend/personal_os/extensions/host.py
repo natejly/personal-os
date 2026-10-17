@@ -22,9 +22,11 @@ from .. import backups, migrations
 from ..context import Block, Contribution, RetrievalSources, Slot
 from .channels import ChannelAdapter, Channels
 from .defaults import DEFAULT_KEYS, Defaults
+from .directives import Directive, Directives
 from .disposables import Disposable, Scope
 from .hooks import HookBus
 from .manifest import Manifest, load_manifest
+from .prechecks import Precheck, Prechecks
 from .routes import ExtensionRoutes
 from .triggers import TriggerAdapter, Triggers
 
@@ -43,8 +45,9 @@ SETTING_PREFIX = "ext."  # a setting `ext.<id>.<field>` belongs to the extension
 STOP_BUDGET_S = 5.0  # what one extension's app.stop handlers get before they are cancelled
 STABLE_CONTEXT_TIMEOUT_MS = 100  # a stable block reads cached state: it is built in the turn path, before the first token
 LIFECYCLE_HOOKS = frozenset({"app.start", "app.stop", "ext.changed"})  # fired whether or not the extension is enabled: its handlers start and stop its own work
-HOOK_PERMISSION = {"tool.permission": "hooks:gate", "tool.pre": "hooks:gate", "turn.accept": "input:rewrite",
-                   "memory.before_write": "memory:gate"}  # the hooks that can narrow or change what the user did
+HOOK_PERMISSION = {"tool.permission": ("hooks:gate",), "tool.pre": ("hooks:gate",), "turn.accept": ("input:rewrite",),
+                   "memory.before_write": ("memory:gate",), "coding.tool.pre": ("hooks:gate", "coding:read"),
+                   "coding.tool.post": ("coding:read",)}  # the hooks that can narrow or change what the user did, or read what a session does
 
 
 @dataclass
@@ -69,6 +72,7 @@ class ExtensionContext:
     wsid: Callable[[str | None], str | None]
     publish: Callable[[str, Any], None]  # an app-topic event, from any thread
     widget_kinds: Callable[[], tuple[str, ...]] = lambda: ()  # the canvas widget kinds the loaded extensions declare
+    owe_wake: Callable[[str, str, dict[str, Any]], None] = lambda *_: None  # (conversation id, text, wake record): the chat is owed a hidden turn
 
 
 _generation = itertools.count(1)
@@ -117,6 +121,8 @@ class ExtensionScope:
     retrieval: RetrievalSources
     channels: Channels
     triggers: Triggers
+    prechecks: Prechecks
+    directives: Directives
     module: Module | None = None  # set for an adapted Module
     root: Path | None = None  # the extension's folder, where data.migrations is looked up
     _ctx: ExtensionContext | None = None  # set for an extension loaded from its folder
@@ -205,8 +211,8 @@ class ExtensionScope:
         and failure policy default to its entry. Only the lifecycle hooks reach `fn` while the extension is disabled."""
         if hook not in self.manifest.hooks:
             raise ValueError(f"extension {self.manifest.id!r} did not declare hook {hook!r}")
-        if hook in HOOK_PERMISSION:
-            self._require(HOOK_PERMISSION[hook])
+        for permission in HOOK_PERMISSION.get(hook, ()):
+            self._require(permission)
         declared = self.manifest.hooks[hook]
         sub = self._bus.subscribe(
             hook, fn if hook in LIFECYCLE_HOOKS else self._while_enabled(fn), owner=self.manifest.id, order=self.index,
@@ -258,6 +264,18 @@ class ExtensionScope:
         if self.dev:
             raise PermissionError(f"extension {self.manifest.id!r} cannot offer a trigger kind: only a built-in extension may")
         return self.disposables.add(self.triggers.register(kind, adapter, self.enabled))
+
+    def precheck(self, fn: Precheck) -> Disposable:
+        """Refuse a tool call before any approval card: `fn(name, args, ctx)` returns the refusal text or None. It cannot
+        approve, and it is silent while the extension is disabled."""
+        return self.disposables.add(self.prechecks.register(fn, self.enabled))
+
+    def directive(self, fn: Directive, *, version: int) -> Disposable:
+        """Add an unwrapped paragraph to the stable prompt prefix: `fn(settings)` returns the text (empty for none). Built-in
+        only: the text is not marked as an extension's, so it is the app's own voice. Bump `version` when the text changes."""
+        if self.dev:
+            raise PermissionError(f"extension {self.manifest.id!r} cannot add a prompt directive: only a built-in extension may")
+        return self.disposables.add(self.directives.register(self.manifest.id, fn, version, self.enabled))
 
     def spawn(self, coro: Awaitable[Any]) -> asyncio.Task[Any]:
         """Run a background task that is cancelled and awaited when the extension stops."""
@@ -329,6 +347,8 @@ class ExtensionHost:
         self.retrieval = RetrievalSources()
         self.channels = Channels()
         self.triggers = Triggers()
+        self.prechecks = Prechecks()
+        self.directives = Directives()
         self.routes = ExtensionRoutes(self)  # mounted at /ext by the app: where folder-loaded extensions' routers are served
         self.extensions: dict[str, ExtensionScope] = {}  # in start order
         self.failed: dict[Path, str] = {}  # folders `load_dev` could not load, with the reason
@@ -447,7 +467,7 @@ class ExtensionHost:
              ctx: ExtensionContext | None = None) -> ExtensionScope:
         if manifest.id in self.extensions:
             raise ValueError(f"duplicate extension id {manifest.id!r}")
-        scope = ExtensionScope(manifest, len(self.extensions), self.bus, self.retrieval, self.channels, self.triggers, module, root, ctx)
+        scope = ExtensionScope(manifest, len(self.extensions), self.bus, self.retrieval, self.channels, self.triggers, self.prechecks, self.directives, module, root, ctx)
         self.extensions[manifest.id] = scope
         self._enabled[manifest.id] = scope.enabled()
         return scope

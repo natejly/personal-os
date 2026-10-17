@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="sysacc-"))
@@ -15,7 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os import codingagents, macos, opencode, osplat, shell, system_access  # noqa: E402
+from personal_os import macos, osplat, shell, system_access  # noqa: E402
+from personal_os.extensions.coding import opencode, sessions as codingagents  # noqa: E402
+from personal_os.extensions.coding.extension import Coding  # noqa: E402
 
 
 class _Base(unittest.TestCase):
@@ -25,7 +28,7 @@ class _Base(unittest.TestCase):
         system_access._version.cache_clear()
         self.cfg: dict = {}
         app = FastAPI()
-        app.include_router(system_access.router(lambda: self.cfg, lambda: object()))
+        app.include_router(system_access.router(lambda: self.cfg, lambda: object(), lambda: SimpleNamespace(clis=Coding.clis)))
         self.c = TestClient(app)
         for target, val in [(osplat, {"has": lambda cap: True}),
                             (macos, {"IS_MAC": True, "automation_status": lambda b: "granted", "full_disk_access": lambda: True,

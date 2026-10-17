@@ -7,10 +7,6 @@ import DeskReview from './DeskReview'
 import { ChatFilesList } from './ChatFilesPanel'
 import { useStore } from '../store'
 import ContextDrawer from './ContextDrawer'
-import { createPortal } from 'react-dom'
-import { ensureEntry, startEntry, useTermAvailable, type TermMode } from '../lib/termRegistry'
-import TerminalPane, { modeFor } from './TerminalPane'
-import TerminalWindow from './TerminalWindow'
 import TracesPane from './TracesPane'
 import WorkersPanel from './WorkersPanel'
 import ProgressCard from './ProgressCard'
@@ -40,31 +36,22 @@ registerSlot(CORE, 'sidepanel.tab', {
 })
 registerSlot(CORE, 'sidepanel.tab', { id: 'traces', order: 50, label: 'Traces', Component: TracesTab, shown: (p) => !!p.conversationId })
 
-/** An openTerminal request made just now; an old one must not pull a freshly opened panel onto Terminal. */
-const freshTermRequest = (): boolean => Date.now() - (useStore.getState().terminalRequest?.at ?? 0) < 3000
-
 /**
  * The workspace of a chat, a column of floating cards over the transcript's right edge, each collapsing to its header: Files and Changes for every chat, and Review once it has a desk (a chat
- * working autonomously), which comes forward when the desk asks for it. Traces lists the chat's runs. Terminal shows in every chat with an id when the app can host terminals (running shell jobs, the chat's coding sessions and their terminals); an openTerminal request brings it forward. A running checklist shows as the compact progress card
+ * working autonomously), which comes forward when the desk asks for it. Traces lists the chat's runs. Terminal (the coding extension's card) shows in every chat with an id when the app can host terminals (running shell jobs, the chat's coding sessions and their terminals); opening a terminal brings it forward. A running checklist shows as the compact progress card
  * above the composer (ProgressCard) and workers as the worker list above the composer. Context starts open. The step card and the workers list lead the column (ChatView leaves them off the composer while it is open). Changes shows once the chat has files or its desk has runs, Review once the desk has outputs or is in review. Without a desk, Files is the chat's
  * own list. Context (the store's `contextOpen`) is always there and wins while requested (it expands); a draft chat with no id has only that card. Requests (context, a desk tab, a terminal, a desk in review) expand their card and scroll it into view.
  */
 export default function DeskPanel({ desk, conversationId, onClose }: { desk?: FullDesk | null; conversationId?: string; onClose: () => void }): JSX.Element {
   const id = conversationId ?? '' // '' only on a draft chat, where just the Context card shows
-  const [open, setOpen] = useState<Record<string, boolean>>({ context: true, terminal: freshTermRequest(), review: desk?.status === 'review' })
+  const [open, setOpen] = useState<Record<string, boolean>>({ context: true, review: desk?.status === 'review' })
   const panel = useRef<HTMLElement>(null)
-  // The session shown in the large terminal window (one at a time); its xterm DOM is mounted there only, never in the card.
-  const [attached, setAttached] = useState<{ id: string; mode: TermMode } | null>(null)
-  const attach = (sid: string, mode: TermMode): void => { void startEntry(ensureEntry(sid, mode)); setAttached({ id: sid, mode }) }
   const refs = useRef<Record<string, HTMLElement | null>>({})
   const expand = (k: string): void => { setOpen((o) => ({ ...o, [k]: true })); setTimeout(() => refs.current[k]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 50) }
   useEffect(() => { if (desk?.status === 'review') expand('review') }, [desk?.id, desk?.status])
   const contextOpen = useStore((s) => s.contextOpen)
-  const termOk = useTermAvailable()
   const fileCount = useChatFileCount(id)
   const tracesRequest = useStore((s) => s.deskTabRequest?.n)
-  const termRequest = useStore((s) => s.terminalRequest?.n)
-  useEffect(() => { void useStore.getState().refreshCodingSessions() }, [])
   // Stop at the bottom of the transcript, so the column never covers the checklist, workers or composer under it, whatever their height.
   useEffect(() => {
     const body = panel.current?.parentElement
@@ -77,14 +64,6 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
     return () => ro.disconnect()
   }, [])
   useEffect(() => { if (contextOpen) expand('context') }, [contextOpen])
-  useEffect(() => {
-    const r = useStore.getState().terminalRequest
-    if (!r || !freshTermRequest()) return
-    expand('terminal')
-    const c = useStore.getState().codingSessions[r.sessionId]
-    attach(r.sessionId, r.mode ?? (c ? modeFor(c) : 'attach'))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [termRequest])
   useEffect(() => { const r = useStore.getState().deskTabRequest; if (r && Date.now() - r.at < 3000) { useStore.setState({ contextOpen: false, deskPanel: true }); expand(r.tab) } }, [tracesRequest])
   useEffect(() => {
     const esc = (e: KeyboardEvent): void => { if (e.key === 'Escape' && !e.defaultPrevented && !(e.target as HTMLElement | null)?.closest?.('.xterm, .term-window, input, textarea, [contenteditable]')) onClose() }
@@ -93,10 +72,7 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   }, [onClose])
   const tabProps: SidePanelTabProps = { conversationId, desk, fileCount }
   const slotTabs = useSlot('sidepanel.tab').filter((t) => !t.shown || t.shown(tabProps))
-  const tabs = [
-    ...slotTabs.map((t) => ({ id: t.id, label: t.label, count: t.count?.(tabProps), body: <t.Component {...tabProps} /> })),
-    ...(termOk && conversationId ? [{ id: 'terminal', label: 'Terminal', count: undefined, body: <TerminalPane conversationId={conversationId} attached={attached} onAttach={attach} /> }] : [])
-  ]
+  const tabs = slotTabs.map((t) => ({ id: t.id, label: t.label, count: t.count?.(tabProps), body: <t.Component {...tabProps} /> }))
   return (
     <aside ref={panel} className="desk-panel" aria-label="Workspace">
       <button className="icon-btn ghost desk-close" title="Close" aria-label="Close workspace" onClick={onClose}><X size={14} /></button>
@@ -114,7 +90,7 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
           </section>
         )
       })}
-      {attached && panel.current?.parentElement && createPortal(<TerminalWindow key={`${attached.id}:${attached.mode}`} sessionId={attached.id} mode={attached.mode} onClose={() => setAttached(null)} />, panel.current.parentElement)}
+      {slotTabs.map((t) => t.Overlay && <t.Overlay key={t.id} {...tabProps} />)}
     </aside>
   )
 }

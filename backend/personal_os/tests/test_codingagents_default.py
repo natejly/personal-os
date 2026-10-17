@@ -5,7 +5,7 @@ import unittest
 import unittest.mock
 from typing import Any
 
-from personal_os import codingagents as ca
+from personal_os.extensions.coding import sessions as ca
 from personal_os import permissions
 from personal_os.tests.test_codingagents import CodingTestCase
 

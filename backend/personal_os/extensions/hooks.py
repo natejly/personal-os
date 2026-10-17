@@ -45,6 +45,7 @@ HOOKS = frozenset({
     "approval.requested", "approval.resolved",
     "job.fired", "job.done", "schedule.tick",
     "channel.inbound", "channel.outbound", "file.written", "review.accepted", "notify",
+    "coding.tool.pre", "coding.tool.post",
 })
 
 

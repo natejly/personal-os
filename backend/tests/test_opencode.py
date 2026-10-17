@@ -21,7 +21,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="opencodetest-"))
 os.environ.setdefault("PERSONAL_OS_AUTH_TOKEN", "test-token")
 
-from personal_os import opencode, osplat, sandbox, shell  # noqa: E402
+from personal_os import osplat, sandbox, shell  # noqa: E402
+from personal_os.extensions.coding import opencode  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 
 
@@ -30,7 +31,7 @@ def fake_seatbelt(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(osplat, "_current", osplat._build("darwin"))
     monkeypatch.setattr(shell, "sandbox_available", lambda: True)
 from personal_os.mcp_servers import RESERVED_TOOL_NAMES  # noqa: E402
-from personal_os.tools import Toolbox  # noqa: E402
+from coding_ext import coding_box  # noqa: E402
 from personal_os.working import ToolResults  # noqa: E402
 
 HAVE_SEATBELT = sys.platform == "darwin" and bool(shutil.which("sandbox-exec"))
@@ -56,7 +57,7 @@ class Box:
         self.db = Database(tmp / "data")
         with self.db.tx() as c:
             c.execute("INSERT INTO conversations(id, title, model, created_at, updated_at) VALUES(?,?,?,?,?)", ("c1", "t", "m", 0.0, 0.0))
-        self.tb = Toolbox(None, None, None, lambda: self.settings, results=ToolResults(self.db))  # type: ignore[arg-type]
+        self.tb, _, _ = coding_box(self.settings, results=ToolResults(self.db))
         self.ctx: dict[str, Any] = {"conversation_id": "c1", "message_id": None, "settings": self.settings,
                                     "tainted": False, "taint_sources": []}
 

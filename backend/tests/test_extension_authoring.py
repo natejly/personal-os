@@ -77,7 +77,7 @@ def test_the_hook_schema_covers_exactly_the_hooks_the_host_knows() -> None:
     hooks = json.loads((SCHEMAS / "hooks.schema.json").read_text("utf-8"))["x-hooks"]
     assert set(hooks) == HOOKS == set(types.HOOK_KINDS)
     assert set(types.HOOK_KINDS.values()) <= {"emit", "collect", "pipe", "gate"}
-    assert {h for h, k in types.HOOK_KINDS.items() if k == "gate"} == {"tool.pre", "tool.permission"}
+    assert {h for h, k in types.HOOK_KINDS.items() if k == "gate"} == {"tool.pre", "tool.permission", "coding.tool.pre"}
     assert set(typing.get_args(types.HookName)) == HOOKS
 
 

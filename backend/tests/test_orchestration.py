@@ -35,7 +35,8 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import app as appmod  # noqa: E402
-from personal_os import codingagents, limits, llm, providers  # noqa: E402
+from personal_os import limits, llm, providers  # noqa: E402
+from personal_os.extensions.coding import sessions as codingagents  # noqa: E402
 from personal_os import workers as W  # noqa: E402
 from personal_os.subagents import WRITER_TOOLS  # noqa: E402
 

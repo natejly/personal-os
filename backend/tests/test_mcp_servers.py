@@ -21,7 +21,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from calendar_ext import calendar_box  # noqa: E402
-from personal_os import codingagents, mcp_servers, ship  # noqa: E402
+from coding_ext import coding_scope  # noqa: E402
+from personal_os import mcp_servers, ship  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.extensions.host import ExtensionContext, ExtensionHost, ExtensionScope  # noqa: E402
 from personal_os.modules.mailwatch import MailWatchModule
@@ -64,8 +65,8 @@ def full_toolbox(google: Any = None) -> Toolbox:
     Every collaborator Toolbox takes has to be passed: a tool group whose object is None never
     registers, and this file's whole point is comparing the registered set against the reserved
     one. A new optional integration therefore belongs in this call too, or its tools silently
-    stop being checked. The ship and coding-session groups register outside the constructor (app.py
-    calls their register() after building the Toolbox), so they are added here the same way.
+    stop being checked. The ship tools and the coding extension's register outside the constructor (app.py
+    does both after building the Toolbox), so they are added here the same way.
     """
     tb = Toolbox(Stub(), Stub(), Stub(), lambda: {},  # type: ignore[arg-type]
                  extensions=loaded_extensions(google), google=google or Stub(),  # type: ignore[arg-type]
@@ -73,7 +74,7 @@ def full_toolbox(google: Any = None) -> Toolbox:
                  skills=Stub(), jobs=Stub(), style=Stub(),
                  desks=Stub(), workspace=Stub())
     ship.register(tb, Stub())  # type: ignore[arg-type]
-    codingagents.register(tb, Stub())  # type: ignore[arg-type]
+    tb.set_extension_tools(coding_scope(ExtensionHost()))
     return tb
 
 

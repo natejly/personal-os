@@ -15,7 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import httpx  # noqa: E402
 
-from personal_os import mcp_catalog, opencode_mcp  # noqa: E402
+from personal_os import mcp_catalog  # noqa: E402
+from personal_os.extensions.coding import opencode_mcp  # noqa: E402
 
 
 def entry(**over: object) -> dict:

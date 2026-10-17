@@ -398,11 +398,11 @@ All `U` hooks attach at `dispatch_tool`, which wraps `Toolbox.call` (`tools.py:1
 | `tools.offer` | end of `_schemas_all` (`app.py:2494`/`2506`) | `{names}` | `pipe`: hide names (built-ins/user), or add own | hide-only for third-party | tool exposure modes (pi), hidden tools |
 | `tool.args` **U** | before the gate chain (`app.py:~3430`, after `precheck`) | `{name, args, ctx}` | `pipe` args | **Not in the first cut.** Mutating args after permission resolution would bypass the permission check; this hook is only valid before the gate in each loop, so it needs full loop unification. | tool_call mutate (pi), updatedInput (Claude Code), tool.execute.before (OpenCode) |
 | `tool.permission` **U** | `permrules.resolve` (`app.py:3402`, `permrules.py:1280`) and `autoreview.route` (`app.py:3496-3516`) | `{name, args, danger, mode, tainted}` | `gate`: `Deny`/`Ask` only | built-ins and user extensions with `hooks:gate`; fail toward ask; consistent with "rules can only narrow" (`app.py:3365-3367`) | PermissionRequest/PermissionDenied (Claude Code), permission.asked (OpenCode), before_tool_call (OpenClaw) |
-| `tool.pre` **U** | top of `dispatch_tool`, after the gate chain, before the body | `{name, args, call_id, ctx}` | `gate`: `Deny`/`Ask` (cannot mutate args) | fail toward ask | tool_call (pi), PreToolUse (Claude Code), tool.execute.before (OpenCode), before_tool_call (OpenClaw) |
-| `tool.post` **U** | after `checked()` (`tools.py:1140`) / after MCP return | `{name, args, result_preview, error, duration_ms}` | observe | `emit` | tool_result (pi), PostToolUse (Claude Code), tool.execute.after (OpenCode) |
-| `tool.result` **U** | before `tool_results.render` (`app.py:3951`, `working.py:253`) | `{name, result, tainted}` | `pipe` result for the model (redaction, trimming) | must cover every channel: model-bound text, the UI-only side-channel keys (`images`, `show`, `research`, `dashboard`, `app.py:3881-3885`) and the stored preview. A redactor that misses one channel leaks. | tool_result modify (pi, must also redact structured content), updatedToolOutput (Claude Code) |
+| `tool.pre` **U** | top of `dispatch_tool`, after the gate chain, before the body | `{name, args, call_id, ctx}`; `ctx` is `{run_id, conversation_id, project_id, agent_id, desk_id, tainted}` | `gate`: `Deny`/`Ask` (cannot mutate args) | fail toward ask | tool_call (pi), PreToolUse (Claude Code), tool.execute.before (OpenCode), before_tool_call (OpenClaw) |
+| `tool.post` **U** | after `checked()` (`tools.py:1140`) / after MCP return | `{name, call_id, args, result_preview, error, duration_ms}` | observe | `emit` | tool_result (pi), PostToolUse (Claude Code), tool.execute.after (OpenCode) |
+| `tool.result` **U** | before `tool_results.render` (`app.py:3951`, `working.py:253`) | `{name, call_id, result, tainted}` | `pipe` result for the model (redaction, trimming) | must cover every channel: model-bound text, the UI-only side-channel keys (`images`, `show`, `research`, `dashboard`, `app.py:3881-3885`) and the stored preview. A redactor that misses one channel leaks. | tool_result modify (pi, must also redact structured content), updatedToolOutput (Claude Code) |
 | `tool.taint` | `app.py:3897-3902` | `{name, source}` | add a taint source | `emit`; monotonic, cleared only by the user | n/a |
-| `tool.error` | `_call` exception path (`tools.py:1096-1147`) | `{name, error}` | observe | `emit` | PostToolUseFailure (Claude Code) |
+| `tool.error` | `_call` exception path (`tools.py:1096-1147`) | `{name, call_id, error}` | observe | `emit` | PostToolUseFailure (Claude Code) |
 
 ### 5.6 Turn and run end
 
@@ -412,7 +412,7 @@ All `U` hooks attach at `dispatch_tool`, which wraps `Toolbox.call` (`tools.py:1
 | `turn.settled` | after `reply.complete`, on the same task: the four former blocks (style learn, auto-learn, follow-ups, title) are now its built-in subscribers (`settled.py`) | a `Settled` record (an extension gets a copy without the live trace and `publish`, with the secret settings blanked and the reply scrubbed): ids, the conversation as loaded, settings, model, user text, reply, error/stopped/gone/internal/in-side/proposal-only flags, taint, tool events, the trace and the run's `publish` | none (jobs submit themselves) | `emit`; each subscriber keeps its own gate conditions; slow work goes to a worker, so the chat is busy only as long as the handlers take. Style learning is subscribed first because auto-learn copies the trace it extends | agent_settled (pi), SessionEnd |
 | `turn.continue` | where desk chaining decides (`_should_chain`, `app.py:4288`) | `{reply, desk}` | `RequestTurn(note)` at most once | v2; loop guard mandatory | agent_before_settle `continue:true` (pi), Stop block (Claude Code) |
 | `run.after` | `RunBus._drive`'s `finally`, before the run is closed (the after-snapshot and the child clean-up are its core subscribers) | `Run` | observe | `emit`; the snapshot subscriber has a 120 s budget (`limits.SNAPSHOT_AFTER_MS`), so a closing run still waits for its after-snapshot | n/a |
-| `subagent.start` / `subagent.stop` | `Subagents.begin` (a queued worker starts when it begins running), `Subagents._finish` | `{child_id, role, parent}` | observe | `emit_sync` | SubagentStart/Stop (Claude Code) |
+| `subagent.start` / `subagent.stop` | `Subagents.begin` (a queued worker starts when it begins running), `Subagents._finish` | `{child_id, role, parent, exit_reason, error, detached}` (the last three are empty at start; at stop they say why it ended and whether it was a worker) | observe | `emit_sync` | SubagentStart/Stop (Claude Code) |
 | `worker.report` | `workers_mod.build_wake` (feeds `_wake_conversation`, `app.py:4609`) | `{worker, summary}` | add note | `collect` | n/a |
 
 ### 5.7 Memory and compaction
@@ -468,7 +468,9 @@ Reported from Claude Code's own tool calls in Grain-started sessions through the
 | Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
 | `coding.tool.pre` | `claude_hook` PreToolUse, via `POST /coding-hooks/{session}/pre` | `{session_id, agent, tool, input, cwd, worktree, permission_mode, lifted, call_id?, conversation_id, run_id}`; strings scrubbed, 2 KB each, 16 KB total | `gate`: `Deny`/`Ask` only; strictest of this and the local floor wins; never `allow` or `updatedInput` | 2 s bus budget, 3 s socket timeout; failure, timeout or a bad return becomes `Ask`; with the app unreachable and a gate subscriber at session start the hook asks; `lifted` sessions honor `Deny` only | built-in and user with `hooks:gate` and `coding:read`; third-party only if decision 5 is taken, narrow-only |
-| `coding.tool.post` | PostToolUse, via `POST /coding-hooks/{session}/post` | the pre payload plus `{result_preview, error?, duration_ms?}` | observe | `emit`, 1 s hook timeout, never affects the session | any enabled extension with `coding:read` |
+| `coding.tool.post` | PostToolUse, via `POST /coding-hooks/{session}/post` | the pre payload plus `{result_preview, duration_ms}` | observe | `emit`, 1 s hook timeout, never affects the session | any enabled extension with `coding:read` |
+
+As built (PR 17): the payload has exactly the fields listed, strings credential-scrubbed and cut to 2 KB, the whole cut to 16 KB. A gate subscriber needs `hooks:gate` and `coding:read` in its manifest; a post subscriber needs `coding:read`. The hook sends the per-session key in `X-Grain-Hook-Key`; `GET`/`POST` routes other than the two above never accept it.
 
 ### 5.13 Runtime slots (PR 18)
 
@@ -1011,6 +1013,22 @@ Hook bridge (Part 5)
 26. Section 5.12 and the tables in sections 3.4, 4, 8 and 9 agree with the implementation (hook ids, payloads, permissions).
 
 Repo gates: backend suite, `npm run typecheck`, `npm test`, the e2e suite for terminal, coding, health, todos and settings/sidebar specs, with no new red against the recorded baseline.
+
+#### 10.5.7a As built (PR 17)
+
+What exists: `backend/personal_os/extensions/coding/` (the moved modules as `sessions.py`, `events.py`, `route.py`, `opencode*.py`, `pi.py`; `extension.py`, `routes.py`, `bridge.py`, `headless.py`, `recipes.py`, `recipe_tools.py`, `recipe_routes.py`, `recipe_job.py`, `terminals.py`, `terminal_tools.py`, `migrations/0001..0004`) and `src/renderer/src/extensions/coding/` (the store slice, the tool cards, `TerminalTab.tsx` with its overlay, `RecipesPanel.tsx`). Host additions: `ExtensionScope.precheck`, `ExtensionScope.directive` (registries `prechecks.py` and `directives.py`), the per-tool `after` anchor was already there, `ExtensionContext.owe_wake`, `HOOK_PERMISSION` values are tuples (a hook may need several permissions), `tool.result`, `tool.error` and `tool.post` carry `call_id`, the hook `ctx` carries `desk_id`, `subagent.stop` carries the exit reason, `ToolSpec.preview` (the lines an approval card shows beyond the arguments; the recipe-run card uses it), the sidepanel slot's `Overlay`, and `shell.confine` (the one function that puts an argv under the sandbox with the user's network choice, used by `shell_run` and the agent terminals).
+
+Where it differs from the text above, on purpose:
+- The extension loads in `app.py` after the ship tools and calls `toolbox.set_extension_tools`, so its tools keep their old place at the end of the list; `Coding.bind(toolbox)` starts the sessions once the Toolbox exists. `requires.services` is empty: the OpenCode MCP server runs as its own process.
+- A terminal's `attach` is not a bridge command: the user's attach is an IPC call into the hub (`term:attach`, `term:detach`), and the bridge carries `open`, `write`, `read`, `status` and `close`. The hub enforces "not while the user has it open, not after the user typed until ctrl-c" itself, so the check and the write cannot race.
+- Text typed without Enter (`submit: false`) is remembered per terminal and judged together with the next line, so a command cannot be assembled out of lines that each pass.
+- `coding_recipe_save` asks when the run is tainted through `force_ask` rather than through `PROMPT_WRITES` (same effect, no core list to edit). The recipe-run card shows the resolved settings through `ToolSpec.preview`. A recipe's verify command runs after the run started, which is the user's approval of exactly that command, so only a deny or ask rule, the hardline list and the destructive floor stop it (`verify_blocked`).
+- A `coding_recipe` job keeps its settings as JSON in the job's prompt (`{recipe, version, inputs, cron}`), starts a recipe run itself instead of a chat run, and says so through `job.fired` and `job.done`; it does not use the scheduler's fire record.
+- The refusal reaches the model without `try_instead` on the pre-card path (the text already names `coding_session_start`); the gate path says "blocked by an extension (...)".
+- The directive names recipes once one exists, so its text depends on the recipes table as well as the two settings; it is versioned and changes only when a recipe is first created or the last one removed.
+- The deferred tool index in the stable prefix lists the new tools, so `chat_prefix.txt` changed by those lines (and only those). The terminal tools join the index only while the desktop app is connected.
+- `@xterm/headless` is loaded on first use; without it `screen` reads give the last lines of the output.
+- No e2e covers an agent terminal: it needs the OS sandbox, which only macOS has; the hub, the bridge and the tools have unit tests.
 
 #### 10.5.8 Not in this step
 

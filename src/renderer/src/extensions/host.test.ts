@@ -23,9 +23,9 @@ test('a registered view becomes a module the shell can turn off, and disposing i
 test('a settings panel gets a section id under its extension and is removed on dispose', () => {
   let panel: { dispose(): void } | undefined
   activateExtension('demo', { activate: (ui) => { panel = ui.settingsPanel({ id: 'main', label: 'Demo', Component }) } })
-  assert.deepEqual(settingsPanels.map((p) => [p.tab, p.extension]), [['ext:demo:main', 'demo']])
+  assert.deepEqual(settingsPanels.map((p) => [p.tab, p.extension]), [['ext:coding:recipes', 'coding'], ['ext:demo:main', 'demo']])
   panel?.dispose()
-  assert.deepEqual(settingsPanels, [])
+  assert.deepEqual(settingsPanels.map((p) => p.tab), ['ext:coding:recipes'])
 })
 
 test('Lists is registered through its extension with its nav entry and canvas widget', () => {

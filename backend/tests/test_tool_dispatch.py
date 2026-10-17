@@ -61,7 +61,7 @@ def test_pre_sees_the_call_and_a_deny_or_ask_stops_it() -> None:
     out = go(box)
     assert "not today" in out["error"] and "blocked by an extension" in out["error"]
     assert seen[0] == {"name": "t", "args": {"a": 1}, "call_id": "id1",
-                       "ctx": {"run_id": "r", "conversation_id": "c", "project_id": "p", "agent_id": "a", "tainted": False}}
+                       "ctx": {"run_id": "r", "conversation_id": "c", "project_id": "p", "agent_id": "a", "desk_id": None, "tainted": False}}
     ask = fake_toolbox()
     on(ask, "tool.pre", lambda ev: Ask("spend over limit"))
     assert "needs the user's approval" in go(ask)["error"] and "spend over limit" in go(ask)["error"]
@@ -156,7 +156,7 @@ def test_post_sees_the_piped_result_and_error_fires_for_an_error_result() -> Non
     go(box)
     assert posts[0]["name"] == "t" and posts[0]["args"] == {"a": 1} and posts[0]["error"] == "disk full"
     assert "disk full" in posts[0]["result_preview"] and posts[0]["duration_ms"] >= 0
-    assert errors == [{"name": "t", "error": "disk full"}]
+    assert errors == [{"name": "t", "call_id": "id1", "error": "disk full"}]
 
 
 def test_a_raised_exception_fires_error_and_post_and_still_raises() -> None:

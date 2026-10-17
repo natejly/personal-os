@@ -1674,7 +1674,7 @@
         "command": "{grain_python}",
         "args": [
           "-m",
-          "personal_os.opencode_mcp"
+          "personal_os.extensions.coding.opencode_mcp"
         ],
         "env": {},
         "url": "",

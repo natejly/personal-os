@@ -83,6 +83,20 @@ def test_chat_prefix_matches_golden(monkeypatch) -> None:  # type: ignore[no-unt
     assert prefix.encode() == GOLDEN.read_bytes(), f"the stable prefix changed; compare with {GOLDEN}"
 
 
+def test_turning_the_coding_rule_off_removes_only_its_paragraph(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The coding extension's directive is unwrapped text at the end of the stable prefix: off, the prefix is the golden one without it."""
+    _setup()
+    appmod.db.set_settings({"codingRoute": False})
+    try:
+        monkeypatch.setattr(llm, "stream_chat", _fake)
+        cid = appmod.convos.create(None, "Golden off", "test-model")["id"]
+        prefix = _turn(cid, content="hello there")["messages"][0]["content"]
+    finally:
+        appmod.db.set_settings({"codingRoute": True})
+    on = GOLDEN.read_text()
+    assert prefix == on.split("\n\n## Coding goes to a coding agent", 1)[0], "the rest of the prefix moved"
+
+
 def test_chat_prefix_stable_across_turns(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     _setup()
     monkeypatch.setattr(llm, "stream_chat", _fake)

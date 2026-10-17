@@ -19,7 +19,7 @@ import type {
   BackupInfo, DataOverview, ShellJobInfo, ShellJobTail, TelegramStatus
 } from '@shared/types'
 import type { SavedDashboard, DashboardRender, DashboardViewSpec } from '@shared/types'
-import type { CodingSession, CodingSessionDiff, CodingSessionEvent, DuelWinner, ModelStanding, ShipChecklist } from '@shared/types'
+import type { AgentTerminal, CodingRecipe, CodingRecipeDetail, CodingRecipePreview, CodingRecipeRun, CodingSession, CodingSessionDiff, CodingSessionEvent, DuelWinner, ModelStanding, ShipChecklist } from '@shared/types'
 import type { ExtensionInfo, ExtensionsDev, ExtensionsReview } from '@shared/types'
 import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
 import { ApiError, detailText } from './apiError'
@@ -299,7 +299,21 @@ export const api = {
     diff: (id: string, full = false) => req<CodingSessionDiff>(`/coding-sessions/${id}/diff${full ? '?full=1' : ''}`),
     events: (id: string, after = 0, limit = 2000) => req<{ events: CodingSessionEvent[] }>(`/coding-sessions/${id}/events?after=${after}&limit=${limit}`),
     stop: (id: string) => req<CodingSession>(`/coding-sessions/${id}/stop`, { method: 'POST' }),
-    send: (id: string, message: string) => req<CodingSession>(`/coding-sessions/${id}/send`, { method: 'POST', body: json({ message }) })
+    send: (id: string, message: string) => req<CodingSession>(`/coding-sessions/${id}/send`, { method: 'POST', body: json({ message }) }),
+    /** Saved coding tasks with a verify command (Settings > Coding recipes, the palette's "Run coding recipe..."). */
+    recipes: {
+      list: () => req<{ recipes: CodingRecipe[] }>('/coding/recipes'),
+      get: (ref: string) => req<CodingRecipeDetail>(`/coding/recipes/${encodeURIComponent(ref)}`),
+      /** Saves the body as the next version, approved as the user's own. */
+      save: (body: Record<string, unknown>) => req<{ recipe_id: string; version: number }>('/coding/recipes', { method: 'POST', body: json(body) }),
+      approve: (ref: string, version: number) => req<{ approved: boolean }>(`/coding/recipes/${encodeURIComponent(ref)}/versions/${version}/approve`, { method: 'POST' }),
+      archive: (ref: string) => req<{ archived: boolean }>(`/coding/recipes/${encodeURIComponent(ref)}`, { method: 'DELETE' }),
+      preview: (ref: string, inputs: Record<string, unknown>) => req<CodingRecipePreview>(`/coding/recipes/${encodeURIComponent(ref)}/preview`, { method: 'POST', body: json({ inputs }) }),
+      run: (ref: string, inputs: Record<string, unknown>) => req<{ run_id: string; session_id: string | null }>(`/coding/recipes/${encodeURIComponent(ref)}/run`, { method: 'POST', body: json({ inputs }) }),
+      runs: (recipeId?: string) => req<{ runs: CodingRecipeRun[] }>(`/coding/recipe-runs${recipeId ? `?recipe_id=${encodeURIComponent(recipeId)}` : ''}`)
+    },
+    /** Terminals agents have open: the Terminal card lists them and attaches one in a window. */
+    terminals: () => req<{ terminals: AgentTerminal[] }>('/coding/terminals')
   },
   /** OS-notification-worthy job events newer than `since` (unix seconds). */
   inboxNotify: (since: number) => req<JobNotifyEvent[]>(`/inbox/notify?since=${since}`),

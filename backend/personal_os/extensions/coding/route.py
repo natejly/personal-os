@@ -40,7 +40,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from . import permissions, permrules
+from ... import permissions, permrules
 
 log = logging.getLogger(__name__)
 
@@ -240,7 +240,7 @@ def _shell_refusal(cmd: str, start: str) -> tuple[str, str] | None:
 
 
 def _shell_cwd(tb: Any, args: dict[str, Any], ctx: dict[str, Any]) -> str:
-    from . import shell
+    from ... import shell
     roots, start = shell.perm_where(tb, ctx)
     raw = os.path.expanduser(str(args.get("cwd") or "").strip())
     return os.path.join(roots[0] if roots else str(Path.home()), raw) if raw else start  # as shell.floor judges it
@@ -397,7 +397,7 @@ def check(tb: Any, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> str 
     cfg = ctx.get("settings") or tb.settings()
     if not enabled(cfg):
         return None
-    from . import fsx
+    from ... import fsx
     if name in fsx.WRITE_ARGS:
         g = fsx.grants_for(tb, ctx)
         base = str(g.desk) if g.desk and name not in fsx.LOCAL_TOOLS else str(Path.home())

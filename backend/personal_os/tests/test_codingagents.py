@@ -7,6 +7,7 @@ asked for one, that a follow-up never goes to a session that is still working, a
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import tempfile
 import unittest
@@ -15,7 +16,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from personal_os import codingagents as ca
+from personal_os.extensions.coding import sessions as ca
+from personal_os import migrations
 from personal_os.db import Database
 
 SID = "0b7e6f2a-1c3d-4e5f-8a9b-0c1d2e3f4a5b"
@@ -53,7 +55,10 @@ class CodingTestCase(unittest.IsolatedAsyncioTestCase):
         self.fake = Fake()
         self.events: list[tuple[str, dict[str, Any]]] = []
         self.jobs = SimpleNamespace(jobs={})
-        self.cs = ca.CodingSessions(Database(self.tmp / "data"), self.jobs, self.fake, lambda e, d: self.events.append((e, d)),
+        db = Database(self.tmp / "data")
+        with contextlib.closing(db.connect()) as c:  # the coding extension's own tables, as the host migrates them
+            migrations.run_extension(c, "coding", migrations.sql_steps(Path(ca.__file__).parent / "migrations"))
+        self.cs = ca.CodingSessions(db, self.jobs, self.fake, lambda e, d: self.events.append((e, d)),
                                     lambda: {}, claude_home=self.home)
         p = unittest.mock.patch.object(ca, "claude_binary", return_value="/bin/claude")
         p.start()
@@ -71,6 +76,10 @@ class CodingTestCase(unittest.IsolatedAsyncioTestCase):
         d.mkdir(exist_ok=True)
         (d / "state.json").write_text(json.dumps({"state": state, "detail": detail, "sessionId": SID, **extra}))
         (d / "timeline.jsonl").write_text("\n".join(json.dumps(x) for x in (lines or [])))
+
+    def register(self, tb: Any) -> None:
+        """Put the coding_session_* tools on `tb`, over this case's sessions."""
+        tb.specs.update({s.name: s for s in ca.specs(SimpleNamespace(sessions=self.cs))})
 
     async def started(self, **kw: Any) -> dict[str, Any]:
         self.job_files("deadbeef", "working", "reading files")
@@ -633,7 +642,7 @@ class Control(CodingTestCase):
     async def test_the_tool_returns_the_note(self) -> None:
         row = await self.waiting("Allow Edit(/x)?")
         tb = SimpleNamespace(specs={})
-        ca.register(tb, self.cs)
+        self.register(tb)
         out = await tb.specs["coding_session_send"].fn({}, row["id"], "ok")
         self.assertIn("NOT granted", out["note"])
         self.assertEqual(out["status"], "working")
@@ -656,7 +665,7 @@ class Control(CodingTestCase):
         with self.cs.db.tx() as c:
             c.execute("UPDATE coding_sessions SET log_tail=? WHERE id=?", ("first\n" + "z" * 500 + "\n", row["id"]))
         tb = SimpleNamespace(specs={})
-        ca.register(tb, self.cs)
+        self.register(tb)
         ctx: dict[str, Any] = {}
         out = await tb.specs["coding_session_summary"].fn(ctx, "deadbeef")  # by external id
         self.assertEqual((out["id"], out["status"], out["detail"], len(out["last_log"])), (row["id"], "working", "reading files", 300))
@@ -684,7 +693,7 @@ class Control(CodingTestCase):
     async def test_own_session_taint_exemption_holds_for_external_ids(self) -> None:
         row = await self.started()
         tb = SimpleNamespace(specs={})
-        ca.register(tb, self.cs)
+        self.register(tb)
         ctx: dict[str, Any] = {}
         await tb.specs["coding_session_summary"].fn(ctx, "deadbeef")
         spec = tb.specs["coding_session_send"]
@@ -698,7 +707,7 @@ class Control(CodingTestCase):
         row = await self.waiting("Which database should I use?")
         self.fake.out["postgres"] = (False, "boom")
         tb = SimpleNamespace(specs={})
-        ca.register(tb, self.cs)
+        self.register(tb)
         out = await tb.specs["coding_session_send"].fn({}, row["id"], "postgres")
         self.assertIn("did not resume", str(out))
         self.assertIn("coding_session_send can retry", str(out))
@@ -755,7 +764,7 @@ class Control(CodingTestCase):
         row = await self.waiting("Which one?")
         self.fake.out["answer"] = (False, "daemon not running")
         tb = SimpleNamespace(specs={})
-        ca.register(tb, self.cs)
+        self.register(tb)
         out = await tb.specs["coding_session_send"].fn({}, row["id"], "answer")
         self.assertIn("did not resume", out["error"])
         self.assertIn("claude attach deadbeef", out["try_instead"])
@@ -766,3 +775,69 @@ class Control(CodingTestCase):
         with self.assertRaises(ca.CodingError) as cm:
             await self.cs.send(row["id"], "answer")
         self.assertIn("claude attach", cm.exception.alt)
+
+
+class Bridge(CodingTestCase):
+    """What a start and a follow-up carry for the hook bridge and a recipe's options (claude_hook, extensions/coding/bridge.py)."""
+
+    def settings_of(self, argv: list[str]) -> dict[str, Any]:
+        return json.loads(argv[argv.index("--settings") + 1])
+
+    def starts(self) -> list[list[str]]:
+        return [a for a in self.fake.calls if "--bg" in a]
+
+    async def test_with_nobody_listening_a_start_is_what_it_always_was(self) -> None:
+        self.cs.bridge_port = 4321
+        row = await self.started()
+        argv = self.starts()[0]
+        self.assertEqual(argv[argv.index("--settings") + 1], ca.floor_settings(None))
+        self.assertNotIn("--allowedTools", argv)
+        self.assertEqual(self.cs.get(row["id"])["hook_gate"], 0)
+
+    async def test_subscribers_and_a_step_cap_put_the_bridge_in_the_start_and_the_follow_up(self) -> None:
+        self.cs.bridge_port = 4321
+        self.cs.subscribers = lambda: (True, True)
+        row = await self.started(cli_opts={"allowed_tools": ["Read"], "denied_tools": ["WebFetch"], "max_steps": 5}, recipe_run_id="rr1")
+        saved = self.cs.get(row["id"])
+        self.assertEqual((saved["recipe_run_id"], saved["hook_gate"]), ("rr1", 1))
+        self.assertTrue(saved["hook_key"] and json.loads(saved["cli_opts"])["max_steps"] == 5)
+        argv = self.starts()[0]
+        self.assertEqual(argv[4:8], ["--allowedTools", "Read", "--disallowedTools", "WebFetch"])
+        hooks = self.settings_of(argv)["hooks"]
+        command = hooks["PreToolUse"][0]["hooks"][0]["command"]
+        self.assertEqual(hooks["PreToolUse"][0]["matcher"], "*")
+        self.assertIn(f"GRAIN_HOOK_KEY={saved['hook_key']}", command)
+        self.assertIn(f"--session {row['id']} --gate --cap 5 --counter ", command)
+        self.assertIn(str(self.cs.db.data_dir / "coding-counters" / row["id"]), command)
+        self.assertEqual(hooks["PostToolUse"][0]["matcher"], "*")
+        self.assertNotIn("hook_key", ca.summary(saved))  # the key never leaves through the tools or the routes
+        self.assertNotIn(saved["hook_key"], json.dumps(ca.brief(saved)))
+        self.job_files("deadbeef", "done")
+        self.cs.refresh(self.cs.get(row["id"]))
+        self.cs.subscribers = lambda: (False, True)  # the gate subscriber is gone: the next resume is not gated
+        await self.cs.send(row["id"], "more")
+        resume = [a for a in self.fake.calls if "--resume" in a][0]
+        self.assertEqual(resume[4:7], ["--allowedTools", "Read", "--disallowedTools"])
+        resumed = self.settings_of(resume)["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        self.assertIn(f"GRAIN_HOOK_KEY={saved['hook_key']}", resumed)
+        self.assertNotIn("--gate", resumed)
+        self.assertEqual(self.cs.get(row["id"])["hook_gate"], 0)  # the row records what it ran with
+
+    async def test_a_session_from_before_the_bridge_gets_its_key_when_it_is_first_needed(self) -> None:
+        row = await self.started()
+        with self.cs.db.tx() as c:
+            c.execute("UPDATE coding_sessions SET hook_key = NULL WHERE id = ?", (row["id"],))
+        self.cs.bridge_port, self.cs.subscribers = 4321, lambda: (True, False)
+        self.job_files("deadbeef", "done")
+        self.cs.refresh(self.cs.get(row["id"]))
+        await self.cs.send(row["id"], "more")
+        self.assertTrue(self.cs.get(row["id"])["hook_key"])
+
+    async def test_without_a_known_port_there_is_nothing_to_report_to(self) -> None:
+        self.cs.bridge_port, self.cs.subscribers = None, lambda: (True, True)
+        await self.started()
+        self.assertNotIn("--gate", json.dumps(self.settings_of(self.starts()[0])))  # no known address: nothing to report to
+
+    async def test_options_that_only_claude_has_are_refused_for_the_others(self) -> None:
+        with self.assertRaises(ca.CodingError):
+            await self.cs.start("opencode", str(self.repo), "x", cli_opts={"max_steps": 5})

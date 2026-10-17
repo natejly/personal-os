@@ -38,7 +38,7 @@ _TOKEN_VALUE = re.compile(r"(?![\s\S]*/\*)[^;{}<>@\\]{1,200}")  # one declaratio
 _TOKEN_FUNCTIONS = {"", "rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch", "color", "color-mix", "calc",
                     "var", "min", "max", "clamp", "linear-gradient", "radial-gradient", "conic-gradient"}  # none fetches anything
 _PERMISSIONS = {"db:own", "context:volatile", "conversation:read", "input:rewrite", "hooks:gate", "memory:gate",
-                "prompt:inject", "ui:unsupported-css"}  # plus "service:<name>"
+                "prompt:inject", "ui:unsupported-css", "coding:read", "terminal:control"}  # plus "service:<name>"
 
 
 class ManifestError(ValueError):

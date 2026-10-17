@@ -164,6 +164,14 @@ def test_the_step_cap_counts_every_tool_and_denies_past_the_limit(monkeypatch, c
     assert Path(counter).stat().st_size == 6
 
 
+def test_a_cap_or_gate_that_cannot_be_checked_does_not_fall_silent(monkeypatch, capsys, tmp_path):
+    broken = str(tmp_path / "missing" / "steps")  # the counter file cannot be created
+    assert decision(run_hook(monkeypatch, capsys, PRE, "--cap", "5", "--counter", broken)) == "ask"
+    assert decision(run_hook(monkeypatch, capsys, PRE, "--gate", "--cap", "5", "--counter", broken)) == "ask"
+    assert decision(run_hook(monkeypatch, capsys, PRE, "--cap", "5", "--counter", broken, "--lifted")) == "deny"
+    assert decision(run_hook(monkeypatch, capsys, PRE, "--cap", "many", "--counter", str(tmp_path / "steps"))) == "ask"
+
+
 def test_a_gate_verdict_and_the_local_floor_combine_strictest_first(monkeypatch, capsys, app):
     gate = app.args("--gate")
     app.answer = {"verdict": "ask", "reason": "an extension wants a look"}

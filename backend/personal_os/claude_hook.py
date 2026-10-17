@@ -168,8 +168,11 @@ def main(argv: list[str] | None = None) -> int:
             over = ("deny", "Grain's step limit for this run was reached.")
         gated = bridge_verdict(args, event, lifted) if "--gate" in args else None
         verdict = strictest(local, over, gated)
-    except Exception:  # fail safe: never allow, ask when the command could be destructive
-        verdict = ("ask", "Grain could not check this command, so it asks.") if not lifted and RISKY.search(raw) else None
+    except Exception:  # fail safe: never allow; a step cap or an extension gate that could not be checked asks (denies when lifted)
+        if "--cap" in args or "--gate" in args:
+            verdict = ("deny" if lifted else "ask", "Grain could not check this call, so it does not allow it.")
+        else:
+            verdict = ("ask", "Grain could not check this command, so it asks.") if not lifted and RISKY.search(raw) else None
     if verdict:
         sys.stdout.write(output(*verdict))
     return 0

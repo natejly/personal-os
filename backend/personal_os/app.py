@@ -31,6 +31,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import AfterValidator, BaseModel, Field
 
 from . import auth_breaker, blobs, system_access
+from .bounds import clamp_limit
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
 from . import branch_summary, compaction, side_question, followups, otel_export, replay_trace, router, thinking_summary, titles
 from . import chatlink, duel, fsx, labels, request_log, toolcore
@@ -942,11 +943,6 @@ def wsid(project_id: str | None) -> str | None:
     if s is not None and not projects.get(s):
         raise HTTPException(404, "No such project")
     return s
-
-
-def _clamp(limit: int, hi: int = 500) -> int:
-    """A list route's LIMIT. SQLite reads a negative one as 'no limit', so it is bounded here, not trusted."""
-    return max(1, min(int(limit), hi))
 
 
 def sse(event: str, data: Any) -> str:
@@ -4510,7 +4506,7 @@ def list_shell_jobs() -> dict[str, Any]:
 @app.get("/shell/jobs/{job_id}/tail")
 def shell_job_tail(job_id: str, limit: int = 4000) -> dict[str, Any]:
     """The end of a job's output for the user. It never moves the model's shell_poll cursor."""
-    return toolbox.shell.tail(_shell_job(job_id), _clamp(limit, 50_000))
+    return toolbox.shell.tail(_shell_job(job_id), clamp_limit(limit, 50_000))
 
 
 @app.post("/shell/jobs/{job_id}/kill")
@@ -4932,7 +4928,7 @@ async def list_runs(status: str | None = None, conversation_id: str | None = Non
         statuses = tuple(x for x in status.split(",") if x)
         if not statuses or any(x not in STATUSES for x in statuses):
             raise HTTPException(400, f"status must be 'all' or a comma list of {', '.join(STATUSES)}")
-    return bus.list(statuses, conversation_id, _clamp(limit), desk_id)
+    return bus.list(statuses, conversation_id, clamp_limit(limit), desk_id)
 
 
 @app.get("/runs/{run_id}/children")
@@ -5502,7 +5498,7 @@ async def list_approvals(status: str | None = "pending", run_id: str | None = No
         raise HTTPException(400, "status must be pending, approved, denied, decided or all")
     if order not in ("asc", "desc"):
         raise HTTPException(400, "order must be asc or desc")
-    rows = run_store.approvals(None if status in (None, "", "all") else status, run_id, _clamp(limit), desk_id,
+    rows = run_store.approvals(None if status in (None, "", "all") else status, run_id, clamp_limit(limit), desk_id,
                                newest_first=order == "desc")
     if status == "pending":
         rows = _untrashed(rows)
@@ -6459,7 +6455,7 @@ def list_proposals(status: str | None = "pending", run_id: str | None = None, li
     """Outward-facing calls a background run recorded instead of making. Pending by default."""
     if status not in (None, "", "all", *PROPOSAL_STATUSES):
         raise HTTPException(400, "status must be pending, accepted, rejected, expired or all")
-    return proposals.list(None if status in (None, "", "all") else status, run_id, _clamp(limit))
+    return proposals.list(None if status in (None, "", "all") else status, run_id, clamp_limit(limit))
 
 
 @app.post("/proposals/{pid}/accept")
@@ -6551,7 +6547,7 @@ def _review_queues() -> list[dict[str, Any]]:
 
 def _inbox_runs(hours: float, limit: int, include_dry: int) -> list[dict[str, Any]]:
     """The job runs "While you were away" lists: one window, shared by the read and by Mark all read."""
-    runs = run_store.of_kind("job", since=time.time() - max(0.0, float(hours)) * 3600, limit=_clamp(limit))
+    runs = run_store.of_kind("job", since=time.time() - max(0.0, float(hours)) * 3600, limit=clamp_limit(limit))
     if not include_dry:  # a preview is not something that happened while the user was away
         runs = [r for r in runs if not (isinstance(r.get("input"), dict) and r["input"].get("dry_run"))]
     # A run whose result matched the previous one's, on a job that only wants to hear about changes, is not news.
@@ -6665,7 +6661,7 @@ def inbox_delete_run(run_id: str) -> dict[str, Any]:
 def inbox_archived(limit: int = 50) -> list[dict[str, Any]]:
     """Archived run messages, newest first: out of "While you were away" but kept, and restorable."""
     out = []
-    for r in run_store.of_kind("job", limit=_clamp(limit), archived=True):
+    for r in run_store.of_kind("job", limit=clamp_limit(limit), archived=True):
         fire = r["input"] if isinstance(r.get("input"), dict) else {}
         text = workers_mod.strip_no_reply(run_store.transcript(r["run_id"], r["message_id"])[0]) if r["message_id"] else ""
         out.append({"run_id": r["run_id"], "conversation_id": r["conversation_id"], "status": r["status"],
@@ -8411,7 +8407,7 @@ def delete_doc(id: str) -> dict[str, bool]:
 def doc_revisions(id: str, limit: int = 100) -> list[dict[str, Any]]:
     if not docs.get(id):
         raise HTTPException(404)
-    return docs.revisions(id, _clamp(limit))
+    return docs.revisions(id, clamp_limit(limit))
 
 
 @app.get("/docs/revisions/{rev_id}")
@@ -8593,7 +8589,7 @@ def delete_plan(id: str) -> dict[str, bool]:
 @app.get("/conversations/{id}/tool-results")
 def list_tool_results(id: str, limit: int = 20) -> list[dict[str, Any]]:
     """The handles this conversation produced: what was stored instead of inlined."""
-    return tool_results.list(id, _clamp(limit))
+    return tool_results.list(id, clamp_limit(limit))
 
 
 @app.get("/tool-results/{rid}")
@@ -8601,7 +8597,7 @@ def read_tool_result_blob(rid: str, offset: int = 0, limit: int = 20000) -> dict
     row = tool_results.get(rid)
     if not row:
         raise HTTPException(404, "No such tool result")
-    out = tool_results.read(row["conversation_id"], rid, max(0, offset), _clamp(limit, 200000))
+    out = tool_results.read(row["conversation_id"], rid, max(0, offset), clamp_limit(limit, 200000))
     return out or {}
 
 
@@ -9752,7 +9748,7 @@ def _close_review(desk_id: str) -> dict[str, Any] | None:
 
 @app.get("/cowork/inbox")
 def cowork_inbox(limit: int = 40) -> list[dict[str, Any]]:
-    return desks.inbox(_clamp(limit))
+    return desks.inbox(clamp_limit(limit))
 
 
 @app.post("/cowork/inbox/{event_id}/seen")

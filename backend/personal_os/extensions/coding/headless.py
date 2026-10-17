@@ -26,6 +26,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 from ... import mac, shell
+from ...bounds import clamp_int
 from ...tools import scrub_strings
 from . import route
 from .sessions import CLAUDE_HINT, MODEL_RE, claude_binary, claude_env, floor_settings
@@ -50,14 +51,6 @@ class StructuredError(ValueError):
     def __init__(self, code: str, detail: str = "", **extra: Any) -> None:
         super().__init__(code)
         self.code, self.detail, self.extra = code, detail, extra
-
-
-def _clamp(value: Any, bounds: tuple[int, int, int]) -> int:
-    lo, hi, default = bounds
-    try:
-        return max(lo, min(int(value if value is not None else default), hi))
-    except (TypeError, ValueError):
-        return default
 
 
 def check_schema(schema: Any) -> dict[str, Any]:
@@ -192,7 +185,7 @@ def tool(coding: Any) -> ToolSpec:
             return tool_error(f"'{model}' is not a model id this tool accepts.", field="model")
         try:
             check_schema(schema)
-            value = await run(coding, ctx, prompt, schema, cwd, tools, _clamp(max_steps, STEPS), _clamp(timeout_s, TIMEOUT_S),
+            value = await run(coding, ctx, prompt, schema, cwd, tools, clamp_int(max_steps, *STEPS), clamp_int(timeout_s, *TIMEOUT_S),
                               None if max_budget_usd is None else float(max_budget_usd), model)
         except StructuredError as e:
             return {"error": e.code, "detail": e.detail, **e.extra}

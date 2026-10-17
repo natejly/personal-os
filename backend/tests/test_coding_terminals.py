@@ -416,13 +416,13 @@ def test_the_reason_follows_the_order_exited_matched_stdin_idle_timeout(tmp_path
         call(tb, "terminal_close", mine, terminal_id=tid)
 
 
-@pytest.mark.parametrize("pattern", [r"(a+)+b", r"(x*)*y", r"(\w)\1", r"foo(?=bar)", r"(?<!a)b", "x" * 201, "(unclosed"])
+@pytest.mark.parametrize("pattern", [r"(a+)+b", r"(x*)*y", r"(a|a)*b", r"(a|ab)+c", r"(a{1,2})*b", r"(\w)\1", r"foo(?=bar)", r"(?<!a)b", "x" * 201, "(unclosed"])
 def test_dangerous_or_broken_patterns_are_refused(pattern):
     with pytest.raises(terms.TerminalError):
         terms.safe_pattern(pattern)
 
 
-@pytest.mark.parametrize("pattern", [r"ready", r"port \d+", r"(error|fail)ed?", r"^\$ $", r"[0-9]{1,3}\.[0-9]{1,3}", r"a+b+c*"])
+@pytest.mark.parametrize("pattern", [r"ready", r"port \d+", r"(error|fail)ed?", r"^\$ $", r"[0-9]{1,3}\.[0-9]{1,3}", r"a+b+c*", r"(ab)+c", r"(?:error|fail)ed? at \d+"])
 def test_ordinary_patterns_are_accepted(pattern):
     assert terms.safe_pattern(pattern).pattern == pattern
 

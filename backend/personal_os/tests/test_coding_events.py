@@ -1,4 +1,4 @@
-"""The structured live feed of coding sessions (coding_events.py + its capture in codingagents.py + the events route).
+"""The structured live feed of coding sessions (events.py + its capture in sessions.py + the events route).
 
 Run: cd backend && .venv/bin/python -m pytest personal_os/tests/test_coding_events.py -q
 """

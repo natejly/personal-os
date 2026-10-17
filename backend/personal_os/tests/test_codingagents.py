@@ -1,4 +1,4 @@
-"""Coding sessions (codingagents.py) with a fake command runner and fake claude job files.
+"""Coding sessions (extensions/coding/sessions.py) with a fake command runner and fake claude job files.
 
 Run: PYTHONPATH=backend backend/.venv/bin/python -m unittest personal_os.tests.test_codingagents -v
 What matters here: the paths and branches a session may use, that a permission flag appears only when the caller

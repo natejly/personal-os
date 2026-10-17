@@ -1059,7 +1059,7 @@ class CodingSessions:
 
 
 def recent_events(db: Any, sid: str, n: int) -> list[Any]:
-    """The last n structured events of a session, or [] while coding_events (or its `recent`) is not there."""
+    """The last n structured events of a session, or [] while events (or its `recent`) is not there."""
     try:
         return list(coding_events.recent(db, sid, n))
     except (AttributeError, TypeError):

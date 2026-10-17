@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ... import shell as shell_tool
+from ...bounds import clamp_limit
 from . import events as coding_events
 from .sessions import CodingError, summary
 
@@ -22,11 +23,6 @@ class CodingSendIn(BaseModel):
 class BridgeReply(BaseModel):
     id: str
     result: dict[str, Any]
-
-
-def _clamp(limit: int, hi: int) -> int:
-    """A list route's LIMIT. SQLite reads a negative one as 'no limit', so it is bounded here, not trusted."""
-    return max(1, min(int(limit), hi))
 
 
 def sessions_router(coding: Coding) -> APIRouter:
@@ -56,13 +52,13 @@ def sessions_router(coding: Coding) -> APIRouter:
     @r.get("/coding-sessions/{id}/logs")
     async def coding_session_logs(id: str, limit: int = 4000) -> dict[str, Any]:
         row = known(id)
-        return {"id": id, "output": row["log_tail"][-_clamp(limit, 50_000):], "status": row["status"]}
+        return {"id": id, "output": row["log_tail"][-clamp_limit(limit, 50_000):], "status": row["status"]}
 
     @r.get("/coding-sessions/{id}/events")
     async def coding_session_events(id: str, after: int = 0, limit: int = 500) -> dict[str, Any]:
         """The session's structured live feed, oldest first: events with seq above `after`."""
         known(id)
-        return {"events": coding_events.list_after(coding.sessions.db, id, max(0, after), _clamp(limit, coding_events.CAP))}
+        return {"events": coding_events.list_after(coding.sessions.db, id, max(0, after), clamp_limit(limit, coding_events.CAP))}
 
     @r.get("/coding-sessions/{id}/diff")
     async def coding_session_diff(id: str, full: int = 0) -> dict[str, Any]:

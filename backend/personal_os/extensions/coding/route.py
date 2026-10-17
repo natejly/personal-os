@@ -338,7 +338,7 @@ def guard_start(tb: Any, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
         try:
             before = _status(root)
         except (OSError, subprocess.SubprocessError):
-            log.warning("coding_route: git status failed in %s; not guarding it", root, exc_info=True)
+            log.warning("git status failed in %s; not guarding it", root, exc_info=True)
             continue
         snap["repos"][root] = {p: (xy, _stat(os.path.join(root, p))) for p, xy in before.items()}
     return snap if snap["repos"] else None
@@ -350,7 +350,7 @@ def guard_finish(snap: dict[str, Any]) -> str | None:
         try:
             after = _status(root)
         except (OSError, subprocess.SubprocessError):
-            log.warning("coding_route: git status failed in %s after a command", root, exc_info=True)
+            log.warning("git status failed in %s after a command", root, exc_info=True)
             continue
         new = [p for p in after if p not in before and _source(p)]
         # Already modified before the command: never touched, only named when the command changed them further.
@@ -373,7 +373,7 @@ def guard_finish(snap: dict[str, Any]) -> str | None:
                             os.remove(f)
                 reverted = new
             except (OSError, subprocess.SubprocessError):
-                log.warning("coding_route: could not revert %s in %s", new, root, exc_info=True)
+                log.warning("could not revert %s in %s", new, root, exc_info=True)
                 failed = new
         def names(ps: list[str]) -> str:
             return ", ".join(ps[:8]) + (f" and {len(ps) - 8} more" if len(ps) > 8 else "")

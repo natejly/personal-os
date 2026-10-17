@@ -28,6 +28,7 @@ from collections import deque
 from typing import TYPE_CHECKING, Any
 
 from ... import logs, mac, permrules, redact, reliability, shell
+from ...bounds import clamp_int
 from ...db import new_id
 from . import opencode, route
 
@@ -145,9 +146,9 @@ def tail(text: str, cap: int = READ_MAX) -> tuple[str, int]:
 
 # ---- a pattern the agent waits for ----
 def safe_pattern(pattern: str) -> re.Pattern[str]:
-    """A compiled pattern that cannot run away: short, without backreferences or lookarounds, and with no unbounded repeat
-    inside another. Python's `re` cannot be interrupted, so what could backtrack badly is refused. If the parser is not
-    there to ask, every pattern is refused (a literal still works)."""
+    """A compiled pattern that cannot run away: short, without backreferences or lookarounds, and with no alternation or
+    repeat inside an unbounded repeat. Python's `re` cannot be interrupted, so what could backtrack badly is refused. If
+    the parser is not there to ask, every pattern is refused (a literal still works)."""
     if len(pattern) > PATTERN_MAX:
         raise TerminalError(f"pattern is over {PATTERN_MAX} characters.", "use `literal` for fixed text")
     try:
@@ -174,7 +175,7 @@ def _risky(items: Any, inside_loop: bool, parser: Any) -> str | None:
         if name in ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"):
             _, hi, body = arg
             loops = hi == unbounded
-            if loops and inside_loop:
+            if inside_loop and hi > 1:
                 return "a repeat inside a repeat"
             if why := _risky(body, inside_loop or loops, parser):
                 return why
@@ -182,6 +183,8 @@ def _risky(items: Any, inside_loop: bool, parser: Any) -> str | None:
             if why := _risky(arg[-1], inside_loop, parser):
                 return why
         elif name == "BRANCH":
+            if inside_loop:
+                return "an alternation inside a repeat"
             for branch in arg[1]:
                 if why := _risky(branch, inside_loop, parser):
                     return why
@@ -270,7 +273,7 @@ class Terminals:
         terminal_id = "tm_" + secrets.token_hex(8)
         try:
             await self.bridge.call({"type": "open", "terminal_id": terminal_id, "argv": confined.argv, "env": env, "cwd": str(where),
-                                    "cols": _clamp(cols, SCREEN_COLS, 120), "rows": _clamp(rows, SCREEN_ROWS, 30)})
+                                    "cols": clamp_int(cols, *SCREEN_COLS, 120), "rows": clamp_int(rows, *SCREEN_ROWS, 30)})
         except TerminalError:
             self._release(tmp, confined.token)
             raise

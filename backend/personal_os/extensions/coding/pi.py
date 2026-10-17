@@ -1,4 +1,4 @@
-"""pi as a coding-session driver (codingagents.py): `pi --mode json "<task>"` under the OS sandbox, as a background job.
+"""pi as a coding-session driver (sessions.py): `pi --mode json "<task>"` under the OS sandbox, as a background job.
 
 pi is a terminal coding agent installed separately on this Mac (`npm i -g @mariozechner/pi-coding-agent`). `--mode json`
 runs one prompt without a terminal UI and prints every session event as a JSON line, the first being the session header

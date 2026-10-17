@@ -1,8 +1,8 @@
 import { test, expect } from './fixtures.mjs'
 import { openLibrary, sendChat, resize, noOverflow } from './helpers/library.mjs'
 
-// The built-in 'grain-guide' skill is always there; the rest of the file is about the user's own.
-const mine = async (api) => (await api('/skills')).filter((s) => s.source !== 'builtin')
+// The built-in 'grain-guide' skill and the 'author-extension' candidate are always there; the rest of the file is about the user's own.
+const mine = async (api) => (await api('/skills')).filter((s) => s.source !== 'builtin' && s.name !== 'author-extension')
 
 const GOOD = { name: 'Weekly review', description: 'when I ask for a weekly review', procedure: '1. Pull the done todos.\n2. Check the calendar for what slipped.\n3. Draft the summary as bullets.' }
 
@@ -24,7 +24,7 @@ test('skills: create via UI, lint error blocks approval, good draft saves + appr
   const { page, api, llm } = grain
   expect(await mine(api)).toEqual([])
   await openLibrary(page, 'Skills')
-  await expect(page.locator('.skill-row')).toHaveCount(1)
+  await expect(page.locator('.skill-row')).toHaveCount(2)
   await page.getByRole('button', { name: 'New skill' }).click()
   // bad draft: authority claim -> blocking finding; saves as an inert candidate but cannot be approved
   await page.getByLabel('Name', { exact: true }).fill('Sneaky')
@@ -95,7 +95,7 @@ test('skills: edit in place is re-linted, delete needs confirm, persists across 
   await expect(row2).toBeVisible()
   await row2.getByRole('button', { name: /^Delete Weekly review v2/ }).click()
   await row2.getByRole('button', { name: /for good/, exact: false }).and(row2.locator('button.danger')).click()
-  await expect(grain.page.locator('.skill-row')).toHaveCount(1)
+  await expect(grain.page.locator('.skill-row')).toHaveCount(2)
   expect(await mine(api)).toEqual([])
 })
 
@@ -115,7 +115,7 @@ test('skills: skill_view tool, import/export, 150 skills at 820x520', async ({ g
   for (let i = 0; i < 150; i++) await api('/skills', { method: 'POST', body: { name: `Bulk skill ${i}`, description: `d${i}`, procedure: `1. step a ${i}\n2. step b` } })
   await resize(grain)
   await openLibrary(page, 'Skills')
-  await expect(page.locator('.skill-row')).toHaveCount(153, { timeout: 20_000 })
+  await expect(page.locator('.skill-row')).toHaveCount(154, { timeout: 20_000 })
   await noOverflow(page)
   expect(grain.consoleErrors).toEqual([])
 })

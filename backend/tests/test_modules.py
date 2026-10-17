@@ -51,11 +51,15 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(names[i - 2:i], ["read_tool_result", "search_tool_results"])  # last of the working-memory block
         self.assertFalse([n for n in names if n.startswith("board_")])  # boards are todos now
 
-    def test_health_and_space_tools_keep_their_place_after_the_modules_tools(self) -> None:
+    def test_health_tools_keep_their_place_after_the_modules_tools(self) -> None:
         names = list(toolbox.specs)
         i = names.index("health_summary")
-        self.assertEqual(names[i - 2:i + 7], ["mail_followups", "schedule_suggest", "health_summary", "health_log", "health_delete_entry",
-                                              "space_list", "space_add_widget", "space_arrange", "doc_list"])
+        self.assertEqual(names[i - 2:i + 4], ["mail_followups", "schedule_suggest", "health_summary", "health_log", "health_delete_entry", "doc_list"])
+
+    def test_space_tools_keep_their_place_after_the_google_tools(self) -> None:
+        names = list(toolbox.specs)
+        i = names.index("space_list")
+        self.assertEqual(names[i - 1:i + 4], ["google_sheets_create", "space_list", "space_add_widget", "space_arrange", "find_files"])
 
     def test_tool_metadata_unchanged(self) -> None:
         for n in TODO_TOOLS:

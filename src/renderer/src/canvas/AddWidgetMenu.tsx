@@ -113,7 +113,8 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
   }
 
   const settings = useStore.getState().settings
-  return (Object.keys(WIDGETS) as WidgetKind[]).filter((kind) => widgetOn(settings, kind)).map((kind): MenuEntry => {
+  const kinds = (Object.keys(WIDGETS) as WidgetKind[]).filter((kind) => widgetOn(settings, kind))
+  return kinds.map((kind): MenuEntry => {
     const { label } = WIDGETS[kind]
     const picker = pickers[kind]
     if (picker) return { kind: 'submenu', label, icon: iconOf(kind), items: safe(picker) }

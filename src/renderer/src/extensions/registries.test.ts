@@ -9,7 +9,9 @@ import {
   activateExtension, fenceRenderer, keybindings, paletteCommands, registerSlot, selectionActions, slotItems, WIDGETS, widgetOn, type UiApi
 } from './host'
 import { Slot } from './slot'
+import { addWidgetEntries } from '../canvas/AddWidgetMenu'
 import type { WidgetDef } from '../canvas/registry'
+import { kindIcon, kindLabel } from '../canvas/WindowHost'
 import '../components/Sidebar'
 import '../components/Composer'
 import '../components/Message'
@@ -90,7 +92,17 @@ test('a canvas widget is added with its extension, offered while it is on, and a
   assert.equal(widgetOn({ hiddenViews: [] } as never, kind), true)
   assert.equal(widgetOn({ hiddenViews: ['widgetdemo'] } as never, kind), false)
   assert.equal(widgetOn({ hiddenViews: ['widgetdemo'] } as never, 'chat'), true)
+  // What the Dock, the Overview and the Add widget menu read for a window of that kind.
+  assert.equal(kindLabel(kind), 'Clock')
+  assert.equal(kindIcon(kind)?.props.size, 18)
+  const menu = (hidden: string[]): string[] => {
+    Object.assign(useStore.getInitialState(), { settings: { hiddenViews: hidden } })
+    return addWidgetEntries({ canvasId: 'c1' }).map((e) => ('label' in e ? e.label : ''))
+  }
+  assert.ok(menu([]).includes('Clock'))
+  assert.ok(!menu(['widgetdemo']).includes('Clock'))
   gone()
+  assert.equal(kindIcon(kind), null)
   assert.equal(kind in WIDGETS, false)
 })
 

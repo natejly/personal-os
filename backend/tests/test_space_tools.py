@@ -1,4 +1,4 @@
-"""space_list / space_add_widget / space_arrange (space_tools.py).
+"""space_list / space_add_widget / space_arrange (extensions/spaces/tools.py).
 
 Run: pytest backend/tests/test_space_tools.py
 """

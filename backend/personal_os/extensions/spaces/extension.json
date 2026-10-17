@@ -10,9 +10,9 @@
   "provides": { "services": ["canvases"] },
   "contributes": {
     "tools": [
-      { "name": "space_list", "danger": "safe", "group": "spaces" },
-      { "name": "space_add_widget", "danger": "writes", "group": "spaces" },
-      { "name": "space_arrange", "danger": "writes", "group": "spaces" }
+      { "name": "space_list", "after": "google_sheets_create", "danger": "safe", "group": "spaces" },
+      { "name": "space_add_widget", "after": "space_list", "danger": "writes", "group": "spaces" },
+      { "name": "space_arrange", "after": "space_add_widget", "danger": "writes", "group": "spaces" }
     ]
   },
   "hooks": { "app.start": {} },

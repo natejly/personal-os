@@ -58,6 +58,12 @@ def register(api: ExtensionScope, canvases: Canvases, widget_kinds: Callable[[],
             return None, {"error": "That canvas is locked by the user; ask them to unlock it."}
         return c, None
 
+    kinds = list(widget_kinds())
+
+    async def refresh_kinds(_: Any) -> None:
+        kinds[:] = widget_kinds()  # the extensions loaded after this one have declared theirs by now
+    api.on("app.start", refresh_kinds)
+
     async def space_list(ctx: dict[str, Any]) -> Any:
         return {"canvases": [{"canvas_id": c["id"], "name": redact.scrub_command_output(str(c["name"] or "")),
                             "locked": bool(c.get("locked")),
@@ -84,7 +90,7 @@ def register(api: ExtensionScope, canvases: Canvases, widget_kinds: Callable[[],
         "space_add_widget",
         "Put a window on a canvas: a todos/calendar/memory/etc. view, or an existing chat, doc or project "
         "(pass its id as ref_id). Never closes or moves other windows.",
-        _obj({"canvas_id": {"type": "string"}, "kind": {"type": "string", "enum": list(widget_kinds())},
+        _obj({"canvas_id": {"type": "string"}, "kind": {"type": "string", "enum": kinds},
               "ref_id": {"type": "string", "description": "Required for chat, doc, project"},
               "title": {"type": "string"}}, ["canvas_id", "kind"]),
         space_add_widget, "spaces", "writes"))

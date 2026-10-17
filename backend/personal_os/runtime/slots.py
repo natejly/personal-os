@@ -17,7 +17,7 @@ from typing import Any, Callable, Iterable, Iterator
 from ..extensions.disposables import Disposable
 from ..extensions.hooks import HookBus
 from ..osplat.base import DIMENSIONS, weaker
-from . import contracts, protocols
+from . import contracts, loop_api, loop_fence, protocols
 
 log = logging.getLogger(__name__)
 
@@ -32,11 +32,11 @@ ACCEPT_PARTIAL = "accept_partial"  # the global selection's record of what the u
 @dataclass(frozen=True)
 class SlotDef:
     id: str
-    protocol: type | None   # None for agent.loop: its interface ships with the first alternative loop
+    protocol: type
     multi: bool          # tools.source only: several providers active at once
     default_id: str
     permission: str
-    contract: Callable[[Any], Any] | None  # a suite any provider must pass (async; raises AssertionError)
+    contract: Callable[[Any], Any]  # a suite any provider must pass (async; raises AssertionError)
     noun: str
 
 
@@ -45,7 +45,7 @@ SLOTS: dict[str, SlotDef] = {d.id: d for d in (
     SlotDef("model.router", protocols.ModelRouter, False, "core/heuristic", "runtime:router", contracts.model_router, "model router"),
     SlotDef("tools.source", protocols.ToolSource, True, "core/builtin", "runtime:tools", contracts.tool_source, "tool source"),
     SlotDef("sandbox.backend", protocols.SandboxBackend, False, "core/os-default", "runtime:sandbox", contracts.sandbox_backend, "sandbox backend"),
-    SlotDef("agent.loop", None, False, "core/chat-loop", "runtime:loop", None, "agent loop"),
+    SlotDef("agent.loop", loop_api.AgentLoop, False, "core/chat-loop", "runtime:loop", contracts.agent_loop, "agent loop"),
 )}
 PERMISSIONS = frozenset(d.permission for d in SLOTS.values())
 
@@ -136,6 +136,8 @@ class Runtime:
         self._announced: set[tuple[str, str, bool]] = set()
         self.router_failures: dict[str, int] = {}  # model.router provider id -> failures in a row (router.choose)
         for provider in core:
+            if provider.slot == "agent.loop" and provider.impl is not None:
+                loop_fence.check(provider.impl)
             self._providers[provider.slot][provider.id] = provider
 
     # ---- registration ----
@@ -147,8 +149,6 @@ class Runtime:
             raise ValueError(f"{provider.slot} already has a provider {provider.id!r}")
         if provider.tier == "user" and provider.slot not in USER_SLOTS:
             raise PermissionError(f"a user extension cannot provide {provider.slot}")
-        if provider.slot == "agent.loop":
-            raise ValueError("agent.loop takes no other provider yet")
         self._providers[provider.slot][provider.id] = provider
         return Disposable(lambda: self._providers[provider.slot].pop(provider.id, None))
 
@@ -160,6 +160,8 @@ class Runtime:
             raise ValueError(f"{provider_id!r} does not implement the {slot} interface")
         if slot == "model.client" and not set(impl.kinds) <= CLIENT_KINDS:
             raise ValueError(f"a model client's kinds are among {', '.join(sorted(CLIENT_KINDS))}")
+        if slot == "agent.loop":
+            loop_fence.check(impl)
         provider.impl = impl
         self._remember(provider)
 

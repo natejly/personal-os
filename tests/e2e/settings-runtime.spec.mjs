@@ -11,8 +11,9 @@ test('Settings > Runtime shows every slot on its built-in provider, with the rea
   for (const slot of SLOTS) {
     await expect(dialog(page).getByTestId(`runtime-${slot}-reason`)).toContainText('by default')
   }
-  // Nothing but the built-in providers exists, so there is nothing to pick and the endpoint agrees.
+  // The model router has only its built-in provider, so there is nothing to pick; the agent loop has one built-in alternative.
   await expect(dialog(page).getByLabel('Model router, Everywhere')).toBeDisabled()
+  await expect(dialog(page).getByLabel('Agent loop, Everywhere').locator('option')).toHaveText(['Default (Chat loop)', 'Chat loop', 'Plan, execute, verify (built-in)'])
   const resolved = await api('/runtime/resolve')
   expect(Object.keys(resolved).sort()).toEqual([...SLOTS].sort())
   expect(Object.values(resolved).every((r) => r.default === true && r.source === 'default')).toBe(true)

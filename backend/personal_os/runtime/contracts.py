@@ -4,6 +4,7 @@ async and raises AssertionError with the reason."""
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 import re
 import subprocess
@@ -106,3 +107,9 @@ def _sandbox_checks(impl: Any) -> None:
 
 async def sandbox_backend(impl: Any) -> None:
     await asyncio.to_thread(_sandbox_checks, impl)
+
+
+async def agent_loop(impl: Any) -> None:
+    assert isinstance(impl.id, str) and impl.id, "a loop has an id"
+    assert impl.bounds and all(isinstance(n, int) and n > 0 for n in impl.bounds.values()), "bounds name the rounds the loop may count, each a positive number"
+    assert inspect.isasyncgenfunction(impl.run), "run(turn, harness) must be an async generator of events"

@@ -1,6 +1,7 @@
 """The built-in provider of each slot: what runs when nothing else is selected."""
 from __future__ import annotations
 
+from .plan_loop import PlanExecuteVerify
 from .slots import Provider
 
 
@@ -13,4 +14,5 @@ def core_providers() -> list[Provider]:
         Provider("core/mcp", "tools.source", "Connectors", core=True),
         Provider("core/os-default", "sandbox.backend", "OS sandbox", impl=sandbox.OS_DEFAULT, core=True),
         Provider("core/chat-loop", "agent.loop", "Chat loop", core=True),
+        Provider("core/plan-execute-verify", "agent.loop", "Plan, execute, verify", impl=PlanExecuteVerify()),
     ]

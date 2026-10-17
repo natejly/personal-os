@@ -723,7 +723,7 @@ export interface ToolEvent {
 /** Why a reply stopped early. `rounds`, `tokens`, `time` and `cost` only appear on rows stored by an older version. */
 export type PartialReason = 'rounds' | 'tokens' | 'time' | 'cost' | 'loop' | 'stuck' | 'stuck_nudge'
 
-export type SpanKind = 'context' | 'llm' | 'tool' | 'learn' | 'compact' | 'runtime'
+export type SpanKind = 'context' | 'llm' | 'tool' | 'learn' | 'compact' | 'runtime' | 'loop'
 
 /** One timed step in the execution trace of an assistant reply. */
 export interface Span {

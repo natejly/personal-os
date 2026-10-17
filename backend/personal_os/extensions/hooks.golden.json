@@ -40,6 +40,8 @@
     ["runtime.changed", "emit", "1.0"],
     ["runtime.fallback", "emit", "1.0"],
     ["sandbox.refused", "emit", "1.0"],
-    ["preset.applied", "emit", "1.0"]
+    ["preset.applied", "emit", "1.0"],
+    ["loop.plan", "emit", "1.0"],
+    ["loop.verify", "emit", "1.0"]
   ]
 }

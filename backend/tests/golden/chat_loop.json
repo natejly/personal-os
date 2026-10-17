@@ -1,0 +1,8011 @@
+{
+ "repeat_breaker": {
+  "events": [
+   {
+    "data": null,
+    "event": "user_message",
+    "keys": {
+     "attachments": null,
+     "content": null,
+     "context_used": null,
+     "conversation_id": null,
+     "created_at": null,
+     "error": null,
+     "error_kind": null,
+     "id": null,
+     "kind": null,
+     "model": null,
+     "outcome": null,
+     "reasoning": null,
+     "role": null,
+     "tool_events": null,
+     "trace": null,
+     "variant_of": null,
+     "variants": null
+    }
+   },
+   {
+    "data": null,
+    "event": "title",
+    "keys": {
+     "id": null,
+     "title": null
+    }
+   },
+   {
+    "data": null,
+    "event": "assistant_message",
+    "keys": {
+     "attachments": null,
+     "content": null,
+     "context_used": {
+      "chunks": null,
+      "edges": null,
+      "map": null,
+      "memories": null,
+      "nodes": null,
+      "page": null,
+      "pinned": null,
+      "profile": null,
+      "project": null,
+      "skills": null,
+      "stable_hash": null,
+      "style": null,
+      "tokens_estimate": null,
+      "tools_deferred": null,
+      "trimmed": null
+     },
+     "conversation_id": null,
+     "created_at": null,
+     "error": null,
+     "error_kind": null,
+     "id": null,
+     "kind": null,
+     "model": null,
+     "outcome": null,
+     "reasoning": null,
+     "role": null,
+     "tool_events": null,
+     "trace": null,
+     "variant_of": null,
+     "variants": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "arguments": {},
+     "forced": false,
+     "id": "<id>:r0",
+     "mcp": null,
+     "message_id": "<id>",
+     "name": "g_read",
+     "needs_approval": false,
+     "permission": null,
+     "plan": null,
+     "proposal": null,
+     "review": null
+    },
+    "event": "tool_call",
+    "keys": {
+     "arguments": {},
+     "forced": null,
+     "id": null,
+     "mcp": null,
+     "message_id": null,
+     "name": null,
+     "needs_approval": null,
+     "permission": null,
+     "plan": null,
+     "proposal": null,
+     "review": null,
+     "started_at": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "error": null,
+     "forced": false,
+     "id": "<id>:r0",
+     "images": null,
+     "message_id": "<id>",
+     "name": "g_read",
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": "{\"ok\": true, \"read\": 1}",
+     "show": null,
+     "tainted": false,
+     "undo": null
+    },
+    "event": "tool_result",
+    "keys": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "duration_ms": null,
+     "error": null,
+     "forced": null,
+     "id": null,
+     "images": null,
+     "message_id": null,
+     "name": null,
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": null,
+     "show": null,
+     "tainted": null,
+     "undo": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "arguments": {},
+     "forced": false,
+     "id": "<id>:r1",
+     "mcp": null,
+     "message_id": "<id>",
+     "name": "g_read",
+     "needs_approval": false,
+     "permission": null,
+     "plan": null,
+     "proposal": null,
+     "review": null
+    },
+    "event": "tool_call",
+    "keys": {
+     "arguments": {},
+     "forced": null,
+     "id": null,
+     "mcp": null,
+     "message_id": null,
+     "name": null,
+     "needs_approval": null,
+     "permission": null,
+     "plan": null,
+     "proposal": null,
+     "review": null,
+     "started_at": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "error": null,
+     "forced": false,
+     "id": "<id>:r1",
+     "images": null,
+     "message_id": "<id>",
+     "name": "g_read",
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": "{\"ok\": true, \"read\": 1}",
+     "show": null,
+     "tainted": false,
+     "undo": null
+    },
+    "event": "tool_result",
+    "keys": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "duration_ms": null,
+     "error": null,
+     "forced": null,
+     "id": null,
+     "images": null,
+     "message_id": null,
+     "name": null,
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": null,
+     "show": null,
+     "tainted": null,
+     "undo": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "arguments": {},
+     "forced": true,
+     "id": "<id>:r2",
+     "mcp": null,
+     "message_id": "<id>",
+     "name": "g_read",
+     "needs_approval": true,
+     "permission": {
+      "danger": "safe",
+      "kind": "doom_loop",
+      "rule": null,
+      "session": false,
+      "subject": "doom_loop(g_read)",
+      "suggestions": []
+     },
+     "plan": null,
+     "proposal": null,
+     "review": null
+    },
+    "event": "tool_call",
+    "keys": {
+     "arguments": {},
+     "forced": null,
+     "id": null,
+     "mcp": null,
+     "message_id": null,
+     "name": null,
+     "needs_approval": null,
+     "permission": {
+      "danger": null,
+      "kind": null,
+      "rule": null,
+      "session": null,
+      "subject": null,
+      "suggestions": null
+     },
+     "plan": null,
+     "proposal": null,
+     "review": null,
+     "started_at": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "decision": "allow",
+     "id": "<id>:r2",
+     "message_id": "<id>"
+    },
+    "event": "tool_decision",
+    "keys": {
+     "decision": null,
+     "id": null,
+     "message_id": null
+    }
+   },
+   {
+    "data": {
+     "approval": "allow",
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "error": null,
+     "forced": true,
+     "id": "<id>:r2",
+     "images": null,
+     "message_id": "<id>",
+     "name": "g_read",
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": "{\"ok\": true, \"read\": 1}",
+     "show": null,
+     "tainted": false,
+     "undo": null
+    },
+    "event": "tool_result",
+    "keys": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "duration_ms": null,
+     "error": null,
+     "forced": null,
+     "id": null,
+     "images": null,
+     "message_id": null,
+     "name": null,
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": null,
+     "show": null,
+     "tainted": null,
+     "undo": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "arguments": {},
+     "forced": true,
+     "id": "<id>:r3",
+     "mcp": null,
+     "message_id": "<id>",
+     "name": "g_read",
+     "needs_approval": true,
+     "permission": {
+      "danger": "safe",
+      "kind": "doom_loop",
+      "rule": null,
+      "session": false,
+      "subject": "doom_loop(g_read)",
+      "suggestions": []
+     },
+     "plan": null,
+     "proposal": null,
+     "review": null
+    },
+    "event": "tool_call",
+    "keys": {
+     "arguments": {},
+     "forced": null,
+     "id": null,
+     "mcp": null,
+     "message_id": null,
+     "name": null,
+     "needs_approval": null,
+     "permission": {
+      "danger": null,
+      "kind": null,
+      "rule": null,
+      "session": null,
+      "subject": null,
+      "suggestions": null
+     },
+     "plan": null,
+     "proposal": null,
+     "review": null,
+     "started_at": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "decision": "allow",
+     "id": "<id>:r3",
+     "message_id": "<id>"
+    },
+    "event": "tool_decision",
+    "keys": {
+     "decision": null,
+     "id": null,
+     "message_id": null
+    }
+   },
+   {
+    "data": {
+     "approval": "allow",
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": "stuck_nudge",
+     "dashboard": null,
+     "error": null,
+     "forced": true,
+     "id": "<id>:r3",
+     "images": null,
+     "message_id": "<id>",
+     "name": "g_read",
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": "{\"ok\": true, \"read\": 1}",
+     "show": null,
+     "tainted": false,
+     "undo": null
+    },
+    "event": "tool_result",
+    "keys": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "duration_ms": null,
+     "error": null,
+     "forced": null,
+     "id": null,
+     "images": null,
+     "message_id": null,
+     "name": null,
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": null,
+     "show": null,
+     "tainted": null,
+     "undo": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "delta",
+    "keys": {
+     "id": null,
+     "text": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "done",
+    "keys": {
+     "attachments": null,
+     "context_used": {
+      "chunks": null,
+      "edges": null,
+      "map": null,
+      "memories": null,
+      "nodes": null,
+      "page": null,
+      "pinned": null,
+      "profile": null,
+      "project": null,
+      "skills": null,
+      "stable_hash": null,
+      "style": null,
+      "tokens_estimate": null,
+      "tools_deferred": null,
+      "trimmed": null
+     },
+     "error": null,
+     "error_kind": null,
+     "id": null,
+     "notice": null,
+     "outcome": null,
+     "partial": null,
+     "reasoning": null,
+     "segment": null,
+     "stopped": null,
+     "taint_sources": null,
+     "tainted": null,
+     "tool_events": null,
+     "trace": null
+    }
+   }
+  ],
+  "executed_calls": [],
+  "hooks": [
+   [
+    "emit",
+    "chat.created",
+    "4f24799e3eb6"
+   ],
+   [
+    "pipe",
+    "model.select",
+    "51618bde1db8"
+   ],
+   [
+    "collect",
+    "context.contribute",
+    "7ed8eba0c90c"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "b14cdda6d3ea"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "1f17c13bff15"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "d78ef3ea5790"
+   ],
+   [
+    "emit_sync",
+    "approval.requested",
+    "5bc8e348674c"
+   ],
+   [
+    "emit_sync",
+    "approval.resolved",
+    "7e7da20f08f9"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "1172939987a7"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "791376bcafeb"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "091975c272de"
+   ],
+   [
+    "emit",
+    "turn.settled",
+    "<object>"
+   ],
+   [
+    "emit",
+    "run.after",
+    "<object>"
+   ],
+   [
+    "emit",
+    "chat.created",
+    "4f24799e3eb6"
+   ],
+   [
+    "pipe",
+    "model.select",
+    "51618bde1db8"
+   ],
+   [
+    "collect",
+    "context.contribute",
+    "7ed8eba0c90c"
+   ],
+   [
+    "emit_sync",
+    "approval.requested",
+    "f7e2abe9941b"
+   ],
+   [
+    "emit_sync",
+    "approval.resolved",
+    "6a73034bdbf4"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "54d218ad39f2"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "475847c141cd"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "81cf6e86edc0"
+   ],
+   [
+    "emit",
+    "turn.settled",
+    "<object>"
+   ],
+   [
+    "emit",
+    "run.after",
+    "<object>"
+   ],
+   [
+    "emit",
+    "chat.created",
+    "4f24799e3eb6"
+   ],
+   [
+    "pipe",
+    "model.select",
+    "51618bde1db8"
+   ],
+   [
+    "collect",
+    "context.contribute",
+    "7ed8eba0c90c"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "830ee6e3895b"
+   ],
+   [
+    "emit",
+    "turn.settled",
+    "<object>"
+   ],
+   [
+    "emit",
+    "run.after",
+    "<object>"
+   ],
+   [
+    "emit",
+    "chat.created",
+    "4f24799e3eb6"
+   ],
+   [
+    "pipe",
+    "model.select",
+    "51618bde1db8"
+   ],
+   [
+    "collect",
+    "context.contribute",
+    "7ed8eba0c90c"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "270a2a878917"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "5d4827694e48"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "a9be0407ecff"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "e7d2d26a137f"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "7716defca443"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "8ef96fa5416b"
+   ],
+   [
+    "emit_sync",
+    "approval.requested",
+    "7266aad3ad5b"
+   ],
+   [
+    "emit_sync",
+    "approval.resolved",
+    "2c717d19dc5a"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "e6d598cb414a"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "303f6f6057df"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "71b235e2d7a9"
+   ],
+   [
+    "emit_sync",
+    "approval.requested",
+    "1dc3dc4ad586"
+   ],
+   [
+    "emit_sync",
+    "approval.resolved",
+    "eeea41211503"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "5d245653c84b"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "2720929fe5cd"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "ff7f5e55696b"
+   ],
+   [
+    "emit",
+    "turn.settled",
+    "<object>"
+   ],
+   [
+    "emit",
+    "run.after",
+    "<object>"
+   ]
+  ],
+  "model_calls": [
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "a",
+        "type": "function"
+       },
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_off"
+        },
+        "id": "b",
+        "type": "function"
+       },
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_write"
+        },
+        "id": "c",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "a"
+     },
+     {
+      "content": "{\"error\": \"g_off is turned off for this chat. Do not retry it.\", \"try_instead\": \"continue without it, or ask the user what they would like instead\"}",
+      "role": "tool",
+      "tool_call_id": "b"
+     },
+     {
+      "content": "{\"ok\": true, \"wrote\": 1}",
+      "role": "tool",
+      "tool_call_id": "c"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_write"
+        },
+        "id": "a",
+        "type": "function"
+       },
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "b",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"error\": \"g_write is just declined by the user. Do not retry it.\", \"try_instead\": \"continue without it, or ask the user what they would like instead\"}",
+      "role": "tool",
+      "tool_call_id": "a"
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "b"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_off",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r0",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r0",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r1",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r1"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r0",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r1",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r1"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r2",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r2"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r0",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r1",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r1"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r2",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r2"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r3",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}\n\n[stuck_notice] You appear to be stuck: g_read returned the same result 4 times in a row. Change approach: use a different tool or arguments, or answer with what you have and say what is missing.",
+      "role": "tool",
+      "tool_call_id": "r3"
+     },
+     {
+      "content": "This reply has already used 4 rounds of tool calls itself. From here only delegate, message_worker, check_worker, stop_worker, resume_worker and todo_write are offered. Hand the remaining work to a worker with a self-contained brief. Do not announce it and do not explain this rule; if there is nothing else for the user, answer with exactly NO_REPLY.",
+      "role": "system"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "deep_research"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r0",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r1",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r1"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r2",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r2"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r3",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}\n\n[stuck_notice] You appear to be stuck: g_read returned the same result 4 times in a row. Change approach: use a different tool or arguments, or answer with what you have and say what is missing.",
+      "role": "tool",
+      "tool_call_id": "r3"
+     },
+     {
+      "content": "This reply has already used 4 rounds of tool calls itself. From here only delegate, message_worker, check_worker, stop_worker, resume_worker and todo_write are offered. Hand the remaining work to a worker with a self-contained brief. Do not announce it and do not explain this rule; if there is nothing else for the user, answer with exactly NO_REPLY.",
+      "role": "system"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r4",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "g_read has been called with identical arguments 5 times in a row, so this reply is stopping tool use. Answer with what you already have, and say in one line what you could not finish.",
+      "role": "tool",
+      "tool_call_id": "r4"
+     }
+    ],
+    "tool_choice": "none",
+    "tools": [
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "deep_research"
+    ]
+   }
+  ],
+  "prefix_sha1": "b553374af93ab2117cbc0165e1b40d11cfe1cb7e"
+ },
+ "round_card_allowed": {
+  "events": [
+   {
+    "data": null,
+    "event": "user_message",
+    "keys": {
+     "attachments": null,
+     "content": null,
+     "context_used": null,
+     "conversation_id": null,
+     "created_at": null,
+     "error": null,
+     "error_kind": null,
+     "id": null,
+     "kind": null,
+     "model": null,
+     "outcome": null,
+     "reasoning": null,
+     "role": null,
+     "tool_events": null,
+     "trace": null,
+     "variant_of": null,
+     "variants": null
+    }
+   },
+   {
+    "data": null,
+    "event": "title",
+    "keys": {
+     "id": null,
+     "title": null
+    }
+   },
+   {
+    "data": null,
+    "event": "assistant_message",
+    "keys": {
+     "attachments": null,
+     "content": null,
+     "context_used": {
+      "chunks": null,
+      "edges": null,
+      "map": null,
+      "memories": null,
+      "nodes": null,
+      "page": null,
+      "pinned": null,
+      "profile": null,
+      "project": null,
+      "skills": null,
+      "stable_hash": null,
+      "style": null,
+      "tokens_estimate": null,
+      "tools_deferred": null,
+      "trimmed": null
+     },
+     "conversation_id": null,
+     "created_at": null,
+     "error": null,
+     "error_kind": null,
+     "id": null,
+     "kind": null,
+     "model": null,
+     "outcome": null,
+     "reasoning": null,
+     "role": null,
+     "tool_events": null,
+     "trace": null,
+     "variant_of": null,
+     "variants": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "arguments": {},
+     "forced": false,
+     "id": "<id>:a",
+     "mcp": null,
+     "message_id": "<id>",
+     "name": "g_read",
+     "needs_approval": false,
+     "permission": null,
+     "plan": null,
+     "proposal": null,
+     "review": null
+    },
+    "event": "tool_call",
+    "keys": {
+     "arguments": {},
+     "forced": null,
+     "id": null,
+     "mcp": null,
+     "message_id": null,
+     "name": null,
+     "needs_approval": null,
+     "permission": null,
+     "plan": null,
+     "proposal": null,
+     "review": null,
+     "started_at": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "error": null,
+     "forced": false,
+     "id": "<id>:a",
+     "images": null,
+     "message_id": "<id>",
+     "name": "g_read",
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": "{\"ok\": true, \"read\": 1}",
+     "show": null,
+     "tainted": false,
+     "undo": null
+    },
+    "event": "tool_result",
+    "keys": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "duration_ms": null,
+     "error": null,
+     "forced": null,
+     "id": null,
+     "images": null,
+     "message_id": null,
+     "name": null,
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": null,
+     "show": null,
+     "tainted": null,
+     "undo": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "arguments": {},
+     "forced": false,
+     "id": "<id>:b",
+     "mcp": null,
+     "message_id": "<id>",
+     "name": "g_off",
+     "needs_approval": false,
+     "permission": null,
+     "plan": null,
+     "proposal": null,
+     "review": null
+    },
+    "event": "tool_call",
+    "keys": {
+     "arguments": {},
+     "forced": null,
+     "id": null,
+     "mcp": null,
+     "message_id": null,
+     "name": null,
+     "needs_approval": null,
+     "permission": null,
+     "plan": null,
+     "proposal": null,
+     "review": null,
+     "started_at": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "error": "g_off is turned off for this chat. Do not retry it.",
+     "forced": false,
+     "id": "<id>:b",
+     "images": null,
+     "message_id": "<id>",
+     "name": "g_off",
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": "{\"error\": \"g_off is turned off for this chat. Do not retry it.\", \"try_instead\": \"continue without it, or ask the user what they would like instead\"}",
+     "show": null,
+     "tainted": false,
+     "undo": null
+    },
+    "event": "tool_result",
+    "keys": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "duration_ms": null,
+     "error": null,
+     "forced": null,
+     "id": null,
+     "images": null,
+     "message_id": null,
+     "name": null,
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": null,
+     "show": null,
+     "tainted": null,
+     "undo": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "arguments": {},
+     "forced": false,
+     "id": "<id>:c",
+     "mcp": null,
+     "message_id": "<id>",
+     "name": "g_write",
+     "needs_approval": true,
+     "permission": {
+      "danger": "writes",
+      "kind": null,
+      "rule": null,
+      "session": true,
+      "subject": "g_write",
+      "suggestions": []
+     },
+     "plan": null,
+     "proposal": null,
+     "review": null
+    },
+    "event": "tool_call",
+    "keys": {
+     "arguments": {},
+     "forced": null,
+     "id": null,
+     "mcp": null,
+     "message_id": null,
+     "name": null,
+     "needs_approval": null,
+     "permission": {
+      "danger": null,
+      "kind": null,
+      "rule": null,
+      "session": null,
+      "subject": null,
+      "suggestions": null
+     },
+     "plan": null,
+     "proposal": null,
+     "review": null,
+     "started_at": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "decision": "allow",
+     "id": "<id>:c",
+     "message_id": "<id>"
+    },
+    "event": "tool_decision",
+    "keys": {
+     "decision": null,
+     "id": null,
+     "message_id": null
+    }
+   },
+   {
+    "data": {
+     "approval": "allow",
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "error": null,
+     "forced": false,
+     "id": "<id>:c",
+     "images": null,
+     "message_id": "<id>",
+     "name": "g_write",
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": "{\"ok\": true, \"wrote\": 1}",
+     "show": null,
+     "tainted": false,
+     "undo": null
+    },
+    "event": "tool_result",
+    "keys": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "duration_ms": null,
+     "error": null,
+     "forced": null,
+     "id": null,
+     "images": null,
+     "message_id": null,
+     "name": null,
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": null,
+     "show": null,
+     "tainted": null,
+     "undo": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "delta",
+    "keys": {
+     "id": null,
+     "text": null
+    }
+   },
+   {
+    "data": null,
+    "event": "delta",
+    "keys": {
+     "id": null,
+     "text": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "done",
+    "keys": {
+     "attachments": null,
+     "context_used": {
+      "chunks": null,
+      "edges": null,
+      "map": null,
+      "memories": null,
+      "nodes": null,
+      "page": null,
+      "pinned": null,
+      "profile": null,
+      "project": null,
+      "skills": null,
+      "stable_hash": null,
+      "style": null,
+      "tokens_estimate": null,
+      "tools_deferred": null,
+      "trimmed": null
+     },
+     "error": null,
+     "error_kind": null,
+     "id": null,
+     "notice": null,
+     "outcome": null,
+     "partial": null,
+     "reasoning": null,
+     "segment": null,
+     "stopped": null,
+     "taint_sources": null,
+     "tainted": null,
+     "tool_events": null,
+     "trace": null
+    }
+   }
+  ],
+  "executed_calls": [
+   {
+    "args_digest": "<id>",
+    "attempts": 1,
+    "result": {
+     "ok": true,
+     "wrote": 1
+    },
+    "status": "done",
+    "tool": "g_write"
+   }
+  ],
+  "hooks": [
+   [
+    "emit",
+    "chat.created",
+    "4f24799e3eb6"
+   ],
+   [
+    "pipe",
+    "model.select",
+    "51618bde1db8"
+   ],
+   [
+    "collect",
+    "context.contribute",
+    "7ed8eba0c90c"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "b14cdda6d3ea"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "1f17c13bff15"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "d78ef3ea5790"
+   ],
+   [
+    "emit_sync",
+    "approval.requested",
+    "5bc8e348674c"
+   ],
+   [
+    "emit_sync",
+    "approval.resolved",
+    "7e7da20f08f9"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "1172939987a7"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "791376bcafeb"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "091975c272de"
+   ],
+   [
+    "emit",
+    "turn.settled",
+    "<object>"
+   ],
+   [
+    "emit",
+    "run.after",
+    "<object>"
+   ]
+  ],
+  "model_calls": [
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "a",
+        "type": "function"
+       },
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_off"
+        },
+        "id": "b",
+        "type": "function"
+       },
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_write"
+        },
+        "id": "c",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "a"
+     },
+     {
+      "content": "{\"error\": \"g_off is turned off for this chat. Do not retry it.\", \"try_instead\": \"continue without it, or ask the user what they would like instead\"}",
+      "role": "tool",
+      "tool_call_id": "b"
+     },
+     {
+      "content": "{\"ok\": true, \"wrote\": 1}",
+      "role": "tool",
+      "tool_call_id": "c"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   }
+  ],
+  "prefix_sha1": "b553374af93ab2117cbc0165e1b40d11cfe1cb7e"
+ },
+ "round_card_denied": {
+  "events": [
+   {
+    "data": null,
+    "event": "user_message",
+    "keys": {
+     "attachments": null,
+     "content": null,
+     "context_used": null,
+     "conversation_id": null,
+     "created_at": null,
+     "error": null,
+     "error_kind": null,
+     "id": null,
+     "kind": null,
+     "model": null,
+     "outcome": null,
+     "reasoning": null,
+     "role": null,
+     "tool_events": null,
+     "trace": null,
+     "variant_of": null,
+     "variants": null
+    }
+   },
+   {
+    "data": null,
+    "event": "title",
+    "keys": {
+     "id": null,
+     "title": null
+    }
+   },
+   {
+    "data": null,
+    "event": "assistant_message",
+    "keys": {
+     "attachments": null,
+     "content": null,
+     "context_used": {
+      "chunks": null,
+      "edges": null,
+      "map": null,
+      "memories": null,
+      "nodes": null,
+      "page": null,
+      "pinned": null,
+      "profile": null,
+      "project": null,
+      "skills": null,
+      "stable_hash": null,
+      "style": null,
+      "tokens_estimate": null,
+      "tools_deferred": null,
+      "trimmed": null
+     },
+     "conversation_id": null,
+     "created_at": null,
+     "error": null,
+     "error_kind": null,
+     "id": null,
+     "kind": null,
+     "model": null,
+     "outcome": null,
+     "reasoning": null,
+     "role": null,
+     "tool_events": null,
+     "trace": null,
+     "variant_of": null,
+     "variants": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "arguments": {},
+     "forced": false,
+     "id": "<id>:a",
+     "mcp": null,
+     "message_id": "<id>",
+     "name": "g_write",
+     "needs_approval": true,
+     "permission": {
+      "danger": "writes",
+      "kind": null,
+      "rule": null,
+      "session": true,
+      "subject": "g_write",
+      "suggestions": []
+     },
+     "plan": null,
+     "proposal": null,
+     "review": null
+    },
+    "event": "tool_call",
+    "keys": {
+     "arguments": {},
+     "forced": null,
+     "id": null,
+     "mcp": null,
+     "message_id": null,
+     "name": null,
+     "needs_approval": null,
+     "permission": {
+      "danger": null,
+      "kind": null,
+      "rule": null,
+      "session": null,
+      "subject": null,
+      "suggestions": null
+     },
+     "plan": null,
+     "proposal": null,
+     "review": null,
+     "started_at": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "decision": "deny",
+     "id": "<id>:a",
+     "message_id": "<id>"
+    },
+    "event": "tool_decision",
+    "keys": {
+     "decision": null,
+     "id": null,
+     "message_id": null
+    }
+   },
+   {
+    "data": {
+     "approval": "deny",
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "error": "g_write is just declined by the user. Do not retry it.",
+     "forced": false,
+     "id": "<id>:a",
+     "images": null,
+     "message_id": "<id>",
+     "name": "g_write",
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": "{\"error\": \"g_write is just declined by the user. Do not retry it.\", \"try_instead\": \"continue without it, or ask the user what they would like instead\"}",
+     "show": null,
+     "tainted": false,
+     "undo": null
+    },
+    "event": "tool_result",
+    "keys": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "duration_ms": null,
+     "error": null,
+     "forced": null,
+     "id": null,
+     "images": null,
+     "message_id": null,
+     "name": null,
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": null,
+     "show": null,
+     "tainted": null,
+     "undo": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "arguments": {},
+     "forced": false,
+     "id": "<id>:b",
+     "mcp": null,
+     "message_id": "<id>",
+     "name": "g_read",
+     "needs_approval": false,
+     "permission": null,
+     "plan": null,
+     "proposal": null,
+     "review": null
+    },
+    "event": "tool_call",
+    "keys": {
+     "arguments": {},
+     "forced": null,
+     "id": null,
+     "mcp": null,
+     "message_id": null,
+     "name": null,
+     "needs_approval": null,
+     "permission": null,
+     "plan": null,
+     "proposal": null,
+     "review": null,
+     "started_at": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "error": null,
+     "forced": false,
+     "id": "<id>:b",
+     "images": null,
+     "message_id": "<id>",
+     "name": "g_read",
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": "{\"ok\": true, \"read\": 1}",
+     "show": null,
+     "tainted": false,
+     "undo": null
+    },
+    "event": "tool_result",
+    "keys": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "duration_ms": null,
+     "error": null,
+     "forced": null,
+     "id": null,
+     "images": null,
+     "message_id": null,
+     "name": null,
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": null,
+     "show": null,
+     "tainted": null,
+     "undo": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "delta",
+    "keys": {
+     "id": null,
+     "text": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "done",
+    "keys": {
+     "attachments": null,
+     "context_used": {
+      "chunks": null,
+      "edges": null,
+      "map": null,
+      "memories": null,
+      "nodes": null,
+      "page": null,
+      "pinned": null,
+      "profile": null,
+      "project": null,
+      "skills": null,
+      "stable_hash": null,
+      "style": null,
+      "tokens_estimate": null,
+      "tools_deferred": null,
+      "trimmed": null
+     },
+     "error": null,
+     "error_kind": null,
+     "id": null,
+     "notice": null,
+     "outcome": null,
+     "partial": null,
+     "reasoning": null,
+     "segment": null,
+     "stopped": null,
+     "taint_sources": null,
+     "tainted": null,
+     "tool_events": null,
+     "trace": null
+    }
+   }
+  ],
+  "executed_calls": [],
+  "hooks": [
+   [
+    "emit",
+    "chat.created",
+    "4f24799e3eb6"
+   ],
+   [
+    "pipe",
+    "model.select",
+    "51618bde1db8"
+   ],
+   [
+    "collect",
+    "context.contribute",
+    "7ed8eba0c90c"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "b14cdda6d3ea"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "1f17c13bff15"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "d78ef3ea5790"
+   ],
+   [
+    "emit_sync",
+    "approval.requested",
+    "5bc8e348674c"
+   ],
+   [
+    "emit_sync",
+    "approval.resolved",
+    "7e7da20f08f9"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "1172939987a7"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "791376bcafeb"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "091975c272de"
+   ],
+   [
+    "emit",
+    "turn.settled",
+    "<object>"
+   ],
+   [
+    "emit",
+    "run.after",
+    "<object>"
+   ],
+   [
+    "emit",
+    "chat.created",
+    "4f24799e3eb6"
+   ],
+   [
+    "pipe",
+    "model.select",
+    "51618bde1db8"
+   ],
+   [
+    "collect",
+    "context.contribute",
+    "7ed8eba0c90c"
+   ],
+   [
+    "emit_sync",
+    "approval.requested",
+    "f7e2abe9941b"
+   ],
+   [
+    "emit_sync",
+    "approval.resolved",
+    "6a73034bdbf4"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "54d218ad39f2"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "475847c141cd"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "81cf6e86edc0"
+   ],
+   [
+    "emit",
+    "turn.settled",
+    "<object>"
+   ],
+   [
+    "emit",
+    "run.after",
+    "<object>"
+   ]
+  ],
+  "model_calls": [
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "a",
+        "type": "function"
+       },
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_off"
+        },
+        "id": "b",
+        "type": "function"
+       },
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_write"
+        },
+        "id": "c",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "a"
+     },
+     {
+      "content": "{\"error\": \"g_off is turned off for this chat. Do not retry it.\", \"try_instead\": \"continue without it, or ask the user what they would like instead\"}",
+      "role": "tool",
+      "tool_call_id": "b"
+     },
+     {
+      "content": "{\"ok\": true, \"wrote\": 1}",
+      "role": "tool",
+      "tool_call_id": "c"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_write"
+        },
+        "id": "a",
+        "type": "function"
+       },
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "b",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"error\": \"g_write is just declined by the user. Do not retry it.\", \"try_instead\": \"continue without it, or ask the user what they would like instead\"}",
+      "role": "tool",
+      "tool_call_id": "a"
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "b"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   }
+  ],
+  "prefix_sha1": "b553374af93ab2117cbc0165e1b40d11cfe1cb7e"
+ },
+ "stopped_in_a_tool": {
+  "events": [
+   {
+    "data": null,
+    "event": "user_message",
+    "keys": {
+     "attachments": null,
+     "content": null,
+     "context_used": null,
+     "conversation_id": null,
+     "created_at": null,
+     "error": null,
+     "error_kind": null,
+     "id": null,
+     "kind": null,
+     "model": null,
+     "outcome": null,
+     "reasoning": null,
+     "role": null,
+     "tool_events": null,
+     "trace": null,
+     "variant_of": null,
+     "variants": null
+    }
+   },
+   {
+    "data": null,
+    "event": "title",
+    "keys": {
+     "id": null,
+     "title": null
+    }
+   },
+   {
+    "data": null,
+    "event": "assistant_message",
+    "keys": {
+     "attachments": null,
+     "content": null,
+     "context_used": {
+      "chunks": null,
+      "edges": null,
+      "map": null,
+      "memories": null,
+      "nodes": null,
+      "page": null,
+      "pinned": null,
+      "profile": null,
+      "project": null,
+      "skills": null,
+      "stable_hash": null,
+      "style": null,
+      "tokens_estimate": null,
+      "tools_deferred": null,
+      "trimmed": null
+     },
+     "conversation_id": null,
+     "created_at": null,
+     "error": null,
+     "error_kind": null,
+     "id": null,
+     "kind": null,
+     "model": null,
+     "outcome": null,
+     "reasoning": null,
+     "role": null,
+     "tool_events": null,
+     "trace": null,
+     "variant_of": null,
+     "variants": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "arguments": {},
+     "forced": false,
+     "id": "<id>:a",
+     "mcp": null,
+     "message_id": "<id>",
+     "name": "g_hang",
+     "needs_approval": false,
+     "permission": null,
+     "plan": null,
+     "proposal": null,
+     "review": null
+    },
+    "event": "tool_call",
+    "keys": {
+     "arguments": {},
+     "forced": null,
+     "id": null,
+     "mcp": null,
+     "message_id": null,
+     "name": null,
+     "needs_approval": null,
+     "permission": null,
+     "plan": null,
+     "proposal": null,
+     "review": null,
+     "started_at": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "error": "Stopped by the user.",
+     "forced": false,
+     "id": "<id>:a",
+     "images": null,
+     "interrupted": true,
+     "message_id": "<id>",
+     "name": "g_hang",
+     "pending": false,
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": "{\"error\": \"Stopped by the user.\"}",
+     "show": null,
+     "tainted": false,
+     "undo": null
+    },
+    "event": "tool_result",
+    "keys": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "blocked_by": null,
+     "breaker": null,
+     "dashboard": null,
+     "duration_ms": null,
+     "error": null,
+     "forced": null,
+     "id": null,
+     "images": null,
+     "interrupted": null,
+     "message_id": null,
+     "name": null,
+     "pending": null,
+     "plan": null,
+     "proposal": null,
+     "research": null,
+     "result_preview": null,
+     "show": null,
+     "tainted": null,
+     "undo": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "done",
+    "keys": {
+     "attachments": null,
+     "context_used": {
+      "chunks": null,
+      "edges": null,
+      "map": null,
+      "memories": null,
+      "nodes": null,
+      "page": null,
+      "pinned": null,
+      "profile": null,
+      "project": null,
+      "skills": null,
+      "stable_hash": null,
+      "style": null,
+      "tokens_estimate": null,
+      "tools_deferred": null,
+      "trimmed": null
+     },
+     "error": null,
+     "error_kind": null,
+     "id": null,
+     "notice": null,
+     "outcome": null,
+     "partial": null,
+     "reasoning": null,
+     "segment": null,
+     "stopped": null,
+     "taint_sources": null,
+     "tainted": null,
+     "tool_events": null,
+     "trace": null
+    }
+   }
+  ],
+  "executed_calls": [],
+  "hooks": [
+   [
+    "emit",
+    "chat.created",
+    "4f24799e3eb6"
+   ],
+   [
+    "pipe",
+    "model.select",
+    "51618bde1db8"
+   ],
+   [
+    "collect",
+    "context.contribute",
+    "7ed8eba0c90c"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "b14cdda6d3ea"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "1f17c13bff15"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "d78ef3ea5790"
+   ],
+   [
+    "emit_sync",
+    "approval.requested",
+    "5bc8e348674c"
+   ],
+   [
+    "emit_sync",
+    "approval.resolved",
+    "7e7da20f08f9"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "1172939987a7"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "791376bcafeb"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "091975c272de"
+   ],
+   [
+    "emit",
+    "turn.settled",
+    "<object>"
+   ],
+   [
+    "emit",
+    "run.after",
+    "<object>"
+   ],
+   [
+    "emit",
+    "chat.created",
+    "4f24799e3eb6"
+   ],
+   [
+    "pipe",
+    "model.select",
+    "51618bde1db8"
+   ],
+   [
+    "collect",
+    "context.contribute",
+    "7ed8eba0c90c"
+   ],
+   [
+    "emit_sync",
+    "approval.requested",
+    "f7e2abe9941b"
+   ],
+   [
+    "emit_sync",
+    "approval.resolved",
+    "6a73034bdbf4"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "54d218ad39f2"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "475847c141cd"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "81cf6e86edc0"
+   ],
+   [
+    "emit",
+    "turn.settled",
+    "<object>"
+   ],
+   [
+    "emit",
+    "run.after",
+    "<object>"
+   ],
+   [
+    "emit",
+    "chat.created",
+    "4f24799e3eb6"
+   ],
+   [
+    "pipe",
+    "model.select",
+    "51618bde1db8"
+   ],
+   [
+    "collect",
+    "context.contribute",
+    "7ed8eba0c90c"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "830ee6e3895b"
+   ],
+   [
+    "emit",
+    "turn.settled",
+    "<object>"
+   ],
+   [
+    "emit",
+    "run.after",
+    "<object>"
+   ]
+  ],
+  "model_calls": [
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "a",
+        "type": "function"
+       },
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_off"
+        },
+        "id": "b",
+        "type": "function"
+       },
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_write"
+        },
+        "id": "c",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "a"
+     },
+     {
+      "content": "{\"error\": \"g_off is turned off for this chat. Do not retry it.\", \"try_instead\": \"continue without it, or ask the user what they would like instead\"}",
+      "role": "tool",
+      "tool_call_id": "b"
+     },
+     {
+      "content": "{\"ok\": true, \"wrote\": 1}",
+      "role": "tool",
+      "tool_call_id": "c"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_write"
+        },
+        "id": "a",
+        "type": "function"
+       },
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "b",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"error\": \"g_write is just declined by the user. Do not retry it.\", \"try_instead\": \"continue without it, or ask the user what they would like instead\"}",
+      "role": "tool",
+      "tool_call_id": "a"
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "b"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_off",
+     "g_hang"
+    ]
+   }
+  ],
+  "prefix_sha1": "b553374af93ab2117cbc0165e1b40d11cfe1cb7e"
+ },
+ "unknown_tool": {
+  "events": [
+   {
+    "data": null,
+    "event": "user_message",
+    "keys": {
+     "attachments": null,
+     "content": null,
+     "context_used": null,
+     "conversation_id": null,
+     "created_at": null,
+     "error": null,
+     "error_kind": null,
+     "id": null,
+     "kind": null,
+     "model": null,
+     "outcome": null,
+     "reasoning": null,
+     "role": null,
+     "tool_events": null,
+     "trace": null,
+     "variant_of": null,
+     "variants": null
+    }
+   },
+   {
+    "data": null,
+    "event": "title",
+    "keys": {
+     "id": null,
+     "title": null
+    }
+   },
+   {
+    "data": null,
+    "event": "assistant_message",
+    "keys": {
+     "attachments": null,
+     "content": null,
+     "context_used": {
+      "chunks": null,
+      "edges": null,
+      "map": null,
+      "memories": null,
+      "nodes": null,
+      "page": null,
+      "pinned": null,
+      "profile": null,
+      "project": null,
+      "skills": null,
+      "stable_hash": null,
+      "style": null,
+      "tokens_estimate": null,
+      "tools_deferred": null,
+      "trimmed": null
+     },
+     "conversation_id": null,
+     "created_at": null,
+     "error": null,
+     "error_kind": null,
+     "id": null,
+     "kind": null,
+     "model": null,
+     "outcome": null,
+     "reasoning": null,
+     "role": null,
+     "tool_events": null,
+     "trace": null,
+     "variant_of": null,
+     "variants": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "arguments": {},
+     "forced": false,
+     "id": "<id>:a",
+     "message_id": "<id>",
+     "name": "no_such_tool",
+     "needs_approval": false,
+     "permission": null,
+     "plan": null,
+     "proposal": null
+    },
+    "event": "tool_call",
+    "keys": {
+     "arguments": {},
+     "forced": null,
+     "id": null,
+     "message_id": null,
+     "name": null,
+     "needs_approval": null,
+     "permission": null,
+     "plan": null,
+     "proposal": null,
+     "started_at": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "breaker": null,
+     "error": "Unknown tool no_such_tool. Did you mean: search_tool_results, shell_poll, doc_search, cancel_scheduled_task, writing_style, search_memory, schedule_task, doc_list",
+     "forced": false,
+     "id": "<id>:a",
+     "images": null,
+     "invalid": "name",
+     "message_id": "<id>",
+     "name": "no_such_tool",
+     "plan": null,
+     "proposal": null,
+     "result_preview": "{\"error\": \"Unknown tool no_such_tool. Did you mean: search_tool_results, shell_poll, doc_search, cancel_scheduled_task, writing_style, search_memory, schedule_task, doc_list\", \"try_instead\": \"call one of the tools listed in this request, by its exact name\"}",
+     "tainted": false,
+     "undo": null
+    },
+    "event": "tool_result",
+    "keys": {
+     "approval": null,
+     "arguments": {},
+     "blocked": null,
+     "breaker": null,
+     "duration_ms": null,
+     "error": null,
+     "forced": null,
+     "id": null,
+     "images": null,
+     "invalid": null,
+     "message_id": null,
+     "name": null,
+     "plan": null,
+     "proposal": null,
+     "result_preview": null,
+     "tainted": null,
+     "undo": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "parent_id": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "delta",
+    "keys": {
+     "id": null,
+     "text": null
+    }
+   },
+   {
+    "data": null,
+    "event": "span",
+    "keys": {
+     "message_id": null,
+     "span": {
+      "end": null,
+      "error": null,
+      "id": null,
+      "kind": null,
+      "meta": null,
+      "name": null,
+      "start": null
+     }
+    }
+   },
+   {
+    "data": null,
+    "event": "done",
+    "keys": {
+     "attachments": null,
+     "context_used": {
+      "chunks": null,
+      "edges": null,
+      "map": null,
+      "memories": null,
+      "nodes": null,
+      "page": null,
+      "pinned": null,
+      "profile": null,
+      "project": null,
+      "skills": null,
+      "stable_hash": null,
+      "style": null,
+      "tokens_estimate": null,
+      "tools_deferred": null,
+      "trimmed": null
+     },
+     "error": null,
+     "error_kind": null,
+     "id": null,
+     "notice": null,
+     "outcome": null,
+     "partial": null,
+     "reasoning": null,
+     "segment": null,
+     "stopped": null,
+     "taint_sources": null,
+     "tainted": null,
+     "tool_events": null,
+     "trace": null
+    }
+   }
+  ],
+  "executed_calls": [],
+  "hooks": [
+   [
+    "emit",
+    "chat.created",
+    "4f24799e3eb6"
+   ],
+   [
+    "pipe",
+    "model.select",
+    "51618bde1db8"
+   ],
+   [
+    "collect",
+    "context.contribute",
+    "7ed8eba0c90c"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "b14cdda6d3ea"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "1f17c13bff15"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "d78ef3ea5790"
+   ],
+   [
+    "emit_sync",
+    "approval.requested",
+    "5bc8e348674c"
+   ],
+   [
+    "emit_sync",
+    "approval.resolved",
+    "7e7da20f08f9"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "1172939987a7"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "791376bcafeb"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "091975c272de"
+   ],
+   [
+    "emit",
+    "turn.settled",
+    "<object>"
+   ],
+   [
+    "emit",
+    "run.after",
+    "<object>"
+   ],
+   [
+    "emit",
+    "chat.created",
+    "4f24799e3eb6"
+   ],
+   [
+    "pipe",
+    "model.select",
+    "51618bde1db8"
+   ],
+   [
+    "collect",
+    "context.contribute",
+    "7ed8eba0c90c"
+   ],
+   [
+    "emit_sync",
+    "approval.requested",
+    "f7e2abe9941b"
+   ],
+   [
+    "emit_sync",
+    "approval.resolved",
+    "6a73034bdbf4"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "54d218ad39f2"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "475847c141cd"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "81cf6e86edc0"
+   ],
+   [
+    "emit",
+    "turn.settled",
+    "<object>"
+   ],
+   [
+    "emit",
+    "run.after",
+    "<object>"
+   ],
+   [
+    "emit",
+    "chat.created",
+    "4f24799e3eb6"
+   ],
+   [
+    "pipe",
+    "model.select",
+    "51618bde1db8"
+   ],
+   [
+    "collect",
+    "context.contribute",
+    "7ed8eba0c90c"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "830ee6e3895b"
+   ],
+   [
+    "emit",
+    "turn.settled",
+    "<object>"
+   ],
+   [
+    "emit",
+    "run.after",
+    "<object>"
+   ],
+   [
+    "emit",
+    "chat.created",
+    "4f24799e3eb6"
+   ],
+   [
+    "pipe",
+    "model.select",
+    "51618bde1db8"
+   ],
+   [
+    "collect",
+    "context.contribute",
+    "7ed8eba0c90c"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "270a2a878917"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "5d4827694e48"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "a9be0407ecff"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "e7d2d26a137f"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "7716defca443"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "8ef96fa5416b"
+   ],
+   [
+    "emit_sync",
+    "approval.requested",
+    "7266aad3ad5b"
+   ],
+   [
+    "emit_sync",
+    "approval.resolved",
+    "2c717d19dc5a"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "e6d598cb414a"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "303f6f6057df"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "71b235e2d7a9"
+   ],
+   [
+    "emit_sync",
+    "approval.requested",
+    "1dc3dc4ad586"
+   ],
+   [
+    "emit_sync",
+    "approval.resolved",
+    "eeea41211503"
+   ],
+   [
+    "gate",
+    "tool.pre",
+    "5d245653c84b"
+   ],
+   [
+    "pipe",
+    "tool.result",
+    "2720929fe5cd"
+   ],
+   [
+    "emit",
+    "tool.post",
+    "ff7f5e55696b"
+   ],
+   [
+    "emit",
+    "turn.settled",
+    "<object>"
+   ],
+   [
+    "emit",
+    "run.after",
+    "<object>"
+   ],
+   [
+    "emit",
+    "chat.created",
+    "4f24799e3eb6"
+   ],
+   [
+    "pipe",
+    "model.select",
+    "51618bde1db8"
+   ],
+   [
+    "collect",
+    "context.contribute",
+    "7ed8eba0c90c"
+   ],
+   [
+    "emit",
+    "turn.settled",
+    "<object>"
+   ],
+   [
+    "emit",
+    "run.after",
+    "<object>"
+   ]
+  ],
+  "model_calls": [
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "a",
+        "type": "function"
+       },
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_off"
+        },
+        "id": "b",
+        "type": "function"
+       },
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_write"
+        },
+        "id": "c",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "a"
+     },
+     {
+      "content": "{\"error\": \"g_off is turned off for this chat. Do not retry it.\", \"try_instead\": \"continue without it, or ask the user what they would like instead\"}",
+      "role": "tool",
+      "tool_call_id": "b"
+     },
+     {
+      "content": "{\"ok\": true, \"wrote\": 1}",
+      "role": "tool",
+      "tool_call_id": "c"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_write"
+        },
+        "id": "a",
+        "type": "function"
+       },
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "b",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"error\": \"g_write is just declined by the user. Do not retry it.\", \"try_instead\": \"continue without it, or ask the user what they would like instead\"}",
+      "role": "tool",
+      "tool_call_id": "a"
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "b"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_off",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r0",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r0",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r1",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r1"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r0",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r1",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r1"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r2",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r2"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r0",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r1",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r1"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r2",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r2"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r3",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}\n\n[stuck_notice] You appear to be stuck: g_read returned the same result 4 times in a row. Change approach: use a different tool or arguments, or answer with what you have and say what is missing.",
+      "role": "tool",
+      "tool_call_id": "r3"
+     },
+     {
+      "content": "This reply has already used 4 rounds of tool calls itself. From here only delegate, message_worker, check_worker, stop_worker, resume_worker and todo_write are offered. Hand the remaining work to a worker with a self-contained brief. Do not announce it and do not explain this rule; if there is nothing else for the user, answer with exactly NO_REPLY.",
+      "role": "system"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "deep_research"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r0",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r1",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r1"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r2",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r2"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r3",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}\n\n[stuck_notice] You appear to be stuck: g_read returned the same result 4 times in a row. Change approach: use a different tool or arguments, or answer with what you have and say what is missing.",
+      "role": "tool",
+      "tool_call_id": "r3"
+     },
+     {
+      "content": "This reply has already used 4 rounds of tool calls itself. From here only delegate, message_worker, check_worker, stop_worker, resume_worker and todo_write are offered. Hand the remaining work to a worker with a self-contained brief. Do not announce it and do not explain this rule; if there is nothing else for the user, answer with exactly NO_REPLY.",
+      "role": "system"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r4",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "g_read has been called with identical arguments 5 times in a row, so this reply is stopping tool use. Answer with what you already have, and say in one line what you could not finish.",
+      "role": "tool",
+      "tool_call_id": "r4"
+     }
+    ],
+    "tool_choice": "none",
+    "tools": [
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "deep_research"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "67463e5050e0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "invalid_tool"
+        },
+        "id": "a",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"error\": \"Unknown tool no_such_tool. Did you mean: search_tool_results, shell_poll, doc_search, cancel_scheduled_task, writing_style, search_memory, schedule_task, doc_list\", \"try_instead\": \"call one of the tools listed in this request, by its exact name\"}",
+      "role": "tool",
+      "tool_call_id": "a"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "generate_image",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   }
+  ],
+  "prefix_sha1": "b553374af93ab2117cbc0165e1b40d11cfe1cb7e"
+ }
+}

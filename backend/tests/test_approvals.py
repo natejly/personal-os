@@ -47,7 +47,8 @@ def test_uid_is_unique_across_conversations() -> None:
 
 def test_source_keys_approvals_by_uid() -> None:
     """Guard the fix in the source itself, so a future edit cannot silently reintroduce the collision."""
-    src = (Path(__file__).resolve().parents[1] / "personal_os" / "app.py").read_text()
+    package = Path(__file__).resolve().parents[1] / "personal_os"
+    src = (package / "app.py").read_text() + (package / "runtime" / "tool_step.py").read_text()
     check('_approvals[uid] = fut' in src, "_approvals must be keyed by the per-message uid")
     check('_approvals[c["id"]]' not in src, "_approvals must not be keyed by the raw provider call id")
     check('"id": uid' in src, "the tool_call/tool_result events must carry the unique id")

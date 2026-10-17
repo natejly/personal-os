@@ -346,7 +346,28 @@ class PresetAppliedPayload(TypedDict):
     by: str
 
 
-HookId = Literal["app.start", "app.stop", "settings.changed", "chat.created", "chat.deleted", "project.created", "project.deleted", "ext.changed", "context.contribute", "model.select", "model.request", "model.response", "tool.permission", "tool.pre", "tool.post", "tool.result", "tool.taint", "tool.error", "reply.complete", "turn.settled", "run.after", "subagent.start", "subagent.stop", "memory.before_write", "memory.written", "memory.deleted", "compaction.before", "compaction.after", "approval.requested", "approval.resolved", "job.fired", "job.done", "channel.inbound", "channel.outbound", "coding.tool.pre", "coding.tool.post", "runtime.changed", "runtime.fallback", "sandbox.refused", "preset.applied"]
+class LoopStep(TypedDict):
+    title: str
+    done_when: str
+
+
+class LoopPlanPayload(TypedDict):
+    """The plan-execute-verify loop parsed and validated its plan. Strings are credential-scrubbed."""
+    run_id: str | None
+    conversation_id: str
+    steps: list[LoopStep]
+
+
+class LoopVerifyPayload(TypedDict):
+    """The plan-execute-verify loop's check of its work came back. Gaps are credential-scrubbed."""
+    run_id: str | None
+    conversation_id: str
+    attempt: int
+    ok: bool
+    gaps: list[str]
+
+
+HookId = Literal["app.start", "app.stop", "settings.changed", "chat.created", "chat.deleted", "project.created", "project.deleted", "ext.changed", "context.contribute", "model.select", "model.request", "model.response", "tool.permission", "tool.pre", "tool.post", "tool.result", "tool.taint", "tool.error", "reply.complete", "turn.settled", "run.after", "subagent.start", "subagent.stop", "memory.before_write", "memory.written", "memory.deleted", "compaction.before", "compaction.after", "approval.requested", "approval.resolved", "job.fired", "job.done", "channel.inbound", "channel.outbound", "coding.tool.pre", "coding.tool.post", "runtime.changed", "runtime.fallback", "sandbox.refused", "preset.applied", "loop.plan", "loop.verify"]
 
 
 class On(Protocol):
@@ -431,6 +452,10 @@ class On(Protocol):
     def __call__(self, hook: Literal["sandbox.refused"], fn: Callable[[SandboxRefusedPayload], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
     @overload
     def __call__(self, hook: Literal["preset.applied"], fn: Callable[[PresetAppliedPayload], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
+    @overload
+    def __call__(self, hook: Literal["loop.plan"], fn: Callable[[LoopPlanPayload], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
+    @overload
+    def __call__(self, hook: Literal["loop.verify"], fn: Callable[[LoopVerifyPayload], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
 
 
 class Fire(Protocol):
@@ -515,3 +540,7 @@ class Fire(Protocol):
     def __call__(self, hook: Literal["sandbox.refused"], payload: SandboxRefusedPayload, /) -> None: ...
     @overload
     def __call__(self, hook: Literal["preset.applied"], payload: PresetAppliedPayload, /) -> None: ...
+    @overload
+    def __call__(self, hook: Literal["loop.plan"], payload: LoopPlanPayload, /) -> None: ...
+    @overload
+    def __call__(self, hook: Literal["loop.verify"], payload: LoopVerifyPayload, /) -> None: ...

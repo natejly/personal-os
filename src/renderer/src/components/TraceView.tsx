@@ -24,8 +24,8 @@ export function traceSummary(spans: Span[]): { steps: number; total_ms: number; 
   }
 }
 
-const ICON: Record<SpanKind, JSX.Element> = { context: <Layers size={12} />, llm: <Sparkles size={12} />, tool: <Wrench size={12} />, learn: <Wand2 size={12} />, compact: <Shrink size={12} />, runtime: <Cpu size={12} /> }
-const LABEL: Record<SpanKind, string> = { context: 'Context', llm: 'Model', tool: 'Tool', learn: 'Auto-learn', compact: 'Compaction', runtime: 'Runtime' }
+const ICON: Record<SpanKind, JSX.Element> = { context: <Layers size={12} />, llm: <Sparkles size={12} />, tool: <Wrench size={12} />, learn: <Wand2 size={12} />, compact: <Shrink size={12} />, runtime: <Cpu size={12} />, loop: <Cpu size={12} /> }
+const LABEL: Record<SpanKind, string> = { context: 'Context', llm: 'Model', tool: 'Tool', learn: 'Auto-learn', compact: 'Compaction', runtime: 'Runtime', loop: 'Loop' }
 
 function detail(s: Span): string {
   const m = s.meta
@@ -62,6 +62,8 @@ function detail(s: Span): string {
         : `summarized ${n('summarized')} messages · ~${n('tokens_before').toLocaleString()} → ~${n('tokens_after').toLocaleString()} tokens`
     case 'runtime':
       return ((m.providers as string[] | undefined) ?? []).join(' · ')
+    case 'loop':
+      return Object.entries(m).map(([k, v]) => `${k} ${String(v)}`).join(' · ')
     case 'learn':
       return s.end === null ? 'extracting…' : [n('memories') && `+${n('memories')} memories`, n('entities') && `+${n('entities')} entities`, n('relations') && `+${n('relations')} relations`].filter(Boolean).join(' · ') || 'nothing new'
   }

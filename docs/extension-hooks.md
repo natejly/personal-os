@@ -103,3 +103,10 @@ A hook is a named point where an extension may observe, add, transform or narrow
 | Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
 | `preset.applied` | `POST /permissions/presets/{id}/apply`, after the write and the `setting_sources` stamp | `{preset_id, scope, scope_id, changed_keys, loosened, by}`. A permission preset was applied at a scope. Key names only, never values. | none | `emit` | any enabled extension |
+
+## Agent loop
+
+| Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
+|---|---|---|---|---|---|
+| `loop.plan` | the plan-execute-verify loop, after the plan is parsed and validated, before the first step | `{run_id, conversation_id, steps}`. The plan-execute-verify loop parsed and validated its plan. Strings are credential-scrubbed. | none | `emit` | built-in extensions, or one that declares `conversation:read` |
+| `loop.verify` | the plan-execute-verify loop, after each verify call | `{run_id, conversation_id, attempt, ok, gaps}`. The plan-execute-verify loop's check of its work came back. Gaps are credential-scrubbed. | none | `emit` | built-in extensions, or one that declares `conversation:read` |

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from ...mcp_servers import RESERVED_TOOL_NAMES
+from ...runtime import loop_fence
 from ...skillbuild import _authority
 from ..catalog import HOOKS
 from ..manifest import Manifest, ManifestError, load_manifest
@@ -142,6 +143,7 @@ def _code(root: Path, manifest: Manifest) -> list[Finding]:
         return [Finding("error", "code", "extension.py is missing")]
     subscribed: set[str] = set()
     uses_context = dynamic = False
+    provides_loop = any(e["slot"] == "agent.loop" for e in manifest.contributes.get("runtime", ()))
     for path in _python_files(root):
         rel = path.relative_to(root)
         try:
@@ -150,6 +152,8 @@ def _code(root: Path, manifest: Manifest) -> list[Finding]:
             out.append(Finding("error", "code", f"{rel}:{e.lineno}: {e.msg}"))
             continue
         out += _imports(rel, tree)
+        if provides_loop:  # the agent loop import fence (design doc 10.10.3): what a loop may import is checked on every file of the extension
+            out += [Finding("error", "loop-fence", f"{rel}: {problem}") for problem in loop_fence.violations(tree)]
         for call in (n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and _is_api(n.func.value)):
             if call.func.attr == "context":
                 uses_context = True

@@ -293,10 +293,10 @@ def test_chat_loop_hands_the_model_a_handle_not_a_truncation() -> None:
     run_chat(cid)
     tool_msgs = [m for m in SEEN[1] if m["role"] == "tool"]
     check(len(tool_msgs) == 1, "the tool answered into the context")
-    src = (Path(__file__).resolve().parents[1] / "personal_os" / "app.py").read_text()
-    check("tool_results.render(conv_id, am[\"id\"], c[\"name\"], for_model, untrusted=brought_untrusted, fence=fence)" in src,
+    src = (Path(__file__).resolve().parents[1] / "personal_os" / "runtime" / "tool_step.py").read_text()
+    check("tool_results.render(st.conv_id, rnd.am[\"id\"], c[\"name\"], for_model, untrusted=brought_untrusted, fence=fence)" in src,
           "the tool-result append site goes through the handle store and marks untrusted blobs")
-    check("brought_untrusted = bool(tool_ctx.get(\"tainted\"))" in src,
+    check("brought_untrusted = bool(st.tool_ctx.get(\"tainted\"))" in src,
           "a blob saved during an already-tainted run is marked, not only the call that first tainted it")
     check("summarize_result(for_model, 24000)" not in src, "the 24k truncation of model-facing results is gone")
 

@@ -202,7 +202,7 @@ def test_approval_row_lifecycle() -> None:
 
 
 def test_a_pending_approval_does_not_auto_deny() -> None:
-    src = (Path(__file__).resolve().parents[1] / "personal_os" / "app.py").read_text()
+    src = (Path(__file__).resolve().parents[1] / "personal_os" / "runtime" / "tool_step.py").read_text()
     assert "waited >= 600" not in src, "the 10-minute auto-deny is gone"
     ROUNDS.append({"tool_calls": [call("todo_add", {"title": "never answered"})]})
     cid, rid = start({"tools": {"todo_add": "ask"}})

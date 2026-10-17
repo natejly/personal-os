@@ -1,0 +1,29 @@
+import { test, expect } from './fixtures.mjs'
+import { dialog, openSettings } from './helpers/home.mjs'
+
+const row = (page, name) => page.locator('.sidebar .nav-item', { hasText: new RegExp(`^${name}`) })
+const profile = (page, name) => dialog(page).getByRole('checkbox', { name, exact: true })
+const flip = (page, name) => profile(page, name).locator('xpath=following-sibling::span[contains(@class,"switch")]').click()
+
+test('a profile switch applies its defaults at once and turning it off puts them back', async ({ grain }) => {
+  const { page, api } = grain
+  await expect(row(page, 'Lists')).toHaveCount(1)
+  await openSettings(page, 'Sidebar')
+  // The harness starts with every view on, though a first boot recorded Lean: switch it off first.
+  await flip(page, 'Lean')
+  await expect(profile(page, 'Lean')).not.toBeChecked()
+  await flip(page, 'Lean')
+  await expect(profile(page, 'Lean')).toBeChecked()
+  await expect(row(page, 'Lists')).toHaveCount(0)
+  expect((await api('/settings')).hiddenViews).toEqual(expect.arrayContaining(['todos', 'calendar']))
+
+  await flip(page, 'Lean')
+  await expect(profile(page, 'Lean')).not.toBeChecked()
+  await expect(row(page, 'Lists')).toHaveCount(1)
+  expect((await api('/settings')).hiddenViews).toEqual([])
+
+  await flip(page, 'Focus')
+  await expect.poll(async () => (await api('/settings')).defaultEffort).toBe('low')
+  await flip(page, 'Focus')
+  await expect.poll(async () => (await api('/settings')).defaultEffort).toBe('high')
+})

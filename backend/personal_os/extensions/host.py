@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Itera
 from .. import backups, migrations
 from ..context import Block, Contribution, RetrievalSources, Slot
 from .channels import ChannelAdapter, Channels
+from .defaults import Defaults
 from .disposables import Disposable, Scope
 from .hooks import HookBus
 from .manifest import Manifest, load_manifest
@@ -101,6 +102,10 @@ class ExtensionScope:
         return self.ctx
 
     @property
+    def defaults(self) -> Defaults:
+        return Defaults(self.db)
+
+    @property
     def services(self) -> Services:
         assert self.ctx is not None
         return Services(self.manifest.requires_services, self.ctx.services)
@@ -108,6 +113,8 @@ class ExtensionScope:
     def enabled(self) -> bool:
         if self.module:
             return self.module.enabled()
+        if self.manifest.kind == "profile":
+            return self.defaults.applied(self.manifest.id)
         if self.manifest.enabled == "always":
             return True
         if self.ctx is None:
@@ -225,6 +232,13 @@ class ExtensionScope:
             self.disposables.dispose()
 
 
+BUILTIN_ROOT = Path(__file__).parent
+
+
+def builtin_manifest(ext_id: str) -> Manifest:
+    return load_manifest(BUILTIN_ROOT / ext_id / "extension.json")
+
+
 class ExtensionHost:
     def __init__(self) -> None:
         self.bus = HookBus()
@@ -267,8 +281,9 @@ class ExtensionHost:
 
     def load_builtin(self, ext_id: str, ctx: ExtensionContext) -> ExtensionScope:
         """Load the built-in extension in this package's `<ext_id>/` folder: read its manifest, then run its `activate(scope)`."""
-        root = Path(__file__).parent / ext_id
-        scope = self._add(load_manifest(root / "extension.json"), root=root, ctx=ctx)
+        scope = self._add(builtin_manifest(ext_id), root=BUILTIN_ROOT / ext_id, ctx=ctx)
+        if scope.manifest.kind == "profile":
+            return scope  # a profile is data: nothing to import or activate
         importlib.import_module(f"{__package__}.{ext_id}.extension").activate(scope)
         declared = {t["name"]: (t.get("danger"), t.get("group")) for t in scope.manifest.contributes.get("tools", ())}
         registered = {name: (spec.danger, spec.group) for name, spec in scope.tools.items()}
@@ -300,10 +315,16 @@ class ExtensionHost:
         self.bus.fire(hook, payload)
 
     def refresh_enabled(self) -> None:
-        """Fire ext.changed for each extension whose enabled state differs from the last one reported."""
+        """Fire ext.changed for each extension whose enabled state differs from the last one reported. An extension's
+        contributes.defaults are applied when it turns on and reverted when it turns off (a profile does this itself)."""
         for ext_id, scope in self.extensions.items():
             if (now := scope.enabled()) != self._enabled[ext_id]:
                 self._enabled[ext_id] = now
+                if scope.ctx and scope.manifest.kind == "extension":
+                    if now:
+                        scope.defaults.apply(scope.manifest)
+                    else:
+                        scope.defaults.revert(ext_id)
                 self.fire("ext.changed", {"id": ext_id, "enabled": now})
 
     # ---- data ----

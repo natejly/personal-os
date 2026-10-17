@@ -13,6 +13,7 @@ import type { WidgetDef } from '../canvas/registry'
 import { viewHidden } from '../moduleToggles'
 import { registerToolCard, type ToolCardDisplay, type ToolCardProps } from '../components/toolcards/registry'
 import { extStore, onExtEvent, onMessageDisplay, onViewOpened, type ExtStore, type HostEvents } from './events'
+import { addTheme, type Scheme, type Tokens } from './theme'
 
 export interface Disposable { dispose(): void }
 
@@ -83,6 +84,8 @@ export interface UiApi {
   on(event: 'ui.view.opened', fn: (e: HostEvents['ui.view.opened']) => void): Disposable
   on(event: 'ui.message.display', fn: (e: HostEvents['ui.message.display']) => string | void): Disposable
   on(event: `ext:${string}`, fn: (data: unknown) => void): Disposable
+  /** Set existing CSS custom properties for one colour scheme, or both when `scheme` is omitted. */
+  theme(tokens: Tokens, opts?: { scheme?: Scheme }): Disposable
 }
 
 export interface ExtensionModule {
@@ -191,7 +194,8 @@ export function activateExtension(id: string, ext: ExtensionModule): Disposable 
     store: extStore(id),
     on: ((event: string, fn: never) => keep(
       event === 'ui.view.opened' ? onViewOpened(fn) : event === 'ui.message.display' ? onMessageDisplay(fn) : onExtEvent(event, fn)
-    )) as UiApi['on']
+    )) as UiApi['on'],
+    theme: (tokens, opts) => keep(addTheme(tokens, opts?.scheme))
   })
   return { dispose: () => { for (const d of scope.reverse()) d.dispose() } }
 }

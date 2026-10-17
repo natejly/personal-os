@@ -1472,6 +1472,18 @@ export interface TodayDashboard {
   errors: Record<string, string>
 }
 
+/** A profile extension: defaults and design tokens with no code. `theme` holds CSS custom properties per colour scheme. */
+export interface Profile {
+  id: string
+  name: string
+  description: string
+  enabled: boolean
+  theme: { light?: Record<string, string>; dark?: Record<string, string> }
+}
+
+/** A default a profile would change but that needs the user's click first: a looser permission preset. */
+export interface ProfileHeld { key: string; was: string; set: string }
+
 export interface Settings {
   baseUrl: string
   apiKey: string
@@ -1574,6 +1586,8 @@ export interface Settings {
   homeWidgets?: Record<string, boolean>
   /** Sidebar views the user removed. Missing means every view is shown. */
   hiddenViews?: string[]
+  /** The reasoning effort a new chat starts on. Missing means high. */
+  defaultEffort?: Effort
   /** Sidebar rows hidden without turning anything off (docs, mail, health, spaces, projects, jobs). Missing means shown; the default hides Mail and Health. */
   sidebarHidden?: string[]
   tools: Record<string, ToolMode | boolean>

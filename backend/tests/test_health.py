@@ -18,9 +18,9 @@ os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="healthtes
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os import llm  # noqa: E402
 from personal_os.app import AUTH_TOKEN, app, db, host, toolbox  # noqa: E402
 from personal_os.db import Database  # noqa: E402
+from personal_os.extensions.host import builtin_manifest  # noqa: E402
 from personal_os.health import Health, HealthError, daily_value  # noqa: E402
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
@@ -242,7 +242,7 @@ class ToolTests(unittest.TestCase):
     def test_extension_is_loaded_and_off_on_a_fresh_install(self) -> None:
         scope = host.extensions["health"]
         self.assertEqual(scope.manifest.enabled, False)
-        self.assertIn("health", llm.LEAN_OFF_VIEWS)
+        self.assertIs(builtin_manifest("lean").contributes["defaults"]["views"]["health"], False)
         self.assertEqual({t["name"]: (t["danger"], t["group"]) for t in scope.manifest.contributes["tools"]},
                          {n: (t.danger, t.group) for n, t in scope.tools.items()})
         self.assertTrue(scope.enabled())  # this test db never hid the view: an existing install keeps what it had

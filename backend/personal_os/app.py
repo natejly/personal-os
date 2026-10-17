@@ -52,7 +52,7 @@ from .graph_learn import canonical_type, normalize_predicate
 from .graph_recall import GraphRecall, subgraph as graph_subgraph
 from .memory_index import MemoryIndex
 from .retrieval import Retriever
-from .repos import ALL, Conversations, Documents, Graph, Memories, MemoryRefused, Projects, is_isolated
+from .repos import ALL, EFFORTS, Conversations, Documents, Graph, Memories, MemoryRefused, Projects, is_isolated
 from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .recap import Recaps, generate_recap
 from . import vision
@@ -104,7 +104,9 @@ from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .style import WritingStyle
 from .extensions.channels import ChatService
-from .extensions.host import ExtensionContext, ExtensionHost
+from .extensions import profiles as profile_routes
+from .extensions.defaults import Defaults
+from .extensions.host import ExtensionContext, ExtensionHost, builtin_manifest
 from .modules import Module, ModuleContext, build_modules
 from .tools import ASK_LOCKED_DANGER, Toolbox, UrlBlocked, guarded_request, page_title, summarize_result, times_body
 from .webread import WebCache
@@ -366,6 +368,7 @@ _MODULES_DEFAULT = 6
 # Stamp 4 shows these once: agent work waits for review there (desks, skill and workflow approvals), and a hidden row
 # meant the user could not find work the assistant had already handed back.
 _SHOWN_AT_4 = ("library", "cowork")
+_PROFILES = ("lean", "focus")  # the bundled profiles; a fresh install gets those whose manifest says enabled
 
 
 def _seed_hidden_modules() -> None:
@@ -379,12 +382,16 @@ def _seed_hidden_modules() -> None:
     )
     if current < 4:
         hidden = [v for v in hidden if v not in _SHOWN_AT_4]
+    first_boot = False
     if current == 0 and "hiddenViews" not in stored:
         with db.tx() as c:  # a first boot starts lean; an install that already has chats keeps every view it had
-            if not c.execute("SELECT 1 FROM conversations LIMIT 1").fetchone():
-                hidden = list(llm.LEAN_OFF_VIEWS)
+            first_boot = not c.execute("SELECT 1 FROM conversations LIMIT 1").fetchone()
     widgets = dict(stored["homeWidgets"]) if isinstance(stored.get("homeWidgets"), dict) else {}
     db.set_settings({"hiddenViews": hidden, "homeWidgets": widgets, "modulesDefault": _MODULES_DEFAULT})
+    if first_boot:
+        for profile in map(builtin_manifest, _PROFILES):
+            if profile.enabled is True:
+                Defaults(db).apply(profile)
 
 
 _seed_hidden_modules()
@@ -448,6 +455,16 @@ for _m in modules:
         app.include_router(_r)
 for _r in host.load_builtin("health", _ext_ctx).routers:
     app.include_router(_r)
+for _p in _PROFILES:
+    host.load_builtin(_p, _ext_ctx)
+
+
+def _profile_changed(before: dict[str, Any]) -> None:
+    """A profile toggle writes through contributes.defaults: these are the settings it can touch."""
+    _settings_changed(before, ["hiddenViews", "defaultModel", "defaultEffort", "theme", permissions.KEY], set())
+
+
+app.include_router(profile_routes.router(host, _profile_changed))
 host.migrate(db)
 # Soft delete: the DELETE routes below move things here, and /trash restores or erases them (trash.py).
 trash = Trash(db, todos, docs)
@@ -927,7 +944,7 @@ def health() -> dict[str, Any]:
 
 
 # Google OAuth material lives in settings but never leaves the backend.
-PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "modelCaps", "telegramState"}
+PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "modelCaps", "telegramState", "extDefaults"}
 # Readable through /settings, but only writable through its own route: a plain PUT would replace the
 # whole nested dict and silently drop the signal switches and exclusion lists.
 SETTINGS_READ_ONLY = {"googleTasksSync", "voice",
@@ -1043,6 +1060,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, f"{k} must be a {type(d).__name__}")
         elif k == "retrievalMode" and v not in ("hybrid", "bm25"):
             raise HTTPException(422, "retrievalMode must be 'hybrid' or 'bm25'")
+        elif k == "defaultEffort" and v not in EFFORTS:
+            raise HTTPException(422, f"defaultEffort must be one of {', '.join(EFFORTS)}")
         elif k == "docTypography":
             clean[k] = clean_typography(v) or {}
     _lock_embedding(clean)

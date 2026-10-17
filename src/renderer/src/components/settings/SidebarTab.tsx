@@ -1,12 +1,13 @@
 import type { View } from '../../store'
 import { navEntries } from '../../shell/nav'
+import ProfilesSection from './ProfilesSection'
 import Switch from './Switch'
 import { Sec, type TabProps } from './shared'
 
 const FILES: [string, string][] = [['docs', 'Files']]
 const SECTIONS: [string, string][] = [['projects', 'Projects']]
 
-export default function SidebarTab({ draft, patch }: TabProps): JSX.Element {
+export default function SidebarTab({ draft, patch, onProfileApplied }: TabProps & { onProfileApplied: () => Promise<void> }): JSX.Element {
   const hidden = draft.hiddenViews ?? []
   const sbHidden = draft.sidebarHidden ?? []
   /** A row that only leaves the sidebar (still reachable by ⌘K and shortcuts). */
@@ -29,6 +30,7 @@ export default function SidebarTab({ draft, patch }: TabProps): JSX.Element {
         <Switch plain={false} title="Canvases" label="Canvases" checked={!hidden.includes('spaces') && !sbHidden.includes('spaces')} onChange={(on) => setRowShown('spaces', on)} />
         {SECTIONS.map(sectionRow)}
       </div></Sec>
+      <ProfilesSection onApplied={onProfileApplied} />
     </section>
   )
 }

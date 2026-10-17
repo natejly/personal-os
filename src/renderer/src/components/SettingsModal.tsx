@@ -139,6 +139,11 @@ export default function SettingsModal(): JSX.Element {
     base.current = fresh
     setDraft((d) => Object.fromEntries(Object.entries(fresh).map(([k, v]) => [k, JSON.stringify((d as unknown as Record<string, unknown>)[k]) === JSON.stringify(old[k]) ? v : (d as unknown as Record<string, unknown>)[k]])) as unknown as Settings)
   }
+  /** A profile was turned on or off (applied at once by its own routes): the same refresh, and off the view it may have hidden. */
+  const profileApplied = async (): Promise<void> => {
+    await providersChanged()
+    if (viewHidden(useStore.getState().settings, view)) setView('chat')
+  }
   // Every way out (X, Escape, the backdrop, Cancel) comes through here, so a changed draft is never
   // dropped without the footer asking first.
   const requestClose = (): void => {
@@ -265,7 +270,7 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'agents' && <AgentsTab {...tabProps} />}
             {tab === 'memory' && <MemoryTab {...tabProps} {...gp} />}
             {tab === 'appearance' && <GeneralTab {...tabProps} shortcuts={shortcuts} />}
-            {tab === 'sidebar' && <SidebarTab {...tabProps} />}
+            {tab === 'sidebar' && <SidebarTab {...tabProps} onProfileApplied={profileApplied} />}
             {tab === 'system' && <SystemTab />}
             {tab === 'advanced' && <AdvancedTab {...tabProps} {...gp} />}
             {panels.map((p) => tab === p.tab && <p.Component key={p.tab} />)}

@@ -36,7 +36,7 @@ def _route_set() -> set[tuple[str, str]]:
 class HostTests(unittest.TestCase):
     def test_modules_and_built_in_extensions_load_and_the_app_starts_through_the_lifespan(self) -> None:
         from personal_os import app as appmod
-        self.assertEqual(list(appmod.host.extensions), ["google", "todos", *(m.key for m in modules), "health", "telegram"])
+        self.assertEqual(list(appmod.host.extensions), ["google", "todos", *(m.key for m in modules), "health", "lean", "focus", "telegram"])
         self.assertIs(appmod.google, appmod._ext_ctx.services["google"]())
         self.assertEqual(app.router.on_startup + app.router.on_shutdown, [])  # no @app.on_event handlers remain
         with TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN}) as c:  # runs the lifespan
@@ -181,7 +181,7 @@ class ModulesStampTests(unittest.TestCase):
     @staticmethod
     def _reset(appmod) -> None:  # type: ignore[no-untyped-def]
         with appmod.db.tx() as c:
-            c.execute("DELETE FROM settings WHERE key IN ('modulesDefault', 'hiddenViews', 'homeWidgets')")
+            c.execute("DELETE FROM settings WHERE key IN ('modulesDefault', 'hiddenViews', 'homeWidgets', 'extDefaults')")
             c.execute("DELETE FROM conversations")
 
     def test_first_boot_starts_lean(self) -> None:
@@ -189,6 +189,10 @@ class ModulesStampTests(unittest.TestCase):
         self._reset(appmod)
         appmod._seed_hidden_modules()
         self.assertEqual(appmod.db.get_settings()["hiddenViews"], ["todos", "calendar", "mail", "health", "spaces"])
+        self.assertTrue(host.extensions["lean"].enabled())
+        self.assertFalse(host.extensions["focus"].enabled())
+        host.extensions["lean"].defaults.revert("lean")  # turning the lean profile off shows every view again
+        self.assertEqual(appmod.db.get_settings()["hiddenViews"], [])
 
     def test_install_with_chats_keeps_every_view(self) -> None:
         from personal_os import app as appmod

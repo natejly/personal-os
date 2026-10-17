@@ -345,7 +345,7 @@ def unverified(name: str, out: dict[str, Any]) -> dict[str, Any]:
 
 
 def checked(name: str, out: Any) -> Any:
-    """Pass a extensions/google/client.py result through, unless its read-back failed to prove the write."""
+    """Pass a Google client result through, unless its read-back failed to prove the write."""
     if not isinstance(out, dict) or out.get("error") or "verification" not in out:
         return out
     return out if verify.ok(out["verification"]) else unverified(name, out)

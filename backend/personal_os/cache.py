@@ -15,7 +15,7 @@ Three rules keep it honest:
   is what a user-initiated "refresh" should do.
 
 Nothing here is persisted: a backend restart starts this layer cold on purpose.
-Snapshots of calendar rows and mail headers live in extensions/google/store.py instead, so
+Snapshots of calendar rows and mail headers live in the Google extension's store instead, so
 the next read can ask Google for what changed. Disconnect and Google.forget drop
 those too.
 """

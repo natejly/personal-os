@@ -44,7 +44,7 @@ test('the shell registers its own items in the slots', () => {
   assert.deepEqual(ids('sidebar.section'), ['spaces'])
   assert.deepEqual(ids('composer.toolbar'), ['mic'])
   assert.deepEqual(ids('message.footer'), ['model-tag', 'trace'])
-  assert.deepEqual(ids('sidepanel.tab'), ['context', 'files', 'changes', 'review', 'traces'])
+  assert.deepEqual(ids('sidepanel.tab'), ['context', 'files', 'changes', 'review', 'traces', 'terminal'])  // the last is the coding extension's
   assert.deepEqual(ids('sidebar.row'), ['todos', 'calendar', 'mail', 'health', 'library', 'jobs'])
 })
 
@@ -68,7 +68,7 @@ test('a slot renders its items in order, and skips one whose extension is off or
 })
 
 test('palette commands: the shell registers its own, an extension adds more, ids are unique', () => {
-  assert.deepEqual(paletteCommands.map((c) => c.id), ['new-chat', 'new-file', 'help', 'help:guide'])
+  assert.deepEqual(paletteCommands.map((c) => c.id), ['run-recipe', 'new-chat', 'new-file', 'help', 'help:guide'])  // the first is the coding extension's
   const gone = withExtension('cmddemo', (ui) => {
     ui.command({ id: 'cmddemo:go', label: 'Go', run: () => undefined })
     assert.throws(() => ui.command({ id: 'cmddemo:go', label: 'Again', run: () => undefined }), /already registered/)

@@ -53,6 +53,7 @@ def main() -> None:
     p.add_argument("--reload", action="store_true")
     args = p.parse_args()
     os.environ["PERSONAL_OS_DATA_DIR"] = args.data_dir
+    os.environ["PERSONAL_OS_PORT"] = str(args.port)  # the hooks of a coding session report to the app on this port
     from .logs import register_secret, setup_logging
 
     register_secret(os.environ.get("PERSONAL_OS_AUTH_TOKEN"))

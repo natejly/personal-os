@@ -12,7 +12,7 @@ import type { State, View } from '../store'
 import type { WidgetDef } from '../canvas/registry'
 import { viewHidden } from '../moduleToggles'
 import { registerToolCard, type ToolCardDisplay, type ToolCardProps } from '../components/toolcards/registry'
-import { extStore, onExtEvent, onMessageDisplay, onViewOpened, type ExtStore, type HostEvents } from './events'
+import { extStore, onExtEvent, onMessageDisplay, onViewOpened, type AppEvent, type ExtStore, type HostEvents } from './events'
 import { addTheme, type Scheme, type Tokens } from './theme'
 
 export interface Disposable { dispose(): void }
@@ -50,8 +50,11 @@ export interface SlotItems {
   'composer.toolbar': { Component: FC<ComposerToolbarProps> }
   'message.header': { Component: FC<MessageSlotProps> }
   'message.footer': { Component: FC<MessageSlotProps> }
-  /** A card of the chat's side panel; it is listed while `shown` (default: always) and `count` is its badge. */
-  'sidepanel.tab': { label: string; Component: FC<SidePanelTabProps>; shown?: (p: SidePanelTabProps) => boolean; count?: (p: SidePanelTabProps) => number }
+  /**
+   * A card of the chat's side panel; it is listed while `shown` (default: always) and `count` is its badge. `Overlay` is drawn
+   * over the chat whenever the card is listed, collapsed or not, so a window the card opens outlives the card closing.
+   */
+  'sidepanel.tab': { label: string; Component: FC<SidePanelTabProps>; Overlay?: FC<SidePanelTabProps>; shown?: (p: SidePanelTabProps) => boolean; count?: (p: SidePanelTabProps) => number }
 }
 export type SlotName = keyof SlotItems
 
@@ -85,7 +88,7 @@ export interface UiApi {
   /** `ext:<id>:<name>` is the `ui.event` hook for that name. */
   on(event: 'ui.view.opened', fn: (e: HostEvents['ui.view.opened']) => void): Disposable
   on(event: 'ui.message.display', fn: (e: HostEvents['ui.message.display']) => string | void): Disposable
-  on(event: `ext:${string}`, fn: (data: unknown) => void): Disposable
+  on(event: `ext:${string}` | AppEvent, fn: (data: unknown) => void): Disposable
   /** Set existing CSS custom properties for one colour scheme, or both when `scheme` is omitted. */
   theme(tokens: Tokens, opts?: { scheme?: Scheme }): Disposable
 }

@@ -40,6 +40,7 @@ EDIT_TOOLS = {"write_local_file", "fs_edit", "fs_copy", "fs_mkdir", "move_local_
 HOME_TOOLS = {"read_local_file", "write_local_file", "move_local_file", "trash_local_file"}  # mac.py resolves from home
 MAIL_TOOLS = {"gmail_send", "gmail_draft"}
 CALENDAR_TOOLS = {"calendar_create", "calendar_update", "calendar_delete", "calendar_propose"}
+TERMINAL_TOOLS = {"terminal_open", "terminal_send"}  # the agent terminal tools whose line is judged like a shell command (extensions/coding/terminals.py)
 PATH_KEYS = ("path", "root", "directory", "dir", "file_path", "folder")
 SRC_KEYS = ("src", "source", "from")
 DEST_KEYS = ("dest", "dst", "destination", "to", "target")
@@ -903,6 +904,9 @@ def subject_for(tool: str, args: dict[str, Any]) -> list[Subject]:
     a = args if isinstance(args, dict) else {}
     if tool == "shell_run":
         return [Subject("Bash", str(a.get("command") or ""))]
+    if tool in TERMINAL_TOOLS:  # a line typed into an agent's terminal is a shell command: the same rules judge it
+        line = a.get("text") if tool == "terminal_send" else a.get("command")
+        return [Subject("Bash", str(line))] if isinstance(line, str) and line.strip() else [Subject(tool, None)]
     if tool in READ_TOOLS:
         p = _first(a, PATH_KEYS)
         return [Subject("Read", p)] if p else [Subject("Read", None)]

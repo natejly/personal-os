@@ -14,11 +14,10 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from . import codingagents, mac, macos, opencode, osplat, pi, shell
+from . import mac, macos, osplat, shell
 
 AUTOMATION = {"finder": "com.apple.finder", "systemEvents": "com.apple.systemevents",
               "contacts": "com.apple.AddressBook", "calendar": "com.apple.iCal", "reminders": "com.apple.reminders"}
-CLAUDE_INSTALL_HINT = "Install the claude CLI: npm i -g @anthropic-ai/claude-code"
 
 
 class PermissionIn(BaseModel):
@@ -67,8 +66,9 @@ def _cli_safe(find: Callable[[], str | None], hint: str) -> dict[str, Any]:
         return _cli(None, hint)
 
 
-def router(settings: Callable[[], dict[str, Any]], shell_jobs: Callable[[], Any]) -> APIRouter:
-    """settings: effective settings; shell_jobs: the shell job registry (resolved late, it is built after the routers)."""
+def router(settings: Callable[[], dict[str, Any]], shell_jobs: Callable[[], Any], coding: Callable[[], Any]) -> APIRouter:
+    """settings: effective settings; shell_jobs: the shell job registry; coding: the coding service, which knows the coding CLIs
+    (both resolved late, they are built after the routers)."""
     r = APIRouter()
 
     def access() -> dict[str, Any]:
@@ -82,9 +82,7 @@ def router(settings: Callable[[], dict[str, Any]], shell_jobs: Callable[[], Any]
             "browsers": [{"name": n, "state": _safe(lambda n=n: macos.automation_status(macos.BROWSER_BUNDLES[n]))}
                          for n in names],
             "scope": _safe_scope(),
-            "clis": {"claude": _cli_safe(codingagents.claude_binary, CLAUDE_INSTALL_HINT),
-                     "opencode": _cli_safe(opencode.binary, opencode.INSTALL_HINT),
-                     "pi": _cli_safe(pi.binary, pi.INSTALL_HINT)},
+            "clis": {name: _cli_safe(find, hint) for name, (find, hint) in coding().clis().items()},
         }
 
     @r.get("/system/access")

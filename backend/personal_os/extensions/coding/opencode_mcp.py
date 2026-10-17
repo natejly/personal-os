@@ -1,4 +1,4 @@
-"""A stdio MCP server that drives a running OpenCode: run `python -m personal_os.opencode_mcp`.
+"""A stdio MCP server that drives a running OpenCode: run `python -m personal_os.extensions.coding.opencode_mcp`.
 
 OpenCode has no MCP-server mode of its own, but its background service speaks an HTTP API (`/api/session`, ...). This shim
 starts or finds that service (`opencode service status|start` prints its URL), signs in with the service password

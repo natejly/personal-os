@@ -28,6 +28,7 @@ import httpx
 
 from . import duel, egress, labels, limits, llm, mac, osplat, permissions
 from .extensions.hooks import HookBus
+from .extensions.prechecks import Prechecks
 from .kinds import is_internal
 from .embed import rrf
 from . import fsx
@@ -37,7 +38,6 @@ from .style import voice_wanted
 from .cowork import UNDECIDED_OUTPUTS
 from .workspace import Workspace, WorkspaceError
 from . import plans, router
-from . import coding_route
 from . import firecrawl, reach, setup_cards
 from . import mcp_search
 from .learn import KINDS as MEMORY_KINDS, normalize_memory, skill_block, until_ts
@@ -167,6 +167,8 @@ class ToolSpec:
         self.taint_ok: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
         # () -> False while the thing this tool needs is missing (a binary, the desktop bridge); it is then not offered
         self.available_fn: Callable[[], bool] | None = None
+        # (args) -> the lines its approval card shows beyond the arguments (what the call would do), or None
+        self.preview: Callable[[dict[str, Any]], list[str] | None] | None = None
 
     def schema(self) -> dict[str, Any]:
         d = self.description
@@ -777,8 +779,9 @@ class Toolbox:
                  docs: Any = None,
                  work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None,
                  style: Any = None, desks: Any = None, workspace: Any = None, filesnap: Any = None,
-                 conversations: Any = None, extundo: Any = None, bus: HookBus | None = None):
+                 conversations: Any = None, extundo: Any = None, bus: HookBus | None = None, prechecks: Prechecks | None = None):
         self.bus = bus or HookBus()  # the hooks dispatch_tool fires around every call
+        self.prechecks = prechecks or Prechecks()  # extensions' refusals, asked before any approval card
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
         self.extensions = extensions or []  # every loaded extension, adapted feature modules (modules/) included, in load order
         self.google, self.docs = google, docs
@@ -853,9 +856,8 @@ class Toolbox:
         ext_tools.register(self)  # ext_propose
         from . import research
         research.register(self)  # deep_research: planned fan-out over read-only subagents
-        from . import opencode, shell
+        from . import shell
         shell.register(self)
-        opencode.register(self)  # opencode_run: a coding agent in the shell sandbox
         from . import commands as _commands, workflows as _workflows
         _workflows.register(self)
         _commands.register(self)
@@ -1112,14 +1114,14 @@ class Toolbox:
     def precheck(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> dict[str, Any] | None:
         """The error `call` would return for arguments the tool's signature cannot take, found before anything is
         approved or run. Coerces scalar types (coerce_args), then binds, so None means the call may go on. Not a spec
-        (a connector tool) is None as well. With `ctx`, a repo edit that coding_route sends to a coding agent too."""
+        (a connector tool) is None as well. With `ctx`, a refusal by an extension's precheck too."""
         spec = self.specs.get(name)
         if not spec:
             return None
         if (bad := coerce_args(spec, args)) is not None:
             return bad
-        if ctx is not None and (routed := coding_route.check(self, name, args, ctx)):
-            return tool_error(routed, alternative="coding_session_start")
+        if ctx is not None and (refused := self.prechecks.refusal(name, args, ctx)):
+            return tool_error(refused)
         try:
             inspect.signature(spec.fn).bind(None, **args)
         except TypeError as e:
@@ -1146,16 +1148,10 @@ class Toolbox:
             return tool_error(refused.format(name=name), alternative=ALTERNATIVE.get(name))
         if (bad := coerce_args(spec, args)) is not None:
             return bad
-        if routed := coding_route.check(self, name, args, ctx):  # every caller (chat, desk, worker, subagent, script, workflow)
-            return tool_error(routed, alternative="coding_session_start")
-        # The precheck above judges the command's text; this diffs the repo it ran in, for what the text hid (a script, a heredoc).
-        guard = await asyncio.to_thread(coding_route.guard_start, self, args, ctx) if name == "shell_run" else None
         # The item's human name, read before the write (a deleted event can no longer be looked up).
         item = await asyncio.to_thread(labels.for_call, self, name, args) if name in labels.ECHO else None
         try:
             out = await self._dispatch(spec, ctx, args)
-            if guard and (routed := await asyncio.to_thread(coding_route.guard_finish, guard)):
-                return tool_error(routed, alternative="coding_session_start")
         except TypeError as e:  # backstop: signature mismatch, wrong types
             return self._bad_arguments(name, spec, e)
         except Exception as e:  # noqa: BLE001

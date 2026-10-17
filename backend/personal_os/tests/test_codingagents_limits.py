@@ -1,4 +1,4 @@
-"""Coding-session limits and the claude daemon environment (codingagents.py, shell.py pools).
+"""Coding-session limits and the claude daemon environment (extensions/coding/sessions.py, shell.py pools).
 
 Run: PYTHONPATH=backend backend/.venv/bin/python -m unittest personal_os.tests.test_codingagents_limits -v
 What matters here: OpenCode is launched with no timeout, coding sessions have their own concurrency pool,
@@ -16,7 +16,7 @@ import unittest.mock
 from pathlib import Path
 from types import SimpleNamespace
 
-from personal_os import codingagents as ca
+from personal_os.extensions.coding import sessions as ca
 from personal_os import limits, llm, shell
 from personal_os.tests.test_codingagents import SID, CodingTestCase
 

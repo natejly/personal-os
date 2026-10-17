@@ -1,4 +1,4 @@
-"""The structured live feed of coding sessions (coding_events.py + its capture in codingagents.py + the events route).
+"""The structured live feed of coding sessions (events.py + its capture in sessions.py + the events route).
 
 Run: cd backend && .venv/bin/python -m pytest personal_os/tests/test_coding_events.py -q
 """
@@ -16,8 +16,8 @@ os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="codingeve
 os.environ.setdefault("PERSONAL_OS_AUTH_TOKEN", "test-token")
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from personal_os import coding_events as ce  # noqa: E402
-from personal_os import codingagents as ca  # noqa: E402
+from personal_os.extensions.coding import events as ce  # noqa: E402
+from personal_os.extensions.coding import sessions as ca  # noqa: E402
 from personal_os import shell  # noqa: E402
 from personal_os.tests import test_codingagents as base  # noqa: E402
 

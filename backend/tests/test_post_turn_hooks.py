@@ -485,7 +485,10 @@ def test_a_subagent_fires_start_then_stop(monkeypatch: Any) -> None:
             h.dispose()
     assert out["state"] == "completed"
     assert [k for k, _ in log] == ["start", "stop"]
-    assert log[0][1] == log[1][1] and log[0][1]["role"] == "researcher" and log[0][1]["child_id"].startswith("sa_") and log[0][1]["parent"] == ""
+    ident = ("child_id", "role", "parent")
+    assert {k: log[0][1][k] for k in ident} == {k: log[1][1][k] for k in ident}
+    assert log[0][1]["role"] == "researcher" and log[0][1]["child_id"].startswith("sa_") and log[0][1]["parent"] == ""
+    assert not log[0][1]["exit_reason"] and log[1][1]["exit_reason"] == "completed" and log[1][1]["detached"] is False
 
 
 # ---- approval.requested / resolved ----

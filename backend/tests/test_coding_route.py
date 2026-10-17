@@ -1,4 +1,4 @@
-"""Coding goes to OpenCode / Claude Code (coding_route.py): Grain's own file writers and file-changing shell commands are
+"""Coding goes to OpenCode / Claude Code (coding/route.py): Grain's own file writers and file-changing shell commands are
 refused inside a git work tree under every permission mode and for every agent, with a message naming coding_session_start;
 reads, tests and publishing stay allowed, edits outside a repo are untouched, the setting turns it off, and the Allow
 everything floor still decides its own cases. Offline: a fake HOME in a tmpdir.
@@ -17,7 +17,9 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from personal_os import coding_route, permissions, permrules, shell  # noqa: E402
+from coding_ext import call as dispatch, coding_box  # noqa: E402
+from personal_os import permissions, permrules, shell  # noqa: E402
+from personal_os.extensions.coding import route as coding_route  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 from personal_os.workspace import Workspace  # noqa: E402
 
@@ -37,12 +39,12 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def make(tmp_path: Path, **settings: Any) -> tuple[Toolbox, dict[str, Any]]:
     cfg: dict[str, Any] = {"permissionMode": "allow_all", **settings}
-    tb = Toolbox(None, None, None, lambda: cfg, workspace=Workspace(tmp_path / "data"))  # type: ignore[arg-type]
+    tb, _, _ = coding_box(cfg, workspace=Workspace(tmp_path / "data"))
     return tb, cfg
 
 
 def call(tb: Toolbox, name: str, ctx: dict[str, Any], **args: Any) -> Any:
-    return asyncio.run(tb.call(name, args, ctx))
+    return dispatch(tb, name, ctx, **args)
 
 
 needs_sandbox = pytest.mark.skipif(sys.platform != "darwin", reason="shell_run refuses to run without an OS sandbox, and only macOS has one")

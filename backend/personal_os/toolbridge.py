@@ -6,7 +6,7 @@ socket is the only thing the Seatbelt profile lets the script connect to; the ne
 
 Every call goes through the same gate the model's own calls do, never around it:
   * only names on ALLOWED, that the script asked for, that exist, and whose mode for this chat is on or ask
-  * `Toolbox.precheck` (bad arguments, a repo edit coding_route sends to a coding agent) refuses before any card
+  * `Toolbox.precheck` (bad arguments, a repo edit the coding extension sends to a coding agent) refuses before any card
   * `Toolbox.gate` (taint upgrades on -> ask), then an `ask` parks the script on a real approval card (`approve`)
     and the script's clock stops while it waits; no card to answer (a background run) means refused, not run
   * `Toolbox.call` with the run's own ctx, so taint, the ledger and every tool-side check apply

@@ -2039,6 +2039,33 @@ export interface CodingSessionEvent {
 /** GET /coding-sessions/{id}/diff: what the session changed in its worktree. `diff` only with ?full=1. */
 export interface CodingSessionDiff { worktree: string; branch: string | null; status: string; diff_stat: string; log: string; diff?: string; truncated: boolean }
 
+/** GET /coding/terminals: a shell an agent opened (in the OS sandbox); the user can take it over in a window. */
+export interface AgentTerminal {
+  id: string; name: string; cwd: string; session_id: string | null; owner_key: string; created_at: number
+  user_attached: number; user_dirty: number; sandboxed: boolean
+}
+/** One input of a coding recipe, filled into its prompt. */
+export interface CodingRecipeInput { name: string; type: 'string' | 'number' | 'boolean' | 'enum'; required: boolean; default?: string | number | boolean; max_len?: number; values?: string[] }
+/** GET /coding/recipes: a saved coding task with a verify command, and whether its current version may run. */
+export interface CodingRecipe {
+  id: string; name: string; description: string; current_version: number; approved: boolean; created_by: 'user' | 'agent'
+  inputs: Pick<CodingRecipeInput, 'name' | 'type' | 'required'>[]
+}
+/** GET /coding/recipes/{id}: every version with who saved it and when the user approved it, and the current body. */
+export interface CodingRecipeDetail extends Omit<CodingRecipe, 'approved' | 'created_by' | 'inputs' | 'description'> {
+  versions: { version: number; created_by: 'user' | 'agent'; approved_at: number | null; created_at: number }[]
+  current: { version: number; approved_at: number | null; body: { prompt: string; inputs: CodingRecipeInput[]; verify: { command: string } } & Record<string, unknown> }
+}
+export type CodingRecipeRunStatus = 'queued' | 'working' | 'verifying' | 'passed' | 'failed' | 'agent_failed' | 'timeout' | 'stopped' | 'verify_blocked' | 'queued_timeout'
+/** GET /coding/recipe-runs: one run of a recipe version; it passed only if its verify command exited 0. */
+export interface CodingRecipeRun {
+  id: string; recipe_id: string; recipe_version: number; origin: 'chat' | 'palette' | 'job'; status: CodingRecipeRunStatus; attempt: number
+  session_id: string | null; verify_exit: number | null; verify_tail: string | null; created_at: number; ended_at: number | null
+  resolved: { recipe: string }
+}
+/** POST /coding/recipes/{id}/preview: what a run would use, as the lines its confirmation shows. */
+export interface CodingRecipePreview { lines: string[] }
+
 /** One step of a ship checklist. awaiting_confirm is only ever the merge step. */
 export type ShipStepStatus = 'pending' | 'running' | 'green' | 'red' | 'skipped' | 'awaiting_confirm'
 export interface ShipStep {
@@ -2187,6 +2214,9 @@ export interface GrainApi {
   termWrite: (termId: string, data: string) => Promise<boolean>
   termResize: (termId: string, cols: number, rows: number) => Promise<boolean>
   termClose: (termId: string) => Promise<boolean>
+  /** An agent's terminal (opened by the backend): the user takes it over in a window, then lets go. The PTY keeps running. */
+  termAttach: (termId: string, cols: number, rows: number) => Promise<{ termId: string; replay: string; fresh: boolean } | { error: string }>
+  termDetach: (termId: string) => Promise<boolean>
   onTermData: (cb: (termId: string, data: string) => void) => () => void
   onTermExit: (cb: (termId: string, code: number | null) => void) => () => void
   /** System access wizard: side-effect-free status reads, one grant per row, and an allowlisted Settings pane opener. */

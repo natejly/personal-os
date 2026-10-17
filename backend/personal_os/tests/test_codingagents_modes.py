@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import unittest
 
-from personal_os import autoreview, codingagents as ca
+from personal_os import autoreview
+from personal_os.extensions.coding import sessions as ca
 from personal_os.tests.test_codingagents import CodingTestCase
 from personal_os.tools import Toolbox
 
@@ -66,7 +67,7 @@ class Gate(CodingTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.box = Toolbox(None, None, None, lambda: {})  # type: ignore[arg-type]
-        ca.register(self.box, self.cs)
+        self.register(self.box)
 
     def test_start_hard_card_only_for_explicit_bypass_outside_allow_all(self) -> None:
         for mode, pm, want in (("auto", "bypassPermissions", True), ("manual", "bypassPermissions", True),

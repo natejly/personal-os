@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os.codingagents import summary  # noqa: E402
+from personal_os.extensions.coding.sessions import summary  # noqa: E402
 
 ROW = {"id": "s1", "agent": "claude", "name": "n", "status": "working", "repo_path": "/r", "worktree": "/w", "created_at": 1.0, "updated_at": 1.0}
 

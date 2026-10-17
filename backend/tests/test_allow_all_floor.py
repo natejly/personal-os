@@ -246,7 +246,7 @@ def test_allow_all_applies_doc_edits_directly() -> None:
     assert tools.doc_edit_applies({"settings": {"permissionMode": "auto"}, "permission_mode": "allow_all"})
 
 
-# ---- the same floor handed to Claude Code sessions (codingagents.floor_settings), which run outside the sandbox
+# ---- the same floor handed to Claude Code sessions (coding sessions.floor_settings), which run outside the sandbox
 
 def _claude_rules() -> dict[str, list[str]]:
     return permrules.claude_code_floor()["permissions"]

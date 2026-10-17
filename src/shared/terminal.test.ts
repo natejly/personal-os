@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  clampDim, createTermHub, isSessionId, MAX_PTYS, pickArgv, Ring, RING_CAP, scrubEnv, WRITE_CAP,
+  AGENT_MAX, clampDim, createTermHub, isSessionId, lastLines, MAX_PTYS, pickArgv, Ring, RING_CAP, runBridgeCommand, scrubEnv, WRITE_CAP,
   type HubDeps, type Pty, type SessionInfo
 } from './terminal'
 
@@ -220,4 +220,114 @@ test('test-only fake command is honoured unpackaged and ignored when packaged', 
   const packaged = rig({ fakeCmd: 'cat -u', isPackaged: true })
   await packaged.hub.open(1, SID, 'shell', 80, 24)
   assert.deepEqual(packaged.spawns[0].argv, ['/bin/zsh', '-l'])
+})
+
+// ---- terminals an agent drives (opened by the backend, no window owns them until the user attaches one) ----
+const TM = 'tm_0123456789abcdef'
+const open = (over: Record<string, unknown> = {}) => ({ terminal_id: TM, argv: ['/bin/zsh', '-l'], env: { PATH: '/bin', PERSONAL_OS_AUTH_TOKEN: 'x' }, cwd: '/work/tree', cols: 100, rows: 30, ...over })
+
+test('ring cursors are absolute offsets and say when the start was dropped', () => {
+  const r = new Ring(10)
+  r.push('abcdef')
+  r.push('ghijkl')
+  assert.deepEqual([r.total, r.base], [12, 2])
+  assert.deepEqual(r.since(5), { text: 'fghijkl', lost: false })
+  assert.deepEqual(r.since(0), { text: 'cdefghijkl', lost: true })
+  assert.deepEqual(r.since(99), { text: '', lost: false })
+})
+
+test('lastLines strips control sequences and keeps the newest lines', () => {
+  assert.equal(lastLines('\u001b[31mred\u001b[0m\r\n\r\nprogress 1\rprogress 2\r\n$ ', 2), 'progress 2\n$ ')
+})
+
+test('an agent terminal opens from validated backend fields, with the env scrubbed again', () => {
+  const { hub, spawns } = rig()
+  assert.deepEqual(hub.controlOpen(open()), { ok: true })
+  assert.deepEqual(spawns[0].argv, ['/bin/zsh', '-l'])
+  assert.equal(spawns[0].env.PERSONAL_OS_AUTH_TOKEN, undefined)
+  assert.equal(spawns[0].env.TERM, 'xterm-256color')
+  for (const bad of [{ terminal_id: 'tm_1' }, { terminal_id: TM }, { argv: ['zsh', '-l'] }, { argv: [] }, { argv: ['/bin/zsh', 5] }, { cwd: 'relative' }, { cwd: '/missing' }, { env: null }]) {
+    assert.ok('error' in (hub.controlOpen(open(bad)) as object), JSON.stringify(bad))
+  }
+  assert.equal(spawns.length, 1)
+})
+
+test('at most AGENT_MAX agent terminals, and they count against MAX_PTYS', async () => {
+  const { hub } = rig()
+  for (let i = 0; i < AGENT_MAX; i++) assert.deepEqual(hub.controlOpen(open({ terminal_id: `tm_${i.toString(16).padStart(16, '0')}` })), { ok: true })
+  assert.ok('error' in (hub.controlOpen(open({ terminal_id: 'tm_ffffffffffffffff' })) as object))
+  assert.ok('termId' in (await hub.open(1, sid(1), 'shell', 80, 24)))  // two are left for the user's own
+})
+
+test('write, read with a cursor, status and close', async () => {
+  const { hub, ptys } = rig()
+  hub.controlOpen(open())
+  const w = hub.controlWrite(TM, 'ls\r', false)
+  assert.deepEqual([w.ok, w.cursor], [true, 0])
+  assert.deepEqual(ptys[0].written, ['ls\r'])
+  ptys[0].data('file1\r\n')
+  ptys[0].data('file2\r\n')
+  const r = await hub.controlRead(TM, 0, 1000, false)
+  assert.deepEqual([r.text, r.cursor, r.from_cursor_lost, r.exited], ['file1\r\nfile2\r\n', 14, false, false])
+  assert.equal((await hub.controlRead(TM, 7, 4, false)).text, 'e2\r\n')  // newest max_bytes
+  assert.equal((await hub.controlRead(TM, 14, 1000, false)).text, '')
+  assert.equal((await hub.controlRead(TM, 0, 1000, true)).screen, 'file1\nfile2')  // no emulator: the ring's last lines
+  assert.deepEqual([hub.controlStatus(TM).alive, hub.controlStatus('tm_ffffffffffffffff')], [true, { error: 'No such terminal' }])
+  ptys[0].exit(0)
+  assert.deepEqual([hub.controlStatus(TM).alive, hub.controlStatus(TM).exit_code], [false, 0])
+  assert.deepEqual(hub.controlWrite(TM, 'x', false), { error: 'The terminal has exited' })
+  assert.equal((await hub.controlRead(TM, 0, 1000, false)).text, 'file1\r\nfile2\r\n')  // still readable until closed
+  assert.deepEqual(hub.controlClose(TM), { closed: true, exit_code: 0 })
+  assert.deepEqual(hub.controlClose(TM), { error: 'No such terminal' })
+})
+
+test('a screen emulator, when there is one, answers screen reads', async () => {
+  const text = async (): Promise<string> => 'rendered'
+  const { hub } = rig({ screen: () => ({ write: () => {}, resize: () => {}, text }) })
+  hub.controlOpen(open())
+  assert.equal((await hub.controlRead(TM, 0, 10, true)).screen, 'rendered')
+})
+
+test('taking a terminal over: the agent can read but not type, and the user typing blocks it until ctrl-c', async () => {
+  const { hub, ptys, sent } = rig()
+  hub.controlOpen(open())
+  ptys[0].data('before')
+  const a = hub.attach(1, TM, 90, 20)
+  assert.deepEqual(a, { termId: TM, replay: 'before', fresh: false })
+  assert.deepEqual(ptys[0].sizes.at(-1), [90, 20])
+  assert.ok('error' in (hub.attach(2, TM, 80, 24) as object))
+  assert.deepEqual(hub.controlWrite(TM, 'x', false), { blocked: 'attached' })
+  ptys[0].data('live')
+  await sleep(40)
+  assert.deepEqual(sent.at(-1)?.payload, { termId: TM, data: 'live' })  // output now goes to the window
+  assert.equal((await hub.controlRead(TM, 0, 100, false)).attached, true)
+  assert.equal(hub.write(2, TM, 'x'), false)
+  assert.equal(hub.write(1, TM, 'ls'), true)  // the user typed
+  assert.equal(hub.detach(1, TM), true)
+  assert.equal(hub.controlStatus(TM).attached, false)
+  assert.deepEqual(hub.controlWrite(TM, 'y', false), { blocked: 'dirty' })
+  assert.equal(hub.controlWrite(TM, '\x03', true).ok, true)
+  assert.equal(hub.controlWrite(TM, 'z', false).ok, true)
+})
+
+test('closing the window detaches an agent terminal instead of killing it', async () => {
+  const { hub, ptys } = rig()
+  hub.controlOpen(open())
+  hub.attach(1, TM, 80, 24)
+  hub.killSender(1)
+  assert.equal(ptys[0].killed, false)
+  assert.equal(hub.controlStatus(TM).attached, false)
+  hub.killAll()
+  assert.equal(ptys[0].killed, true)
+})
+
+test('bridge commands run on the hub, and an unknown one is an error', async () => {
+  const { hub } = rig()
+  assert.deepEqual(await runBridgeCommand(hub, { id: '1', type: 'open', ...open() }), { ok: true })
+  assert.equal((await runBridgeCommand(hub, { id: '2', type: 'write', terminal_id: TM, data: 'a', clear_dirty: false })).ok, true)
+  assert.equal(((await runBridgeCommand(hub, { id: '3', type: 'read', terminal_id: TM, cursor: 0, max_bytes: 10, screen: false })) as { text: string }).text, '')
+  assert.equal((await runBridgeCommand(hub, { id: '4', type: 'status', terminal_id: TM })).alive, true)
+  assert.deepEqual(await runBridgeCommand(hub, { id: '5', type: 'close', terminal_id: TM }), { closed: true, exit_code: null })
+  assert.deepEqual(await runBridgeCommand(hub, { id: '6', type: 'attach' }), { error: 'Unknown terminal command' })
+  assert.deepEqual(await runBridgeCommand(hub, null), { error: 'Unknown terminal command' })
 })

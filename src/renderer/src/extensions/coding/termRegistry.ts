@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 
-export type TermMode = 'attach' | 'shell' | 'opencode'
+/** `agent` is a shell an agent opened: `sessionId` is then the terminal's own id, and it is taken over rather than opened. */
+export type TermMode = 'attach' | 'shell' | 'opencode' | 'agent'
 export type TermState = 'opening' | 'live' | 'exited'
 
 /** One terminal view: its xterm instance, the element it lives in, and the PTY (in the main process) behind it. */
@@ -22,7 +23,7 @@ const keyOf = (sessionId: string, mode: TermMode): string => `${sessionId}:${mod
 
 let available: Promise<boolean> | null = null
 /** Whether this build can host terminals; asked once. */
-export const termAvailable = (): Promise<boolean> => (available ??= window.os.termAvailable().catch(() => false))
+export const termAvailable = (): Promise<boolean> => (available ??= Promise.resolve().then(() => window.os.termAvailable()).catch(() => false))
 
 export function useTermAvailable(): boolean {
   const [ok, setOk] = useState(false)
@@ -97,7 +98,7 @@ export async function startEntry(e: TermEntry): Promise<void> {
   e.state = 'opening'
   emit()
   try { e.fit.fit() } catch { /* hidden: keep the default size */ }
-  const res = await window.os.termOpen(e.sessionId, e.mode, e.term.cols, e.term.rows)
+  const res = e.mode === 'agent' ? await window.os.termAttach(e.sessionId, e.term.cols, e.term.rows) : await window.os.termOpen(e.sessionId, e.mode, e.term.cols, e.term.rows)
   if (entries.get(e.key) !== e) { if (!('error' in res)) void window.os.termClose(res.termId); return }
   if ('error' in res) {
     e.state = 'exited'
@@ -141,6 +142,14 @@ export function ensureEntry(sessionId: string, mode: TermMode): TermEntry {
   entries.set(key, e)
   emit()
   return e
+}
+
+/** The window over an agent's terminal was closed: the agent has it back, and the shell keeps running. A later attach replays it. */
+export function detachEntry(e: TermEntry): void {
+  if (e.termId) void window.os.termDetach(e.termId)
+  e.termId = null
+  e.state = 'exited'
+  emit()
 }
 
 /** Ends the PTY and drops the view. */

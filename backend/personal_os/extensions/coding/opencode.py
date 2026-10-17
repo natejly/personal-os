@@ -42,9 +42,12 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from . import limits, mac, osplat, sandbox, shell
+from ... import limits, mac, osplat, sandbox, shell
+
+if TYPE_CHECKING:
+    from ...tools import ToolSpec
 
 # Where the binary usually lands: Homebrew, the official installer (~/.opencode/bin), npm -g, ~/.local/bin.
 BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "~/.opencode/bin", "~/.local/bin", "~/.bun/bin")
@@ -104,7 +107,7 @@ def summarize(raw: str) -> tuple[str, str | None]:
 
 def _git(cwd: str | Path, *args: str) -> tuple[bool, str]:
     """A fixed git command run by Grain itself (not the agent): (exit 0, stdout + stderr)."""
-    from .codingagents import GIT
+    from .sessions import GIT
     try:
         r = subprocess.run([*GIT, "-c", "core.hooksPath=/dev/null", *args], cwd=str(cwd), capture_output=True, text=True,
                            timeout=GIT_TIMEOUT, stdin=subprocess.DEVNULL, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
@@ -127,7 +130,7 @@ def repo_of(path: Path) -> tuple[Path, bool] | None:
 def isolate(where: Path, conversation_id: str | None, prompt: str, continue_session: bool) -> dict[str, Any] | None:
     """The worktree a run in `where` should use ({worktree, branch, base, repo, cwd}), or None when `where` is not in a
     repo's main checkout. Raises Refused when git cannot make one."""
-    from .codingagents import _slug, check_branch, worktree_path
+    from .sessions import _slug, check_branch, worktree_path
     found = repo_of(where)
     if not found or not found[1]:
         return None
@@ -257,18 +260,15 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
     return job, {"cwd": shell._scrub(str(where)), "model": use_model or "opencode default", "sandboxed": True}
 
 
-def register(tb: Any) -> None:
-    """Add opencode_run to a Toolbox (group `shell`). shell.register must have run first (it owns tb.shell)."""
-    from .tools import ToolSpec, _obj, tool_error
-
-    jobs: shell.ShellJobs = tb.shell
-
-    def cfg(ctx: dict[str, Any]) -> dict[str, Any]:
-        return ctx.get("settings") or tb.settings()
+def tool(coding: Any) -> ToolSpec:
+    """The opencode_run tool (group `shell`), over `coding.tb`, the Toolbox the app binds once it exists (it owns tb.shell)."""
+    from ...tools import ToolSpec, _obj, tool_error
 
     async def opencode_run(ctx: dict[str, Any], prompt: str, cwd: str | None = None, timeout_s: int | None = None,
                            background: bool = False, continue_session: bool = False, model: str | None = None,
                            in_place: bool = False) -> Any:
+        tb = coding.tb
+        jobs: shell.ShellJobs = tb.shell
         prompt = str(prompt or "").strip()
         if ctx.get("proposal_only"):
             return tool_error("opencode_run edits files and runs commands on this Mac and this is an unattended background "
@@ -367,4 +367,4 @@ def register(tb: Any) -> None:
     spec.default = "ask"
     spec.force_ask = lambda _args, ctx: bool(ctx.get("tainted"))  # it reaches the network, so untrusted input must not drive it unasked
     spec.available_fn = lambda: binary() is not None
-    tb.specs["opencode_run"] = spec
+    return spec

@@ -31,9 +31,10 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import AfterValidator, BaseModel, Field
 
 from . import auth_breaker, blobs, system_access
+from .bounds import clamp_limit
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
 from . import branch_summary, compaction, side_question, followups, otel_export, replay_trace, router, thinking_summary, titles
-from . import chatlink, coding_route, duel, fsx, labels, opencode_usage, request_log, toolcore
+from . import chatlink, duel, fsx, labels, request_log, toolcore
 from .fsx import sensitive_reason
 from . import context_map
 from .dispatch import Contact, dispatch_tool
@@ -83,12 +84,11 @@ from .setup import router as setup_router
 from .reliability import router as reliability_router, secret_values
 from .retention import RetentionWorker
 from . import limits, resume
-from . import permission_tool, permissions, permrules
+from . import permissions, permrules
 from . import egress, settled
 from . import sandbox
 from . import shell as shell_tool
 from . import ship as ship_mod
-from . import codingagents, coding_events
 from . import workers as workers_mod
 from .subagents import UNATTENDED_KINDS, USER_NOTE, AgentDefs, Subagents, parallel_safe
 from .commands import Commands
@@ -101,6 +101,7 @@ from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .style import WritingStyle
 from .extensions.channels import ChatService
+from .extensions.coding.extension import Coding
 from .extensions import devapi, profiles as profile_routes, review as review_routes
 from .extensions.authoring import skill as author_extension
 from .extensions.drafts import Drafts
@@ -148,6 +149,7 @@ def _resolve_auth_token() -> str:
 
 AUTH_TOKEN = _resolve_auth_token()
 PUBLIC_PATHS = ("/health", "/integrations/google/callback", "/mcp/oauth/callback")
+PUBLIC_PREFIXES = ("/coding-hooks/",)  # a coding session's hooks carry their own per-session key, checked by the route
 
 
 def _token_eq(sent: str, expected: str) -> bool:
@@ -200,7 +202,7 @@ async def _memory_refused(request: Request, exc: Exception) -> JSONResponse:  # 
 @app.middleware("http")
 async def _require_token(request: Request, call_next):  # type: ignore[no-untyped-def]
     p = request.url.path
-    if request.method == "OPTIONS" or p in PUBLIC_PATHS:
+    if request.method == "OPTIONS" or p in PUBLIC_PATHS or p.startswith(PUBLIC_PREFIXES):
         return await call_next(request)
     auth = request.headers.get("authorization", "")
     sent = request.headers.get("x-personal-os-token") or (auth[7:].strip() if auth[:7].lower() == "bearer " else "")
@@ -232,8 +234,8 @@ def _run_changed(run: Run) -> None:
         channel.on_run_change(run)  # it never raises
     if run.conversation_id in _wake_waiting and not run.answering:
         _schedule_wake(run.conversation_id)  # a worker finished while this reply was being written: its report goes in now
-    if run.conversation_id in _coding_waiting and not run.answering:
-        _schedule_coding_wake(run.conversation_id)  # a coding session settled while this reply was being written
+    if run.conversation_id in _owed_waiting and not run.answering:
+        _schedule_owed_wake(run.conversation_id)  # an extension's wake arrived while this reply was being written
     if _chat_waiting and not run.answering:  # any run ending may free the chat (or the desk slot) a cross-chat turn waits on
         for cid in list(_chat_waiting):
             _schedule_chat_delivery(cid)
@@ -436,11 +438,11 @@ def _publish_event(name: str, data: Any) -> None:
 
 
 ext_drafts = Drafts(db.data_dir)
-# sid/wsid are defined further down, so the contexts look them up late.
+# sid/wsid/owe_wake are defined further down, so the contexts look them up late.
 _ext_ctx = ExtensionContext(db=db, hidden_views=lambda: settings().get("hiddenViews") or (), services={"mcp": lambda: mcp, "extundo": lambda: extundo, "memories": lambda: memories,
                                       "documents": lambda: documents, "uploads": lambda: _store_upload},
                             settings=settings, set_settings=db.set_settings, sid=lambda p: sid(p), wsid=lambda p: wsid(p), publish=_publish_event,
-                            widget_kinds=lambda: (*host.widget_kinds(), *ext_drafts.widget_kinds()))
+                            widget_kinds=lambda: (*host.widget_kinds(), *ext_drafts.widget_kinds()), owe_wake=lambda c, t, w: owe_wake(c, t, w))
 host.load_builtin("google", _ext_ctx)
 google: Google = _ext_ctx.services["google"]()
 app.include_router(setup_router(settings, db.set_settings, lambda: google.status()["connected"]))
@@ -477,7 +479,7 @@ host.migrate(db)
 # Soft delete: the DELETE routes below move things here, and /trash restores or erases them (trash.py).
 trash = Trash(db, todos, docs)
 app.include_router(trash_router(trash))
-app.include_router(system_access.router(settings, lambda: toolbox.shell))
+app.include_router(system_access.router(settings, lambda: toolbox.shell, lambda: coding))
 usage = Usage(db)
 pricing = Pricing()
 llm.caps_lookup = pricing.caps
@@ -664,7 +666,7 @@ learner.skills, learner.known_tools = skills, lambda: _known_tools()
 toolbox = Toolbox(memories, graph, documents, settings, extensions=list(host.extensions.values()), google=google, docs=docs,
                   work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, desks=desks, workspace=workspace, filesnap=filesnap,
-                  conversations=convos, extundo=extundo, bus=host.bus)
+                  conversations=convos, extundo=extundo, bus=host.bus, prechecks=host.prechecks)
 # Which chat each file belongs to (chat_files.py): triggers record uploads, local writes and coding sessions; these hooks the rest.
 chat_files = ChatFiles(db, toolbox.chat_outputs.root if toolbox.chat_outputs is not None else None)
 app.include_router(chat_files_router(chat_files))
@@ -709,7 +711,7 @@ toolbox.web_cache = WebCache(db)  # fetch_url's response cache
 # same _approvals futures a chat's do.
 agent_defs = AgentDefs(db)
 subagent_mgr = Subagents(run_store, toolbox, settings, defs=agent_defs, results=tool_results, pricing=pricing, memories=memories,
-                         projects=projects, workspace=workspace, approvals=_approvals, skills=skills, hooks=host.bus)
+                         projects=projects, workspace=workspace, approvals=_approvals, skills=skills, hooks=host.bus, directives=host.directives)
 toolbox.subagents = subagent_mgr
 subagent_mgr.snaps = snaps
 subagent_mgr.connectors = SimpleNamespace(
@@ -870,7 +872,8 @@ def _mcp_review_text(name: str) -> str:
 def _permission_card(perm: permrules.Resolution, danger: str, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
     """The tool_call event's `permission`: the rule context, plus the before -> after lines of a settings change."""
     card = {**perm.card(), "danger": danger} if perm.card() else None
-    if name == permission_tool.NAME and (change := permission_tool.preview(toolbox, args)):
+    spec = toolbox.specs.get(name)
+    if spec and spec.preview and (change := spec.preview(args)):
         return {"kind": None, "subject": None, "rule": None, "suggestions": [], "session": False, **(card or {"danger": danger}), "change": change}
     return card
 
@@ -938,11 +941,6 @@ def wsid(project_id: str | None) -> str | None:
     if s is not None and not projects.get(s):
         raise HTTPException(404, "No such project")
     return s
-
-
-def _clamp(limit: int, hi: int = 500) -> int:
-    """A list route's LIMIT. SQLite reads a negative one as 'no limit', so it is bounded here, not trusted."""
-    return max(1, min(int(limit), hi))
 
 
 def sse(event: str, data: Any) -> str:
@@ -2641,7 +2639,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
                  PERSONA_FOLDER_HINT.format(path=folder) if folder and not desk and tool_schemas else "",
                  channel.hint if tool_schemas and channel is not None else "",
-                 coding_route.hint(cfg) if tool_schemas else "")
+                 host.directives.text(cfg) if tool_schemas else "")
         inputs_block = _desk_inputs_block() if desk else ""
         map_block = _map_status_block(used, conv["settings"], cfg, conv["project_id"], fence_nonce, tool_schemas, tool_ctx["deferred"])
         skipped: list[str] = []
@@ -2655,7 +2653,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
         stable = "\n\n".join(p for p in (used["stable_system"], *slots.stable) if p)
         system = "\n\n".join(p for p in (stable, *used["volatile_blocks"], *slots.tail) if p)
-        used["stable_hash"] = prefix_hash(stable, slots.versions)
+        used["stable_hash"] = prefix_hash(stable, [*slots.versions, *(host.directives.versions(cfg) if tool_schemas else ())])
         cspan["meta"]["stable_hash"] = used["stable_hash"]
         used["system_prompt"] = system
         used["tokens_estimate"] = estimate_tokens(system)
@@ -3039,9 +3037,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             steer check and `done`, so a steer is either folded in or already answered with a 409."""
             if not desk_id:  # a worker's jobs are its own (keyed to its run): they outlive this reply and end with the worker
                 await toolbox.shell.kill_conversation(conv_id, run_id=run.run_id if run else None)
-            if stop.is_set() and run is not None:  # a Stopped reply stops its coding sessions; a finished one leaves them running
-                with contextlib.suppress(Exception):
-                    await coding.stop_owned(run.run_id, f"the {'desk run' if desk_id else 'reply'} that started it was stopped")
 
         async def _final_round() -> AsyncIterator[tuple[str, Any]]:
             """Closing answer after a breaker stop: one tool-free call, abandoned if it hangs past FINAL_ROUND_SECONDS."""
@@ -4509,7 +4504,7 @@ def list_shell_jobs() -> dict[str, Any]:
 @app.get("/shell/jobs/{job_id}/tail")
 def shell_job_tail(job_id: str, limit: int = 4000) -> dict[str, Any]:
     """The end of a job's output for the user. It never moves the model's shell_poll cursor."""
-    return toolbox.shell.tail(_shell_job(job_id), _clamp(limit, 50_000))
+    return toolbox.shell.tail(_shell_job(job_id), clamp_limit(limit, 50_000))
 
 
 @app.post("/shell/jobs/{job_id}/kill")
@@ -4672,45 +4667,52 @@ async def _wake_conversation(conv_id: str) -> None:
     run.task.add_done_callback(lambda _t: _wake_inflight.difference_update(wake["ids"]))
 
 
-# Coding sessions that settled and are owed to the chat that started them, and the chats whose wake waits for a reply to end.
-_coding_owed: dict[str, list[dict[str, Any]]] = {}
-_coding_waiting: set[str] = set()
+# Wake turns an extension owes a chat (a coding session that settled), and the chats whose wake waits for a reply to end.
+_owed_wakes: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+_owed_waiting: set[str] = set()
 
 
-def _schedule_coding_wake(conv_id: str) -> None:
+def _schedule_owed_wake(conv_id: str) -> None:
     try:
         asyncio.get_running_loop()
-        asyncio.ensure_future(_wake_coding(conv_id))
-    except RuntimeError:  # called from the threadpool (the watcher refreshes off the loop)
+        asyncio.ensure_future(_wake_owed(conv_id))
+    except RuntimeError:  # called from the threadpool (a watcher refreshes off the loop)
         if _loop is not None and not _loop.is_closed():
-            _loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_wake_coding(conv_id)))
+            _loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_wake_owed(conv_id)))
 
 
-def _coding_finished(row: dict[str, Any]) -> None:
-    """A coding session settled: hand it to the front agent as the same hidden wake turn a finished worker gets (NO_REPLY
-    when there is nothing new to say). Sessions started by an unattended run with no chat have nobody to tell."""
-    if cid := row.get("conversation_id"):
-        _coding_owed.setdefault(cid, []).append(row)
-        _schedule_coding_wake(cid)
+def owe_wake(conversation_id: str, text: str, wake: dict[str, Any]) -> None:
+    """An extension owes this chat a hidden wake turn: the same kind a finished worker's report gets (NO_REPLY when there is
+    nothing new to say). Several owed at once fold into one turn."""
+    _owed_wakes.setdefault(conversation_id, []).append((text, wake))
+    _schedule_owed_wake(conversation_id)
 
 
-async def _wake_coding(conv_id: str) -> None:
-    if not _coding_owed.get(conv_id):
+def _merge_wakes(owed: list[tuple[str, dict[str, Any]]]) -> tuple[str, dict[str, Any]]:
+    wakes = [w for _, w in owed]
+    return "\n\n".join(t for t, _ in owed), {
+        "ids": [i for w in wakes for i in w["ids"]], "tainted": any(w["tainted"] for w in wakes),
+        "title": next((w["title"] for w in wakes if w["title"]), ""),
+        "attachments": list({a["id"]: a for w in wakes for a in w["attachments"]}.values())}
+
+
+async def _wake_owed(conv_id: str) -> None:
+    if not _owed_wakes.get(conv_id):
         return
     conv = convos.get(conv_id, with_messages=False)
     if conv is None:  # the chat is gone: nobody to tell
-        _coding_owed.pop(conv_id, None)
+        _owed_wakes.pop(conv_id, None)
         return
     if bus.answering(conv_id):
-        _coding_waiting.add(conv_id)  # _run_changed retries when the reply ends
+        _owed_waiting.add(conv_id)  # _run_changed retries when the reply ends
         return
-    _coding_waiting.discard(conv_id)
-    rows = _coding_owed.pop(conv_id)
-    text, wake = workers_mod.build_coding_wake(rows)
+    _owed_waiting.discard(conv_id)
+    owed = _owed_wakes.pop(conv_id)
+    text, wake = _merge_wakes(owed)
     if desk_id := conv["settings"].get("deskId"):
         if not isinstance(_launch_desk(desk_id, text, MESSAGE_FROM, wake=wake), Run):
-            _coding_owed.setdefault(conv_id, [])[:0] = rows
-            _coding_waiting.add(conv_id)
+            _owed_wakes.setdefault(conv_id, [])[:0] = owed
+            _owed_waiting.add(conv_id)
         return
     body = ChatIn(content=text, wake=wake)
     bus.start(conv_id, lambda r: _run_chat(r, body), input=body.model_dump())
@@ -4924,7 +4926,7 @@ async def list_runs(status: str | None = None, conversation_id: str | None = Non
         statuses = tuple(x for x in status.split(",") if x)
         if not statuses or any(x not in STATUSES for x in statuses):
             raise HTTPException(400, f"status must be 'all' or a comma list of {', '.join(STATUSES)}")
-    return bus.list(statuses, conversation_id, _clamp(limit), desk_id)
+    return bus.list(statuses, conversation_id, clamp_limit(limit), desk_id)
 
 
 @app.get("/runs/{run_id}/children")
@@ -5494,7 +5496,7 @@ async def list_approvals(status: str | None = "pending", run_id: str | None = No
         raise HTTPException(400, "status must be pending, approved, denied, decided or all")
     if order not in ("asc", "desc"):
         raise HTTPException(400, "order must be asc or desc")
-    rows = run_store.approvals(None if status in (None, "", "all") else status, run_id, _clamp(limit), desk_id,
+    rows = run_store.approvals(None if status in (None, "", "all") else status, run_id, clamp_limit(limit), desk_id,
                                newest_first=order == "desc")
     if status == "pending":
         rows = _untrashed(rows)
@@ -6395,87 +6397,15 @@ async def retry_ship(id: str) -> dict[str, Any]:
     return await _ship_do(ship_runner.retry, id)
 
 
-# ---------------- coding sessions (codingagents.py): Claude Code / OpenCode on a repo or a fresh worktree ----------------
-async def _coding_run(argv: list[str], cwd: str, timeout: float, env: dict[str, str] | None = None) -> tuple[bool, str]:
-    return await shell_tool.run_fixed(toolbox.shell, argv, cwd, settings(), sandboxed=False, timeout=timeout, label="coding",
-                                      extra_env=env)
-
-
-coding = codingagents.CodingSessions(db, toolbox.shell, _coding_run, events.publish, settings, tb=toolbox)
-codingagents.register(toolbox, coding)
-coding.on_finish = _coding_finished
-
-
-@host.on_start
-async def _coding_watch_startup() -> None:
-    app.state.coding_watch = asyncio.create_task(coding.watch(), name="coding-watch")
-
-
-@host.on_stop
-async def _coding_watch_shutdown() -> None:
-    if t := getattr(app.state, "coding_watch", None):
-        t.cancel()
-
-
-class CodingSendIn(BaseModel):
-    message: str
-
-
-def _coding_row(id: str) -> dict[str, Any]:
-    row = coding.get(id)
-    if not row:
-        raise HTTPException(404, "No such coding session")
-    return coding.refresh(row)
-
-
-async def _coding_do(fn: Any, *args: Any) -> Any:
-    try:
-        return await fn(*args)
-    except (codingagents.CodingError, shell_tool.ShellError) as e:
-        raise HTTPException(409, shell_tool._scrub(str(e))) from e
-
-
-@app.get("/coding-sessions")
-async def list_coding_sessions() -> dict[str, Any]:
-    # Off the loop: each refresh reads files (the topic hands a publish from a worker thread to the loop).
-    return {"sessions": await asyncio.to_thread(lambda: [codingagents.summary(coding.refresh(r), None) for r in coding.list(50)])}
-
-
-@app.get("/coding-sessions/{id}")
-async def get_coding_session(id: str) -> dict[str, Any]:
-    return codingagents.summary(_coding_row(id), None)
-
-
-@app.get("/coding-sessions/{id}/logs")
-async def coding_session_logs(id: str, limit: int = 4000) -> dict[str, Any]:
-    row = _coding_row(id)
-    return {"id": id, "output": row["log_tail"][-_clamp(limit, 50_000):], "status": row["status"]}
-
-
-@app.get("/coding-sessions/{id}/events")
-async def coding_session_events(id: str, after: int = 0, limit: int = 500) -> dict[str, Any]:
-    """The session's structured live feed, oldest first: events with seq above `after`."""
-    _coding_row(id)
-    return {"events": coding_events.list_after(db, id, max(0, after), _clamp(limit, coding_events.CAP))}
-
-
-@app.get("/coding-sessions/{id}/diff")
-async def coding_session_diff(id: str, full: int = 0) -> dict[str, Any]:
-    _coding_row(id)
-    return await _coding_do(coding.diff, id, bool(full))
-
-
-@app.post("/coding-sessions/{id}/stop")
-async def stop_coding_session(id: str) -> dict[str, Any]:
-    _coding_row(id)
-    return codingagents.summary(await _coding_do(coding.stop, id), None)
-
-
-@app.post("/coding-sessions/{id}/send")
-async def send_coding_session(id: str, body: CodingSendIn) -> dict[str, Any]:
-    """A follow-up from the user: only a session that has finished or been stopped can take one."""
-    _coding_row(id)
-    return codingagents.summary(await _coding_do(coding.send, id, body.message), None)
+# ---------------- coding (extensions/coding): Claude Code / OpenCode / pi on a repo or a fresh worktree ----------------
+# Loaded here, after the ship tools, so its tools keep the place they always had at the end of the list.
+_coding_scope = host.load_builtin("coding", _ext_ctx)
+host.migrate(db)
+coding: Coding = _ext_ctx.services["coding"]()
+coding.bind(toolbox)
+toolbox.extensions.append(_coding_scope)
+toolbox.set_extension_tools(_coding_scope)
+host.mount(app, _coding_scope)
 
 
 def _checked_edit(tool: str, args: dict[str, Any], desk_id: str | None = None) -> dict[str, Any]:
@@ -6502,7 +6432,7 @@ def list_proposals(status: str | None = "pending", run_id: str | None = None, li
     """Outward-facing calls a background run recorded instead of making. Pending by default."""
     if status not in (None, "", "all", *PROPOSAL_STATUSES):
         raise HTTPException(400, "status must be pending, accepted, rejected, expired or all")
-    return proposals.list(None if status in (None, "", "all") else status, run_id, _clamp(limit))
+    return proposals.list(None if status in (None, "", "all") else status, run_id, clamp_limit(limit))
 
 
 @app.post("/proposals/{pid}/accept")
@@ -6594,7 +6524,7 @@ def _review_queues() -> list[dict[str, Any]]:
 
 def _inbox_runs(hours: float, limit: int, include_dry: int) -> list[dict[str, Any]]:
     """The job runs "While you were away" lists: one window, shared by the read and by Mark all read."""
-    runs = run_store.of_kind("job", since=time.time() - max(0.0, float(hours)) * 3600, limit=_clamp(limit))
+    runs = run_store.of_kind("job", since=time.time() - max(0.0, float(hours)) * 3600, limit=clamp_limit(limit))
     if not include_dry:  # a preview is not something that happened while the user was away
         runs = [r for r in runs if not (isinstance(r.get("input"), dict) and r["input"].get("dry_run"))]
     # A run whose result matched the previous one's, on a job that only wants to hear about changes, is not news.
@@ -6708,7 +6638,7 @@ def inbox_delete_run(run_id: str) -> dict[str, Any]:
 def inbox_archived(limit: int = 50) -> list[dict[str, Any]]:
     """Archived run messages, newest first: out of "While you were away" but kept, and restorable."""
     out = []
-    for r in run_store.of_kind("job", limit=_clamp(limit), archived=True):
+    for r in run_store.of_kind("job", limit=clamp_limit(limit), archived=True):
         fire = r["input"] if isinstance(r.get("input"), dict) else {}
         text = workers_mod.strip_no_reply(run_store.transcript(r["run_id"], r["message_id"])[0]) if r["message_id"] else ""
         out.append({"run_id": r["run_id"], "conversation_id": r["conversation_id"], "status": r["status"],
@@ -6799,7 +6729,7 @@ async def _opencode_usage_startup() -> None:
 
     async def go() -> None:  # best effort, in the background: it must never hold up /health
         with contextlib.suppress(Exception):
-            await asyncio.to_thread(opencode_usage.import_usage, db, pricing, cfg)
+            await asyncio.to_thread(coding.import_usage, pricing, cfg)
     app.state.opencode_usage_task = asyncio.create_task(go(), name="opencode-usage-import")
 
 
@@ -6808,7 +6738,7 @@ async def usage_report(days: int = 30) -> dict[str, Any]:
     cfg = settings()
     await pricing.refresh(cfg)
     with contextlib.suppress(Exception):  # OpenCode calls since the last look; incremental, so cheap on every open
-        await asyncio.to_thread(opencode_usage.import_usage, db, pricing, cfg)
+        await asyncio.to_thread(coding.import_usage, pricing, cfg)
     return {**usage.report(days), "prices": pricing.table(cfg)}
 
 
@@ -7652,9 +7582,7 @@ async def _shutdown() -> None:
     # Sessions whose owner (a reply or subagent) is still running stop with it; ones whose owner already finished were
     # left working on purpose and outlive the app.
     owners = bus.live_ids() | {c.id for c in subagent_mgr.running()}
-    await asyncio.gather(*(asyncio.wait_for(coding.stop_owned(r, "Grain was shut down while it was running"), 10) for r in owners),
-                         return_exceptions=True)
-    coding.closing = True  # past this point a run's teardown leaves its sessions alone (stop_owned)
+    await coding.shutdown(owners)
     await host.channels.stop()  # before the runs are cancelled: a dying backend must not send "interrupted" replies
     await toolbox.shell.shutdown()  # first: host shell jobs (SIGTERM then SIGKILL per group) before anything slow can stall exit
     await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there
@@ -8343,7 +8271,7 @@ def delete_doc(id: str) -> dict[str, bool]:
 def doc_revisions(id: str, limit: int = 100) -> list[dict[str, Any]]:
     if not docs.get(id):
         raise HTTPException(404)
-    return docs.revisions(id, _clamp(limit))
+    return docs.revisions(id, clamp_limit(limit))
 
 
 @app.get("/docs/revisions/{rev_id}")
@@ -8512,7 +8440,7 @@ def delete_plan(id: str) -> dict[str, bool]:
 @app.get("/conversations/{id}/tool-results")
 def list_tool_results(id: str, limit: int = 20) -> list[dict[str, Any]]:
     """The handles this conversation produced: what was stored instead of inlined."""
-    return tool_results.list(id, _clamp(limit))
+    return tool_results.list(id, clamp_limit(limit))
 
 
 @app.get("/tool-results/{rid}")
@@ -8520,7 +8448,7 @@ def read_tool_result_blob(rid: str, offset: int = 0, limit: int = 20000) -> dict
     row = tool_results.get(rid)
     if not row:
         raise HTTPException(404, "No such tool result")
-    out = tool_results.read(row["conversation_id"], rid, max(0, offset), _clamp(limit, 200000))
+    out = tool_results.read(row["conversation_id"], rid, max(0, offset), clamp_limit(limit, 200000))
     return out or {}
 
 
@@ -9671,7 +9599,7 @@ def _close_review(desk_id: str) -> dict[str, Any] | None:
 
 @app.get("/cowork/inbox")
 def cowork_inbox(limit: int = 40) -> list[dict[str, Any]]:
-    return desks.inbox(_clamp(limit))
+    return desks.inbox(clamp_limit(limit))
 
 
 @app.post("/cowork/inbox/{event_id}/seen")

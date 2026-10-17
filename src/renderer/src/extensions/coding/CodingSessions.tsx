@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { AGENT_LABEL, codingDot, codingLive, codingStatusLabel, codingStoppable, eventSummary, formatElapsed, latestActivity, pathBase, plainExcerpt, splitSessions } from '../lib/codingSessions'
-import { useStore } from '../store'
+import { AGENT_LABEL, codingDot, codingLive, codingStatusLabel, codingStoppable, eventSummary, formatElapsed, latestActivity, pathBase, plainExcerpt, splitSessions } from './lib/codingSessions'
+import { useCoding } from './store'
 import { CodingFollowUp, CodingTimeline } from './CodingTimeline'
-import { CodingDiffView, NeedsYou, ShowSession, useStop } from './toolcards/CodingSessionCard'
+import { CodingDiffView, NeedsYou, ShowSession, useStop } from './CodingSessionCard'
 import type { CodingSession } from '@shared/types'
 
 /** Re-render every `ms` while `on`, so a running session's elapsed time moves. */
@@ -22,7 +22,7 @@ function Row({ c, now }: { c: CodingSession; now: number }): JSX.Element {
   const [diff, setDiff] = useState(false)
   const [full, setFull] = useState(false)
   const { stop, busy } = useStop(c.id)
-  const events = useStore((s) => s.codingEvents[c.id])
+  const events = useCoding((s) => s.events[c.id])
   const live = codingLive(c.status)
   const activity = latestActivity(events)
   const raw = live && activity ? eventSummary(activity) : c.detail
@@ -68,8 +68,8 @@ function Row({ c, now }: { c: CodingSession; now: number }): JSX.Element {
  * stream; the refetch here (on mount, then every 30 s while any session is live) is only a fallback.
  */
 export default function CodingSessions(): JSX.Element | null {
-  const sessions = useStore((s) => s.codingSessions)
-  const refresh = useStore((s) => s.refreshCodingSessions)
+  const sessions = useCoding((s) => s.sessions)
+  const refresh = useCoding((s) => s.refresh)
   const [recentOpen, setRecentOpen] = useState(true)
   useEffect(() => { void refresh() }, [refresh])
   const { live, recent } = splitSessions(Object.values(sessions))

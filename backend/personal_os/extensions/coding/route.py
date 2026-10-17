@@ -40,7 +40,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from . import permissions, permrules
+from ... import permissions, permrules
 
 log = logging.getLogger(__name__)
 
@@ -240,7 +240,7 @@ def _shell_refusal(cmd: str, start: str) -> tuple[str, str] | None:
 
 
 def _shell_cwd(tb: Any, args: dict[str, Any], ctx: dict[str, Any]) -> str:
-    from . import shell
+    from ... import shell
     roots, start = shell.perm_where(tb, ctx)
     raw = os.path.expanduser(str(args.get("cwd") or "").strip())
     return os.path.join(roots[0] if roots else str(Path.home()), raw) if raw else start  # as shell.floor judges it
@@ -338,7 +338,7 @@ def guard_start(tb: Any, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
         try:
             before = _status(root)
         except (OSError, subprocess.SubprocessError):
-            log.warning("coding_route: git status failed in %s; not guarding it", root, exc_info=True)
+            log.warning("git status failed in %s; not guarding it", root, exc_info=True)
             continue
         snap["repos"][root] = {p: (xy, _stat(os.path.join(root, p))) for p, xy in before.items()}
     return snap if snap["repos"] else None
@@ -350,7 +350,7 @@ def guard_finish(snap: dict[str, Any]) -> str | None:
         try:
             after = _status(root)
         except (OSError, subprocess.SubprocessError):
-            log.warning("coding_route: git status failed in %s after a command", root, exc_info=True)
+            log.warning("git status failed in %s after a command", root, exc_info=True)
             continue
         new = [p for p in after if p not in before and _source(p)]
         # Already modified before the command: never touched, only named when the command changed them further.
@@ -373,7 +373,7 @@ def guard_finish(snap: dict[str, Any]) -> str | None:
                             os.remove(f)
                 reverted = new
             except (OSError, subprocess.SubprocessError):
-                log.warning("coding_route: could not revert %s in %s", new, root, exc_info=True)
+                log.warning("could not revert %s in %s", new, root, exc_info=True)
                 failed = new
         def names(ps: list[str]) -> str:
             return ", ".join(ps[:8]) + (f" and {len(ps) - 8} more" if len(ps) > 8 else "")
@@ -397,7 +397,7 @@ def check(tb: Any, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> str 
     cfg = ctx.get("settings") or tb.settings()
     if not enabled(cfg):
         return None
-    from . import fsx
+    from ... import fsx
     if name in fsx.WRITE_ARGS:
         g = fsx.grants_for(tb, ctx)
         base = str(g.desk) if g.desk and name not in fsx.LOCAL_TOOLS else str(Path.home())

@@ -39,9 +39,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import approval_log, autoreview, coding_route, compaction, context_map, fsx, limits, llm, mac, mcp_search, permissions, permrules, redact
+from . import approval_log, autoreview, compaction, context_map, fsx, limits, llm, mac, mcp_search, permissions, permrules, redact
 from .db import new_id, now
 from .dispatch import Contact, dispatch_tool
+from .extensions.directives import Directives
 from .extensions.hooks import HookBus
 from . import toolcore
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
@@ -81,14 +82,6 @@ SHELL_TOOLS = ("shell_run", "shell_poll", "shell_kill", "opencode_run", "coding_
 UNATTENDED_KINDS = ("job", "scheduled")
 STATEFUL_GROUPS = ("browser", "shell")  # tools that hold session state never run side by side
 # What an interrupted child's run row says, by exit reason: an empty error left the user guessing why a worker stopped.
-# exit reasons that stop the coding sessions a child started (codingagents.stop_owned), and how the row says it. A
-# completed child or one that errored leaves them running: a session started to work in the background keeps going.
-SESSION_STOPS = {
-    "stopped": "was stopped",
-    "stale": "was stopped by the hang watchdog",
-    "interrupted": "was stopped with the reply or agent that started it",
-    "shutdown": "was halted at app shutdown",
-}
 ENDED_EARLY = {
     "stopped": "Stopped by the user.",
     "stale": "Stopped by the hang watchdog: no model or tool progress for too long.",
@@ -601,9 +594,11 @@ class Subagents:
 
     def __init__(self, store: Any, toolbox: Any, settings_fn: Callable[[], dict[str, Any]], *, defs: AgentDefs | None = None,
                  results: Any = None, pricing: Any = None, memories: Any = None, projects: Any = None, workspace: Any = None,
-                 approvals: dict[str, asyncio.Future] | None = None, skills: Any = None, hooks: HookBus | None = None) -> None:
+                 approvals: dict[str, asyncio.Future] | None = None, skills: Any = None, hooks: HookBus | None = None,
+                 directives: Directives | None = None) -> None:
         self.store, self.toolbox, self.settings = store, toolbox, settings_fn
         self.hooks = hooks or HookBus()  # subagent.start and subagent.stop
+        self.directives = directives or Directives()  # the paragraphs built-in extensions add to every prompt
         self.defs, self.results, self.pricing, self.memories, self.projects = defs, results, pricing, memories, projects
         self.workspace, self.skills = workspace, skills
         self.approvals = approvals if approvals is not None else {}
@@ -868,8 +863,8 @@ class Subagents:
         if db is not None and (not ch.role.tools or "context_map" in ch.role.tools) and "context_map" in getattr(self.toolbox, "specs", {}):
             if block := context_map.agent_block(db, cx.get("project_id"), cfg):
                 parts.append(block)
-        if route := coding_route.hint(cfg):
-            parts.append(route)
+        if directives := self.directives.text(cfg):
+            parts.append(directives)
         if index := self._tool_index(ch):
             parts.append(index)
         if ch.roots and ch.confine:
@@ -1234,7 +1229,7 @@ class Subagents:
                                      roots=self._perm_roots(ch), conv=ch.conversation_id, cwd=pcwd,
                                      doom=ch.detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
             mode, forced = perm.mode, perm.forced
-            bad = perm.refusal or self._confine(ch, name, args) or coding_route.check(self.toolbox, name, args, ch.ctx)
+            bad = perm.refusal or self._confine(ch, name, args) or self.toolbox.prechecks.refusal(name, args, ch.ctx)
             floor = self.toolbox.floor_action(name, args, ch.ctx)
             if not bad and (pmode != "manual" or floor) and mode != "off":
                 # The parent's permission mode (autoreview.route), with the child's own task as the reviewer's intent.
@@ -1558,16 +1553,6 @@ class Subagents:
                     await asyncio.shield(jobs.kill_run(ch.id))
             except BaseException:  # noqa: BLE001 - a second cancel or a kill that failed must not skip `finished`
                 log.warning("could not end the jobs of worker %s", ch.id, exc_info=True)
-        if ch.exit_reason in SESSION_STOPS:  # stopped, not finished: the coding sessions it started stop with it
-            coding = getattr(self.toolbox, "coding", None)
-            how = SESSION_STOPS[ch.exit_reason]
-            if ch.exit_reason == "stopped" and ch.error:  # who stopped it, e.g. "Stopped by the user."
-                how = "was " + ch.error[0].lower() + ch.error[1:].rstrip(".")
-            try:
-                if coding is not None:
-                    await asyncio.shield(coding.stop_owned(ch.id, f"the {'worker' if ch.detached else 'subagent'} that started it {how}"))
-            except BaseException:  # noqa: BLE001 - as above: `finished` must still be set
-                log.warning("could not stop the coding sessions of %s", ch.id, exc_info=True)
         if not ch.text:
             ch.text = "(the subagent produced no text)" if ch.state != "error" else f"(the subagent failed: {ch.error})"
         try:
@@ -1600,7 +1585,8 @@ class Subagents:
 
     @staticmethod
     def _hook_payload(ch: Child) -> dict[str, Any]:
-        return {"child_id": ch.id, "role": ch.role.name, "parent": ch.parent_id}
+        return {"child_id": ch.id, "role": ch.role.name, "parent": ch.parent_id, "exit_reason": ch.exit_reason, "error": ch.error,
+                "detached": ch.detached}
 
     def report(self, ch: Child) -> dict[str, Any]:
         text = redact.scrub_command_output(ch.text)

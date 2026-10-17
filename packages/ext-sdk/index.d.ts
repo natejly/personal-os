@@ -196,6 +196,7 @@ export interface ToolPrePayloadCtx {
   project_id: string | null
   agent_id: string | null
   tainted: boolean
+  desk_id: string | null
 }
 
 /** A tool call is about to run; Deny or Ask only. */
@@ -209,6 +210,7 @@ export interface ToolPrePayload {
 /** A tool call finished. */
 export interface ToolPostPayload {
   name: string
+  call_id: string
   args: Record<string, unknown>
   result_preview: string
   error: string | null
@@ -218,6 +220,7 @@ export interface ToolPostPayload {
 /** A tool's whole result before it is rendered for the model; return the payload with result changed. */
 export interface ToolResultPayload {
   name: string
+  call_id: string
   result: unknown
   tainted: boolean
 }
@@ -231,6 +234,7 @@ export interface ToolTaintPayload {
 /** A tool call failed. */
 export interface ToolErrorPayload {
   name: string
+  call_id: string
   error: string
 }
 
@@ -290,6 +294,9 @@ export interface SubagentStartPayload {
   child_id: string
   role: string
   parent: string | null
+  exit_reason: string | null
+  error: string | null
+  detached: boolean
 }
 
 /** A subagent finished. */
@@ -297,6 +304,9 @@ export interface SubagentStopPayload {
   child_id: string
   role: string
   parent: string | null
+  exit_reason: string | null
+  error: string | null
+  detached: boolean
 }
 
 /** A worker's report is being handed back. */
@@ -411,7 +421,39 @@ export interface NotifyPayload {
   target: unknown
 }
 
-export type HookName = "app.start" | "app.stop" | "settings.changed" | "chat.created" | "chat.deleted" | "project.created" | "project.deleted" | "ext.changed" | "turn.accept" | "turn.start" | "input.attachment" | "context.contribute" | "model.select" | "model.request" | "model.response" | "tools.offer" | "tool.permission" | "tool.pre" | "tool.post" | "tool.result" | "tool.taint" | "tool.error" | "reply.complete" | "turn.settled" | "run.after" | "subagent.start" | "subagent.stop" | "worker.report" | "memory.before_write" | "memory.written" | "memory.deleted" | "compaction.before" | "compaction.after" | "approval.requested" | "approval.resolved" | "job.fired" | "job.done" | "schedule.tick" | "channel.inbound" | "channel.outbound" | "file.written" | "review.accepted" | "notify"
+/** A Claude Code session Grain started is about to run a tool; Deny or Ask only (the stricter of this and Grain's own floor wins). */
+export interface CodingToolPrePayload {
+  session_id: string
+  agent: string
+  tool: string
+  input: Record<string, unknown>
+  cwd: string | null
+  worktree: string
+  permission_mode: string | null
+  lifted: boolean
+  call_id: string | null
+  conversation_id: string | null
+  run_id: string | null
+}
+
+/** A Claude Code session Grain started finished a tool call. */
+export interface CodingToolPostPayload {
+  session_id: string
+  agent: string
+  tool: string
+  input: Record<string, unknown>
+  cwd: string | null
+  worktree: string
+  permission_mode: string | null
+  lifted: boolean
+  call_id: string | null
+  conversation_id: string | null
+  run_id: string | null
+  result_preview: string
+  duration_ms: number | null
+}
+
+export type HookName = "app.start" | "app.stop" | "settings.changed" | "chat.created" | "chat.deleted" | "project.created" | "project.deleted" | "ext.changed" | "turn.accept" | "turn.start" | "input.attachment" | "context.contribute" | "model.select" | "model.request" | "model.response" | "tools.offer" | "tool.permission" | "tool.pre" | "tool.post" | "tool.result" | "tool.taint" | "tool.error" | "reply.complete" | "turn.settled" | "run.after" | "subagent.start" | "subagent.stop" | "worker.report" | "memory.before_write" | "memory.written" | "memory.deleted" | "compaction.before" | "compaction.after" | "approval.requested" | "approval.resolved" | "job.fired" | "job.done" | "schedule.tick" | "channel.inbound" | "channel.outbound" | "file.written" | "review.accepted" | "notify" | "coding.tool.pre" | "coding.tool.post"
 
 /** The payload each hook's handlers receive. */
 export interface HookPayloads {
@@ -458,4 +500,6 @@ export interface HookPayloads {
   "file.written": FileWrittenPayload
   "review.accepted": ReviewAcceptedPayload
   "notify": NotifyPayload
+  "coding.tool.pre": CodingToolPrePayload
+  "coding.tool.post": CodingToolPostPayload
 }

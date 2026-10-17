@@ -72,10 +72,14 @@ export function extStore(id: string): ExtStore {
 
 const EXT_EVENT = /^ext:([a-z0-9-]+):(.+)$/
 
-/** An `ext:<id>:<name>` event from the backend: written into that extension's slice, then handed to its subscribers. */
+/** Events the app topic carries under their own names (they predate extensions) that an extension's frontend half subscribes to. */
+export type AppEvent = 'coding_session' | 'coding_session_event'
+export const isAppEvent = (event: string): event is AppEvent => event === 'coding_session' || event === 'coding_session_event'
+
+/** An `ext:<id>:<name>` event from the backend: written into that extension's slice, then handed to its subscribers. An app event only reaches its subscribers. */
 export function dispatchExtEvent(event: string, data: unknown): void {
   const m = EXT_EVENT.exec(event)
-  if (!m) return
-  extStore(m[1]).set(m[2], data)
+  if (m) extStore(m[1]).set(m[2], data)
+  else if (!isAppEvent(event)) return
   for (const fn of extEvents.get(event) ?? []) guarded(fn, data)
 }

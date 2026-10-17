@@ -1,0 +1,59 @@
+{
+ "_about": "Events recorded from claude 2.1.302: a PreToolUse and a PostToolUse hook event (matcher \"*\") and the result object of `claude -p --output-format json --json-schema` (paths and ids shortened).",
+ "pre": {
+  "session_id": "fdb41eec-c00d-4120-9975-5f072d9b8ab1",
+  "transcript_path": "/home/user/.claude/projects/-work-repo/fdb41eec-c00d-4120-9975-5f072d9b8ab1.jsonl",
+  "cwd": "/work/repo",
+  "prompt_id": "b93b7ca7-2937-4e24-b652-b98c4f71bfd5",
+  "permission_mode": "dontAsk",
+  "effort": {
+   "level": "high"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+   "file_path": "/work/repo/f.txt"
+  },
+  "tool_use_id": "toolu_01RMJ51Tavo1UFqb1cYSDuyz"
+ },
+ "post": {
+  "session_id": "fdb41eec-c00d-4120-9975-5f072d9b8ab1",
+  "transcript_path": "/home/user/.claude/projects/-work-repo/fdb41eec-c00d-4120-9975-5f072d9b8ab1.jsonl",
+  "cwd": "/work/repo",
+  "prompt_id": "b93b7ca7-2937-4e24-b652-b98c4f71bfd5",
+  "permission_mode": "dontAsk",
+  "effort": {
+   "level": "high"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+   "file_path": "/work/repo/f.txt"
+  },
+  "tool_response": {
+   "type": "text",
+   "file": {
+    "filePath": "/work/repo/f.txt",
+    "content": "hello\n",
+    "numLines": 2,
+    "startLine": 1,
+    "totalLines": 2
+   }
+  },
+  "tool_use_id": "toolu_01RMJ51Tavo1UFqb1cYSDuyz",
+  "duration_ms": 12
+ },
+ "result": {
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 2,
+  "total_cost_usd": 0.12051,
+  "terminal_reason": "completed",
+  "permission_denials": [],
+  "result": "{\"n\":7}",
+  "structured_output": {
+   "n": 7
+  }
+ }
+}

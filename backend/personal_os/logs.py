@@ -54,11 +54,17 @@ def register_secret(value: str | None) -> None:
         _secrets.add(value.strip())
 
 
+def redact_literals(text: str, extra: Iterable[str] = ()) -> str:
+    """`text` with every registered secret (and the `extra` values) replaced: exact matches only, so it is fast on any input."""
+    for lit in sorted({*_secrets, *(e.strip() for e in extra if e and len(e.strip()) >= 8)}, key=len, reverse=True):
+        text = text.replace(lit, "[redacted]")
+    return text
+
+
 def redact(text: str, extra: Iterable[str] = ()) -> str:
     if not text:
         return text
-    for lit in sorted({*_secrets, *(e.strip() for e in extra if e and len(e.strip()) >= 8)}, key=len, reverse=True):
-        text = text.replace(lit, "[redacted]")
+    text = redact_literals(text, extra)
     for pat, repl in _PATTERNS:
         text = pat.sub(repl, text)
     return text

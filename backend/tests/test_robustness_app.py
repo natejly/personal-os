@@ -290,7 +290,7 @@ def test_message_delete_is_scoped_to_its_conversation() -> None:
 
 # ---- 14. Limits ---------------------------------------------------------------------------------------------------
 def test_negative_limits_are_clamped() -> None:
-    assert appmod._clamp(-1) == 1 and appmod._clamp(10**9) == 500 and appmod._clamp(7) == 7
+    assert appmod.clamp_limit(-1) == 1 and appmod.clamp_limit(10**9) == 500 and appmod.clamp_limit(7) == 7
     assert client.get("/runs?status=all&limit=-1").status_code == 200
     assert len(client.get("/runs?status=all&limit=-1").json()) <= 1
 

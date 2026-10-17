@@ -3,14 +3,15 @@ import { useEffect, useState } from 'react'
 import { Bot } from '../../icons'
 import type { CodingSession, CodingSessionDiff } from '@shared/types'
 import { useStore } from '../../store'
+import { useCoding } from './store'
 import { api } from '../../lib/api'
-import { AGENT_LABEL, codingDot, codingLive, codingStatusLabel, codingStoppable, codingTone } from '../../lib/codingSessions'
+import { AGENT_LABEL, codingDot, codingLive, codingStatusLabel, codingStoppable, codingTone } from './lib/codingSessions'
 import { str } from '../../lib/toolResult'
-import { useTermAvailable } from '../../lib/termRegistry'
-import CardShell from './CardShell'
-import { Badge, ErrorLine, Meta, MonoBlock, useParsed } from './blocks'
-import { CodingActivityPreview } from '../CodingTimeline'
-import { registerToolCard, type ToolCardProps } from './registry'
+import { useTermAvailable } from './termRegistry'
+import CardShell from '../../components/toolcards/CardShell'
+import { Badge, ErrorLine, Meta, MonoBlock, useParsed } from '../../components/toolcards/blocks'
+import { CodingActivityPreview } from './CodingTimeline'
+import type { ToolCardProps } from '../../components/toolcards/registry'
 
 const TITLE: Record<string, string> = {
   coding_session_start: 'Start coding session', coding_session_list: 'Coding sessions', coding_session_status: 'Check coding session',
@@ -24,7 +25,7 @@ const PERMISSION_WARNING: Record<string, string> = {
 
 /** Stop button state shared by the card and the list: the row comes back from the route and goes into the store. */
 export function useStop(id: string): { stop: () => Promise<void>; busy: boolean } {
-  const upsert = useStore((s) => s.upsertCodingSession)
+  const upsert = useCoding((s) => s.upsert)
   const toast = useStore((s) => s.toast)
   const [busy, setBusy] = useState(false)
   const stop = async (): Promise<void> => {
@@ -36,7 +37,7 @@ export function useStop(id: string): { stop: () => Promise<void>; busy: boolean 
 
 /** Opens the side panel's Terminal tab on a session: its attached terminal, or its live activity when it cannot attach. */
 export function ShowSession({ id, cls = 'sm' }: { id: string; cls?: 'sm' | 'xs' }): JSX.Element | null {
-  const openTerminal = useStore((s) => s.openTerminal)
+  const openTerminal = useCoding((s) => s.openTerminal)
   const termOk = useTermAvailable()
   return termOk ? <button type="button" className={`ghost-btn ${cls}`} onClick={() => openTerminal(id)}>Show coding session</button> : null
 }
@@ -135,7 +136,7 @@ export function CodingDiffView({ id }: { id: string }): JSX.Element {
 
 /** One line per session, for coding_session_list. Live rows come from the store so a result read later still moves. */
 function CodingListRows({ rows }: { rows: CodingSession[] }): JSX.Element {
-  const live = useStore((s) => s.codingSessions)
+  const live = useCoding((s) => s.sessions)
   if (!rows.length) return <div className="tc-muted">No coding sessions yet.</div>
   return (
     <ul className="plain-list coding-list">
@@ -155,14 +156,14 @@ function CodingListRows({ rows }: { rows: CodingSession[] }): JSX.Element {
 }
 
 /** The six coding_session_* tools: the approval says what will run and where; afterwards the live session. */
-function CodingSessionCard(props: ToolCardProps): JSX.Element {
+export default function CodingSessionCard(props: ToolCardProps): JSX.Element {
   const { event, pending } = props
   const p = useParsed(event)
   const a = event.arguments
   const tool = event.name
   const id = tool === 'coding_session_start' ? str(p.data?.id) : str(a.id) || str(p.data?.id)
-  const live = useStore((s) => (id ? s.codingSessions[id] : undefined))
-  const upsert = useStore((s) => s.upsertCodingSession)
+  const live = useCoding((s) => (id ? s.sessions[id] : undefined))
+  const upsert = useCoding((s) => s.upsert)
   const fetchIt = !!id && !live && tool !== 'coding_session_diff' && tool !== 'coding_session_list'
   useEffect(() => {
     if (fetchIt) api.coding.get(id).then(upsert).catch(() => undefined)
@@ -208,4 +209,5 @@ function CodingSessionCard(props: ToolCardProps): JSX.Element {
   )
 }
 
-for (const name of Object.keys(TITLE)) registerToolCard(name, CodingSessionCard)
+/** The tools this card draws, registered by the extension. */
+export const CARD_TOOLS = Object.keys(TITLE)

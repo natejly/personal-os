@@ -5,11 +5,13 @@ import * as health from './health/extension'
 import * as calendar from './calendar/extension'
 import * as mail from './mail/extension'
 import * as spaces from './spaces/extension'
+import * as coding from './coding/extension'
 
 activateExtension('todos', todos)
 activateExtension('health', health)
 activateExtension('calendar', calendar)
 activateExtension('mail', mail)
 activateExtension('spaces', spaces)
+activateExtension('coding', coding)
 
 export { extensionModules }

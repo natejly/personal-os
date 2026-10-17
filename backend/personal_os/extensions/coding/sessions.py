@@ -32,10 +32,13 @@ refuse while another session is starting, working or needs_you there. Every tool
 short `external_id` or the Claude Code `session_id` (`CodingSessions.get`).
 
 A session belongs to the run that started it (`run_id`: the calling subagent or worker, else the chat or desk reply).
-When that run is stopped, not when it finishes normally, its live sessions are stopped too (stop_owned, called from
-subagents' _finish and the reply's teardown in app.py), with the reason on the row's detail. At app shutdown the
+When that run is stopped, not when it finishes normally, its live sessions are stopped too (stop_owned, called by the
+extension on `subagent.stop` and `run.after`), with the reason on the row's detail. At app shutdown the
 sessions of runs still going (halted workers, live replies and subagents) are stopped; ones whose run already finished
 keep running in the daemon. Stopping never removes a worktree, so uncommitted or unmerged work stays.
+
+A Claude Code session can also report its own tool calls to the app (`bridge`: the hook in claude_hook, the route in bridge.py)
+and carry a recipe's options (`cli_opts`: tool lists and a step limit); both ride in the same `--settings` and flags as the floor.
 
 Every change is saved and published on the app `events` topic as a `coding_session` event carrying `summary(row)`.
 Nothing here removes a session, force-pushes, or runs git beyond `worktree add`, `status`, `diff` and `log`.
@@ -55,13 +58,17 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from . import claude_hook, coding_events, mac, opencode, osplat, permrules, pi, shell
-from .coding_route import AGENT_NAMES
-from .db import new_id
-from .limits import CODING_SESSION_MAX_CONCURRENT, LOGIN_SHELL_TIMEOUT_SECONDS
-from .ship import BRANCH_RE, PROTECTED
+from ... import claude_hook, mac, osplat, permrules, shell
+from ...db import new_id
+from ...limits import CODING_SESSION_MAX_CONCURRENT, LOGIN_SHELL_TIMEOUT_SECONDS
+from ...ship import BRANCH_RE, PROTECTED
+from . import events as coding_events, opencode, pi, route
+from .route import AGENT_NAMES
+
+if TYPE_CHECKING:
+    from ...tools import ToolSpec
 
 log = logging.getLogger(__name__)
 
@@ -183,32 +190,43 @@ CLAUDE_AGENTS = json.dumps({
 }, separators=(",", ":"))
 
 
-def floor_settings(worktree: str | None = None, lifted: bool = False) -> str:
+def floor_settings(worktree: str | None = None, lifted: bool = False, bridge: dict[str, Any] | None = None) -> str:
     """The `--settings` JSON every claude start and resume carries: the allow-all floor as permission rules plus the
     Bash PreToolUse hook (claude_hook) that judges what a command runs. `worktree` is a worktree Grain made for this
     session, where deleting files is the session's own work. Inline, so nothing on disk can be swapped under the
     session; the CLI merges these lists with the user's own settings. `lifted` (the session runs in bypassPermissions,
-    which is Allow everything): keep the denies on Grain's own data and disk wipes, drop every ask and the delete hook."""
+    which is Allow everything): keep the denies on Grain's own data and disk wipes, drop every ask and the delete hook.
+    `bridge` (see claude_hook.settings_hooks) is what ties the session's tool calls to the app's extensions; without it
+    the JSON is what it always was."""
     if lifted:
-        return json.dumps({"permissions": {"deny": permrules.claude_code_floor()["permissions"]["deny"]}}, separators=(",", ":"))
-    return json.dumps({**permrules.claude_code_floor(), "hooks": claude_hook.settings_hooks(worktree)}, separators=(",", ":"))
+        hooks = claude_hook.settings_hooks(worktree, bridge, lifted=True) if bridge else {}
+        floor = {"permissions": {"deny": permrules.claude_code_floor()["permissions"]["deny"]}}
+        return json.dumps({**floor, **({"hooks": hooks} if hooks else {})}, separators=(",", ":"))
+    return json.dumps({**permrules.claude_code_floor(), "hooks": claude_hook.settings_hooks(worktree, bridge)}, separators=(",", ":"))
+
+
+def _tool_flags(allowed: list[str] | None, denied: list[str] | None) -> list[str]:
+    """`--allowedTools` and `--disallowedTools` take any number of values, so each goes before another flag, never the prompt."""
+    return [*(["--allowedTools", *allowed] if allowed else []), *(["--disallowedTools", *denied] if denied else [])]
 
 
 def claude_argv(exe: str, name: str, prompt: str, model: str | None = None, permission_mode: str | None = None,
-                worktree: str | None = None, lifted: bool | None = None) -> list[str]:
+                worktree: str | None = None, lifted: bool | None = None, bridge: dict[str, Any] | None = None,
+                allowed_tools: list[str] | None = None, denied_tools: list[str] | None = None) -> list[str]:
     """The start command, with the two inline sub-agents and the floor settings. A model flag appears only when the caller
     named one: the session runs on the user's own account, so their own CLI default is the one model they are known to
     have quota for (pinning one here started every session on it and failed the moment that model's limit was reached).
-    A permission flag likewise appears only when the caller asked for a mode."""
-    return [exe, "--bg", "-n", name, *(["--model", model] if model else []), "--agents", CLAUDE_AGENTS,
-            "--settings", floor_settings(worktree, permission_mode == "bypassPermissions" if lifted is None else lifted), *(["--permission-mode", permission_mode] if permission_mode else []), _lead(prompt)]
+    A permission flag likewise appears only when the caller asked for a mode; so do the tool lists (a recipe's)."""
+    return [exe, "--bg", "-n", name, *_tool_flags(allowed_tools, denied_tools), *(["--model", model] if model else []), "--agents", CLAUDE_AGENTS,
+            "--settings", floor_settings(worktree, permission_mode == "bypassPermissions" if lifted is None else lifted, bridge), *(["--permission-mode", permission_mode] if permission_mode else []), _lead(prompt)]
 
 
 def resume_argv(exe: str, session_id: str, message: str, worktree: str | None = None, permission_mode: str | None = None,
-                lifted: bool | None = None) -> list[str]:
+                lifted: bool | None = None, bridge: dict[str, Any] | None = None, allowed_tools: list[str] | None = None,
+                denied_tools: list[str] | None = None) -> list[str]:
     """A follow-up is a new CLI process: it needs the floor settings again (the mode is the session's own)."""
-    return [exe, "--bg", "--resume", session_id, "--settings",
-            floor_settings(worktree, permission_mode == "bypassPermissions" if lifted is None else lifted), _lead(message)]
+    return [exe, "--bg", "--resume", session_id, *_tool_flags(allowed_tools, denied_tools), "--settings",
+            floor_settings(worktree, permission_mode == "bypassPermissions" if lifted is None else lifted, bridge), _lead(message)]
 
 
 def own_worktree(row: dict[str, Any]) -> str | None:
@@ -366,6 +384,8 @@ class CodingSessions:
         self.waiting: dict[str, int] = {}   # id -> coding_session_wait calls blocked on it (they report it themselves, no wake)
         self.stopping: set[str] = set()     # ids Grain is stopping itself: that stop is not news
         self.closing = False  # set at app shutdown, after the halted workers' sessions are stopped (see stop_owned)
+        self.bridge_port: int | None = None  # the app's own port: set, a Claude Code session's hooks can report to the app
+        self.subscribers: Callable[[], tuple[bool, bool]] = lambda: (False, False)  # (a gate, an observer) on the tool-call hooks
         self._recover()
         self._prev_on_change = getattr(jobs, "on_change", None)
         jobs.on_change = self._job_changed
@@ -650,8 +670,7 @@ class CodingSessions:
 
     def default_agent(self) -> str | None:
         """The user's default harness: the `codingAgent` setting when it names one, else the first installed (claude, opencode, pi)."""
-        from . import coding_route
-        choice = coding_route.agent_choice(self.settings())
+        choice = route.agent_choice(self.settings())
         if choice != "any":
             return choice
         have = self.installed_agents()
@@ -678,7 +697,10 @@ class CodingSessions:
 
     async def start(self, agent: str | None, repo_path: str, prompt: str, *, new_worktree: bool | None = None, branch: str | None = None,
                     model: str | None = None, permission_mode: str | None = None, name: str | None = None,
-                    ctx: dict[str, Any] | None = None) -> dict[str, Any]:
+                    ctx: dict[str, Any] | None = None, cli_opts: dict[str, Any] | None = None,
+                    recipe_run_id: str | None = None) -> dict[str, Any]:
+        """`cli_opts` (Claude Code only; a recipe's) are `allowed_tools`, `denied_tools` and `max_steps`, kept on the row so a
+        follow-up carries them too."""
         ctx = ctx if ctx is not None else {}
         agent = self.resolve_agent(agent)
         prompt = self._text(prompt, "prompt")
@@ -688,6 +710,8 @@ class CodingSessions:
         if permission_mode and agent != "claude":
             raise CodingError("permission_mode is for Claude Code only: OpenCode and pi already run with every permission "
                               "allowed inside the OS sandbox.")
+        if cli_opts and agent != "claude":
+            raise CodingError("Tool lists and a step limit are for Claude Code only: OpenCode and pi have no such control.")
         model = (str(model).strip() or None) if model else None
         if model and not MODEL_RE.fullmatch(model):
             raise CodingError(f"'{model}' is not a model id this tool accepts.")
@@ -702,7 +726,7 @@ class CodingSessions:
         sid, wt, want = new_id(), repo, branch
         branch = None
         if agent == "claude":  # the stored mode is what the CLI gets and what the UI shows
-            from . import autoreview
+            from ... import autoreview
             permission_mode = cli_permission_mode(ctx.get("permission_mode") or autoreview.mode_of(ctx.get("settings") or self.settings()),
                                                   permission_mode)
         if new_worktree:
@@ -728,13 +752,15 @@ class CodingSessions:
                # the owner: the subagent or worker that called (agent_run_id), else the chat or desk reply (stop_owned)
                "run_id": ctx.get("agent_run_id") or ctx.get("run_id"), "name": name, "prompt": prompt, "model": model, "permission_mode": permission_mode,
                "status": "starting", "detail": None, "log_tail": "", "created_at": t, "updated_at": t, "ended_at": None,
-               "base_sha": base}
+               "base_sha": base, "hook_key": secrets.token_urlsafe(24), "hook_gate": 0, "recipe_run_id": recipe_run_id,
+               "cli_opts": json.dumps(cli_opts) if cli_opts else None}
         with self.db.tx() as c:
             c.execute("INSERT INTO coding_sessions(id, agent, external_id, session_id, repo_path, worktree, branch, conversation_id, "
                       "desk_id, run_id, name, prompt, model, permission_mode, status, detail, log_tail, created_at, updated_at, "
-                      "ended_at, base_sha) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      "ended_at, base_sha, hook_key, recipe_run_id, cli_opts) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (sid, agent, None, None, row["repo_path"], row["worktree"], branch, row["conversation_id"], row["desk_id"],
-                       row["run_id"], name, prompt, model, permission_mode, "starting", None, "", t, t, None, base))
+                       row["run_id"], name, prompt, model, permission_mode, "starting", None, "", t, t, None, base,
+                       row["hook_key"], recipe_run_id, row["cli_opts"]))
         self.publish("coding_session", summary(row, None))
         self.event(sid, "user", prompt)
         shell.taint(ctx, f"coding_session:start:{sid}")  # the agent's text comes back through status, logs and diff
@@ -752,17 +778,37 @@ class CodingSessions:
     def _lifted(self, row: dict[str, Any], ctx: dict[str, Any] | None) -> bool:
         """The floor's asks and delete hook are dropped only when Grain itself is in Allow everything: an explicit
         bypassPermissions the user approved under Auto or Manual keeps every gate."""
-        from . import autoreview
+        from ... import autoreview
         ctx = ctx or {}
         return row["permission_mode"] == "bypassPermissions" and (
             ctx.get("permission_mode") or autoreview.mode_of(ctx.get("settings") or self.settings())) == "allow_all"
+
+    def _bridge(self, row: dict[str, Any], opts: dict[str, Any]) -> dict[str, Any] | None:
+        """What ties this session's tool calls to the app (claude_hook.settings_hooks), or None when nothing needs it: no
+        extension gates or watches them and the run has no step limit. Computed at every start and resume, so an extension
+        that subscribed since applies from the session's next one; the row records the gate flag it ran with."""
+        gate, post = self.subscribers()
+        cap = opts.get("max_steps")
+        if self.bridge_port is None or not (gate or post or cap):
+            return None
+        key = row.get("hook_key") or secrets.token_urlsafe(24)  # a session from before the bridge has none yet
+        if (key, int(gate)) != (row.get("hook_key"), row.get("hook_gate")):
+            with self.db.tx() as c:
+                c.execute("UPDATE coding_sessions SET hook_key=?, hook_gate=? WHERE id=?", (key, int(gate), row["id"]))
+            row["hook_key"], row["hook_gate"] = key, int(gate)
+        counters = self.db.data_dir / "coding-counters"
+        counters.mkdir(exist_ok=True)
+        return {"port": self.bridge_port, "session_id": row["id"], "key": key, "gate": gate, "post": post, "cap": cap,
+                "counter": str(counters / row["id"])}
 
     async def _start_claude(self, row: dict[str, Any], ctx: dict[str, Any] | None = None) -> None:
         exe = claude_binary()
         if not exe:
             raise CodingError(CLAUDE_HINT)
+        opts = json.loads(row["cli_opts"] or "{}")
+        lifted = self._lifted(row, ctx)
         ok, out = await self.run(claude_argv(exe, row["name"], row["prompt"], row["model"], row["permission_mode"], own_worktree(row),
-                                           self._lifted(row, ctx)),
+                                           lifted, self._bridge(row, opts), opts.get("allowed_tools"), opts.get("denied_tools")),
                                  row["worktree"], START_TIMEOUT, await asyncio.to_thread(claude_env))
         if not ok:
             raise CodingError(f"claude did not start: {out.strip()[-300:]}")
@@ -866,8 +912,10 @@ class CodingSessions:
                 self._check_capacity()
             if row["status"] == "done":  # still open in the daemon: resuming it would start a copy, so close it first
                 await self.run([exe, "stop", row["external_id"]], row["worktree"], GIT_TIMEOUT, await asyncio.to_thread(claude_env))
-            ok, out = await self.run(resume_argv(exe, row["session_id"], message, own_worktree(row), row["permission_mode"], self._lifted(row, ctx)), row["worktree"], START_TIMEOUT,
-                                     await asyncio.to_thread(claude_env))
+            opts = json.loads(row.get("cli_opts") or "{}")
+            ok, out = await self.run(resume_argv(exe, row["session_id"], message, own_worktree(row), row["permission_mode"], self._lifted(row, ctx),
+                                                 self._bridge(row, opts), opts.get("allowed_tools"), opts.get("denied_tools")),
+                                     row["worktree"], START_TIMEOUT, await asyncio.to_thread(claude_env))
             if not ok:
                 if waiting:  # the quiesce already stopped it: say so instead of leaving a stale question
                     self._apply(row, detail="reply not delivered: claude did not resume; the session is stopped")
@@ -1011,19 +1059,19 @@ class CodingSessions:
 
 
 def recent_events(db: Any, sid: str, n: int) -> list[Any]:
-    """The last n structured events of a session, or [] while coding_events (or its `recent`) is not there."""
+    """The last n structured events of a session, or [] while events (or its `recent`) is not there."""
     try:
-        from . import coding_events
         return list(coding_events.recent(db, sid, n))
-    except (ImportError, AttributeError, TypeError):
+    except (AttributeError, TypeError):
         return []
 
 
-def register(tb: Any, sessions: CodingSessions) -> None:
-    """The coding_session_* tools (group `shell`). Starting and following up are external: they run an agent that edits
-    a repo on this Mac, so an unattended run only proposes them and a chat asks first."""
-    from .tools import ToolSpec, _obj, tool_error
-    tb.coding = sessions
+def specs(coding: Any) -> list[ToolSpec]:
+    """The coding_session_* tools (group `shell`), over `coding.sessions`, which the app binds once its Toolbox exists.
+    Starting and following up are external: they run an agent that edits a repo on this Mac, so an unattended run only
+    proposes them and a chat asks first."""
+    from ...tools import ToolSpec, _obj, tool_error
+    built: list[ToolSpec] = []
 
     def available() -> bool:
         return claude_binary() is not None or opencode.binary() is not None or pi.binary() is not None
@@ -1034,7 +1082,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
     def harnesses() -> list[dict[str, Any]]:
         have, default = CodingSessions.installed_agents(), None
         try:
-            default = sessions.default_agent()
+            default = coding.sessions.default_agent()
         except Exception:
             pass
         return [{"id": n, "name": AGENT_NAMES[n], "installed": n in have, "default": n == default} for n in AGENTS]
@@ -1044,8 +1092,8 @@ def register(tb: Any, sessions: CodingSessions) -> None:
                           "so it cannot run here.", alternative="describe the task in your report for the user")
 
     def view(sid: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        row = sessions.get(str(sid or ""))
-        return (sessions.refresh(row), None) if row else (None, tool_error(f"No coding session '{sid}'.", field="id", alternative="coding_session_list shows the ids"))
+        row = coding.sessions.get(str(sid or ""))
+        return (coding.sessions.refresh(row), None) if row else (None, tool_error(f"No coding session '{sid}'.", field="id", alternative="coding_session_list shows the ids"))
 
     async def coding_session_start(ctx: dict[str, Any], repo_path: str, prompt: str, agent: str | None = None,
                                    new_worktree: bool | None = None, branch: str | None = None, model: str | None = None,
@@ -1053,7 +1101,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
         if ctx.get("proposal_only"):
             return unattended("coding_session_start")
         try:
-            row = await sessions.start(agent, repo_path, prompt, new_worktree=None if new_worktree is None else bool(new_worktree),
+            row = await coding.sessions.start(agent, repo_path, prompt, new_worktree=None if new_worktree is None else bool(new_worktree),
                                        branch=branch, model=model,
                                        permission_mode=permission_mode, name=name, ctx=ctx)
         except (CodingError, shell.ShellError) as e:
@@ -1094,17 +1142,17 @@ def register(tb: Any, sessions: CodingSessions) -> None:
                                "new_worktree": True}])
     spec.default = "ask"
     def _bypass(args: dict[str, Any], ctx: dict[str, Any]) -> bool:  # an explicit bypass that Allow all did not itself choose
-        from . import autoreview
-        gm = ctx.get("permission_mode") or autoreview.mode_of(ctx.get("settings") or sessions.settings())
+        from ... import autoreview
+        gm = ctx.get("permission_mode") or autoreview.mode_of(ctx.get("settings") or coding.sessions.settings())
         return args.get("permission_mode") == "bypassPermissions" and gm != "allow_all"
 
     spec.force_card = _bypass  # a hard card: no grant, and not the reviewer, buys it off
     spec.force_ask = lambda args, ctx: bool(ctx.get("tainted")) or _bypass(args, ctx)
     spec.available_fn = available
-    tb.specs["coding_session_start"] = spec
+    built.append(spec)
 
     async def coding_session_list(ctx: dict[str, Any]) -> Any:
-        rows = [summary(sessions.refresh(r), 0) for r in sessions.list(20)]
+        rows = [summary(coding.sessions.refresh(r), 0) for r in coding.sessions.list(20)]
         shell.taint(ctx, "coding_session:list:" + ",".join(r["id"] for r in rows))  # each row's detail was written by a coding agent
         return {"harnesses": harnesses(), "sessions": rows}
 
@@ -1124,7 +1172,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
         except (TypeError, ValueError):
             want = 0
         if want:
-            out["events"] = recent_events(sessions.db, row["id"], want)
+            out["events"] = recent_events(coding.sessions.db, row["id"], want)
         return out
 
     async def coding_session_summary(ctx: dict[str, Any], id: str) -> Any:
@@ -1136,7 +1184,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
 
     async def coding_session_wait(ctx: dict[str, Any], ids: list[str], mode: str = "all", timeout_s: int = 120) -> Any:
         try:
-            out = await sessions.wait(list(ids or []), "any" if mode == "any" else "all", timeout_s)
+            out = await coding.sessions.wait(list(ids or []), "any" if mode == "any" else "all", timeout_s)
         except CodingError as e:
             return tool_error(shell._scrub(str(e)), field="ids")
         shell.taint(ctx, "coding_session:wait:" + ",".join(r["id"] for r in out["sessions"]))  # logs and details are agent-written
@@ -1146,7 +1194,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
         if ctx.get("proposal_only"):
             return unattended("coding_session_send")
         try:
-            row = await sessions.send(str(id), message, ctx)
+            row = await coding.sessions.send(str(id), message, ctx)
         except CodingError as e:
             return tool_error(shell._scrub(str(e)), alternative=e.alt)
         except shell.ShellError as e:
@@ -1157,7 +1205,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
         if ctx.get("proposal_only"):
             return unattended("coding_session_stop")
         try:
-            row = await sessions.stop(str(id))
+            row = await coding.sessions.stop(str(id))
         except (CodingError, shell.ShellError) as e:
             return tool_error(shell._scrub(str(e)))
         shell.taint(ctx, f"coding_session:stop:{row['id']}")  # the row's detail and log may be agent-written
@@ -1165,10 +1213,10 @@ def register(tb: Any, sessions: CodingSessions) -> None:
 
     async def coding_session_diff(ctx: dict[str, Any], id: str, full: bool = False) -> Any:
         try:
-            out = await sessions.diff(str(id), bool(full))
+            out = await coding.sessions.diff(str(id), bool(full))
         except (CodingError, shell.ShellError) as e:
             return tool_error(shell._scrub(str(e)))
-        shell.taint(ctx, f"coding_session:diff:{sessions.get(str(id))['id']}")  # agent-written content
+        shell.taint(ctx, f"coding_session:diff:{coding.sessions.get(str(id))['id']}")  # agent-written content
         return out
 
     sid = {"id": {"type": "string"}}
@@ -1207,7 +1255,8 @@ def register(tb: Any, sessions: CodingSessions) -> None:
         if name == "coding_session_send":
             s.default = "ask"
             s.taint_ok = lambda args, ctx: (not ctx.get("taint_unsourced")
-                                            and (r := sessions.get(str(args.get("id") or ""))) is not None
+                                            and (r := coding.sessions.get(str(args.get("id") or ""))) is not None
                                             and own_session_taint(r["id"], ctx.get("taint_sources")))
             s.force_ask = lambda args, ctx, ok=s.taint_ok: bool(ctx.get("tainted")) and not ok(args, ctx)
-        tb.specs[name] = s
+        built.append(s)
+    return built

@@ -1141,7 +1141,7 @@ straight into `REPEAT_LIMIT = 5` (`app.py`).
 
 ### 5.1 A coding agent in the shell sandbox: `opencode_run`
 
-`opencode_run(prompt, cwd?, timeout_s=300, background?, continue_session?, model?)` (`opencode.py`, group `shell`,
+`opencode_run(prompt, cwd?, timeout_s=300, background?, continue_session?, model?)` (`extensions/coding/opencode.py`, group `shell`,
 danger `executes`, default `ask`) hands a whole coding task to the opencode CLI inside the working folder. It runs
 exactly the way `shell_run` does — under `sandbox.shell_profile`, writes confined to the granted root plus the desk
 workspace, under `ShellJobs` so timeouts, background promotion, `shell_poll` and `shell_kill` apply.

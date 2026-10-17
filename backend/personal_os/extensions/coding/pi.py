@@ -1,4 +1,4 @@
-"""pi as a coding-session driver (codingagents.py): `pi --mode json "<task>"` under the OS sandbox, as a background job.
+"""pi as a coding-session driver (sessions.py): `pi --mode json "<task>"` under the OS sandbox, as a background job.
 
 pi is a terminal coding agent installed separately on this Mac (`npm i -g @mariozechner/pi-coding-agent`). `--mode json`
 runs one prompt without a terminal UI and prints every session event as a JSON line, the first being the session header
@@ -23,7 +23,7 @@ import shutil
 import tempfile
 from typing import Any
 
-from . import osplat, sandbox, shell
+from ... import osplat, sandbox, shell
 
 # npm -g lands in Homebrew's or the system prefix, a user prefix (~/.npm-global), a node version manager's bin, or ~/.local/bin.
 BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "~/.npm-global/bin", "~/.local/bin", "~/.bun/bin", "~/.volta/bin")

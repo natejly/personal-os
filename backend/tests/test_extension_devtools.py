@@ -68,6 +68,13 @@ def load(root: Path) -> Any:
     return client.post("/dev/extensions/load", json={"path": str(root)})
 
 
+def load_on(root: Path) -> Any:
+    """Load a folder and turn it on: a folder extension starts disabled."""
+    got = load(root)
+    client.post(f"/dev/extensions/{got.json()['id']}/enable")
+    return got
+
+
 # ---- the dev panel's API ----
 def test_the_listing_shows_built_ins_with_their_registrations() -> None:
     out = listing()
@@ -125,8 +132,14 @@ def test_a_folder_cannot_take_over_a_tool_the_app_already_has(ext: Path) -> None
     assert "sample" not in appmod.host.extensions and appmod.toolbox.specs[core] is spec
 
 
+def test_a_loaded_folder_starts_disabled_whatever_its_manifest_says(ext: Path) -> None:
+    edit(ext, "extension.json", lambda t: t.replace('"enabled": true', '"enabled": "always"'))
+    assert load(ext).json()["enabled"] is False and not appmod.toolbox.available("sample_note")
+    assert client.post("/dev/extensions/sample/enable").json()["enabled"] is True and appmod.toolbox.available("sample_note")
+
+
 def test_disabling_a_loaded_extension_takes_its_tools_away(ext: Path) -> None:
-    load(ext)
+    load_on(ext)
     assert appmod.toolbox.available("sample_note")
     client.post("/dev/extensions/sample/disable")
     try:
@@ -195,7 +208,7 @@ def test_a_loaded_extensions_routes_sit_behind_the_token(ext: Path) -> None:
     r.get("/hi")(lambda: {"say": "hi"})
     api.router(r)
 ''')
-    load(ext)
+    load_on(ext)
     assert client.get("/ext/sample/hi").json() == {"say": "hi"}
     assert TestClient(appmod.app).get("/ext/sample/hi").status_code == 401
 
@@ -203,7 +216,7 @@ def test_a_loaded_extensions_routes_sit_behind_the_token(ext: Path) -> None:
 def test_the_panel_sees_handler_stats_and_a_muted_handler(ext: Path) -> None:
     declare(ext, "chat.created")
     edit(ext, "extension.py", lambda t: t + '\n    api.on("chat.created", lambda p: 1 / 0)\n')
-    load(ext)
+    load_on(ext)
     for _ in range(5):
         appmod.host.bus.emit_sync("chat.created", {"id": "c", "project_id": None})
     hook = next(h for h in next(e for e in listing()["extensions"] if e["id"] == "sample")["hooks"] if h["hook"] == "chat.created")

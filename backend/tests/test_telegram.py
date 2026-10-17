@@ -10,6 +10,7 @@ import logging
 import re
 import sqlite3
 import sys
+import threading
 import time
 import types
 from pathlib import Path
@@ -265,6 +266,20 @@ async def test_unpaired_bridge_never_starts_a_turn_or_answers_a_tap(env: Env) ->
     env.bridge.issue_pairing()
     await env.feed(msg("hello"), tap("ap:11"))
     assert env.turns == [] and env.decisions == [] and env.sent() == []
+
+
+@case
+async def test_state_writes_from_two_threads_do_not_lose_each_other(env: Env) -> None:
+    store = env.state
+    env.bridge.deps.save_state = lambda st: (time.sleep(0.001), store.update(st))  # a slow write widens the read-modify-write window
+
+    def many(key: str) -> None:
+        for i in range(30):
+            env.bridge._save(**{key: i})
+    threads = [threading.Thread(target=many, args=(k,)) for k in ("offset", "textsConversationId")]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert store["offset"] == 29 and store["textsConversationId"] == 29
 
 
 @case

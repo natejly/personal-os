@@ -232,6 +232,24 @@ class ExtensionDefaultsTests(unittest.TestCase):
         host.refresh_enabled()
         self.assertEqual(db.get_settings()["defaultEffort"], "high")
 
+    def test_one_extensions_defaults_that_flip_an_earlier_one_are_reported(self) -> None:
+        folder = tempfile.mkdtemp(prefix="extdefaults-")
+        self.addCleanup(shutil.rmtree, folder)
+        db = Database(folder)
+        db.set_settings({"hiddenViews": ["a"]})
+        ctx = ExtensionContext(db=db, hidden_views=lambda: db.get_settings().get("hiddenViews") or (), services={},
+                               settings=db.get_settings, set_settings=db.set_settings, sid=lambda p: p, wsid=lambda p: p, publish=lambda _n, _d: None)
+        host, fired = ExtensionHost(), []
+        host.fire = lambda hook, payload=None: fired.append((hook, payload))  # type: ignore[method-assign]
+        host._add(Manifest.from_dict({**BASE, "id": "b"}), ctx=ctx)
+        host._add(Manifest.from_dict({**BASE, "id": "a", "contributes": {"defaults": {"views": {"b": False}}}}), ctx=ctx)
+        db.set_settings({"hiddenViews": []})
+        host.refresh_enabled()
+        self.assertEqual(db.get_settings()["hiddenViews"], ["b"])
+        self.assertEqual([e for h, e in fired if h == "ext.changed"], [{"id": "a", "enabled": True}, {"id": "b", "enabled": False}])
+        self.assertEqual([e for h, e in fired if h == "settings.changed"],
+                         [{"keys": ["hiddenViews"], "old": {"hiddenViews": []}, "new": {"hiddenViews": ["b"]}}])
+
 
 if __name__ == "__main__":
     unittest.main()

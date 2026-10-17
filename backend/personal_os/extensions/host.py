@@ -21,7 +21,7 @@ from fastapi import Depends, HTTPException
 from .. import backups, migrations
 from ..context import Block, Contribution, RetrievalSources, Slot
 from .channels import ChannelAdapter, Channels
-from .defaults import Defaults
+from .defaults import DEFAULT_KEYS, Defaults
 from .disposables import Disposable, Scope
 from .hooks import HookBus
 from .manifest import Manifest, load_manifest
@@ -111,12 +111,12 @@ class ExtensionScope:
     """One loaded extension: its manifest, and everything it registered, undone together when it stops."""
     manifest: Manifest
     index: int
-    bus: HookBus
+    _bus: HookBus
     retrieval: RetrievalSources
     channels: Channels
     module: Module | None = None  # set for an adapted Module
     root: Path | None = None  # the extension's folder, where data.migrations is looked up
-    ctx: ExtensionContext | None = None  # set for an extension loaded from its folder
+    _ctx: ExtensionContext | None = None  # set for an extension loaded from its folder
     dev: bool = False  # loaded from a folder outside the package (`load_folder`), so it can be reloaded
     disposables: Scope = field(default_factory=Scope)
     tools: dict[str, ToolSpec] = field(default_factory=dict)
@@ -129,34 +129,47 @@ class ExtensionScope:
         return logging.getLogger(f"{__package__}.{self.manifest.id}")
 
     @property
+    def bus(self) -> HookBus:
+        """The raw bus, for built-in code. A folder extension subscribes through `on`, which checks its manifest."""
+        if self.dev:
+            raise PermissionError(f"extension {self.manifest.id!r} subscribes through scope.on, not the bus")
+        return self._bus
+
+    @property
     def db(self) -> Database:
-        assert self.ctx is not None
-        return self.ctx.db
+        assert self._ctx is not None
+        if self.dev:
+            self._require("db:own")
+        return self._ctx.db
 
     @property
     def app(self) -> ExtensionContext:
-        assert self.ctx is not None
-        return self.ctx
+        """The app's context, for built-in code. A folder extension reaches a service through `services`."""
+        assert self._ctx is not None
+        if self.dev:
+            raise PermissionError(f"extension {self.manifest.id!r} reaches the app through scope.services, not scope.app")
+        return self._ctx
 
     @property
     def defaults(self) -> Defaults:
-        return Defaults(self.db)
+        assert self._ctx is not None
+        return Defaults(self._ctx.db)
 
     @property
     def services(self) -> Services:
-        assert self.ctx is not None
-        return Services(self.manifest.requires_services, self.manifest.permissions, self.ctx.services)
+        assert self._ctx is not None
+        return Services(self.manifest.requires_services, self.manifest.permissions, self._ctx.services)
 
     def enabled(self) -> bool:
         if self.module:
             return self.module.enabled()
         if self.manifest.kind == "profile":
             return self.defaults.applied(self.manifest.id)
-        if self.manifest.enabled == "always":
+        if self.manifest.enabled == "always" and not self.dev:  # only a built-in decides it cannot be turned off
             return True
-        if self.ctx is None:
+        if self._ctx is None:
             return self.manifest.enabled is not False
-        return self.manifest.id not in self.ctx.hidden_views()
+        return self.manifest.id not in self._ctx.hidden_views()
 
     def migration_steps(self) -> list[tuple[int, str, migrations.Step]]:
         folder = self.manifest.data.get("migrations")
@@ -192,7 +205,7 @@ class ExtensionScope:
         if hook in HOOK_PERMISSION:
             self._require(HOOK_PERMISSION[hook])
         declared = self.manifest.hooks[hook]
-        sub = self.bus.subscribe(
+        sub = self._bus.subscribe(
             hook, fn if hook in LIFECYCLE_HOOKS else self._while_enabled(fn), owner=self.manifest.id, order=self.index,
             priority=declared.get("priority") if priority is None else priority,
             timeout_ms=declared.get("timeoutMs") if timeout_ms is None else timeout_ms,
@@ -220,13 +233,13 @@ class ExtensionScope:
 
     def emit_ui(self, name: str, data: Any) -> None:
         """Send the open windows an `ext:<id>:<name>` event; the extension's frontend half receives it."""
-        self.app.publish(f"ext:{self.manifest.id}:{name}", data)
+        self._ctx.publish(f"ext:{self.manifest.id}:{name}", data)
 
     def provide(self, service: str, impl: Any) -> Disposable:
         """Offer a service the manifest declares under provides.services, to the app and to extensions that require it."""
         if service not in self.manifest.provides_services:
             raise ValueError(f"extension {self.manifest.id!r} did not declare service {service!r} under provides")
-        services = self.app.services
+        services = self._ctx.services
         if service in services:
             raise ValueError(f"service {service!r} is already provided")
         services[service] = lambda: impl
@@ -275,12 +288,12 @@ class ExtensionScope:
     async def start(self) -> None:
         if self.module:
             await self.module.start()
-        await self.bus.emit("app.start", {}, owner=self.manifest.id)
+        await self._bus.emit("app.start", {}, owner=self.manifest.id)
 
     async def stop(self) -> None:
         try:
             try:
-                await asyncio.wait_for(self.bus.emit("app.stop", None, owner=self.manifest.id), STOP_BUDGET_S)
+                await asyncio.wait_for(self._bus.emit("app.stop", None, owner=self.manifest.id), STOP_BUDGET_S)
             except asyncio.TimeoutError:
                 log.warning("extension %s: app.stop handlers cancelled after %.0f s", self.manifest.id, STOP_BUDGET_S)
             if self.module:
@@ -367,14 +380,14 @@ class ExtensionHost:
         return scope
 
     async def load_dev(self, root: Path, ctx: ExtensionContext, *, first_load: bool = True) -> ExtensionScope:
-        """Load and start the extension in `root` (the dev panel and the dev server). A manifest that ships `enabled: false`
-        starts disabled on a first load, not on a reload. A failure is kept in `failed` and raised."""
+        """Load and start the extension in `root` (the dev panel and the dev server). A folder extension starts disabled on
+        a first load, not on a reload: the user turns it on. A failure is kept in `failed` and raised."""
         if loaded := next((s for s in self.extensions.values() if s.root == root), None):
             raise ValueError(f"{root} is already loaded as {loaded.manifest.id!r}")
         scope: ExtensionScope | None = None
         try:
             scope = self.load_folder(root, ctx)
-            if first_load and scope.manifest.enabled is False and scope.manifest.id not in ctx.hidden_views():
+            if first_load and scope.manifest.id not in ctx.hidden_views():
                 ctx.set_settings({"hiddenViews": [*ctx.hidden_views(), scope.manifest.id]})
                 self.refresh_enabled()
             self.migrate(ctx.db)
@@ -395,10 +408,10 @@ class ExtensionHost:
     async def reload(self, ext_id: str) -> ExtensionScope:
         """Stop a folder-loaded extension and load it again from its folder: new code, same data."""
         old = self.extensions[ext_id]
-        if not old.dev or old.root is None or old.ctx is None:
+        if not old.dev or old.root is None or old._ctx is None:
             raise ValueError(f"extension {ext_id!r} is not loaded from a folder, so it cannot be reloaded")
         await self.unload(ext_id)
-        return await self.load_dev(old.root, old.ctx, first_load=False)
+        return await self.load_dev(old.root, old._ctx, first_load=False)
 
     @staticmethod
     def _activate(scope: ExtensionScope, module: ModuleType) -> None:
@@ -438,16 +451,33 @@ class ExtensionHost:
 
     def refresh_enabled(self) -> None:
         """Fire ext.changed for each extension whose enabled state differs from the last one reported. An extension's
-        contributes.defaults are applied when it turns on and reverted when it turns off (a profile does this itself)."""
+        contributes.defaults are applied when it turns on and reverted when it turns off (a profile does this itself).
+        Those writes can flip an extension already visited, so it goes round again until nothing changes."""
+        for _ in self.extensions:
+            if not self._refresh_pass():
+                return
+
+    def _refresh_pass(self) -> bool:
+        changed = False
         for ext_id, scope in self.extensions.items():
             if (now := scope.enabled()) != self._enabled[ext_id]:
-                self._enabled[ext_id] = now
-                if scope.ctx and scope.manifest.kind == "extension":
+                changed, self._enabled[ext_id] = True, now
+                if scope._ctx and scope.manifest.kind == "extension":
+                    db = scope._ctx.db
+                    before = db.get_settings()
                     if now:
                         scope.defaults.apply(scope.manifest)
                     else:
                         scope.defaults.revert(ext_id)
+                    self._settings_changed(before, db.get_settings())
                 self.fire("ext.changed", {"id": ext_id, "enabled": now})
+        return changed
+
+    def _settings_changed(self, before: dict[str, Any], after: dict[str, Any]) -> None:
+        """Fire settings.changed for the settings a defaults write touched."""
+        keys = [k for k in DEFAULT_KEYS if before.get(k) != after.get(k)]
+        if keys:
+            self.fire("settings.changed", {"keys": keys, "old": {k: before.get(k) for k in keys}, "new": {k: after.get(k) for k in keys}})
 
     # ---- data ----
     def migrate(self, db: Database) -> None:

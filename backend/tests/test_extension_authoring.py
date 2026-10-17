@@ -424,16 +424,32 @@ def test_a_folder_extension_may_not_use_the_chat_service(ext: Path) -> None:
     assert host.extensions == {}
 
 
-def test_a_folder_that_ships_disabled_loads_disabled_and_a_reload_keeps_the_users_choice(ext: Path) -> None:
+def test_a_folder_loads_disabled_whatever_its_manifest_says_and_a_reload_keeps_the_users_choice(ext: Path) -> None:
     hidden: list[str] = []
     ctx = context()
     ctx.hidden_views, ctx.set_settings = lambda: hidden, lambda v: hidden.__setitem__(slice(None), v["hiddenViews"])
-    set_manifest(ext, enabled=False)
+    set_manifest(ext, enabled="always")
     host = ExtensionHost()
     scope = run(host.load_dev(ext, ctx))
     assert hidden == ["sample"] and not scope.enabled()
     hidden.clear()
     assert run(host.reload("sample")).enabled()
+
+
+def test_a_folder_extension_reaches_neither_the_bus_nor_the_app_nor_an_undeclared_db(ext: Path) -> None:
+    set_manifest(ext, permissions=["context:volatile"])
+    host, ctx = ExtensionHost(), context()
+    ctx.services["chat"] = lambda: object()
+    scope = host.load_folder(ext, ctx)
+    for attr in ("bus", "app"):
+        with pytest.raises(PermissionError):
+            getattr(scope, attr)
+    with pytest.raises(ValueError, match="db:own"):
+        scope.db
+    with pytest.raises(KeyError):
+        scope.services.get("chat")
+    with pytest.raises(ValueError, match="did not declare hook"):
+        scope.on("tool.permission", lambda p: Deny("x"))
 
 
 def test_a_tool_the_manifest_does_not_declare_is_refused(ext: Path) -> None:

@@ -20,6 +20,7 @@ KEY = "extDefaults"
 SETTING_OF = {"model": "defaultModel", "effort": "defaultEffort", "theme": "theme"}
 STRICTEST_FIRST = ("manual", "auto", "allow_all")  # permissionMode, by how much runs without a card
 VIEW = "view:"
+DEFAULT_KEYS = ("hiddenViews", *SETTING_OF.values(), permissions.KEY)  # the settings a defaults write can change
 
 
 @dataclass(frozen=True)

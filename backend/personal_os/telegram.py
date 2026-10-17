@@ -26,6 +26,7 @@ import secrets
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -347,6 +348,7 @@ class TelegramBridge:
         self._tasks: set[asyncio.Task[Any]] = set()
         self._send_lock = asyncio.Lock()  # one send at a time keeps replies in order
         self._order_lock = asyncio.Lock()  # a whole delivery (text + files + notes) before the next one starts
+        self._state_lock = threading.Lock()  # the poller and the pairing routes (worker threads) both read-modify-write the state
         self._updates: dict[str, _Update] = {}  # conversation id -> progress waiting out the window
         self._sent_atts = _Memo()  # attachment ids already sent as progress: the final reply does not repeat them
         self._approval_lock = asyncio.Lock()
@@ -536,9 +538,10 @@ class TelegramBridge:
         return dict(self.deps.load_state() or {})
 
     def _save(self, **patch: Any) -> dict[str, Any]:
-        st = self._state()
-        st.update(patch)
-        self.deps.save_state(st)
+        with self._state_lock:
+            st = self._state()
+            st.update(patch)
+            self.deps.save_state(st)
         return st
 
     def paired(self) -> bool:

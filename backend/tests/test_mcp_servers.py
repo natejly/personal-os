@@ -21,10 +21,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from calendar_ext import calendar_box  # noqa: E402
+from mail_ext import mail_tools  # noqa: E402
 from personal_os import codingagents, mcp_servers, ship  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.extensions.host import ExtensionContext, ExtensionHost, ExtensionScope  # noqa: E402
-from personal_os.modules.mailwatch import MailWatchModule
 from personal_os.modules.planner import PlannerModule
 from personal_os.tools import DEFAULT_MODE, Toolbox  # noqa: E402
 
@@ -45,12 +45,13 @@ def stub_module(cls: Any) -> Any:
 
 
 def loaded_extensions(google: Any = None) -> list[ExtensionScope]:
-    """The todos extension, the two modules and the health, calendar and spaces extensions, in the app's load order."""
+    """The todos and mail extensions, the planner module and the health, calendar and spaces extensions, in the app's load order."""
     host = ExtensionHost()
-    ctx = ExtensionContext(db=Database(tempfile.mkdtemp(prefix="mcpreserved-")), hidden_views=lambda: (), services={"google": lambda: google or Stub(), "extundo": lambda: Stub(), "memories": lambda: Stub()},
+    ctx = ExtensionContext(db=Database(tempfile.mkdtemp(prefix="mcpreserved-")), hidden_views=lambda: (), services={"google": lambda: google or Stub(), "extundo": lambda: Stub(), "memories": lambda: Stub(),
+                                      "documents": lambda: Stub(), "uploads": lambda: Stub()},
                            settings=lambda: {}, set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p, publish=lambda _n, _d: None)
     host.load_builtin("todos", ctx)
-    host.add_module(stub_module(MailWatchModule))
+    host.load_builtin("mail", ctx)
     host.add_module(stub_module(PlannerModule))
     host.load_builtin("health", ctx)
     host.load_builtin("calendar", ctx)
@@ -69,7 +70,7 @@ def full_toolbox(google: Any = None) -> Toolbox:
     """
     tb = Toolbox(Stub(), Stub(), Stub(), lambda: {},  # type: ignore[arg-type]
                  extensions=loaded_extensions(google), google=google or Stub(),  # type: ignore[arg-type]
-                 docs=Stub(), outbox=Stub(), work_plans=Stub(), results=Stub(),
+                 docs=Stub(), work_plans=Stub(), results=Stub(),
                  skills=Stub(), jobs=Stub(), style=Stub(),
                  desks=Stub(), workspace=Stub())
     ship.register(tb, Stub())  # type: ignore[arg-type]
@@ -285,7 +286,7 @@ def test_a_token_in_a_gmail_header_is_stripped() -> None:
         def gmail_get(message_id: str) -> dict[str, Any]:
             return {"id": message_id, "from": f"Ada {pat}", "to": f"Bo {pat}", "subject": "Hi", "body": "ok"}
 
-    tb = calendar_box(G())
+    tb, _ = mail_tools(G())
     ctx: dict[str, Any] = {"project_id": "p1"}
     found = asyncio.run(tb.call("gmail_search", {"query": "in:inbox"}, ctx))
     assert pat not in found["messages"][0]["from"] and "[github-pat]" in found["messages"][0]["from"]
@@ -307,7 +308,7 @@ def test_a_token_in_a_gmail_draft_subject_is_stripped() -> None:
         def gmail_send(to: str, subject: str, body: str, reply_to_message_id: str | None = None) -> dict[str, Any]:
             return {"sent": "m1", "to": to, "subject": subject}
 
-    tb = calendar_box(G())
+    tb, _ = mail_tools(G())
     ctx: dict[str, Any] = {"project_id": "p1"}
     draft = asyncio.run(tb.call("gmail_draft", {"to": "mira@example.com", "subject": f"Hi {pat}", "body": f"body {pat}"}, ctx))
     assert pat not in draft["subject"] and "[github-pat]" in draft["subject"]
@@ -329,7 +330,7 @@ def test_a_token_in_a_gmail_modify_result_is_stripped() -> None:
                                      "detail": f"message {message_id} is not in the mailbox",
                                      "status": "unverified"}}
 
-    tb = calendar_box(G())
+    tb, _ = mail_tools(G())
     out = asyncio.run(tb.call("gmail_modify", {"message_id": pat, "star": True}, {"project_id": "p1"}))
     assert seen == [pat]
     assert pat not in str(out)

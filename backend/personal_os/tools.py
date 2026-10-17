@@ -46,9 +46,6 @@ from . import graph_recall, redact
 from .graph_learn import LITERAL_PREDICATES, PREDICATES, SINGLE_VALUED, TYPES as ENTITY_TYPES, canonical_type, normalize_predicate
 from . import webread
 from . import websearch
-from . import outbox as outbox_mod
-from . import blobs as blob_store, mail_attachments
-from .extract_text import safe_upload_name
 from . import saved_dashboards, verify
 from .jobs import check_watch_dir, local_tz_name, parse_when, valid_cron, valid_tz
 from .learn import SELF_LABELS, SKILL_STATUSES, induce_skill, run_transcript
@@ -777,7 +774,7 @@ class Toolbox:
     style_relearn: Any = None  # (project_id) -> None: queues a background voice relearn; wired in app.py
 
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], extensions: list[ExtensionScope] | None = None, google: Any = None,
-                 docs: Any = None, outbox: Any = None,
+                 docs: Any = None,
                  work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None,
                  style: Any = None, desks: Any = None, workspace: Any = None, filesnap: Any = None,
                  conversations: Any = None, extundo: Any = None, bus: HookBus | None = None):
@@ -787,7 +784,6 @@ class Toolbox:
         self.google, self.docs = google, docs
         self.filesnap = filesnap  # pre-image snapshots for local file writes (filesnap.py); None skips them
         self.extundo = extundo  # undo rows for calendar / Google Tasks writes (extundo.py); None skips them
-        self.outbox = outbox  # delayed Gmail send; gmail_send queues through it when it is wired up
         # The todo_write artifact (working.py), not the propose_plan approval record in the `plans` module.
         self.work_plans, self.results, self.skills = work_plans, results, skills
         self.jobs = jobs  # scheduled tasks; the schedule_* tools are only registered when it is wired up
@@ -828,6 +824,8 @@ class Toolbox:
             self._register_google()
         for e in self.extensions:
             self.set_extension_tools(e, anchored=True)  # the tools that sit after one of the tools registered above
+        if google is not None and "gmail_draft" in self.specs:
+            self._register_propose_times()
         self._register_mac()
         fsx.register(self)  # fs_glob / fs_grep / fs_edit / fs_copy / fs_mkdir
         self._register_reach()
@@ -2104,90 +2102,8 @@ async def undoable(extundo: Any, tool: str, ctx: dict[str, Any], where: dict[str
     return await asyncio.to_thread(extundo.after, tool, where, pre, res, ctx) if extundo is not None else res
 
 
-def _register_google(self: Toolbox) -> None:
-    for e in self.extensions:
-        if e.manifest.id in GOOGLE_BLOCK_EXTENSIONS:
-            self.set_extension_tools(e)
-    R = self.specs.__setitem__
-    g = self.google
-    run = asyncio.to_thread
-
-    async def gmail_search(ctx: dict[str, Any], query: str = "is:unread in:inbox newer_than:14d", max_results: int = 25, offset: int = 0) -> Any:
-        off, n = max(0, int(offset)), max(1, min(int(max_results), 100))
-        # One past the page, so page() can tell whether more exist.
-        rows = scrub_strings(await run(g.gmail_search, query, off + n + 1))
-        return page(rows, offset=off, limit=n, key="messages")
-    R("gmail_search", ToolSpec("gmail_search", "Search Gmail with Gmail query syntax (e.g. 'from:alice newer_than:7d'). One call returns a page of up to 25 messages (headers and snippets), newest first; narrow the query rather than paging. Use offset (with the same query and max_results, from next_offset) only when has_more is true and you need a deeper look.",
-        _obj({"query": {"type": "string", "default": "is:unread in:inbox newer_than:14d"}, "max_results": {"type": "integer", "default": 25}, "offset": {"type": "integer", "default": 0}}, []), gmail_search, "google",
-        examples=[{"query": "is:unread in:inbox newer_than:14d"}, {"query": "from:mira@example.com subject:invoice", "max_results": 5},
-                  {"query": "has:attachment newer_than:30d", "max_results": 25, "offset": 25}], taints=True))
-
-    async def gmail_read(ctx: dict[str, Any], message_id: str) -> Any:
-        return scrub_strings(await run(g.gmail_get, message_id))
-    R("gmail_read", ToolSpec("gmail_read", "Read the full body of an email by id (from gmail_search).",
-        _obj({"message_id": {"type": "string"}}, ["message_id"]), gmail_read, "google",
-        examples=[{"message_id": "18f2c1a9b7e4d0aa"}], taints=True))
-
-    _ATTACH_PARAM = {"type": "array", "items": {"type": "string"}, "description": "Uploads document ids or file paths on this Mac to attach (25 MB total)"}
-
-    _ADDR_PARAM = {"type": "string", "description": "Optional address list, same format as `to`"}
-
-    def _mail_shown(out: Any) -> Any:
-        return scrub_strings(out) if isinstance(out, dict) else out
-
-    def _attach(ctx: dict[str, Any], entries: list[str]) -> list[dict[str, Any]]:
-        """Each entry (an Uploads document id, or a file path on this Mac, which is copied into Uploads) as a resolved
-        attachment. ValueError names the entry that cannot be attached."""
-        pid = ctx.get("project_id") if isinstance(ctx.get("project_id"), str) else None
-        ids = []
-        for raw in (str(e).strip() for e in entries):
-            try:
-                d = self.documents.get(raw)
-                if d and d["project_id"] and d["project_id"] != pid:
-                    raise ValueError("that file belongs to another project")
-                if not d:
-                    p = mac.readable_path(raw)
-                    if not p.is_file():
-                        raise ValueError("not a file")
-                    if p.stat().st_size > mail_attachments.MAX_TOTAL_BYTES:
-                        raise mail_attachments.AttachmentError(f"{p.name} is over Gmail's 25 MB limit.")
-                    data = p.read_bytes()
-                    name = safe_upload_name(p.name)
-                    dest, digest = blob_store.store(self.documents.db.data_dir, name, data)
-                    d = self.documents.find_by_hash(pid, digest) or self.documents.create(
-                        pid, name, mimetypes.guess_type(name)[0] or "application/octet-stream", len(data), str(dest), "", content_hash=digest)
-                ids.append(d["id"])
-            except (mac.LocalPathError, OSError) as e:
-                raise ValueError(f"{raw}: {e if isinstance(e, mac.LocalPathError) else 'no such document id or file'}") from e
-            except ValueError as e:
-                raise ValueError(f"{raw}: {e}") from e
-        return ids
-
-    async def _attachments(ctx: dict[str, Any], entries: list[str] | None) -> tuple[list[str], list[dict[str, Any]]] | Any:
-        """(document ids, resolved items), or a tool_error for the first entry that cannot be attached."""
-        if not entries:
-            return [], []
-        try:
-            ids = await run(_attach, ctx, list(entries))
-            return ids, await run(mail_attachments.resolve, self.documents, self.documents.db.data_dir, ids)
-        except ValueError as e:
-            return tool_error(redact.scrub_command_output(f"attachments: {e}"), field="attachments",
-                              expected="Uploads document ids or readable file paths on this Mac, 25 MB in total")
-
-    async def gmail_draft(ctx: dict[str, Any], to: str, subject: str, body: str, reply_to_message_id: str | None = None,
-                          attachments: list[str] | None = None, cc: str | None = None, bcc: str | None = None,
-                          thread_id: str | None = None) -> Any:
-        got = await _attachments(ctx, attachments)
-        if isinstance(got, dict):
-            return got
-        reply_to_message_id = reply_to_message_id or (await run(g.gmail_thread_last_id, thread_id) if thread_id else None)
-        return _mail_shown(await run(lambda: g.gmail_draft(to, subject, body, reply_to_message_id, **outbox_mod.extras(got[1], cc, bcc))))
-    R("gmail_draft", ToolSpec("gmail_draft", "Create a Gmail draft (never sends). Prefer this over gmail_send unless the user explicitly asked to send. Files can be attached (25 MB in total).",
-        _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "reply_to_message_id": {"type": "string"}, "thread_id": {"type": "string"}, "attachments": _ATTACH_PARAM,
-              "cc": _ADDR_PARAM, "bcc": _ADDR_PARAM}, ["to", "subject", "body"]), gmail_draft, "google", "external",
-        examples=[{"to": "mira@example.com", "subject": "Invoice 42", "body": "Hi Mira,\n\nAttached is invoice 42.\n\nThanks", "attachments": ["<document id>"]},
-                  {"to": "team@example.com", "subject": "Re: sprint review", "body": "Works for me.", "reply_to_message_id": "18f2c1a9b7e4d0aa"}]))
-
+def _register_propose_times(self: Toolbox) -> None:
+    """The suggest-times draft composes the calendar and mail extensions' tools, so it sits right after gmail_draft."""
     async def propose_times_draft(ctx: dict[str, Any], to: str, subject: str, duration_minutes: int, window_start: str, window_end: str,
                                   attendees: list[str] | None = None, working_hours: Any = None, timezone: str | None = None,
                                   max_results: int = 3, confirm: bool = False, chosen_start: str | None = None) -> Any:
@@ -2196,7 +2112,7 @@ def _register_google(self: Toolbox) -> None:
             return found
         slots = found["slots"]
         body = times_body(found)
-        draft = await gmail_draft(ctx, to, subject, body)
+        draft = await self.specs["gmail_draft"].fn(ctx, to, subject, body)
         out: dict[str, Any] = {"slots": slots, "draft": draft}
         if confirm:  # only after the user picked a time; guests get an invite email only when they were named
             pick = next((s for s in slots if s["start"] == chosen_start), None)
@@ -2204,88 +2120,21 @@ def _register_google(self: Toolbox) -> None:
                 return tool_error("propose_times_draft: chosen_start must be the start of one of the offered slots.", field="chosen_start")
             out["event"] = await self.specs["calendar_create"].fn(ctx, subject, pick["start"], pick["end"], attendees=attendees, send_updates="all" if attendees else "none")
         return out
-    R("propose_times_draft", ToolSpec("propose_times_draft", "Find free meeting slots (calendar_find_time rules: 9-18 local weekdays unless working_hours is given) and write them into a Gmail draft to `to`. Never sends and creates no event. After the user picks a slot, call again with confirm=true and chosen_start set to that slot's start to also create the event.",
+    self._insert_after("gmail_draft", "propose_times_draft", ToolSpec("propose_times_draft", "Find free meeting slots (calendar_find_time rules: 9-18 local weekdays unless working_hours is given) and write them into a Gmail draft to `to`. Never sends and creates no event. After the user picks a slot, call again with confirm=true and chosen_start set to that slot's start to also create the event.",
         _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "duration_minutes": {"type": "integer"}, "window_start": {"type": "string"}, "window_end": {"type": "string"},
               "attendees": {"type": "array", "items": {"type": "string"}}, "working_hours": {"type": "string"}, "timezone": {"type": "string"},
               "max_results": {"type": "integer", "default": 3}, "confirm": {"type": "boolean", "default": False}, "chosen_start": {"type": "string"}},
              ["to", "subject", "duration_minutes", "window_start", "window_end"]), propose_times_draft, "google", "external",
         examples=[{"to": "mira@example.com", "subject": "Catch up", "duration_minutes": 30, "window_start": "2026-10-05", "window_end": "2026-10-09"}]))
 
-    async def gmail_send(ctx: dict[str, Any], to: str, subject: str, body: str, reply_to_message_id: str | None = None,
-                         as_draft: bool = False, attachments: list[str] | None = None, cc: str | None = None,
-                         bcc: str | None = None, thread_id: str | None = None) -> Any:
-        got = await _attachments(ctx, attachments)
-        if isinstance(got, dict):
-            return got
-        # A thread id (as gmail_search returns it) means "reply to the newest message in that thread".
-        reply_to_message_id = reply_to_message_id or (await run(g.gmail_thread_last_id, thread_id) if thread_id else None)
-        ids, items = got
-        if as_draft:
-            # The user chose "Save as draft" on the approval card: the same email, written to Drafts and never sent.
-            # It still goes through gmail_draft's read-back, so the card can say "Saved to Drafts, verified".
-            return _mail_shown(await run(lambda: g.gmail_draft(to, subject, body, reply_to_message_id, **outbox_mod.extras(items, cc, bcc))))
-        if self.outbox is None:
-            return _mail_shown(await run(lambda: g.gmail_send(to, subject, body, reply_to_message_id, **outbox_mod.extras(items, cc, bcc))))
-        row = await run(self.outbox.queue, to, subject, body, reply_to_message_id, "assistant", ctx.get("conversation_id"), ids, cc, bcc)
-        return outbox_mod.queued_result(row)
-    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it. Pass reply_to_message_id (or thread_id, to answer the newest message of that thread) to reply in the thread. Files can be attached (25 MB in total), with optional cc and bcc. Unless Allow everything is on, the user reviews and edits the email on a card first, and only their Send click sends it, so an approved send may differ from what you wrote: the result says what was finally sent, or that it was discarded or saved as a draft. Leave as_draft unset: the user sets it on the card.",
-        _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "reply_to_message_id": {"type": "string"}, "thread_id": {"type": "string"},
-              "as_draft": {"type": "boolean", "default": False}, "attachments": _ATTACH_PARAM, "cc": _ADDR_PARAM, "bcc": _ADDR_PARAM}, ["to", "subject", "body"]), gmail_send, "google", "external",
-        examples=[{"to": "mira@example.com", "subject": "Running late", "body": "I will be 10 minutes late."},
-                  {"to": "mira@example.com", "subject": "Invoice 42", "body": "Attached.", "attachments": ["~/Documents/invoice-42.pdf"]}]))
 
-    # Never sent unasked in Auto or Manual: no allow rule, grant, plan step or reviewer stands in for the user's click. Allow
-    # everything sends without it (autoreview.route runs a forced card there); Manual also refuses it by default (STATIC_FLOOR).
-    self.specs["gmail_send"].force_ask = self.specs["gmail_send"].force_card = lambda args, ctx: True
-
-    async def gmail_outbox(ctx: dict[str, Any], action: str = "list", id: str | None = None) -> Any:
-        if self.outbox is None:
-            return tool_error("The send hold is not enabled, so there is no outbox.", alternative="gmail_search for what was sent")
-        mine = ctx.get("conversation_id")
-
-        def own(row: dict[str, Any]) -> bool:
-            # The compose window and other chats are the user's. This tool only touches what this chat queued.
-            return bool(mine) and row.get("conversation_id") == mine
-
-        if action == "cancel":
-            if not id:
-                return tool_error("cancel needs the id of a queued send.", field="id",
-                                  expected="an id from gmail_outbox(action='list')", example={"action": "cancel", "id": "a1b2c3d4"})
-            existing = await run(self.outbox.get, id)
-            if not existing or not own(existing):
-                return tool_error("That queued send is not from this chat.", field="id",
-                                  alternative="tell the user to use the Undo button on the pending send")
-            row = await run(self.outbox.cancel, id)
-            if not row:
-                return tool_error(redact.scrub_command_output(
-                    f"Send '{id}' can no longer be cancelled — it has already gone out."), field="id",
-                                  alternative="tell the user it was sent, and offer to send a follow-up")
-            return scrub_strings({"cancelled": id, "to": row["to"], "subject": row["subject"], "note": "It was never sent."})
-        rows = [r for r in await run(self.outbox.list) if own(r)]
-
-        def _shown(r: dict[str, Any], **extra: Any) -> dict[str, Any]:
-            return scrub_strings({"id": r["id"], "to": r["to"], "subject": r["subject"], **extra})
-
-        waiting = [_shown(r, sends_in_seconds=r["seconds_left"]) for r in rows if r["status"] == "holding"]
-        recent = [_shown(r, status=r["status"], verified=r["verified"], error=r.get("error"))
-                  for r in rows if r["status"] != "holding"][:10]
-        return {"waiting": waiting, "count": len(waiting), "recent": recent}
-    R("gmail_outbox", ToolSpec("gmail_outbox", "The emails waiting out their undo hold before Gmail sends them: list them, or cancel one so it never goes out. Use cancel when the user changes their mind about a send you just queued. Sending cannot be hurried from here — only the user can do that.",
-        _obj({"action": {"type": "string", "enum": ["list", "cancel"], "default": "list"}, "id": {"type": "string", "description": "the queued send to cancel"}}, []), gmail_outbox, "google", "writes",
-        examples=[{}, {"action": "cancel", "id": "a1b2c3d4"}]))
-
-    async def gmail_modify(ctx: dict[str, Any], message_id: str | None = None, mark_read: bool | None = None, archive: bool = False, star: bool | None = None,
-                           message_ids: list[str] | None = None) -> Any:
-        ids = list(dict.fromkeys(m.strip() for m in [message_id, *(message_ids or [])] if isinstance(m, str) and m.strip()))
-        if not ids:
-            return {"error": "Pass message_id, or message_ids to change several emails in one call."}
-        target = ids if message_ids else ids[0]
-        return scrub_strings(await run(g.gmail_modify, target, mark_read, archive, star))
-    R("gmail_modify", ToolSpec("gmail_modify", "Mark emails read/unread, star them, or archive them. To change more than one email, pass all their ids in message_ids in ONE call (a single batch request, up to 1000 ids) - never one call per email. Use message_id only for a single email.",
-        _obj({"message_id": {"type": "string"}, "message_ids": {"type": "array", "items": {"type": "string"}, "description": "several emails changed together in one request"},
-              "mark_read": {"type": "boolean"}, "archive": {"type": "boolean", "default": False}, "star": {"type": "boolean"}}, []), gmail_modify, "google", "external",
-        examples=[{"message_ids": ["18f2c1a9b7e4d0aa", "18f2c1a9b7e4d0ab", "18f2c1a9b7e4d0ac"], "mark_read": True, "archive": True},
-                  {"message_id": "18f2c1a9b7e4d0aa", "mark_read": True}, {"message_id": "18f2c1a9b7e4d0aa", "star": True}]))
+def _register_google(self: Toolbox) -> None:
+    for e in self.extensions:
+        if e.manifest.id in GOOGLE_BLOCK_EXTENSIONS:
+            self.set_extension_tools(e)
+    R = self.specs.__setitem__
+    g = self.google
+    run = asyncio.to_thread
 
     def _task_text(row: dict[str, Any]) -> dict[str, Any]:
         return scrub_strings(row)
@@ -2433,6 +2282,7 @@ def _register_style(self: Toolbox) -> None:
 
 Toolbox._register_style = _register_style  # type: ignore[attr-defined]
 Toolbox._register_google = _register_google  # type: ignore[attr-defined]
+Toolbox._register_propose_times = _register_propose_times  # type: ignore[attr-defined]
 
 
 def _register_docs(self: Toolbox) -> None:

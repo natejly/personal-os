@@ -17,10 +17,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fake_google_api import FakeGoogle, FakeServer  # noqa: E402
-from personal_os import outbox as outbox_mod, verify  # noqa: E402
+from mail_ext import mail_tools  # noqa: E402
+from personal_os import verify  # noqa: E402
+from personal_os.extensions.mail import outbox as outbox_mod  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.extensions.google.client import NotSent  # noqa: E402
-from personal_os.outbox import Outbox  # noqa: E402
+from personal_os.extensions.mail.outbox import Outbox  # noqa: E402
 
 
 class Clock:
@@ -250,10 +252,8 @@ class OutboxTests(unittest.TestCase):
 
     # ---- the agent's reach ----
     def test_a_token_in_a_queued_subject_is_stripped(self) -> None:
-        from personal_os.tools import Toolbox
-
         pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
-        box = Toolbox(None, None, None, lambda: {}, google=self.google, outbox=self.box)  # type: ignore[arg-type]
+        box, _ = mail_tools(self.google, db=self.db, settings=self.cfg)
         ctx = {"project_id": None, "conversation_id": "c1"}
         queued = asyncio.run(box.call("gmail_send", {
             "to": "mira@example.com", "subject": f"Hi {pat}", "body": f"body {pat}",
@@ -267,10 +267,8 @@ class OutboxTests(unittest.TestCase):
         self.assertIn(pat, stored["subject"])
 
     def test_a_token_in_a_sent_id_is_stripped(self) -> None:
-        from personal_os.tools import Toolbox
-
         pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
-        box = Toolbox(None, None, None, lambda: {}, google=self.google, outbox=self.box)  # type: ignore[arg-type]
+        box, _ = mail_tools(self.google, db=self.db, settings=self.cfg)
         ctx = {"project_id": None, "conversation_id": "c1"}
         queued = asyncio.run(box.call("gmail_send", {"to": "mira@example.com", "subject": "Hi", "body": "x"}, ctx))
         with self.db.tx() as c:
@@ -284,9 +282,7 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(stored["to"], "mira@example.com")
 
     def test_the_agent_can_cancel_but_not_hurry_a_send(self) -> None:
-        from personal_os.tools import Toolbox
-
-        box = Toolbox(None, None, None, lambda: {}, google=self.google, outbox=self.box)  # type: ignore[arg-type]
+        box, _ = mail_tools(self.google, db=self.db, settings=self.cfg)
         actions = box.specs["gmail_outbox"].parameters["properties"]["action"]["enum"]
         self.assertEqual(actions, ["list", "cancel"])
         queued = asyncio.run(box.call("gmail_send", {"to": "mira@example.com", "subject": "Hi", "body": "x"},
@@ -300,9 +296,7 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(self.server.messages, {})
 
     def test_another_chat_cannot_see_or_cancel_a_queued_send(self) -> None:
-        from personal_os.tools import Toolbox
-
-        box = Toolbox(None, None, None, lambda: {}, google=self.google, outbox=self.box)  # type: ignore[arg-type]
+        box, _ = mail_tools(self.google, db=self.db, settings=self.cfg)
         queued = asyncio.run(box.call("gmail_send", {"to": "mira@example.com", "subject": "Hi", "body": "x"},
                                       {"project_id": None, "conversation_id": "c1"}))
         other = {"project_id": None, "conversation_id": "c2"}

@@ -27,7 +27,7 @@ import type { ChatRunChanges } from './deskFiles'
 import type { SetupStatus } from '../components/onboarding/steps'
 /** Day plan settings (modules/planner.py). workDays: 1 = Monday … 7 = Sunday. */
 export interface PlannerConfig { workStart: string; workEnd: string; workDays: number[]; bufferMin: number; minBlockMin: number; maxBlockMin: number; slotStepMin: number; lookaheadDays: number; calendarName: string; busyCalendarIds: string[] }
-/** Reply tracker settings (modules/mailwatch.py). */
+/** Reply tracker settings (extensions/mail/watch.py). */
 export interface MailWatchConfig { enabled: boolean; awaitingAfterDays: number; needsReplyAfterHours: number; useLLM: boolean; query: string; proposeFollowups: boolean }
 
 let base = ''
@@ -472,7 +472,7 @@ export const api = {
     cancelRestore: () => req<{ ok: boolean }>('/data/restore', { method: 'DELETE' }),
     exportTo: (dest: string) => req<{ path: string; size: number }>('/data/export', { method: 'POST', body: json({ dest }) }, NO_TIMEOUT)
   },
-  /** Emails waiting out their undo hold (backend outbox.py). */
+  /** Emails waiting out their undo hold (backend extensions/mail/outbox.py). */
   outbox: {
     list: () => req<{ sends: PendingSend[]; config: SendHoldConfig }>('/outbox/gmail'),
     cancel: (id: string) => req<PendingSend>(`/outbox/gmail/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),

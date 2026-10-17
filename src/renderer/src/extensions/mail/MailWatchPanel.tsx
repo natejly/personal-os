@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { ExternalLink, X, ListPlus, ScanSearch } from '../icons'
-import { api } from '../lib/api'
-import { useStore } from '../store'
+import { ExternalLink, X, ListPlus, ScanSearch } from '../../icons'
+import { api } from '../../lib/api'
+import { useStore } from '../../store'
 import type { MailWatchList as WatchData, MailWatchThread } from '@shared/types'
 
 type Kind = 'to_reply' | 'awaiting_reply'

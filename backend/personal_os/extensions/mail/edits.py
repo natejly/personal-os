@@ -4,8 +4,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .approval_edits import register_validator
-
 
 class ApprovalEditError(ValueError):
     """An edited mail field is not acceptable; the message becomes the 400 detail."""
@@ -96,7 +94,7 @@ def _clean(args: dict[str, Any], *, allow_draft_flag: bool) -> dict[str, Any]:
     return out
 
 
-def _validator(allow_draft_flag: bool):
+def validator(allow_draft_flag: bool):
     """approval_edits' contract: an error string for the 400, or the cleaned arguments."""
     def check(args: dict[str, Any]) -> str | dict[str, Any]:
         try:
@@ -104,7 +102,3 @@ def _validator(allow_draft_flag: bool):
         except ApprovalEditError as e:
             return str(e)
     return check
-
-
-register_validator("gmail_send", _validator(True))
-register_validator("gmail_draft", _validator(False))

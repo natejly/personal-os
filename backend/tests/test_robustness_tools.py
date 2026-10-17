@@ -15,9 +15,9 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from personal_os import mac, outbox as outbox_mod, reach, sandbox, tools, verify  # noqa: E402
+from personal_os import mac, reach, sandbox, tools, verify  # noqa: E402
 from personal_os.db import Database  # noqa: E402
-from personal_os.outbox import Outbox  # noqa: E402
+from personal_os.extensions.mail.outbox import Outbox  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 from personal_os.workspace import Workspace, WorkspaceError  # noqa: E402
 

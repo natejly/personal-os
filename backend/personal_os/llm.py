@@ -214,7 +214,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "docTypography": {},
     "responseStyle": "default",  # what a new chat starts on; see style_presets
     "responseStyleText": "",
-    # Undo window on outgoing mail (outbox.py). `seconds` is clamped to 60-120 on read.
+    # Undo window on outgoing mail (extensions/mail/outbox.py). `seconds` is clamped to 60-120 on read.
     "gmailSendHold": {"enabled": True, "seconds": GMAIL_SEND_HOLD_SECONDS},
     # When set (or when the FIRECRAWL_API_KEY environment variable is), Firecrawl answers web_search and fetch_url first; the engines below are the fallback.
     "firecrawlApiKey": "",
@@ -268,7 +268,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # the prompt of background workers and subagents that can call context_map (off: their prompts stay small).
     "mapMemory": True, "mapFiles": True, "mapUploads": True, "mapProjects": True, "mapSkills": True,
     "mapSources": True, "mapToday": True, "mapWorkers": False,
-    # Reply tracker (mailwatch.py); MailWatchModule.config() merges stored values over these defaults.
+    # Reply tracker (extensions/mail/watch.py); MailExtension.config() merges stored values over these defaults.
     "mailWatch": {"awaitingAfterDays": 3, "needsReplyAfterHours": 24, "useLLM": False,
                   "query": "newer_than:14d -category:promotions -category:social"},
     # Text Grain from your own phone over a Telegram bot (telegram.py). Off until a token is saved and a chat is paired.

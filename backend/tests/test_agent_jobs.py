@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+from mail_ext import app_outbox  # noqa: E402
 from personal_os import app as appmod  # noqa: E402
 from personal_os import llm  # noqa: E402
 from personal_os import verify  # noqa: E402
@@ -81,9 +82,9 @@ def _script():  # type: ignore[no-untyped-def]
     with appmod.db.tx() as c:
         c.execute("UPDATE jobs SET enabled=0, next_due_at=NULL")
     # Nothing may be left holding in the outbox between tests, or one test's mail goes out under another.
-    for row in appmod.outbox.list():
+    for row in app_outbox(appmod).list():
         if row["status"] == "holding":
-            appmod.outbox.cancel(row["id"])
+            app_outbox(appmod).cancel(row["id"])
     for name in ("gmail_send", "gmail_draft", "calendar_create"):
         setattr(appmod.google, name, _recorder(name))
     yield
@@ -416,7 +417,7 @@ def _one_proposal(tool: str, args: dict[str, Any], prompt: str = "do the thing")
 
 def _flush_outbox() -> None:
     """Accepting a send queues it behind the undo window (outbox.py); this is the user cutting that short."""
-    for row in appmod.outbox.list():
+    for row in app_outbox(appmod).list():
         if row["status"] == "holding":  # list() also carries recently resolved rows, which cannot be sent again
             j("POST", f"/outbox/gmail/{row['id']}/send-now")
 
@@ -966,7 +967,7 @@ def test_accepting_a_send_says_it_is_queued_not_sent() -> None:
     p = _one_proposal("gmail_send", {"to": "a@example.com", "subject": "Hi", "body": "B."})
     res = j("POST", f"/proposals/{p['id']}/accept")
     assert res["ok"] is True and res["queued"] is True and res["sends_in_seconds"] > 0
-    assert SENT == [] and any(r["status"] == "holding" for r in appmod.outbox.list())
+    assert SENT == [] and any(r["status"] == "holding" for r in app_outbox(appmod).list())
     q = _one_proposal("calendar_create", {"summary": "Standup", "start": "2026-10-01T09:00"})
     res = j("POST", f"/proposals/{q['id']}/accept")
     assert res["ok"] is True and res["queued"] is False and res["sends_in_seconds"] is None

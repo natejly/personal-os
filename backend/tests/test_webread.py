@@ -12,6 +12,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from calendar_ext import calendar_box  # noqa: E402
+from mail_ext import mail_tools  # noqa: E402
 from personal_os import limits, llm, tools, webread  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
@@ -188,7 +189,7 @@ def test_an_email_body_is_stripped() -> None:
         def gmail_search(self, query: str, n: int) -> list[dict[str, str]]:
             return [{"id": "1", "from": "a@b.com", "subject": "hi", "snippet": pat}]
 
-    tb = Toolbox(None, None, None, lambda: {}, google=G())  # type: ignore[arg-type]
+    tb, _ = mail_tools(G())
     read = run(tb.specs["gmail_read"].fn({}, message_id="m1"))
     assert pat not in read["body"] and read["from"] == "a@b.com" and "[github-pat]" in read["body"]
     found = run(tb.specs["gmail_search"].fn({}, query="in:inbox", max_results=5))

@@ -13,15 +13,17 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os import llm, mailwatch as mw  # noqa: E402
+from mail_ext import mail_scope  # noqa: E402
+from personal_os import llm  # noqa: E402
 from personal_os.db import Database  # noqa: E402
-from personal_os.extensions.google.client import _gmail_thread_meta  # noqa: E402
-from personal_os.modules import ModuleContext  # noqa: E402
-from personal_os.modules.mailwatch import MailWatchModule  # noqa: E402
+from personal_os.extensions.google.client import NOT_CONNECTED_FACT, _gmail_thread_meta  # noqa: E402
+from personal_os.extensions.mail import watch as mw  # noqa: E402
+from personal_os.extensions.mail.extension import MailExtension  # noqa: E402
 from personal_os.todos import Todos  # noqa: E402
 
 ME = "me@x.com"
@@ -259,12 +261,20 @@ class RefineTests(unittest.TestCase):
 
 
 class StubGoogle:
-    """Only the two reads the module may use; touching anything else fails the test."""
+    """Only the reads the extension may use; touching anything else fails the test."""
     def __init__(self, threads: list[dict[str, Any]]) -> None:
-        self.threads, self.reads = threads, 0
+        self.threads, self.reads, self.connected, self.inbox = threads, 0, True, [{"from": "al@y.com", "subject": "Review"}]
 
     def _me(self) -> str:
         return ME
+
+    def status(self) -> dict[str, Any]:
+        return {"connected": self.connected}
+
+    def gmail_search(self, *_a: Any, **_k: Any) -> list[dict[str, Any]]:
+        if isinstance(self.inbox, Exception):
+            raise self.inbox
+        return self.inbox
 
     def gmail_threads_recent(self, *_a: Any, **_k: Any) -> list[dict[str, Any]]:
         self.reads += 1
@@ -274,7 +284,7 @@ class StubGoogle:
         raise AssertionError(f"mailwatch touched google.{name}")
 
 
-class ModuleTests(unittest.TestCase):
+class ExtensionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.stored: dict[str, Any] = {}
@@ -284,9 +294,9 @@ class ModuleTests(unittest.TestCase):
             thread("c", msg("1", "noreply@y.com", 1, "Receipt")),
         ])
         self.calls: list[Any] = []
-        self.ctx = ModuleContext(db=Database(self.tmp.name), settings=lambda: {**llm.DEFAULT_SETTINGS, **self.stored},
-                                 set_settings=self.stored.update, google=self.google, sid=lambda p: p, wsid=lambda p: p)
-        self.mod = MailWatchModule(self.ctx, llm_fn=lambda p: self.calls.append(p) or ["fyi"] * len(p), clock=lambda: NOW)
+        self.db = Database(self.tmp.name)
+        self.scope = mail_scope(self.google, db=self.db, settings=self.stored, set_settings=self.stored.update)
+        self.mod = MailExtension(self.scope, llm_fn=lambda p: self.calls.append(p) or ["fyi"] * len(p), clock=lambda: NOW)
         app = FastAPI()
         app.include_router(self.mod.router())
         self.client = TestClient(app)
@@ -312,7 +322,7 @@ class ModuleTests(unittest.TestCase):
         one = self.client.post("/mail/watch/b/followup").json()
         two = self.client.post("/mail/watch/b/followup").json()
         self.assertEqual(one["id"], two["id"])
-        self.assertEqual(len(Todos(self.ctx.db).list()), 1)
+        self.assertEqual(len(Todos(self.db).list()), 1)
         self.assertEqual(self.client.post("/mail/watch/zzz/followup").status_code, 404)
 
     def test_config_merges_validates_and_enables_llm(self) -> None:
@@ -324,18 +334,28 @@ class ModuleTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
         self.assertEqual(set(self.calls[0][0]), {"subject", "domain", "snippet"})
 
-    def test_today_never_calls_google(self) -> None:
+    def test_the_card_takes_the_counts_from_the_table_and_the_inbox_from_gmail(self) -> None:
         before = self.google.reads
-        self.assertEqual(self.mod.today(), {"mail_watch": {"to_reply": 0, "awaiting_reply_overdue": 0}})
-        self.assertEqual(self.google.reads, before)
+        self.assertEqual(self.mod.card(), {"mail_watch": {"to_reply": 0, "awaiting_reply_overdue": 0},
+                                           "gmail": [{"from": "al@y.com", "subject": "Review"}]})
+        self.assertEqual(self.google.reads, before)  # the reply tracker's own read is not repeated for the card
+
+    def test_the_card_has_no_inbox_until_google_is_connected_or_when_the_read_fails(self) -> None:
+        self.google.connected = False
+        self.assertIsNone(self.mod.card()["gmail"])
+        self.google.connected, self.google.inbox = True, RuntimeError("boom")  # type: ignore[assignment]
+        self.assertIsNone(self.mod.card()["gmail"])
+
+    def test_the_recap_fact_is_the_unread_senders_and_subjects_or_says_why_not(self) -> None:
+        self.assertEqual(self.mod.facts(), {"unread_mail": [{"from": "al@y.com", "subject": "Review"}]})
+        self.google.inbox = RuntimeError("boom")  # type: ignore[assignment]
+        self.assertEqual(self.mod.facts(), {"unread_mail": "unavailable: boom"})
+        self.google.connected = False
+        self.assertEqual(self.mod.facts(), {"unread_mail": NOT_CONNECTED_FACT})
 
     def test_tool_is_read_only_and_tainting(self) -> None:
-        class Box:
-            specs: dict = {}
-        box = Box()
-        box.specs = {}
-        self.mod.register_tools(box)  # type: ignore[arg-type]
-        spec = box.specs["mail_followups"]
+        self.mod.register_tools()
+        spec = self.scope.tools["mail_followups"]
         self.assertTrue(spec.taints)
         self.assertEqual(spec.danger, "safe")
         out = asyncio.run(spec.fn({}, kind="awaiting_reply"))
@@ -346,13 +366,8 @@ class ModuleTests(unittest.TestCase):
     def test_a_token_in_a_followup_subject_is_stripped(self) -> None:
         pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
         self.google.threads = [thread("b", msg("1", ME, 5, "Let me know when", to="bo@y.com"), subject=f"Quote {pat}")]
-
-        class Box:
-            specs: dict = {}
-
-        box = Box()
-        self.mod.register_tools(box)  # type: ignore[arg-type]
-        out = asyncio.run(box.specs["mail_followups"].fn({}, kind="awaiting_reply"))
+        self.mod.register_tools()
+        out = asyncio.run(self.scope.tools["mail_followups"].fn({}, kind="awaiting_reply"))
         shown = out["threads"][0]["subject"]
         self.assertNotIn(pat, shown)
         self.assertIn("[github-pat]", shown)

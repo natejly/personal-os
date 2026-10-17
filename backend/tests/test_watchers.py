@@ -231,7 +231,7 @@ def _probe_rig() -> tuple[Rig, _Probe, dict[str, Any]]:
 
 def test_a_registered_kind_is_a_job_kind_without_a_cron_and_never_books_a_wake() -> None:
     r, _, jb = _probe_rig()
-    assert r.jobs.known("probe") and not Jobs(r.db).known("probe") and Jobs(r.db).known("mail")
+    assert r.jobs.known("probe") and not Jobs(r.db).known("probe") and not Jobs(r.db).known("mail")
     assert Jobs(r.db).create("q", "0 9 * * *", "go", kind="probe", timezone="UTC")["kind"] == "cron"  # nobody serves it there
     assert r.jobs.create("q", "0 9 * * *", "go", kind="probe", timezone="UTC")["cron"] == ""
     assert r.jobs.update(r.jobs.create("c", "0 9 * * *", "go", timezone="UTC")["id"], {"kind": "probe"})["cron"] == ""

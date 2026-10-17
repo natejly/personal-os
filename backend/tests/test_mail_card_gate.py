@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from mail_ext import app_outbox  # noqa: E402
 from personal_os import app as appmod  # noqa: E402
 
 REAL = appmod.toolbox.specs["gmail_send"]
@@ -87,10 +88,10 @@ def test_allow_all_sends_with_no_card() -> None:
     cid = setup("allow_all")
     ev = drive(cid, [[send(0)], []], [])
     check(not T.cards(ev), "allow-all raised no card for the email")
-    check(len(SERVER.messages) == 1 or [r for r in appmod.outbox.list() if r["to"] == GOOD["to"]], "the email went out or is queued")
+    check(len(SERVER.messages) == 1 or [r for r in app_outbox(appmod).list() if r["to"] == GOOD["to"]], "the email went out or is queued")
     SERVER.messages.clear()
-    for r in appmod.outbox.list():
-        appmod.outbox.cancel(r["id"])
+    for r in app_outbox(appmod).list():
+        app_outbox(appmod).cancel(r["id"])
 
 
 def test_manual_raises_the_email_card_and_a_discard_sends_nothing() -> None:
@@ -146,9 +147,9 @@ def test_save_as_draft_writes_a_draft_and_never_sends() -> None:
 def test_the_hold_still_applies_after_the_click() -> None:
     cid = setup("allow_all", hold=True)
     drive(cid, [[send(0)], []], ["allow"])
-    check(not SERVER.messages and [r["status"] for r in appmod.outbox.list() if r["to"] == GOOD["to"]][:1] == ["holding"], "the Send click queues it for the undo window")
-    for r in appmod.outbox.list():
-        appmod.outbox.cancel(r["id"])
+    check(not SERVER.messages and [r["status"] for r in app_outbox(appmod).list() if r["to"] == GOOD["to"]][:1] == ["holding"], "the Send click queues it for the undo window")
+    for r in app_outbox(appmod).list():
+        app_outbox(appmod).cancel(r["id"])
 
 
 def test_a_background_job_files_a_proposal_and_sends_nothing() -> None:

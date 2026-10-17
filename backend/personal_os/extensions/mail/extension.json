@@ -1,0 +1,28 @@
+{
+  "id": "mail",
+  "name": "Mail",
+  "description": "Gmail: the inbox view, the agent's mail tools, sends held for a minute and a half so they can be undone, the reply tracker, and jobs that run when matching mail arrives.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "kind": "extension",
+  "enabled": false,
+  "activation": ["startup"],
+  "requires": { "services": ["google", "documents", "uploads"] },
+  "provides": { "services": ["outbox"] },
+  "contributes": {
+    "tools": [
+      { "name": "mail_followups", "danger": "safe", "group": "google" },
+      { "name": "gmail_search", "after": "calendar_propose", "danger": "safe", "group": "google" },
+      { "name": "gmail_read", "after": "gmail_search", "danger": "safe", "group": "google" },
+      { "name": "gmail_draft", "after": "gmail_read", "danger": "external", "group": "google" },
+      { "name": "gmail_send", "after": "gmail_draft", "danger": "external", "group": "google" },
+      { "name": "gmail_outbox", "after": "gmail_send", "danger": "writes", "group": "google" },
+      { "name": "gmail_modify", "after": "gmail_outbox", "danger": "external", "group": "google" }
+    ],
+    "views": [{ "id": "mail", "label": "Mail", "icon": "mail" }],
+    "slots": { "recap.section": [{ "id": "mail" }] }
+  },
+  "hooks": { "app.start": {} },
+  "permissions": ["db:own", "service:google", "service:documents", "service:uploads"],
+  "data": { "tables": ["pending_sends", "thread_status"] }
+}

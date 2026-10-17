@@ -16,8 +16,8 @@ from datetime import date, datetime, timezone
 from email.utils import parseaddr
 from typing import Any, Callable
 
-from . import redact
-from .db import Database, now as _now
+from ... import redact
+from ...db import Database, now as _now
 
 STATUSES = ("to_reply", "awaiting_reply", "fyi", "actioned")
 

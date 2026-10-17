@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const src = readFileSync('src/renderer/src/components/MailView.tsx', 'utf8')
+const src = readFileSync('src/renderer/src/extensions/mail/MailView.tsx', 'utf8')
 const button = (cls: string, label: string): string => {
   const m = src.match(new RegExp(`<button className="${cls}"[^>]*>(?:(?!</button>).)*${label}`))
   assert.ok(m, `${label} button not found`)
@@ -18,7 +18,7 @@ test('Forward uses the same loaded-body gate', () => {
 })
 
 test('compose validity goes through parseAddressList for to, cc and bcc', () => {
-  assert.match(src, /import \{[^}]*\bparseAddressList\b[^}]*\} from '..\/lib\/mailCompose'/)
+  assert.match(src, /import \{[^}]*\bparseAddressList\b[^}]*\} from '..\/..\/lib\/mailCompose'/)
   const line = src.split('\n').find((l) => l.includes('const composeValid')) ?? ''
   assert.ok(line.includes('composeInvalid === null'), 'any invalid entry must block sending')
   assert.ok(line.includes('parseAddressList(compose.to).ok.length > 0'), 'needs one valid recipient')

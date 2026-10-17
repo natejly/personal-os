@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from calendar_ext import calendar_box  # noqa: E402
+from mail_ext import mail_tools  # noqa: E402
 from personal_os.extensions.google.client import GoogleNotConnected  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 
@@ -68,7 +69,7 @@ class SetupCards(unittest.TestCase):
         self.assertNotIn("reauth", r["setup"])
 
     def test_expired_sign_in_offers_reconnect(self) -> None:
-        r = call(box(StubGoogle(connected=True, needs_reauth=True, reauth_reason="Sign-in expired.")), "gmail_search", query="x")
+        r = call(mail_tools(StubGoogle(connected=True, needs_reauth=True, reauth_reason="Sign-in expired."))[0], "gmail_search", query="x")
         self.assertTrue(r["setup"]["reauth"])
         self.assertEqual(r["setup"]["title"], "Reconnect Google")
 

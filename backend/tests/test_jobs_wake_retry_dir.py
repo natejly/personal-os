@@ -16,6 +16,7 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="jobswrd-"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -23,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+from mail_ext import app_outbox  # noqa: E402
 from personal_os import app as appmod  # noqa: E402
 from personal_os import llm, verify  # noqa: E402
 from personal_os.db import Database  # noqa: E402
@@ -57,6 +59,7 @@ def _portal():  # type: ignore[no-untyped-def]
     llm.stream_chat = _scripted
     with client:
         client.put("/settings", json={"autoLearn": False, "baseUrl": ""})
+        appmod.db.set_settings({"hiddenViews": []})  # a fresh install has Mail off, and its job kind stands down with it
         task = getattr(appmod.app.state, "jobs_task", None)
         if task is not None:
             task.get_loop().call_soon_threadsafe(task.cancel)
@@ -71,9 +74,9 @@ def _script():  # type: ignore[no-untyped-def]
     SENT.clear()
     with appmod.db.tx() as c:
         c.execute("UPDATE jobs SET enabled=0, next_due_at=NULL")
-    for row in appmod.outbox.list():
+    for row in app_outbox(appmod).list():
         if row["status"] == "holding":
-            appmod.outbox.cancel(row["id"])
+            app_outbox(appmod).cancel(row["id"])
 
     def send(*a: Any, **kw: Any) -> dict[str, Any]:
         SENT.append("gmail_send")
@@ -444,10 +447,9 @@ class FakeMail:
                                 "messages": [{"id": mid, "from": "Landlord <ll@example.com>", "labels": labels or ["INBOX"]}]})
 
 
-def mail_tick(at: float, mail: Any) -> list[dict[str, Any]]:
-    holder = type("W", (), {})()
-    holder.sched = Scheduler(jobs, appmod._launch_job, mail=mail)  # noqa: SLF001
-    return tick(at, holder)
+def mail_tick(at: float, mail: FakeMail) -> list[dict[str, Any]]:
+    with mock.patch.object(appmod.google, "gmail_threads_recent", side_effect=lambda query, _max=None: mail(query)):
+        return tick(at)
 
 
 def mail_job() -> dict[str, Any]:
@@ -504,7 +506,7 @@ def test_mail_job_looks_at_most_every_five_minutes_and_never_books_an_os_wake() 
 def test_mail_job_fails_closed_when_google_is_not_connected() -> None:
     assert not appmod.google.status()["connected"]
     job = mail_job()
-    s = Scheduler(jobs, appmod._launch_job, clock=lambda: T0 + 1, mail=appmod._mail_threads)  # noqa: SLF001
+    s = Scheduler(jobs, appmod._launch_job, clock=lambda: T0 + 1)  # noqa: SLF001
     assert asyncio.run(s.tick()) == []
     row = jobs.get(job["id"])
     assert row["last_skip_reason"] == "google_disconnected" and row["last_fired_at"] is None

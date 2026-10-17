@@ -1237,7 +1237,7 @@ export interface Verified {
   verification?: Verification
 }
 
-/** One email waiting out its undo hold before Gmail sends it (backend outbox.py). */
+/** One email waiting out its undo hold before Gmail sends it (backend extensions/mail/outbox.py). */
 export interface PendingSend {
   id: string
   to: string
@@ -1536,7 +1536,8 @@ export interface TodayDashboard {
   recent_conversations: Conversation[]
   /** Missing while the Calendar extension is off. */
   calendar?: CalendarEvent[] | null
-  gmail: GmailMessage[] | null
+  /** Missing while the Mail extension is off. */
+  gmail?: GmailMessage[] | null
   tasks: GoogleTask[] | null
   /** null until the token has the Drive scope (older sign-ins need a Reconnect). */
   drive: DriveFile[] | null

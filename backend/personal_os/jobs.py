@@ -10,10 +10,9 @@ Three pieces, all of them rows:
                    switches itself off, so a spent one-off stays in the list as a record of what it did rather
                    than as a chore the user has to come back and delete.
                  · `watch` — a folder; new or touched files in it fire a run.
-                 · `mail` — a Gmail search; a matching thread that is new or has a new message fires a run.
-                   Its `next_due_at` is the next poll (every MAIL_POLL_S), not a slot, and never books an OS wake.
-                 · any kind an extension registers (`calendar`: an event matched by `calendar_query` starting soon fires
-                   one run, `minutes_before` its start). Like `mail`, its `next_due_at` is the next look, never an OS wake.
+                 · any kind an extension registers (`mail`: a Gmail search whose matching thread is new or has a new
+                   message fires a run; `calendar`: an event matched by `calendar_query` starting soon fires one run,
+                   `minutes_before` its start). Its `next_due_at` is the next look, never a slot or an OS wake.
                Separately, `target` says what a fire starts: 'run' (a proposal-only chat run) or 'desk' (a desk with
                the prompt as its brief, in plan or propose autonomy; see app._launch_desk_job).
 - `Proposals` — the `proposals` table: an outward-facing tool call a background run was not allowed to
@@ -49,7 +48,6 @@ from croniter import CroniterBadCronError, CroniterBadDateError, croniter
 from .approval_edits import EDITABLE_TOOLS
 from .db import Database, new_id, now, row_to_dict
 from . import limits
-from .extensions.google.client import GoogleNotConnected
 from .extensions.triggers import Triggers
 from .runs import args_digest
 
@@ -70,10 +68,6 @@ PROPOSAL_STATUSES = ("pending", "accepted", "rejected", "expired")
 # Skipped slots kept per job in job_skips; older ones are dropped as new ones arrive.
 SKIP_KEEP = 200
 CLOCKED = ("cron", "once", "watch")  # kinds the clock or a folder starts; every other kind is polled
-BUILTIN_KINDS = (*CLOCKED, "mail")
-# A mail job asks Gmail at most this often, and reads at most this many matching threads per look.
-MAIL_POLL_S = 300.0
-MAIL_MAX_THREADS = 20
 # A job whose kind no extension serves any more, or whose look raised, is looked at again this often.
 TRIGGER_RETRY_S = 300.0
 # What a fire starts: a proposal-only chat run, or a desk. A desk job keeps any schedule kind; it only changes the
@@ -389,7 +383,7 @@ class Jobs:
 
     def known(self, kind: str) -> bool:
         """Whether jobs of this kind can exist: a built-in kind, or one an extension registered."""
-        return kind in BUILTIN_KINDS or kind in self.triggers
+        return kind in CLOCKED or kind in self.triggers
 
     @staticmethod
     def _row(r: Any) -> dict[str, Any] | None:
@@ -550,23 +544,6 @@ class Jobs:
             with self.db.tx() as c:
                 c.execute("UPDATE jobs SET watch_seen=? WHERE id=?", (json.dumps(new), job["id"]))
         return [] if old is None else sorted(k for k, v in new.items() if old.get(k) != v)
-
-    def poll_mail(self, job: dict[str, Any], threads: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """The threads that are new, or whose newest message changed, since the last look, and remember this
-        look. The first look (no baseline yet) only records one. A thread whose newest message is the user's
-        own (SENT) is not news."""
-        new = {t["thread_id"]: (t.get("messages") or [{}])[-1].get("id") for t in threads if t.get("thread_id")}
-        with self.db.tx() as c:
-            r = c.execute("SELECT mail_seen FROM jobs WHERE id=?", (job["id"],)).fetchone()
-            raw = r["mail_seen"] if r else None
-            old = json.loads(raw) if raw else None
-            # Merged, so a thread that drops out of the newest N and comes back unchanged is not news again.
-            # ponytail: grows by every thread the search ever matched; prune if a broad search makes it large.
-            c.execute("UPDATE jobs SET mail_seen=? WHERE id=?", (json.dumps({**(old or {}), **new}), job["id"]))
-        if old is None:
-            return []
-        return [t for t in threads if t.get("thread_id") in new and old.get(t["thread_id"]) != new[t["thread_id"]]
-                and "SENT" not in ((t.get("messages") or [{}])[-1].get("labels") or [])]
 
     def record_digest(self, id: str, digest: str, at: float) -> bool:
         """Store the digest of a finished run's result; True if it differs from the last one (or there was none)."""
@@ -797,8 +774,7 @@ class Scheduler:
 
     def __init__(self, jobs: Jobs, launch: Callable[[dict[str, Any], dict[str, Any]], Awaitable[str | None]],
                  clock: Callable[[], float] = time.time,
-                 sleep: Callable[[float], Awaitable[None]] | None = None, policy: Any = None, wake: Any = None,
-                 mail: Callable[[str], list[dict[str, Any]]] | None = None) -> None:
+                 sleep: Callable[[float], Awaitable[None]] | None = None, policy: Any = None, wake: Any = None) -> None:
         self.jobs = jobs
         self.launch = launch
         # Optional run policy (jobs_policy.JobPolicy): the overlap guard before a launch, the watcher after it.
@@ -807,9 +783,6 @@ class Scheduler:
         self._sleep = sleep
         # Optional OS wake sink with schedule(at) / cancel(at): asks the machine to be awake for the next slot.
         self.wake = wake
-        # Blocking Gmail search -> thread metadata (Google.gmail_threads_recent shape), run off the event loop.
-        # It raises when Google is not connected. None = mail jobs never fire.
-        self.mail = mail
         self._woken: float | None = None
         # Set by nudge() (the Mac woke or unlocked): cuts the current nap short so a missed slot fires now.
         self._poke = asyncio.Event()
@@ -882,8 +855,7 @@ class Scheduler:
         if (pdays := limits.PROPOSAL_EXPIRE_DAYS) > 0:
             Proposals(self.jobs.db).expire(at - pdays * 86400, at)
         due = self.jobs.due(at)
-        mail_due = [j for j in due if j["kind"] == "mail"]
-        polled_due = [j for j in due if j["kind"] not in BUILTIN_KINDS]
+        polled_due = [j for j in due if j["kind"] not in CLOCKED]
         due = [j for j in due if j["kind"] in CLOCKED]
         # Directory jobs: one listing each. A job that is also clock-due is still one launch this tick.
         seen = {j["id"] for j in due}
@@ -915,19 +887,6 @@ class Scheduler:
                 # One last fire (this one), then the job stops until the user switches it back on.
                 self.jobs.pause(job["id"], "expired", at)
             await self._start(job, fire, fired)
-        for job in mail_due:
-            threads = await self._poll_mail(job, at)
-            if not threads:
-                continue
-            fire = {"job_id": job["id"], "job": job["name"], "kind": "mail", "cron": "", "timezone": job["timezone"],
-                    "due_at": at, "fired_at": at, "late_seconds": 0.0, "missed_slots": 0, "late": False,
-                    "trigger": "mail", "collapsed": len(threads),
-                    "mail": [{"thread_id": t["thread_id"], "subject": t.get("subject") or "",
-                              "from": ((t.get("messages") or [{}])[-1].get("from") or "")} for t in threads]}
-            self.jobs.mark_fired(job["id"], fired_at=at, due_at=at, next_due_at=at + MAIL_POLL_S)
-            if days > 0 and job.get("expires_at") is not None and at >= float(job["expires_at"]):
-                self.jobs.pause(job["id"], "expired", at)
-            await self._start(job, fire, fired)
         for job in polled_due:
             fire, nxt = await self._poll_trigger(job, at)
             if fire is None:
@@ -952,21 +911,6 @@ class Scheduler:
         with self.jobs.db.tx() as c:
             c.execute("UPDATE jobs SET next_due_at=? WHERE id=?", (nxt, job["id"]))
         return fire, nxt
-
-    async def _poll_mail(self, job: dict[str, Any], at: float) -> list[dict[str, Any]]:
-        """One Gmail look for a mail job (the next is booked either way). Fails closed: no Google, no fire."""
-        with self.jobs.db.tx() as c:
-            c.execute("UPDATE jobs SET next_due_at=? WHERE id=?", (at + MAIL_POLL_S, job["id"]))
-        if self.mail is None or not (job.get("mail_query") or "").strip():
-            return []
-        try:
-            threads = await asyncio.to_thread(self.mail, job["mail_query"])
-        except Exception as e:  # noqa: BLE001 - a failed look skips this pass, it never fires blind
-            log.info("mail job %s skipped: %s", job["name"], e)
-            self.jobs.record_skip(job["id"], "google_disconnected" if isinstance(e, GoogleNotConnected)
-                                  else "mail_unreachable", at)
-            return []
-        return self.jobs.poll_mail(job, threads)
 
     async def _start(self, job: dict[str, Any], fire: dict[str, Any], fired: list[dict[str, Any]]) -> None:
         """Admit and launch one fire, after its clock bookkeeping is already safe."""

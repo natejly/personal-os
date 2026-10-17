@@ -8,7 +8,6 @@ import GrainLogo from './components/GrainLogo'
 import ChatView from './components/ChatView'
 import DocsView from './components/DocsView'
 import ProjectView from './components/ProjectView'
-import MailView from './components/MailView'
 import PendingSends from './components/PendingSends'
 import PageAgentPanel from './components/PageAgentPanel'
 import SelectionToolbar from './components/SelectionToolbar'
@@ -293,7 +292,6 @@ export default function App(): JSX.Element {
         >
           {view === 'chat' && <ChatView />}
           {ModView && <ModView />}
-          {view === 'mail' && <MailView />}
           {view === 'docs' && <DocsView />}
           {view === 'library' && <LibraryView />}
           {view === 'jobs' && <JobsView />}

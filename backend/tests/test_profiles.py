@@ -135,11 +135,11 @@ class DefaultsTests(unittest.TestCase):
         self.defaults.revert("demo")
         self.assertNotIn("extDefaults", self.db.get_settings())
 
-    def test_a_stricter_permission_preset_is_applied_and_reverted(self) -> None:
+    def test_a_stricter_permission_preset_is_applied_and_stays_on_revert(self) -> None:
         self.assertEqual(self.defaults.apply(profile(permissions="manual")), [])
         self.assertEqual(permissions.load(self.db.get_settings())["permissionMode"], "manual")
-        self.defaults.revert("demo")
-        self.assertEqual(permissions.load(self.db.get_settings())["permissionMode"], "auto")
+        self.defaults.revert("demo")  # putting "auto" back would loosen it without a click
+        self.assertEqual(permissions.load(self.db.get_settings())["permissionMode"], "manual")
 
     def test_a_looser_permission_preset_is_held_until_confirmed(self) -> None:
         m = profile(permissions="allow_all", effort="low")

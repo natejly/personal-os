@@ -3,7 +3,7 @@
 Each default is recorded as source `ext:<id>` in the private setting `extDefaults`, as {id: {key: {"was", "set"}}}.
 Revert puts `was` back only while the value is still `set`: whatever the user changed in the meantime stays.
 When two enabled extensions set the same value, the one still enabled keeps it: the other's `was` is handed over.
-A permission preset looser than the current one is never applied unless the caller says the user clicked for it.
+A permission preset looser than the current one is never applied unless the caller says the user clicked for it, and revert never loosens it.
 """
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ class Defaults:
                 continue  # it changed nothing, so there is nothing to put back
             if heir := next((rec[key] for rec in records.values() if rec.get(key, {}).get("set") == r["set"]), None):
                 heir["was"] = r["was"]  # another enabled extension wants this value too: it inherits the way back
-            elif self._read(stored, key) == r["set"]:
+            elif (now := self._read(stored, key)) == r["set"] and not Change(key, now, r["was"]).looser:
                 back.append((key, r["was"]))
         self._write(back)
         self.db.set_settings({KEY: records})

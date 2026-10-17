@@ -6,6 +6,7 @@ the assistant no tool and no privilege; `ext_propose` and the Review flow (draft
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 NAME = "author-extension"
@@ -18,7 +19,7 @@ PROCEDURE = """\
 Use when the user asks for a capability Grain does not have and that a small extension can add. Read references/sdk.md first.
 
 1. Say in one or two sentences what the extension will do and which permissions it needs. Pick an id: lowercase letters, digits and hyphens.
-2. Call ext_propose(id) once before writing anything. With no draft yet it fails and names the draft folder. Write every file there with write_local_file (fs_edit to change one). You cannot write anywhere else a Grain extension is read from.
+2. Write every file under DRAFTS/<id>/ with write_local_file (fs_edit to change one). You cannot write anywhere else a Grain extension is read from.
 3. Write the smallest working extension: extension.json, extension.py with activate(api), a schema file per tool, and a test under tests/. Follow references/sdk.md exactly; the manifest declares every tool, hook and permission the code uses.
 4. Call ext_propose(id) again. It runs the extension check. If it reports errors, fix the files and call it again. Each call replaces the earlier proposal.
 5. When it succeeds, tell the user the diff is waiting in Settings > Advanced > Extensions, what the extension does and which permissions it declares. Accepting installs it switched off. Only the user can switch it on, and you cannot.
@@ -70,7 +71,8 @@ Hooks: app.start, app.stop, settings.changed, chat.created, turn.accept, turn.st
 """}
 
 
-def ensure(skills: Any) -> None:
-    """Offer the skill as a candidate unless a skill of that name exists (the user may have approved, edited or rejected it)."""
+def ensure(skills: Any, drafts: Path) -> None:
+    """Offer the skill as a candidate unless a skill of that name exists (the user may have approved, edited or rejected it).
+    `drafts` is the folder drafts are written in, named in the procedure."""
     if not any(s["name"] == NAME for s in skills.list()):
-        skills.propose(NAME, DESCRIPTION, PROCEDURE, references=REFERENCES)
+        skills.propose(NAME, DESCRIPTION, PROCEDURE.replace("DRAFTS", str(drafts)), references=REFERENCES)

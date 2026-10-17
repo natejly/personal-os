@@ -652,7 +652,7 @@ work_plans = WorkPlans(db)
 tool_results = ToolResults(db)
 skills = Skills(db)
 guide.ensure(skills)  # the built-in "Using Grain" skill: created approved, text refreshed when the bundle changes
-author_extension.ensure(skills)  # the "author-extension" skill: created approved once
+author_extension.ensure(skills, ext_review.drafts.drafts)  # the "author-extension" skill: offered once as a candidate in the Library
 # Auto-learn may only ever *propose* a skill (a friction fix, or a revised copy of one that failed); the lint it
 # runs is the approval gate's, so a draft that claims authority never even becomes a candidate.
 learner.skills, learner.known_tools = skills, lambda: _known_tools()
@@ -6606,7 +6606,8 @@ def _review_queues() -> list[dict[str, Any]]:
     each rather than re-implementing its review UI. A queue that fails to count is left out, never fatal."""
     queues: list[tuple[str, str, Callable[[], int]]] = [
         ("doc_edits", "Proposed doc edits", docs.pending_count),
-        ("skills", "Skills to approve", lambda: len(skills.list(status="candidate", project_id="__all__"))),
+        ("skills", "Skills to approve", lambda: sum(1 for s in skills.list(status="candidate", project_id="__all__")
+                                                           if s["name"] != author_extension.NAME)),  # the standing offer is not a queue
         ("workflows", "Workflow runs to approve",
          lambda: sum(1 for r in workflow_store.list_runs(limit=200) if r.get("status") == "awaiting_approval")),
         ("memory", "Memory tidy-ups", lambda: len(consolidator.list("pending", ALL))),

@@ -539,7 +539,7 @@ As built (PR 15). Not yet built, the rows above still stand: `new` registering t
 
 ### 6.3 Layer 3: Grain authoring its own extensions
 
-A skill (`author-extension`, a normal approved skill with the SDK reference as `references`) lets the agent do the work, with no new privileges:
+A skill (`author-extension`, a normal skill, offered as a candidate (see "As built"), with the SDK reference as `references`) lets the agent do the work, with no new privileges:
 
 1. The agent writes a draft into a staging folder `<data>/ext-drafts/<id>/` using the existing sandboxed file tools. It cannot write into the live extensions folder.
 2. A new tool `ext_propose(id)` runs `grain ext check`. The tool is `ALWAYS_CARD` (the same class as `agent_create`, `tools.py:111`), so it always shows a card, even in `allow_all`.
@@ -553,7 +553,7 @@ As built (PR 16). Not yet built, the steps above still stand: a derived `tier` f
 - The file tools may write `<data>/ext-drafts/` and nothing else in the data folder (`mac.EXT_DRAFTS` is carved out of `protected_reason`). `ext_propose(id)` copies the draft's shipped files into `<data>/extensions/.review/<id>/`, sets `enabled: false` in the copy, runs `check` on the copy, and records the session's taint (`ctx["tainted"]`, `taint_sources`). What the user reviews is that snapshot: a later edit to the draft changes nothing until the next `ext_propose`. The proposal and the pin live under `<data>/extensions/`, which the file tools cannot write.
 - Accept stands the installed version down (disabled, unloaded), replaces `<data>/extensions/<id>/` with the snapshot and pins its content hash (`pack.digest`) in `.pins/<id>.json` with the provenance. Nothing is imported until the user enables it.
 - Enable (`approve`, then load) refuses when the files differ from the pin, when the drafting session was tainted and the manifest declares `prompt:inject` or `hooks:gate`, and when it declares `hooks:gate`, `input:rewrite` or `memory:gate` without that permission in the request's `grants`. Disable unloads it, so the dev panel cannot bring it back past those checks. At startup an enabled extension whose files changed, or that fails to load, is disabled instead.
-- The `author-extension` skill (`authoring/skill.py`) is created once as a candidate, with the SDK reference as `references/sdk.md`. Approving it in the Library is the user's opt-in: an approved skill rides in every chat's prompt, so it is not approved for them (the prefix golden test stays byte-identical).
+- The `author-extension` skill (`authoring/skill.py`) is created once as a candidate, with the SDK reference as `references/sdk.md`. Approving it in the Library is the user's opt-in: an approved skill rides in every chat's prompt, so it is not approved for them (the skill adds nothing to the prompt; the golden prefix gains only the `ext_propose` tool line).
 
 ## 7. Trust and security model
 

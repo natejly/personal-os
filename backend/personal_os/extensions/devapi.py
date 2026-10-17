@@ -46,6 +46,13 @@ async def adopt(host: ExtensionHost, toolbox: Toolbox, scope: ExtensionScope) ->
         raise
 
 
+def set_hidden_view(host: ExtensionHost, ctx: ExtensionContext, ext_id: str, hidden: bool) -> None:
+    """Turn an extension off (listed in `hiddenViews`) or on, and apply it."""
+    views = [v for v in ctx.hidden_views() if v != ext_id]
+    ctx.set_settings({"hiddenViews": [*views, ext_id] if hidden else views})
+    host.refresh_enabled()
+
+
 def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Toolbox]) -> APIRouter:
     r = APIRouter(prefix="/dev/extensions")
     live = os.environ.get("GRAIN_EXT_DEV") == "1"
@@ -61,9 +68,7 @@ def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Too
 
     def set_hidden(ext_id: str, hidden: bool) -> dict[str, Any]:
         scope = known(ext_id)
-        views = [v for v in ctx.settings().get("hiddenViews") or () if v != ext_id]
-        ctx.set_settings({"hiddenViews": [*views, ext_id] if hidden else views})
-        host.refresh_enabled()
+        set_hidden_view(host, ctx, ext_id, hidden)
         return describe(host, scope)
 
     @r.get("")

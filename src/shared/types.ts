@@ -783,7 +783,7 @@ export interface ExtensionCard {
   name: string
   description: string
   version: string
-  contributes: { tools?: { name: string; danger: string }[]; views?: { id: string; label: string }[]; slots?: Record<string, unknown> } & Record<string, unknown>
+  contributes: { tools?: { name: string; danger: string }[]; views?: { id: string; label: string }[] }
   hooks: string[]
   permissions: string[]
   settings: string[]

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from .devapi import adopt
+from .devapi import adopt, set_hidden_view
 from .drafts import Drafts, DraftError
 
 if TYPE_CHECKING:
@@ -29,9 +29,7 @@ class Review:
         self.drafts, self.host, self.ctx, self.toolbox = drafts, host, ctx, toolbox
 
     def _hide(self, ext_id: str, hidden: bool) -> None:
-        views = [v for v in self.ctx.hidden_views() if v != ext_id]
-        self.ctx.set_settings({"hiddenViews": [*views, ext_id] if hidden else views})
-        self.host.refresh_enabled()
+        set_hidden_view(self.host, self.ctx, ext_id, hidden)
 
     async def _load(self, ext_id: str) -> None:
         scope = await self.host.load_dev(self.drafts.installed / ext_id, self.ctx, first_load=False)

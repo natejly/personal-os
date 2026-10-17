@@ -801,6 +801,7 @@ class Toolbox:
         self.setup_probes: dict[str, Callable[[], bool]] = {}  # setup_request's "is it set up" checks for stores app.py owns (telegram, mcp)
         self.permission_store: Callable[[Callable[[dict[str, Any]], dict[str, Any]]], Any] | None = None  # permissions_update's write: fn(current) -> keys to store; set by app.py
         self.dashboards: Any = None  # saved_dashboards.SavedDashboards; set by app.py
+        self.ext_drafts: Any = None  # extensions.drafts.Drafts; set by app.py (ext_tools.py)
         self.chat_files: Any = None  # chat_files.ChatFiles: which chat each file belongs to; set by app.py
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
         self.trash: Any = None  # soft delete (trash.py); set by app.py

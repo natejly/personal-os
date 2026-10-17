@@ -13,7 +13,6 @@ import json
 import logging
 import re
 import shutil
-import time
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +28,6 @@ INSTALLED = "extensions"
 ID = re.compile(r"[a-z0-9-]+")
 MAX_FILES = 200
 MAX_BYTES = 2_000_000
-DIFF_CHARS = 20_000  # per file
 TAINT_REFUSED = frozenset({"prompt:inject", "hooks:gate"})  # a session that read untrusted content may not write these in
 GATE_PERMISSIONS = frozenset(HOOK_PERMISSION.values())  # the permissions that can narrow or change what the user did: granted by name at enable
 
@@ -54,6 +52,11 @@ def _copy(src: Path, dst: Path) -> None:
     if any(p.is_symlink() for p in src.rglob("*")):
         raise DraftError("a draft may not contain symbolic links")
     files = shipped(src)
+    for p in files:
+        try:
+            p.read_text("utf-8")
+        except UnicodeDecodeError:
+            raise DraftError(f"{p.relative_to(src).as_posix()} is not UTF-8 text: a draft is reviewed as text, so it holds nothing else") from None
     if len(files) > MAX_FILES or sum(p.stat().st_size for p in files) > MAX_BYTES:
         raise DraftError(f"a draft may hold at most {MAX_FILES} files and {MAX_BYTES // 1_000_000} MB")
     for p in files:
@@ -74,12 +77,10 @@ def _disable(manifest_path: Path) -> None:
 
 
 def _diff(old: Path | None, new: Path | None, rel: str) -> str:
-    try:
-        before = old.read_text("utf-8").splitlines(True) if old else []
-        after = new.read_text("utf-8").splitlines(True) if new else []
-    except UnicodeDecodeError:
-        return "binary file"
-    return "".join(difflib.unified_diff(before, after, f"a/{rel}", f"b/{rel}"))[:DIFF_CHARS]
+    """The whole unified diff: a draft is capped in size and all text (`_copy`), so nothing the user approves is left unshown."""
+    before = old.read_text("utf-8").splitlines(True) if old else []
+    after = new.read_text("utf-8").splitlines(True) if new else []
+    return "".join(difflib.unified_diff(before, after, f"a/{rel}", f"b/{rel}"))
 
 
 def _changes(old: Path, new: Path) -> list[dict[str, str]]:
@@ -112,8 +113,7 @@ class Drafts:
             _copy(src, snap / "files")
             _disable(snap / "files" / "extension.json")
             warnings = self._check(ext_id, snap / "files")
-            (snap / "proposal.json").write_text(json.dumps({"tainted": tainted, "taintSources": taint_sources, "findings": warnings,
-                                                           "proposedAt": time.time()}), "utf-8")
+            (snap / "proposal.json").write_text(json.dumps({"tainted": tainted, "taintSources": taint_sources, "findings": warnings}), "utf-8")
         except BaseException:
             shutil.rmtree(snap, ignore_errors=True)
             raise
@@ -136,7 +136,7 @@ class Drafts:
         meta = json.loads((self._review / ext_id / "proposal.json").read_text("utf-8"))
         files = self._review / ext_id / "files"
         return {**_card(load_manifest(files / "extension.json"), meta["tainted"], meta["taintSources"]),
-                "findings": meta["findings"], "proposedAt": meta["proposedAt"], "update": (self.installed / ext_id).is_dir(),
+                "findings": meta["findings"], "update": (self.installed / ext_id).is_dir(),
                 "changes": _changes(self.installed / ext_id, files)}
 
     def proposals(self) -> list[dict[str, Any]]:
@@ -161,7 +161,7 @@ class Drafts:
         staging.replace(self.installed / ext_id)
         self._pins.mkdir(exist_ok=True)
         (self._pins / f"{ext_id}.json").write_text(json.dumps({"hash": digest(content_hash(self.installed / ext_id)), "tainted": meta["tainted"],
-                                                              "taintSources": meta["taintSources"], "acceptedAt": time.time()}), "utf-8")
+                                                              "taintSources": meta["taintSources"]}), "utf-8")
         shutil.rmtree(self._review / ext_id)
 
     # ---- installed ----

@@ -125,6 +125,19 @@ def test_a_checked_draft_is_queued_as_a_diff_and_nothing_is_installed() -> None:
     assert not (review.drafts.installed / "rl-notes").exists() and not appmod.toolbox.available("rl_notes_note")
 
 
+def test_the_whole_diff_is_shown_however_long_the_file() -> None:
+    draft(code="\n" * 30_000 + "PAYLOAD = 1\n")
+    propose()
+    [proposal] = client.get("/extensions").json()["proposals"]
+    assert "+PAYLOAD = 1" in next(c for c in proposal["changes"] if c["path"] == "extension.py")["diff"]
+
+
+def test_a_draft_with_a_file_that_is_not_text_is_refused() -> None:
+    (draft() / "blob.bin").write_bytes(b"\xff\xfe\x00")
+    out = propose()
+    assert "blob.bin" in out["error"] and client.get("/extensions").json()["proposals"] == []
+
+
 def test_a_draft_that_fails_the_check_is_not_queued() -> None:
     root = draft(code="    import personal_os.app\n")
     out = propose()
@@ -274,5 +287,6 @@ def test_drafts_error_carries_findings() -> None:
 def test_the_author_extension_skill_waits_for_the_users_approval_with_the_sdk_reference_and_is_created_once() -> None:
     [row] = [s for s in appmod.skills.list() if s["name"] == skill.NAME]
     assert row["status"] == "candidate" and skill.NAME not in appmod.skills.approved_block() and "references/sdk.md" in row["references"] and "ext_propose" in row["procedure"]
-    skill.ensure(appmod.skills)
+    assert str(review.drafts.drafts) in row["procedure"] and "DRAFTS" not in row["procedure"]
+    skill.ensure(appmod.skills, review.drafts.drafts)
     assert len([s for s in appmod.skills.list() if s["name"] == skill.NAME]) == 1

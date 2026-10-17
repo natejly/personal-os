@@ -32,7 +32,7 @@ def shipped(root: Path) -> list[Path]:
 
 
 def content_hash(root: Path) -> dict[str, str]:
-    """sha256 of every file that ships, by path."""
+    """sha256 of every file that ships (the tests and build leftovers do not), by path."""
     return {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in shipped(root)}
 
 

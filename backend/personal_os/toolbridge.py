@@ -22,7 +22,7 @@ import tempfile
 import time
 from typing import Any, Awaitable, Callable
 
-from . import autoreview, permrules
+from . import autoreview, guards, permrules
 from .dispatch import dispatch_tool
 
 ALLOWED = frozenset({"fs_glob", "fs_grep", "read_local_file", "fs_edit", "search_documents", "web_search", "fetch_url"})
@@ -196,6 +196,12 @@ class Bridge:
                 and autoreview.route("auto", mode="on", danger=spec.danger, covered=bool(perm.rule) or gated == "ask",
                                      explicit_on=(self.ctx.get("explicit_modes") or {}).get(name) == "on") != "run"):
             mode = "ask"
+        why, narrowed = await guards.settle(self.tb, self.ctx, name, args, danger=spec.danger, mode=mode)
+        if why:
+            return self._refuse(name, f"{name} was refused: {why}")
+        if narrowed and mode == "on":
+            mode = "ask"
+            perm.forced = True
         if mode == "ask":
             if self.approve is None or self.ctx.get("proposal_only"):
                 return self._refuse(name, f"{name} needs the user's approval and there is nobody to ask in this run.")

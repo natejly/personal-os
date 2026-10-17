@@ -37,7 +37,7 @@ import re
 import time
 from typing import Any, Callable
 
-from . import limits, permrules
+from . import guards, limits, permrules
 from .db import new_id, now
 from .dispatch import dispatch_tool
 from .tools import ASK_LOCKED_DANGER
@@ -927,6 +927,11 @@ class Engine:
         if perm.refusal:
             raise _StepFailed(f"{name} was refused: {perm.refusal}")
         mode, forced = perm.mode, perm.forced
+        why, narrowed = await guards.settle(self.toolbox, ctx, name, args, danger=spec.danger, mode=mode)
+        if why:
+            raise _StepFailed(f"{name} was refused: {why}")
+        if narrowed and mode == "on":
+            mode, forced = "ask", True
         uid = f"{run['id']}:{step['id']}"
         if mode == "ask" and (forced or step.get("approval") != "required"):
             if not await self._ask(run, ctx, uid + ":call", name, args, forced, spec.danger, stop):

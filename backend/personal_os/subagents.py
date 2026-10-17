@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import approval_log, autoreview, compaction, context_map, fsx, limits, llm, mac, mcp_search, permissions, permrules, redact
+from . import approval_log, autoreview, compaction, context_map, fsx, guards, limits, llm, mac, mcp_search, permissions, permrules, redact
 from .db import new_id, now
 from .dispatch import Contact, dispatch_tool
 from .extensions.directives import Directives
@@ -779,7 +779,7 @@ class Subagents:
         cfg = ctx.get("settings") or self.settings()
         model = str(a.get("model") or role.model or str(cfg.get("workerModel") or "").strip() or ctx.get("model") or cfg.get("defaultModel") or "")
         cid = "sa_" + new_id()
-        cctx = {**ctx, "depth": depth + 1, "agent_run_id": cid, "modes": modes, "mcp_modes": {n: m for n, m in modes.items() if n in (ctx.get("mcp_schemas") or {})}, "tainted": bool(ctx.get("tainted")),
+        cctx = {**ctx, "depth": depth + 1, "agent_run_id": cid, "modes": modes, "planning": False, "propose_without_run": False, "mcp_modes": {n: m for n, m in modes.items() if n in (ctx.get("mcp_schemas") or {})}, "tainted": bool(ctx.get("tainted")),
                 # a worker owns what it starts: its shell and opencode jobs are keyed to its run and die with it, not the reply's
                 **({"run_id": cid} if kind == "worker" else {}),
                 "taint_sources": list(ctx.get("taint_sources") or []), "allowed_urls": set(ctx.get("allowed_urls") or ()),
@@ -1267,6 +1267,13 @@ class Subagents:
                     else:
                         mode, forced = "ask", forced or rt == "review_strict"
                         self._log_mode(ch, uid, name, args, "review-ask", "auto-review", "mode: auto", rv)
+            if not bad and mode != "off":
+                why, narrowed = await guards.settle(self.toolbox, ch.ctx, name, args, danger=spec.danger, mode=mode,
+                                                    roots=self._perm_roots(ch), cwd=pcwd)
+                if why:
+                    bad = why
+                elif narrowed and mode == "on":
+                    mode, forced = "ask", True
             if bad:
                 result = denied(name, bad)
             elif mode == "ask" and (unattended := self._unattended(ch, pmode)):
@@ -1388,6 +1395,11 @@ class Subagents:
                 else:
                     mode = "ask"
                     self._log_mode(ch, uid, name, args, "review-ask", "auto-review", "mode: auto", rv)
+        why, narrowed = await guards.settle(self.toolbox, ch.ctx, name, args, danger="external", mode=mode, kind="items" if hints.get("destructive") else None)
+        if why:
+            return "deny", denied(name, why), False
+        if narrowed and mode == "on":
+            mode, hard_forced = "ask", True
         if mode == "ask":
             if unattended := self._unattended(ch, pmode):
                 if self.store is not None:

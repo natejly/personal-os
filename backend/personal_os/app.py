@@ -34,7 +34,7 @@ from . import auth_breaker, blobs, system_access
 from .bounds import clamp_limit
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
 from . import branch_summary, compaction, side_question, followups, otel_export, replay_trace, router, thinking_summary, titles
-from . import chatlink, duel, fsx, labels, request_log, toolcore
+from . import chatlink, duel, fsx, guards, labels, request_log, toolcore
 from .fsx import sensitive_reason
 from . import context_map
 from .dispatch import Contact, dispatch_tool
@@ -73,7 +73,7 @@ from .cowork import (AUTO_RESUME_FROM, internal_kind, AUTONOMY, CHAT_HANDOFF, CO
                      OUTPUT_KINDS, checklist_items, mail_parts, origin_report, parked_report)
 from .workspace import MAX_PREVIEW, OVERLAY as WORKSPACE_OVERLAY, Workspace, WorkspaceError
 from .envs import WorkEnv
-from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
+from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, Plans,
                     normalize_plan, parse_plan_edits, plan_voided_by_taint, taint_expected)
 from .chat_files import ChatFiles, router as chat_files_router
 from .filesnap import FileSnapshots, router as filesnap_router
@@ -667,6 +667,7 @@ toolbox = Toolbox(memories, graph, documents, settings, extensions=list(host.ext
                   work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, desks=desks, workspace=workspace, filesnap=filesnap,
                   conversations=convos, extundo=extundo, bus=host.bus, prechecks=host.prechecks)
+run_store.core_refusal = lambda tool, args: (r := guards.run_core_guards(toolbox, {"settings": settings()}, tool, args)) and r.reason
 # Which chat each file belongs to (chat_files.py): triggers record uploads, local writes and coding sessions; these hooks the rest.
 chat_files = ChatFiles(db, toolbox.chat_outputs.root if toolbox.chat_outputs is not None else None)
 app.include_router(chat_files_router(chat_files))
@@ -2496,6 +2497,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # True while a plan is being drafted and nothing consequential may run. 'plan' autonomy starts a
         # desk here; an approved plan ends it, which is why `active_plan` turns it off.
         planning = bool(desk) and autonomy == "plan" and active_plan is None
+        tool_ctx["planning"], tool_ctx["propose_without_run"] = planning, autonomy == "propose" and run is None  # guards.plan_block
         # Cards this desk let go of and the user has since answered: told to this turn once, then marked.
         parked_note = ""
         if desk_id:
@@ -3445,18 +3447,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # ---- plan mode, in priority order. Each rule can only ever make a call ask or stop;
                 # none of them can turn a card off, so this is a narrowing of the gate above.
                 if c["name"] != PLAN_TOOL and raw_mode != "off":
-                    if planning and danger not in PLAN_SAFE_DANGER:
-                        # Nothing consequential runs while a plan is being drafted. `forced` rides out
-                        # on the tool_call event so the UI can say "blocked while planning" rather than
-                        # "turned off".
-                        mode, forced, blocked_reason = "off", True, PLAN_BLOCKED
-                    elif autonomy == "propose" and danger == "external":
-                        # A propose-only desk never performs an external action: it is filed as a proposal below
-                        # (`proposing`), or refused when there is no run to file it under.
-                        if run is None:
-                            mode, forced, blocked_reason = "off", True, PROPOSE_ONLY
-                    elif plan_voided_by_taint(danger, bool(tool_ctx["tainted"]),
-                                              taint_expected(active_plan, tool_ctx["taint_sources"])):
+                    # Nothing consequential runs while a plan is being drafted. `forced` rides out
+                    # on the tool_call event so the UI can say "blocked while planning" rather than
+                    # "turned off". A propose-only desk never performs an external action: it is filed as a proposal
+                    # below (`proposing`), or refused when there is no run to file it under.
+                    blocked_reason = guards.plan_refusal(danger, planning=planning,
+                                                         propose_without_run=autonomy == "propose" and run is None)
+                    if blocked_reason:
+                        mode, forced = "off", True
+                    elif (autonomy != "propose" or danger != "external") and plan_voided_by_taint(
+                            danger, bool(tool_ctx["tainted"]), taint_expected(active_plan, tool_ctx["taint_sources"])):
                         # Taint the approved plan did not predict voids the pre-approval: ask, and
                         # consume nothing. A web fetch is included: its address can carry what was read.
                         # Checked before any claim, because a step burnt on a call the
@@ -3616,6 +3616,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         else:
                             mode, forced = "ask", forced or rt == "review_strict"
                             _log_mode(c["name"], args, uid, "review-ask", "auto-review", "mode: auto", review)
+                if pre is None and mode != "off" and not proposing:
+                    # The core has settled on run or card: its guards refuse what they refuse, then an extension may only narrow.
+                    why, narrowed = await guards.settle(toolbox, tool_ctx, c["name"], args, danger=danger, mode=mode,
+                                                        kind="items" if mcp_is(c["name"]) and (_mcp_event(c["name"]) or {}).get("destructive") else None)
+                    if why:
+                        pre = tools.denied(c["name"], why)
+                    elif narrowed and mode == "on" and claimed is None:
+                        mode, forced = "ask", True
                 # A background run never waits on a card. Manual mode keeps unattendedApprovals; in the other modes a card that
                 # survives routing becomes a proposal when the call can be one, else a recorded refusal.
                 if (mode == "ask" and claimed is None and pre is None and not proposing and run is not None and is_background
@@ -3884,6 +3892,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                             # consequential calls lifts with it - otherwise the plan the user just
                             # approved could never be carried out.
                             active_plan, planning = plan, False
+                            tool_ctx["planning"] = False
                             # Drafting is over: the tools held back above are offered again.
                             tool_schemas = _schemas()
                         # Published on the run's own stream, so a window that was watching the card
@@ -7804,6 +7813,8 @@ def google_tasklists() -> Any:
 
 @host.on_start
 async def _modules_startup() -> None:
+    if not guards.sealed():
+        log.critical("%s before start: every tool call will be refused", guards.TAMPERED)
     await host.start()
 
 

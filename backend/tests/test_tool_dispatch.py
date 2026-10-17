@@ -38,7 +38,8 @@ def fake_toolbox(result: Any = None, *, taints: bool = False, boom: bool = False
             ctx["tainted"] = True
             ctx.setdefault("taint_sources", []).append(name)
         return {"ok": True} if result is None else result
-    return SimpleNamespace(bus=HookBus(), call=call)
+    return SimpleNamespace(bus=HookBus(), call=call, specs={"t": SimpleNamespace(danger="safe")}, settings=dict, proposes=lambda n: False,
+                           floor_action=lambda *a, **k: None, floor_kind=lambda *a, **k: None)
 
 
 def go(box: Any, name: str = "t", args: dict[str, Any] | None = None, ctx: dict[str, Any] | None = None, **kw: Any) -> Any:

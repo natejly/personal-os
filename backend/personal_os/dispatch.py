@@ -1,6 +1,7 @@
 """The tool-path seam (design doc 5.0 and 5.5): every tool call, whichever loop makes it, passes through here.
 
-dispatch_tool wraps Toolbox.call, or a connector call a loop hands it, and fires the tool hooks around it:
+dispatch_tool wraps Toolbox.call, or a connector call a loop hands it. The core guards (guards.py) run first, so no
+extension hook sees a call the core refuses; then it fires the tool hooks around the call:
 tool.pre (a gate), then tool.result (a pipe over the whole result, so every channel a loop later splits out of it is
 covered), then tool.error, tool.post and tool.taint (emits). Core redaction runs on whatever the pipe returns.
 Callers that journal a call put the seam inside the journal, so a replayed result is the one the hooks produced.
@@ -11,7 +12,7 @@ import copy
 import time
 from typing import Any, Awaitable, Callable
 
-from . import redact
+from . import guards, redact
 from .extensions.hooks import Ask, Deny, HookBus, hook_ctx
 from .tools import Toolbox, scrub_strings, denied, summarize_result, tool_error
 
@@ -19,7 +20,7 @@ def _refused(name: str, verdict: Deny | Ask) -> dict[str, Any]:
     # The seam sits below each loop's approval wait, so it cannot open a card: an Ask stops the call and tells the
     # model to ask the user, which is the closest thing to asking that never lets the call through.
     if isinstance(verdict, Deny):
-        return denied(name, f"blocked by an extension ({verdict.reason})")
+        return denied(name, guards.blocked_by_extension(verdict))
     return tool_error(f"{name} needs the user's approval before it runs ({verdict.reason}). It was not run.",
                       alternative="ask the user whether to go ahead")
 
@@ -53,6 +54,8 @@ async def dispatch_tool(toolbox: Toolbox, ctx: dict[str, Any], name: str, args: 
     """Run one tool call under the hooks. `connector` is the call to make for an MCP tool (Toolbox.call otherwise);
     its text taints the run, which the calling loop records itself."""
     bus = toolbox.bus
+    if refusal := guards.run_core_guards(toolbox, ctx, name, args):
+        return refusal.result(name)
     if bus.active("tool.pre") and (verdict := await bus.gate(
             "tool.pre", {"name": name, "args": copy.deepcopy(args), "call_id": call_id, "ctx": hook_ctx(ctx)})):
         return _refused(name, verdict)

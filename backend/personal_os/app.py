@@ -59,7 +59,7 @@ from . import vision
 from .saved_dashboards import FOLDER as DASHBOARD_FOLDER, SavedDashboards, is_dashboard as saved_dashboards_is
 from .docs import ASSET_MIMES, asset_path, AssetError, Docs, clean_typography, save_asset, unified_diff
 from . import cache as google_cache
-from .google import Google, GoogleNotConnected, http_failure, json_safe
+from .extensions.google.client import Google, GoogleNotConnected, http_failure, json_safe
 from . import job_history, job_tools
 from .jobs_policy import JobPolicy
 from .jobs import (DESK_JOB_AUTONOMY, KINDS, MAIL_MAX_THREADS, TARGETS, PowerWake, check_watch_dir, PROPOSAL_STATUSES, Jobs, Proposals,
@@ -417,9 +417,6 @@ ensure_embedding_model(local=False)  # a key already saved before any embedding 
 jobs = Jobs(db)
 proposals = Proposals(db)
 recaps = Recaps(db)
-google = Google(settings, db.set_settings, cache_dir=db.data_dir)
-app.include_router(setup_router(settings, db.set_settings, lambda: google.status()["connected"]))
-app.include_router(providers_router(db.get_settings, db.set_settings, db.secrets, ensure_embedding_model))
 
 
 def _publish_event(name: str, data: Any) -> None:
@@ -433,8 +430,12 @@ def _publish_event(name: str, data: Any) -> None:
 
 
 # sid/wsid are defined further down, so the contexts look them up late.
-_ext_ctx = ExtensionContext(db=db, hidden_views=lambda: settings().get("hiddenViews") or (), services={"mcp": lambda: mcp, "google": lambda: google},
+_ext_ctx = ExtensionContext(db=db, hidden_views=lambda: settings().get("hiddenViews") or (), services={"mcp": lambda: mcp},
                             settings=settings, set_settings=db.set_settings, sid=lambda p: sid(p), wsid=lambda p: wsid(p), publish=_publish_event)
+host.load_builtin("google", _ext_ctx)
+google: Google = _ext_ctx.services["google"]()
+app.include_router(setup_router(settings, db.set_settings, lambda: google.status()["connected"]))
+app.include_router(providers_router(db.get_settings, db.set_settings, db.secrets, ensure_embedding_model))
 for _r in host.load_builtin("todos", _ext_ctx).routers:
     app.include_router(_r)
 todos, tasks_sync = _ext_ctx.services["todos"](), _ext_ctx.services["tasks_sync"]()

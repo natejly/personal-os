@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os.google import _overlaps, _parse_iso, _rfc2822_iso  # noqa: E402
+from personal_os.extensions.google.client import _overlaps, _parse_iso, _rfc2822_iso  # noqa: E402
 
 
 def test_js_toisostring_with_millis_and_z() -> None:

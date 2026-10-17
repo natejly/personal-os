@@ -50,7 +50,7 @@ from croniter import CroniterBadCronError, CroniterBadDateError, croniter
 from .approval_edits import EDITABLE_TOOLS
 from .db import Database, new_id, now, row_to_dict
 from . import limits
-from .google import GoogleNotConnected
+from .extensions.google.client import GoogleNotConnected
 from .runs import args_digest
 
 log = logging.getLogger(__name__)

@@ -30,7 +30,7 @@ from typing import Any
 
 from . import blobs
 from .db import Database
-from .google import Google, GoogleNotConnected
+from .extensions.google.client import Google, GoogleNotConnected
 
 log = logging.getLogger("personal_os.drive_backup")
 FOLDER = "Grain Backup"

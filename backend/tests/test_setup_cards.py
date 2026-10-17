@@ -12,7 +12,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os.google import GoogleNotConnected  # noqa: E402
+from personal_os.extensions.google.client import GoogleNotConnected  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 
 

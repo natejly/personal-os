@@ -15,9 +15,9 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import cache  # noqa: E402
-from personal_os import google as google_module  # noqa: E402
-from personal_os.google import _CAL_FULL_AFTER, TTL, Google  # noqa: E402
-from personal_os.google_store import ReadStore  # noqa: E402
+from personal_os.extensions.google import client as google_module  # noqa: E402
+from personal_os.extensions.google.client import _CAL_FULL_AFTER, TTL, Google  # noqa: E402
+from personal_os.extensions.google.store import ReadStore  # noqa: E402
 
 
 class _Req:
@@ -161,7 +161,7 @@ class IdTokenTests(unittest.TestCase):
     def test_email_comes_from_the_id_token_claims(self) -> None:
         import base64
         import json
-        from personal_os.google import _id_token_email
+        from personal_os.extensions.google.client import _id_token_email
         claims = base64.urlsafe_b64encode(json.dumps({"email": "me@x.com"}).encode()).decode().rstrip("=")
         self.assertEqual(_id_token_email(f"h.{claims}.sig"), "me@x.com")
         self.assertIsNone(_id_token_email(None))
@@ -280,7 +280,7 @@ class ClientReuseTests(unittest.TestCase):
         g = Google(dict, lambda _s: None)
         g._creds = lambda: creds  # type: ignore[method-assign]
 
-        import personal_os.google as gmod
+        import personal_os.extensions.google.client as gmod
 
         real_import = gmod.__dict__.get("build")
         self.assertIsNone(real_import, "build is imported inside _svc; nothing to shadow at module level")
@@ -830,6 +830,6 @@ class GmailModifyBatchTests(unittest.TestCase):
         self.assertNotIn("count", out)
 
     def test_http_client_has_a_timeout(self) -> None:
-        import personal_os.google as gmod
+        import personal_os.extensions.google.client as gmod
         http = gmod._authorized_http(object())
         self.assertEqual(http.http.timeout, gmod.HTTP_TIMEOUT)

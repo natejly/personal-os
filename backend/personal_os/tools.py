@@ -345,7 +345,7 @@ def unverified(name: str, out: dict[str, Any]) -> dict[str, Any]:
 
 
 def checked(name: str, out: Any) -> Any:
-    """Pass a google.py result through, unless its read-back failed to prove the write."""
+    """Pass a Google client result through, unless its read-back failed to prove the write."""
     if not isinstance(out, dict) or out.get("error") or "verification" not in out:
         return out
     return out if verify.ok(out["verification"]) else unverified(name, out)
@@ -1134,7 +1134,7 @@ class Toolbox:
                 return {**tool_error(f"{name}: " + ("Google needs to be reconnected." if c.get("reauth") else "Google is not connected."),
                                      alternative="a connect button was shown in the chat; tell the user to click it, then retry"), "setup": c}
             if type(e).__name__ == "HttpError":
-                from .google import http_failure
+                from .extensions.google.client import http_failure
                 return tool_error(redact.scrub_command_output(f"{name}: {http_failure(e)[1]}"), alternative=ALTERNATIVE.get(name))
             if isinstance(e, httpx.HTTPStatusError):
                 return tool_error(redact.scrub_command_output(f"{name}: HTTP {e.response.status_code} from {e.request.url.host}"),

@@ -15,7 +15,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os.db import Database  # noqa: E402
-from personal_os.google import _task_body  # noqa: E402
+from personal_os.extensions.google.client import _task_body  # noqa: E402
 from personal_os.gtasks import TasksSync  # noqa: E402
 from personal_os.todos import Todos  # noqa: E402
 

@@ -220,7 +220,7 @@ src/preload/         contextBridge
 src/renderer/        React UI (store.ts holds state; lib/api.ts is the client)
 src/shared/          Types and the shortcut table shared by both processes
 backend/personal_os/ FastAPI app: app.py routes, repos.py storage, tools.py, context.py,
-                     learn.py, google.py, jobs.py, telegram.py, and more
+                     learn.py, jobs.py, telegram.py, and more
 scripts/             dev.sh, litellm.sh, bundle-backend.sh, install-app.sh
 litellm.yaml         Model routing (Fireworks by default)
 tests/e2e/           Playwright end-to-end tests

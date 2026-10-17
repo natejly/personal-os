@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import llm, mailwatch as mw  # noqa: E402
 from personal_os.db import Database  # noqa: E402
-from personal_os.google import _gmail_thread_meta  # noqa: E402
+from personal_os.extensions.google.client import _gmail_thread_meta  # noqa: E402
 from personal_os.modules import ModuleContext  # noqa: E402
 from personal_os.modules.mailwatch import MailWatchModule  # noqa: E402
 from personal_os.todos import Todos  # noqa: E402

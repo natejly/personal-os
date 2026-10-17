@@ -35,9 +35,9 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from . import mail_attachments, verify
-from .cache import TTLCache, bypassing, cached, dont_cache, invalidates
-from .google_store import ReadStore
+from ... import mail_attachments, verify
+from ...cache import TTLCache, bypassing, cached, dont_cache, invalidates
+from .store import ReadStore
 
 # Packaged builds ship the OAuth client in Resources/backend/oauth_client.json (written by
 # scripts/bundle-backend.sh); sys.prefix is Resources/backend/python there.
@@ -185,7 +185,7 @@ class Google:
         self.set_settings = set_settings
         self._pending: dict[str, Any] = {}  # state -> flow
         self._cache = TTLCache()
-        # Survives the minute-scale TTL and a process restart. See google_store.py.
+        # Survives the minute-scale TTL and a process restart. See store.py.
         self._reads = ReadStore(Path(cache_dir) / "google-reads.json" if cache_dir else None)
         # Built API clients and the Credentials they wrap, reused across calls; see _svc.
         self._svc_lock = threading.Lock()

@@ -64,7 +64,7 @@ rm -rf "$SP/site-packages/pip" "$SP"/site-packages/pip-*
 # matplotlib ships sample data and test images; the backend only renders charts.
 rm -rf "$SP/site-packages/matplotlib/mpl-data/sample_data" "$SP/site-packages/matplotlib/mpl-data/images"
 find "$SP/site-packages" -name '*.pyi' -delete
-# googleapiclient bundles ~500 discovery documents (110MB); google.py only builds these services.
+# googleapiclient bundles ~500 discovery documents (110MB); the Google client only builds these services.
 DOCS="$SP/site-packages/googleapiclient/discovery_cache/documents"
 find "$DOCS" -name '*.json' ! \( -name 'gmail.v1.json' -o -name 'calendar.v3.json' -o -name 'drive.v3.json' \
   -o -name 'tasks.v1.json' -o -name 'docs.v1.json' -o -name 'sheets.v4.json' -o -name 'people.v1.json' \) -delete
@@ -72,7 +72,7 @@ find "$DOCS" -name '*.json' ! \( -name 'gmail.v1.json' -o -name 'calendar.v3.jso
 rm -rf "$SP/site-packages/PyObjCTest"
 find "$SP/site-packages/babel/locale-data" -name '*.dat' ! -name 'en*.dat' ! -name 'root.dat' -delete 2>/dev/null || true
 
-# Built-in Google OAuth client (a Desktop client's secret is not confidential); google.py reads it as the
+# Built-in Google OAuth client (a Desktop client's secret is not confidential); the Google client reads it as the
 # last fallback. Absent unless both variables are set at build time.
 if [ -n "${GRAIN_GOOGLE_CLIENT_ID:-}" ] && [ -n "${GRAIN_GOOGLE_CLIENT_SECRET:-}" ]; then
   "$PY" -c 'import json,os; print(json.dumps({"client_id": os.environ["GRAIN_GOOGLE_CLIENT_ID"], "client_secret": os.environ["GRAIN_GOOGLE_CLIENT_SECRET"]}))' > "$OUT/oauth_client.json"

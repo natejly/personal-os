@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os import google  # noqa: E402
+from personal_os.extensions.google import client as google  # noqa: E402
 
 
 def test_client_order(tmp_path, monkeypatch):

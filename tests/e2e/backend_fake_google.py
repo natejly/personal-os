@@ -22,7 +22,7 @@ from typing import Any
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "backend"))
 
 from fastapi import Request  # noqa: E402
-from personal_os import google as gmod  # noqa: E402
+from personal_os.extensions.google import client as gmod  # noqa: E402
 
 NOW = dt.datetime.now().astimezone().replace(microsecond=0)
 MONDAY = (NOW - dt.timedelta(days=NOW.weekday())).replace(hour=0, minute=0, second=0)

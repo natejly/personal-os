@@ -247,7 +247,7 @@ class ModuleTests(unittest.TestCase):
             self.assertFalse(overlaps(span(b), (dt(5, "11:10"), dt(5, "12:40")), pad=10))
 
     def test_not_connected_is_409(self) -> None:
-        from personal_os.google import GoogleNotConnected
+        from personal_os.extensions.google.client import GoogleNotConnected
 
         def boom(*_a: Any, **_k: Any) -> Any:
             raise GoogleNotConnected("Google is not connected.")

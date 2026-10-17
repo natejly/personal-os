@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from . import verify
-from .google import Google, GoogleNotConnected, _parse_iso
+from .extensions.google.client import Google, GoogleNotConnected, _parse_iso
 from .todos import Todos
 
 log = logging.getLogger(__name__)

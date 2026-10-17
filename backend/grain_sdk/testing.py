@@ -16,8 +16,10 @@ not scripted answers "ok".
 from __future__ import annotations
 
 import asyncio
+import atexit
 import json
 import os
+import shutil
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,7 +43,9 @@ class Turn:
 
 class Harness:
     def __init__(self, folder: Path | str, settings: dict[str, Any] | None = None) -> None:
-        os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="grain-harness-"))
+        if "PERSONAL_OS_DATA_DIR" not in os.environ:
+            os.environ["PERSONAL_OS_DATA_DIR"] = scratch = tempfile.mkdtemp(prefix="grain-harness-")
+            atexit.register(shutil.rmtree, scratch, ignore_errors=True)  # the app singleton keeps using it until the process ends
         os.environ.setdefault("GRAIN_SECRETS_BACKEND", "file")
         from personal_os import app as appmod, llm
         self._app, self._llm = appmod, llm

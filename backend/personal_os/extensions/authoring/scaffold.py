@@ -78,10 +78,8 @@ def activate(api: Extension) -> None:
     api.context(lambda payload: Contribution(f"The user has {count()} saved notes."), slot="volatile")
 ''')
 
-FRONTEND = '''// The renderer half. `ui` is the app's UiApi; register views, settings panels and slot items on it.
-export function activate(ui: unknown): void {
-  void ui
-}
+FRONTEND = '''// The renderer half. Register views, settings panels and slot items from `activate`.
+export function activate(): void {}
 '''
 
 TEST = Template('''from pathlib import Path

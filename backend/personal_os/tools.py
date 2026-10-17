@@ -878,6 +878,9 @@ class Toolbox:
         return bool(self.google and self.google.status()["connected"])
 
     def set_extension_tools(self, scope: ExtensionScope) -> None:
+        taken = [n for n in scope.tools if n in self.specs and self.tool_owner.get(n) != scope.manifest.id]
+        if taken:
+            raise ValueError(f"extension {scope.manifest.id!r} registers {taken}, which the app already has")
         self.specs.update(scope.tools)
         self.tool_owner.update(dict.fromkeys(scope.tools, scope.manifest.id))
 

@@ -93,8 +93,9 @@ def cmd_test(args: argparse.Namespace) -> int:
     root = Path(args.folder).resolve()
     with tempfile.TemporaryDirectory(prefix="grain-ext-test-") as scratch:
         backend = str(Path(__file__).parents[3])  # where personal_os and grain_sdk are, installed or not
-        env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [backend, os.environ.get("PYTHONPATH")])), "PERSONAL_OS_DATA_DIR": scratch, "GRAIN_SECRETS_BACKEND": "file",
-               "PERSONAL_OS_OPENCODE_DB": str(Path(scratch) / "no-opencode.db")}
+        env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [backend, os.environ.get("PYTHONPATH")])),
+               "PERSONAL_OS_DATA_DIR": scratch, "GRAIN_SECRETS_BACKEND": "file",
+               "PERSONAL_OS_OPENCODE_DB": str(Path(scratch) / "no-opencode.db")}  # keeps the run away from the real coding-agent usage database
         targets = args.pytest_args or [str(root / "tests")]
         return subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *targets], cwd=root, env=env).returncode
 

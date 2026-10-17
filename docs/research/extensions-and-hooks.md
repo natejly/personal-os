@@ -477,10 +477,10 @@ Extensions fill **fixed named slots** and set **design tokens**; they do not rea
 
 | Piece | What it does |
 |---|---|
-| `grain ext new <id> [--profile]` | Scaffolds `extension.json`, `extension.py`, `extension.tsx`, a test, and a migrations folder. Registers the folder with a running dev backend. |
+| `grain ext new <id> [--profile]` | Scaffolds `extension.json`, `extension.py`, `extension.tsx`, a test, and a migrations folder. |
 | Typed SDK | `grain_sdk` (Python, `py.typed`) and `@grain/ext-sdk` (TypeScript), both generated from the one set of JSON Schemas for hook payloads, slot items and manifest. Extensions import nothing from `personal_os.*`. |
-| Hot reload (`grain ext dev`) | Backend: file watcher, deactivate, import into a fresh module namespace, activate; per-extension state survives via `api.data_dir` and the UI store slice. Frontend: Vite HMR with registry disposal so a hot-swapped component replaces, not duplicates, its slot item. |
-| Dev panel (Settings > Developer) | Loaded extensions with state; contributions registered; hooks subscribed with count, p50 and p95 latency; last N errors; muted-handler list; recent payloads (redacted); enable, disable, reload buttons. |
+| Hot reload (`grain ext dev`) | Backend: file watcher, deactivate, import into a fresh module namespace, activate; per-extension state survives via `api.data_dir` and the UI store slice. Frontend: see As built (PR 15). |
+| Dev panel (Settings > Developer) | Loaded extensions with state; contributions registered; hooks subscribed with count, p50 and p95 latency; last N errors; muted-handler list; enable, disable, reload buttons. |
 | Test harness | `from grain_sdk.testing import Harness`: starts a scratch backend (temp data dir, scripted fake model), loads the extension, then `h.fire("tool.pre", ...)`, `h.chat("...", model_script=[...])`, `h.assert_context_contains(...)`, `h.assert_prefix_stable()`. The project already runs a scratch backend with a Playwright-driven Electron for e2e (`tests/e2e/`); the harness reuses that fixture. |
 | `grain ext check` | Validates manifest schema, `apiVersion`, id and tool-name collisions, `requires` closure, undeclared hook usage (AST scan for `api.on("...")` against `hooks`), forbidden imports, tool-schema lint, permission diff against the previous version, static authority-claim lint on prompt text. Exit non-zero on error. |
 | `grain ext pack` | Builds `dist/extension.js` for the renderer half, writes a content hash into a lock file used for pinning (section 7). |

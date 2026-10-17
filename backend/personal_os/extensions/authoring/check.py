@@ -202,7 +202,7 @@ def _imports(rel: Path, tree: ast.AST) -> list[Finding]:
             continue
         for name in names:
             if name == "personal_os" or name.startswith("personal_os."):
-                out.append(Finding("error", "forbidden-import", f"{rel}:{node.lineno}: import {name} from grain_sdk instead of personal_os"))
+                out.append(Finding("error", "forbidden-import", f"{rel}:{node.lineno}: import {name}: an extension imports from grain_sdk, not from personal_os"))
     return out
 
 

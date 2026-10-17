@@ -113,6 +113,17 @@ def test_loading_a_folder_registers_its_tools_and_hooks_and_reload_picks_up_edit
     appmod.toolbox.drop_extension_tools(["sample_jot"])
 
 
+def test_a_folder_cannot_take_over_a_tool_the_app_already_has(ext: Path) -> None:
+    core = "fs_glob"
+    spec = appmod.toolbox.specs[core]
+    for name in ("extension.json", "extension.py"):
+        edit(ext, name, lambda t: t.replace("sample_note", core))
+    shutil.move(ext / "tools" / "sample_note.json", ext / f"tools/{core}.json")
+    r = load(ext)
+    assert r.status_code == 400 and core in r.json()["detail"]
+    assert "sample" not in appmod.host.extensions and appmod.toolbox.specs[core] is spec
+
+
 def test_disabling_a_loaded_extension_takes_its_tools_away(ext: Path) -> None:
     load(ext)
     assert appmod.toolbox.available("sample_note")
@@ -144,9 +155,12 @@ def test_a_failed_reload_keeps_the_reason_and_drops_the_old_tools(ext: Path) -> 
     assert load(ext).status_code == 200
 
 
-def test_a_built_in_cannot_be_reloaded() -> None:
+def test_a_built_in_cannot_be_reloaded_and_keeps_its_tools() -> None:
+    tools = list(appmod.host.extensions["health"].tools)
+    assert tools and all(t in appmod.toolbox.specs for t in tools)
     r = client.post("/dev/extensions/health/reload")
     assert r.status_code == 400 and "not loaded from a folder" in r.json()["detail"]
+    assert all(t in appmod.toolbox.specs and appmod.toolbox.tool_owner[t] == "health" for t in tools)
     assert client.post("/dev/extensions/ghost/reload").status_code == 404
 
 

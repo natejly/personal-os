@@ -70,6 +70,15 @@ def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Too
     def disable(ext_id: str) -> dict[str, Any]:
         return set_hidden(ext_id, True)
 
+    async def adopt(scope: ExtensionScope) -> dict[str, Any]:
+        """Offer a loaded extension's tools to the model; unload it when they clash with the app's own."""
+        try:
+            toolbox().set_extension_tools(scope)
+        except ValueError as e:
+            await host.unload(scope.manifest.id)
+            raise HTTPException(400, f"ValueError: {e}") from e
+        return describe(host, scope)
+
     @r.post("/load")
     async def load(body: LoadIn) -> dict[str, Any]:
         require_dev()
@@ -77,18 +86,19 @@ def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Too
             scope = await host.load_dev(Path(body.path).expanduser().resolve(), ctx)
         except Exception as e:  # noqa: BLE001 - the reason goes to the panel
             raise HTTPException(400, f"{type(e).__name__}: {e}") from e
-        toolbox().set_extension_tools(scope)
-        return describe(host, scope)
+        return await adopt(scope)
 
     @r.post("/{ext_id}/reload")
     async def reload(ext_id: str) -> dict[str, Any]:
         require_dev()
-        toolbox().drop_extension_tools(known(ext_id).tools)
+        old = known(ext_id)
+        if not old.dev:  # before its tools are dropped: a built-in keeps them
+            raise HTTPException(400, f"ValueError: extension {ext_id!r} is not loaded from a folder, so it cannot be reloaded")
+        toolbox().drop_extension_tools(old.tools)
         try:
             scope = await host.reload(ext_id)
         except Exception as e:  # noqa: BLE001
             raise HTTPException(400, f"{type(e).__name__}: {e}") from e
-        toolbox().set_extension_tools(scope)
-        return describe(host, scope)
+        return await adopt(scope)
 
     return r

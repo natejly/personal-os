@@ -181,13 +181,13 @@ class HookBus:
             log.warning("hook %s from %s failed", sub.hook, sub.owner, exc_info=True)
             sub.record(started, e)
             return False, None
-        sub.record(started)
         if inspect.isawaitable(out):
             if inspect.iscoroutine(out):
                 out.close()
             log.warning("hook %s from %s is async and cannot run inline from synchronous code; skipped", sub.hook, sub.owner)
-            sub.errors.append("async handler cannot run inline from synchronous code")
+            sub.record(started, RuntimeError("async handler cannot run inline from synchronous code"))
             return False, None
+        sub.record(started)
         return True, out
 
     def emit_sync(self, hook: str, payload: Any = None) -> None:

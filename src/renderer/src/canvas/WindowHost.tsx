@@ -1,42 +1,13 @@
-import { useCallback, type FC, type PointerEvent as ReactPointerEvent } from 'react'
-import {
-  Brain, Calendar, CheckSquare, FileText, MessageSquare, Network,
-  FolderKanban, Sparkles, Gauge, FilePen, Smile, Users } from '../icons'
+import { cloneElement, useCallback, type FC, type PointerEvent as ReactPointerEvent } from 'react'
 import type { CanvasWindow, WidgetKind } from '@shared/types'
 import { WIDGETS, type WidgetProps } from './registry'
 import { useCanvas } from './store'
 import WidgetBoundary from './WidgetBoundary'
 
-/** Placeholder catalog. Wave 3 reads `WIDGETS[kind].label` / `.icon` instead. */
-export const KIND_LABEL: Record<WidgetKind, string> = {
-  chat: 'Chat',
-  todos: 'Lists',
-  calendar: 'Calendar',
-  memory: 'Memory',
-  graph: 'Graph',
-  documents: 'Uploads',
-  recap: 'Recap',
-  project: 'Project',
-  usage: 'Usage',
-  doc: 'Doc',
-  face: 'Face',
-  crew: 'Crew'
-}
+export const kindLabel = (kind: WidgetKind): string => WIDGETS[kind]?.label ?? kind
 
-export const KIND_ICON: Record<WidgetKind, JSX.Element> = {
-  chat: <MessageSquare size={18} />,
-  todos: <CheckSquare size={18} />,
-  calendar: <Calendar size={18} />,
-  memory: <Brain size={18} />,
-  graph: <Network size={18} />,
-  documents: <FileText size={18} />,
-  recap: <Sparkles size={18} />,
-  project: <FolderKanban size={18} />,
-  usage: <Gauge size={18} />,
-  doc: <FilePen size={18} />,
-  face: <Smile size={18} />,
-  crew: <Users size={18} />
-}
+/** The registry's icon at dock size; none for a kind this build has no widget for. */
+export const kindIcon = (kind: WidgetKind): JSX.Element | null => (WIDGETS[kind] ? cloneElement(WIDGETS[kind].icon, { size: 18 }) : null)
 
 /** A row the backend accepted that this build has no widget for: still titled, still closable. */
 function Unknown({ window: win }: WidgetProps): JSX.Element {
@@ -61,7 +32,7 @@ export default function WindowHost({ win, focused, live, onMove }: { win: Canvas
   return (
     // Keyed on what the window shows, so a caught error does not outlive a re-point at another referent.
     // This is the boundary's key, not the frame's: a raise never changes it.
-    <WidgetBoundary key={win.ref_id ?? win.id} label={win.title || KIND_LABEL[win.kind] || win.kind}>
+    <WidgetBoundary key={win.ref_id ?? win.id} label={win.title || kindLabel(win.kind)}>
       <Body window={win} focused={focused} live={live} onConfig={onConfig} onTitle={onTitle} onMove={onMove} />
     </WidgetBoundary>
   )

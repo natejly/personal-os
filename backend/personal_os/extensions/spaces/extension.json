@@ -1,0 +1,21 @@
+{
+  "id": "spaces",
+  "name": "Canvases",
+  "description": "Canvases of floating windows, and the tools that put widgets on them.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "kind": "extension",
+  "enabled": "always",
+  "activation": ["startup"],
+  "provides": { "services": ["canvases"] },
+  "contributes": {
+    "tools": [
+      { "name": "space_list", "after": "google_sheets_create", "danger": "safe", "group": "spaces" },
+      { "name": "space_add_widget", "after": "space_list", "danger": "writes", "group": "spaces" },
+      { "name": "space_arrange", "after": "space_add_widget", "danger": "writes", "group": "spaces" }
+    ]
+  },
+  "hooks": { "app.start": {} },
+  "permissions": ["db:own"],
+  "data": { "tables": ["canvases", "canvas_windows"] }
+}

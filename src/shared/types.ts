@@ -2389,10 +2389,13 @@ export interface PromotionResult {
 
 // ---------------- Canvas Mode ----------------
 
-/** Every widget a canvas window can host. Source of truth for `WIDGET_KINDS` in backend/personal_os/canvas.py. */
-export type WidgetKind =
+/** The widgets the app provides. Source of truth for `CORE_WIDGET_KINDS` in backend/personal_os/extensions/spaces/store.py. */
+export type BuiltinWidgetKind =
   | 'chat' | 'todos' | 'calendar'
   | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'doc' | 'face' | 'crew'
+
+/** Every widget a canvas window can host: a built-in one, or `ext:<extension id>:<name>` from an extension's `canvas.widget` slot. */
+export type WidgetKind = BuiltinWidgetKind | `ext:${string}`
 
 export type WindowState = 'normal' | 'minimized' | 'maximized' | 'popped'
 export type SnapMode = 'off' | 'grid' | 'guides' | 'both'

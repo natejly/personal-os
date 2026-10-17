@@ -1,7 +1,7 @@
 /**
  * The one place the renderer knows what a pop-out's transparency may be. The steps mirror
  * OPACITY_LEVELS in src/main/popouts.ts (the tray and Window menus offer the same rungs) and the
- * floor mirrors MIN_OPACITY there and in canvas.py: below it a pop-out is invisible and unclickable.
+ * floor mirrors MIN_OPACITY there and in extensions/spaces/store.py: below it a pop-out is invisible and unclickable.
  */
 export const MIN_OPACITY = 0.2
 export const OPACITY_LEVELS = [1, 0.9, 0.75, 0.6, 0.45, 0.3] as const

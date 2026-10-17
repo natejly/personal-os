@@ -1,5 +1,5 @@
 import type { FC, PointerEvent as ReactPointerEvent } from 'react'
-import type { CanvasWindow, DragKind, WidgetKind } from '@shared/types'
+import type { BuiltinWidgetKind, CanvasWindow, DragKind, WidgetKind } from '@shared/types'
 import type { MenuEntry } from './Menu'
 import { setDefaultConfigs, setDefaultSizes } from './store'
 import { def as chat } from './widgets/chat'
@@ -13,6 +13,7 @@ import { def as project } from './widgets/project'
 import { def as recap } from './widgets/recap'
 import { def as usage } from './widgets/usage'
 import { MODULES } from '../shell/registry'
+import { CORE, registerWidget, WIDGETS } from '../extensions/host'
 import '../styles/widgets.css'
 
 /** One entry of the catalog: everything the canvas needs to open, size, chrome and drop onto a kind. */
@@ -60,10 +61,10 @@ const todos = moduleWidget('todos')
 const calendar = moduleWidget('calendar')
 
 /**
- * The catalog, in the order of contract §6. The annotation is the guard: `Record<WidgetKind, WidgetDef>`
+ * The built-in kinds, in the order of contract §6. The annotation is the guard: `Record<BuiltinWidgetKind, WidgetDef>`
  * makes a missing kind a compile error, and a missing kind is a window that cannot render.
  */
-export const WIDGETS: Record<WidgetKind, WidgetDef> = {
+const BUILTIN_WIDGETS: Record<BuiltinWidgetKind, WidgetDef> = {
   chat,
   todos,
   calendar,
@@ -77,6 +78,11 @@ export const WIDGETS: Record<WidgetKind, WidgetDef> = {
   face,
   crew
 }
+
+for (const def of Object.values(BUILTIN_WIDGETS)) registerWidget(CORE, def)
+
+/** The catalog: the built-in kinds and those extensions registered with `ui.widget`. */
+export { WIDGETS }
 
 // The canvas store may not import the registry (its own note), so the catalog comes to it instead.
 setDefaultSizes((kind) => WIDGETS[kind]?.defaultSize)

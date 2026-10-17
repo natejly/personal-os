@@ -144,10 +144,13 @@ def _contributes(raw: dict[str, Any]) -> dict[str, Any]:
     tools = c.get("tools", [])
     _check(isinstance(tools, list) and all(isinstance(t, dict) and _is_str(t.get("name")) for t in tools),
            "contributes.tools must be a list of objects with a name")
+    _check(all(_is_str(t["after"]) for t in tools if "after" in t), "contributes.tools 'after' must be the name of an existing tool")
     slots = c.get("slots", {})
     _check(isinstance(slots, dict) and all(isinstance(v, list) and all(isinstance(i, dict) for i in v) for v in slots.values()),
            "contributes.slots must map a slot name to a list of objects")
     _check(all(_is_str(i.get("id")) for i in slots.get("recap.section", ())), "contributes.slots['recap.section'] entries need an id")
+    _check(all(_is_str(i.get("id")) and i["id"].startswith(f"ext:{raw.get('id')}:") for i in slots.get("canvas.widget", ())),
+           "contributes.slots['canvas.widget'] entries need an id of the form ext:<extension id>:<name>")
     _theme(c)
     _defaults(c)
     return c

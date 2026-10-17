@@ -810,7 +810,6 @@ class Toolbox:
         self.todos: Any = None  # todos.Todos, the todos extension's store (labels.py reads it); set by app.py
         self.retriever: Any = None  # hybrid document search (retrieval.py); set by app.py
         self.plans: Any = None  # plans.Plans (approved plan records); desk_done's gate reads the unconsumed steps; set by app.py
-        self.canvases: Any = None  # canvas.Canvases; set by app.py (space_tools.py is not offered until then)
         self.fs_reads = fsx.ReadLedger()  # what each conversation has read of each file (fsx.py): the baseline for edits
         self.conversations = conversations  # past replies, so skill_from_run can read one run
         self.specs: dict[str, ToolSpec] = {}
@@ -821,13 +820,13 @@ class Toolbox:
             if e.module:
                 e.module.register_tools(self)
             if e.manifest.id not in GOOGLE_BLOCK_EXTENSIONS:
-                self.set_extension_tools(e)
+                self.set_extension_tools(e, anchored=False)
         if docs is not None:
             self._register_docs()
         if google is not None:
             self._register_google()
-        from . import space_tools
-        space_tools.register(self)
+        for e in self.extensions:
+            self.set_extension_tools(e, anchored=True)  # the tools that sit after one of the tools registered above
         self._register_mac()
         fsx.register(self)  # fs_glob / fs_grep / fs_edit / fs_copy / fs_mkdir
         self._register_reach()
@@ -881,12 +880,28 @@ class Toolbox:
     def _google_ok(self) -> bool:
         return bool(self.google and self.google.status()["connected"])
 
-    def set_extension_tools(self, scope: ExtensionScope) -> None:
-        taken = [n for n in scope.tools if n in self.specs and self.tool_owner.get(n) != scope.manifest.id]
+    def set_extension_tools(self, scope: ExtensionScope, anchored: bool | None = None) -> None:
+        """Offer the extension's tools: at the end of the modules' tools, or right after the tool its manifest names under
+        `after`, so a ported tool keeps its place in the list. `anchored` picks only the tools with (True) or without (False) an anchor."""
+        after = {t["name"]: t.get("after") for t in scope.manifest.contributes.get("tools", ())}
+        mine = {n: s for n, s in scope.tools.items() if anchored is None or bool(after.get(n)) == anchored}
+        taken = [n for n in mine if n in self.specs and self.tool_owner.get(n) != scope.manifest.id]
         if taken:
             raise ValueError(f"extension {scope.manifest.id!r} registers {taken}, which the app already has")
-        self.specs.update(scope.tools)
-        self.tool_owner.update(dict.fromkeys(scope.tools, scope.manifest.id))
+        for name, spec in mine.items():
+            if not after.get(name):
+                self.specs[name] = spec
+            elif after[name] in self.specs:
+                self._insert_after(after[name], name, spec)
+            else:
+                raise ValueError(f"extension {scope.manifest.id!r} puts {name!r} after {after[name]!r}, which is not a tool")
+            self.tool_owner[name] = scope.manifest.id
+
+    def _insert_after(self, anchor: str, name: str, spec: ToolSpec) -> None:
+        items = [(n, s) for n, s in self.specs.items() if n != name]
+        items.insert(next(i for i, (n, _) in enumerate(items) if n == anchor) + 1, (name, spec))
+        self.specs.clear()
+        self.specs.update(items)
 
     def drop_extension_tools(self, names: Iterable[str]) -> None:
         for name in names:

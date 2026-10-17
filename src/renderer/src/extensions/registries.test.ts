@@ -6,9 +6,12 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { FullDesk, Message } from '@shared/types'
 import { useStore } from '../store'
 import {
-  activateExtension, fenceRenderer, keybindings, paletteCommands, registerSlot, selectionActions, slotItems, type UiApi
+  activateExtension, fenceRenderer, keybindings, paletteCommands, registerSlot, selectionActions, slotItems, WIDGETS, widgetOn, type UiApi
 } from './host'
 import { Slot } from './slot'
+import { addWidgetEntries } from '../canvas/AddWidgetMenu'
+import type { WidgetDef } from '../canvas/registry'
+import { kindIcon, kindLabel } from '../canvas/WindowHost'
 import '../components/Sidebar'
 import '../components/Composer'
 import '../components/Message'
@@ -73,6 +76,34 @@ test('palette commands: the shell registers its own, an extension adds more, ids
   assert.equal(paletteCommands.find((c) => c.id === 'cmddemo:go')?.extension, 'cmddemo')
   gone()
   assert.equal(paletteCommands.some((c) => c.id === 'cmddemo:go'), false)
+})
+
+const clock = (kind: WidgetDef['kind']): WidgetDef => ({
+  kind, label: 'Clock', icon: createElement('i'), defaultSize: { w: 300, h: 200 }, minSize: { w: 200, h: 100 }, chrome: 'full', Component
+})
+
+test('a canvas widget is added with its extension, offered while it is on, and a repeated kind is refused', () => {
+  const kind = 'ext:widgetdemo:clock'
+  const gone = withExtension('widgetdemo', (ui) => {
+    ui.widget(clock(kind))
+    assert.throws(() => ui.widget(clock(kind)), /already registered/)
+  })
+  assert.equal(WIDGETS[kind].label, 'Clock')
+  assert.equal(widgetOn({ hiddenViews: [] } as never, kind), true)
+  assert.equal(widgetOn({ hiddenViews: ['widgetdemo'] } as never, kind), false)
+  assert.equal(widgetOn({ hiddenViews: ['widgetdemo'] } as never, 'chat'), true)
+  // What the Dock, the Overview and the Add widget menu read for a window of that kind.
+  assert.equal(kindLabel(kind), 'Clock')
+  assert.equal(kindIcon(kind)?.props.size, 18)
+  const menu = (hidden: string[]): string[] => {
+    Object.assign(useStore.getInitialState(), { settings: { hiddenViews: hidden } })
+    return addWidgetEntries({ canvasId: 'c1' }).map((e) => ('label' in e ? e.label : ''))
+  }
+  assert.ok(menu([]).includes('Clock'))
+  assert.ok(!menu(['widgetdemo']).includes('Clock'))
+  gone()
+  assert.equal(kindIcon(kind), null)
+  assert.equal(kind in WIDGETS, false)
 })
 
 test('a keybinding that collides with a core shortcut or another binding is a validation error', () => {

@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterable
 from typing import Any
 
-from .db import Database, new_id, now, row_to_dict
+from ...db import Database, new_id, now, row_to_dict
 
-# Mirrors the WidgetKind union in src/shared/types.ts, which is the source of truth.
-WIDGET_KINDS = (
+# The kinds the app itself provides; mirrors BuiltinWidgetKind in src/shared/types.ts. An extension adds its own
+# under contributes.slots["canvas.widget"], and the extension reads the full list from the host.
+CORE_WIDGET_KINDS = (
     "chat", "todos", "calendar",
     "memory", "graph", "documents", "recap", "project", "usage", "doc", "face", "crew",
 )
@@ -93,8 +95,6 @@ class Canvases:
         self.db = db
         with db.tx() as c:
             c.executescript(SCHEMA)
-            # Windows of a kind that no longer exists (an older build's widgets) would render as "Unknown".
-            c.execute(f"DELETE FROM canvas_windows WHERE kind NOT IN ({','.join('?' * len(WIDGET_KINDS))})", WIDGET_KINDS)
             # Post-release columns; CREATE TABLE IF NOT EXISTS won't add them to an existing db.
             for table, cols in _ADDED_COLUMNS.items():
                 have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
@@ -103,6 +103,12 @@ class Canvases:
                         c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
             for old, new in _RENAMED_DEFAULTS:
                 c.execute("UPDATE canvases SET name=? WHERE name=?", (new, old))
+
+    def drop_unknown_kinds(self, kinds: Iterable[str]) -> None:
+        """Windows of a kind that no longer exists (an older build's widgets) would render as "Unknown"."""
+        kinds = tuple(kinds)
+        with self.db.tx() as c:
+            c.execute(f"DELETE FROM canvas_windows WHERE kind NOT IN ({','.join('?' * len(kinds))})", kinds)
 
     @staticmethod
     def _seed(c: sqlite3.Connection) -> None:

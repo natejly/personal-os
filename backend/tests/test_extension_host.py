@@ -69,9 +69,12 @@ class ManifestTests(unittest.TestCase):
             "bad activation": manifest(activation=["onTuesday"]),
             "unknown contributes key": manifest(contributes={"toolz": []}),
             "tool without a name": manifest(contributes={"tools": [{}]}),
+            "tool after not a name": manifest(contributes={"tools": [{"name": "demo_x", "after": 3}]}),
             "slots not a list": manifest(contributes={"slots": {"sidebar.row": {}}}),
             "slot entry not an object": manifest(contributes={"slots": {"sidebar.row": ["nav"]}}),
             "recap section without an id": manifest(contributes={"slots": {"recap.section": [{"order": 1}]}}),
+            "canvas widget without an id": manifest(contributes={"slots": {"canvas.widget": [{"label": "Clock"}]}}),
+            "canvas widget in another extension's namespace": manifest(contributes={"slots": {"canvas.widget": [{"id": "ext:other:clock"}]}}),
             "unknown hook": manifest(hooks={"tool.preee": {}}),
             "unknown hook option": manifest(hooks={"app.start": {"retries": 3}}),
             "onFailure allow": manifest(hooks={"tool.pre": {"onFailure": "allow"}}),
@@ -684,6 +687,53 @@ class BuiltinExtensionTests(unittest.TestCase):
         scope = ExtensionHost().load_builtin("todos", ctx)
         self.assertFalse(scope.enabled())
         self.assertTrue({"todos", "tasks_sync"} <= set(ctx.services))
+
+    def test_load_builtin_spaces_provides_the_store_and_its_tools_and_stays_on_when_hidden(self) -> None:
+        ctx = builtin_ctx({})
+        ctx.hidden_views = lambda: ("spaces",)
+        scope = ExtensionHost().load_builtin("spaces", ctx)
+        self.assertEqual(list(scope.tools), ["space_list", "space_add_widget", "space_arrange"])
+        self.assertTrue(scope.enabled())
+        self.assertIs(ctx.services["canvases"]().db, ctx.db)
+        paths = {route.path for r in scope.routers for route in r.routes}  # type: ignore[attr-defined]
+        self.assertTrue({"/canvases", "/canvases/{id}/windows", "/windows/{wid}"} <= paths)
+
+    def test_widget_kinds_are_the_declared_ones_enabled_or_not(self) -> None:
+        host = ExtensionHost()
+        host._add(Manifest.from_dict(manifest(enabled=False, contributes={"slots": {"canvas.widget": [{"id": "ext:demo:clock"}]}})))
+        self.assertEqual(host.widget_kinds(), ("ext:demo:clock",))
+
+    def test_spaces_accepts_a_declared_widget_kind_and_drops_windows_of_a_removed_one_on_start(self) -> None:
+        host = ExtensionHost()
+        ctx = builtin_ctx({})
+        ctx.widget_kinds = host.widget_kinds
+        host._add(Manifest.from_dict(manifest(contributes={"slots": {"canvas.widget": [{"id": "ext:demo:clock"}]}})))
+        host.load_builtin("spaces", ctx)
+        canvases = ctx.services["canvases"]()
+        cid = canvases.list()[0]["id"]
+        for kind in ("ext:demo:clock", "ext:gone:old", "todos"):
+            canvases.add_window(cid, kind)
+        run(host.start())
+        self.assertEqual([w["kind"] for w in canvases.get(cid)["windows"]], ["ext:demo:clock", "todos"])
+
+    def test_spaces_routes_and_tool_schema_follow_the_kinds_declared_by_extensions_loaded_after_it(self) -> None:
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        host = ExtensionHost()
+        ctx = builtin_ctx({})
+        ctx.widget_kinds = host.widget_kinds
+        scope = host.load_builtin("spaces", ctx)
+        host._add(Manifest.from_dict(manifest(contributes={"slots": {"canvas.widget": [{"id": "ext:demo:clock"}]}})))
+        cid = ctx.services["canvases"]().list()[0]["id"]
+        app = FastAPI()
+        host.mount(app, scope)
+        client = TestClient(app)
+        self.assertEqual(client.post(f"/canvases/{cid}/windows", json={"kind": "ext:demo:clock"}).status_code, 200)
+        self.assertEqual(client.post(f"/canvases/{cid}/windows", json={"kind": "ext:demo:nope"}).status_code, 400)
+        enum = scope.tools["space_add_widget"].parameters["properties"]["kind"]["enum"]
+        self.assertNotIn("ext:demo:clock", enum)
+        run(host.start())
+        self.assertIn("ext:demo:clock", enum)
 
     def test_load_builtin_google_provides_the_client_to_requirers_only(self) -> None:
         host = ExtensionHost()

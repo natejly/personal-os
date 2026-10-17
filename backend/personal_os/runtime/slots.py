@@ -107,6 +107,15 @@ def at_least_as_private(a: str, b: str) -> bool:
     return _LOCALITY[a] >= _LOCALITY[b]
 
 
+def support_of(backend: Any) -> dict[str, Any]:
+    """What a sandbox backend enforces; one that cannot say is judged as enforcing nothing."""
+    try:
+        return backend.support()
+    except Exception:  # noqa: BLE001
+        log.warning("sandbox backend %s failed to report its support", getattr(backend, "id", backend), exc_info=True)
+        return {}
+
+
 class Refused(Exception):
     """The selected provider is gone and the built-in default is less safe than it was, so nothing may run in its place."""
 
@@ -124,6 +133,7 @@ class Runtime:
         self._providers: dict[str, dict[str, Provider]] = {slot: {} for slot in SLOTS}
         self._seen: dict[str, Any] = {}  # provider id -> its locality or support when last available: what a fallback is judged against
         self._announced: set[tuple[str, str, bool]] = set()
+        self.router_failures: dict[str, int] = {}  # model.router provider id -> failures in a row (router.choose)
         for provider in core:
             self._providers[provider.slot][provider.id] = provider
 
@@ -243,11 +253,7 @@ class Runtime:
         if provider.slot == "model.client":
             self._seen[provider.id] = provider.impl.locality
         elif provider.slot == "sandbox.backend":
-            try:
-                self._seen[provider.id] = provider.impl.support()
-            except Exception:  # noqa: BLE001 - a backend that cannot say what it enforces is judged as enforcing nothing
-                log.warning("sandbox backend %s failed to report its support", provider.id, exc_info=True)
-                self._seen[provider.id] = {}
+            self._seen[provider.id] = support_of(provider.impl)
 
     def traits(self, slot: str, provider_id: str) -> tuple[str | None, dict[str, Any] | None]:
         """(locality, enforcement) of a provider, from its code while it is there and from the last report otherwise."""

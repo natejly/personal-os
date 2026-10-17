@@ -65,25 +65,25 @@ class Heuristic:
         return {"model": model, "effort": "none" if no_think else turn["effort"], "reason": reason, "no_think": no_think}
 
 
-_failures: dict[str, int] = {}
+HEURISTIC = Heuristic()
 
 
 async def choose(rt: Runtime, turn: dict[str, Any], served: Callable[[str], bool]) -> tuple[RouteChoice, str | None]:
     """The route for one turn, and a notice for the user when the selected router could not give it. A router that raises, is
     slower than its budget or names a model no configured provider serves is replaced by the default's answer for the turn,
     and after MUTE_AFTER failures in a row it is skipped for the session."""
-    default = Heuristic().route(turn)
+    default = HEURISTIC.route(turn)
     chosen = rt.alternative("model.router")
-    if chosen is None or _failures.get(chosen.id, 0) >= MUTE_AFTER:
+    if chosen is None or rt.router_failures.get(chosen.id, 0) >= MUTE_AFTER:
         return default, None
     try:
         got = await asyncio.wait_for(asyncio.to_thread(chosen.impl.route, turn), ROUTER_BUDGET_S)
         if problem := route_problem(got) or (None if served(got["model"]) else f"model {got['model']!r} is not served by any configured provider"):
             raise ValueError(problem)
     except Exception as e:  # noqa: BLE001 - whatever a router does wrong, the turn still gets a route
-        _failures[chosen.id] = _failures.get(chosen.id, 0) + 1
+        rt.router_failures[chosen.id] = rt.router_failures.get(chosen.id, 0) + 1
         why = f"{chosen.label} could not route this turn ({str(e) or type(e).__name__}); the default router was used."
         rt.announce("model.router", chosen.id, "core/heuristic", why, False)
         return default, why
-    _failures[chosen.id] = 0
+    rt.router_failures[chosen.id] = 0
     return got, None

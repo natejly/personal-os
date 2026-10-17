@@ -24,6 +24,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -166,7 +167,7 @@ class FakeModelClient:
             yield ev
 
     async def complete(self, req: Any) -> Any:
-        from personal_os.runtime.protocols import ModelReply
+        from personal_os.runtime.protocols import ModelReply  # lazy: the app is not importable until the data dir is set
         self.requests.append(req)
         if self.fail_at == 0:
             raise RuntimeError("scripted failure")
@@ -180,7 +181,6 @@ class FakeRouter:
         self.id, self.choice, self.error, self.delay_s = id, choice, error, delay_s
 
     def route(self, turn: dict[str, Any]) -> dict[str, Any]:
-        import time
         time.sleep(self.delay_s)
         if self.error is not None:
             raise self.error

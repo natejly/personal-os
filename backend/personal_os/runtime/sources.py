@@ -20,6 +20,7 @@ from .slots import Provider, Runtime, Scopes
 log = logging.getLogger(__name__)
 
 PREFIX = "x__"
+SERVER = "extension"  # the group the deferred-tool index lists these tools under
 HASHES = "toolSourceHashes"  # private setting: {slug: the declaration hash the user last saw}
 MAX_NAME = 64  # what a model API accepts as a function name
 CALL_TIMEOUT_S = 120.0

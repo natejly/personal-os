@@ -66,7 +66,6 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> Rig:
     monkeypatch.setattr(runtime, "active", r.rt)
     monkeypatch.setattr(llm, "bus", r.bus)
     monkeypatch.setattr(llm.default_client, "settings", lambda: REMOTE)
-    monkeypatch.setattr(router, "_failures", {})
     return r
 
 
@@ -241,6 +240,41 @@ def test_a_silent_client_is_cut_off_after_the_idle_limit(rig: Rig) -> None:
     with pytest.raises(llm.LLMError, match="stopped responding") as e:
         run(collect(stream(settings={**REMOTE, "llmIdleSeconds": 0.05})))
     assert e.value.kind == "timeout"
+
+
+def test_cancelling_the_turn_cancels_the_clients_pending_read(rig: Rig) -> None:
+    ended: list[str] = []
+
+    class Slow(FakeModelClient):
+        async def stream(self, req: Any) -> AsyncIterator[dict[str, Any]]:
+            try:
+                await asyncio.sleep(30)
+                yield END
+            except asyncio.CancelledError:
+                ended.append("cancelled")
+                raise
+
+    rig.select("model.client", rig.add("model.client", "c", Slow()))
+
+    async def go() -> None:
+        turn = asyncio.ensure_future(collect(stream()))
+        await asyncio.sleep(0.05)
+        turn.cancel()
+        await asyncio.gather(turn, return_exceptions=True)
+        await asyncio.sleep(0)
+
+    run(go())
+    assert ended == ["cancelled"]
+
+
+def test_a_well_formed_stream_passes_through_the_wrapper_unchanged(rig: Rig) -> None:
+    call = {"id": "c1", "name": "t", "arguments": "{}"}
+    sent = [{"type": "reasoning", "text": "hm"}, {"type": "delta", "text": "a"}, {"type": "delta", "text": "b"},
+            {"type": "end", "finish_reason": "tool_calls", "tool_calls": [call], "usage": {"prompt_tokens": 3, "completion_tokens": 2}}]
+    rig.select("model.client", rig.add("model.client", "c", FakeModelClient(script=sent)))
+    got = run(collect(stream()))
+    assert got[:3] == sent[:3]
+    assert {k: got[3][k] for k in ("finish_reason", "tool_calls", "usage")} == {k: sent[3][k] for k in ("finish_reason", "tool_calls", "usage")}
 
 
 def test_stop_and_the_deadline_end_a_swapped_clients_stream_like_a_providers(rig: Rig, monkeypatch: pytest.MonkeyPatch) -> None:

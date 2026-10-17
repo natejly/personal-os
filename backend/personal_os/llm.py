@@ -1726,21 +1726,37 @@ async def _drop(task: asyncio.Future[Any]) -> None:
     await asyncio.gather(task, return_exceptions=True)
 
 
+def _left(idle: float, deadline_at: float | None) -> float:
+    return idle if deadline_at is None else min(idle, deadline_at - time.monotonic())
+
+
+async def _first(work: asyncio.Future[Any], stopper: asyncio.Future[Any] | None, timeout: float) -> str:
+    """Wait for `work`, Stop or the timeout, whichever comes first: "done", "stopped" or "timeout". If the caller is cancelled
+    meanwhile, `work` is dropped with it."""
+    try:
+        await asyncio.wait({work, *([stopper] if stopper else [])}, timeout=max(timeout, 0.01), return_when=asyncio.FIRST_COMPLETED)
+    except asyncio.CancelledError:
+        await _drop(work)
+        raise
+    if stopper is not None and stopper.done():
+        return "stopped"
+    return "done" if work.done() else "timeout"
+
+
 async def _bounded(events: AsyncIterator[Any], idle: float, cancel: asyncio.Event | None, deadline_at: float | None) -> AsyncIterator[Any]:
     """A client's events, ended early (finish_reason cancelled or timeout, no tool calls) by Stop or the deadline. A client silent
     for `idle` seconds raises LLMError, as a provider that stops answering does."""
     stopper = asyncio.ensure_future(cancel.wait()) if cancel is not None else None
     try:
         while True:
-            left = idle if deadline_at is None else min(idle, deadline_at - time.monotonic())
             nxt = asyncio.ensure_future(events.__anext__())
-            await asyncio.wait({nxt, *([stopper] if stopper else [])}, timeout=max(left, 0.01), return_when=asyncio.FIRST_COMPLETED)
-            if stopper is not None and stopper.done():
+            outcome = await _first(nxt, stopper, _left(idle, deadline_at))
+            if outcome != "done":
                 await _drop(nxt)
+            if outcome == "stopped":
                 yield _stopped("cancelled")
                 return
-            if not nxt.done():
-                await _drop(nxt)
+            if outcome == "timeout":
                 if deadline_at is not None and time.monotonic() >= deadline_at:
                     yield _stopped("timeout")
                     return
@@ -1802,12 +1818,11 @@ async def _client_complete(client: Any, settings: dict[str, Any], req: ModelRequ
                            deadline: float | None) -> str:
     task = asyncio.ensure_future(client.complete(req))
     stopper = asyncio.ensure_future(cancel.wait()) if cancel is not None else None
-    left = _idle_s(settings) if deadline is None else min(_idle_s(settings), deadline - time.monotonic())
     try:
-        await asyncio.wait({task, *([stopper] if stopper else [])}, timeout=max(left, 0.01), return_when=asyncio.FIRST_COMPLETED)
-        if stopper is not None and stopper.done():
+        outcome = await _first(task, stopper, _left(_idle_s(settings), deadline))
+        if outcome == "stopped":
             raise LLMError("Stopped.", kind="cancelled")
-        if not task.done():
+        if outcome == "timeout":
             raise LLMError("The model provider took too long.", kind="timeout")
         reply = task.result()
     finally:

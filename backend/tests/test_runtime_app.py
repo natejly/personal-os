@@ -55,7 +55,7 @@ def ext(tmp_path: Path) -> Path:
 
 @pytest.fixture(autouse=True)
 def fresh_state(monkeypatch: pytest.MonkeyPatch) -> Any:
-    monkeypatch.setattr(router, "_failures", {})
+    appmod.host.runtime.router_failures.clear()
     yield
     Defaults(appmod.db).revert("calm")
     appmod.db.set_settings({"hiddenViews": [v for v in appmod.settings().get("hiddenViews") or () if v != "demo"]})
@@ -215,6 +215,13 @@ def test_a_plain_settings_write_cannot_select_a_provider_and_the_agent_has_no_to
         appmod.put_settings({"runtime": {"model.router": "demo/router"}})
         assert not appmod.db.get_settings().get("runtime")
         assert [n for n in appmod.toolbox.specs if "runtime" in n or "provider" in n] == []
+
+
+def test_a_conversation_patch_cannot_select_a_provider(ext: Path) -> None:
+    with Harness(ext, SETTINGS):
+        conv = appmod.convos.create(None, "t", "m")
+        appmod.patch_conversation(conv["id"], appmod.ConvPatch(settings={"runtime": "x"}))
+        assert not appmod.convos.get(conv["id"])["settings"].get("runtime")
 
 
 def test_accepting_a_partly_enforced_dimension_is_the_users_alone(ext: Path, api: TestClient) -> None:

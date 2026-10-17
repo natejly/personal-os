@@ -104,7 +104,7 @@ from .extensions.channels import ChatService
 from .extensions.coding.extension import Coding
 from .extensions import devapi, profiles as profile_routes, review as review_routes
 from .runtime import routes as runtime_routes
-from .runtime.sources import ToolSources, is_source_tool
+from .runtime.sources import SERVER as SOURCE_SERVER, ToolSources, is_source_tool
 from .extensions.authoring import skill as author_extension
 from .extensions.drafts import Drafts
 from .extensions.defaults import Defaults
@@ -1597,6 +1597,7 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
     if isinstance(settings_patch.get("tools"), dict):
         settings_patch["tools"] = toolbox.cap_modes(settings_patch["tools"])  # external and schedules tools top out at ask
     settings_patch.pop("deskId", None)  # bound and unbound by the cowork routes only, never by a settings PATCH
+    settings_patch.pop("runtime", None)  # chosen only through PUT /runtime, which checks the provider and confirms any loosening
     settings_patch.pop("workingFolder", None)  # retired: the file tools reach the whole Mac, so a chat needs no folder bound to it
     new_title = (patch.get("title") or "").strip()
     if new_title:
@@ -2540,7 +2541,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             tool_ctx["mcp_catalog"] = lambda: [*({**t, "server": _mcp_names.get(t["server_id"], "MCP")}
                                                  for t in mcp_store.tools() if t["slug"] in mcp_modes),
                                                *({"slug": s["function"]["name"], "description": s["function"]["description"],
-                                                  "parameters": s["function"]["parameters"], "server": "extension"}
+                                                  "parameters": s["function"]["parameters"], "server": SOURCE_SERVER}
                                                  for s in mcp_schemas if is_source_tool(s["function"]["name"]))]
             if use_tools:
                 modes["mcp_tool_search"] = "on"
@@ -2688,7 +2689,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     _by_server.setdefault(_mcp_names.get(t["server_id"], "MCP"), []).append(t["slug"])
             for _slug in mcp_modes:
                 if is_source_tool(_slug):
-                    _by_server.setdefault("extension", []).append(_slug)
+                    _by_server.setdefault(SOURCE_SERVER, []).append(_slug)
             tools_hint = "\n".join(p for p in (tools_hint, mcp_search.mcp_index(_by_server)) if p)
         if tool_ctx["deferrable"]:
             tools_hint = "\n".join(p for p in (tools_hint, mcp_search.tool_index(

@@ -25,8 +25,8 @@ from collections import deque
 from typing import Any
 
 from . import osplat, runtime
-from .osplat.base import SandboxRequest, shortfalls
-from .runtime.slots import Refused
+from .osplat.base import Enforcement, Mode, SandboxRequest, shortfalls
+from .runtime.slots import Refused, support_of
 
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
 MAX_IMAGE_BYTES = 3_000_000
@@ -52,10 +52,10 @@ def _warm_mpl(py: str) -> None:
             return
         cmd = [py, "-I", "-B", "-c", "import matplotlib.font_manager"]
         if osplat.current().sandbox.python_available():
-            cmd = osplat.current().sandbox.wrap(cmd, _mac_profile(MPL_CACHE, py))
+            cmd = sandbox_wrap(python_request(MPL_CACHE, py, None, None), cmd)
         subprocess.run(cmd, capture_output=True, timeout=180,
                        env={"PATH": "/usr/bin:/bin", "HOME": MPL_CACHE, "MPLBACKEND": "Agg", "MPLCONFIGDIR": MPL_CACHE})
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, SandboxRefused):
         pass  # worst case matplotlib rebuilds the cache inside the run
 
 
@@ -87,7 +87,7 @@ class OsDefault:
     already encodes the places the request's `deny` lists, so it is built here from the request as it always was."""
     id = "core/os-default"
 
-    def support(self) -> dict[str, dict[str, str]]:
+    def support(self) -> dict[Mode, Enforcement]:
         # Nothing asks for read-only today and the Seatbelt profiles have no read-only form, so it is not claimed.
         return {"workspace-write": dict.fromkeys(("fs_write", "fs_read_deny", "network", "process"), "full")} \
             if osplat.current().sandbox.shell_available() else {}
@@ -104,7 +104,7 @@ class OsDefault:
         return osplat.current().sandbox.failed_to_start(exit_code, output)
 
 
-_OS_DEFAULT = OsDefault()
+OS_DEFAULT = OsDefault()
 
 
 def _denied() -> tuple[str, ...]:
@@ -130,7 +130,7 @@ def python_request(work: str, py: str, socket_path: str | None, workspace: str |
 
 def _current_backend() -> tuple[str, Any]:
     chosen = runtime.active.alternative("sandbox.backend") if runtime.active is not None else None
-    return (chosen.id, chosen.impl) if chosen is not None else (_OS_DEFAULT.id, _OS_DEFAULT)
+    return (chosen.id, chosen.impl) if chosen is not None else (OS_DEFAULT.id, OS_DEFAULT)
 
 
 def _refuse(req: SandboxRequest, backend: str, why: str, dimension: str, enforcement: dict[str, Any]) -> SandboxRefused:
@@ -152,7 +152,7 @@ def sandbox_wrap(req: SandboxRequest, argv: list[str]) -> list[str]:
         backend_id, backend = _current_backend()
     except Refused as e:
         raise _refuse(req, "", f"{req.purpose} needs {req.mode} confinement; {e}", "setup", {}) from None
-    support = _support_of(backend)
+    support = support_of(backend)
     accepted = runtime.active.accepted(backend_id) if runtime.active is not None else frozenset()
     for dimension, level in shortfalls(support, req.mode, req.network):
         if level != "partial" or dimension not in accepted:
@@ -165,19 +165,12 @@ def sandbox_wrap(req: SandboxRequest, argv: list[str]) -> list[str]:
                       f"failed to set it up ({type(e).__name__}: {str(e)[:120]}). It was not run.", "setup", support.get(req.mode, {})) from e
 
 
-def _support_of(backend: Any) -> dict[str, Any]:
-    try:
-        return backend.support()
-    except Exception:  # noqa: BLE001 - a backend that cannot say what it enforces enforces nothing we can rely on
-        return {}
-
-
 def failed_to_start(exit_code: int | None, output: str) -> bool:
     """Did the selected backend's confinement itself refuse to start (as opposed to the confined command failing)?"""
     try:
         _, backend = _current_backend()
     except Refused:
-        backend = _OS_DEFAULT
+        backend = OS_DEFAULT
     return bool(backend.failed_to_start(exit_code, output))
 
 

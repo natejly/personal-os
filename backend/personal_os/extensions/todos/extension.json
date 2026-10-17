@@ -16,7 +16,8 @@
       { "name": "todo_update", "danger": "writes", "group": "todos" },
       { "name": "todo_delete", "danger": "writes", "group": "todos" }
     ],
-    "views": [{ "id": "todos", "label": "Lists", "icon": "list-checks" }]
+    "views": [{ "id": "todos", "label": "Lists", "icon": "list-checks" }],
+    "slots": { "recap.section": [{ "id": "todos" }] }
   },
   "hooks": { "app.start": {} },
   "permissions": ["db:own", "service:google"],

@@ -15,6 +15,9 @@ import { traceSummary, fmtMs } from './TraceView'
 import { replyMetrics } from '../lib/replyMetrics'
 import { compactCount } from '../lib/usageFormat'
 import { parseChatMessage } from '../lib/chatLink'
+import { CORE, registerSlot, type MessageSlotProps } from '../extensions/host'
+import { Slot } from '../extensions/slot'
+import { displayText } from '../extensions/events'
 import { parseQuotedMessage } from '../lib/selectionActions'
 import { modelLabel } from '../lib/modelLabel'
 import { outcomeLabel } from '../lib/outcomeLabel'
@@ -255,9 +258,9 @@ export function Thinking({ chat }: { chat?: string }): JSX.Element {
 
 /** The "N steps · ms · tok" chip, shown only with Settings → Behavior → Developer tools on. Its own component so the
  *  subscription stays out of MessageView. */
-function TraceChip({ message }: { message: Message }): JSX.Element | null {
+function TraceChip({ message, showContextChips }: MessageSlotProps): JSX.Element | null {
   const devTools = useStore((s) => s.settings.devTools === true)
-  if (!devTools || !message.trace?.length) return null
+  if (!showContextChips || !devTools || !message.trace?.length) return null
   const trace = traceSummary(message.trace)
   return (
     <button className="ctx-chip" title="Execution trace: LLM rounds, tool calls, timings and tokens" onClick={() => useStore.getState().openTrace(message.id)}>
@@ -278,6 +281,9 @@ function ModelTag({ message, streaming }: { message: Message; streaming: boolean
   return <span className="model-tag" title={tips.join('\n') || undefined}>{[label, usage].filter(Boolean).join(' · ')}</span>
 }
 
+registerSlot(CORE, 'message.footer', { id: 'model-tag', order: 10, Component: ModelTag })
+registerSlot(CORE, 'message.footer', { id: 'trace', order: 20, Component: TraceChip })
+
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
 // streamed token would re-render every message in every mounted transcript.
 /** `showContextChips`: only ChatView mounts the context drawer, so only it shows chips that open it.
@@ -292,6 +298,8 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   // The NO_REPLY marker is never text the user sees: a reply that is only the marker keeps its tool cards, and one that trails it loses the line.
   const sentinel = !isUser && isNoReply(message.content)
   const content = useMemo(() => (isUser ? message.content : stripNoReply(message.content)), [isUser, message.content])
+  // What the extensions' display handlers make of the text; copying, citing and editing still use the stored text.
+  const shownText = useMemo(() => displayText(message, content), [message, content])
   const chatFrom = useMemo(() => (message.kind === 'chat_in' || message.kind === 'chat_reply' ? parseChatMessage(message.content) : null), [message.kind, message.content])
   const ctx = message.context_used
   // Numbered sources this reply may cite as [n]; rows saved before numbering have no `n` and stay plain text.
@@ -321,11 +329,12 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
       {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a face, and each thread its own. */}
       {!isUser && <div className="avatar face-avatar"><Face name={face?.name ?? message.conversation_id} hue={face?.hue} tone={face?.tone} status={streaming ? 'streaming' : message.error ? 'error' : undefined} calm={message.outcome === 'stopped'} /></div>}
       <div className="bubble">
+        <Slot name="message.header" props={{ message, streaming, showContextChips }} />
         {isUser ? (
           editing ? (
             <MessageEditor message={message} onClose={() => setEditing(false)} />
           ) : (
-            <div className="user-bubble">{from && <div className="user-from"><Face name={from.face.name} hue={from.face.hue} tone={from.face.tone} size={14} /> {from.label}</div>}<AttachmentChips files={message.attachments} />{message.content && (chatFrom ? <ChatMessageText content={message.content} from={chatFrom} /> : <UserText content={message.content} />)}</div>
+            <div className="user-bubble">{from && <div className="user-from"><Face name={from.face.name} hue={from.face.hue} tone={from.face.tone} size={14} /> {from.label}</div>}<AttachmentChips files={message.attachments} />{message.content && (chatFrom ? <ChatMessageText content={message.content} from={chatFrom} /> : <UserText content={shownText} />)}</div>
           )
         ) : (
           <div className="msg-body">
@@ -339,7 +348,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
               {content ? (
                 <div className={streaming ? 'markdown streaming' : 'markdown'}>
                   <ShowCtx.Provider value={message.conversation_id}>
-                    <MarkdownPreview source={content} streaming={streaming} cites={cites} onCite={onCite} />
+                    <MarkdownPreview source={shownText} streaming={streaming} cites={cites} onCite={onCite} />
                   </ShowCtx.Provider>
                 </div>
               ) : streaming && !message.reasoning && !folded.length && !shown.some((t) => t.pending) && !busy ? (
@@ -368,8 +377,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
         {!editing && !plain && (
           <div className={streaming ? 'msg-actions streaming' : 'msg-actions'} aria-hidden={streaming || undefined}>
             {message.created_at > 0 && <time className="msg-time" dateTime={new Date(message.created_at * 1000).toISOString()} title={fullTime(message.created_at)}>{clockTime(message.created_at)}</time>}
-            <ModelTag message={message} streaming={streaming} />
-            {showContextChips && <TraceChip message={message} />}
+            <Slot name="message.footer" props={{ message, streaming, showContextChips }} />
             {!bare && <CopyButton text={content} />}
             {resendable && isUser && !message.kind && (
               <button type="button" className="ctx-chip" title="Edit and resend: this message and everything after it is hidden" aria-label="Edit message" onClick={() => setEditing(true)}>

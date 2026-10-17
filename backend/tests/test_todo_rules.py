@@ -170,7 +170,7 @@ class RouteTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         ctx = ExtensionContext(db=Database(self.tmp.name), hidden_views=lambda: (), services={"google": lambda: None},
-                               settings=lambda: {}, set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p)
+                               settings=lambda: {}, set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p, publish=lambda _n, _d: None)
         self.scope = ExtensionHost().load_builtin("todos", ctx)
         self.store = ctx.services["todos"]()
         app = FastAPI()

@@ -26,6 +26,7 @@ import ProjectModal from './components/ProjectModal'
 import UploadPreview from './components/UploadPreview'
 import SubagentPanel from './components/SubagentPanel'
 import { moduleForView } from './shell/registry'
+import { startExtensionRuntime } from './extensions/runtime'
 import Canvas from './canvas/Canvas'
 import { useCanvas } from './canvas/store'
 import { BackendBanner } from './components/BackendStatus'
@@ -235,6 +236,8 @@ export default function App(): JSX.Element {
   useEffect(() => { if (ready && !backendError) void useOnboarding.getState().check() }, [ready, backendError])
   // What the user has highlighted rides along with the next ⌘I question, whatever view they are in.
   useEffect(() => watchSelection(), [])
+  // Extension keybindings, and the view-opened event their frontend halves listen for.
+  useEffect(() => startExtensionRuntime(), [])
   // Spaces are listed in the sidebar, so the canvas store loads with the app, not on first entry.
   // `load()` is also what registers the canvas store's menu, bus and pop-out listeners; each of their
   // canvas-only actions is guarded on the canvas view.

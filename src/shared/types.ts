@@ -1920,6 +1920,8 @@ export type BackgroundEvent =
   /** A background worker changed status or asked for approval. */
   | { event: 'workers'; data: { conversation_id: string; worker: WorkerInfo } }
   | { event: 'todos_changed'; data: Record<string, never> }
+  /** An extension's backend half sent its frontend half something (`emit_ui`): it lands in the extension's store slice. */
+  | { event: `ext:${string}`; data: unknown }
   /** A workflow run or one of its steps moved (payloads stripped): crew windows and the run list refetch. */
   | { event: 'workflow_run'; data: WorkflowRun }
   | { event: 'provider_auth'; data: { provider: string; open: boolean; message: string } }

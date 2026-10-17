@@ -69,6 +69,9 @@ class ManifestTests(unittest.TestCase):
             "bad activation": manifest(activation=["onTuesday"]),
             "unknown contributes key": manifest(contributes={"toolz": []}),
             "tool without a name": manifest(contributes={"tools": [{}]}),
+            "slots not a list": manifest(contributes={"slots": {"sidebar.row": {}}}),
+            "slot entry not an object": manifest(contributes={"slots": {"sidebar.row": ["nav"]}}),
+            "recap section without an id": manifest(contributes={"slots": {"recap.section": [{"order": 1}]}}),
             "unknown hook": manifest(hooks={"tool.preee": {}}),
             "unknown hook option": manifest(hooks={"app.start": {"retries": 3}}),
             "onFailure allow": manifest(hooks={"tool.pre": {"onFailure": "allow"}}),
@@ -470,13 +473,15 @@ class ScopeAndHostTests(unittest.TestCase):
 
 def builtin_ctx(services: dict[str, Any]) -> ExtensionContext:
     return ExtensionContext(db=Database(tempfile.mkdtemp(prefix="exthealth-")), hidden_views=lambda: (), services=services,
-                            settings=lambda: {}, set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p)
+                            settings=lambda: {}, set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p, publish=lambda _n, _d: None)
 
 
 class BuiltinExtensionTests(unittest.TestCase):
     def scope(self, hidden: list[str] | None = None, **over: Any) -> Any:
+        self.published: list[tuple[str, Any]] = []
         ctx = ExtensionContext(db=None, hidden_views=lambda: hidden or (), services={"mcp": lambda: "client"},  # type: ignore[arg-type]
-                               settings=lambda: {}, set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p)
+                               settings=lambda: {}, set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p,
+                               publish=lambda n, d: self.published.append((n, d)))
         return ExtensionHost()._add(Manifest.from_dict(manifest(**over)), ctx=ctx)
 
     def test_enabled_follows_the_hidden_views_unless_always(self) -> None:
@@ -486,25 +491,47 @@ class BuiltinExtensionTests(unittest.TestCase):
         self.assertTrue(self.scope(hidden, enabled="always").enabled())
         self.assertFalse(ExtensionHost()._add(Manifest.from_dict(manifest(enabled=False))).enabled())  # no settings: the manifest default
 
-    def test_tool_router_and_today_are_registered_and_disposed_with_the_scope(self) -> None:
+    def test_tool_and_router_are_registered_and_disposed_with_the_scope(self) -> None:
         scope = self.scope()
         spec = mock.Mock()
         spec.name = "demo_x"
         router = object()
         scope.tool(spec)
         scope.router(router)
-        scope.today(lambda: {"demo": 1})
-        host = ExtensionHost()
-        host.extensions["demo"] = scope
-        self.assertEqual((scope.tools, scope.routers, host.today()), ({"demo_x": spec}, [router], {"demo": 1}))
+        self.assertEqual((scope.tools, scope.routers), ({"demo_x": spec}, [router]))
         run(scope.stop())
-        self.assertEqual((scope.tools, scope.routers, host.today()), ({}, [], {}))
+        self.assertEqual((scope.tools, scope.routers), ({}, []))
 
-    def test_today_skips_a_disabled_extension(self) -> None:
-        host, scope = ExtensionHost(), self.scope(["demo"])
-        scope.today(lambda: {"demo": 1})
+    def recap_scope(self, hidden: list[str] | None = None) -> tuple[ExtensionHost, Any]:
+        host, scope = ExtensionHost(), self.scope(hidden, contributes={"slots": {"recap.section": [{"id": "demo"}]}})
         host.extensions["demo"] = scope
-        self.assertEqual(host.today(), {})
+        return host, scope
+
+    def test_a_recap_section_adds_dashboard_keys_and_facts_and_is_disposed_with_the_scope(self) -> None:
+        host, scope = self.recap_scope()
+        scope.recap_section("demo", card=lambda: {"demo": 1}, facts=lambda: {"demo_facts": 2})
+        self.assertEqual((host.recap_cards(), host.recap_facts()), ({"demo": 1}, {"demo_facts": 2}))
+        run(scope.stop())
+        self.assertEqual((host.recap_cards(), host.recap_facts()), ({}, {}))
+
+    def test_a_recap_section_without_facts_adds_none(self) -> None:
+        host, scope = self.recap_scope()
+        scope.recap_section("demo", card=lambda: {"demo": 1})
+        self.assertEqual((host.recap_cards(), host.recap_facts()), ({"demo": 1}, {}))
+
+    def test_a_recap_section_must_be_declared_in_the_manifest(self) -> None:
+        with self.assertRaises(ValueError):
+            self.scope().recap_section("demo", card=dict)
+
+    def test_recap_sections_skip_a_disabled_extension(self) -> None:
+        host, scope = self.recap_scope(["demo"])
+        scope.recap_section("demo", card=lambda: {"demo": 1}, facts=lambda: {"demo_facts": 2})
+        self.assertEqual((host.recap_cards(), host.recap_facts()), ({}, {}))
+
+    def test_emit_ui_publishes_an_event_named_for_the_extension(self) -> None:
+        scope = self.scope()
+        scope.emit_ui("synced", {"n": 3})
+        self.assertEqual(self.published, [("ext:demo:synced", {"n": 3})])
 
     def test_spawned_tasks_are_cancelled_and_awaited_on_stop(self) -> None:
         async def go() -> None:

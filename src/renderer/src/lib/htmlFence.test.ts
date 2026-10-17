@@ -1,16 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert'
 import { readFileSync } from 'node:fs'
-import { buildPreviewDoc, fenceKind, PREVIEW_SANDBOX, SVG_CSP } from './htmlFence'
-
-test('fenceKind recognises html and svg fences only', () => {
-  assert.equal(fenceKind('html'), 'html')
-  assert.equal(fenceKind('HTML'), 'html')
-  assert.equal(fenceKind('svg'), 'svg')
-  assert.equal(fenceKind('xml'), null)
-  assert.equal(fenceKind(''), null)
-  assert.equal(fenceKind('js'), null)
-})
+import { buildPreviewDoc, PREVIEW_SANDBOX, SVG_CSP } from './htmlFence'
 
 test('the preview sandbox never includes allow-same-origin', () => {
   assert.equal(PREVIEW_SANDBOX, 'allow-scripts')

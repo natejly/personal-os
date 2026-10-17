@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { SHORTCUTS, formatAccelerator, shortcut } from './shortcuts'
+import { SHORTCUTS, acceleratorOf, canonicalAccelerator, formatAccelerator, shortcut, shortcutForKeys } from './shortcuts'
 
 const inMenu = SHORTCUTS.filter((s) => s.scope === 'menu' || s.scope === 'window')
 
@@ -42,4 +42,24 @@ test('formatAccelerator renders macOS glyphs in ⌃⌥⇧⌘ order', () => {
 test('shortcut() throws on an unknown id', () => {
   assert.equal(shortcut('help').keys, 'CmdOrCtrl+/')
   assert.throws(() => shortcut('nope'))
+})
+
+test('two spellings of one chord have one canonical form', () => {
+  assert.equal(canonicalAccelerator('Shift+CmdOrCtrl+G'), canonicalAccelerator('commandorcontrol+shift+g'))
+  assert.equal(canonicalAccelerator('CmdOrCtrl++'), 'mod++')
+  assert.notEqual(canonicalAccelerator('Control+1'), canonicalAccelerator('CmdOrCtrl+1'))
+})
+
+test('shortcutForKeys finds the core shortcut that owns a chord', () => {
+  assert.equal(shortcutForKeys('commandorcontrol+k')?.id, 'palette')
+  assert.equal(shortcutForKeys('CmdOrCtrl+Alt+J'), undefined)
+  assert.equal(shortcutForKeys(''), undefined)
+})
+
+test('acceleratorOf names a key press the way a binding is named', () => {
+  const press = { key: 'j', metaKey: false, ctrlKey: false, altKey: true, shiftKey: false }
+  assert.equal(acceleratorOf({ ...press, metaKey: true }, true), canonicalAccelerator('CmdOrCtrl+Alt+J'))
+  assert.equal(acceleratorOf({ ...press, ctrlKey: true }, false), canonicalAccelerator('CmdOrCtrl+Alt+J'))
+  assert.equal(acceleratorOf({ ...press, ctrlKey: true }, true), canonicalAccelerator('Control+Alt+J'))
+  assert.equal(acceleratorOf({ ...press, key: 'Enter', altKey: false }, true), 'enter')
 })

@@ -27,16 +27,6 @@ export const SVG_CSP = [
   "worker-src 'none'"
 ].join('; ')
 
-export type FenceKind = 'html' | 'svg' | null
-
-/** Which of our preview renderers a fence language belongs to. */
-export function fenceKind(lang: string): FenceKind {
-  const l = (lang || '').trim().toLowerCase()
-  if (l === 'html' || l === 'htm') return 'html'
-  if (l === 'svg') return 'svg'
-  return null
-}
-
 const metaFor = (csp: string): string => `<meta http-equiv="Content-Security-Policy" content="${csp.replace(/"/g, '&quot;')}">`
 
 /** The full svg document for the iframe's `srcdoc`, the CSP meta first, ahead of anything the model wrote. */

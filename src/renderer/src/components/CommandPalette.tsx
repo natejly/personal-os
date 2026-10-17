@@ -6,6 +6,7 @@ import { useModal } from '../lib/useModal'
 import { plainTitle } from '../lib/chatRows'
 import { SETTINGS_TABS } from './SettingsModal'
 import { useCanvas } from '../canvas/store'
+import { CORE, ownerOn, paletteCommands, registerCommand } from '../extensions/host'
 
 type Entry = { key: string; label: string; hint: string; run: () => void }
 
@@ -15,6 +16,10 @@ const VIEWS: { view: View; label: string }[] = [
   ...OPTIONAL_VIEWS
 ]
 const RECENT = 8
+registerCommand(CORE, { id: 'new-chat', label: 'New chat', hint: 'Create', run: () => useStore.getState().newChat(null) })
+registerCommand(CORE, { id: 'new-file', label: 'New file', hint: 'Create', run: () => void useStore.getState().createDoc({}) })
+registerCommand(CORE, { id: 'help', label: 'Help and keyboard shortcuts', hint: 'Help', run: () => useStore.getState().openHelp('shortcuts') })
+registerCommand(CORE, { id: 'help:guide', label: 'Using Grain', hint: 'Help', run: () => useStore.getState().openHelp('guide') })
 const recent = <T extends { updated_at: number }>(rows: T[]): T[] => [...rows].sort((a, b) => b.updated_at - a.updated_at).slice(0, RECENT)
 
 /** ⌘K: one input over every place and every "new" the app has. Typing filters, ↑/↓ pick, Enter goes. */
@@ -39,10 +44,8 @@ export default function CommandPalette(): JSX.Element {
     { key: 'inbox', label: 'Agent inbox and jobs', hint: 'Go to', run: () => s.openInbox() },
     ...projects.map((p) => ({ key: `project:${p.id}`, label: p.name, hint: 'Project', run: () => s.openProject(p.id) })),
     ...canvases.map((c) => ({ key: `space:${c.id}`, label: c.name, hint: 'Canvas', run: () => void useCanvas.getState().enterSpace(c.id) })),
-    { key: 'new-chat', label: 'New chat', hint: 'Create', run: () => s.newChat(null) },
-    { key: 'new-file', label: 'New file', hint: 'Create', run: () => void s.createDoc({}) },
-    { key: 'help', label: 'Help and keyboard shortcuts', hint: 'Help', run: () => s.openHelp('shortcuts') },
-    { key: 'help:guide', label: 'Using Grain', hint: 'Help', run: () => s.openHelp('guide') },
+    ...paletteCommands.filter((c) => ownerOn(settings, c.extension))
+      .map((c) => ({ key: c.id, label: c.label, hint: c.hint ?? 'Command', run: c.run })),
     ...recent(conversations).map((c) => ({ key: `chat:${c.id}`, label: plainTitle(c.title) || 'Untitled chat', hint: 'Chat', run: () => void s.selectChat(c.id) })),
     ...recent(docs).map((d) => ({ key: `doc:${d.id}`, label: d.title || 'Untitled', hint: 'File', run: () => void s.openDoc(d.id) })),
     ...SETTINGS_TABS.map((t) => ({ key: `settings:${t.id}`, label: t.label, hint: 'Settings', run: () => s.openSettings(t.id) })),

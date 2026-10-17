@@ -33,9 +33,15 @@ export interface ToolCardProps {
   rules?: ReactNode
 }
 
+/** How the generic row titles and draws a tool that has a card: the title, and the icon before it. */
+export interface ToolCardDisplay { verb?: string; icon?: JSX.Element }
+
 /** Tool name -> card. A registered card replaces the generic row and ask card for that tool, pending and finished. */
 export const TOOL_CARDS: Record<string, ComponentType<ToolCardProps>> = {}
+export const TOOL_DISPLAY: Record<string, ToolCardDisplay> = {}
 
-export function registerToolCard(name: string, c: ComponentType<ToolCardProps>): void {
+export function registerToolCard(name: string, c: ComponentType<ToolCardProps>, display?: ToolCardDisplay): { dispose(): void } {
   TOOL_CARDS[name] = c
+  if (display) TOOL_DISPLAY[name] = display
+  return { dispose: () => { if (TOOL_CARDS[name] === c) { delete TOOL_CARDS[name]; delete TOOL_DISPLAY[name] } } }
 }

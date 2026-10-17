@@ -3,11 +3,10 @@ import { useStore } from '../store'
 import { appendToDraft } from '../lib/drafts'
 import { COMPOSER_INSERT_EVENT } from '../lib/composerInsert'
 import { askDraft, selectionMessage, SELECTION_VERBS, type SelectionVerb } from '../lib/selectionActions'
+import { CORE, ownerOn, registerSelectionAction, selectionActions } from '../extensions/host'
 
 /** Where a selection gets the toolbar: chat transcripts, the page agent panel, the note editor, the mail reader. */
 const SURFACES = '.messages, .page-agent-body, .md-surface, .mail-body'
-
-const verbOf = (action: string): SelectionVerb | undefined => SELECTION_VERBS.find((v) => `selection:${v.id}` === action)?.id
 
 /** The highlighted text right now, from a text box or from the page. */
 function selectedText(): string {
@@ -27,15 +26,18 @@ export function runSelectionVerb(verb: SelectionVerb, quote: string): void {
   } else void useStore.getState().sendToPageAgent(selectionMessage(verb, quote))
 }
 
-/** A small bubble over a selection with the four verbs; the same verbs arrive from the right-click menu. */
+for (const v of SELECTION_VERBS) registerSelectionAction(CORE, { id: v.id, label: v.label, run: (text) => runSelectionVerb(v.id, text) })
+
+/** A small bubble over a selection with its actions (the four verbs, and any an extension adds); the verbs also arrive from the right-click menu. */
 export default function SelectionToolbar(): JSX.Element | null {
-  const enabled = useStore((s) => s.settings.selectionToolbar !== false)
+  const settings = useStore((s) => s.settings)
+  const enabled = settings.selectionToolbar !== false
   const [at, setAt] = useState<{ x: number; y: number; quote: string } | null>(null)
 
   useEffect(() => window.os.onMenu((action) => {
-    const verb = verbOf(action)
-    if (verb) runSelectionVerb(verb, selectedText())
-  }), [])
+    const found = selectionActions.find((a) => `selection:${a.id}` === action && ownerOn(settings, a.extension))
+    if (found) found.run(selectedText())
+  }), [settings])
 
   useEffect(() => {
     if (!enabled) return setAt(null)
@@ -75,8 +77,8 @@ export default function SelectionToolbar(): JSX.Element | null {
   return (
     <div className="selection-toolbar" role="toolbar" aria-label="Selection actions" style={{ left: at.x, top: at.y }}
       onMouseDown={(e) => e.preventDefault() /* keep the selection alive while clicking */}>
-      {SELECTION_VERBS.map((v) => (
-        <button key={v.id} type="button" onClick={() => { runSelectionVerb(v.id, at.quote); setAt(null) }}>{v.label}</button>
+      {selectionActions.filter((a) => ownerOn(settings, a.extension)).map((a) => (
+        <button key={a.id} type="button" onClick={() => { a.run(at.quote); setAt(null) }}>{a.label}</button>
       ))}
     </div>
   )

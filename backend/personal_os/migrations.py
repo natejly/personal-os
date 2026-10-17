@@ -737,7 +737,7 @@ def _permission_presets(c: sqlite3.Connection) -> None:
               "source TEXT NOT NULL DEFAULT 'user', created_at REAL NOT NULL, updated_at REAL NOT NULL)")
     c.execute("CREATE TABLE IF NOT EXISTS setting_sources(key TEXT NOT NULL, scope TEXT NOT NULL, scope_id TEXT NOT NULL DEFAULT '', "
               "source TEXT NOT NULL, prev TEXT, set_at REAL NOT NULL, PRIMARY KEY (key, scope, scope_id))")
-    if "permissions" not in _cols(c, "projects"):
+    if (cols := _cols(c, "projects")) and "permissions" not in cols:
         c.execute("ALTER TABLE projects ADD COLUMN permissions TEXT NOT NULL DEFAULT '{}'")
 
 

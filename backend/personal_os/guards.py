@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import mac, permissions, permrules
+from .mcp_servers import RESERVED_PREFIX
 from .extensions.hooks import Ask, Deny, HookBus
 
 log = logging.getLogger(__name__)
@@ -82,14 +83,14 @@ def plan_refusal(danger: str, *, planning: bool, propose_without_run: bool) -> s
 
 def rule_refusal(name: str, args: dict[str, Any], rules: Any, *, roots: list[str], cwd: str | None, hardline: bool) -> str | None:
     """Why the hardline list (`hardline`) or a deny rule (not) refuses this call. A connector slug is judged by `mcp_denied`."""
-    if name.startswith("mcp__"):
+    if name.startswith(RESERVED_PREFIX):
         return None if hardline else permrules.mcp_denied(name, rules)
     v = permrules.evaluate(name, args, rules, roots=roots, cwd=cwd)
     return v.refusal if v.action == "deny" and v.hardline == hardline else None
 
 
 def _unknown_or_off(c: Call) -> str | None:
-    if c.toolbox.specs.get(c.name) is None and not c.name.startswith("mcp__"):
+    if c.toolbox.specs.get(c.name) is None and not c.name.startswith(RESERVED_PREFIX):
         return "not a tool in this request"
     modes = c.ctx.get("modes")
     return "turned off for this run" if isinstance(modes, dict) and modes.get(c.name) == "off" else None

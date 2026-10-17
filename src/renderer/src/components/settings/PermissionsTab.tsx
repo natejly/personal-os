@@ -10,13 +10,15 @@ import { PermissionModeCards } from '../PermissionMode'
 import { DestructiveDefaults } from '../DestructiveDefaults'
 import NumberField from './NumberField'
 import Switch from './Switch'
+import PresetsSection from './PresetsSection'
 import { Sec, type TabProps } from './shared'
 
-export default function PermissionsTab({ draft, patch }: TabProps): JSX.Element {
+export default function PermissionsTab({ draft, patch, onPresetApplied }: TabProps & { onPresetApplied: () => Promise<void> }): JSX.Element {
   const mode = modeOf(draft)
   return (
     <section className="permissions-tab">
       <h3>Permissions</h3>
+      <PresetsSection onApplied={onPresetApplied} />
       <Sec id="mode"><PermissionModeCards mode={mode} onPick={(permissionMode) => patch({ permissionMode })} /></Sec>
       {mode !== 'manual' && (
         <label className="setting-row"><span className="toggle-text"><b>Go ahead with confident plans after</b><small>Seconds. A plan the assistant is sure about starts by itself unless you change or answer it first. Cards that always ask still ask. 0 turns this off.</small></span>

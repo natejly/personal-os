@@ -1554,7 +1554,55 @@ export interface Profile {
 }
 
 /** A default a profile would change but that needs the user's click first: a looser permission preset. */
-export interface ProfileHeld { key: string; was: string; set: string }
+export interface ProfileHeld { key: string; was: unknown; set: unknown }
+
+/** A permission preset (backend presets.py). `readonly` is a built-in or a profile's. */
+export interface PermissionPreset {
+  id: string
+  name: string
+  description: string
+  source: 'builtin' | 'user' | 'import' | 'profile'
+  owner: string | null
+  readonly: boolean
+  body: PresetBody
+}
+export interface PresetBody {
+  schema?: string
+  name: string
+  description?: string
+  permissionMode?: 'auto' | 'manual' | 'allow_all'
+  permissionRules?: { allow: string[]; ask: string[]; deny: string[] }
+  alwaysAsk?: string[]
+  destructiveDefaults?: Record<string, string>
+  unattendedApprovals?: 'ask' | 'deny'
+  tools?: { groups?: Record<string, ToolMode>; danger?: Record<string, ToolMode>; tools?: Record<string, ToolMode> }
+  connectors?: Record<string, 'ask' | 'off'>
+  network?: Record<string, unknown>
+}
+export type PresetScope = 'global' | 'project' | 'chat'
+/** What applying a preset would change at a scope. `diff_hash` is what the confirming call quotes. */
+export interface PresetDiff {
+  changes: Record<string, { old: unknown; new: unknown; loosens: boolean }>
+  not_applied: string[]
+  pending: string[]
+  loosened: string[]
+  diff_hash: string
+}
+/** One setting in the effective configuration: its value, where it came from, and what it shadows. */
+export interface EffectiveValue {
+  value: unknown
+  source: string
+  scope: PresetScope
+  shadowed: { source: string; value: unknown }[]
+  legacy?: boolean
+}
+export interface EffectiveConfig {
+  scope: { project_id: string | null; conversation_id: string | null }
+  values: Record<string, EffectiveValue>
+  tools: Record<string, { mode: ToolMode; source: string }>
+  runtime: Record<string, unknown>
+  secrets: Record<string, string | Record<string, string>>
+}
 
 export interface Settings {
   baseUrl: string

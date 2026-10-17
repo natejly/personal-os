@@ -232,7 +232,7 @@ def test_no_hook_is_named_after_a_guard() -> None:
 
 # ---- the pin ----
 PIN = {
-    "unknown_or_off": "8c8fec1a50c56b0e",
+    "unknown_or_off": "c2189f52913888bc",
     "proposal_only": "46c1f42a0ded442c",
     "plan_block": "362dc4de4fab91a0",
     "hardline": "4fa41c559109e24d",
@@ -240,7 +240,7 @@ PIN = {
     "protected_paths": "9c45e0f8a550e978",
     "floor_block": "82ed412f8b4b40c8",
     "plan_refusal": "6c85d9ed539305f3",
-    "rule_refusal": "f4cc5d0825136892",
+    "rule_refusal": "0357461af618da1f",
     "protected_reason": "076bea77f9e3190a",
     "floor_refusal": "495ade90374576f3",
 }

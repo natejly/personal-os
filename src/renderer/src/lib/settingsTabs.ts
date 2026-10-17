@@ -1,7 +1,7 @@
 /** The Settings sections, and where the ids older code still passes to openSettings now live. Pure: no store import. */
 export type SettingsTab = 'model' | 'usage' | 'permissions' | 'integrations' | 'agents' | 'memory' | 'appearance' | 'sidebar' | 'system' | 'advanced' | `ext:${string}`
 /** Collapsed groups left on the Advanced tab. */
-export type AdvancedGroup = 'data' | 'extensions' | 'developer' | 'learning' | 'search' | 'map'
+export type AdvancedGroup = 'data' | 'extensions' | 'effective' | 'developer' | 'learning' | 'search' | 'map'
 export type LegacySettingsTab = 'models' | 'workspace' | 'provider' | 'memory' | 'cowork' | 'modules' | 'behavior' | 'data' | 'spending' | 'texting'
 
 const LEGACY: Record<LegacySettingsTab, { tab: SettingsTab; group?: AdvancedGroup }> = {
@@ -40,6 +40,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'model', sec: 'picker', title: 'Models in the picker', keys: 'composer model menu choose show hide checkbox reset suggested' },
   { tab: 'usage', sec: 'usage', title: 'Usage and cost', keys: 'tokens spend price billing calls' },
   { tab: 'permissions', sec: 'mode', title: 'Permission mode', keys: 'auto manual allow everything approvals ask risky reviewer' },
+  { tab: 'permissions', sec: 'presets', title: 'Permission presets', keys: 'preset presets bundle apply duplicate export import read only manual auto allow everything project chat scope diff' },
   { tab: 'permissions', sec: 'safety', title: 'Run safety', keys: 'snapshot undo checkpoint safety' },
   { tab: 'permissions', sec: 'tools', title: 'Per-tool access', keys: 'tools on off ask hide disable' },
   { tab: 'permissions', sec: 'always-ask', title: 'Always ask first', keys: 'confirm cards rules deny allow grants approvals revoke' },
@@ -64,6 +65,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'system', sec: 'system', title: 'System access', keys: 'macos accessibility screen recording automation folders privacy permission' },
   { tab: 'advanced', sec: 'data', title: 'Data, backups and trash', keys: 'export import backup restore presets archive trash delete diagnostics support logs' },
   { tab: 'advanced', sec: 'extensions', title: 'Extensions', keys: 'review proposed assistant drafted install enable disable permissions diff accept reject' },
+  { tab: 'advanced', sec: 'effective', title: 'Effective configuration', keys: 'effective config dump sources where settings come from default profile preset user project chat differs json' },
   { tab: 'advanced', sec: 'developer', title: 'Developer tools', keys: 'traces otel telemetry export context preview system prompt debug extensions hooks reload latency' }
 ]
 

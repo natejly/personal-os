@@ -37,7 +37,7 @@ async def _fake(settings: dict[str, Any], model: str, messages: list[dict[str, A
 @pytest.fixture(scope="module", autouse=True)
 def _app():  # type: ignore[no-untyped-def]
     with client:
-        client.put("/settings", json={"autoLearn": False, "baseUrl": "", "permissionMode": "manual", "autoTitle": False,
+        client.put("/settings", json={"autoLearn": False, "baseUrl": "", "permissionMode": "manual", "destructiveDefaults": {"send": "ask"}, "autoTitle": False,
                                       "followUps": False, "learnStyle": False})
         yield
 

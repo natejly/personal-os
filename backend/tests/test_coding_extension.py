@@ -377,7 +377,8 @@ def test_a_dispatched_call_carries_its_id_to_the_result_error_and_post_hooks():
 
     async def boom(ctx: dict[str, Any]) -> Any:
         raise RuntimeError("x")
-    tb = SimpleNamespace(bus=host.bus, call=lambda *_a: boom({}))
+    tb = SimpleNamespace(bus=host.bus, call=lambda *_a: boom({}), specs={"t": SimpleNamespace(danger="safe")}, settings=dict,
+                         proposes=lambda n: False, floor_action=lambda *a, **k: None, floor_kind=lambda *a, **k: None)
     with pytest.raises(RuntimeError):
         asyncio.run(dispatch.dispatch_tool(tb, {"desk_id": "d1"}, "t", {}, call_id="id9"))  # type: ignore[arg-type]
     assert seen["tool.error"]["call_id"] == "id9" and seen["tool.post"]["call_id"] == "id9"

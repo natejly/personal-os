@@ -213,7 +213,7 @@ def test_a_background_workers_card_is_texted_when_it_opens_and_other_cards_are_n
     monkeypatch.setattr(appmod.workers_mgr, "_owner", lambda call_id: object() if call_id.startswith("sa_w1:") else None)
     appmod.run_store.create("run-ext-1", None, "chat", {})
     appmod.run_store.create("sa_w1", None, "subagent", {})
-    appmod.run_store.open_approval("call-ext-chat", "run-ext-1", "send_email", {"to": "a@b.co"})
+    appmod.run_store.open_approval("call-ext-chat", "run-ext-1", "gmail_draft", {"to": "a@b.co"})
     assert texted == []
     appmod.run_store.open_approval("sa_w1:f1", "sa_w1", "fetch_url", {"url": "https://example.com"})
     assert texted == ["sa_w1:f1"]

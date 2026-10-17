@@ -2,11 +2,14 @@
 export class ApiError extends Error {
   status: number | null
   kind: 'http' | 'timeout' | 'stalled'
-  constructor(message: string, opts?: { status?: number | null; kind?: ApiError['kind'] }) {
+  /** The JSON body of a failed response, for a caller that reads more than the message (a 409 that carries a diff). */
+  body: unknown
+  constructor(message: string, opts?: { status?: number | null; kind?: ApiError['kind']; body?: unknown }) {
     super(message)
     this.name = 'ApiError'
     this.status = opts?.status ?? null
     this.kind = opts?.kind ?? 'http'
+    this.body = opts?.body ?? null
   }
 }
 

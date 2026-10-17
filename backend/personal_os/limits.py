@@ -2,9 +2,10 @@
 
 There are no budgets: nothing caps a reply's rounds, tokens, cost or wall-clock time. A reply, a job, a subagent or a
 desk turn ends when the model stops calling tools, or a stuck breaker fires (REPEAT_LIMIT, TOOL_ERROR_LIMIT, the stuck
-detector, a denial streak), or the user stops it. (A turn of an alternative agent loop is also held to LOOP_MODEL_CALLS.) The only clocks are hang detection (LLM_IDLE_SECONDS for a silent
-provider stream, FINAL_ROUND_SECONDS for the closing answer, SUBAGENT_STALE/TOOL_SECONDS for a child, JOB_IDLE_SECONDS
-for an unattended run) and per-request timeouts on tools.
+detector, a denial streak), or the user stops it. The one exception is a turn of an alternative agent loop, which is also
+held to LOOP_MODEL_CALLS. The only clocks are hang detection (LLM_IDLE_SECONDS for a silent provider stream,
+FINAL_ROUND_SECONDS for the closing answer, SUBAGENT_STALE/TOOL_SECONDS for a child, JOB_IDLE_SECONDS for an unattended
+run) and per-request timeouts on tools.
 
 llm.DEFAULT_SETTINGS takes its numeric defaults from these constants. Four settings default to 0, meaning
 "automatic": contextWindow (the model's window from the proxy, else CONTEXT_WINDOW_FALLBACK) and subagentMaxConcurrent /

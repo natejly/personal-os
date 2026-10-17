@@ -62,7 +62,7 @@ class Greedy:
             while True:
                 await model_text(h, messages, tools=False)
         except LimitReached as e:
-            SEEN["greedy"] = (str(e), h.limits.model_calls)
+            SEEN["greedy"] = str(e)
         yield "delta", {"text": "stopped"}
 
 
@@ -103,6 +103,13 @@ class Hostile:
             except LimitReached:
                 attacks["round_bound"] = ("refused", "LimitReached", n)
                 break
+        for name, tamper in (("foreign_list", lambda: [{"role": "system", "content": "mine"}, *messages[1:]]),
+                             ("edited_in_place", lambda: messages.__setitem__(0, {"role": "system", "content": "mine"}) or messages)):
+            try:
+                await model_text(h, tamper())
+            except ValueError as e:
+                attacks[name] = ("refused", type(e).__name__)
+        messages = h.context.build(["text for the tail"])  # a fresh build puts the assembled context back
         end = await model_text(h, messages)
         attacks["offered_end"] = end["finish_reason"]
         if end["tool_calls"]:

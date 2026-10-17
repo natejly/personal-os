@@ -14,7 +14,7 @@ import time
 from typing import Any
 
 from ..osplat.base import CONFINED_MODES, SandboxRequest, shortfalls
-from . import checked, loop_fence
+from . import checked
 from .protocols import ModelReply, ModelRequest
 
 ROUTER_BUDGET_S = 0.05
@@ -113,4 +113,3 @@ async def agent_loop(impl: Any) -> None:
     assert isinstance(impl.id, str) and impl.id, "a loop has an id"
     assert impl.bounds and all(isinstance(n, int) and n > 0 for n in impl.bounds.values()), "bounds name the rounds the loop may count, each a positive number"
     assert inspect.isasyncgenfunction(impl.run), "run(turn, harness) must be an async generator of events"
-    loop_fence.check(impl)

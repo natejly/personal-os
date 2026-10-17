@@ -451,18 +451,19 @@ def test_the_tail_cannot_change_the_stable_prefix_or_the_offered_tools(test_loop
     assert a["prefix"] == baseline["messages"][0]["content"], "the stable prefix is the chat's, whatever the loop adds"
     assert a["tail_last"].endswith("text for the tail") and a["tail_last"] not in a["prefix"]
     assert MODEL[0]["tools"] == baseline["tools"], "the offered tools and their order are the core's"
+    assert a["foreign_list"] == a["edited_in_place"] == ("refused", "ValueError"), "a loop cannot send a rewritten prefix"
+    assert all("mine" not in json.dumps(m["messages"]) for m in MODEL)
 
 
 # ---------------------------------------------------------------- limits
 def test_the_core_caps_the_model_calls_of_a_turn(test_loops: None, monkeypatch: pytest.MonkeyPatch) -> None:
     cid = chat("test/greedy")
     drive(cid)
-    reason, calls = fx.SEEN["greedy"]
-    assert calls == limits.LOOP_MODEL_CALLS == len(MODEL) == 60 and "60 model calls" in reason
+    assert limits.LOOP_MODEL_CALLS == len(MODEL) == 60 and "60 model calls" in fx.SEEN["greedy"]
     MODEL.clear()
     monkeypatch.setattr(limits, "LOOP_MODEL_CALLS", 5)  # a budget added in core applies to every alternative loop
     drive(chat("test/greedy"))
-    assert len(MODEL) == 5 and fx.SEEN["greedy"][1] == 5
+    assert len(MODEL) == 5
 
 
 # ---------------------------------------------------------------- plan, execute, verify

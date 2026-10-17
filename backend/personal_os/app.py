@@ -3186,6 +3186,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             open_spans: dict[str, dict[str, Any]] = {}
             last: dict[str, Any] = {}  # the last model call's text, reasoning, finish and span, which the tool step needs
             calls_made = ModelCalls(limits.LOOP_MODEL_CALLS)
+            sealed = ""  # digest of the assembled context after the core last wrote it
 
             def _loop_event(event: LoopEvent) -> tuple[str, Any]:
                 """An event the loop emitted, checked and shaped for the reply: the loop says what happened, the core publishes it."""
@@ -3205,20 +3206,25 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
             turn_loop = LoopRun(loop, _loop_event)
 
+            def _prefix_digest() -> str:
+                """The context the core assembled (everything before the run's own messages), which a loop may not rewrite."""
+                return hashlib.sha256(json.dumps(messages[:base_len], sort_keys=True, default=str).encode()).hexdigest()
+
             def _build(extra_tail: Sequence[str]) -> list[dict[str, Any]]:
-                nonlocal base_len
+                nonlocal base_len, sealed
                 head = _assemble(history, extra_tail)
                 messages[:] = head + messages[base_len:]
                 base_len = len(head)
+                sealed = _prefix_digest()
                 return messages
 
             async def _model(msgs: list[dict[str, Any]], with_tools: bool) -> AsyncIterator[dict[str, Any]]:
                 """One round of the default loop's bookkeeping around a model call: old tool results shrink, finished shell jobs and the
                 plan ride along, the round gets its span and its usage is metered. The loop sees the text and the calls."""
-                nonlocal _round, notice
+                nonlocal _round, notice, sealed
                 calls_made.spend()
-                if msgs is not messages:
-                    messages[:] = msgs
+                if msgs is not messages or _prefix_digest() != sealed:
+                    raise ValueError("a model call is made on the list the context builder returned, with its assembled context unchanged")
                 _round += 1
                 st.meter.rounds = _round - 1
                 n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), win, float(cfg.get("microAt", 0.25)),
@@ -3284,15 +3290,18 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     raise llm.LLMError("The provider filtered this reply. Try rephrasing.", kind="content_filter")
                 if finish == "length":
                     st.partial = "length"
+                sealed = _prefix_digest()  # microcompact and an overflow recovery rewrite it, and the core does so
                 last.update(text="".join(text).strip(), reasoning=end.get("reasoning"), finish=finish, span=lspan)
                 yield {"type": "end", "text": last["text"], "tool_calls": calls, "finish_reason": finish}
 
             async def _tools(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+                nonlocal sealed
                 messages.append(tool_step.prepare(calls, text=last["text"], reasoning=last["reasoning"], cut=last["finish"] == "length"))
                 first = len(messages)
                 async with contextlib.aclosing(tool_step.run(calls, Round(am, buf, tool_events, tracer, _round, last["span"]))) as step_events:
                     async for item in step_events:
                         turn_loop.publish(item)
+                sealed = _prefix_digest()
                 if st.ended:
                     raise TurnEnded
                 if st.partial == "loop":  # a breaker stopped tool use: the turn closes as the default loop's does, with one tool-free answer

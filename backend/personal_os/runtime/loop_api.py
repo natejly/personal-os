@@ -48,7 +48,8 @@ class TurnInput:
 class ContextBuilder(Protocol):
     def build(self, extra_tail: Sequence[str] = ()) -> Messages:
         """The turn's context from the contributor pipeline (stable, volatile, tail), then this run's own messages so far. `extra_tail`
-        joins the tail, which is never cached; the stable prefix cannot be written from here. The list returned is the turn's own."""
+        joins the tail, which is never cached. The list returned is the turn's own; the stable prefix in it is checked before every
+        model call, and a call whose prefix was changed fails."""
 
 
 class ModelStream(Protocol):
@@ -76,8 +77,6 @@ class LoopHooks(Protocol):
 class TurnLimits(Protocol):
     @property
     def stopped(self) -> bool: ...
-    @property
-    def model_calls(self) -> int: ...
     def next_round(self, scope: str) -> int:
         """Count one more round in `scope` (a name in the loop's `bounds`) and return the count; `LimitReached` once the bound is spent."""
     def restart(self, scope: str) -> None:

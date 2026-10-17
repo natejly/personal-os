@@ -98,7 +98,7 @@ class LoopHooks(_Sealed):
         if hook not in LOOP_HOOKS or set(payload) != set(LOOP_HOOKS[hook].__annotations__):
             raise ValueError(f"a loop fires {' or '.join(LOOP_HOOKS)}, each with the keys of its payload")
         full = scrub_strings({**payload, **self._ids})  # the ids are the core's, whatever the loop wrote
-        if hook == "loop.plan":
+        if hook == "loop.plan":  # the catalog scan reads literal hook ids, so each is spelled out
             await self._bus.emit("loop.plan", full)  # hook: loop.plan
         else:
             await self._bus.emit("loop.verify", full)  # hook: loop.verify
@@ -115,10 +115,6 @@ class TurnLimits(_Sealed):
     @property
     def stopped(self) -> bool:
         return self._stopped()
-
-    @property
-    def model_calls(self) -> int:
-        return self._calls.made
 
     def next_round(self, scope: str) -> int:
         if scope not in self._bounds:
@@ -140,7 +136,7 @@ class LoopRun:
     so a card reaches the UI while the loop is still waiting on its answer."""
 
     def __init__(self, loop: AgentLoop, translate: Callable[[LoopEvent], tuple[str, Any]]) -> None:
-        self.loop, self._translate = loop, translate
+        self._loop, self._translate = loop, translate
         self._queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
 
     def publish(self, item: tuple[str, Any]) -> None:
@@ -154,7 +150,7 @@ class LoopRun:
     async def events(self, turn: TurnInput, harness: LoopHarness) -> AsyncIterator[tuple[str, Any]]:
         async def feed() -> None:
             try:
-                async for event in self.loop.run(turn, harness):
+                async for event in self._loop.run(turn, harness):
                     self.emit(event)
             except TurnEnded:
                 pass

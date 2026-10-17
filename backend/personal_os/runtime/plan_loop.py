@@ -169,10 +169,10 @@ class PlanExecuteVerify:
                 break
             names = {c["id"]: c["name"] for c in out.tool_calls}
             for message in await h.tools.run(out.tool_calls):
-                content = str(message.get("content") or "")
-                work.notes[index].append(f"{names.get(message.get('tool_call_id'), 'a tool')}: {content[:PREVIEW_CHARS]}")
+                content, name = str(message.get("content") or ""), names.get(message.get("tool_call_id"), "a tool")
+                work.notes[index].append(f"{name}: {content[:PREVIEW_CHARS]}")
                 if error := _error_of(content):
-                    work.gaps.append(f"{names.get(message.get('tool_call_id'), 'a tool')} failed: {error[:PREVIEW_CHARS]}")
+                    work.gaps.append(f"{name} failed: {error[:PREVIEW_CHARS]}")
             await h.limits.take_steers()
         if not repair:
             work.status[index] = "done"

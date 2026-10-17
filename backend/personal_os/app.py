@@ -103,6 +103,7 @@ from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, 
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .style import WritingStyle
+from .extensions import devapi
 from .extensions.host import ExtensionContext, ExtensionHost
 from .modules import Module, ModuleContext, build_modules
 from .tools import ASK_LOCKED_DANGER, Toolbox, UrlBlocked, guarded_request, page_title, summarize_result, times_body
@@ -605,6 +606,8 @@ async def _snapshot_after(run: Run) -> None:
 host.bus.subscribe("run.after", _snapshot_after, owner="core", order=0, timeout_ms=limits.SNAPSHOT_AFTER_MS)
 host.bus.subscribe("run.after", lambda run: subagent_mgr.end_of_run(run), owner="core", order=0)
 app.include_router(backups.router(db.data_dir, host.data_tables))
+app.include_router(devapi.router(host, _ext_ctx, lambda: toolbox))
+app.mount("/ext", host.routes)
 # Supportability: GET /diagnostics, POST /maintenance/sweep, and the daily retention sweep (retention.py).
 retention = RetentionWorker(db, settings)
 app.include_router(reliability_router(db, settings, retention, lambda: system_access.permissions()))

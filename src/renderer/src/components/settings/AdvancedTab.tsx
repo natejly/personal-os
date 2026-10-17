@@ -1,5 +1,6 @@
 import SupportSettings from '../SupportSettings'
 import TraceExportSettings from '../TraceExportSettings'
+import ExtensionsDev from './ExtensionsDev'
 import DataSettings from '../DataSettings'
 import TrashPanel from '../TrashPanel'
 import NumberField from './NumberField'
@@ -25,6 +26,7 @@ export default function AdvancedTab({ draft, patch, openGroups, toggle }: TabPro
       <Sec id="developer"><AdvGroup id="developer" title="Developer" {...gp}>
           <Switch title="Developer tools" help="Show traces, the context preview and the system prompt." checked={draft.devTools === true} onChange={(devTools) => patch({ devTools })} />
           <TraceExportSettings value={draft.otelExport} onChange={(otelExport) => patch({ otelExport })} />
+          {draft.devTools === true && <ExtensionsDev />}
       </AdvGroup></Sec>
     </section>
   )

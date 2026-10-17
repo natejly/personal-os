@@ -4,11 +4,16 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import importlib
+import importlib.machinery
+import importlib.util
 import inspect
+import itertools
 import logging
 import math
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import ModuleType
 from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Iterable, get_args
 
 from .. import backups, migrations
@@ -16,6 +21,7 @@ from ..context import Block, Contribution, RetrievalSources, Slot
 from .disposables import Disposable, Scope
 from .hooks import HookBus
 from .manifest import Manifest, load_manifest
+from .routes import ExtensionRoutes
 
 if TYPE_CHECKING:
     from fastapi import APIRouter, FastAPI
@@ -47,6 +53,29 @@ class ExtensionContext:
     wsid: Callable[[str | None], str | None]
 
 
+_generation = itertools.count(1)
+
+
+def _import_extension(root: Path, scope: ExtensionScope) -> ModuleType:
+    """Import `<root>/extension.py` into a package namespace of its own, so a reload never meets the previous code's
+    modules. The namespace is dropped when the scope is disposed."""
+    name = f"grain_ext_{scope.manifest.id.replace('-', '_')}_{next(_generation)}"
+    spec = importlib.machinery.ModuleSpec(name, None, is_package=True)
+    spec.submodule_search_locations = [str(root)]
+    sys.modules[name] = importlib.util.module_from_spec(spec)
+
+    def drop() -> None:
+        for module in [m for m in sys.modules if m == name or m.startswith(f"{name}.")]:
+            del sys.modules[module]
+    scope.disposables.add(Disposable(drop))
+    importlib.invalidate_caches()
+    keep, sys.dont_write_bytecode = sys.dont_write_bytecode, True  # no stale .pyc on a same-second edit, no litter in the folder
+    try:
+        return importlib.import_module(f"{name}.extension")
+    finally:
+        sys.dont_write_bytecode = keep
+
+
 class Services:
     """The services an extension declared under `requires`."""
 
@@ -69,6 +98,7 @@ class ExtensionScope:
     module: Module | None = None  # set for an adapted Module
     root: Path | None = None  # the extension's folder, where data.migrations is looked up
     ctx: ExtensionContext | None = None  # set for an extension loaded from its folder
+    dev: bool = False  # loaded from a folder outside the package (`load_folder`), so it can be reloaded
     disposables: Scope = field(default_factory=Scope)
     tools: dict[str, ToolSpec] = field(default_factory=dict)
     routers: list[APIRouter] = field(default_factory=list)
@@ -206,7 +236,9 @@ class ExtensionHost:
     def __init__(self) -> None:
         self.bus = HookBus()
         self.retrieval = RetrievalSources()
+        self.routes = ExtensionRoutes(self)  # mounted at /ext by the app: where folder-loaded extensions' routers are served
         self.extensions: dict[str, ExtensionScope] = {}  # in start order
+        self.failed: dict[Path, str] = {}  # folders `load_dev` could not load, with the reason
         self._startup: list[Handler] = []
         self._shutdown: list[Handler] = []
         self._enabled: dict[str, bool] = {}  # what ext.changed last reported, per extension
@@ -245,12 +277,56 @@ class ExtensionHost:
         """Load the built-in extension in this package's `<ext_id>/` folder: read its manifest, then run its `activate(scope)`."""
         root = Path(__file__).parent / ext_id
         scope = self._add(load_manifest(root / "extension.json"), root=root, ctx=ctx)
-        importlib.import_module(f"{__package__}.{ext_id}.extension").activate(scope)
+        self._activate(scope, importlib.import_module(f"{__package__}.{ext_id}.extension"))
+        return scope
+
+    def load_folder(self, root: Path, ctx: ExtensionContext) -> ExtensionScope:
+        """Load an extension from any folder holding extension.json and extension.py, in a fresh module namespace. If its
+        manifest or `activate` is wrong, nothing stays registered."""
+        scope = self._add(load_manifest(root / "extension.json"), root=root, ctx=ctx)
+        scope.dev = True
+        try:
+            self._activate(scope, _import_extension(root, scope))
+        except BaseException:
+            scope.disposables.dispose()
+            del self.extensions[scope.manifest.id], self._enabled[scope.manifest.id]
+            raise
+        return scope
+
+    async def load_dev(self, root: Path, ctx: ExtensionContext) -> ExtensionScope:
+        """Load and start the extension in `root` (the dev panel and the dev server). A failure is kept in `failed` and raised."""
+        if loaded := next((s for s in self.extensions.values() if s.root == root), None):
+            raise ValueError(f"{root} is already loaded as {loaded.manifest.id!r}")
+        try:
+            scope = self.load_folder(root, ctx)
+        except Exception as e:
+            self.failed[root] = f"{type(e).__name__}: {e}"
+            raise
+        self.failed.pop(root, None)
+        self.migrate(ctx.db)
+        await scope.start()
+        return scope
+
+    async def unload(self, ext_id: str) -> None:
+        """Stop an extension and forget it."""
+        await self.extensions[ext_id].stop()
+        del self.extensions[ext_id], self._enabled[ext_id]
+
+    async def reload(self, ext_id: str) -> ExtensionScope:
+        """Stop a folder-loaded extension and load it again from its folder: new code, same data."""
+        old = self.extensions[ext_id]
+        if not old.dev or old.root is None or old.ctx is None:
+            raise ValueError(f"extension {ext_id!r} is not loaded from a folder, so it cannot be reloaded")
+        await self.unload(ext_id)
+        return await self.load_dev(old.root, old.ctx)
+
+    @staticmethod
+    def _activate(scope: ExtensionScope, module: ModuleType) -> None:
+        module.activate(scope)
         declared = {t["name"]: (t.get("danger"), t.get("group")) for t in scope.manifest.contributes.get("tools", ())}
         registered = {name: (spec.danger, spec.group) for name, spec in scope.tools.items()}
         if registered != declared:
-            raise ValueError(f"extension {ext_id!r} registered tools {registered}, its manifest declares {declared}")
-        return scope
+            raise ValueError(f"extension {scope.manifest.id!r} registered tools {registered}, its manifest declares {declared}")
 
     def today(self) -> dict[str, Any]:
         """The dashboard keys contributed by the enabled extensions."""

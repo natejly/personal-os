@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Manifest",
+  "description": "extension.json (design doc section 3.1). Unknown keys are rejected, not stripped.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "version", "apiVersion"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9-]+$", "description": "Stable identity; namespaces tools, settings, routes and tables."},
+    "name": {"type": "string"},
+    "description": {"type": "string"},
+    "version": {"type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$"},
+    "apiVersion": {"type": "integer", "minimum": 1, "description": "The host API major this targets."},
+    "kind": {"enum": ["extension", "profile"]},
+    "enabled": {"enum": [true, false, "always"], "description": "Default for a fresh install."},
+    "activation": {"type": "array", "items": {"type": "string"}},
+    "requires": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"services": {"type": "array", "items": {"type": "string"}}, "extensions": {"type": "array", "items": {"type": "string"}}}
+    },
+    "provides": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"services": {"type": "array", "items": {"type": "string"}}}
+    },
+    "contributes": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": {"type": "string"},
+              "description": {"type": "string"},
+              "danger": {"type": "string"},
+              "group": {"type": "string"},
+              "schema": {"type": "string", "description": "Path of the tool's JSON Schema inside the extension."}
+            }
+          }
+        },
+        "routes": {"type": "object", "properties": {"prefix": {"type": "string"}}},
+        "views": {
+          "type": "array",
+          "items": {"type": "object", "required": ["id", "label"], "properties": {"id": {"type": "string"}, "label": {"type": "string"}, "icon": {"type": "string"}}}
+        },
+        "slots": {"type": "object"},
+        "settings": {"type": "object", "properties": {"panel": {"type": "string"}}},
+        "commands": {"type": "array", "items": {"type": "object"}},
+        "keybindings": {"type": "array", "items": {"type": "object"}},
+        "theme": {"type": "object"},
+        "defaults": {"type": "object"},
+        "layout": {"type": "object"}
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "description": "Every hook the code may subscribe to, by name.",
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "priority": {"type": "integer"},
+          "timeoutMs": {"type": "integer", "minimum": 1},
+          "onFailure": {"enum": ["ask", "deny"], "description": "What a gate hook that did not answer turns into; never allow."}
+        }
+      }
+    },
+    "permissions": {"type": "array", "items": {"type": "string"}},
+    "settings": {
+      "type": "object",
+      "description": "Typed settings, stored as ext.<id>.<field>; a secret goes to the secret store.",
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false, "required": ["type"],
+        "properties": {"type": {"enum": ["string", "number", "integer", "boolean", "secret"]}}
+      }
+    },
+    "data": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"tables": {"type": "array", "items": {"type": "string"}}, "migrations": {"type": "string"}}
+    }
+  }
+}

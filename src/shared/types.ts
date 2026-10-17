@@ -746,6 +746,37 @@ export interface OtelExportConfig {
   timeoutSeconds: number
 }
 
+/** One hook an extension is subscribed to, as the dev panel shows it (GET /dev/extensions). */
+export interface ExtensionHookStats {
+  hook: string
+  calls: number
+  p50Ms: number | null
+  p95Ms: number | null
+  muted: boolean
+  errors: string[]
+}
+
+export interface ExtensionInfo {
+  id: string
+  name: string
+  version: string
+  enabled: boolean
+  /** Loaded from a folder, so it can be reloaded. */
+  reloadable: boolean
+  folder: string | null
+  contributes: Record<string, unknown>
+  tools: string[]
+  permissions: string[]
+  hooks: ExtensionHookStats[]
+}
+
+export interface ExtensionsDev {
+  /** The backend was started with GRAIN_EXT_DEV=1, so folders can be loaded and reloaded. */
+  live: boolean
+  extensions: ExtensionInfo[]
+  failed: { path: string; error: string }[]
+}
+
 /** GET /conversations/{id}/context-meter: the replayed history against the model window (estimates, len/4). */
 export interface ContextMeter {
   window: number

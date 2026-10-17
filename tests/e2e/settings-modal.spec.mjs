@@ -37,6 +37,23 @@ test('Voice input settings act at once and persist through /voice/config', async
   noErrors(grain)
 })
 
+test('the Developer panel lists extensions with their hooks and flips one at once', async ({ grain }) => {
+  const { page, api } = grain
+  const enabled = async () => (await api('/dev/extensions')).extensions.find((e) => e.id === 'health').enabled
+  const was = await enabled()
+  await openAdvanced(page, 'Developer')
+  await setToggle(field(page, 'Developer tools'), true)
+  const summary = dialog(page).locator('summary', { hasText: 'Health health 1.0.0' })
+  const health = summary.locator('..')
+  await summary.click()
+  await expect(health.getByText('app.start')).toBeVisible()
+  await health.getByRole('button', { name: was ? 'Disable' : 'Enable', exact: true }).click()
+  await expect.poll(enabled).toBe(!was)
+  await expect(health.getByRole('button', { name: was ? 'Enable' : 'Disable', exact: true })).toBeVisible()
+  await save(page)
+  noErrors(grain)
+})
+
 test('toggles and fields persist through PUT /settings and survive relaunch', async ({ grain }) => {
   const { page, api } = grain
   // Advanced groups

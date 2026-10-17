@@ -18,6 +18,8 @@ import asyncio
 import inspect
 import itertools
 import logging
+import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine, Literal
 
@@ -27,6 +29,8 @@ log = logging.getLogger(__name__)
 
 DEFAULT_PRIORITY = 50
 MUTE_AFTER = 5  # consecutive emit failures before a handler is muted for the session
+STATS_WINDOW = 200  # latencies kept per handler for the dev panel's p50 and p95
+ERROR_WINDOW = 10  # failures kept per handler
 TIMEOUT_S = {"emit": 2.0, "collect": 1.0, "pipe": 1.0, "gate": 2.0}
 
 HOOKS = frozenset({
@@ -66,6 +70,15 @@ class Subscription:
     seq: int
     failures: int = field(default=0)
     muted: bool = field(default=False)
+    calls: int = field(default=0)
+    latencies: deque[float] = field(default_factory=lambda: deque(maxlen=STATS_WINDOW))  # seconds
+    errors: deque[str] = field(default_factory=lambda: deque(maxlen=ERROR_WINDOW))
+
+    def record(self, started: float, error: BaseException | None = None) -> None:
+        self.calls += 1
+        self.latencies.append(time.perf_counter() - started)
+        if error is not None:
+            self.errors.append(f"{type(error).__name__}: {error}" if str(error) else type(error).__name__)
 
     @property
     def sort_key(self) -> tuple[int, int, int]:
@@ -117,11 +130,19 @@ class HookBus:
         return await asyncio.wait_for(sub.call(arg), self._timeout(sub, kind))
 
     async def _try(self, sub: Subscription, arg: Any, kind: str) -> tuple[bool, Any]:
+        started = time.perf_counter()
         try:
-            return True, await self._invoke(sub, arg, kind)
-        except Exception:  # noqa: BLE001 - a handler is third-party to the code that fires the hook
+            out = await self._invoke(sub, arg, kind)
+        except Exception as e:  # noqa: BLE001 - a handler is third-party to the code that fires the hook
             log.warning("hook %s from %s failed", sub.hook, sub.owner, exc_info=True)
+            sub.record(started, e)
             return False, None
+        sub.record(started)
+        return True, out
+
+    def subscriptions(self, owner: str) -> list[Subscription]:
+        """Everything one extension is subscribed with, for the dev panel."""
+        return [s for subs in self._subs.values() for s in subs if s.owner == owner]
 
     def active(self, hook: str) -> bool:
         """Whether anything is subscribed, so a hot path can skip building a payload nobody will read."""
@@ -153,15 +174,19 @@ class HookBus:
 
     def _inline(self, sub: Subscription, arg: Any) -> tuple[bool, Any]:
         """Call a handler on the caller's thread. One that answers with an awaitable cannot be waited for here."""
+        started = time.perf_counter()
         try:
             out = sub.fn(arg)
-        except Exception:  # noqa: BLE001 - a handler is third-party to the code that fires the hook
+        except Exception as e:  # noqa: BLE001 - a handler is third-party to the code that fires the hook
             log.warning("hook %s from %s failed", sub.hook, sub.owner, exc_info=True)
+            sub.record(started, e)
             return False, None
+        sub.record(started)
         if inspect.isawaitable(out):
             if inspect.iscoroutine(out):
                 out.close()
             log.warning("hook %s from %s is async and cannot run inline from synchronous code; skipped", sub.hook, sub.owner)
+            sub.errors.append("async handler cannot run inline from synchronous code")
             return False, None
         return True, out
 

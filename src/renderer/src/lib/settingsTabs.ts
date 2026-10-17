@@ -59,6 +59,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'appearance', sec: 'look', title: 'Theme, accent, fonts and zoom', keys: 'preset presets dark light colour color custom accent font typeface code monospace size scale recap blobs' },
   { tab: 'appearance', sec: 'notifications', title: 'Notifications', keys: 'notify alerts unread dot jobs finish' },
   { tab: 'appearance', sec: 'shortcuts', title: 'Shortcuts and voice', keys: 'keyboard hotkey dictation microphone speech quick note quick ask gather widgets' },
+  { tab: 'sidebar', sec: 'profiles', title: 'Profiles', keys: 'lean focus defaults preset bundle theme effort quiet' },
   { tab: 'sidebar', sec: 'sidebar', title: 'Sidebar rows', keys: 'hide show lists calendar mail health library files spaces projects jobs modules views' },
   { tab: 'system', sec: 'system', title: 'System access', keys: 'macos accessibility screen recording automation folders privacy permission' },
   { tab: 'advanced', sec: 'data', title: 'Data, backups and trash', keys: 'export import backup restore presets archive trash delete diagnostics support logs' },

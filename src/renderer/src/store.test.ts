@@ -136,6 +136,17 @@ test('a new chat defaults to no project, and only an explicit choice files it in
   assert.equal(draft(), null)
 })
 
+test('a new chat starts on the default effort the settings hold, high when they hold none', () => {
+  const settings = useStore.getState().settings
+  useStore.setState({ settings: { ...settings, defaultEffort: 'low' } })
+  useStore.getState().newChat()
+  assert.equal(useStore.getState().draftEffort, 'low')
+  useStore.setState({ settings: { ...settings, defaultEffort: undefined } })
+  useStore.getState().newChat()
+  assert.equal(useStore.getState().draftEffort, 'high')
+  useStore.setState({ settings })
+})
+
 test('accept/restore: typing during the request survives an append and yields to a replacement', () => {
   const appended = { id: 'd', content: 'notes\n\n## Summary\nbody\n' } as never
   // nothing typed since the pre-request flush: the server body wins and the draft clears

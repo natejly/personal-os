@@ -2,7 +2,7 @@ import type {
   ArchivedInboxRun,
   BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, DriveBackupRun, DriveBackupStatus, Recap, Conversation, ConversationSettings, WorkerInfo, ContextUsed, ContextMeter, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
-  Memory, MemoryProposal, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
+  Memory, MemoryProposal, Profile, ProfileHeld, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasWindow, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskRichPreview,
@@ -176,6 +176,12 @@ export const api = {
   settings: {
     get: () => req<Settings>('/settings'),
     set: (patch: Partial<Settings>) => req<Settings>('/settings', { method: 'PUT', body: json(patch) })
+  },
+  /** Profile extensions. `enable` applies nothing and returns what it held back unless `confirm` is true. */
+  profiles: {
+    list: () => req<Profile[]>('/profiles'),
+    enable: (id: string, confirm = false) => req<{ held: ProfileHeld[] }>(`/profiles/${id}/enable`, { method: 'POST', body: json({ confirm }) }),
+    disable: (id: string) => req<void>(`/profiles/${id}/disable`, { method: 'POST' })
   },
   /** First-run state. */
   setup: {

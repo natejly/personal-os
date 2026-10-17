@@ -13,6 +13,7 @@ import { acceptToast } from './lib/proposalToast'
 import { installRejectionToasts } from './lib/rejections'
 import { busyText, nowText } from './lib/runStatus'
 import { api, backgroundStream, chatStream, getBase, getToken, setBase, type Scope } from './lib/api'
+import { applyProfileThemes } from './extensions/profiles'
 import { useTodos } from './extensions/todos/store'
 import { currentSelection } from './lib/pageContext'
 import { panelConversationFor, type PagePin } from './lib/pagePanel'
@@ -672,6 +673,9 @@ const toastClocks = new Map<number, { left: number; at?: number; timer?: ReturnT
 let toastsHeld = false
 /** The completion popup's snooze timer. Its own, so dismissing a toast never clears a snoozed popup. */
 let completionTimer: ReturnType<typeof setTimeout> | null = null
+/** What a new chat's effort control starts on: the default a profile or the user set, else high. */
+const startEffort = (s: Settings): Effort => s.defaultEffort ?? DEFAULT_EFFORT
+
 /** Set by the Settings modal while its draft is dirty: it asks before discarding instead of closing. */
 let settingsGuard: (() => void) | null = null
 let memoriesSeq = 0
@@ -2006,8 +2010,9 @@ export const useStore = create<State>((set, get) => {
       }
       // Quiet while the backend restarts: the banner already says so, and every refresher would fail at once.
       installRejectionToasts((m, kind) => { if (get().backendState === 'ready') get().toast(m, kind) })
-      set({ settings, view: 'chat', projects, conversations, ready: true })
+      set({ settings, view: 'chat', projects, conversations, ready: true, draftEffort: startEffort(settings) })
       void get().loadModels()
+      void api.profiles.list().then(applyProfileThemes).catch(() => undefined)
       void get().loadScope('all')
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
       void get().refreshAgentDefs().catch(() => undefined)
@@ -2232,7 +2237,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftChatSettings: {}, view: 'chat', ...closeSettings() }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: startEffort(get().settings), draftModel: null, draftFast: false, draftChatSettings: {}, view: 'chat', ...closeSettings() }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -2569,7 +2574,7 @@ export const useStore = create<State>((set, get) => {
       const { messages: _m, ...row } = c
       set((s) => ({
         draftPendingSend: null,
-        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftChatSettings: {},
+        focusedConversationId: c.id, view: 'chat', draftEffort: startEffort(get().settings), draftModel: null, draftFast: false, draftChatSettings: {},
         uploadTaintTarget: fromUpload ? null : uploadTaintTarget,
         uploadTaintSource: fromUpload ? 'upload' : uploadTaintSource,
         conversations: [row as Conversation, ...s.conversations.filter((x) => x.id !== c.id)]

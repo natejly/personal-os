@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..llm import EFFORTS
+from ..permissions import CHOICES
 from .hooks import HOOKS
 
 API_VERSION = 1
@@ -25,6 +27,13 @@ _HOOK_KEYS = {"priority", "timeoutMs", "onFailure"}
 SETTING_TYPES = ("string", "number", "integer", "boolean", "secret")  # a secret is a string kept in the secret store
 _FIELD = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 _TABLE = re.compile(r"[a-z_][a-z0-9_]*")
+_PROFILE_CONTRIBUTES = {"theme", "defaults", "layout"}  # all a profile may contribute: it runs nothing
+_PROFILE_FORBIDDEN = ("requires", "provides", "hooks", "permissions", "settings", "data")
+_DEFAULTS = {"views", "model", "effort", "theme", "permissions"}
+PERMISSION_MODES = CHOICES["permissionMode"]
+_THEMES = ("dark", "light", "system")
+_TOKEN = re.compile(r"--[a-z0-9-]+")
+_TOKEN_VALUE = re.compile(r"[^;{}<>@\\]{1,200}")  # one declaration value: no way to open a rule, an import or an escape
 _PERMISSIONS = {"db:own", "context:volatile", "conversation:read", "input:rewrite", "hooks:gate", "memory:gate",
                 "prompt:inject", "ui:unsupported-css"}  # plus "service:<name>"
 
@@ -75,6 +84,8 @@ class Manifest:
         _check(all(_ACTIVATION.fullmatch(a) for a in activation), "activation has an unknown event")
         requires, provides = _object(raw, "requires", {"services", "extensions"}), _object(raw, "provides", {"services"})
         permissions = _strings(raw, "permissions", ())
+        if raw.get("kind") == "profile":
+            _check_profile(raw)
         _check(all(p in _PERMISSIONS or p.startswith("service:") for p in permissions), "permissions has an unknown capability")
         return cls(
             id=raw["id"], name=raw["name"], version=raw["version"], api_version=api,
@@ -92,7 +103,10 @@ def load_manifest(path: Path) -> Manifest:
         raw = json.loads(path.read_text("utf-8"))
     except (OSError, ValueError) as e:
         raise ManifestError(f"cannot read {path.name}: {e}") from e
-    return Manifest.from_dict(raw)
+    manifest = Manifest.from_dict(raw)
+    if manifest.kind == "profile" and (extra := sorted(p.name for p in path.parent.iterdir() if p.name != path.name)):
+        raise ManifestError(f"a profile holds only {path.name}, found {', '.join(extra)}")
+    return manifest
 
 
 def _check(ok: object, message: str) -> None:
@@ -127,7 +141,39 @@ def _contributes(raw: dict[str, Any]) -> dict[str, Any]:
     tools = c.get("tools", [])
     _check(isinstance(tools, list) and all(isinstance(t, dict) and _is_str(t.get("name")) for t in tools),
            "contributes.tools must be a list of objects with a name")
+    _theme(c)
+    _defaults(c)
     return c
+
+
+def _check_profile(raw: dict[str, Any]) -> None:
+    """A profile has no code: only theme, defaults and layout, which the host reads as data."""
+    _check(not (used := [k for k in _PROFILE_FORBIDDEN if raw.get(k)]), f"a profile cannot declare {', '.join(used)}")
+    _check(raw.get("activation", ["startup"]) == ["startup"], "a profile has no code to activate")
+    _check(set(_object(raw, "contributes")) <= _PROFILE_CONTRIBUTES, "a profile contributes only theme, defaults and layout")
+
+
+def _theme(c: dict[str, Any]) -> None:
+    theme = c.get("theme", {})
+    _check(isinstance(theme, dict) and set(theme) <= {"light", "dark"}, "contributes.theme takes only 'light' and 'dark'")
+    for scheme, tokens in theme.items():
+        _check(isinstance(tokens, dict), f"contributes.theme.{scheme} must be an object of tokens")
+        for name, value in tokens.items():
+            _check(_TOKEN.fullmatch(name), f"contributes.theme.{scheme}: {name!r} is not a custom property name")
+            _check(isinstance(value, str) and _TOKEN_VALUE.fullmatch(value) and "url(" not in value.lower(),
+                   f"contributes.theme.{scheme}.{name} must be a plain CSS value")
+
+
+def _defaults(c: dict[str, Any]) -> None:
+    d = c.get("defaults", {})
+    _check(isinstance(d, dict) and set(d) <= _DEFAULTS, f"contributes.defaults takes only {', '.join(sorted(_DEFAULTS))}")
+    views = d.get("views", {})
+    _check(isinstance(views, dict) and all(_is_str(k) and isinstance(v, bool) for k, v in views.items()),
+           "defaults.views must map a view id to true or false")
+    _check(_is_str(d.get("model", "x")), "defaults.model must be a model id")
+    _check(d.get("effort", "high") in EFFORTS, f"defaults.effort must be one of {', '.join(EFFORTS)}")
+    _check(d.get("theme", "dark") in _THEMES, f"defaults.theme must be one of {', '.join(_THEMES)}")
+    _check(d.get("permissions", "auto") in PERMISSION_MODES, f"defaults.permissions must be one of {', '.join(PERMISSION_MODES)}")
 
 
 def _settings(raw: dict[str, Any]) -> dict[str, Any]:

@@ -36,7 +36,7 @@ session_affinity: ContextVar[str | None] = ContextVar("session_affinity", defaul
 
 # Views the model-facing side honours: a view in `hiddenViews` is off, so its tools, loops and prompt data stand down.
 # `spaces` is the canvas view's key (the sidebar row it hides is Canvases).
-LEAN_OFF_VIEWS = ["todos", "calendar", "mail", "health", "spaces"]
+EFFORTS = ("default", "low", "medium", "high", "xhigh", "max")  # a chat's reasoning effort; 'default' sends none
 TOOL_VIEWS = (("health_", "health"), ("todo_list", "todos"), ("todo_add", "todos"), ("todo_update", "todos"),
               ("todo_delete", "todos"), ("google_tasks_", "todos"), ("calendar_", "calendar"), ("meeting_brief", "calendar"),
               ("propose_times_draft", "calendar"), ("schedule_suggest", "calendar"), ("gmail_", "mail"),
@@ -115,6 +115,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "modelHigh": "",
     "modelMedium": "",
     "modelLow": "",
+    "defaultEffort": "high",  # the reasoning effort a new chat starts on (a chat's own choice wins)
     "workerEffort": "medium",  # reasoning effort of workers' rounds: low | medium | high, or "chat" to follow the chat's
     "workerModel": "",  # "" = workers run on the chat model; an agent definition's own model still wins
     "autoRoute": False,  # new chats start on Auto: the fast or the default model per message
@@ -144,7 +145,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "dictationChord": "Control+Alt+D",
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
     "homeWidgets": {},
-    "hiddenViews": [],  # a fresh install is seeded lean by app._seed_hidden_modules; an install without the key keeps every view on
+    "hiddenViews": [],  # a fresh install gets the lean profile (app._seed_hidden_modules); an install without the key keeps every view on
     "pickerModels": [],  # model ids the picker lists; [] = every keyed provider's preset models
     # Rows hidden from the sidebar only; they stay reachable everywhere else. Default: only Files, Lists, Calendar, Library, Jobs, Canvases and Projects show.
     "sidebarHidden": ["mail", "health"],

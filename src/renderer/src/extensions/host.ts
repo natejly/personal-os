@@ -7,6 +7,7 @@ import type { FC } from 'react'
 import type { ModuleDef, ModuleNav } from '../shell/types'
 import type { View } from '../store'
 import type { WidgetDef } from '../canvas/registry'
+import { addTheme, type Scheme, type Tokens } from './theme'
 
 export interface Disposable { dispose(): void }
 
@@ -34,6 +35,8 @@ export interface UiApi {
   view(def: ViewDef): Disposable
   /** A Settings section of its own, listed while the extension is on. */
   settingsPanel(def: SettingsPanelDef): Disposable
+  /** Set existing CSS custom properties for one colour scheme, or both when `scheme` is omitted. */
+  theme(tokens: Tokens, opts?: { scheme?: Scheme }): Disposable
 }
 
 export interface ExtensionModule {
@@ -61,6 +64,7 @@ export function activateExtension(id: string, ext: ExtensionModule): void {
       key: id, label: def.label, description: def.description, icon: def.icon, nav: def.nav, widget: def.widget,
       view: { id: def.id, Component: def.Component, optional: true }
     }),
-    settingsPanel: (def) => add(settingsPanels, { ...def, tab: `ext:${id}:${def.id}`, extension: id })
+    settingsPanel: (def) => add(settingsPanels, { ...def, tab: `ext:${id}:${def.id}`, extension: id }),
+    theme: (tokens, opts) => addTheme(tokens, opts?.scheme)
   })
 }

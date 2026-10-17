@@ -21,7 +21,6 @@ test('module keys, view ids, widget kinds are unique', () => {
 test('an optional view is in OPTIONAL_VIEWS', () => {
   for (const m of MODULES) {
     if (m.view?.optional) assert.ok(OPTIONAL_VIEWS.some((o) => o.view === m.view!.id), `${m.key}: view ${m.view.id}`)
-    if (m.nav) assert.ok(m.view, `${m.key}: nav needs a view`)
   }
 })
 

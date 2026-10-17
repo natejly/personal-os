@@ -15,6 +15,8 @@ import { hasModelKey } from '../lib/modelLabel'
 import { PAGE_AGENT_DRAFT, useStore, useIsStreaming, useIsStopping } from '../store'
 import SmartTextarea from './SmartTextarea'
 import MicButton from './MicButton'
+import { CORE, registerSlot } from '../extensions/host'
+import { Slot } from '../extensions/slot'
 import { dictationText } from '../lib/dictation'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { COMPOSER_INSERT_EVENT, type ComposerInsertDetail } from '../lib/composerInsert'
@@ -31,6 +33,7 @@ import { tip } from '../lib/tip'
 
 const NO_MESSAGES: never[] = []
 const NO_SUGGESTIONS: string[] = []
+registerSlot(CORE, 'composer.toolbar', { id: 'mic', order: 10, Component: MicButton })
 
 interface ComposerProps {
   conversationId?: string
@@ -549,7 +552,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
         {/* Send keeps its slot for the whole reply (disabled until there is text to steer with), so
             typing mid-reply never changes the width of the text box; Stop sits beside it. */}
         <div className="composer-actions">
-          <MicButton scope={box} onText={dictate} />
+          <Slot name="composer.toolbar" props={{ scope: box, onText: dictate }} />
           {streaming && (
             <button className="send stop" title={stopping ? 'Stopping…' : tip('Stop', 'stop')} aria-label={stopping ? 'Stopping' : 'Stop'} aria-busy={stopping} disabled={stopping} onClick={halt}>
               {stopping ? <Loader2 size={14} className="spin" /> : <Square size={14} />}

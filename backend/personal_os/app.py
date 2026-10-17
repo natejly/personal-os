@@ -418,9 +418,21 @@ recaps = Recaps(db)
 google = Google(settings, db.set_settings, cache_dir=db.data_dir)
 app.include_router(setup_router(settings, db.set_settings, lambda: google.status()["connected"]))
 app.include_router(providers_router(db.get_settings, db.set_settings, db.secrets, ensure_embedding_model))
+
+
+def _publish_event(name: str, data: Any) -> None:
+    """An app-topic event from any thread: sync routes run in a threadpool, so an off-loop call is handed to the loop."""
+    try:
+        asyncio.get_running_loop()
+        events.publish(name, data)
+    except RuntimeError:
+        if _loop is not None and not _loop.is_closed():
+            _loop.call_soon_threadsafe(events.publish, name, data)
+
+
 # sid/wsid are defined further down, so the contexts look them up late.
 _ext_ctx = ExtensionContext(db=db, hidden_views=lambda: settings().get("hiddenViews") or (), services={"mcp": lambda: mcp, "google": lambda: google},
-                            settings=settings, set_settings=db.set_settings, sid=lambda p: sid(p), wsid=lambda p: wsid(p))
+                            settings=settings, set_settings=db.set_settings, sid=lambda p: sid(p), wsid=lambda p: wsid(p), publish=_publish_event)
 for _r in host.load_builtin("todos", _ext_ctx).routers:
     app.include_router(_r)
 todos, tasks_sync = _ext_ctx.services["todos"](), _ext_ctx.services["tasks_sync"]()
@@ -8120,7 +8132,7 @@ async def dashboard() -> dict[str, Any]:
     out: dict[str, Any] = {
         "google": st,
         **{k: v for m in modules if m.enabled() for k, v in m.today().items()},
-        **host.today(),
+        **host.recap_cards(),
         "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
         "recent_memories": memories.list(ALL)[:6],
         "recent_conversations": convos.list(ALL)[:6],
@@ -8207,9 +8219,7 @@ async def recap(force: bool = False) -> dict[str, Any]:
         "recent_memories": [m["content"] for m in memories.list(ALL) if m["created_at"] >= since][:15],
         "projects": [{"name": p["name"], **projects.stats(p["id"])} for p in projects.list()],
     }
-    if llm.view_on(cfg, "todos"):
-        facts["open_todos"] = [{"title": t["title"], "due": t["due"], "priority": t["priority"]} for t in todos.list("__all__")[:20]]
-        facts["todo_stats"] = todos.stats()
+    facts.update(host.recap_facts())
     internal = await _internal_data()
     # A fresh install with Google off has nothing to recap: no model call, and nothing cached, so the
     # first chat, todo or Google sign-in today gets a real recap instead of this empty one.

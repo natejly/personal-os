@@ -15,7 +15,8 @@
       { "name": "health_delete_entry", "danger": "writes", "group": "health" }
     ],
     "routes": { "prefix": "/health" },
-    "views": [{ "id": "health", "label": "Health", "icon": "heart" }]
+    "views": [{ "id": "health", "label": "Health", "icon": "heart" }],
+    "slots": { "recap.section": [{ "id": "health" }] }
   },
   "hooks": { "app.start": {} },
   "permissions": ["db:own", "service:mcp"],

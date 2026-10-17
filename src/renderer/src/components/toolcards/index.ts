@@ -16,4 +16,4 @@ import './ShipChecklistCard'
 import './CodingSessionCard'
 import './ShareCards'
 
-export { TOOL_CARDS } from './registry'
+export { TOOL_CARDS, TOOL_DISPLAY } from './registry'

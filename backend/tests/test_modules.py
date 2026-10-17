@@ -141,7 +141,7 @@ class DashboardTests(unittest.TestCase):
             client.delete(f"/todos/{t['id']}")
 
     def test_today_payload(self) -> None:
-        self.assertEqual(set(host.extensions["todos"].today_fns[0]()), {"todos", "todo_stats"})
+        self.assertEqual(set(host.extensions["todos"].recap_sections[0].card()), {"todos", "todo_stats"})
 
 
 class LoopTests(unittest.TestCase):

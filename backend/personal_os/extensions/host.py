@@ -9,7 +9,7 @@ import logging
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Iterable, get_args
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Iterable, Iterator, get_args
 
 from .. import backups, migrations
 from ..context import Block, Contribution, RetrievalSources, Slot
@@ -34,6 +34,14 @@ STABLE_CONTEXT_TIMEOUT_MS = 100  # a stable block reads cached state: it is buil
 
 
 @dataclass
+class RecapSection:
+    """One extension's slice of the recap: `card` adds keys to GET /dashboard, `facts` to what the recap model reads."""
+    id: str
+    card: Callable[[], dict[str, Any]]
+    facts: Callable[[], dict[str, Any]] | None = None
+
+
+@dataclass
 class ExtensionContext:
     """What the app lends to the extensions it loads."""
     db: Database
@@ -45,6 +53,7 @@ class ExtensionContext:
     # a stale project id and 400s on 'all').
     sid: Callable[[str | None], Any]
     wsid: Callable[[str | None], str | None]
+    publish: Callable[[str, Any], None]  # an app-topic event, from any thread
 
 
 class Services:
@@ -72,7 +81,7 @@ class ExtensionScope:
     disposables: Scope = field(default_factory=Scope)
     tools: dict[str, ToolSpec] = field(default_factory=dict)
     routers: list[APIRouter] = field(default_factory=list)
-    today_fns: list[Callable[[], dict[str, Any]]] = field(default_factory=list)
+    recap_sections: list[RecapSection] = field(default_factory=list)
     tasks: set[asyncio.Task[Any]] = field(default_factory=set)
 
     @property
@@ -129,10 +138,18 @@ class ExtensionScope:
         self.routers.append(router)
         return self.disposables.add(Disposable(lambda: self.routers.remove(router)))
 
-    def today(self, fn: Callable[[], dict[str, Any]]) -> Disposable:
-        """Add keys to the GET /dashboard payload while the extension is enabled; `fn` must be cheap."""
-        self.today_fns.append(fn)
-        return self.disposables.add(Disposable(lambda: self.today_fns.remove(fn)))
+    def recap_section(self, section_id: str, *, card: Callable[[], dict[str, Any]],
+                      facts: Callable[[], dict[str, Any]] | None = None) -> Disposable:
+        """Fill the manifest's `recap.section` slot of that id while the extension is enabled; both functions must be cheap."""
+        if section_id not in {s["id"] for s in self.manifest.contributes.get("slots", {}).get("recap.section", ())}:
+            raise ValueError(f"extension {self.manifest.id!r} did not declare recap section {section_id!r}")
+        section = RecapSection(section_id, card, facts)
+        self.recap_sections.append(section)
+        return self.disposables.add(Disposable(lambda: self.recap_sections.remove(section)))
+
+    def emit_ui(self, name: str, data: Any) -> None:
+        """Send the open windows an `ext:<id>:<name>` event; the extension's frontend half receives it."""
+        self.app.publish(f"ext:{self.manifest.id}:{name}", data)
 
     def provide(self, service: str, impl: Any) -> Disposable:
         """Offer a service the manifest declares under provides.services, to the app and to extensions that require it."""
@@ -252,9 +269,16 @@ class ExtensionHost:
             raise ValueError(f"extension {ext_id!r} registered tools {registered}, its manifest declares {declared}")
         return scope
 
-    def today(self) -> dict[str, Any]:
-        """The dashboard keys contributed by the enabled extensions."""
-        return {k: v for s in self.extensions.values() if s.enabled() for fn in s.today_fns for k, v in fn().items()}
+    def recap_cards(self) -> dict[str, Any]:
+        """The dashboard keys contributed by the enabled extensions' recap sections."""
+        return {k: v for s in self._enabled_sections() for k, v in s.card().items()}
+
+    def recap_facts(self) -> dict[str, Any]:
+        """The recap facts contributed by the enabled extensions' recap sections."""
+        return {k: v for s in self._enabled_sections() if s.facts for k, v in s.facts().items()}
+
+    def _enabled_sections(self) -> Iterator[RecapSection]:
+        return (sec for scope in self.extensions.values() if scope.enabled() for sec in scope.recap_sections)
 
     def _add(self, manifest: Manifest, module: Module | None = None, root: Path | None = None,
              ctx: ExtensionContext | None = None) -> ExtensionScope:

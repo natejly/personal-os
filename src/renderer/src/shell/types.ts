@@ -1,7 +1,7 @@
 /**
  * The frontend half of a feature module (docs/module-manifest.md). One ModuleDef carries every
  * surface a feature puts into the shell, and the shell reads them from `MODULES` instead of naming
- * the feature: App.tsx renders `view`, the Sidebar lists `nav`, the canvas
+ * the feature: App.tsx renders `view`, the canvas
  * catalog takes `widget`, and Settings → Sidebar derives its toggles from `view`.
  *
  * `WidgetKind` is still a closed union, so a module can only fill a widget slot whose id already exists in it. A built-in extension keeps its own store slice beside its view (extensions/todos/store.ts).
@@ -31,7 +31,5 @@ export interface ModuleDef {
   description?: string
   icon: JSX.Element
   view?: ModuleView
-  /** Requires `view` (a nav entry opens it). Its canvas drag kind is `widget.kind` when there is one. */
-  nav?: ModuleNav
   widget?: WidgetDef
 }

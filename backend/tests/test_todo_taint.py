@@ -20,7 +20,7 @@ from personal_os.tools import Toolbox  # noqa: E402
 def _box(store: Todos) -> Toolbox:
     """A Toolbox carrying the todos extension's tools, over the same database as `store`."""
     ctx = ExtensionContext(db=store.db, hidden_views=lambda: (), services={"google": lambda: None}, settings=lambda: {},
-                           set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p)
+                           set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p, publish=lambda _n, _d: None)
     return Toolbox(None, None, None, lambda: {}, extensions=[ExtensionHost().load_builtin("todos", ctx)])  # type: ignore[arg-type]
 
 

@@ -120,10 +120,17 @@ class TodayCardTests(unittest.TestCase):
         near_low = todos.create("Near low", due=(today + timedelta(days=1)).isoformat(), priority=3)
         far_high = todos.create("Far high", due=(today + timedelta(days=3)).isoformat(), priority=1)
         self.assertGreater(todo_rules.urgency(far_high, today), todo_rules.urgency(near_low, today))
-        rows = [r["id"] for r in host.extensions["todos"].today_fns[0]()["todos"] if r["id"] in (near_low["id"], far_high["id"])]
+        rows = [r["id"] for r in host.extensions["todos"].recap_sections[0].card()["todos"] if r["id"] in (near_low["id"], far_high["id"])]
         self.assertEqual(rows, [far_high["id"], near_low["id"]])
         for t in (near_low, far_high):
             todos.trash(t["id"])
+
+    def test_the_todos_recap_section_gives_the_model_open_todos_and_stats(self) -> None:
+        t = todos.create("Recap me", due="2030-01-02", priority=2)
+        facts = host.extensions["todos"].recap_sections[0].facts()
+        self.assertEqual(set(facts), {"open_todos", "todo_stats"})
+        self.assertIn({"title": "Recap me", "due": "2030-01-02", "priority": 2}, facts["open_todos"])
+        todos.trash(t["id"])
 
     def test_home_calendar_uses_checked_calendars(self) -> None:
         got: list = []

@@ -21,7 +21,7 @@ import { OutputFiles, StatusDot } from './toolcards/parts'
 import { editedFileItem } from '../lib/showPanel'
 import SetupCard, { setupOf } from './toolcards/SetupCard'
 // Importing the index registers every dedicated card (TaskCard, FileCard, and whatever other workstreams add).
-import { TOOL_CARDS } from './toolcards'
+import { TOOL_CARDS, TOOL_DISPLAY } from './toolcards'
 import { quietEvents } from '../lib/orchestration'
 import { latestBrowserCall } from '../lib/browserApproval'
 import { planOfCall } from '../lib/planDigest'
@@ -355,7 +355,7 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
         <button className="tool-head" title={tools.find((x) => x.name === t.name)?.description || t.name} aria-expanded={!!open[t.id]} onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
           <ChevronRight size={12} className={open[t.id] ? 'rot90' : ''} />
           <StatusDot event={t} />
-          <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
+          <span className="tool-icon">{ICONS[t.name] ?? TOOL_DISPLAY[t.name]?.icon ?? <Wrench size={13} />}</span>
           <span className={`tool-name human ${t.pending && !t.needs_approval ? 'shimmer' : ''}`}>{d.verb}</span>
           {t.agent && <span className="tag" title="Raised by a subagent">via {t.agent}</span>}
           <ItemSubject event={t} fallback={d.subject} />

@@ -145,3 +145,37 @@ export function formatAccelerator(accel: string): string {
   }
   return ORDER.filter((m) => mods.has(m)).join('') + keys.join('')
 }
+
+const MODIFIERS: Record<string, string> = {
+  cmdorctrl: 'mod', commandorcontrol: 'mod', control: 'ctrl', ctrl: 'ctrl', alt: 'alt', option: 'alt', shift: 'shift',
+  command: 'meta', cmd: 'meta', super: 'meta', meta: 'meta'
+}
+const KEY_NAMES: Record<string, string> = { return: 'enter', esc: 'escape', plus: '+' }
+
+/**
+ * One spelling for an accelerator, so two spellings of the same chord compare equal: modifiers sorted and named
+ * ('mod' is CmdOrCtrl), the key lower-cased. 'Shift+CmdOrCtrl+g' and 'CommandOrControl+Shift+G' both give 'mod+shift+g'.
+ */
+export function canonicalAccelerator(accel: string): string {
+  const parts = accel.endsWith('++') ? [...accel.slice(0, -2).split('+'), '+'] : accel.split('+')
+  const mods = new Set<string>()
+  let key = ''
+  for (const p of parts) {
+    const lower = p.toLowerCase()
+    if (MODIFIERS[lower]) mods.add(MODIFIERS[lower])
+    else key = KEY_NAMES[lower] ?? lower
+  }
+  return [...[...mods].sort(), key].join('+')
+}
+
+/** The core shortcut that already uses this chord, if any. */
+export function shortcutForKeys(accel: string): Shortcut | undefined {
+  const canonical = canonicalAccelerator(accel)
+  return SHORTCUTS.find((s) => s.keys && canonicalAccelerator(s.keys) === canonical)
+}
+
+/** The canonical accelerator of a key press, to compare with `canonicalAccelerator` of a binding. */
+export function acceleratorOf(e: { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }, mac: boolean): string {
+  const mods = [e.shiftKey && 'shift', e.altKey && 'alt', mac ? e.metaKey && 'mod' : e.metaKey && 'meta', mac ? e.ctrlKey && 'ctrl' : e.ctrlKey && 'mod']
+  return [...mods.filter(Boolean).sort(), e.key === ' ' ? 'space' : KEY_NAMES[e.key.toLowerCase()] ?? e.key.toLowerCase()].join('+')
+}

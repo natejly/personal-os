@@ -15,9 +15,31 @@ import TracesPane from './TracesPane'
 import WorkersPanel from './WorkersPanel'
 import ProgressCard from './ProgressCard'
 import { useChatFileCount } from '../lib/useChatFiles'
+import { CORE, registerSlot, type SidePanelTabProps } from '../extensions/host'
+import { useSlot } from '../extensions/slot'
 
-type Tab = 'context' | 'files' | 'changes' | 'review' | 'traces' | 'terminal'
-const TABS: { key: Tab; label: string }[] = [{ key: 'context', label: 'Context' }, { key: 'files', label: 'Files' }, { key: 'changes', label: 'Changes' }, { key: 'review', label: 'Review' }, { key: 'traces', label: 'Traces' }, { key: 'terminal', label: 'Terminal' }]
+// The cards other than Terminal are `sidepanel.tab` slot items. Terminal owns the panel's attach state, so it stays here, last.
+const TERMINAL = { id: 'terminal', label: 'Terminal', Component: undefined, count: undefined }
+
+const ContextTab = ({ conversationId }: SidePanelTabProps): JSX.Element => <ContextDrawer conversationId={conversationId} embedded />
+const FilesTab = ({ conversationId, desk }: SidePanelTabProps): JSX.Element => (desk
+  ? <><ChatFilesList conversationId={conversationId ?? ''} layout="above" /><h4 className="cf-ws">Workspace</h4><DeskFiles desk={desk} /></>
+  : <ChatFilesList conversationId={conversationId ?? ''} />)
+const ChangesTab = ({ conversationId, desk }: SidePanelTabProps): JSX.Element => <div className="desk-pane scroll"><DeskChanges desk={desk ?? undefined} conversationId={conversationId ?? ''} /></div>
+const ReviewTab = ({ desk }: SidePanelTabProps): JSX.Element | null => (desk ? <div className="desk-pane scroll"><DeskReview desk={desk} /></div> : null)
+const TracesTab = ({ conversationId }: SidePanelTabProps): JSX.Element => <TracesPane conversationId={conversationId} />
+
+registerSlot(CORE, 'sidepanel.tab', { id: 'context', order: 10, label: 'Context', Component: ContextTab })
+registerSlot(CORE, 'sidepanel.tab', { id: 'files', order: 20, label: 'Files', Component: FilesTab, shown: (p) => !!p.conversationId })
+registerSlot(CORE, 'sidepanel.tab', {
+  id: 'changes', order: 30, label: 'Changes', Component: ChangesTab,
+  shown: (p) => !!p.conversationId && (p.desk ? p.desk.runs.length > 0 : p.fileCount > 0)
+})
+registerSlot(CORE, 'sidepanel.tab', {
+  id: 'review', order: 40, label: 'Review', Component: ReviewTab,
+  shown: (p) => !!p.desk && (p.desk.outputs.length > 0 || p.desk.status === 'review'), count: (p) => p.desk?.outputs.length ?? 0
+})
+registerSlot(CORE, 'sidepanel.tab', { id: 'traces', order: 50, label: 'Traces', Component: TracesTab, shown: (p) => !!p.conversationId })
 
 /** An openTerminal request made just now; an old one must not pull a freshly opened panel onto Terminal. */
 const freshTermRequest = (): boolean => Date.now() - (useStore.getState().terminalRequest?.at ?? 0) < 3000
@@ -30,13 +52,13 @@ const freshTermRequest = (): boolean => Date.now() - (useStore.getState().termin
  */
 export default function DeskPanel({ desk, conversationId, onClose }: { desk?: FullDesk | null; conversationId?: string; onClose: () => void }): JSX.Element {
   const id = conversationId ?? '' // '' only on a draft chat, where just the Context card shows
-  const [open, setOpen] = useState<Partial<Record<Tab, boolean>>>({ context: true, terminal: freshTermRequest(), review: desk?.status === 'review' })
+  const [open, setOpen] = useState<Record<string, boolean>>({ context: true, terminal: freshTermRequest(), review: desk?.status === 'review' })
   const panel = useRef<HTMLElement>(null)
   // The session shown in the large terminal window (one at a time); its xterm DOM is mounted there only, never in the card.
   const [attached, setAttached] = useState<{ id: string; mode: TermMode } | null>(null)
   const attach = (sid: string, mode: TermMode): void => { void startEntry(ensureEntry(sid, mode)); setAttached({ id: sid, mode }) }
-  const refs = useRef<Partial<Record<Tab, HTMLElement | null>>>({})
-  const expand = (k: Tab): void => { setOpen((o) => ({ ...o, [k]: true })); setTimeout(() => refs.current[k]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 50) }
+  const refs = useRef<Record<string, HTMLElement | null>>({})
+  const expand = (k: string): void => { setOpen((o) => ({ ...o, [k]: true })); setTimeout(() => refs.current[k]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 50) }
   useEffect(() => { if (desk?.status === 'review') expand('review') }, [desk?.id, desk?.status])
   const contextOpen = useStore((s) => s.contextOpen)
   const termOk = useTermAvailable()
@@ -70,34 +92,27 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
     window.addEventListener('keydown', esc)
     return () => window.removeEventListener('keydown', esc)
   }, [onClose])
-  const shown = (k: Tab): boolean => k === 'context' || (!!conversationId && k === 'files') || (k === 'changes' && !!conversationId && (desk ? desk.runs.length > 0 : fileCount > 0)) || (k === 'review' && !!desk && (desk.outputs.length > 0 || desk.status === 'review')) || (k === 'traces' && !!conversationId) || (k === 'terminal' && termOk && !!conversationId)
-  const content = (k: Tab): JSX.Element | null => {
-    switch (k) {
-      case 'context': return <ContextDrawer conversationId={conversationId} embedded />
-      case 'files': return desk
-        ? <><ChatFilesList conversationId={id} layout="above" /><h4 className="cf-ws">Workspace</h4><DeskFiles desk={desk} /></>
-        : <ChatFilesList conversationId={id} />
-      case 'changes': return <div className="desk-pane scroll"><DeskChanges desk={desk ?? undefined} conversationId={id} /></div>
-      case 'terminal': return <TerminalPane conversationId={conversationId} attached={attached} onAttach={attach} />
-      case 'traces': return <TracesPane conversationId={conversationId} />
-      case 'review': return desk ? <div className="desk-pane scroll"><DeskReview desk={desk} /></div> : null
-    }
-  }
+  const tabProps: SidePanelTabProps = { conversationId, desk, fileCount }
+  const slotTabs = useSlot('sidepanel.tab').filter((t) => !t.shown || t.shown(tabProps))
+  const tabs = [...slotTabs, ...(termOk && conversationId ? [TERMINAL] : [])]
   return (
     <aside ref={panel} className="desk-panel" aria-label="Workspace">
       <button className="icon-btn ghost desk-close" title="Close" aria-label="Close workspace" onClick={onClose}><X size={14} /></button>
       <ProgressCard conversationId={conversationId} desk={desk} />
       <WorkersPanel conversationId={conversationId} />
-      {TABS.filter((t) => shown(t.key)).map((t) => (
-        <section key={t.key} ref={(el) => { refs.current[t.key] = el }} className="desk-card">
-          <button data-testid={`desk-tab-${t.key}`} className={`desk-card-head${open[t.key] ? ' active' : ''}`} aria-expanded={!!open[t.key]} onClick={() => setOpen((o) => ({ ...o, [t.key]: !o[t.key] }))}>
-            {t.label}
-            {t.key === 'review' && desk && desk.outputs.length > 0 && <span className="count">{desk.outputs.length}</span>}
-            {open[t.key] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          </button>
-          {open[t.key] && <div className={`desk-card-body`}>{content(t.key)}</div>}
-        </section>
-      ))}
+      {tabs.map((t) => {
+        const count = t.count?.(tabProps)
+        return (
+          <section key={t.id} ref={(el) => { refs.current[t.id] = el }} className="desk-card">
+            <button data-testid={`desk-tab-${t.id}`} className={`desk-card-head${open[t.id] ? ' active' : ''}`} aria-expanded={!!open[t.id]} onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
+              {t.label}
+              {!!count && <span className="count">{count}</span>}
+              {open[t.id] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            </button>
+            {open[t.id] && <div className={`desk-card-body`}>{t.Component ? <t.Component {...tabProps} /> : <TerminalPane conversationId={conversationId} attached={attached} onAttach={attach} />}</div>}
+          </section>
+        )
+      })}
       {attached && panel.current?.parentElement && createPortal(<TerminalWindow key={`${attached.id}:${attached.mode}`} sessionId={attached.id} mode={attached.mode} onClose={() => setAttached(null)} />, panel.current.parentElement)}
     </aside>
   )

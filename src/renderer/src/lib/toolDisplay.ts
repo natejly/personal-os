@@ -8,6 +8,7 @@
 import type { ToolEvent } from '@shared/types'
 import { hostPath } from './browserApproval'
 import { browserLine } from './toolResult'
+import { TOOL_DISPLAY } from '../components/toolcards/registry'
 
 /** What the call does, in words. `verb` is the title; `subject` is what it acts on, shown muted beside it. */
 export interface Described { verb: string; subject: string }
@@ -75,7 +76,7 @@ export function humanizeName(name: string): string {
 export function describeCall(name: string, args: Record<string, unknown> | null | undefined): Described {
   const a = args ?? {}
   const str = (k: string): string => (typeof a[k] === 'string' ? (a[k] as string) : '')
-  const verb = VERBS[name] ?? humanizeName(name)
+  const verb = VERBS[name] ?? TOOL_DISPLAY[name]?.verb ?? humanizeName(name)
   switch (name) {
     case 'run_shortcut': return { verb, subject: str('name') ? `'${str('name')}'` : '' }
     case 'propose_plan': {

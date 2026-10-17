@@ -14,6 +14,7 @@ import { installRejectionToasts } from './lib/rejections'
 import { busyText, nowText } from './lib/runStatus'
 import { api, backgroundStream, chatStream, getBase, getToken, setBase, type Scope } from './lib/api'
 import { useTodos } from './extensions/todos/store'
+import { dispatchExtEvent } from './extensions/events'
 import { currentSelection } from './lib/pageContext'
 import { panelConversationFor, type PagePin } from './lib/pagePanel'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
@@ -1325,6 +1326,8 @@ export const useStore = create<State>((set, get) => {
             })
           } else if (ev.event === 'todos_changed') {
             if (todosTickTimer === null) todosTickTimer = setTimeout(() => { todosTickTimer = null; useTodos.setState((st) => ({ tick: st.tick + 1 })); void get().refreshDashboard() }, 200)
+          } else if (ev.event.startsWith('ext:')) {
+            dispatchExtEvent(ev.event, ev.data)
           } else if (ev.event === 'ship_checklist') {
             get().upsertShip(ev.data)
           } else if (ev.event === 'coding_session') {

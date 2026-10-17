@@ -318,7 +318,7 @@ class HealthExtension:
         self.api.tool(ToolSpec("health_delete_entry", "Delete one logged health reading by id (from health_summary with `metric`). Only when the user asks to remove or correct an entry.",
             _obj({"id": {"type": "string"}}, ["id"]), health_delete_entry, "health", "writes", examples=[{"id": "a1b2c3"}]))
 
-    def today(self) -> dict[str, Any]:
+    def card(self) -> dict[str, Any]:
         return {"health": self.store.today()}
 
 
@@ -327,4 +327,4 @@ def activate(api: ExtensionScope) -> None:
     api.router(ext.router())
     ext.register_tools()
     api.on("app.start", ext.start)
-    api.today(ext.today)
+    api.recap_section("health", card=ext.card)

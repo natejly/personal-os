@@ -17,7 +17,7 @@ import ChartBlock from './ChartBlock'
 import InteractiveBlock from './InteractiveBlock'
 import MermaidBlock from './MermaidBlock'
 import HtmlBlock, { SvgBlock } from './HtmlBlock'
-import { fenceKind } from '../lib/htmlFence'
+import { fenceRenderer, registerFenceRenderer, type FenceRendererProps } from '../extensions/host'
 import remarkWikilinks from '../features/notes/remarkWikilinks'
 import remarkFilePaths, { filePathOf, hrefPath } from '../lib/pathLinks'
 import { openPathLink } from '../lib/useChatFiles'
@@ -126,19 +126,28 @@ const MermaidBlockM = memo(MermaidBlock)
 const HtmlBlockM = memo(HtmlBlock)
 const SvgBlockM = memo(SvgBlock)
 
+// Blocks the model can use to render rich content instead of code (see RENDER_HINT in the backend).
+// Model HTML/SVG never runs in the app's origin: html previews load from the grain-preview: scheme and svg from srcdoc, both in a sandboxed iframe (HtmlBlock).
+const ChartFence = ({ code, streaming }: FenceRendererProps): JSX.Element => <ChartBlockM source={code} streaming={streaming} />
+const InteractiveFence = ({ code, streaming }: FenceRendererProps): JSX.Element => <InteractiveBlockM source={code} streaming={streaming} />
+const MermaidFence = ({ code, streaming }: FenceRendererProps): JSX.Element => <MermaidBlockM source={code} streaming={streaming} />
+const HtmlFence = ({ code, streaming }: FenceRendererProps): JSX.Element => <HtmlBlockM source={code} streaming={streaming} />
+const SvgFence = ({ code, streaming }: FenceRendererProps): JSX.Element => <SvgBlockM source={code} streaming={streaming} />
+registerFenceRenderer('chart', ChartFence)
+registerFenceRenderer('interactive', InteractiveFence)
+registerFenceRenderer('mermaid', MermaidFence)
+registerFenceRenderer('html', HtmlFence)
+registerFenceRenderer('htm', HtmlFence)
+registerFenceRenderer('svg', SvgFence)
+
 function Pre({ node, ...props }: React.HTMLAttributes<HTMLPreElement> & { node?: unknown }): JSX.Element {
   void node // react-markdown's AST node must not reach the DOM
   const streaming = useContext(StreamingCtx)
   const child = props.children as React.ReactElement<{ className?: string; children?: string }> | undefined
   const lang = child?.props?.className?.replace('hljs language-', '').replace('language-', '') ?? ''
   const code = textOf(child?.props?.children)
-  // Blocks the model can use to render rich content instead of code (see RENDER_HINT in the backend).
-  if (lang === 'chart') return <ChartBlockM source={code} streaming={!!streaming} />
-  if (lang === 'interactive') return <InteractiveBlockM source={code} streaming={!!streaming} />
-  if (lang === 'mermaid') return <MermaidBlockM source={code} streaming={!!streaming} />
-  // Model HTML/SVG never runs in the app's origin: html previews load from the grain-preview: scheme and svg from srcdoc, both in a sandboxed iframe (HtmlBlock).
-  if (fenceKind(lang) === 'html') return <HtmlBlockM source={code} streaming={!!streaming} />
-  if (fenceKind(lang) === 'svg') return <SvgBlockM source={code} streaming={!!streaming} />
+  const Fence = fenceRenderer(lang.trim().toLowerCase())
+  if (Fence) return <Fence code={code} streaming={!!streaming} />
   return (
     <div className="code-block">
       <div className="code-head"><span>{lang || 'text'}</span><CopyButton text={code} label /></div>

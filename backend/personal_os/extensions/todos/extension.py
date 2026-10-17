@@ -327,10 +327,14 @@ class TodosExtension:
     async def start(self, _: Any) -> None:
         self.api.spawn(self.tasks_sync.loop())
 
-    def today(self) -> dict[str, Any]:
+    def card(self) -> dict[str, Any]:
         d = date.today()
         rows = sorted(self.store.list("__all__", include_done=False), key=lambda t: -todo_rules.urgency(t, d))  # stable: ties keep the due order
         return {"todos": rows[:12], "todo_stats": self.store.stats()}
+
+    def facts(self) -> dict[str, Any]:
+        return {"open_todos": [{"title": t["title"], "due": t["due"], "priority": t["priority"]} for t in self.store.list("__all__")[:20]],
+                "todo_stats": self.store.stats()}
 
 
 def activate(api: ExtensionScope) -> None:
@@ -340,4 +344,4 @@ def activate(api: ExtensionScope) -> None:
     api.router(ext.router())
     ext.register_tools()
     api.on("app.start", ext.start)
-    api.today(ext.today)
+    api.recap_section("todos", card=ext.card, facts=ext.facts)

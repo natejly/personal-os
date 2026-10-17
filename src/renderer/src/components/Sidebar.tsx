@@ -7,8 +7,9 @@ import { chatAttentionOf, useStore, type View } from '../store'
 import SidebarSpaces from './SidebarSpaces'
 import ResizeHandle from './ResizeHandle'
 import { rowHidden } from '../moduleToggles'
-import { MODULES } from '../shell/registry'
 import { navEntries, navTitle } from '../shell/nav'
+import { CORE, registerSlot } from '../extensions/host'
+import { Slot } from '../extensions/slot'
 import { dragProps } from '../canvas/dnd'
 import { useCanvas } from '../canvas/store'
 import { api } from '../lib/api'
@@ -81,11 +82,12 @@ type NavEntry = { view?: View; label: string; description?: string; icon: JSX.El
 const TOP: NavEntry[] = [
   { view: 'docs', description: 'Documents and folders', label: 'Files', icon: <Files size={15} /> }
 ]
+registerSlot(CORE, 'sidebar.section', { id: 'spaces', order: 10, Component: SidebarSpaces, when: (s) => !rowHidden(s.settings, 'spaces') })
+
 /** Sidebar view to the id of its Go-to shortcut. */
 const NAV_SHORTCUT: Partial<Record<string, string>> = {
   chat: 'view-chat', todos: 'view-todos', calendar: 'view-calendar', docs: 'view-docs', mail: 'view-mail'
 }
-const NAV_MODULES = MODULES.filter((m) => m.nav && m.view)
 
 export default function Sidebar(): JSX.Element {
   const navPill = useSlidingPill<HTMLElement>()
@@ -262,10 +264,11 @@ export default function Sidebar(): JSX.Element {
 
   // Module badges are pure functions of the store; useShallow compares the array element-wise, so a
   // fresh array with the same counts does not re-render.
-  const moduleBadges = useStore(useShallow((s) => NAV_MODULES.map((m) => m.nav?.badge?.(s) ?? null)))
+  const rows = navEntries()
+  const rowBadges = useStore(useShallow((s) => rows.map((r) => r.badge?.(s) ?? null)))
   const libCount = (v: View): number | null => {
-    const mi = NAV_MODULES.findIndex((m) => m.view?.id === v)
-    if (mi >= 0) return moduleBadges[mi]
+    const ri = rows.findIndex((r) => r.view === v && r.badge)
+    if (ri >= 0) return rowBadges[ri]
     if (v === 'library') return skillCandidates || null
     if (v === 'jobs') return jobsWanting || null
     return null
@@ -319,7 +322,7 @@ export default function Sidebar(): JSX.Element {
         )}
       </nav>
 
-      {!rowHidden(settings, 'spaces') && <SidebarSpaces />}
+      <Slot name="sidebar.section" props={{}} />
 
       {!rowHidden(settings, 'projects') && <>
       <div className="section-row">

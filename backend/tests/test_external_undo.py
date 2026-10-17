@@ -17,10 +17,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+from calendar_ext import calendar_box  # noqa: E402
 from fake_google_api import FakeGoogle, FakeServer  # noqa: E402
 from personal_os import extundo, verify  # noqa: E402
 from personal_os.db import Database  # noqa: E402
-from personal_os.tools import Toolbox  # noqa: E402
 
 CTX = {"project_id": None, "conversation_id": "c1", "message_id": "m1", "run_id": "r1"}
 
@@ -33,7 +33,7 @@ class ExternalUndoTests(unittest.TestCase):
         verify.RETRY_DELAYS, verify.SLEEP = (0.0,), lambda s: None
         self.db = Database(tempfile.mkdtemp(prefix="extundo-"))
         self.ex = extundo.ExternalUndo(self.db, self.g)
-        self.box = Toolbox(None, None, None, lambda: {}, google=self.g, extundo=self.ex)  # type: ignore[arg-type]
+        self.box = calendar_box(self.g, self.ex)
         app = FastAPI()
         app.include_router(extundo.router(self.ex))
         self.http = TestClient(app)

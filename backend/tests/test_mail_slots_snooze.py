@@ -19,8 +19,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os import app as appmod, llm, mailwatch as mw, tools  # noqa: E402
+from personal_os import app as appmod, llm, mailwatch as mw  # noqa: E402
 from personal_os.db import Database  # noqa: E402
+from personal_os.extensions.calendar import extension as calendar_extension  # noqa: E402
 from personal_os.modules import ModuleContext  # noqa: E402
 from personal_os.modules.mailwatch import MailWatchModule  # noqa: E402
 
@@ -30,7 +31,7 @@ NOW = dt.datetime(2026, 10, 2, 13, 0, tzinfo=dt.timezone.utc)
 
 
 class _FrozenDt:
-    """tools.dt with datetime.now() pinned; everything else is the real module."""
+    """The calendar extension's dt with datetime.now() pinned; everything else is the real module."""
     class datetime(dt.datetime):  # noqa: N801
         @classmethod
         def now(cls, tz: Any = None) -> dt.datetime:
@@ -54,7 +55,7 @@ def _setup() -> dict[str, mock.Mock]:
 def _call(**kw: Any) -> Any:
     args = {"to": "a@x.com", "subject": "Catch up", "duration_minutes": 30, "window_start": "2026-10-02", "window_end": "2026-10-02",
             "timezone": NY, **kw}
-    with mock.patch.object(tools, "dt", _FrozenDt()):
+    with mock.patch.object(calendar_extension, "dt", _FrozenDt()):
         return asyncio.run(appmod.toolbox.specs["propose_times_draft"].fn({}, **args))
 
 

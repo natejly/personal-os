@@ -335,5 +335,5 @@ def test_recap_reads_every_visible_calendar_not_only_primary(monkeypatch: pytest
     monkeypatch.setattr(appmod.google, "status", lambda: {"connected": True})
     monkeypatch.setattr(appmod.google, "calendar_events", events)
     monkeypatch.setattr(appmod.google, "gmail_search", lambda *a, **k: [], raising=False)
-    asyncio.run(appmod._internal_data())
+    assert appmod.host.extensions["calendar"].recap_sections[0].facts() == {"calendar_next_3_days": []}
     assert seen["kw"].get("calendar_ids") == ["all"]

@@ -2,7 +2,6 @@ import type { FC, PointerEvent as ReactPointerEvent } from 'react'
 import type { CanvasWindow, DragKind, WidgetKind } from '@shared/types'
 import type { MenuEntry } from './Menu'
 import { setDefaultConfigs, setDefaultSizes } from './store'
-import { def as calendar } from './widgets/calendar'
 import { def as chat } from './widgets/chat'
 import { def as crew } from './widgets/crew'
 import { def as doc } from './widgets/doc'
@@ -58,6 +57,7 @@ function moduleWidget(kind: WidgetKind): WidgetDef {
   return w
 }
 const todos = moduleWidget('todos')
+const calendar = moduleWidget('calendar')
 
 /**
  * The catalog, in the order of contract §6. The annotation is the guard: `Record<WidgetKind, WidgetDef>`

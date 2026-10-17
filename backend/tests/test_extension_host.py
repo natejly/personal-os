@@ -502,6 +502,16 @@ class BuiltinExtensionTests(unittest.TestCase):
         run(scope.stop())
         self.assertEqual((scope.tools, scope.routers), ({}, []))
 
+    def test_a_trigger_kind_is_offered_once_and_taken_back_with_the_scope(self) -> None:
+        scope = self.scope()
+        adapter = mock.Mock()
+        scope.trigger("demo-kind", adapter)
+        self.assertEqual((list(scope.triggers), scope.triggers["demo-kind"], "demo-kind" in scope.triggers), (["demo-kind"], adapter, True))
+        with self.assertRaises(ValueError):
+            scope.trigger("demo-kind", adapter)
+        run(scope.stop())
+        self.assertEqual(list(scope.triggers), [])
+
     def recap_scope(self, hidden: list[str] | None = None) -> tuple[ExtensionHost, Any]:
         host, scope = ExtensionHost(), self.scope(hidden, contributes={"slots": {"recap.section": [{"id": "demo"}]}})
         host.extensions["demo"] = scope

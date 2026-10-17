@@ -34,6 +34,12 @@ test('Lists is registered through its extension with its nav entry and canvas wi
   assert.deepEqual([m.key, m.label, navEntries().find((e) => e.view === 'todos')?.order, m.view?.optional, m.widget?.kind], ['todos', 'Lists', 12, true, 'todos'])
 })
 
+test('Calendar is registered through its extension with its nav entry and canvas widget', () => {
+  const m = moduleForView('calendar')
+  assert.ok(m && extensionModules.includes(m) && MODULES.includes(m))
+  assert.deepEqual([m.key, m.label, navEntries().find((e) => e.view === 'calendar')?.order, m.view?.optional, m.widget?.kind], ['calendar', 'Calendar', 14, true, 'calendar'])
+})
+
 test('Health is registered through its extension', () => {
   const m = moduleForView('health')
   assert.ok(m && extensionModules.includes(m) && MODULES.includes(m))

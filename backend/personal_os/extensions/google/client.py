@@ -137,6 +137,8 @@ class GoogleNotConnected(Exception):
 REAUTH = "Google sign-in expired or was revoked. Open Settings → Integrations and sign in again."
 # Lists and gets only (writes are not safe to repeat): the client itself backs off and retries on 429/5xx.
 READ_RETRIES = 2
+# What the recap model reads in place of a Google source (calendar, mail) when no account is connected: an empty list would read as "nothing on".
+NOT_CONNECTED_FACT = "not connected (unknown; Google is not connected in Settings)"
 
 
 class NotSent(Exception):

@@ -17,8 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fake_google_api import FakeGoogle, FakeServer, _Call  # noqa: E402
+from calendar_ext import calendar_box  # noqa: E402
 from personal_os import tools, verify  # noqa: E402
-from personal_os.tools import Toolbox  # noqa: E402
 
 
 class _FreeBusy:
@@ -67,7 +67,7 @@ class Base(unittest.TestCase):
         self.g = Fake(self.server)
         self._delays, self._sleep = verify.RETRY_DELAYS, verify.SLEEP
         verify.RETRY_DELAYS, verify.SLEEP = (0.0,), lambda s: None
-        self.box = Toolbox(None, None, None, lambda: {}, google=self.g)  # type: ignore[arg-type]
+        self.box = calendar_box(self.g)
 
     def tearDown(self) -> None:
         verify.RETRY_DELAYS, verify.SLEEP = self._delays, self._sleep

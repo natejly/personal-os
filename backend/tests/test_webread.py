@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from calendar_ext import calendar_box  # noqa: E402
 from personal_os import limits, llm, tools, webread  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
@@ -165,7 +166,7 @@ def test_a_calendar_note_and_a_doc_are_stripped() -> None:
         def sheets_read(self, spreadsheet_id: str, cell_range: str | None = None) -> dict[str, Any]:
             return {"id": spreadsheet_id, "title": "Budget", "values": [["ok", pat]]}
 
-    tb = Toolbox(None, None, None, lambda: {}, google=G())  # type: ignore[arg-type]
+    tb = calendar_box(G())
     event = run(tb.specs["calendar_get"].fn({}, event_id="e1"))
     assert pat not in event["description"] and "secretvalue" not in event["location"]
     assert event["summary"] == "sync"

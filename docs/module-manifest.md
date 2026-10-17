@@ -17,6 +17,7 @@ pilot because it touches every surface. Built-in only — no runtime loading, no
 | `mailwatch` | `modules/mailwatch.py` — `MailWatchModule` (reply tracker, `mail_followups`) | none (backend only) |
 | `planner` | `modules/planner.py` — `PlannerModule` (time-block suggestions for todos) | none (backend only) |
 | `health` | `extensions/health/extension.py`, a built-in extension loaded by `ExtensionHost.load_builtin` (registered after the modules, so its tools keep their place) | `extensions/health/extension.tsx` (`ui.view`) |
+| `calendar` | `extensions/calendar/extension.py`, a built-in extension loaded after health (the `calendar_*` tools and `meeting_brief`, the `/integrations/google/calendar*` routes, a `recap.section`, and the `calendar` job kind through `api.trigger`) | `extensions/calendar/extension.tsx` (`ui.view`, with its canvas widget) |
 
 The slices below are the pilot's original work split, kept as the worked example of a port.
 
@@ -82,4 +83,4 @@ The todos rows below name the pilot's files, which no longer exist: the todos co
 
 ## Later
 Open the `View`/`WidgetKind` unions; move store slices into modules; a settings-panel slot (GoogleSettings'
-sync UI); per-module SCHEMA registration; port calendar, docs, mail (mailwatch is ported; the mail view is not); then think about third-party.
+sync UI); per-module SCHEMA registration; port docs, mail (mailwatch and calendar are ported; the mail view is not); then think about third-party.

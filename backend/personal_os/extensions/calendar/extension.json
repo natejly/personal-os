@@ -1,0 +1,28 @@
+{
+  "id": "calendar",
+  "name": "Calendar",
+  "description": "Google Calendar: the week and month view, the agent's calendar tools, and jobs that run before an event.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "kind": "extension",
+  "enabled": false,
+  "activation": ["startup"],
+  "requires": { "services": ["google", "extundo", "memories"] },
+  "contributes": {
+    "tools": [
+      { "name": "calendar_events", "danger": "safe", "group": "google" },
+      { "name": "calendar_get", "danger": "safe", "group": "google" },
+      { "name": "meeting_brief", "danger": "safe", "group": "google" },
+      { "name": "calendar_create", "danger": "external", "group": "google" },
+      { "name": "calendar_update", "danger": "external", "group": "google" },
+      { "name": "calendar_delete", "danger": "external", "group": "google" },
+      { "name": "calendar_respond", "danger": "external", "group": "google" },
+      { "name": "calendar_free_busy", "danger": "safe", "group": "google" },
+      { "name": "calendar_find_time", "danger": "safe", "group": "google" },
+      { "name": "calendar_propose", "danger": "external", "group": "google" }
+    ],
+    "views": [{ "id": "calendar", "label": "Calendar", "icon": "calendar" }],
+    "slots": { "recap.section": [{ "id": "calendar" }] }
+  },
+  "permissions": ["service:google", "service:extundo", "service:memories"]
+}

@@ -143,6 +143,14 @@ class TodayCardTests(unittest.TestCase):
         dashboard(calendars=cals, calendar_ids_out=got)
         self.assertEqual(got, [["mine", "classes"]])
 
+    def test_the_calendar_card_rides_the_dashboard_only_while_the_calendar_is_on(self) -> None:
+        self.assertEqual(dashboard()["calendar"], [])
+        db.set_settings({"hiddenViews": ["calendar"]})
+        try:
+            self.assertNotIn("calendar", dashboard())
+        finally:
+            db.set_settings({"hiddenViews": []})
+
     def test_synced_task_shows_once(self) -> None:
         linked = todos.create("Synced thing", external_id="gt-1", source="google_tasks")
         tasks = [{"id": "gt-1", "title": "Synced thing", "due": None}, {"id": "gt-2", "title": "Remote only", "due": None}]

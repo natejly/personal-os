@@ -2,7 +2,7 @@ import type {
   ArchivedInboxRun,
   BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, DriveBackupRun, DriveBackupStatus, Recap, Conversation, ConversationSettings, WorkerInfo, ContextUsed, ContextMeter, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
-  Memory, MemoryProposal, Profile, ProfileHeld, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
+  Memory, MemoryProposal, Profile, ProfileHeld, RuntimeResolution, RuntimeSelection, RuntimeView, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasWindow, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskRichPreview,
@@ -100,13 +100,15 @@ export async function req<T>(path: string, init?: RequestInit, timeoutMs = REQUE
   }
   if (!r.ok) {
     let msg = detailText(undefined, r.status, r.statusText)
+    let detail: unknown
     try {
       const j = await r.json()
-      msg = detailText(j.detail, r.status, r.statusText)
+      detail = j.detail
+      msg = detailText(detail, r.status, r.statusText)
     } catch {
       /* ignore */
     }
-    throw new ApiError(msg, { status: r.status, kind: 'http' })
+    throw new ApiError(msg, { status: r.status, kind: 'http', detail })
   }
   return (await r.json()) as T
 }
@@ -183,6 +185,18 @@ export const api = {
     list: () => req<Profile[]>('/profiles'),
     enable: (id: string, confirm = false) => req<{ held: ProfileHeld[] }>(`/profiles/${id}/enable`, { method: 'POST', body: json({ confirm }) }),
     disable: (id: string) => req<void>(`/profiles/${id}/disable`, { method: 'POST' })
+  },
+  /** Runtime slots (Settings > Runtime): the providers a chat can run on and the user's selection per scope. */
+  runtime: {
+    get: (conversationId?: string | null, projectId?: string | null) =>
+      req<RuntimeView>(`/runtime?${new URLSearchParams({ ...(conversationId ? { conversation_id: conversationId } : {}), ...(projectId ? { project_id: projectId } : {}) })}`),
+    /** A looser provider answers 409 with `{needs_confirm, diff}` as the error's `detail` until `confirm` is true. */
+    select: (body: { slot: string; scope: 'global' | 'project' | 'chat'; scope_id?: string | null; value: RuntimeSelection; confirm?: boolean }) =>
+      req<Record<string, RuntimeResolution>>('/runtime', { method: 'PUT', body: json(body) }),
+    acceptPartial: (provider: string, dimensions: string[]) =>
+      req<Record<string, string[]>>('/runtime/accept-partial', { method: 'PUT', body: json({ provider, dimensions }) }),
+    test: (slot: string, provider: string) => req<{ ok: boolean; detail: string }>('/runtime/test', { method: 'POST', body: json({ slot, provider }) }),
+    acceptTool: (slug: string) => req<{ ok: boolean }>(`/runtime/tools/${encodeURIComponent(slug)}/accept`, { method: 'POST' })
   },
   /** First-run state. */
   setup: {

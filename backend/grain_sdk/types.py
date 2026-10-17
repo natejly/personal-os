@@ -33,6 +33,13 @@ class ManifestContributesSettings(TypedDict):
     panel: NotRequired[str]
 
 
+class ManifestContributesRuntimeItem(TypedDict):
+    slot: str
+    id: str
+    label: str
+    meta: NotRequired[dict[str, Any]]
+
+
 class ManifestContributes(TypedDict):
     tools: NotRequired[list[ManifestContributesToolsItem]]
     routes: NotRequired[ManifestContributesRoutes]
@@ -44,6 +51,7 @@ class ManifestContributes(TypedDict):
     theme: NotRequired[dict[str, Any]]
     defaults: NotRequired[dict[str, Any]]
     layout: NotRequired[dict[str, Any]]
+    runtime: NotRequired[list[ManifestContributesRuntimeItem]]
 
 
 class ManifestHooksValue(TypedDict):
@@ -455,7 +463,38 @@ class CodingToolPostPayload(TypedDict):
     duration_ms: int | None
 
 
-HookName = Literal["app.start", "app.stop", "settings.changed", "chat.created", "chat.deleted", "project.created", "project.deleted", "ext.changed", "turn.accept", "turn.start", "input.attachment", "context.contribute", "model.select", "model.request", "model.response", "tools.offer", "tool.permission", "tool.pre", "tool.post", "tool.result", "tool.taint", "tool.error", "reply.complete", "turn.settled", "run.after", "subagent.start", "subagent.stop", "worker.report", "memory.before_write", "memory.written", "memory.deleted", "compaction.before", "compaction.after", "approval.requested", "approval.resolved", "job.fired", "job.done", "schedule.tick", "channel.inbound", "channel.outbound", "file.written", "review.accepted", "notify", "coding.tool.pre", "coding.tool.post"]
+class RuntimeChangedPayload(TypedDict):
+    """A runtime slot selection was stored (at chat, project or global scope) or a profile applied one."""
+    slot: str
+    scope: str
+    scope_id: str | None
+    old: str | dict[str, Any] | None
+    new: str | dict[str, Any] | None
+    by: str
+
+
+class RuntimeFallbackPayload(TypedDict):
+    """A selected runtime provider was disabled, removed or failed and the default was used, or the fallback was refused (used is null)."""
+    slot: str
+    wanted: str
+    used: str | None
+    why: str
+    refused: bool
+    conversation_id: str | None
+    run_id: str | None
+
+
+class SandboxRefusedPayload(TypedDict):
+    """A confined request was refused because the selected sandbox backend cannot enforce it; nothing was run."""
+    tool: str
+    mode: str
+    backend: str
+    dimension: str
+    enforcement: dict[str, Any]
+    run_id: str | None
+
+
+HookName = Literal["app.start", "app.stop", "settings.changed", "chat.created", "chat.deleted", "project.created", "project.deleted", "ext.changed", "turn.accept", "turn.start", "input.attachment", "context.contribute", "model.select", "model.request", "model.response", "tools.offer", "tool.permission", "tool.pre", "tool.post", "tool.result", "tool.taint", "tool.error", "reply.complete", "turn.settled", "run.after", "subagent.start", "subagent.stop", "worker.report", "memory.before_write", "memory.written", "memory.deleted", "compaction.before", "compaction.after", "approval.requested", "approval.resolved", "job.fired", "job.done", "schedule.tick", "channel.inbound", "channel.outbound", "file.written", "review.accepted", "notify", "coding.tool.pre", "coding.tool.post", "runtime.changed", "runtime.fallback", "sandbox.refused"]
 
 # How the host calls the handlers of each hook: emit and collect pass the payload, pipe and gate the current value.
 HOOK_KINDS: dict[str, Literal["emit", "collect", "pipe", "gate"]] = {
@@ -504,4 +543,7 @@ HOOK_KINDS: dict[str, Literal["emit", "collect", "pipe", "gate"]] = {
     "notify": "emit",
     "coding.tool.pre": "gate",
     "coding.tool.post": "emit",
+    "runtime.changed": "emit",
+    "runtime.fallback": "emit",
+    "sandbox.refused": "emit",
 }

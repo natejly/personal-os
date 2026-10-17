@@ -21,7 +21,7 @@ import urllib.parse
 from types import SimpleNamespace
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Any, AsyncIterator, Callable, Literal
+from typing import Annotated, Any, AsyncIterator, Awaitable, Callable, Literal
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
@@ -34,7 +34,7 @@ from . import auth_breaker, blobs, system_access
 from .bounds import clamp_limit
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
 from . import branch_summary, compaction, side_question, followups, otel_export, replay_trace, router, thinking_summary, titles
-from . import chatlink, duel, fsx, labels, request_log, toolcore
+from . import chatlink, duel, fsx, labels, request_log, runtime, toolcore
 from .fsx import sensitive_reason
 from . import context_map
 from .dispatch import Contact, dispatch_tool
@@ -103,9 +103,12 @@ from .style import WritingStyle
 from .extensions.channels import ChatService
 from .extensions.coding.extension import Coding
 from .extensions import devapi, profiles as profile_routes, review as review_routes
+from .runtime import routes as runtime_routes
+from .runtime.sources import ToolSources, is_source_tool
 from .extensions.authoring import skill as author_extension
 from .extensions.drafts import Drafts
 from .extensions.defaults import Defaults
+from .extensions.hooks import hook_ctx
 from .extensions.host import ExtensionContext, ExtensionHost, builtin_manifest
 from .modules import Module, ModuleContext, build_modules
 from .tools import ASK_LOCKED_DANGER, Toolbox, UrlBlocked, guarded_request, page_title, summarize_result, times_body
@@ -561,6 +564,10 @@ def _record_usage(ev: dict[str, Any]) -> None:
 
 
 llm.bus = host.bus
+runtime.active = host.runtime
+llm.default_client.settings = settings
+runtime_selections = runtime_routes.Selections(db, convos, projects)
+host.runtime.scopes = runtime_selections.current
 host.bus.subscribe("model.response", _record_usage, owner="core", order=0)
 
 
@@ -715,7 +722,7 @@ subagent_mgr = Subagents(run_store, toolbox, settings, defs=agent_defs, results=
 toolbox.subagents = subagent_mgr
 subagent_mgr.snaps = snaps
 subagent_mgr.connectors = SimpleNamespace(
-    call=lambda slug, args: _mcp_call(slug, args), hints=lambda slug: _mcp_event(slug) or {},
+    call=lambda slug, args: _connector_call(slug, args), hints=lambda slug: _mcp_event(slug) or {},
     review_text=lambda slug: _mcp_review_text(slug),
     mode=lambda slug, ctx: mcp_store.effective_mode(slug, ctx.get("project_id"), ctx.get("conversation_id"))["mode"],
     denied=lambda slug: permrules.mcp_denied(slug, subagent_mgr.settings().get("permissionRules")))
@@ -736,11 +743,14 @@ mcp_store = McpServers(db, lambda: bool(permissions.get(settings(), "allowAllCon
 # Remote servers sign in with OAuth; tokens live in their own table, never in a server's secrets.
 mcp_oauth = OAuthFlows(OAuthStore(db))
 mcp = McpClient(mcp_store, oauth=mcp_oauth)
+tool_sources = ToolSources(host.runtime, db, lambda: set(toolbox.specs) | {t["slug"] for t in mcp_store.tools()})
+app.include_router(runtime_routes.router(host.runtime, runtime_selections, tool_sources))
 
 
 def mcp_is(name: str) -> bool:
-    """Is this tool slug a third-party MCP tool? The prefix is reserved, so the check is exact."""
-    return name.startswith(MCP_PREFIX)
+    """Is this tool slug a connector-shaped tool, an MCP tool or one from an extension's tool source? Both prefixes are reserved,
+    so the check is exact."""
+    return name.startswith(MCP_PREFIX) or is_source_tool(name)
 
 
 def _mutates(name: str) -> bool:
@@ -764,12 +774,19 @@ def _mcp_tooling(project_id: str | None, conversation_id: str | None) -> tuple[d
     not spend a round discovering that a connector is offline. `effective_mode` has already decayed
     an 'on' back to 'ask' for a tool whose shape changed since it was approved.
     """
-    ready = set(mcp.ready_slugs())
-    if not ready:
-        return {}, []
-    names = {s["id"]: s["name"] for s in mcp_store.servers()}
     modes: dict[str, str] = {}
     schemas: list[dict[str, Any]] = []
+    sources = tool_sources.tools(runtime_selections.scopes(conversation_id, project_id)) if host.runtime.has_alternatives("tools.source") else []
+    for tool in sources:  # an extension's source: always ask
+        modes[tool.slug] = "ask"
+        schemas.append({"type": "function", "function": {
+            "name": tool.slug,
+            "description": f"[{redact.scrub_command_output(tool.provider.label)} — extension tool source] {redact.scrub_command_output(tool.description.strip())}",
+            "parameters": _public_schema(tool.parameters or {"type": "object", "properties": {}})}})
+    ready = set(mcp.ready_slugs())
+    if not ready:
+        return modes, schemas
+    names = {s["id"]: s["name"] for s in mcp_store.servers()}
     for tool in mcp_drift.offerable(mcp_store.tools(), mcp_store.allow_all()):  # a quarantined (drifted) tool is not offered
         slug = tool["slug"]
         if slug not in ready:
@@ -863,8 +880,28 @@ async def _mcp_call(slug: str, args: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in out.items() if k != "is_error"}
 
 
+async def _source_call(slug: str, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    """One call on an extension's tool source, with its failures turned into results the model can read."""
+    if (side := duel.SIDE.get()) is not None:
+        return side.hold(slug, args)  # a source's tools are never known to be read-only
+    try:
+        return await tool_sources.call(slug, args, ctx)
+    except LookupError as e:
+        return tools.tool_error(str(e))
+    except Exception as e:  # noqa: BLE001 - an extension's source must not be able to break a reply
+        log.warning("tool source call %s failed", slug, exc_info=True)
+        return tools.tool_error(f"{slug}: {type(e).__name__}: {str(e).splitlines()[0][:200] if str(e) else 'failed'}")
+
+
+def _connector_call(slug: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> Awaitable[dict[str, Any]]:
+    """The call a connector-shaped tool makes: on its MCP server, or on the extension tool source that offers it."""
+    return _source_call(slug, args, ctx or {}) if is_source_tool(slug) else _mcp_call(slug, args)
+
+
 def _mcp_review_text(name: str) -> str:
     """The auto reviewer's description of an MCP tool (connector tools have no ToolSpec): its text plus its self-reported hints."""
+    if source := tool_sources.find(name):
+        return f"{source.name}: {source.description}"
     tool = mcp_store.tool(name) if mcp_is(name) else None
     return mcp_review_text(tool) if tool else ""
 
@@ -880,6 +917,8 @@ def _permission_card(perm: permrules.Resolution, danger: str, name: str, args: d
 
 def _mcp_event(name: str) -> dict[str, Any] | None:
     """The `mcp` field of a tool_call event, so a card can say which connector asks and what it claims to do."""
+    if source := tool_sources.find(name):
+        return {"server": source.provider.label, "read_only": False, "destructive": False}
     tool = mcp_store.tool(name) if mcp_is(name) else None
     if tool is None:
         return None
@@ -954,10 +993,10 @@ def health() -> dict[str, Any]:
 
 
 # Google OAuth material lives in settings but never leaves the backend.
-PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "modelCaps", "telegramState", "extDefaults"}
+PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "modelCaps", "telegramState", "extDefaults", "toolSourceHashes"}
 # Readable through /settings, but only writable through its own route: a plain PUT would replace the
 # whole nested dict and silently drop the signal switches and exclusion lists.
-SETTINGS_READ_ONLY = {"googleTasksSync", "voice",
+SETTINGS_READ_ONLY = {"googleTasksSync", "voice", "runtime",
                       # Providers and their keys change only through /providers, where a key is verified before it is saved;
                       # provider, baseUrl and apiKey are the computed stand-ins for the first usable one (see settings()).
                       "providers", "provider", "baseUrl", "apiKey"}
@@ -2030,6 +2069,15 @@ def _stream_cancel(stop: asyncio.Event, steers: list[dict[str, Any]] | None, run
     return run.wake
 
 
+def _served(cfg: dict[str, Any], model: str) -> bool:
+    """Can a configured provider serve this model?"""
+    try:
+        provider_route.resolve(cfg, model)
+    except llm.LLMError:
+        return False
+    return True
+
+
 async def _select_model(cfg: dict[str, Any], model: str, effort: str, reason: str) -> tuple[str, str]:
     """model.select: once the router has chosen, extensions may swap the turn's model and effort. A model no
     configured provider can serve is ignored, so a handler cannot send the turn somewhere it cannot run."""
@@ -2040,10 +2088,9 @@ async def _select_model(cfg: dict[str, Any], model: str, effort: str, reason: st
         return model, effort
     new_model, new_effort = picked.get("model"), picked.get("effort")
     if isinstance(new_model, str) and new_model and new_model != model:
-        try:
-            provider_route.resolve(cfg, new_model)
+        if _served(cfg, new_model):
             model = new_model
-        except llm.LLMError:
+        else:
             log.warning("model.select chose %r, which no provider serves; keeping %r", new_model, model)
     return model, new_effort if isinstance(new_effort, str) and new_effort else effort
 
@@ -2073,21 +2120,25 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # Auto: the model for this turn is chosen from the message (router.py). The chat keeps `auto`; the reply row and
     # the trace record what was used. An explicit pick for a regenerated variant arrives as body.model and wins.
     routed: tuple[str, str, bool] | None = None
+    routed_effort: str | None = None
+    route_notice: str | None = None
     requested_model = model  # before auto-routing: the replay trace records what was asked for and what ran
     if router.wanted(model, body.model or "", cfg):
         msgs_ = conv["messages"]
         last_user = next((m for m in reversed(msgs_) if _said(m)), None)
         last_asst = next((m for m in reversed(msgs_) if m["role"] == "assistant"), None)
-        routed = router.route(
-            body.content if body.content is not None else str((last_user or {}).get("content") or ""),
-            attachments=bool(body.attachments) if body.content is not None else bool((last_user or {}).get("attachments")),
-            prior_tools=bool(last_asst and last_asst.get("tool_events")),
-            effort=str(conv["settings"].get("effort") or "default"),
-            plan_mode=((desks.get(str(conv["settings"].get("deskId") or ""), with_outputs=False) or {}).get("autonomy") == "plan"),
-            fast_model=str(cfg.get("fastModel") or ""), default_model=str(cfg.get("defaultModel") or ""))
+        choice, route_notice = await router.choose(host.runtime, {
+            "text": body.content if body.content is not None else str((last_user or {}).get("content") or ""),
+            "attachments": bool(body.attachments) if body.content is not None else bool((last_user or {}).get("attachments")),
+            "prior_tools": bool(last_asst and last_asst.get("tool_events")),
+            "effort": str(conv["settings"].get("effort") or "default"),
+            "plan_mode": (desks.get(str(conv["settings"].get("deskId") or ""), with_outputs=False) or {}).get("autonomy") == "plan",
+            "fast_model": str(cfg.get("fastModel") or ""), "default_model": str(cfg.get("defaultModel") or ""),
+            "conversation_id": conv_id, "project_id": conv["project_id"]}, lambda m: _served(cfg, m))
+        routed, routed_effort = (choice["model"], choice["reason"], choice["no_think"]), choice["effort"]
         model = routed[0]
     # A routed short turn on the chat's own model skips the thinking pass: effort "none" (reasoning_effort "none").
-    turn_effort = "none" if routed and routed[2] else str(conv["settings"].get("effort") or "default")
+    turn_effort = routed_effort or str(conv["settings"].get("effort") or "default")
     model, turn_effort = await _select_model(cfg, model, turn_effort, routed[1] if routed else "")
     user_msg_id: str | None = None  # the user message this turn answers: what a learned memory cites
     regen_am: dict[str, Any] | None = None  # set when a regenerate superseded the trailing answer
@@ -2194,6 +2245,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     _job = conv["settings"].get("job_id")
     _ucx = {"conversation_id": conv_id, "project_id": conv["project_id"], "tag": f"desk:{_desk}" if _desk else f"job:{_job}" if _job else "chat"}
     llm.usage_context.set(_ucx)
+    runtime.slots.run_id.set(run.run_id if run else None)
     llm.session_affinity.set(conv_id)  # every turn of this chat shares one cached prefix: keep it on one replica
     await pricing.ensure(cfg)
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
@@ -2221,6 +2273,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         draft=bool(conv["settings"].get("draftMode")), window=win,
     )
     skills.bump_use([x["id"] for x in used["skills"] if x.get("disclosure") != "manifest"])
+    # Every slot a provider other than the built-in serves for this chat is recorded with the reply, its run and its trace.
+    resolutions = host.runtime.non_default(runtime_selections.scopes(conv_id, conv["project_id"]))
+    if resolutions:
+        used["runtime"] = [r.to_dict() for r in resolutions]
+        tracer.end(tracer.start("runtime", "Runtime providers", {"providers": [r.reason for r in resolutions]}))
+        if run is not None:
+            run_store.mark_input(run.run_id, runtime=used["runtime"])
+        if refused := next((r for r in resolutions if r.refused and r.slot == "model.client"), None):
+            yield "error", {"message": refused.reason}
+            return
     # Older messages are folded into a rolling summary when the replay outgrows the window (compaction.py).
     # The window is this model's: the global setting, what the proxy reports, and what an overflow taught us.
     # The summarizer call can take a while. When it is about to run, the reply row is opened first so the transcript
@@ -2475,8 +2537,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         tool_ctx["approve"] = _bridge_approve
         if mcp_defer:
             _mcp_names = {s["id"]: s["name"] for s in mcp_store.servers()}
-            tool_ctx["mcp_catalog"] = lambda: [{**t, "server": _mcp_names.get(t["server_id"], "MCP")}
-                                               for t in mcp_store.tools() if t["slug"] in mcp_modes]
+            tool_ctx["mcp_catalog"] = lambda: [*({**t, "server": _mcp_names.get(t["server_id"], "MCP")}
+                                                 for t in mcp_store.tools() if t["slug"] in mcp_modes),
+                                               *({"slug": s["function"]["name"], "description": s["function"]["description"],
+                                                  "parameters": s["function"]["parameters"], "server": "extension"}
+                                                 for s in mcp_schemas if is_source_tool(s["function"]["name"]))]
             if use_tools:
                 modes["mcp_tool_search"] = "on"
             for _slug in loaded & mcp_modes.keys():  # found by a search in an earlier reply
@@ -2621,6 +2686,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             for t in mcp_store.tools():
                 if t["slug"] in mcp_modes:
                     _by_server.setdefault(_mcp_names.get(t["server_id"], "MCP"), []).append(t["slug"])
+            for _slug in mcp_modes:
+                if is_source_tool(_slug):
+                    _by_server.setdefault("extension", []).append(_slug)
             tools_hint = "\n".join(p for p in (tools_hint, mcp_search.mcp_index(_by_server)) if p)
         if tool_ctx["deferrable"]:
             tools_hint = "\n".join(p for p in (tools_hint, mcp_search.tool_index(
@@ -2721,7 +2789,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         seen_ids = set(cinfo.get("row_ids") or [])  # rows the context was built from; a steer in it is not sent twice
         inflight: dict[str, Any] | None = None  # the call whose tool is executing, for a cancelled run to record
         error_kind: str | None = None
-        notice: str | None = None  # one line for the user on the final done, e.g. the model took no reasoning effort
+        notice: str | None = route_notice or next((r.reason for r in resolutions if r.fell_back_from), None)  # one line for the user on the final done, e.g. the model took no reasoning effort
         awaiting: dict[str, Any] | None = None  # the tool event of a call blocked on approval, for a cancelled run to keep
         # The call this reply let go of rather than keep waiting on. Set once, and the reply ends there.
         parked: str | None = None
@@ -3077,6 +3145,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     fin = ev
                     if ev.get("effort_dropped"):
                         notice = EFFORT_DROPPED_NOTICE
+                    notice = ev.get("notice") or notice
                 if steers:
                     break
             llm.stream_deadline.set(None)
@@ -3255,6 +3324,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     end = ev
                     if ev.get("effort_dropped"):
                         notice = EFFORT_DROPPED_NOTICE
+                    notice = ev.get("notice") or notice
                 if steers:
                     break
             calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
@@ -3845,8 +3915,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # propose_plan would leave the plan with no approval at all.
                     # An external write, or booking unattended work, is never granted whole-tool: only a patterned rule
                     # (always_rule) can stand. Toolbox.effective would cap such a grant back to ask anyway.
-                    standing = granted and not forced and c["name"] != PLAN_TOOL and (
-                        spec is None or not toolbox.ask_locked(spec))  # a connector tool (no spec) keeps its schema-bound grant
+                    standing = granted and not forced and c["name"] != PLAN_TOOL and not is_source_tool(c["name"]) and (
+                        spec is None or not toolbox.ask_locked(spec))  # a connector tool (no spec) keeps its schema-bound grant; a source's tools always ask
                     if granted and not standing:
                         decision = "allow"  # one-shot
                     elif decision == "always_chat":
@@ -3922,7 +3992,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     result, ran = _propose(run, c["name"], args, uid, tool_ctx), True
                 elif mcp_is(c["name"]):
                     inflight = {"id": uid, "name": c["name"], "arguments": args}
-                    contact = Contact(functools.partial(_mcp_call, c["name"], args))
+                    contact = Contact(functools.partial(_connector_call, c["name"], args, hook_ctx(tool_ctx)))
                     result, interrupted = await _await_tool(dispatch_tool(toolbox, tool_ctx, c["name"], args, call_id=uid,
                                                                           connector=contact), stop,
                                                             grace=STOP_GRACE_SECONDS if danger in IDEMPOTENT_DANGER else 0.0)
@@ -6458,7 +6528,7 @@ async def accept_proposal(pid: str, body: ProposalIn | None = None) -> dict[str,
         # A connector is not a built-in. toolbox.call would report it as unknown and the accept would die.
         if mcp_is(claimed["tool"]):
             return await dispatch_tool(toolbox, ctx, claimed["tool"], claimed["args"], call_id=pid,
-                                       connector=functools.partial(_mcp_call, claimed["tool"], claimed["args"]))
+                                       connector=functools.partial(_connector_call, claimed["tool"], claimed["args"], hook_ctx(ctx)))
         return await dispatch_tool(toolbox, ctx, claimed["tool"], claimed["args"], call_id=pid)
 
     # call_id is not part of the journal key, so two identical proposals from one run would share it and the second

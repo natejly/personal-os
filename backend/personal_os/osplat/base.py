@@ -9,9 +9,9 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 
 class Unsupported(OSError):
@@ -63,6 +63,56 @@ class Sandbox(Protocol):
     def shell_profile(self, writable: list[str], network: bool = False, proxy_port: int | None = None,
                       allow_hosts: list[str] | None = None, loopback: bool = False) -> str: ...
     def python_profile(self, work: str, py: str, socket_path: str | None = None, workspace: str | None = None) -> str: ...
+
+
+Mode = Literal["read-only", "workspace-write", "full"]
+Level = Literal["full", "partial", "none"]
+Enforcement = dict[str, Level]  # dimension (fs_write, fs_read_deny, network, process) -> how far the backend enforces it
+
+
+@dataclass(frozen=True)
+class SandboxRequest:
+    """What a caller needs confined. `mode` "full" asks for no confinement and never reaches a backend. `deny` is the
+    core's list of places no confined process may touch (credential stores, Grain's data folder and app bundle). `native`
+    holds knobs only the OS-default adapter reads (the Seatbelt profile's extras); another backend ignores it."""
+    mode: Mode
+    cwd: str
+    writable: tuple[str, ...]
+    network: Literal["none", "proxy", "open"]
+    proxy_port: int | None
+    allow_hosts: tuple[str, ...]
+    deny: tuple[str, ...]
+    purpose: Literal["shell", "python", "terminal"]
+    native: dict[str, Any] = field(default_factory=dict)
+
+
+@runtime_checkable
+class SandboxBackend(Protocol):
+    id: str
+    def support(self) -> dict[Mode, Enforcement]: ...   # a mode that is absent cannot be enforced
+    def wrap(self, req: SandboxRequest, argv: list[str]) -> list[str]: ...
+    def failed_to_start(self, exit_code: int | None, output: str) -> bool: ...
+
+
+DIMENSIONS = ("fs_write", "fs_read_deny", "network", "process")
+CONFINED_MODES: tuple[Mode, ...] = ("read-only", "workspace-write")
+_RANK: dict[str, int] = {"none": 0, "partial": 1, "full": 2}
+
+
+def shortfalls(support: dict[Mode, Enforcement], mode: Mode, network: str) -> list[tuple[str, Level]]:
+    """The dimensions a request needs that `support` does not enforce fully, with how far it does each. A mode needs fs_write and
+    fs_read_deny, and workspace-write also needs network unless the network is open; `full` asks for no confinement."""
+    if mode == "full":
+        return []
+    have = support.get(mode, {})
+    needs = ("fs_write", "fs_read_deny", *(("network",) if mode == "workspace-write" and network != "open" else ()))
+    return [(d, have.get(d, "none")) for d in needs if have.get(d, "none") != "full"]
+
+
+def weaker(new: dict[Mode, Enforcement], old: dict[Mode, Enforcement]) -> list[str]:
+    """Where `new` enforces less than `old`, one line per mode and dimension."""
+    return [f"{mode} {d}: {lv} instead of {old_lv}" for mode in CONFINED_MODES for d in DIMENSIONS
+            if _RANK[lv := new.get(mode, {}).get(d, "none")] < _RANK[old_lv := old.get(mode, {}).get(d, "none")]]
 
 
 @runtime_checkable

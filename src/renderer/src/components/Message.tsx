@@ -13,6 +13,7 @@ import { ShowCtx } from './ShowButton'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
 import { replyMetrics } from '../lib/replyMetrics'
+import { runtimeChip, runtimeReasons } from '../lib/runtime'
 import { compactCount } from '../lib/usageFormat'
 import { parseChatMessage } from '../lib/chatLink'
 import { CORE, registerSlot, type MessageSlotProps } from '../extensions/host'
@@ -269,6 +270,13 @@ function TraceChip({ message, showContextChips }: MessageSlotProps): JSX.Element
   )
 }
 
+/** Which runtime slots a provider other than the built-in served this reply, with the reasons on hover. Nothing for a reply that used only the defaults. */
+function RuntimeChip({ message }: MessageSlotProps): JSX.Element | null {
+  const used = message.context_used?.runtime
+  if (!used?.length) return null
+  return <span className="model-tag" title={runtimeReasons(used)}>{runtimeChip(used)}</span>
+}
+
 /** The model name plus, on a finished reply with a trace, its total tokens and generation speed, as one muted line.
  *  It reads no store state, so it stays out of MessageView's render path. */
 function ModelTag({ message, streaming }: { message: Message; streaming: boolean }): JSX.Element | null {
@@ -282,6 +290,7 @@ function ModelTag({ message, streaming }: { message: Message; streaming: boolean
 }
 
 registerSlot(CORE, 'message.footer', { id: 'model-tag', order: 10, Component: ModelTag })
+registerSlot(CORE, 'message.footer', { id: 'runtime', order: 15, Component: RuntimeChip })
 registerSlot(CORE, 'message.footer', { id: 'trace', order: 20, Component: TraceChip })
 
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a

@@ -36,6 +36,7 @@ from typing import Any, NamedTuple
 
 from . import duel, egress, limits, mac, osplat, permissions, permrules, redact, sandbox
 from .db import new_id
+from .osplat.base import SandboxRequest
 
 log = logging.getLogger(__name__)
 
@@ -792,7 +793,11 @@ def register(tb: Any) -> None:
         writable = [tmp]  # the profile lets a command write anywhere but the protected places; this is the run's own scratch dir
         if dr:
             writable.append(str(dr))  # a desk workspace sits inside the protected data folder and is let back in
-        argv, network, proxied, token = await confine(jobs, argv, env, s, writable, unsandboxed=unsandboxed)
+        try:
+            argv, network, proxied, token = await confine(jobs, argv, env, s, writable, str(where), unsandboxed=unsandboxed)
+        except ShellError as e:
+            shutil.rmtree(tmp, ignore_errors=True)
+            return tool_error(_scrub(str(e)))
         if unsandboxed:  # the approval log has the call; this line is for the backend log (no card under Allow everything)
             log.warning("shell_run unsandboxed in %s (conversation %s): %s", _scrub(str(where)), ctx.get("conversation_id"),
                         _scrub(command)[:500])
@@ -853,7 +858,7 @@ def register(tb: Any) -> None:
             net_report(res)
             _note_shell_copies(ctx, since_ns)
             return res
-        if not unsandboxed and osplat.current().sandbox.failed_to_start(job.exit_code, text):
+        if not unsandboxed and sandbox.failed_to_start(job.exit_code, text):
             return tool_error(_scrub("The OS sandbox refused to start (" + text.strip()[:200] + "), so nothing was run."),
                               alternative=f"retry with unsandboxed=true, which {_escape(is_allow_all)}")
         shown, cut = truncate(text)
@@ -976,10 +981,19 @@ class Confined(NamedTuple):
     token: str | None  # the proxy run to revoke when the command ends
 
 
-async def confine(jobs: ShellJobs, argv: list[str], env: dict[str, str], settings: dict[str, Any], writable: list[str], *,
+def wrap_confined(req: SandboxRequest, argv: list[str]) -> list[str]:
+    """`argv` confined by the selected sandbox backend; ShellError (nothing run) when it cannot enforce the request."""
+    try:
+        return sandbox.sandbox_wrap(req, argv)
+    except sandbox.SandboxRefused as e:
+        raise ShellError(str(e)) from None
+
+
+async def confine(jobs: ShellJobs, argv: list[str], env: dict[str, str], settings: dict[str, Any], writable: list[str], cwd: str, *,
                   unsandboxed: bool = False) -> Confined:
     """`argv` under the OS sandbox with the network the user allowed: open, or limited to the allowlist through a proxy
-    (whose address goes into `env`), or off. `writable` are the folders it may write besides what the profile always allows.
+    (whose address goes into `env`), or off. `writable` are the folders it may write besides what the profile always allows;
+    `cwd` is where it runs.
     The one place a shell_run and an agent's terminal get their confinement from. `unsandboxed` leaves the argv alone."""
     network = bool(permissions.get(settings, "shellNetwork"))
     allowed = egress.allowed_set(permissions.get(settings, "shellRegistryAccess"), permissions.get(settings, "shellAllowedDomains"),
@@ -998,8 +1012,13 @@ async def confine(jobs: ShellJobs, argv: list[str], env: dict[str, str], setting
             env.update(jobs.egress.env(token))
     if not unsandboxed:
         # A model duel's side (duel.py) may write only its own overlay folder and the scratch dir, never the user's real files.
-        argv = osplat.current().sandbox.wrap(argv, sandbox.shell_profile(writable, network=network, proxy_port=port if proxied else None,
-                                                                         confine=duel.SIDE.get() is not None))
+        req = sandbox.shell_request(cwd, writable, network="open" if network else "proxy" if proxied else "none",
+                                    proxy_port=port if proxied else None, confine=duel.SIDE.get() is not None)
+        try:
+            argv = wrap_confined(req, argv)
+        except ShellError:
+            jobs.egress.revoke(token)
+            raise
     return Confined(argv, network, proxied, token)
 
 
@@ -1020,7 +1039,11 @@ async def run_fixed(jobs: ShellJobs, argv: list[str], cwd: str, settings: dict[s
             shutil.rmtree(tmp, ignore_errors=True)
             raise ShellError(f"The OS sandbox is not available here ({no_sandbox_reason()}), so nothing was run.")
         net = bool(permissions.get(settings, "shellNetwork"))
-        argv = osplat.current().sandbox.wrap(argv, sandbox.shell_profile([cwd, tmp], network=net))
+        try:
+            argv = wrap_confined(sandbox.shell_request(cwd, [cwd, tmp], network="open" if net else "none"), argv)
+        except ShellError:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
     else:
         env.update(GIT_TERMINAL_PROMPT="0", GH_PROMPT_DISABLED="1")
         if os.environ.get("SSH_AUTH_SOCK"):

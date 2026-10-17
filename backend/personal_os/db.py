@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS projects (
   color TEXT NOT NULL DEFAULT '#d97757',
   tools TEXT NOT NULL DEFAULT '{}',
   memory_mode TEXT NOT NULL DEFAULT 'shared',
+  runtime TEXT NOT NULL DEFAULT '{}',
   created_at REAL NOT NULL
 );
 
@@ -578,7 +579,8 @@ class Database:
         wanted = {
             # Soft delete (trash.py): deleted_at hides a row from every read; deleted_with names the project
             # whose deletion took it along, so restoring the project brings back exactly those rows.
-            "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'", "deleted_at": "REAL", "memory_mode": "TEXT NOT NULL DEFAULT 'shared'"},
+            "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'", "deleted_at": "REAL", "memory_mode": "TEXT NOT NULL DEFAULT 'shared'",
+                         "runtime": "TEXT NOT NULL DEFAULT '{}'"},
             "conversations": {"deleted_at": "REAL", "deleted_with": "TEXT", "pinned_at": "REAL", "archived_at": "REAL"},
             "agent_defs": {"skills": "TEXT NOT NULL DEFAULT '[]'", "hue": "INTEGER",
                            # Scope (subagents.AgentDefs.set_scope): a one-line label, the user's boundaries and notes, a

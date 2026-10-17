@@ -24,7 +24,9 @@ import time
 from collections import deque
 from typing import Any
 
-from . import osplat
+from . import osplat, runtime
+from .osplat.base import SandboxRequest, shortfalls
+from .runtime.slots import Refused
 
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
 MAX_IMAGE_BYTES = 3_000_000
@@ -73,6 +75,110 @@ def _seed_mpl(work: str) -> str:
 # The Seatbelt profile builders live in osplat/seatbelt.py (pure text); these names stay for callers and tests.
 from .osplat.seatbelt import MDNS_SOCKET, _paths, _q, shell_profile  # noqa: E402,F401
 from .osplat.seatbelt import python_profile as _mac_profile  # noqa: E402
+
+
+# ---- sandbox.backend slot (design doc section 10.7.2) ----
+class SandboxRefused(Exception):
+    """A confined request the selected sandbox backend cannot enforce. Nothing was run, and nothing is retried unconfined."""
+
+
+class OsDefault:
+    """core/os-default: the platform sandbox (Seatbelt on macOS) behind the sandbox.backend interface. Seatbelt's profile
+    already encodes the places the request's `deny` lists, so it is built here from the request as it always was."""
+    id = "core/os-default"
+
+    def support(self) -> dict[str, dict[str, str]]:
+        # Nothing asks for read-only today and the Seatbelt profiles have no read-only form, so it is not claimed.
+        return {"workspace-write": dict.fromkeys(("fs_write", "fs_read_deny", "network", "process"), "full")} \
+            if osplat.current().sandbox.shell_available() else {}
+
+    def wrap(self, req: SandboxRequest, argv: list[str]) -> list[str]:
+        if req.purpose == "python":
+            profile = _mac_profile(req.cwd, req.native["py"], req.native.get("socket_path"), req.native.get("workspace"))
+        else:
+            profile = shell_profile(list(req.writable), network=req.network == "open", proxy_port=req.proxy_port,
+                                    allow_hosts=list(req.allow_hosts) or None, **req.native)
+        return osplat.current().sandbox.wrap(argv, profile)
+
+    def failed_to_start(self, exit_code: int | None, output: str) -> bool:
+        return osplat.current().sandbox.failed_to_start(exit_code, output)
+
+
+_OS_DEFAULT = OsDefault()
+
+
+def _denied() -> tuple[str, ...]:
+    """The places no confined process may touch: Grain's data folder, its app bundle and code, and the credential stores."""
+    from . import mac
+    home, _, data = _paths()
+    return tuple(dict.fromkeys([data, *map(str, mac.protected_paths()), *(os.path.join(home, d) for d in mac.CRED_HOME_DIRS)]))
+
+
+def shell_request(cwd: str, writable: list[str], *, network: str = "none", proxy_port: int | None = None,
+                  allow_hosts: tuple[str, ...] = (), purpose: str = "shell", **native: Any) -> SandboxRequest:
+    """A workspace-write request for a shell command, an agent terminal or a coding agent. `native` carries the Seatbelt knobs
+    (confine, loopback) only the OS-default backend reads."""
+    return SandboxRequest("workspace-write", cwd, tuple(writable), network, proxy_port, tuple(allow_hosts),  # type: ignore[arg-type]
+                          _denied(), purpose, native)  # type: ignore[arg-type]
+
+
+def python_request(work: str, py: str, socket_path: str | None, workspace: str | None) -> SandboxRequest:
+    """The workspace-write request of one run_python call: it writes its work dir (and a desk's workspace) and has no network."""
+    return SandboxRequest("workspace-write", work, (work, *([workspace] if workspace else [])), "none", None, (), _denied(), "python",
+                          {"py": py, "socket_path": socket_path, "workspace": workspace})
+
+
+def _current_backend() -> tuple[str, Any]:
+    chosen = runtime.active.alternative("sandbox.backend") if runtime.active is not None else None
+    return (chosen.id, chosen.impl) if chosen is not None else (_OS_DEFAULT.id, _OS_DEFAULT)
+
+
+def _refuse(req: SandboxRequest, backend: str, why: str, dimension: str, enforcement: dict[str, Any]) -> SandboxRefused:
+    if runtime.active is not None:
+        scopes = runtime.active.scopes()
+        runtime.active.bus.emit_sync("sandbox.refused", {"tool": req.purpose, "mode": req.mode, "backend": backend, "dimension": dimension,
+                                                         "enforcement": enforcement, "run_id": scopes.run_id})
+    return SandboxRefused(why)
+
+
+def sandbox_wrap(req: SandboxRequest, argv: list[str]) -> list[str]:
+    """The one place a confined request becomes a wrapped argv. It fails closed: when the selected backend cannot enforce the
+    request's mode (or only partly, and the user has not accepted that dimension), the call is refused, never run unconfined,
+    on another backend or on the default one. `full` is not a backend capability: it is the explicit unsandboxed request, which
+    never comes here."""
+    if req.mode == "full":
+        raise ValueError("a full request asks for no confinement and is never wrapped")
+    try:
+        backend_id, backend = _current_backend()
+    except Refused as e:
+        raise _refuse(req, "", f"{req.purpose} needs {req.mode} confinement; {e}", "setup", {}) from None
+    support = _support_of(backend)
+    accepted = runtime.active.accepted(backend_id) if runtime.active is not None else frozenset()
+    for dimension, level in shortfalls(support, req.mode, req.network):
+        if level != "partial" or dimension not in accepted:
+            raise _refuse(req, backend_id, f"{req.purpose} needs {req.mode} confinement; the selected sandbox backend '{backend_id}' "
+                          f"cannot enforce {dimension} here ({level}). It was not run.", dimension, support.get(req.mode, {}))
+    try:
+        return backend.wrap(req, argv)
+    except Exception as e:  # noqa: BLE001 - a backend that cannot set up its confinement must not leave the command unconfined
+        raise _refuse(req, backend_id, f"{req.purpose} needs {req.mode} confinement; the selected sandbox backend '{backend_id}' "
+                      f"failed to set it up ({type(e).__name__}: {str(e)[:120]}). It was not run.", "setup", support.get(req.mode, {})) from e
+
+
+def _support_of(backend: Any) -> dict[str, Any]:
+    try:
+        return backend.support()
+    except Exception:  # noqa: BLE001 - a backend that cannot say what it enforces enforces nothing we can rely on
+        return {}
+
+
+def failed_to_start(exit_code: int | None, output: str) -> bool:
+    """Did the selected backend's confinement itself refuse to start (as opposed to the confined command failing)?"""
+    try:
+        _, backend = _current_backend()
+    except Refused:
+        backend = _OS_DEFAULT
+    return bool(backend.failed_to_start(exit_code, output))
 
 
 # ---- declared limits: the walls, stated before the work ----
@@ -326,7 +432,11 @@ def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: 
         _warm_mpl(py)
     env["MPLCONFIGDIR"] = _seed_mpl(work)
     if osplat.current().sandbox.python_available():
-        cmd = osplat.current().sandbox.wrap(cmd, _mac_profile(work, py, sock, workspace))
+        try:
+            cmd = sandbox_wrap(python_request(work, py, sock, workspace), cmd)
+        except SandboxRefused:
+            shutil.rmtree(work, ignore_errors=True)
+            raise
     try:
         if bridge is None:
             # Byte-capped: `yes` must not grow the backend by gigabytes (capped_run).

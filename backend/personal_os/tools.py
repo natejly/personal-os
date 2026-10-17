@@ -50,7 +50,7 @@ from . import saved_dashboards, verify
 from .jobs import check_watch_dir, local_tz_name, parse_when, valid_cron, valid_tz
 from .learn import SELF_LABELS, SKILL_STATUSES, induce_skill, run_transcript
 from .repos import Documents, Graph, Memories, Projects, is_isolated
-from .sandbox import WORKSPACE_REPORT_CAP, blocked_note, declared_limits, limits_text, profile_failed, run_python
+from .sandbox import WORKSPACE_REPORT_CAP, SandboxRefused, blocked_note, declared_limits, limits_text, profile_failed, run_python
 
 if TYPE_CHECKING:
     from .extensions.host import ExtensionScope
@@ -1695,13 +1695,16 @@ class Toolbox:
                 except (WorkspaceError, OSError):
                     pass
 
-            if tools:  # programmatic tool calling: the script drives app tools over a socket (toolbridge.py)
-                from . import toolbridge
-                runner = lambda c, t, _py, bridge: run_python(c, t, py, bridge, workspace=wroot, keep=keep)  # noqa: E731
-                bridged = await toolbridge.run(self, ctx, code, timeout, list(tools), runner)
-                await _carry(bridged)
-                return bridged
-            out = await asyncio.to_thread(run_python, code, secs, py, None, wroot, keep)
+            try:
+                if tools:  # programmatic tool calling: the script drives app tools over a socket (toolbridge.py)
+                    from . import toolbridge
+                    runner = lambda c, t, _py, bridge: run_python(c, t, py, bridge, workspace=wroot, keep=keep)  # noqa: E731
+                    bridged = await toolbridge.run(self, ctx, code, timeout, list(tools), runner)
+                    await _carry(bridged)
+                    return bridged
+                out = await asyncio.to_thread(run_python, code, secs, py, None, wroot, keep)
+            except SandboxRefused as e:
+                return tool_error(str(e), alternative="shell_run with unsandboxed=true asks the user to run it outside the profile")
             if isinstance(out, dict) and profile_failed(out.get("exit_code"), str(out.get("stderr") or "")):
                 # The profile never applied, so nothing ran: name the rule and the way to ask for an exception, with the
                 # OS message quoted, rather than handing back a bare exit code the model would retry forever.

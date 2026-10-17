@@ -103,7 +103,7 @@ def fake_terminals(tb: Toolbox, coding: Coding, monkeypatch: Any) -> FakeHub:
     coding.terminals.bridge._seen = time.monotonic() + 1e9
     monkeypatch.setattr(shell, "sandbox_available", lambda: True)
 
-    async def confine(jobs: Any, argv: list[str], env: dict[str, str], settings: dict[str, Any], writable: list[str], *, unsandboxed: bool = False) -> Any:
+    async def confine(jobs: Any, argv: list[str], env: dict[str, str], settings: dict[str, Any], writable: list[str], cwd: str, *, unsandboxed: bool = False) -> Any:
         return shell.Confined(["sandboxed", *writable[:1], "--", *argv], False, False, None)
     monkeypatch.setattr(shell, "confine", confine)
     return hub

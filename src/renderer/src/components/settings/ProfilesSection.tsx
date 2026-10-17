@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react'
 import type { Profile, ProfileHeld } from '@shared/types'
 import { api } from '../../lib/api'
 import { MODES } from '../../lib/permissionMode'
+import { slotNoun } from '../../lib/runtime'
 import { applyProfileThemes } from '../../extensions/profiles'
 import { useStore } from '../../store'
 import Switch from './Switch'
 import { Sec } from './shared'
 
 const modeName = (id: string): string => MODES.find((m) => m.id === id)?.label ?? id
+const describe = (c: ProfileHeld): string =>
+  c.key.startsWith('runtime:') ? `choose ${c.set} for the ${slotNoun(c.key.slice('runtime:'.length)).toLowerCase()} (${(c.diff ?? []).join('; ')})` : `set permissions from ${modeName(c.was)} to ${modeName(c.set)}`
 
 /**
  * Profiles: each switch applies or reverts a bundle of defaults at once, so it is an action and not part of the Save draft.
@@ -46,7 +49,7 @@ export default function ProfilesSection({ onApplied }: { onApplied: () => Promis
         {held && (
           <div role="alert">
             <p className="small">
-              {held.profile.name} would set permissions {held.changes.map((c) => `from ${modeName(c.was)} to ${modeName(c.set)}`).join(', ')}, which allows more than you have now. Nothing has been applied.
+              {held.profile.name} would {held.changes.map(describe).join(', and ')}, which allows more than you have now. Nothing has been applied.
             </p>
             <button className="ghost-btn" onClick={() => setHeld(null)}>Cancel</button>
             <button className="ghost-btn danger" onClick={() => enable(held.profile, true).catch((e: Error) => toast(e.message, 'error'))}>Apply anyway</button>

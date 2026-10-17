@@ -29,6 +29,7 @@ from personal_os.db import Database  # noqa: E402
 def fake_seatbelt(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pretend the OS sandbox exists: these tests stop at the point where the confined argv would be started."""
     monkeypatch.setattr(osplat, "_current", osplat._build("darwin"))
+    monkeypatch.setattr(osplat._current.sandbox, "shell_available", lambda: True)  # what the confined-request check asks of the backend
     monkeypatch.setattr(shell, "sandbox_available", lambda: True)
 from personal_os.mcp_servers import RESERVED_TOOL_NAMES  # noqa: E402
 from coding_ext import coding_box  # noqa: E402

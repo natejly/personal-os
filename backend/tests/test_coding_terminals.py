@@ -10,6 +10,7 @@ import os
 import random
 import re
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from coding_ext import FakeHub, call, coding_box, fake_terminals  # noqa: E402
-from personal_os import logs, permrules  # noqa: E402
+from personal_os import logs, permrules, shell  # noqa: E402
 from personal_os.extensions.coding import terminals as terms  # noqa: E402
 from personal_os.workspace import Workspace  # noqa: E402
 
@@ -56,6 +57,21 @@ def test_open_builds_a_confined_login_shell_in_the_folder_and_records_the_row(tm
     assert cmd["cwd"] == str(home / "work") and "NO_COLOR" not in cmd["env"]
     row = coding.terminals.row(out["terminal_id"])
     assert (row["state"], row["name"], row["user_attached"]) == ("open", "dev server", 0)
+
+
+def test_a_sandbox_that_cannot_confine_refuses_the_terminal_and_leaves_no_scratch_dir(tmp_path, monkeypatch):
+    tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
+    made: list[str] = []
+
+    async def refuse(*a: Any, **k: Any) -> Any:
+        raise shell.ShellError("terminal needs workspace-write confinement; the selected sandbox backend 'x/y' cannot enforce fs_write here (none). It was not run.")
+
+    real = tempfile.mkdtemp
+    monkeypatch.setattr(shell, "confine", refuse)
+    monkeypatch.setattr(tempfile, "mkdtemp", lambda *a, **k: made.append(real(*a, **k)) or made[-1])
+    out = call(tb, "terminal_open", ctx_of(cfg), cwd=str(home / "work"))
+    assert "cannot enforce fs_write" in out["error"] and hub.opened == []
+    assert made and not os.path.exists(made[0])
 
 
 def test_a_terminal_in_a_session_worktree_belongs_to_that_session(tmp_path, monkeypatch):

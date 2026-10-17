@@ -31,6 +31,13 @@ export interface ManifestContributesSettings {
   panel?: string
 }
 
+export interface ManifestContributesRuntimeItem {
+  slot: string
+  id: string
+  label: string
+  meta?: Record<string, unknown>
+}
+
 export interface ManifestContributes {
   tools?: ManifestContributesToolsItem[]
   routes?: ManifestContributesRoutes
@@ -42,6 +49,7 @@ export interface ManifestContributes {
   theme?: Record<string, unknown>
   defaults?: Record<string, unknown>
   layout?: Record<string, unknown>
+  runtime?: ManifestContributesRuntimeItem[]
 }
 
 export interface ManifestHooksValue {
@@ -453,7 +461,38 @@ export interface CodingToolPostPayload {
   duration_ms: number | null
 }
 
-export type HookName = "app.start" | "app.stop" | "settings.changed" | "chat.created" | "chat.deleted" | "project.created" | "project.deleted" | "ext.changed" | "turn.accept" | "turn.start" | "input.attachment" | "context.contribute" | "model.select" | "model.request" | "model.response" | "tools.offer" | "tool.permission" | "tool.pre" | "tool.post" | "tool.result" | "tool.taint" | "tool.error" | "reply.complete" | "turn.settled" | "run.after" | "subagent.start" | "subagent.stop" | "worker.report" | "memory.before_write" | "memory.written" | "memory.deleted" | "compaction.before" | "compaction.after" | "approval.requested" | "approval.resolved" | "job.fired" | "job.done" | "schedule.tick" | "channel.inbound" | "channel.outbound" | "file.written" | "review.accepted" | "notify" | "coding.tool.pre" | "coding.tool.post"
+/** A runtime slot selection was stored (at chat, project or global scope) or a profile applied one. */
+export interface RuntimeChangedPayload {
+  slot: string
+  scope: string
+  scope_id: string | null
+  old: string | Record<string, unknown> | null
+  new: string | Record<string, unknown> | null
+  by: string
+}
+
+/** A selected runtime provider was disabled, removed or failed and the default was used, or the fallback was refused (used is null). */
+export interface RuntimeFallbackPayload {
+  slot: string
+  wanted: string
+  used: string | null
+  why: string
+  refused: boolean
+  conversation_id: string | null
+  run_id: string | null
+}
+
+/** A confined request was refused because the selected sandbox backend cannot enforce it; nothing was run. */
+export interface SandboxRefusedPayload {
+  tool: string
+  mode: string
+  backend: string
+  dimension: string
+  enforcement: Record<string, unknown>
+  run_id: string | null
+}
+
+export type HookName = "app.start" | "app.stop" | "settings.changed" | "chat.created" | "chat.deleted" | "project.created" | "project.deleted" | "ext.changed" | "turn.accept" | "turn.start" | "input.attachment" | "context.contribute" | "model.select" | "model.request" | "model.response" | "tools.offer" | "tool.permission" | "tool.pre" | "tool.post" | "tool.result" | "tool.taint" | "tool.error" | "reply.complete" | "turn.settled" | "run.after" | "subagent.start" | "subagent.stop" | "worker.report" | "memory.before_write" | "memory.written" | "memory.deleted" | "compaction.before" | "compaction.after" | "approval.requested" | "approval.resolved" | "job.fired" | "job.done" | "schedule.tick" | "channel.inbound" | "channel.outbound" | "file.written" | "review.accepted" | "notify" | "coding.tool.pre" | "coding.tool.post" | "runtime.changed" | "runtime.fallback" | "sandbox.refused"
 
 /** The payload each hook's handlers receive. */
 export interface HookPayloads {
@@ -502,4 +541,7 @@ export interface HookPayloads {
   "notify": NotifyPayload
   "coding.tool.pre": CodingToolPrePayload
   "coding.tool.post": CodingToolPostPayload
+  "runtime.changed": RuntimeChangedPayload
+  "runtime.fallback": RuntimeFallbackPayload
+  "sandbox.refused": SandboxRefusedPayload
 }

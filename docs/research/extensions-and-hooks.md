@@ -1237,6 +1237,21 @@ Repo gates: backend suite, `npm run typecheck`, `npm test`, the settings and cha
 
 Third-party providers of any slot (PR 22); a user-tier `sandbox.backend` or `agent.loop`; picking a model client per call kind from the UI (a client's `kinds` decides); changing the provider list format or `providerKeys`; a backend for `terminal` PTYs other than the existing hub; making the default loop selectable against anything but itself (PR 21).
 
+#### 10.7.10 As built (PR 18)
+
+Code: `runtime/slots.py` (registry, `resolve`), `runtime/contracts.py` (the suites), `runtime/checked.py` (the stream the model wrapper enforces), `runtime/sources.py` (tool sources), `runtime/routes.py` (`GET/PUT /runtime`, `GET /runtime/resolve`, plus `PUT /runtime/accept-partial`, `POST /runtime/test` and `POST /runtime/tools/{slug}/accept`); the wrapper is `llm.stream_chat`/`llm.complete` over `_stream_openai`/`_complete_openai`; `sandbox.sandbox_wrap` is the one door for a confined request; `router.choose` is the router seam. Settings > Runtime is the last Settings section (`components/settings/RuntimeTab.tsx`), the footer chip is the `runtime` item of `message.footer`, and a turn that used a non-default provider carries `context_used.runtime`, a `runtime` trace span and `agent_runs.input.runtime`.
+
+What differs from the text above, and what is not built:
+- The default sandbox adapter reports only `workspace-write`. The Seatbelt profiles have no read-only form, nothing requests `read-only` today, and claiming it would be claiming enforcement that is not there; it is absent, so a read-only request is refused (fail closed). `SandboxRequest` carries a `native` map for the Seatbelt knobs (`confine`, `loopback`, and run_python's interpreter, socket and workspace) that only the default adapter reads, and `deny` is the core's list for other backends: the default adapter builds the same profile text as before and ignores it.
+- `mcp_is` keeps its name and now means "connector-shaped" (MCP or extension source); the rename to `is_source_tool` touches forty call sites for nothing. A source's tools are `ask` only: "always allow" on their card is one-shot.
+- `projects.runtime` is added by `Database._migrate` beside `projects.tools`, not by a numbered ledger step, so it cannot collide with another step's number. `accept_partial` lives in the global `runtime` setting under that key; only `PUT /runtime/accept-partial` writes it.
+- `ToolDecl` has a `description`; `schema` is the argument schema. The first listing of a tool is the user's baseline (`toolSourceHashes`); a later change withholds the tool until `POST /runtime/tools/{slug}/accept`.
+- The model wrapper dispatches the `chat` and `complete` call kinds. A client may name `embed`, `image` and `audio` in `kinds`, but those paths are not routed through the slot yet. The auth breaker is keyed on a base URL and API key, which an extension client does not have, so it is not applied to one; the idle limit, Stop and the deadline are.
+- A tool call that names a tool the request did not offer is kept and goes down the loop's existing invalid-call path. A selected-but-gone model client with a less private default ends the turn with an error; a gone sandbox backend refuses the call.
+- The contract probe for a sandbox backend checks that a write outside the roots fails, that one inside works under `workspace-write`, and that an unlisted mode raises. The denied-read probe is not built (the default adapter builds its deny set itself).
+- The `runtime.fallback` inbox note is not built: no extension-facing inbox exists yet; the turn notice and the hook are.
+- The chat scope is chosen in Settings > Runtime for the focused chat, not in a chat menu.
+
 ### 10.8 PR 19: Permission presets, core guard order, effective config
 
 Three things that make permissions a thing the user can reason about as extensions multiply: named bundles of permission settings, a guarantee about the order in which core checks and extension checks run, and one view of the settings that are really in force and where each came from. It needs PR 14 (profiles ship presets and defaults name them). The CLI part uses the `grain` dispatcher (see 10.6.1).

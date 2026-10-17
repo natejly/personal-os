@@ -27,8 +27,8 @@ from personal_os.extensions.manifest import Manifest, ManifestError, load_manife
 BASE = {"id": "demo", "name": "Demo", "version": "1.0.0", "apiVersion": 1}
 
 
-def profile(**contributes: Any) -> Manifest:
-    return Manifest.from_dict({**BASE, "kind": "profile", "contributes": {"defaults": contributes}})
+def profile(ext_id: str = "demo", **contributes: Any) -> Manifest:
+    return Manifest.from_dict({**BASE, "id": ext_id, "kind": "profile", "contributes": {"defaults": contributes}})
 
 
 class ValidatorTests(unittest.TestCase):
@@ -40,7 +40,7 @@ class ValidatorTests(unittest.TestCase):
         for extra in ({"hooks": {"app.start": {}}}, {"permissions": ["db:own"]}, {"requires": {"services": ["mcp"]}},
                       {"provides": {"services": ["x"]}}, {"settings": {"a": {"type": "string"}}}, {"data": {"tables": ["t"]}},
                       {"activation": ["onSchedule"]}, {"contributes": {"tools": [{"name": "demo_x"}]}},
-                      {"contributes": {"routes": {"prefix": "/demo"}}}):
+                      {"contributes": {"routes": {"prefix": "/demo"}}}, {"contributes": {"layout": {}}}):
             with self.assertRaises(ManifestError, msg=extra):
                 Manifest.from_dict({**BASE, "kind": "profile", **extra})
 
@@ -63,9 +63,10 @@ class ValidatorTests(unittest.TestCase):
     def test_theme_tokens_are_plain_values_over_custom_properties(self) -> None:
         def theme(t: Any) -> Manifest:
             return Manifest.from_dict({**BASE, "kind": "profile", "contributes": {"theme": t}})
-        theme({"dark": {"--bg": "#101010", "--radius": "6px"}, "light": {"--accent": "rgb(1, 2, 3)"}})
+        theme({"dark": {"--bg": "#101010", "--radius": "6px"}, "light": {"--accent": "rgb(1, 2, 3)", "--edge": "calc(var(--r) * 2)"}})
         for bad in ({"sepia": {}}, {"dark": {"bg": "#000"}}, {"dark": {"--bg": "red; color: blue"}}, {"dark": {"--bg": "url(http://x)"}},
-                    {"dark": {"--bg": "}body{display:none"}}, {"dark": {"--bg": "@import x"}}, {"dark": {"--bg": 3}}, {"dark": ["--bg"]}):
+                    {"dark": {"--bg": "}body{display:none"}}, {"dark": {"--bg": "@import x"}}, {"dark": {"--bg": 3}}, {"dark": ["--bg"]},
+                    {"dark": {"--bg": "x/*"}}, {"dark": {"--bg": 'image-set("https://h/x.png" 1x)'}}, {"dark": {"--bg": "src(x)"}}):
             with self.assertRaises(ManifestError, msg=bad):
                 theme(bad)
 
@@ -111,6 +112,24 @@ class DefaultsTests(unittest.TestCase):
         self.defaults.apply(profile(views={"mail": False}))
         self.defaults.revert("demo")
         self.assertEqual(self.hidden(), ["mail"])
+
+    def test_overlapping_profiles_keep_what_the_other_still_wants(self) -> None:
+        wide, narrow = profile("wide", views={"todos": False, "mail": False}), profile("narrow", views={"mail": False})
+        self.defaults.apply(wide)
+        self.defaults.apply(narrow)  # mail is already hidden: it still counts as wanted by this profile
+        self.defaults.revert("wide")
+        self.assertEqual(self.hidden(), ["mail"])
+        self.defaults.revert("narrow")
+        self.assertEqual(self.hidden(), [])
+
+    def test_the_profile_turned_on_second_inherits_the_way_back(self) -> None:
+        narrow, wide = profile("narrow", views={"mail": False}), profile("wide", views={"todos": False, "mail": False})
+        self.defaults.apply(narrow)
+        self.defaults.apply(wide)
+        self.defaults.revert("narrow")
+        self.assertEqual(self.hidden(), ["mail", "todos"])
+        self.defaults.revert("wide")
+        self.assertEqual(self.hidden(), [])
 
     def test_revert_of_a_never_applied_extension_changes_nothing(self) -> None:
         self.defaults.revert("demo")

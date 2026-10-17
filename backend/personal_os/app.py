@@ -52,7 +52,7 @@ from .graph_learn import canonical_type, normalize_predicate
 from .graph_recall import GraphRecall, subgraph as graph_subgraph
 from .memory_index import MemoryIndex
 from .retrieval import Retriever
-from .repos import ALL, Conversations, Documents, Graph, Memories, MemoryRefused, Projects, is_isolated
+from .repos import ALL, EFFORTS, Conversations, Documents, Graph, Memories, MemoryRefused, Projects, is_isolated
 from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .recap import Recaps, generate_recap
 from . import vision
@@ -442,8 +442,14 @@ for _r in host.load_builtin("health", _ext_ctx).routers:
     app.include_router(_r)
 for _p in _PROFILES:
     host.load_builtin(_p, _ext_ctx)
-app.include_router(profile_routes.router(host, lambda before: _settings_changed(
-    before, ["hiddenViews", "defaultModel", "defaultEffort", "theme", permissions.KEY], set())))
+
+
+def _profile_changed(before: dict[str, Any]) -> None:
+    """A profile toggle writes through contributes.defaults: these are the settings it can touch."""
+    _settings_changed(before, ["hiddenViews", "defaultModel", "defaultEffort", "theme", permissions.KEY], set())
+
+
+app.include_router(profile_routes.router(host, _profile_changed))
 host.migrate(db)
 # Soft delete: the DELETE routes below move things here, and /trash restores or erases them (trash.py).
 trash = Trash(db, todos, docs)
@@ -1053,8 +1059,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, f"{k} must be a {type(d).__name__}")
         elif k == "retrievalMode" and v not in ("hybrid", "bm25"):
             raise HTTPException(422, "retrievalMode must be 'hybrid' or 'bm25'")
-        elif k == "defaultEffort" and v not in llm.EFFORTS:
-            raise HTTPException(422, f"defaultEffort must be one of {', '.join(llm.EFFORTS)}")
+        elif k == "defaultEffort" and v not in EFFORTS:
+            raise HTTPException(422, f"defaultEffort must be one of {', '.join(EFFORTS)}")
         elif k == "docTypography":
             clean[k] = clean_typography(v) or {}
     _lock_embedding(clean)

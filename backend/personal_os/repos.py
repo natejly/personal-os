@@ -155,6 +155,7 @@ class Projects:
 # ---------------- Conversations ----------------
 # New chats start at high. The stored value "default" is a separate choice: it omits
 # reasoning_effort, which on Kimi K3 means the model's own max. See llm.effort_param.
+EFFORTS = ("default", "low", "medium", "high", "xhigh", "max")  # a chat's reasoning effort; 'default' sends none
 DEFAULT_EFFORT = "high"
 DEFAULT_CONV_SETTINGS = {"effort": DEFAULT_EFFORT, "fast": False, "useMemory": True, "useGraph": True, "useDocuments": True,
                          "useStyle": True, "draftMode": False, "autoLearn": True, "useTools": True, "tools": {},

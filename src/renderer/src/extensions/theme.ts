@@ -33,5 +33,12 @@ export function addTheme(tokens: Tokens, scheme?: Scheme): Disposable {
   const entry = { tokens, scheme }
   entries.push(entry)
   render()
-  return { dispose: () => { const i = entries.indexOf(entry); if (i >= 0) { entries.splice(i, 1); render() } } }
+  return {
+    dispose: () => {
+      const i = entries.indexOf(entry)
+      if (i < 0) return
+      entries.splice(i, 1)
+      render()
+    }
+  }
 }

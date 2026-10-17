@@ -2,6 +2,7 @@
 
 Each default is recorded as source `ext:<id>` in the private setting `extDefaults`, as {id: {key: {"was", "set"}}}.
 Revert puts `was` back only while the value is still `set`: whatever the user changed in the meantime stays.
+When two enabled extensions set the same value, the one still enabled keeps it: the other's `was` is handed over.
 A permission preset looser than the current one is never applied unless the caller says the user clicked for it.
 """
 from __future__ import annotations
@@ -50,18 +51,21 @@ class Defaults:
 
     def plan(self, manifest: Manifest) -> list[Change]:
         """What enabling the manifest would change now; a default that already holds is not a change."""
+        return [c for c in self._changes(manifest) if c.was != c.value]
+
+    def _changes(self, manifest: Manifest) -> list[Change]:
         stored = self.db.get_settings()
-        return [c for key, value in _wanted(manifest) if (c := Change(key, self._read(stored, key), value)).was != value]
+        return [Change(key, self._read(stored, key), value) for key, value in _wanted(manifest)]
 
     def apply(self, manifest: Manifest, *, confirmed: bool = False) -> list[Change]:
         """Apply the manifest's defaults once. Returns the changes held back: a looser permission preset without `confirmed`."""
         records = self.db.get_settings().get(KEY) or {}
         if manifest.id in records:
             return []
-        changes = self.plan(manifest)
+        changes = self._changes(manifest)  # includes a default that already holds, so reverting another profile leaves it be
         held = [c for c in changes if c.looser and not confirmed]
         done = [c for c in changes if c not in held]
-        self._write([(c.key, c.value) for c in done])
+        self._write([(c.key, c.value) for c in done if c.was != c.value])
         self.db.set_settings({KEY: {**records, manifest.id: {c.key: {"was": c.was, "set": c.value} for c in done}}})
         return held
 
@@ -70,7 +74,15 @@ class Defaults:
         if (recorded := records.pop(ext_id, None)) is None:
             return
         stored = self.db.get_settings()
-        self._write([(key, r["was"]) for key, r in recorded.items() if self._read(stored, key) == r["set"]])
+        back = []
+        for key, r in recorded.items():
+            if r["was"] == r["set"]:
+                continue  # it changed nothing, so there is nothing to put back
+            if heir := next((rec[key] for rec in records.values() if rec.get(key, {}).get("set") == r["set"]), None):
+                heir["was"] = r["was"]  # another enabled extension wants this value too: it inherits the way back
+            elif self._read(stored, key) == r["set"]:
+                back.append((key, r["was"]))
+        self._write(back)
         self.db.set_settings({KEY: records})
 
     def _read(self, stored: dict[str, Any], key: str) -> Any:

@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Callable
 
 import httpx
 
-from . import anthropic_native, auth_breaker, provider_route, providers
+from . import anthropic_native, auth_breaker, provider_route, providers, repos
 from .extensions.hooks import HookBus
 from .limits import (VOLATILE_HEADER, CODING_SESSION_MAX_CONCURRENT, COMPACT_AT, COMPACT_AT_TOKENS, COMPACT_KEEP_RECENT, COMPACT_KEEP_TOKENS, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, LLM_IDLE_SECONDS, LLM_RETRIES, MICRO_AT, MICRO_KEEP, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, TOOL_DEFER_ABOVE, WORKER_MAX_CONCURRENT)
 from .permissions import DEFAULTS as PERMISSION_DEFAULTS
@@ -36,7 +36,6 @@ session_affinity: ContextVar[str | None] = ContextVar("session_affinity", defaul
 
 # Views the model-facing side honours: a view in `hiddenViews` is off, so its tools, loops and prompt data stand down.
 # `spaces` is the canvas view's key (the sidebar row it hides is Canvases).
-EFFORTS = ("default", "low", "medium", "high", "xhigh", "max")  # a chat's reasoning effort; 'default' sends none
 TOOL_VIEWS = (("health_", "health"), ("todo_list", "todos"), ("todo_add", "todos"), ("todo_update", "todos"),
               ("todo_delete", "todos"), ("google_tasks_", "todos"), ("calendar_", "calendar"), ("meeting_brief", "calendar"),
               ("propose_times_draft", "calendar"), ("schedule_suggest", "calendar"), ("gmail_", "mail"),
@@ -115,7 +114,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "modelHigh": "",
     "modelMedium": "",
     "modelLow": "",
-    "defaultEffort": "high",  # the reasoning effort a new chat starts on (a chat's own choice wins)
+    "defaultEffort": repos.DEFAULT_EFFORT,  # the reasoning effort a new chat starts on (a chat's own choice wins)
     "workerEffort": "medium",  # reasoning effort of workers' rounds: low | medium | high, or "chat" to follow the chat's
     "workerModel": "",  # "" = workers run on the chat model; an agent definition's own model still wins
     "autoRoute": False,  # new chats start on Auto: the fast or the default model per message

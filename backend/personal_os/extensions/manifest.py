@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..llm import EFFORTS
 from ..permissions import CHOICES
+from ..repos import EFFORTS
 from .hooks import HOOKS
 
 API_VERSION = 1
@@ -27,13 +27,16 @@ _HOOK_KEYS = {"priority", "timeoutMs", "onFailure"}
 SETTING_TYPES = ("string", "number", "integer", "boolean", "secret")  # a secret is a string kept in the secret store
 _FIELD = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 _TABLE = re.compile(r"[a-z_][a-z0-9_]*")
-_PROFILE_CONTRIBUTES = {"theme", "defaults", "layout"}  # all a profile may contribute: it runs nothing
+_PROFILE_CONTRIBUTES = {"theme", "defaults"}  # all a profile may contribute: it runs nothing
 _PROFILE_FORBIDDEN = ("requires", "provides", "hooks", "permissions", "settings", "data")
 _DEFAULTS = {"views", "model", "effort", "theme", "permissions"}
 PERMISSION_MODES = CHOICES["permissionMode"]
 _THEMES = ("dark", "light", "system")
 _TOKEN = re.compile(r"--[a-z0-9-]+")
-_TOKEN_VALUE = re.compile(r"[^;{}<>@\\]{1,200}")  # one declaration value: no way to open a rule, an import or an escape
+_CALL = re.compile(r"([\w-]*)\(")
+_TOKEN_VALUE = re.compile(r"(?![\s\S]*/\*)[^;{}<>@\\]{1,200}")  # one declaration value: no way to open a rule, a comment, an import or an escape
+_TOKEN_FUNCTIONS = {"", "rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch", "color", "color-mix", "calc",
+                    "var", "min", "max", "clamp", "linear-gradient", "radial-gradient", "conic-gradient"}  # none fetches anything
 _PERMISSIONS = {"db:own", "context:volatile", "conversation:read", "input:rewrite", "hooks:gate", "memory:gate",
                 "prompt:inject", "ui:unsupported-css"}  # plus "service:<name>"
 
@@ -147,10 +150,10 @@ def _contributes(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def _check_profile(raw: dict[str, Any]) -> None:
-    """A profile has no code: only theme, defaults and layout, which the host reads as data."""
+    """A profile has no code: only theme and defaults, which the host reads as data."""
     _check(not (used := [k for k in _PROFILE_FORBIDDEN if raw.get(k)]), f"a profile cannot declare {', '.join(used)}")
     _check(raw.get("activation", ["startup"]) == ["startup"], "a profile has no code to activate")
-    _check(set(_object(raw, "contributes")) <= _PROFILE_CONTRIBUTES, "a profile contributes only theme, defaults and layout")
+    _check(set(_object(raw, "contributes")) <= _PROFILE_CONTRIBUTES, "a profile contributes only theme and defaults")
 
 
 def _theme(c: dict[str, Any]) -> None:
@@ -160,7 +163,7 @@ def _theme(c: dict[str, Any]) -> None:
         _check(isinstance(tokens, dict), f"contributes.theme.{scheme} must be an object of tokens")
         for name, value in tokens.items():
             _check(_TOKEN.fullmatch(name), f"contributes.theme.{scheme}: {name!r} is not a custom property name")
-            _check(isinstance(value, str) and _TOKEN_VALUE.fullmatch(value) and "url(" not in value.lower(),
+            _check(isinstance(value, str) and _TOKEN_VALUE.fullmatch(value) and _TOKEN_FUNCTIONS.issuperset(_CALL.findall(value.lower())),
                    f"contributes.theme.{scheme}.{name} must be a plain CSS value")
 
 

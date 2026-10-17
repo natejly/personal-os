@@ -24,16 +24,8 @@ test('a later set is written after an earlier one so it wins on a tie', () => {
   assert.ok(css.indexOf('--bg:red') < css.indexOf('--bg:blue'))
 })
 
-test('ui.theme registers tokens and its disposable takes them away', () => {
-  let d: { dispose(): void } | undefined
-  activateExtension('demo', { activate: (ui) => { d = ui.theme({ '--bg': '#000' }, { scheme: 'dark' }) } })
-  assert.ok(d)
-  d.dispose()
-})
-
-const profile = (over: Partial<Profile>): Profile => ({ id: 'p', name: 'P', description: '', enabled: true, theme: {}, ...over })
-
-test('only enabled profiles apply their tokens, and a new list replaces the old one', () => {
+/** Stands in for the page's <style id="ext-theme">: every stylesheet the code writes is collected in `seen`. */
+function withDocument(run: (seen: string[]) => void): void {
   const seen: string[] = []
   const stub = globalThis as unknown as { document?: unknown }
   stub.document = {
@@ -41,12 +33,30 @@ test('only enabled profiles apply their tokens, and a new list replaces the old 
     head: { appendChild: (el: unknown) => el }, createElement: () => ({})
   }
   try {
+    run(seen)
+  } finally {
+    delete stub.document
+  }
+}
+
+test('ui.theme registers tokens and its disposable takes them away', () => {
+  withDocument((seen) => {
+    let d: { dispose(): void } | undefined
+    activateExtension('demo', { activate: (ui) => { d = ui.theme({ '--bg': '#000' }, { scheme: 'dark' }) } })
+    assert.match(seen.at(-1) ?? '', /--bg:#000/)
+    d?.dispose()
+    assert.equal(seen.at(-1), '')
+  })
+})
+
+const profile = (over: Partial<Profile>): Profile => ({ id: 'p', name: 'P', description: '', enabled: true, theme: {}, ...over })
+
+test('only enabled profiles apply their tokens, and a new list replaces the old one', () => {
+  withDocument((seen) => {
     applyProfileThemes([profile({ theme: { dark: { '--bg': 'red' } } }), profile({ id: 'q', enabled: false, theme: { dark: { '--bg': 'blue' } } })])
     assert.match(seen.at(-1) ?? '', /--bg:red/)
     assert.doesNotMatch(seen.at(-1) ?? '', /--bg:blue/)
     applyProfileThemes([])
     assert.equal(seen.at(-1), '')
-  } finally {
-    delete stub.document
-  }
+  })
 })

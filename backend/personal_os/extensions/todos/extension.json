@@ -1,0 +1,24 @@
+{
+  "id": "todos",
+  "name": "Lists",
+  "description": "To-dos, synced with Google Tasks.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "kind": "extension",
+  "enabled": false,
+  "activation": ["startup"],
+  "requires": { "services": ["google"] },
+  "provides": { "services": ["todos", "tasks_sync"] },
+  "contributes": {
+    "tools": [
+      { "name": "todo_list", "danger": "safe", "group": "todos" },
+      { "name": "todo_add", "danger": "writes", "group": "todos" },
+      { "name": "todo_update", "danger": "writes", "group": "todos" },
+      { "name": "todo_delete", "danger": "writes", "group": "todos" }
+    ],
+    "views": [{ "id": "todos", "label": "Lists", "icon": "list-checks" }]
+  },
+  "hooks": { "app.start": {} },
+  "permissions": ["db:own", "service:google"],
+  "data": { "tables": ["todos", "todo_deps", "todo_filters", "todo_tombstones", "todo_event_tombstones", "todo_lists"] }
+}

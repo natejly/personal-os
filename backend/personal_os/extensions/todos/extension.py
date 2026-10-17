@@ -1,23 +1,24 @@
-"""Todos as a feature module: store, routes, agent tools, the two Google sync loops, and the Today payload."""
+"""Todos as a built-in extension: routes, agent tools, the Google Tasks sync loop, and the Today payload.
+
+The store (todos.py) and the sync engine are offered as the services `todos` and `tasks_sync`, because the trash,
+desks, the recap and the planner and mail-watch modules read the same rows."""
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from .. import redact, todo_rules
-from ..google import GoogleNotConnected
-from ..gtasks import TasksSync
-from ..todos import UNTRUSTED_SOURCES, Todos
-from ..tools import ToolSpec, _obj, page, tool_error
-from . import Module, ModuleContext
+from ... import redact, todo_rules
+from ...google import GoogleNotConnected
+from ...gtasks import TasksSync
+from ...todos import UNTRUSTED_SOURCES, Todos
+from ...tools import ToolSpec, _obj, page, tool_error
 
 if TYPE_CHECKING:
-    from ..tools import Toolbox
+    from ..host import ExtensionScope
 
 
 class TodoIn(BaseModel):
@@ -83,17 +84,12 @@ class TasksSyncIn(BaseModel):
     intervalMinutes: int | None = None
 
 
-class TodosModule(Module):
-    key = "todos"
-    view = "todos"
-    label = "Todos"
-
-    def __init__(self, ctx: ModuleContext) -> None:
-        super().__init__(ctx)
-        self.store = Todos(ctx.db)
-        self.tasks_sync = TasksSync(self.store, ctx.google, ctx.settings, ctx.set_settings)
+class TodosExtension:
+    def __init__(self, api: ExtensionScope) -> None:
+        self.api = api
+        self.store = Todos(api.db)
+        self.tasks_sync = TasksSync(self.store, api.services.get("google"), api.app.settings, api.app.set_settings)
         self.store.on_change = self._changed
-        self._tasks: list[asyncio.Task[Any]] = []
 
     def _changed(self) -> None:
         """Any todo write (routes or assistant tools) nudges the Google Tasks sync loop."""
@@ -102,11 +98,11 @@ class TodosModule(Module):
     # ---- routes ----
     def router(self) -> APIRouter:
         r = APIRouter()
-        store, ctx = self.store, self.ctx
+        store, app = self.store, self.api.app
 
         @r.get("/todos")
         def list_todos(project_id: str | None = "all", include_done: bool = False, q: str = "", sort: str = "due", tag: str = "", list_name: str = "") -> list[dict[str, Any]]:
-            scope = "__all__" if project_id in (None, "all") else ctx.sid(project_id)
+            scope = "__all__" if project_id in (None, "all") else app.sid(project_id)
             rows = store.list(scope, include_done, q, tag, list_name)
             if sort == "urgency":
                 today = date.today()
@@ -158,7 +154,7 @@ class TodosModule(Module):
             if not body.title.strip():
                 raise HTTPException(400, "Empty title")
             try:
-                return store.create(body.title, ctx.wsid(body.project_id), body.notes, body.due, body.priority, repeat=body.repeat, estimate_min=body.estimate_min, tags=body.tags, parent_id=body.parent_id, list_name=body.list_name, status=body.status)
+                return store.create(body.title, app.wsid(body.project_id), body.notes, body.due, body.priority, repeat=body.repeat, estimate_min=body.estimate_min, tags=body.tags, parent_id=body.parent_id, list_name=body.list_name, status=body.status)
             except ValueError as e:
                 raise HTTPException(400, str(e)) from e
 
@@ -178,7 +174,7 @@ class TodosModule(Module):
             if body.clear_project:
                 patch["project_id"] = None
             elif "project_id" in patch:
-                patch["project_id"] = ctx.wsid(patch["project_id"])
+                patch["project_id"] = app.wsid(patch["project_id"])
             try:
                 t = store.update(id, patch)
             except ValueError as e:
@@ -223,8 +219,7 @@ class TodosModule(Module):
         return r
 
     # ---- agent tools ----
-    def register_tools(self, box: Toolbox) -> None:
-        R = box.specs.__setitem__
+    def register_tools(self) -> None:
         store = self.store
 
         def _shown_todo(row: dict[str, Any]) -> dict[str, Any]:
@@ -259,7 +254,7 @@ class TodosModule(Module):
                 ctx["tainted"] = True
                 ctx.setdefault("taint_sources", []).append("todo_list")
             return out
-        R("todo_list", ToolSpec("todo_list", "List the user's todos (not your own plan: todo_write), open by default, project plus personal.",
+        self.api.tool(ToolSpec("todo_list", "List the user's todos (not your own plan: todo_write), open by default, project plus personal.",
             _obj({"include_done": {"type": "boolean", "default": False}, "all_projects": {"type": "boolean", "default": False}, "offset": {"type": "integer", "default": 0},
              "sort": {"type": "string", "enum": ["due", "urgency"], "default": "due", "description": "urgency = weighted score (due, priority, age)"},
              "tag": {"type": "string", "description": "Only this tag"},
@@ -277,7 +272,7 @@ class TodosModule(Module):
             except ValueError as e:
                 return tool_error(redact.scrub_command_output(str(e)), field="repeat_unit or parent_id", expected="day, week, month or year; parent_id from todo_list", example={"title": "Water plants", "due": "2026-10-05", "repeat_every": 1, "repeat_unit": "week"})
             return {"id": t["id"], "title": redact.scrub_command_output(str(t["title"] or "")), "due": t["due"]}
-        R("todo_add", ToolSpec("todo_add", "Add a new todo to the user's list (existing: todo_update). Dates YYYY-MM-DD; priority 1 (high) to 3 (low). Not your own checklist (todo_write).",
+        self.api.tool(ToolSpec("todo_add", "Add a new todo to the user's list (existing: todo_update). Dates YYYY-MM-DD; priority 1 (high) to 3 (low). Not your own checklist (todo_write).",
             _obj({"title": {"type": "string"}, "due": {"type": "string"}, "notes": {"type": "string"}, "priority": {"type": "integer", "default": 2}, "personal": {"type": "boolean", "default": False},
              "repeat_every": {"type": "integer", "description": "default 1"}, "repeat_unit": {"type": "string", "enum": ["day", "week", "month", "year"]},
              "repeat_mode": {"type": "string", "enum": ["from_due", "from_completion"], "default": "from_due"},
@@ -305,7 +300,7 @@ class TodosModule(Module):
                 return tool_error(redact.scrub_command_output(str(e)), field="repeat_unit, parent_id or depends_on", expected="a valid value; ids from todo_list, no cycles", example={"id": "td_8c41a2", "repeat_unit": "week"})
             return _shown_todo(t) if t else tool_error(redact.scrub_command_output(f"No todo with id '{id}'."), field="id", expected="an id from todo_list",
                                    example={"id": "td_8c41a2", "done": True}, alternative="todo_list to get the current ids")
-        R("todo_update", ToolSpec("todo_update", "Change or complete an existing todo by id (from todo_list); new: todo_add.",
+        self.api.tool(ToolSpec("todo_update", "Change or complete an existing todo by id (from todo_list); new: todo_add.",
             _obj({"id": {"type": "string"}, "done": {"type": "boolean"}, "title": {"type": "string"}, "due": {"type": "string"}, "priority": {"type": "integer"}, "notes": {"type": "string"},
              "repeat_every": {"type": "integer"}, "repeat_unit": {"type": "string", "enum": ["day", "week", "month", "year"]},
              "repeat_mode": {"type": "string", "enum": ["from_due", "from_completion"], "default": "from_due"},
@@ -325,22 +320,24 @@ class TodosModule(Module):
             store.trash(id)
             return {"deleted": redact.scrub_command_output(str(t["title"] or "")),
                     "note": "moved to the trash; the user can restore it for 30 days"}
-        R("todo_delete", ToolSpec("todo_delete", "Trash a todo by id (restorable 30 days). To complete use todo_update(done=true); delete only when asked to remove it.",
+        self.api.tool(ToolSpec("todo_delete", "Trash a todo by id (restorable 30 days). To complete use todo_update(done=true); delete only when asked to remove it.",
             _obj({"id": {"type": "string"}}, ["id"]), todo_delete, "todos", "writes", examples=[{"id": "td_8c41a2"}]))
 
     # ---- loops ----
-    async def start(self) -> None:
-        self._tasks = [asyncio.create_task(self.tasks_sync.loop())]
-
-    async def stop(self) -> None:
-        tasks, self._tasks = self._tasks, []
-        for t in tasks:
-            t.cancel()
-        for t in tasks:
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await t
+    async def start(self, _: Any) -> None:
+        self.api.spawn(self.tasks_sync.loop())
 
     def today(self) -> dict[str, Any]:
         d = date.today()
         rows = sorted(self.store.list("__all__", include_done=False), key=lambda t: -todo_rules.urgency(t, d))  # stable: ties keep the due order
         return {"todos": rows[:12], "todo_stats": self.store.stats()}
+
+
+def activate(api: ExtensionScope) -> None:
+    ext = TodosExtension(api)
+    api.provide("todos", ext.store)
+    api.provide("tasks_sync", ext.tasks_sync)
+    api.router(ext.router())
+    ext.register_tools()
+    api.on("app.start", ext.start)
+    api.today(ext.today)

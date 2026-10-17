@@ -773,15 +773,14 @@ class Toolbox:
     commands: Any = None
     style_relearn: Any = None  # (project_id) -> None: queues a background voice relearn; wired in app.py
 
-    def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], modules: list[Any] | None = None, extensions: list[ExtensionScope] | None = None, google: Any = None,
+    def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], extensions: list[ExtensionScope] | None = None, google: Any = None,
                  docs: Any = None, outbox: Any = None,
                  work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None,
                  style: Any = None, desks: Any = None, workspace: Any = None, filesnap: Any = None,
                  conversations: Any = None, extundo: Any = None, bus: HookBus | None = None):
         self.bus = bus or HookBus()  # the hooks dispatch_tool fires around every call
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
-        self.modules = modules or []  # feature modules (modules/); each registers its own tools
-        self.extensions = extensions or []  # built-in extensions (extensions/); their tools follow the modules'
+        self.extensions = extensions or []  # every loaded extension, adapted feature modules (modules/) included, in load order
         self.google, self.docs = google, docs
         self.filesnap = filesnap  # pre-image snapshots for local file writes (filesnap.py); None skips them
         self.extundo = extundo  # undo rows for calendar / Google Tasks writes (extundo.py); None skips them
@@ -805,6 +804,7 @@ class Toolbox:
         self.chat_files: Any = None  # chat_files.ChatFiles: which chat each file belongs to; set by app.py
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
         self.trash: Any = None  # soft delete (trash.py); set by app.py
+        self.todos: Any = None  # todos.Todos, the todos extension's store (labels.py reads it); set by app.py
         self.retriever: Any = None  # hybrid document search (retrieval.py); set by app.py
         self.plans: Any = None  # plans.Plans (approved plan records); desk_done's gate reads the unconsumed steps; set by app.py
         self.canvases: Any = None  # canvas.Canvases; set by app.py (space_tools.py is not offered until then)
@@ -813,9 +813,9 @@ class Toolbox:
         self.specs: dict[str, ToolSpec] = {}
         self._register()
         self._register_working()
-        for m in self.modules:
-            m.register_tools(self)
         for e in self.extensions:
+            if e.module:
+                e.module.register_tools(self)
             self.specs.update(e.tools)
         if docs is not None:
             self._register_docs()

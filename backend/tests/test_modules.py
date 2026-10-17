@@ -1,4 +1,4 @@
-"""Feature-module contract (docs/module-manifest.md): TodosModule against the real app.
+"""Feature-module contract (docs/module-manifest.md) and the todos extension, against the real app.
 
 Run: PERSONAL_OS_DATA_DIR=/tmp/x python backend/tests/test_modules.py
 """
@@ -16,14 +16,11 @@ os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="moduleste
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os.app import AUTH_TOKEN, app, modules, toolbox  # noqa: E402
+from personal_os.app import AUTH_TOKEN, app, host, modules, tasks_sync, todos, toolbox  # noqa: E402
 from personal_os.google import GoogleNotConnected  # noqa: E402
-from personal_os.modules import get  # noqa: E402
-from personal_os.modules.todos import TodosModule  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
-todos = get(modules, "todos", TodosModule)
 
 TODO_TOOLS = ["todo_list", "todo_add", "todo_update", "todo_delete"]
 
@@ -39,7 +36,7 @@ def _route_set() -> set[tuple[str, str]]:
 class HostTests(unittest.TestCase):
     def test_modules_and_built_in_extensions_load_and_the_app_starts_through_the_lifespan(self) -> None:
         from personal_os import app as appmod
-        self.assertEqual(list(appmod.host.extensions), [*(m.key for m in modules), "health"])
+        self.assertEqual(list(appmod.host.extensions), ["todos", *(m.key for m in modules), "health"])
         self.assertEqual(app.router.on_startup + app.router.on_shutdown, [])  # no @app.on_event handlers remain
         with TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN}) as c:  # runs the lifespan
             self.assertEqual(c.get("/health").status_code, 200)
@@ -86,9 +83,9 @@ class ToolTests(unittest.TestCase):
     def test_tools_use_the_modules_store(self) -> None:
         t = asyncio.run(toolbox.specs["todo_add"].fn({"project_id": None}, title="module tool todo"))
         try:
-            self.assertEqual(todos.store.get(t["id"])["title"], "module tool todo")
+            self.assertEqual(todos.get(t["id"])["title"], "module tool todo")
         finally:
-            todos.store.delete(t["id"])
+            todos.delete(t["id"])
 
 
 class RouteTests(unittest.TestCase):
@@ -118,7 +115,7 @@ class RouteTests(unittest.TestCase):
 
     def test_sync_run_maps_errors(self) -> None:
         # Not-connected is a 409 the UI turns into "connect Google"; anything else is a 502.
-        target = todos.tasks_sync
+        target = tasks_sync
         orig = target.sync_once
         try:
             for exc, code in [(GoogleNotConnected("no"), 409), (RuntimeError("boom"), 502)]:
@@ -138,41 +135,26 @@ class DashboardTests(unittest.TestCase):
         try:
             d = client.get("/dashboard").json()
             self.assertIn(t["id"], [x["id"] for x in d["todos"]])
-            self.assertEqual(set(d["todo_stats"]), set(todos.store.stats()))
+            self.assertEqual(set(d["todo_stats"]), set(todos.stats()))
             self.assertLessEqual(len(d["todos"]), 12)
         finally:
             client.delete(f"/todos/{t['id']}")
 
     def test_today_payload(self) -> None:
-        self.assertEqual(set(todos.today()), {"todos", "todo_stats"})
+        self.assertEqual(set(host.extensions["todos"].today_fns[0]()), {"todos", "todo_stats"})
 
 
 class LoopTests(unittest.TestCase):
     def test_on_change_pokes_the_sync_loop(self) -> None:
         hits: list[str] = []
-        a = todos.tasks_sync.poke
-        todos.tasks_sync.poke = lambda: hits.append("tasks")  # type: ignore[method-assign]
+        a = tasks_sync.poke
+        tasks_sync.poke = lambda: hits.append("tasks")  # type: ignore[method-assign]
         try:
-            t = todos.store.create("poke me")
-            todos.store.delete(t["id"])
+            t = todos.create("poke me")
+            todos.delete(t["id"])
         finally:
-            todos.tasks_sync.poke = a
+            tasks_sync.poke = a
         self.assertIn("tasks", hits)
-
-    def test_start_stop_leave_no_running_tasks(self) -> None:
-        async def go() -> list[bool]:
-            before = asyncio.all_tasks()
-            await todos.start()
-            started = [t for t in asyncio.all_tasks() if t not in before]
-            states = [not t.done() for t in started]
-            await todos.stop()
-            return states + [t.done() for t in started] + [bool(todos._tasks)]
-
-        res = asyncio.run(go())
-        self.assertEqual(res, [True, True, False])  # the sync loop ran, is finished after stop, and nothing is tracked
-
-    def test_stop_without_start_is_a_noop(self) -> None:
-        asyncio.run(todos.stop())
 
 
 class ModulesStampTests(unittest.TestCase):

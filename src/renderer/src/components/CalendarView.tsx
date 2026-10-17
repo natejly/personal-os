@@ -9,7 +9,8 @@ import CalendarWeek, { addDays, slotIso, startOfWeek, withoutTodoEvents, type Sl
 import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from './EventEditor'
 import CalendarMonth, { monthGridStart } from './CalendarMonth'
 import { useVisibleCalendars } from './useVisibleCalendars'
-import { scheduleTodo } from './TodoItem'
+import { scheduleTodo } from '../extensions/todos/TodoItem'
+import { useTodos } from '../extensions/todos/store'
 import type { CalendarEvent, GoogleCalendar } from '@shared/types'
 import { oneLine } from '../lib/emailAsk'
 import { lines, usePageContext } from '../lib/pageContext'
@@ -61,8 +62,9 @@ export default function CalendarView(): JSX.Element {
   // The active calendar account.
   const google = useStore(pimStatus)
   const label = useStore(pimLabel)
-  const todos = useStore((s) => s.todos)
-  const { refreshTodos, toast, updateTodo, setView } = useStore(useShallow((s) => ({ refreshTodos: s.refreshTodos, toast: s.toast, updateTodo: s.updateTodo, setView: s.setView })))
+  const todos = useTodos((s) => s.todos)
+  const { refreshTodos, updateTodo } = useTodos(useShallow((s) => ({ refreshTodos: s.refreshTodos, updateTodo: s.updateTodo })))
+  const { toast, setView } = useStore(useShallow((s) => ({ toast: s.toast, setView: s.setView })))
   const [week, setWeek] = useState(() => startOfWeek(new Date()))
   // Week or month grid. `week` stays the anchor for both: the month shown is the one holding that week's Thursday.
   const [mode, setModeState] = useState<'week' | 'month'>(() => { try { return localStorage.getItem('calendar.mode') === 'month' ? 'month' : 'week' } catch { return 'week' } })
@@ -173,7 +175,7 @@ export default function CalendarView(): JSX.Element {
   }
 
   const dropTodo = async (todoId: string, day: string, hour: number | null): Promise<void> => {
-    const todo = useStore.getState().todos.find((t) => t.id === todoId)
+    const todo = useTodos.getState().todos.find((t) => t.id === todoId)
     if (!todo) return
     try {
       // scheduleTodo writes the due date with the event link, so the mirror never sees one without the other.

@@ -4,7 +4,7 @@ import { create } from 'zustand'
 import { useMemo } from 'react'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
 import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit, PlanDecision,
-  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskEvent, DeskFile, FullDesk, PromotionResult, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job } from '@shared/types'
+  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskEvent, DeskFile, FullDesk, PromotionResult, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleSample, StyleState, ToolInfo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import { markRunsSeen, withoutInboxRuns } from './lib/inboxBadge'
@@ -13,6 +13,7 @@ import { acceptToast } from './lib/proposalToast'
 import { installRejectionToasts } from './lib/rejections'
 import { busyText, nowText } from './lib/runStatus'
 import { api, backgroundStream, chatStream, getBase, getToken, setBase, type Scope } from './lib/api'
+import { useTodos } from './extensions/todos/store'
 import { currentSelection } from './lib/pageContext'
 import { panelConversationFor, type PagePin } from './lib/pagePanel'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
@@ -190,9 +191,6 @@ export interface State {
   /** Mail-watch chip to open expanded on the next Mail visit (Today's "View all"); MailWatchPanel clears it. */
   mailWatchKind: 'to_reply' | 'awaiting_reply' | null
   dashboard: TodayDashboard | null
-  todos: Todo[]
-  /** Bumped (debounced) when the backend says todos changed elsewhere; the open Todos view re-reads on it. */
-  todosTick: number
   recap: Recap | null
   recapLoading: boolean
   /** The Agent Inbox on Today: what needs the user, and what the scheduled jobs did. */
@@ -598,10 +596,6 @@ export interface State {
   refreshTasksSync: () => Promise<void>
   setTasksSync: (patch: { enabled?: boolean; tasklist?: string; intervalMinutes?: number }) => Promise<void>
   runTasksSync: () => Promise<void>
-  refreshTodos: (scope?: Scope, includeDone?: boolean, sort?: 'due' | 'urgency') => Promise<void>
-  addTodo: (t: Parameters<typeof api.todos.create>[0]) => Promise<void>
-  updateTodo: (id: string, patch: Parameters<typeof api.todos.update>[1]) => Promise<void>
-  deleteTodo: (id: string) => Promise<void>
   /** Stores each file and says which ones the assistant can read; the composer builds its note from that. */
   uploadDocuments: (files: FileList | File[], projectId: string | null) => Promise<UploadOutcome[]>
   deleteDocument: (id: string) => Promise<void>
@@ -657,7 +651,6 @@ export interface State {
 }
 
 let toastSeq = 0
-let todosSeq = 0
 
 const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
 /** What a `learned` event says in its toast: zero counts left out, '' when nothing changed. */
@@ -1200,7 +1193,7 @@ export const useStore = create<State>((set, get) => {
       void get().loadModels()
       void get().loadScope('all')
       void get().refreshDashboard()
-      void get().refreshTodos()
+      void useTodos.getState().refreshTodos()
       void get().refreshDocsPending()
       refreshAll()
       // Runs did not survive the process: the conversation list, the live-run map and every session
@@ -1331,7 +1324,7 @@ export const useStore = create<State>((set, get) => {
               return { settings: { ...st.settings, providerAuthBlocked: d.open ? { ...rest, [d.provider]: d.message || 'The provider rejected the API key.' } : rest } }
             })
           } else if (ev.event === 'todos_changed') {
-            if (todosTickTimer === null) todosTickTimer = setTimeout(() => { todosTickTimer = null; set((st) => ({ todosTick: st.todosTick + 1 })); void get().refreshDashboard() }, 200)
+            if (todosTickTimer === null) todosTickTimer = setTimeout(() => { todosTickTimer = null; useTodos.setState((st) => ({ tick: st.tick + 1 })); void get().refreshDashboard() }, 200)
           } else if (ev.event === 'ship_checklist') {
             get().upsertShip(ev.data)
           } else if (ev.event === 'coding_session') {
@@ -1835,8 +1828,6 @@ export const useStore = create<State>((set, get) => {
     tasksSync: null,
     mailWatchKind: null,
     dashboard: null,
-    todos: [],
-    todosTick: 0,
     recap: null,
     recapLoading: false,
     agentInbox: null,
@@ -2021,7 +2012,7 @@ export const useStore = create<State>((set, get) => {
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
       void get().refreshAgentDefs().catch(() => undefined)
       void get().refreshDashboard()
-      void get().refreshTodos()
+      void useTodos.getState().refreshTodos()
       // The recap is a model call: only make it for a card that is on (Regenerate and the canvas widget still can).
       if (homeModuleOn(get().settings, 'recap')) void get().refreshRecap()
       void get().refreshDocsPending()
@@ -2074,7 +2065,7 @@ export const useStore = create<State>((set, get) => {
         void get().refreshDocs()
         void get().refreshDocsPending()
       }
-      if (view === 'todos') void get().refreshTodos()
+      if (view === 'todos') void useTodos.getState().refreshTodos()
     },
     leaveCanvas: () => {
       const s = get()
@@ -2186,7 +2177,7 @@ export const useStore = create<State>((set, get) => {
       try {
         const out = await Promise.all(items.map((i) => api.trash.restore(i.type, i.id)))
         await Promise.all([get().refreshProjects(), get().refreshConversations(), get().refreshDocs(), get().refreshDocsPending(),
-                           get().refreshMemories(), get().refreshDocuments(), get().refreshTodos(), get().refreshDashboard()])
+                           get().refreshMemories(), get().refreshDocuments(), useTodos.getState().refreshTodos(), get().refreshDashboard()])
         if (out.some((o) => o.moved_to_personal)) get().toast('Restored to Personal: its project is still in the trash')
       } catch (e) {
         get().toast((e as Error).message, 'error')
@@ -2226,7 +2217,7 @@ export const useStore = create<State>((set, get) => {
           focusedConversationId: fid && s.sessions[fid] && !sessions[fid] ? null : fid
         }
       })
-      await Promise.all([get().refreshProjects(), get().refreshConversations(), get().refreshDocs(), get().refreshTodos()])
+      await Promise.all([get().refreshProjects(), get().refreshConversations(), get().refreshDocs(), useTodos.getState().refreshTodos()])
       get().offerUndo(name ? `project “${name}”` : 'project', [{ type: 'project', id }], res?.stopped ? 'Reply stopped.' : undefined)
     },
 
@@ -3700,7 +3691,7 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ tasksSync: s.tasksSync && { ...s.tasksSync, syncing: true } }))
       try {
         set({ tasksSync: await api.google.tasksSyncRun() })
-        await get().refreshTodos()
+        await useTodos.getState().refreshTodos()
         void get().refreshDashboard()
       } catch (e) {
         get().toast((e as Error).message, 'error')
@@ -3745,39 +3736,6 @@ export const useStore = create<State>((set, get) => {
       void get().refreshDashboard()
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
       void get().refreshAgentDefs().catch(() => undefined)
-    },
-
-    // Latest request wins: a slower, older fetch (another scope, or the mount's) must not overwrite the one the view asked for last.
-    refreshTodos: async (scope = 'all', includeDone = false, sort = 'due') => {
-      const n = ++todosSeq
-      const rows = await api.todos.list(scope, includeDone, '', sort)
-      if (n === todosSeq) set({ todos: rows })
-    },
-    addTodo: async (t) => {
-      await api.todos.create(t)
-      await Promise.all([get().refreshTodos(), get().refreshDashboard()])
-    },
-    updateTodo: async (id, patch) => {
-      const recurs = patch.done === true && !!get().todos.find((x) => x.id === id)?.repeat
-      // Completing is shown at once (a 500-row list otherwise waits a full round trip to react); put back if the write fails.
-      const before = get().todos.find((x) => x.id === id)
-      const optimistic = typeof patch.done === 'boolean' && before
-      if (optimistic) set((s) => ({ todos: s.todos.map((x) => (x.id === id ? { ...x, done: patch.done ? 1 : 0 } : x)) }))
-      let t
-      try { t = await api.todos.update(id, patch) } catch (e) {
-        if (optimistic) set((s) => ({ todos: s.todos.map((x) => (x.id === id ? before : x)) }))
-        throw e
-      }
-      if (recurs) void get().refreshTodos()  // the next instance was just created server-side
-      set((s) => ({ todos: s.todos.map((x) => (x.id === id ? t : x)), dashboard: s.dashboard && { ...s.dashboard, todos: s.dashboard.todos.map((x) => (x.id === id ? t : x)).filter((x) => !x.done) } }))
-      if ('done' in patch || 'due' in patch || 'clear_due' in patch) void get().refreshDashboard()  // todo_stats: the nav badge and Today card
-    },
-    deleteTodo: async (id) => {
-      const title = get().todos.find((x) => x.id === id)?.title
-      await api.todos.delete(id)
-      set((s) => ({ todos: s.todos.filter((x) => x.id !== id), dashboard: s.dashboard && { ...s.dashboard, todos: s.dashboard.todos.filter((x) => x.id !== id) } }))
-      void get().refreshDashboard()
-      get().offerUndo(title ? `todo “${title}”` : 'todo', [{ type: 'todo', id }])
     }
   }
 })

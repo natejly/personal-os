@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { X } from './icons'
 import { useStore } from './store'
+import { useTodos } from './extensions/todos/store'
 import { watchSelection } from './lib/pageContext'
 import Sidebar from './components/Sidebar'
 import GrainLogo from './components/GrainLogo'
@@ -254,7 +255,7 @@ export default function App(): JSX.Element {
     const s = useStore.getState()
     void useCanvas.getState().load()
     void s.loadScope('all')
-    void s.refreshTodos('all', true)
+    void useTodos.getState().refreshTodos('all', true)
   }, [inCanvas])
 
   // The window is frameless, so even the boot screen needs a strip to move it by.

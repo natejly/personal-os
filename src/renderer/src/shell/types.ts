@@ -4,7 +4,7 @@
  * the feature: App.tsx renders `view`, the Sidebar lists `nav`, the canvas
  * catalog takes `widget`, and Settings → Sidebar derives its toggles from `view`.
  *
- * `WidgetKind` is still a closed union, so a module can only fill a widget slot whose id already exists in it. Store slices (e.g. `todos` in store.ts) are not moved yet.
+ * `WidgetKind` is still a closed union, so a module can only fill a widget slot whose id already exists in it. A built-in extension keeps its own store slice beside its view (extensions/todos/store.ts).
  */
 import type { FC } from 'react'
 import type { State, View } from '../store'

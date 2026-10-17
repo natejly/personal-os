@@ -144,7 +144,7 @@ as `X-Personal-OS-Token: <token>` or `Authorization: Bearer <token>`. The token 
 otherwise the contents of `<data dir>/.auth_token` (0600), so an agent can read it from the data dir. Dev
 uses port `PERSONAL_OS_PORT` (default 8765); the packaged app picks a free port. Interactive API docs are at `/api-docs` (not `/docs`, which is the user's notes).
 
-Routes (verified in `backend/personal_os/app.py` and `modules/todos.py`):
+Routes (verified in `backend/personal_os/app.py` and `extensions/todos/extension.py`):
 
 | route | use |
 |---|---|

@@ -12,17 +12,16 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from personal_os.db import Database  # noqa: E402
-from personal_os.modules.todos import TodosModule  # noqa: E402
+from personal_os.extensions.host import ExtensionContext, ExtensionHost  # noqa: E402
 from personal_os.todos import Todos  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 
 
 def _box(store: Todos) -> Toolbox:
-    mod = TodosModule.__new__(TodosModule)
-    mod.store = store
-    box = Toolbox(None, None, None, lambda: {})  # type: ignore[arg-type]
-    mod.register_tools(box)
-    return box
+    """A Toolbox carrying the todos extension's tools, over the same database as `store`."""
+    ctx = ExtensionContext(db=store.db, hidden_views=lambda: (), services={"google": lambda: None}, settings=lambda: {},
+                           set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p)
+    return Toolbox(None, None, None, lambda: {}, extensions=[ExtensionHost().load_builtin("todos", ctx)])  # type: ignore[arg-type]
 
 
 def test_a_meeting_todo_taints_and_a_local_one_does_not() -> None:

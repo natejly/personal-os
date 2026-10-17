@@ -6,6 +6,7 @@
 import type { FC } from 'react'
 import type { ModuleDef, ModuleNav } from '../shell/types'
 import type { View } from '../store'
+import type { WidgetDef } from '../canvas/registry'
 
 export interface Disposable { dispose(): void }
 
@@ -17,6 +18,8 @@ export interface ViewDef {
   icon: JSX.Element
   Component: FC
   nav?: ModuleNav
+  /** The canvas window that shows this view's content; its drag kind is `widget.kind`. */
+  widget?: WidgetDef
 }
 
 export interface SettingsPanelDef {
@@ -55,7 +58,7 @@ export function activateExtension(id: string, ext: ExtensionModule): void {
   ext.activate({
     id,
     view: (def) => add(extensionModules, {
-      key: id, label: def.label, description: def.description, icon: def.icon, nav: def.nav,
+      key: id, label: def.label, description: def.description, icon: def.icon, nav: def.nav, widget: def.widget,
       view: { id: def.id, Component: def.Component, optional: true }
     }),
     settingsPanel: (def) => add(settingsPanels, { ...def, tab: `ext:${id}:${def.id}`, extension: id })

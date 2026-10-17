@@ -468,9 +468,15 @@ class ScopeAndHostTests(unittest.TestCase):
         self.assertEqual(log, ["after"])
 
 
+def builtin_ctx(services: dict[str, Any]) -> ExtensionContext:
+    return ExtensionContext(db=Database(tempfile.mkdtemp(prefix="exthealth-")), hidden_views=lambda: (), services=services,
+                            settings=lambda: {}, set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p)
+
+
 class BuiltinExtensionTests(unittest.TestCase):
     def scope(self, hidden: list[str] | None = None, **over: Any) -> Any:
-        ctx = ExtensionContext(db=None, hidden_views=lambda: hidden or (), services={"mcp": lambda: "client"})  # type: ignore[arg-type]
+        ctx = ExtensionContext(db=None, hidden_views=lambda: hidden or (), services={"mcp": lambda: "client"},  # type: ignore[arg-type]
+                               settings=lambda: {}, set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p)
         return ExtensionHost()._add(Manifest.from_dict(manifest(**over)), ctx=ctx)
 
     def test_enabled_follows_the_hidden_views_unless_always(self) -> None:
@@ -521,6 +527,22 @@ class BuiltinExtensionTests(unittest.TestCase):
             self.assertTrue(done.is_set() and task.cancelled() and not scope.tasks)
         run(go())
 
+    def test_a_provided_service_reaches_the_app_and_requirers_until_the_scope_stops(self) -> None:
+        scope = self.scope(provides={"services": ["demo"]})
+        impl = object()
+        scope.provide("demo", impl)
+        self.assertIs(scope.app.services["demo"](), impl)
+        run(scope.stop())
+        self.assertNotIn("demo", scope.app.services)
+
+    def test_provide_refuses_an_undeclared_or_taken_service(self) -> None:
+        scope = self.scope(provides={"services": ["demo"]})
+        with self.assertRaises(ValueError):
+            scope.provide("other", object())
+        scope.provide("demo", object())
+        with self.assertRaises(ValueError):
+            scope.provide("demo", object())
+
     def test_services_must_be_declared_and_are_looked_up_late(self) -> None:
         scope = self.scope(requires={"services": ["mcp"]})
         self.assertEqual(scope.services.get("mcp"), "client")
@@ -529,7 +551,7 @@ class BuiltinExtensionTests(unittest.TestCase):
 
     def test_load_builtin_activates_health_and_starts_and_stops_its_loop(self) -> None:
         host = ExtensionHost()
-        ctx = ExtensionContext(db=Database(tempfile.mkdtemp(prefix="exthealth-")), hidden_views=lambda: (), services={"mcp": lambda: None})
+        ctx = builtin_ctx({"mcp": lambda: None})
         scope = host.load_builtin("health", ctx)
         self.assertEqual(list(scope.tools), ["health_summary", "health_log", "health_delete_entry"])
         self.assertEqual([r.prefix for r in scope.routers], ["/health"])
@@ -542,11 +564,28 @@ class BuiltinExtensionTests(unittest.TestCase):
             self.assertEqual(scope.tasks, set())
         run(go())
 
+    def test_load_builtin_activates_todos_provides_its_store_and_runs_the_sync_loop(self) -> None:
+        host = ExtensionHost()
+        ctx = builtin_ctx({"google": lambda: None})
+        scope = host.load_builtin("todos", ctx)
+        self.assertEqual(list(scope.tools), ["todo_list", "todo_add", "todo_update", "todo_delete"])
+        self.assertTrue({"todos", "tasks_sync"} <= set(ctx.services))
+        self.assertIs(ctx.services["tasks_sync"]().todos, ctx.services["todos"]())
+        self.assertEqual(list(host.bus._subs), ["app.start"])
+
+        async def go() -> None:
+            await host.start()
+            self.assertEqual(len(scope.tasks), 1)
+            await host.stop()
+            self.assertEqual(scope.tasks, set())
+        run(go())
+        self.assertFalse({"todos", "tasks_sync"} & set(ctx.services))
+
     def test_load_builtin_refuses_tools_the_manifest_does_not_declare(self) -> None:
         real = load_manifest(Path(__file__).resolve().parents[1] / "personal_os" / "extensions" / "health" / "extension.json")
         short = Manifest.from_dict({"id": "health", "name": "Health", "version": "1.0.0", "apiVersion": 1,
                                     "hooks": dict(real.hooks), "contributes": {"tools": [{"name": "health_log", "danger": "writes", "group": "health"}]}})
-        ctx = ExtensionContext(db=Database(tempfile.mkdtemp(prefix="exthealth-")), hidden_views=lambda: (), services={})
+        ctx = builtin_ctx({})
         with mock.patch("personal_os.extensions.host.load_manifest", return_value=short), self.assertRaises(ValueError):
             ExtensionHost().load_builtin("health", ctx)
 
@@ -555,7 +594,7 @@ class BuiltinExtensionTests(unittest.TestCase):
         tools = [{**t, "danger": "safe"} if t["name"] == "health_log" else t for t in real.contributes["tools"]]
         drifted = Manifest.from_dict({"id": "health", "name": "Health", "version": "1.0.0", "apiVersion": 1,
                                       "hooks": dict(real.hooks), "contributes": {"tools": tools}})
-        ctx = ExtensionContext(db=Database(tempfile.mkdtemp(prefix="exthealth-")), hidden_views=lambda: (), services={})
+        ctx = builtin_ctx({})
         with mock.patch("personal_os.extensions.host.load_manifest", return_value=drifted), self.assertRaises(ValueError):
             ExtensionHost().load_builtin("health", ctx)
 

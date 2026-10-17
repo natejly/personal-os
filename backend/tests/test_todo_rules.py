@@ -19,8 +19,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import todo_rules as R  # noqa: E402
 from personal_os.db import Database  # noqa: E402
-from personal_os.modules import ModuleContext  # noqa: E402
-from personal_os.modules.todos import TodosModule  # noqa: E402
+from personal_os.extensions.host import ExtensionContext, ExtensionHost  # noqa: E402
 from personal_os.todos import Todos  # noqa: E402
 
 D = date.fromisoformat
@@ -170,11 +169,13 @@ class UrgencyTests(unittest.TestCase):
 class RouteTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
-        ctx = ModuleContext(db=Database(self.tmp.name), settings=lambda: {}, set_settings=lambda _s: None, google=None,
-                            sid=lambda p: p, wsid=lambda p: p)
-        self.mod = TodosModule(ctx)
+        ctx = ExtensionContext(db=Database(self.tmp.name), hidden_views=lambda: (), services={"google": lambda: None},
+                               settings=lambda: {}, set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p)
+        self.scope = ExtensionHost().load_builtin("todos", ctx)
+        self.store = ctx.services["todos"]()
         app = FastAPI()
-        app.include_router(self.mod.router())
+        for router in self.scope.routers:
+            app.include_router(router)
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -204,14 +205,9 @@ class RouteTests(unittest.TestCase):
         self.assertGreater(opened[0]["due"], date.today().isoformat())
 
     def test_todo_list_tool_exposes_urgency(self) -> None:
-        class Box:
-            specs: dict = {}
-        box = Box()
-        box.specs = {}
-        self.mod.register_tools(box)  # type: ignore[arg-type]
-        self.mod.store.create("a", priority=3)
-        self.mod.store.create("b", priority=1)
-        out = asyncio.run(box.specs["todo_list"].fn({"project_id": None}, sort="urgency"))
+        self.store.create("a", priority=3)
+        self.store.create("b", priority=1)
+        out = asyncio.run(self.scope.tools["todo_list"].fn({"project_id": None}, sort="urgency"))
         self.assertEqual(out["todos"][0]["title"], "b")
         self.assertIn("urgency", out["todos"][0])
 

@@ -8,12 +8,12 @@ pilot because it touches every surface. Built-in only — no runtime loading, no
 
 ## Ported modules
 
-`build_modules` (`backend/personal_os/modules/__init__.py`) registers them in this order; the frontend list is
+`build_modules` (`backend/personal_os/modules/__init__.py`) registers the modules in this order; the frontend list is
 `MODULES` in `src/renderer/src/shell/registry.ts`.
 
 | Key | Backend | Frontend `ModuleDef` |
 |---|---|---|
-| `todos` | `modules/todos.py` — `TodosModule` | `features/todos/module.tsx` |
+| `todos` | `extensions/todos/extension.py`, a built-in extension (loaded first, so its tools keep their place; it provides the `todos` and `tasks_sync` services) | `extensions/todos/extension.tsx` (`ui.view`, with its own store slice) |
 | `mailwatch` | `modules/mailwatch.py` — `MailWatchModule` (reply tracker, `mail_followups`) | none (backend only) |
 | `planner` | `modules/planner.py` — `PlannerModule` (time-block suggestions for todos) | none (backend only) |
 | `health` | `extensions/health/extension.py`, a built-in extension loaded by `ExtensionHost.load_builtin` (registered after the modules, so its tools keep their place) | `extensions/health/extension.tsx` (`ui.view`) |

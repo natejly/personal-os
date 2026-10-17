@@ -104,8 +104,7 @@ from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .style import WritingStyle
 from .extensions.host import ExtensionContext, ExtensionHost
-from .modules import Module, ModuleContext, build_modules, get as module_get
-from .modules.todos import TodosModule
+from .modules import Module, ModuleContext, build_modules
 from .tools import ASK_LOCKED_DANGER, Toolbox, UrlBlocked, guarded_request, page_title, summarize_result, times_body
 from .webread import WebCache
 from .trash import Trash, router as trash_router
@@ -419,17 +418,19 @@ recaps = Recaps(db)
 google = Google(settings, db.set_settings, cache_dir=db.data_dir)
 app.include_router(setup_router(settings, db.set_settings, lambda: google.status()["connected"]))
 app.include_router(providers_router(db.get_settings, db.set_settings, db.secrets, ensure_embedding_model))
-# sid/wsid are defined further down, so the module context looks them up late.
+# sid/wsid are defined further down, so the contexts look them up late.
+_ext_ctx = ExtensionContext(db=db, hidden_views=lambda: settings().get("hiddenViews") or (), services={"mcp": lambda: mcp, "google": lambda: google},
+                            settings=settings, set_settings=db.set_settings, sid=lambda p: sid(p), wsid=lambda p: wsid(p))
+for _r in host.load_builtin("todos", _ext_ctx).routers:
+    app.include_router(_r)
+todos, tasks_sync = _ext_ctx.services["todos"](), _ext_ctx.services["tasks_sync"]()
 modules: list[Module] = build_modules(ModuleContext(
     db=db, settings=settings, set_settings=db.set_settings, google=google,
     sid=lambda p: sid(p), wsid=lambda p: wsid(p), mcp=lambda: mcp))
-_todos_module = module_get(modules, "todos", TodosModule)
-todos, tasks_sync = _todos_module.store, _todos_module.tasks_sync
 for _m in modules:
     host.add_module(_m)
     if (_r := _m.router()) is not None:
         app.include_router(_r)
-_ext_ctx = ExtensionContext(db=db, hidden_views=lambda: settings().get("hiddenViews") or (), services={"mcp": lambda: mcp})
 for _r in host.load_builtin("health", _ext_ctx).routers:
     app.include_router(_r)
 host.migrate(db)
@@ -630,7 +631,7 @@ guide.ensure(skills)  # the built-in "Using Grain" skill: created approved, text
 # Auto-learn may only ever *propose* a skill (a friction fix, or a revised copy of one that failed); the lint it
 # runs is the approval gate's, so a draft that claims authority never even becomes a candidate.
 learner.skills, learner.known_tools = skills, lambda: _known_tools()
-toolbox = Toolbox(memories, graph, documents, settings, modules=modules, extensions=list(host.extensions.values()), google=google, docs=docs,
+toolbox = Toolbox(memories, graph, documents, settings, extensions=list(host.extensions.values()), google=google, docs=docs,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, desks=desks, workspace=workspace, filesnap=filesnap,
                   conversations=convos, extundo=extundo, bus=host.bus)
@@ -667,6 +668,7 @@ async def _start_retrieval() -> None:
     retriever.schedule_docs(settings)
 toolbox.retriever = retriever
 toolbox.trash = trash
+toolbox.todos = todos
 toolbox.style_relearn = queue_style_relearn
 toolbox.memory_index = memory_index
 toolbox.plans = plans  # desk_done's gate reads the approved plan's unconsumed steps

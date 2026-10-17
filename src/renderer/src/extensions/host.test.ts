@@ -26,7 +26,13 @@ test('a settings panel gets a section id under its extension and is removed on d
   assert.deepEqual(settingsPanels, [])
 })
 
-test('Health is registered through its extension, after the shell modules', () => {
+test('Lists is registered through its extension with its nav entry and canvas widget', () => {
+  const m = moduleForView('todos')
+  assert.ok(m && extensionModules.includes(m) && MODULES.includes(m))
+  assert.deepEqual([m.key, m.label, m.nav?.order, m.view?.optional, m.widget?.kind], ['todos', 'Lists', 12, true, 'todos'])
+})
+
+test('Health is registered through its extension', () => {
   const m = moduleForView('health')
   assert.ok(m && extensionModules.includes(m) && MODULES.includes(m))
   assert.deepEqual([m.key, m.label, m.nav?.order, m.view?.optional], ['health', 'Health', 18, true])

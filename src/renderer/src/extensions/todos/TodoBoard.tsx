@@ -1,10 +1,11 @@
-import { statusWord } from '../lib/statusWord'
+import { statusWord } from '../../lib/statusWord'
 import { useMemo, useState } from 'react'
-import { Calendar, Plus, X } from '../icons'
+import { Calendar, Plus, X } from '../../icons'
 import type { Todo } from '@shared/types'
-import { api } from '../lib/api'
-import { useStore } from '../store'
-import { dragProps, useDropTarget } from '../canvas/dnd'
+import { api } from '../../lib/api'
+import { useStore } from '../../store'
+import { useTodos } from './store'
+import { dragProps, useDropTarget } from '../../canvas/dnd'
 
 /** The board's default columns; any other status a todo carries (a migrated board's own columns) gets one too. */
 export const DEFAULT_STATUSES = ['Backlog', 'To do', 'In progress', 'Done']
@@ -45,7 +46,7 @@ function Column({ name, label, cards, groupBy, onAdd, onMove }: ColProps): JSX.E
     const before = els.find((el) => e.clientY < el.getBoundingClientRect().top + el.offsetHeight / 2 && el.dataset.id !== p.id)
     onMove(p.id, name, before?.dataset.id ?? null)
   })
-  const toggle = (t: Todo): void => { void useStore.getState().updateTodo(t.id, { done: !t.done }) }
+  const toggle = (t: Todo): void => { void useTodos.getState().updateTodo(t.id, { done: !t.done }) }
   return (
     <div className={`kcol ${drop.over ? 'over drop-over' : ''}`} {...drop.handlers}>
       <header>
@@ -65,7 +66,7 @@ function Column({ name, label, cards, groupBy, onAdd, onMove }: ColProps): JSX.E
                 {(c.tags ?? []).map((l) => <span key={l} className="tag">{l}</span>)}
                 {c.priority === 1 && <span className="tag p1">P1</span>}
                 <span style={{ flex: 1 }} />
-                <button className="icon-btn ghost sm" title="Delete" aria-label={`Delete ${c.title}`} onClick={() => void useStore.getState().deleteTodo(c.id)}><X size={11} /></button>
+                <button className="icon-btn ghost sm" title="Delete" aria-label={`Delete ${c.title}`} onClick={() => void useTodos.getState().deleteTodo(c.id)}><X size={11} /></button>
               </div>
             </div>
           </div>

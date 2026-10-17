@@ -8,7 +8,8 @@ import { api } from '../../lib/api'
 import CalendarWeek, { addDays, dayKey, fmtTime, localDay, slotIso, startOfWeek, withoutTodoEvents, type Slot } from '../../components/CalendarWeek'
 import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from '../../components/EventEditor'
 import { useVisibleCalendars } from '../../components/useVisibleCalendars'
-import { scheduleTodo } from '../../components/TodoItem'
+import { scheduleTodo } from '../../extensions/todos/TodoItem'
+import { useTodos } from '../../extensions/todos/store'
 import { hasDrag, readDrag, useDropTarget } from '../dnd'
 import { calendarViewKey, readView, writeView } from '../../lib/viewCache'
 import type { WidgetDef, WidgetProps } from '../registry'
@@ -24,10 +25,10 @@ const readMode = (v: unknown): CalMode => (MODES.includes(v as CalMode) ? (v as 
 const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Element => {
   const connected = useStore(pimConnected)
   const label = useStore(pimLabel)
-  const todos = useStore((s) => s.todos)
+  const todos = useTodos((s) => s.todos)
   const toast = useStore((s) => s.toast)
   const openTodos = (): void => void useCanvas.getState().ensureWindow(win.canvas_id, 'todos')
-  const updateTodo = useStore((s) => s.updateTodo)
+  const updateTodo = useTodos((s) => s.updateTodo)
   const mode = readMode(win.config.mode)
   const days = typeof win.config.days === 'number' ? win.config.days : 7
   const [shift, setShift] = useState(0)
@@ -55,7 +56,7 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
 
   useEffect(() => {
     if (!live) return
-    void useStore.getState().refreshTodos('all', false)
+    void useTodos.getState().refreshTodos('all', false)
   }, [live])
 
   // Off-screen, minimized or zoomed out: stop the poller so a hidden window does not hit Google.
@@ -91,7 +92,7 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
   }
 
   const dropTodo = async (todoId: string, day: string, hour: number | null): Promise<void> => {
-    const todo = useStore.getState().todos.find((t) => t.id === todoId)
+    const todo = useTodos.getState().todos.find((t) => t.id === todoId)
     if (!todo) return
     try {
       // scheduleTodo writes the due date with the event link, so the mirror never sees one without the other.

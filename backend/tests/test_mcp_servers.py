@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from types import SimpleNamespace
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,6 @@ from personal_os.db import Database  # noqa: E402
 from personal_os.extensions.host import ExtensionContext, ExtensionHost, ExtensionScope  # noqa: E402
 from personal_os.modules.mailwatch import MailWatchModule
 from personal_os.modules.planner import PlannerModule
-from personal_os.modules.todos import TodosModule
 from personal_os.tools import DEFAULT_MODE, Toolbox  # noqa: E402
 
 
@@ -35,21 +35,23 @@ class Stub:
     """
 
 
-def stub_todos_module() -> TodosModule:
-    """TodosModule with a stub store: registering its tools touches nothing else."""
-    m = TodosModule.__new__(TodosModule)
-    m.store = Stub()  # type: ignore[assignment]
+def stub_module(cls: Any) -> Any:
+    """A feature module built without its context: registering its tools touches nothing."""
+    m = cls.__new__(cls)
+    m.ctx = SimpleNamespace(settings=lambda: {})
     return m
 
 
-def health_extension() -> ExtensionScope:
+def loaded_extensions() -> list[ExtensionScope]:
+    """The todos extension, the two modules and the health extension, in the app's load order."""
     host = ExtensionHost()
-    return host.load_builtin("health", ExtensionContext(db=Database(tempfile.mkdtemp(prefix="mcpreserved-")), hidden_views=lambda: (), services={}))
-
-
-def stub_module(cls: Any) -> Any:
-    """A feature module built without its context: registering its tools touches nothing."""
-    return cls.__new__(cls)
+    ctx = ExtensionContext(db=Database(tempfile.mkdtemp(prefix="mcpreserved-")), hidden_views=lambda: (), services={"google": lambda: Stub()},
+                           settings=lambda: {}, set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p)
+    host.load_builtin("todos", ctx)
+    host.add_module(stub_module(MailWatchModule))
+    host.add_module(stub_module(PlannerModule))
+    host.load_builtin("health", ctx)
+    return list(host.extensions.values())
 
 
 def full_toolbox(google: Any = None) -> Toolbox:
@@ -62,8 +64,7 @@ def full_toolbox(google: Any = None) -> Toolbox:
     calls their register() after building the Toolbox), so they are added here the same way.
     """
     tb = Toolbox(Stub(), Stub(), Stub(), lambda: {},  # type: ignore[arg-type]
-                 modules=[stub_todos_module(), stub_module(MailWatchModule), stub_module(PlannerModule)],
-                 extensions=[health_extension()], google=google or Stub(),  # type: ignore[arg-type]
+                 extensions=loaded_extensions(), google=google or Stub(),  # type: ignore[arg-type]
                  docs=Stub(), outbox=Stub(), work_plans=Stub(), results=Stub(),
                  skills=Stub(), jobs=Stub(), style=Stub(),
                  desks=Stub(), workspace=Stub())

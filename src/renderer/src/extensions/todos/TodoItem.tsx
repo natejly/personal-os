@@ -1,14 +1,15 @@
 import { memo, useRef, useState } from 'react'
-import { Trash2, Calendar, CalendarPlus, ExternalLink, Repeat, ListPlus, Lock } from '../icons'
-import { useStore } from '../store'
-import { pimConnected } from '../lib/pim'
-import { api } from '../lib/api'
+import { Trash2, Calendar, CalendarPlus, ExternalLink, Repeat, ListPlus, Lock } from '../../icons'
+import { useStore } from '../../store'
+import { useTodos } from './store'
+import { pimConnected } from '../../lib/pim'
+import { api } from '../../lib/api'
 import type { CalendarEvent, Todo } from '@shared/types'
-import { dragProps } from '../canvas/dnd'
-import ProjectChip from './ProjectChip'
-import { rowButton } from '../lib/rowButton'
-import { localDay } from './CalendarWeek'
-import { dueLabel } from '../lib/dates'
+import { dragProps } from '../../canvas/dnd'
+import ProjectChip from '../../components/ProjectChip'
+import { rowButton } from '../../lib/rowButton'
+import { localDay } from '../../components/CalendarWeek'
+import { dueLabel } from '../../lib/dates'
 
 export { dueLabel }
 
@@ -19,8 +20,7 @@ export { dueLabel }
  * date and link are written together.
  */
 export async function scheduleTodo(todo: Todo, start?: string): Promise<Todo> {
-  const app = useStore.getState()
-  const cur = app.todos.find((t) => t.id === todo.id) ?? todo
+  const cur = useTodos.getState().todos.find((t) => t.id === todo.id) ?? todo
   const when = start || todo.due || localDay()
   let ev: CalendarEvent | null = null
   if (cur.calendar_event_id) {
@@ -36,7 +36,7 @@ export async function scheduleTodo(todo: Todo, start?: string): Promise<Todo> {
   })
   const link = { calendar_event_id: ev.id, calendar_link: ev.link, calendar_id: ev.calendar_id ?? null }
   const due = when.slice(0, 10)
-  await app.updateTodo(todo.id, { ...link, ...(cur.due !== due ? { due } : {}) })
+  await useTodos.getState().updateTodo(todo.id, { ...link, ...(cur.due !== due ? { due } : {}) })
   return { ...cur, due, ...link }
 }
 
@@ -47,11 +47,11 @@ const openPicker = (e: { currentTarget: HTMLInputElement }): void => { try { e.c
 export const justCompleted = new Set<string>()
 
 function TodoItem({ todo, showProject = true, compact = false, depth = 0, onTag }: { todo: Todo; showProject?: boolean; compact?: boolean; depth?: number; onTag?: (tag: string) => void }): JSX.Element {
-  const updateTodo = useStore((s) => s.updateTodo)
-  const deleteTodo = useStore((s) => s.deleteTodo)
+  const updateTodo = useTodos((s) => s.updateTodo)
+  const deleteTodo = useTodos((s) => s.deleteTodo)
   const toast = useStore((s) => s.toast)
   const connected = useStore(pimConnected)
-  const addTodo = useStore((s) => s.addTodo)
+  const addTodo = useTodos((s) => s.addTodo)
   const [editing, setEditing] = useState(false)
   const [sub, setSub] = useState<string | null>(null)
   const [title, setTitle] = useState(todo.title)

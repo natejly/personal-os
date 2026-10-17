@@ -1,24 +1,25 @@
 import { useEffect, useRef, useState } from 'react'
-import { useSlidingPill } from "../lib/useSlidingPill"
+import { useSlidingPill } from "../../lib/useSlidingPill"
 import { useShallow } from 'zustand/react/shallow'
-import { Plus, ListChecks, RefreshCw, Bookmark, X, ChevronDown, KanbanSquare, List, SlidersHorizontal, Pencil, Trash2, Inbox, Layers } from '../icons'
+import { Plus, ListChecks, RefreshCw, Bookmark, X, ChevronDown, KanbanSquare, List, SlidersHorizontal, Pencil, Trash2, Inbox, Layers } from '../../icons'
 import type { TodoFilter, TodoRepeat } from '@shared/types'
-import { api } from '../lib/api'
-import { useStore, type Scope } from '../store'
+import { api } from '../../lib/api'
+import { useStore, type Scope } from '../../store'
+import { useTodos } from './store'
 import TodoItem, { justCompleted } from './TodoItem'
-import ScopeSelect from './ScopeSelect'
-import SmartTextarea from './SmartTextarea'
-import { localDay } from './CalendarWeek'
-import { lines, usePageContext } from '../lib/pageContext'
-import AppSwitcher from './AppSwitcher'
-import PlannerPanel from './PlannerPanel'
+import ScopeSelect from '../../components/ScopeSelect'
+import SmartTextarea from '../../components/SmartTextarea'
+import { localDay } from '../../components/CalendarWeek'
+import { lines, usePageContext } from '../../lib/pageContext'
+import AppSwitcher from '../../components/AppSwitcher'
+import PlannerPanel from '../../components/PlannerPanel'
 import TodoBoard, { type BoardGroup } from './TodoBoard'
-import { clearHandoff, peekHandoff } from '../lib/handoff'
-import SidebarToggle from './SidebarToggle'
-import { rowButton } from '../lib/rowButton'
-import ErrorState from './ErrorState'
+import { clearHandoff, peekHandoff } from '../../lib/handoff'
+import SidebarToggle from '../../components/SidebarToggle'
+import { rowButton } from '../../lib/rowButton'
+import ErrorState from '../../components/ErrorState'
 
-type Todo = ReturnType<typeof useStore.getState>['todos'][number]
+type Todo = ReturnType<typeof useTodos.getState>['todos'][number]
 /** A just-completed row that has left the data: it shows the finished state, then folds shut and removes itself. */
 function LeavingTodo({ todo, onGone }: { todo: Todo; onGone: () => void }): JSX.Element {
   const [done, setDone] = useState(false)
@@ -35,10 +36,11 @@ const DEFAULT_LIST = 'Todos'
 
 export default function TodosView(): JSX.Element {
   const viewPill = useSlidingPill<HTMLDivElement>()
-  const todos = useStore((s) => s.todos)
+  const todos = useTodos((s) => s.todos)
   const tasksSync = useStore((s) => s.tasksSync)
   const googleConnected = useStore((s) => !!s.google?.connected)
-  const { refreshTodos, addTodo, refreshTasksSync, runTasksSync, toast } = useStore(useShallow((s) => ({ refreshTodos: s.refreshTodos, addTodo: s.addTodo, refreshTasksSync: s.refreshTasksSync, runTasksSync: s.runTasksSync, toast: s.toast })))
+  const { refreshTodos, addTodo } = useTodos(useShallow((s) => ({ refreshTodos: s.refreshTodos, addTodo: s.addTodo })))
+  const { refreshTasksSync, runTasksSync, toast } = useStore(useShallow((s) => ({ refreshTasksSync: s.refreshTasksSync, runTasksSync: s.runTasksSync, toast: s.toast })))
   const [scope, setScope] = useState<Scope>('all')
   const [showDone, setShowDone] = useState(false)
   // A canvas todos window in board view hands its view over on Expand.
@@ -72,7 +74,7 @@ export default function TodosView(): JSX.Element {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [retry, setRetry] = useState(0)
 
-  const todosTick = useStore((s) => s.todosTick)
+  const todosTick = useTodos((s) => s.tick)
   useEffect(() => {
     void refreshTodos(scope, showDone || board, sort)
       .then(() => setLoadError(null), (e) => setLoadError((e as Error).message))

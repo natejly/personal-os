@@ -19,16 +19,14 @@ os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="todaycard
 from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import todo_rules  # noqa: E402
-from personal_os.app import AUTH_TOKEN, app, db, google, modules  # noqa: E402
+from personal_os.app import AUTH_TOKEN, app, db, google, host, modules, todos  # noqa: E402
 from personal_os.modules import get  # noqa: E402
 from personal_os.modules.mailwatch import MailWatchModule  # noqa: E402
 from personal_os.modules.planner import PlannerModule  # noqa: E402
-from personal_os.modules.todos import TodosModule  # noqa: E402
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 db.set_settings({"hiddenViews": []})  # a fresh install has Lists, Calendar and Mail off
 NOW = datetime(2026, 10, 5, 8, 0)  # a Monday
-todos_mod = get(modules, "todos", TodosModule)
 planner_mod = get(modules, "planner", PlannerModule)
 mail_mod = get(modules, "mailwatch", MailWatchModule)
 
@@ -55,13 +53,13 @@ def dashboard(tasks: list[dict] | None = None, saved: list | None = None, calend
 
 class TodayCardTests(unittest.TestCase):
     def test_mail_counts_and_plan_blocks_ride_the_dashboard(self) -> None:
-        a = todos_mod.store.create("Write the spec", due="2026-10-06", priority=1, estimate_min=60)
-        b = todos_mod.store.create("Email the landlord", due="2026-10-07", estimate_min=30)
+        a = todos.create("Write the spec", due="2026-10-06", priority=1, estimate_min=60)
+        b = todos.create("Email the landlord", due="2026-10-07", estimate_min=30)
         d = dashboard(saved=[])
         self.assertEqual(d["mail_watch"], {"to_reply": 3, "awaiting_reply_overdue": 2})
         self.assertEqual({x["title"] for x in d["planner_blocks"]}, {"Write the spec", "Email the landlord"})
         for t in (a, b):
-            todos_mod.store.trash(t["id"])
+            todos.trash(t["id"])
 
     def test_today_counts_only_busy_calendars_when_set(self) -> None:
         def block_for(busy_ids: list[str]) -> list:
@@ -71,14 +69,14 @@ class TodayCardTests(unittest.TestCase):
                  mock.patch.object(planner_mod, "config", lambda: cfg), \
                  mock.patch.object(planner_mod, "clock", lambda: NOW):
                 return planner_mod.today()["planner_blocks"]
-        t = todos_mod.store.create("Needs a slot", due="2026-10-05", estimate_min=30)
+        t = todos.create("Needs a slot", due="2026-10-05", estimate_min=30)
         self.assertEqual(block_for([]), [])  # every saved calendar counts: the day is full
         self.assertEqual(block_for(["mine"])[0]["title"], "Needs a slot")  # "other" is not chosen
         self.assertEqual(block_for(["other"]), [])
-        todos_mod.store.trash(t["id"])
+        todos.trash(t["id"])
 
     def test_busy_calendars_still_read_the_planner_calendar_for_locks(self) -> None:
-        t = todos_mod.store.create("Needs a slot", due="2026-10-05", estimate_min=30)
+        t = todos.create("Needs a slot", due="2026-10-05", estimate_min=30)
         saved = [{"start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "all_day": False, "calendar_id": "grain-cal",
                   "summary": "Focus: Needs a slot", "description": f"Planned by Grain from todo {t['id']}"}]
         cfg = {**planner_mod.config(), "busyCalendarIds": ["mine"]}
@@ -88,15 +86,15 @@ class TodayCardTests(unittest.TestCase):
              mock.patch.object(planner_mod, "clock", lambda: NOW):
             blocks = planner_mod.today()["planner_blocks"]
         self.assertEqual([b for b in blocks if b["todo_id"] == t["id"] and b["start"] != "2026-10-05T09:00"], [])
-        todos_mod.store.trash(t["id"])
+        todos.trash(t["id"])
 
     def test_no_snapshot_means_no_blocks(self) -> None:
-        t = todos_mod.store.create("Needs a slot", due="2026-10-06", estimate_min=30)
+        t = todos.create("Needs a slot", due="2026-10-06", estimate_min=30)
         self.assertEqual(dashboard(saved=None)["planner_blocks"], [])
-        todos_mod.store.trash(t["id"])
+        todos.trash(t["id"])
 
     def test_plan_is_unconfirmed_until_apply_and_apply_needs_selected_blocks(self) -> None:
-        t = todos_mod.store.create("Plan me", due="2026-10-06", estimate_min=30)
+        t = todos.create("Plan me", due="2026-10-06", estimate_min=30)
         created: list = []
 
         def create(ev: dict, calendar_id: str = "primary", send_updates: str = "none") -> dict:
@@ -114,18 +112,18 @@ class TodayCardTests(unittest.TestCase):
             self.assertTrue(r.json()["results"][0]["ok"])
             self.assertEqual(len(created), 1)
             self.assertEqual(created[0][1], "none")
-        todos_mod.store.trash(t["id"])
+        todos.trash(t["id"])
 
     def test_todos_come_back_in_urgency_order(self) -> None:
         today = date.today()
         # due order says near-low first; urgency says the high-priority one outranks it
-        near_low = todos_mod.store.create("Near low", due=(today + timedelta(days=1)).isoformat(), priority=3)
-        far_high = todos_mod.store.create("Far high", due=(today + timedelta(days=3)).isoformat(), priority=1)
+        near_low = todos.create("Near low", due=(today + timedelta(days=1)).isoformat(), priority=3)
+        far_high = todos.create("Far high", due=(today + timedelta(days=3)).isoformat(), priority=1)
         self.assertGreater(todo_rules.urgency(far_high, today), todo_rules.urgency(near_low, today))
-        rows = [r["id"] for r in todos_mod.today()["todos"] if r["id"] in (near_low["id"], far_high["id"])]
+        rows = [r["id"] for r in host.extensions["todos"].today_fns[0]()["todos"] if r["id"] in (near_low["id"], far_high["id"])]
         self.assertEqual(rows, [far_high["id"], near_low["id"]])
         for t in (near_low, far_high):
-            todos_mod.store.trash(t["id"])
+            todos.trash(t["id"])
 
     def test_home_calendar_uses_checked_calendars(self) -> None:
         got: list = []
@@ -139,10 +137,10 @@ class TodayCardTests(unittest.TestCase):
         self.assertEqual(got, [["mine", "classes"]])
 
     def test_synced_task_shows_once(self) -> None:
-        linked = todos_mod.store.create("Synced thing", external_id="gt-1", source="google_tasks")
+        linked = todos.create("Synced thing", external_id="gt-1", source="google_tasks")
         tasks = [{"id": "gt-1", "title": "Synced thing", "due": None}, {"id": "gt-2", "title": "Remote only", "due": None}]
         self.assertEqual([t["id"] for t in dashboard(tasks=tasks)["tasks"]], ["gt-2"])
-        todos_mod.store.trash(linked["id"])
+        todos.trash(linked["id"])
 
 
 if __name__ == "__main__":

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CheckSquare, Plus } from '../../icons'
 import type { DragKind, DragPayload, Todo } from '@shared/types'
-import TodoItem from '../../components/TodoItem'
+import TodoItem from '../../extensions/todos/TodoItem'
 import SmartTextarea from '../../components/SmartTextarea'
-import TodoBoard, { type BoardGroup } from '../../components/TodoBoard'
+import TodoBoard, { type BoardGroup } from '../../extensions/todos/TodoBoard'
+import { useTodos } from '../../extensions/todos/store'
 import { localDay } from '../../components/CalendarWeek'
 import { useStore } from '../../store'
 import type { Scope } from '../../lib/api'
@@ -36,7 +37,7 @@ function TodosWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element 
   const [q, setQ] = useState(c.q)
   const [draft, setDraft] = useState('')
   const loaded = useRef(false)
-  const todos = useStore((s) => s.todos)
+  const todos = useTodos((s) => s.todos)
   const projects = useStore((s) => s.projects)
   const projectId = c.scope === 'all' || c.scope === 'personal' ? null : c.scope
 
@@ -45,7 +46,7 @@ function TodosWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element 
   useEffect(() => {
     if (!live || loaded.current) return
     loaded.current = true
-    void useStore.getState().refreshTodos('all', true)
+    void useTodos.getState().refreshTodos('all', true)
   }, [live])
 
   // The query is typed locally and persisted once the typing stops; one PUT per keystroke is not it.
@@ -80,7 +81,7 @@ function TodosWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element 
     const title = draft.trim()
     if (!title) return
     setDraft('')
-    const app = useStore.getState()
+    const app = useTodos.getState()
     await app.addTodo({ title, project_id: projectId, list_name: c.list || null })
     // `addTodo` refreshes at the default scope, which drops the done rows this window may be showing.
     await app.refreshTodos('all', true)
@@ -88,7 +89,7 @@ function TodosWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element 
 
   const onDrop = async (p: DragPayload | null): Promise<void> => {
     if (!p) return
-    const app = useStore.getState()
+    const app = useTodos.getState()
     // A todo dragged in from another window joins this one's scope; under 'all' there is nothing to change.
     if (p.kind === 'todo' && c.scope !== 'all' && p.projectId !== projectId) {
       await app.updateTodo(p.id, projectId ? { project_id: projectId } : { clear_project: true })
@@ -142,7 +143,7 @@ function TodosWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element 
 
       {board ? (
         <div className="widget-scroll">
-          <TodoBoard todos={rows} groupBy={c.groupBy} list={c.list || null} projectId={projectId} onChanged={() => useStore.getState().refreshTodos('all', true)} />
+          <TodoBoard todos={rows} groupBy={c.groupBy} list={c.list || null} projectId={projectId} onChanged={() => useTodos.getState().refreshTodos('all', true)} />
         </div>
       ) : <div className="widget-scroll">
         {!rows.length && <p className="widget-sub">{q.trim() || c.scope !== 'all' ? 'Nothing matches.' : 'No todos yet.'}</p>}

@@ -36,7 +36,7 @@ def _tb() -> Any:
                         gmail_get=lambda m: MAIL if m == "m1" else _boom(),
                         tasks_get=lambda t, l: {"title": "Pay rent", "due": "2026-10-15T00:00:00.000Z"} if t == "t1" else _boom(),
                         calendars=lambda: [])
-    return SimpleNamespace(google=g, modules=[], docs=SimpleNamespace(find=lambda k: {"title": "Notes"} if k == "d1" else None))
+    return SimpleNamespace(google=g, todos=SimpleNamespace(get=lambda i: None), docs=SimpleNamespace(find=lambda k: {"title": "Notes"} if k == "d1" else None))
 
 
 def test_known_ids_get_human_labels() -> None:

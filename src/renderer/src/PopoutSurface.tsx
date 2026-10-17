@@ -4,6 +4,7 @@ import type { CanvasWindow } from '@shared/types'
 import { api } from './lib/api'
 import { useShallow } from 'zustand/react/shallow'
 import { useStore } from './store'
+import { useTodos } from './extensions/todos/store'
 import { applyAppearance } from './lib/appearance'
 import { WIDGETS } from './canvas/registry'
 import { clampOpacity, MIN_OPACITY, nextOpacity, opacityPercent } from './canvas/opacity'
@@ -45,7 +46,7 @@ export default function PopoutSurface({ windowId }: { windowId: string }): JSX.E
       await useStore.getState().init()
       const s = useStore.getState()
       if (s.backendError) return setError(s.backendError)
-      void s.refreshTodos('all', true)
+      void useTodos.getState().refreshTodos('all', true)
       await reload()
     }
     void boot()

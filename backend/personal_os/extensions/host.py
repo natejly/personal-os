@@ -38,7 +38,13 @@ class ExtensionContext:
     """What the app lends to the extensions it loads."""
     db: Database
     hidden_views: Callable[[], Iterable[str]]  # the views the user turned off: an extension in this list is disabled
-    services: dict[str, Callable[[], Any]]  # looked up late, because some are built after the extensions
+    services: dict[str, Callable[[], Any]]  # looked up late, because some are built after the extensions; `provide` adds to it
+    settings: Callable[[], dict[str, Any]]
+    set_settings: Callable[[dict[str, Any]], None]
+    # app.sid / app.wsid: normalise a project query param for a reader / a writer (the writer 404s on
+    # a stale project id and 400s on 'all').
+    sid: Callable[[str | None], Any]
+    wsid: Callable[[str | None], str | None]
 
 
 class Services:
@@ -77,6 +83,11 @@ class ExtensionScope:
     def db(self) -> Database:
         assert self.ctx is not None
         return self.ctx.db
+
+    @property
+    def app(self) -> ExtensionContext:
+        assert self.ctx is not None
+        return self.ctx
 
     @property
     def services(self) -> Services:
@@ -122,6 +133,16 @@ class ExtensionScope:
         """Add keys to the GET /dashboard payload while the extension is enabled; `fn` must be cheap."""
         self.today_fns.append(fn)
         return self.disposables.add(Disposable(lambda: self.today_fns.remove(fn)))
+
+    def provide(self, service: str, impl: Any) -> Disposable:
+        """Offer a service the manifest declares under provides.services, to the app and to extensions that require it."""
+        if service not in self.manifest.provides_services:
+            raise ValueError(f"extension {self.manifest.id!r} did not declare service {service!r} under provides")
+        services = self.app.services
+        if service in services:
+            raise ValueError(f"service {service!r} is already provided")
+        services[service] = lambda: impl
+        return self.disposables.add(Disposable(lambda: services.pop(service, None)))
 
     def spawn(self, coro: Awaitable[Any]) -> asyncio.Task[Any]:
         """Run a background task that is cancelled and awaited when the extension stops."""

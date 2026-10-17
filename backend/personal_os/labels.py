@@ -107,8 +107,7 @@ def lookup(tb: Any, kind: str, ident: str, calendar_id: str | None = None) -> st
         if kind == "task":
             return _task(tb.google, ident)
         if kind == "todo":
-            store = next((m.store for m in tb.modules if getattr(m, "key", "") == "todos"), None)
-            t = store.get(ident) if store else None
+            t = tb.todos.get(ident)
             return " · ".join(p for p in (t["title"], f"due {t['due']}" if t.get("due") else "") if p) if t else None
         if kind == "doc":
             d = tb.docs.find(ident)

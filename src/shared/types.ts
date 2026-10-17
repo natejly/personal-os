@@ -1495,7 +1495,8 @@ export interface TodayDashboard {
   projects: Project[]
   recent_memories: Memory[]
   recent_conversations: Conversation[]
-  calendar: CalendarEvent[] | null
+  /** Missing while the Calendar extension is off. */
+  calendar?: CalendarEvent[] | null
   gmail: GmailMessage[] | null
   tasks: GoogleTask[] | null
   /** null until the token has the Drive scope (older sign-ins need a Reconnect). */

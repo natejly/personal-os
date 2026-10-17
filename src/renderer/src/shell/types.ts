@@ -18,7 +18,7 @@ export interface ModuleView {
 }
 
 export interface ModuleNav {
-  /** Position among the sidebar rows, after Files; the shell's own entries use 14, 16, 30 and 40. */
+  /** Position among the sidebar rows, after Files; the shell's own entries use 16, 30 and 40. */
   order: number
   /** The count shown beside the entry, or null for none. Runs inside a store selector: keep it pure and cheap. */
   badge?: (s: State) => number | null

@@ -26,6 +26,7 @@ from .disposables import Disposable, Scope
 from .hooks import HookBus
 from .manifest import Manifest, load_manifest
 from .routes import ExtensionRoutes
+from .triggers import TriggerAdapter, Triggers
 
 if TYPE_CHECKING:
     from fastapi import APIRouter, FastAPI
@@ -114,6 +115,7 @@ class ExtensionScope:
     _bus: HookBus
     retrieval: RetrievalSources
     channels: Channels
+    triggers: Triggers
     module: Module | None = None  # set for an adapted Module
     root: Path | None = None  # the extension's folder, where data.migrations is looked up
     _ctx: ExtensionContext | None = None  # set for an extension loaded from its folder
@@ -249,6 +251,10 @@ class ExtensionScope:
         """Offer a channel adapter: the app routes its chat, run changes and shutdown through it while the extension runs."""
         return self.disposables.add(self.channels.register(adapter, self.enabled))
 
+    def trigger(self, kind: str, adapter: TriggerAdapter) -> Disposable:
+        """Offer a scheduled-job kind: the scheduler asks the adapter for a look when a job of that kind is due."""
+        return self.disposables.add(self.triggers.register(kind, adapter))
+
     def spawn(self, coro: Awaitable[Any]) -> asyncio.Task[Any]:
         """Run a background task that is cancelled and awaited when the extension stops."""
         task = asyncio.ensure_future(coro)
@@ -318,6 +324,7 @@ class ExtensionHost:
         self.bus = HookBus()
         self.retrieval = RetrievalSources()
         self.channels = Channels()
+        self.triggers = Triggers()
         self.routes = ExtensionRoutes(self)  # mounted at /ext by the app: where folder-loaded extensions' routers are served
         self.extensions: dict[str, ExtensionScope] = {}  # in start order
         self.failed: dict[Path, str] = {}  # folders `load_dev` could not load, with the reason
@@ -436,7 +443,7 @@ class ExtensionHost:
              ctx: ExtensionContext | None = None) -> ExtensionScope:
         if manifest.id in self.extensions:
             raise ValueError(f"duplicate extension id {manifest.id!r}")
-        scope = ExtensionScope(manifest, len(self.extensions), self.bus, self.retrieval, self.channels, module, root, ctx)
+        scope = ExtensionScope(manifest, len(self.extensions), self.bus, self.retrieval, self.channels, self.triggers, module, root, ctx)
         self.extensions[manifest.id] = scope
         self._enabled[manifest.id] = scope.enabled()
         return scope

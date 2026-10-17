@@ -49,6 +49,10 @@ def register_validator(tool: str, fn: Validator) -> None:
     _validators.setdefault(tool, []).append(fn)
 
 
+def unregister_validator(tool: str, fn: Validator) -> None:
+    _validators[tool].remove(fn)
+
+
 _TYPES: dict[str, tuple[type, ...]] = {
     "string": (str,), "boolean": (bool,), "object": (dict,), "array": (list,),
     "integer": (int,), "number": (int, float), "null": (type(None),),

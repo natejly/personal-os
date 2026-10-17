@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from calendar_ext import calendar_box  # noqa: E402
 from personal_os.extensions.google.client import GoogleNotConnected  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 
@@ -32,7 +34,7 @@ class StubGoogle:
 
 
 def box(google: StubGoogle, cfg: dict[str, Any] | None = None) -> Toolbox:
-    return Toolbox(None, None, None, lambda: cfg or {}, google=google)  # type: ignore[arg-type]
+    return calendar_box(google, settings=cfg)
 
 
 def call(tb: Toolbox, name: str, **args: Any) -> Any:

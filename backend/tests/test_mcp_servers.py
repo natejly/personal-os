@@ -18,7 +18,9 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from calendar_ext import calendar_box  # noqa: E402
 from personal_os import codingagents, mcp_servers, ship  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.extensions.host import ExtensionContext, ExtensionHost, ExtensionScope  # noqa: E402
@@ -42,15 +44,16 @@ def stub_module(cls: Any) -> Any:
     return m
 
 
-def loaded_extensions() -> list[ExtensionScope]:
-    """The todos extension, the two modules and the health extension, in the app's load order."""
+def loaded_extensions(google: Any = None) -> list[ExtensionScope]:
+    """The todos extension, the two modules and the health and calendar extensions, in the app's load order."""
     host = ExtensionHost()
-    ctx = ExtensionContext(db=Database(tempfile.mkdtemp(prefix="mcpreserved-")), hidden_views=lambda: (), services={"google": lambda: Stub()},
+    ctx = ExtensionContext(db=Database(tempfile.mkdtemp(prefix="mcpreserved-")), hidden_views=lambda: (), services={"google": lambda: google or Stub(), "extundo": lambda: Stub(), "memories": lambda: Stub()},
                            settings=lambda: {}, set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p, publish=lambda _n, _d: None)
     host.load_builtin("todos", ctx)
     host.add_module(stub_module(MailWatchModule))
     host.add_module(stub_module(PlannerModule))
     host.load_builtin("health", ctx)
+    host.load_builtin("calendar", ctx)
     return list(host.extensions.values())
 
 
@@ -64,7 +67,7 @@ def full_toolbox(google: Any = None) -> Toolbox:
     calls their register() after building the Toolbox), so they are added here the same way.
     """
     tb = Toolbox(Stub(), Stub(), Stub(), lambda: {},  # type: ignore[arg-type]
-                 extensions=loaded_extensions(), google=google or Stub(),  # type: ignore[arg-type]
+                 extensions=loaded_extensions(google), google=google or Stub(),  # type: ignore[arg-type]
                  docs=Stub(), outbox=Stub(), work_plans=Stub(), results=Stub(),
                  skills=Stub(), jobs=Stub(), style=Stub(),
                  desks=Stub(), workspace=Stub())
@@ -187,7 +190,7 @@ def test_a_token_in_a_tool_failure_is_stripped() -> None:
         def calendar_events(*_a: Any, **_k: Any) -> list[dict[str, Any]]:
             raise RuntimeError(f"calendar {pat} refused")
 
-    tb = Toolbox(None, None, None, lambda: {}, google=Cal())  # type: ignore[arg-type]
+    tb = calendar_box(Cal())
     out = asyncio.run(tb.call("calendar_events", {}, {"project_id": "p1"}))
     assert pat not in str(out)
     assert "RuntimeError" in out["error"] and "[github-pat]" in out["error"]
@@ -197,7 +200,7 @@ def test_a_token_in_a_tool_failure_is_stripped() -> None:
         def calendar_events(*_a: Any, **_k: Any) -> list[dict[str, Any]]:
             raise TypeError(f"bad {pat}")
 
-    tb2 = Toolbox(None, None, None, lambda: {}, google=Bad())  # type: ignore[arg-type]
+    tb2 = calendar_box(Bad())
     bad = asyncio.run(tb2.call("calendar_events", {}, {"project_id": "p1"}))
     assert pat not in str(bad)
     assert "bad arguments" in bad["error"] and "[github-pat]" in bad["error"]
@@ -214,7 +217,7 @@ def test_a_token_in_a_deleted_event_id_is_stripped() -> None:
             return {"deleted": event_id, "calendar_id": calendar_id, "verified": True,
                     "verification": {"what": f"calendar event {event_id} on {calendar_id}", "status": "verified"}}
 
-    tb = Toolbox(None, None, None, lambda: {}, google=Cal())  # type: ignore[arg-type]
+    tb = calendar_box(Cal())
     out = asyncio.run(tb.call("calendar_delete", {"event_id": pat, "calendar_id": f"cal/{pat}"}, {"project_id": "p1"}))
     assert seen == [(pat, f"cal/{pat}")]
     assert pat not in str(out)
@@ -240,7 +243,7 @@ def test_a_token_in_a_calendar_event_id_is_stripped() -> None:
                     "link": f"https://cal.example/e?key={pat}", "meet": f"https://meet.example/{pat}",
                     "organizer": f"owner/{pat}", "recurring_event_id": pat}
 
-    tb = Toolbox(None, None, None, lambda: {}, google=Cal())  # type: ignore[arg-type]
+    tb = calendar_box(Cal())
     listed = asyncio.run(tb.call("calendar_events", {}, {"project_id": "p1"}))
     row = listed["events"][0]
     assert pat not in str(listed)
@@ -262,7 +265,7 @@ def test_a_token_in_a_calendar_list_description_is_stripped() -> None:
             return [{"id": "e1", "summary": "Meet", "start": "2026-10-07T15:00:00", "end": "2026-10-07T16:00:00",
                      "description": "x" * 100 + " " + pat + " tail", "calendar_id": pat}]
 
-    tb = Toolbox(None, None, None, lambda: {}, google=Cal())  # type: ignore[arg-type]
+    tb = calendar_box(Cal())
     out = asyncio.run(tb.call("calendar_events", {}, {"project_id": "p1"}))
     blob = str(out)
     assert pat not in blob and "[github-pat]" in out["events"][0]["description"]
@@ -281,7 +284,7 @@ def test_a_token_in_a_gmail_header_is_stripped() -> None:
         def gmail_get(message_id: str) -> dict[str, Any]:
             return {"id": message_id, "from": f"Ada {pat}", "to": f"Bo {pat}", "subject": "Hi", "body": "ok"}
 
-    tb = Toolbox(None, None, None, lambda: {}, google=G())  # type: ignore[arg-type]
+    tb = calendar_box(G())
     ctx: dict[str, Any] = {"project_id": "p1"}
     found = asyncio.run(tb.call("gmail_search", {"query": "in:inbox"}, ctx))
     assert pat not in found["messages"][0]["from"] and "[github-pat]" in found["messages"][0]["from"]
@@ -303,7 +306,7 @@ def test_a_token_in_a_gmail_draft_subject_is_stripped() -> None:
         def gmail_send(to: str, subject: str, body: str, reply_to_message_id: str | None = None) -> dict[str, Any]:
             return {"sent": "m1", "to": to, "subject": subject}
 
-    tb = Toolbox(None, None, None, lambda: {}, google=G())  # type: ignore[arg-type]
+    tb = calendar_box(G())
     ctx: dict[str, Any] = {"project_id": "p1"}
     draft = asyncio.run(tb.call("gmail_draft", {"to": "mira@example.com", "subject": f"Hi {pat}", "body": f"body {pat}"}, ctx))
     assert pat not in draft["subject"] and "[github-pat]" in draft["subject"]
@@ -325,7 +328,7 @@ def test_a_token_in_a_gmail_modify_result_is_stripped() -> None:
                                      "detail": f"message {message_id} is not in the mailbox",
                                      "status": "unverified"}}
 
-    tb = Toolbox(None, None, None, lambda: {}, google=G())  # type: ignore[arg-type]
+    tb = calendar_box(G())
     out = asyncio.run(tb.call("gmail_modify", {"message_id": pat, "star": True}, {"project_id": "p1"}))
     assert seen == [pat]
     assert pat not in str(out)
@@ -346,7 +349,7 @@ def test_a_token_in_a_sheet_write_is_stripped() -> None:
         def sheets_write(spreadsheet_id: str, cell_range: str, values: list[list[Any]], append: bool = False) -> dict[str, Any]:
             return {"id": spreadsheet_id, "range": cell_range, "cells": 1}
 
-    tb = Toolbox(None, None, None, lambda: {}, google=G())  # type: ignore[arg-type]
+    tb = calendar_box(G())
     ctx: dict[str, Any] = {"project_id": "p1"}
     made = asyncio.run(tb.call("google_sheets_create", {"title": f"Budget {pat}"}, ctx))
     assert pat not in made["title"] and "[github-pat]" in made["title"]
@@ -368,7 +371,7 @@ def test_a_token_in_a_created_doc_title_is_stripped() -> None:
         def docs_append(document_id: str, content: str) -> dict[str, Any]:
             return {"id": document_id, "title": f"Notes {pat}"}
 
-    tb = Toolbox(None, None, None, lambda: {}, google=G())  # type: ignore[arg-type]
+    tb = calendar_box(G())
     ctx: dict[str, Any] = {"project_id": "p1"}
     made = asyncio.run(tb.call("google_docs_create", {"title": f"Notes {pat}", "content": "hello"}, ctx))
     assert pat not in made["title"] and "[github-pat]" in made["title"]
@@ -386,7 +389,7 @@ def test_a_token_in_an_rsvp_event_is_stripped() -> None:
             return {"id": event_id, "summary": f"Sync {pat}", "description": f"agenda {pat}",
                     "location": f"room {pat}", "responseStatus": response}
 
-    tb = Toolbox(None, None, None, lambda: {}, google=G())  # type: ignore[arg-type]
+    tb = calendar_box(G())
     out = asyncio.run(tb.call("calendar_respond", {"event_id": "e1", "response": "accepted"}, {"project_id": "p1"}))
     assert pat not in str(out) and str(out).count("[github-pat]") == 3
     assert out["responseStatus"] == "accepted"
@@ -404,7 +407,7 @@ def test_a_token_in_an_rsvp_verification_is_stripped() -> None:
             return {"id": event_id, "summary": "Sync", "responseStatus": response, "calendar_id": calendar_id,
                     "verified": True, "verification": {"what": f"RSVP on event {event_id}", "status": "verified"}}
 
-    tb = Toolbox(None, None, None, lambda: {}, google=G())  # type: ignore[arg-type]
+    tb = calendar_box(G())
     out = asyncio.run(tb.call("calendar_respond", {
         "event_id": pat, "response": "accepted", "calendar_id": f"cal/{pat}",
     }, {"project_id": "p1"}))
@@ -429,7 +432,7 @@ def test_a_token_in_a_created_event_is_stripped() -> None:
                             send_updates: str = "none") -> dict[str, Any]:
             return {"id": event_id, "summary": event.get("summary"), "location": event.get("location")}
 
-    tb = Toolbox(None, None, None, lambda: {}, google=G())  # type: ignore[arg-type]
+    tb = calendar_box(G())
     ctx: dict[str, Any] = {"project_id": "p1"}
     made = asyncio.run(tb.call("calendar_create", {
         "summary": f"Dentist {pat}", "start": "2026-10-07T15:00",
@@ -458,7 +461,7 @@ def test_a_token_in_a_created_event_verification_is_stripped() -> None:
             return {"id": event_id, "summary": event.get("summary"), "calendar_id": calendar_id, "verified": True,
                     "verification": {"what": f"calendar event {event_id} on {calendar_id}", "status": "verified"}}
 
-    tb = Toolbox(None, None, None, lambda: {}, google=G())  # type: ignore[arg-type]
+    tb = calendar_box(G())
     made = asyncio.run(tb.call("calendar_create", {
         "summary": f"Dentist {pat}", "start": "2026-10-07T15:00", "calendar_id": f"cal/{pat}",
     }, {"project_id": "p1"}))
@@ -488,7 +491,7 @@ def test_a_token_in_a_meeting_brief_is_stripped() -> None:
                     "description": f"agenda {pat}",
                     "attendee_details": [{"email": "mira@example.com", "name": f"Mira {pat}", "self": False}]}
 
-    tb = Toolbox(Mem(), None, None, lambda: {}, google=G())  # type: ignore[arg-type]
+    tb = calendar_box(G(), memories=Mem())
     out = asyncio.run(tb.call("meeting_brief", {"event_id": "e1"}, {"project_id": "p1"}))
     blob = str(out)
     assert pat not in blob and blob.count("[github-pat]") == 5
@@ -512,7 +515,7 @@ def test_a_token_in_a_meeting_guest_email_is_stripped() -> None:
             return {"summary": "Sync", "start": "t", "end": "t",
                     "attendee_details": [{"email": pat, "name": "Ada", "self": False}]}
 
-    tb = Toolbox(Mem(), None, None, lambda: {}, google=G())  # type: ignore[arg-type]
+    tb = calendar_box(G(), memories=Mem())
     out = asyncio.run(tb.call("meeting_brief", {"event_id": pat, "calendar_id": f"cal/{pat}"}, {"project_id": "p1"}))
     assert (pat, f"cal/{pat}") in seen and pat in seen
     assert pat not in str(out)

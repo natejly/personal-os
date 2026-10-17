@@ -16,6 +16,7 @@ os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="moduleste
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from calendar_ext import calendar_box  # noqa: E402
 from personal_os.app import AUTH_TOKEN, app, host, modules, tasks_sync, todos, toolbox  # noqa: E402
 from personal_os.extensions.google.client import GoogleNotConnected  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
@@ -23,6 +24,8 @@ from personal_os.tools import Toolbox  # noqa: E402
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 
 TODO_TOOLS = ["todo_list", "todo_add", "todo_update", "todo_delete"]
+CALENDAR_TOOLS = ["calendar_events", "calendar_get", "meeting_brief", "calendar_create", "calendar_update", "calendar_delete", "calendar_respond",
+                  "calendar_free_busy", "calendar_find_time", "calendar_propose"]
 
 
 def _route_set() -> set[tuple[str, str]]:
@@ -36,7 +39,7 @@ def _route_set() -> set[tuple[str, str]]:
 class HostTests(unittest.TestCase):
     def test_modules_and_built_in_extensions_load_and_the_app_starts_through_the_lifespan(self) -> None:
         from personal_os import app as appmod
-        self.assertEqual(list(appmod.host.extensions), ["google", "todos", *(m.key for m in modules), "health", "lean", "focus", "telegram"])
+        self.assertEqual(list(appmod.host.extensions), ["google", "todos", *(m.key for m in modules), "health", "calendar", "lean", "focus", "telegram"])
         self.assertIs(appmod.google, appmod._ext_ctx.services["google"]())
         self.assertEqual(app.router.on_startup + app.router.on_shutdown, [])  # no @app.on_event handlers remain
         with TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN}) as c:  # runs the lifespan
@@ -55,6 +58,13 @@ class ToolTests(unittest.TestCase):
         names = list(toolbox.specs)
         i = names.index("health_summary")
         self.assertEqual(names[i - 2:i + 4], ["mail_followups", "schedule_suggest", "health_summary", "health_log", "health_delete_entry", "doc_list"])
+
+    def test_calendar_tools_keep_their_place_before_the_gmail_tools(self) -> None:
+        names = list(toolbox.specs)
+        i = names.index("calendar_events")
+        self.assertEqual(names[i:i + 10], CALENDAR_TOOLS)
+        self.assertEqual(names[i - 1], "dashboard_pin")
+        self.assertEqual(names[i + 10], "gmail_search")
 
     def test_tool_metadata_unchanged(self) -> None:
         for n in TODO_TOOLS:
@@ -75,7 +85,7 @@ class ToolTests(unittest.TestCase):
                 return {"connected": True}
 
         cfg: dict = {}
-        box = Toolbox(None, None, None, lambda: cfg, google=Google())  # type: ignore[arg-type]
+        box = calendar_box(Google(), settings=cfg)
         self.assertFalse(box.available("google_tasks_list"))  # sync defaults on
         self.assertTrue(box.available("calendar_events"))
         cfg["googleTasksSync"] = {"enabled": False}

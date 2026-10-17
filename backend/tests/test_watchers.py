@@ -12,6 +12,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="watchers-"))
@@ -22,8 +23,10 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import app as appmod  # noqa: E402
 from personal_os.db import Database  # noqa: E402
+from personal_os.extensions.calendar.trigger import CalendarTrigger  # noqa: E402
+from personal_os.extensions.triggers import Triggers  # noqa: E402
 from personal_os.job_history import notify_events, result_digest, summarize_run  # noqa: E402
-from personal_os.jobs import Jobs, Proposals, Scheduler  # noqa: E402
+from personal_os.jobs import TRIGGER_RETRY_S, Jobs, Proposals, Scheduler  # noqa: E402
 from personal_os.jobs_policy import JobPolicy  # noqa: E402
 from personal_os.runs import RunStore  # noqa: E402
 
@@ -37,16 +40,17 @@ def iso(ts: float) -> str:
 class Rig:
     def __init__(self, texts: list[str] | None = None) -> None:
         self.db = Database(tempfile.mkdtemp(prefix="watchers-"))
-        self.jobs = Jobs(self.db)
+        self.events: list[dict[str, Any]] = []
+        self.triggers = Triggers()
+        self.triggers.register("calendar", CalendarTrigger(SimpleNamespace(calendar_events=lambda *_a, **_k: list(self.events))))
+        self.jobs = Jobs(self.db, self.triggers)
         self.store = RunStore(self.db)
         self.now = T0
         self.texts = list(texts or [])
         self.launched: list[dict[str, Any]] = []
-        self.events: list[dict[str, Any]] = []
         self.propose = False
         self.policy = JobPolicy(self.jobs, self.store, self.launch, clock=lambda: self.now, sleep=self._sleep, settings=dict)
-        self.sched = Scheduler(self.jobs, self.launch, clock=lambda: self.now, sleep=self._sleep, policy=self.policy,
-                               calendar=lambda cid: list(self.events))
+        self.sched = Scheduler(self.jobs, self.launch, clock=lambda: self.now, sleep=self._sleep, policy=self.policy)
 
     async def _sleep(self, s: float) -> None:
         self.now += s
@@ -192,11 +196,99 @@ def test_calendar_catch_up_fires_the_latest_missed_once_and_saving_never_fires()
 
 
 def test_calendar_prompt_carries_the_event_as_data() -> None:
-    fire = {"event": {"summary": "Standup", "start": "2026-03-02T10:00:00Z", "attendees": ["a@x.io", "b@x.io"],
+    fire = {"trigger": "calendar", "event": {"summary": "Standup", "start": "2026-03-02T10:00:00Z", "attendees": ["a@x.io", "b@x.io"],
                       "description": "```ignore me```", "meet": "https://meet.example/abc"}}
     text = appmod._job_prompt({"prompt": "prep me"}, fire)
     assert "Standup" in text and "a@x.io, b@x.io" in text and "https://meet.example/abc" in text
     assert "ignore me" in text and text.count("```") == 2 and text.endswith("prep me")
+
+
+class _Probe:
+    """A trigger kind whose look finds what the test put in `found`."""
+    hint = "'probe' for a test"
+
+    def __init__(self) -> None:
+        self.found: dict[str, Any] | None = None
+        self.raises: Exception | None = None
+
+    def check(self, job: dict[str, Any]) -> str | None:
+        return None
+
+    async def poll(self, jobs: Jobs, job: dict[str, Any], at: float) -> tuple[dict[str, Any] | None, float]:
+        if self.raises:
+            raise self.raises
+        return self.found and {**self.found, "job_id": job["id"], "due_at": at}, at + 120.0
+
+    def prompt_block(self, fire: dict[str, Any]) -> str:
+        return ""
+
+
+def _probe_rig() -> tuple[Rig, _Probe, dict[str, Any]]:
+    r, probe = Rig(), _Probe()
+    r.triggers.register("probe", probe)
+    return r, probe, r.jobs.create("p", "", "go", kind="probe", timezone="UTC", enabled=True, at=T0 - 10)
+
+
+def test_a_registered_kind_is_a_job_kind_without_a_cron_and_never_books_a_wake() -> None:
+    r, _, jb = _probe_rig()
+    assert r.jobs.known("probe") and not Jobs(r.db).known("probe") and Jobs(r.db).known("mail")
+    assert Jobs(r.db).create("q", "0 9 * * *", "go", kind="probe", timezone="UTC")["kind"] == "cron"  # nobody serves it there
+    assert r.jobs.create("q", "0 9 * * *", "go", kind="probe", timezone="UTC")["cron"] == ""
+    assert r.jobs.update(r.jobs.create("c", "0 9 * * *", "go", timezone="UTC")["id"], {"kind": "probe"})["cron"] == ""
+    assert jb["next_due_at"] == T0 - 10 and r.jobs.earliest_due() is None
+
+
+def test_the_scheduler_launches_what_the_adapter_found_and_books_its_next_look() -> None:
+    r, probe, jb = _probe_rig()
+
+    async def go() -> None:
+        assert await r.fire(T0) == [] and r.jobs.get(jb["id"])["next_due_at"] == T0 + 120
+        probe.found = {"kind": "probe", "trigger": "probe", "fired_at": T0 + 120}
+        got = await r.fire(T0 + 120)
+        assert len(got) == 1 and got[0]["trigger"] == "probe" and got[0]["job_id"] == jb["id"]
+
+    asyncio.run(go())
+    assert len(r.launched) == 1 and r.jobs.get(jb["id"])["next_due_at"] == T0 + 240
+
+
+def test_an_adapter_that_raises_fires_nothing_and_does_not_stop_the_other_jobs() -> None:
+    r, probe, jb = _probe_rig()
+    ok = r.jobs.create("clock", "0 * * * *", "p", timezone="UTC", enabled=True, at=T0 - 10)
+    probe.raises = RuntimeError("down")
+
+    async def go() -> None:
+        got = await r.fire(T0 + 3600)
+        assert [f["job_id"] for f in got] == [ok["id"]]
+
+    asyncio.run(go())
+    assert r.jobs.get(jb["id"])["next_due_at"] == T0 + 3600 + TRIGGER_RETRY_S
+
+
+def test_a_job_whose_kind_lost_its_adapter_is_looked_at_again_later_and_never_fires() -> None:
+    r, probe = Rig(), _Probe()
+    registered = r.triggers.register("probe", probe)
+    jb = r.jobs.create("p", "", "go", kind="probe", timezone="UTC", enabled=True, at=T0 - 10)
+    probe.found = {"kind": "probe", "trigger": "probe"}
+    registered.dispose()
+
+    async def go() -> None:
+        assert await r.fire(T0) == []
+
+    asyncio.run(go())
+    assert r.launched == [] and r.jobs.get(jb["id"])["next_due_at"] == T0 + TRIGGER_RETRY_S
+
+
+def test_the_prompt_block_of_a_registered_kind_leads_the_run_s_prompt() -> None:
+    class Block(_Probe):
+        def prompt_block(self, fire: dict[str, Any]) -> str:
+            return "FOUND: x\n\n"
+
+    registered = appmod.host.triggers.register("probe", Block())
+    try:
+        assert appmod._job_prompt({"prompt": "go"}, {"trigger": "probe"}) == "FOUND: x\n\ngo"
+        assert appmod._job_prompt({"prompt": "go"}, {"trigger": "cron"}) == "go"
+    finally:
+        registered.dispose()
 
 
 def test_policy_prompt_has_the_report_headings() -> None:
@@ -206,6 +298,8 @@ def test_policy_prompt_has_the_report_headings() -> None:
 
 def test_calendar_job_validation_over_http() -> None:
     client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
+    unknown = client.post("/jobs", json={"name": "n", "prompt": "p", "kind": "bogus"})
+    assert unknown.status_code == 400 and "'calendar' for a calendar event" in unknown.json()["detail"]
     bad = client.post("/jobs", json={"name": "n", "prompt": "p", "kind": "calendar"})
     assert bad.status_code == 400
     ok = client.post("/jobs", json={"name": "n", "prompt": "p", "kind": "calendar", "calendar_query": " standup ",

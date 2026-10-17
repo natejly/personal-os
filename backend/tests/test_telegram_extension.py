@@ -21,7 +21,7 @@ from personal_os import app as appmod  # noqa: E402
 from personal_os.extensions.channels import Channels  # noqa: E402
 from personal_os.extensions.hooks import Cancel, HookBus  # noqa: E402
 from personal_os.extensions.host import ExtensionHost  # noqa: E402
-from test_telegram_api import _portal, _reset, bridge, fake, j, pair, wait_until  # noqa: E402,F401
+from test_telegram_api import OWNER, _portal, _reset, bridge, fake, j, pair, wait_until  # noqa: E402,F401
 
 bus = appmod.host.bus
 
@@ -120,6 +120,15 @@ def test_an_owner_text_fires_channel_inbound_before_the_turn_starts(subscribe) -
     assert seen == [{"channel": "telegram", "sender": "owner", "text": "ping", "files": []}]
 
 
+def test_a_stranger_text_does_not_fire_channel_inbound(subscribe) -> None:  # type: ignore[no-untyped-def]
+    seen: list[dict[str, Any]] = []
+    subscribe("channel.inbound", lambda ev: seen.append(ev))
+    pair()
+    fake.push(fake.update("hi", chat=OWNER + 1, user=OWNER + 1))
+    asyncio.run(asyncio.sleep(0.3))
+    assert seen == []
+
+
 # ---- channel.outbound ----
 def test_a_reply_passes_through_every_outbound_handler_in_order(subscribe) -> None:  # type: ignore[no-untyped-def]
     subscribe("channel.outbound", lambda ev: {**ev, "text": ev["text"] + " [two]"}, priority=60)
@@ -128,6 +137,13 @@ def test_a_reply_passes_through_every_outbound_handler_in_order(subscribe) -> No
     fake.push(fake.update("ping"))
     wait_until(lambda: any("[one] [two]" in t for t in fake.sent()), "the reworded reply")
     assert fake.sent() == ["Hello <b>there</b> [one] [two]"]
+
+
+def test_a_handler_may_drop_the_files_of_a_reply(subscribe) -> None:  # type: ignore[no-untyped-def]
+    subscribe("channel.outbound", lambda ev: {**ev, "files": []})
+    ext_bridge = appmod.host.channels["telegram"]
+    sent = asyncio.run(ext_bridge.deps.outbound("hi", [{"id": "d1", "name": "a.txt"}]))
+    assert sent == ("hi", [])
 
 
 def test_a_cancelled_reply_is_not_sent_and_the_next_one_is(subscribe) -> None:  # type: ignore[no-untyped-def]

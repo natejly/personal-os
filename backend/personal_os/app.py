@@ -1639,8 +1639,17 @@ class PageContextIn(BaseModel):
     hints: list[str] = []
 
 
+def _registered_channel(name: str) -> str:
+    if name not in {c.name for c in host.channels}:
+        raise ValueError(f"unknown channel {name!r}")
+    return name
+
+
+ChannelName = Annotated[str, AfterValidator(_registered_channel)]  # a body can only claim a channel an extension registered
+
+
 class ChatIn(BaseModel):
-    origin: Literal["telegram"] | None = None  # who sent the turn when it was not typed in the app; lands in the run's input
+    origin: ChannelName | None = None  # the channel that sent the turn when it was not typed in the app; lands in the run's input
     content: str | None = None  # None = regenerate from existing history
     model: str | None = None
     page_context: PageContextIn | None = None
@@ -4803,7 +4812,7 @@ async def resume_worker_route(worker_id: str, body: WorkerResumeIn | None = None
 class SteerIn(BaseModel):
     content: str
     attachments: list[str] | None = None
-    origin: Literal["telegram"] | None = None  # a steer sent from the phone is not echoed back to it
+    origin: ChannelName | None = None  # a steer sent from a channel is not echoed back to it
 
 
 @app.post("/conversations/{id}/steer")
@@ -5420,7 +5429,7 @@ class ApprovalIn(BaseModel):
     # An editable tool's approval only (approval_edits.EDITABLE_TOOLS): the arguments the user wants run instead of the
     # model's. Validated against the tool's schema; what executes, is journaled and is verified is this, not the original.
     arguments: dict[str, Any] | None = None
-    via: Literal["telegram"] | None = None  # answered from Telegram: recorded as the decider instead of "user"
+    via: ChannelName | None = None  # answered from a channel: its name is recorded as the decider instead of "user"
 
 
 def _patch_tool_event(message_id: str | None, call_id: str, patch: dict[str, Any]) -> None:
@@ -10182,21 +10191,21 @@ async def _channel_store_upload(name: str, mime: str, data: bytes) -> dict[str, 
     return {"id": row["id"], "name": row["name"], "mime": row["mime"], "size": row["size"]}
 
 
-async def _channel_turn(conv_id: str, text: str, attachment_ids: list[str] | None = None) -> dict[str, Any]:
+async def _channel_turn(conv_id: str, text: str, attachment_ids: list[str] | None, origin: str) -> dict[str, Any]:
     """A message is a new turn, or a steer when a reply is still being written. The two can race, so a 409 tries the other."""
     for _ in range(2):
         try:
             if bus.answering(conv_id):
-                return await steer_run(conv_id, SteerIn(content=text, attachments=attachment_ids or None, origin="telegram"))
-            return await chat(conv_id, ChatIn(content=text, origin="telegram", attachments=attachment_ids or None))
+                return await steer_run(conv_id, SteerIn(content=text, attachments=attachment_ids or None, origin=origin))
+            return await chat(conv_id, ChatIn(content=text, origin=origin, attachments=attachment_ids or None))
         except HTTPException as e:
             if e.status_code != 409:
                 raise
     raise HTTPException(409, "The conversation is busy")
 
 
-async def _channel_decide(call_id: str, decision: str) -> dict[str, Any]:
-    return await approve_tool_call(call_id, ApprovalIn(decision=decision, via="telegram"))
+async def _channel_decide(call_id: str, decision: str, via: str) -> dict[str, Any]:
+    return await approve_tool_call(call_id, ApprovalIn(decision=decision, via=via))
 
 
 def _channel_conversation_title(conv_id: str) -> str | None:
@@ -10204,8 +10213,8 @@ def _channel_conversation_title(conv_id: str) -> str | None:
     return row["title"] if row else None
 
 
-def _channel_mark_conversation(cid: str, flag: bool) -> None:
-    convos.update(cid, {"settings": {"telegram": flag}})
+def _channel_mark_conversation(cid: str, flag: bool, channel: str) -> None:
+    convos.update(cid, {"settings": {channel: flag}})
     _announce_conversation(cid)  # the sidebar only re-reads a chat on this event
 
 

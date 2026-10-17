@@ -37,7 +37,7 @@ class TelegramExtension:
             get_token=lambda: self.db.secrets.get(telegram.SECRET_NAME),
             start_turn=self.start_turn,
             stop=self.chat.stop,
-            decide=self.chat.decide,
+            decide=lambda call_id, decision: self.chat.decide(call_id, decision, self.bridge.name),
             pending_approvals=self.chat.pending_approvals,
             is_live=self.chat.is_live,
             active_runs=self.chat.active_runs,
@@ -49,7 +49,7 @@ class TelegramExtension:
             message_attachments=self.chat.message_attachments,
             attachment_path=self.chat.attachment_path,
             store_upload=self.chat.store_upload,
-            mark_texts_conversation=self.chat.mark_conversation,
+            mark_texts_conversation=lambda cid, flag: self.chat.mark_conversation(cid, flag, self.bridge.name),
             computer_name=telegram.computer_name,
             call_label=self.chat.call_label,
             outbound=self.outbound,
@@ -58,14 +58,17 @@ class TelegramExtension:
     async def start_turn(self, conv_id: str, text: str, attachment_ids: list[str] | None = None) -> dict[str, Any]:
         await self.api.bus.emit("channel.inbound", {"channel": self.bridge.name, "sender": "owner", "text": text,
                                                     "files": list(attachment_ids or [])})
-        return await self.chat.start_turn(conv_id, text, attachment_ids)
+        return await self.chat.start_turn(conv_id, text, attachment_ids, self.bridge.name)
 
     async def outbound(self, text: str, atts: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]] | None:
-        """Chain `channel.outbound` over the reply: a handler returns the payload with `text` changed, or Cancel."""
+        """Chain `channel.outbound` over the reply: a handler returns the payload with `text` and `files` changed, or Cancel."""
         sent = await self.api.bus.pipe("channel.outbound", {"channel": self.bridge.name, "text": text, "files": [dict(a) for a in atts]})
         if isinstance(sent, Cancel):
             return None
-        return (sent["text"], atts) if isinstance(sent, dict) and isinstance(sent.get("text"), str) else (text, atts)
+        if not isinstance(sent, dict) or not isinstance(sent.get("text"), str):
+            return text, atts
+        files = sent.get("files")
+        return sent["text"], files if isinstance(files, list) else atts
 
     async def start(self, _: Any) -> None:
         if self.api.app.settings().get("telegramEnabled") and self.db.secrets.get(telegram.SECRET_NAME):

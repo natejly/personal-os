@@ -32,9 +32,9 @@ class ChannelAdapter(Protocol):
 class ChatService:
     """The chat core's operations an adapter may use, built by the app (late-bound: the chat routes are defined after the
     extensions load)."""
-    start_turn: Callable[..., Awaitable[dict[str, Any]]]  # (conversation id, text[, attachment ids]) -> {"run_id": ...}
+    start_turn: Callable[..., Awaitable[dict[str, Any]]]  # (conversation id, text, attachment ids or None, channel name) -> {"run_id": ...}
     stop: Callable[[str], bool]  # (conversation id)
-    decide: Callable[[str, str], Awaitable[dict[str, Any]]]  # (call id, "allow" | "deny"), recorded as the adapter's decision
+    decide: Callable[[str, str], Awaitable[dict[str, Any]]]  # (call id, "allow" | "deny", channel name), recorded as that channel's decision
     pending_approvals: Callable[[], list[dict[str, Any]]]
     is_live: Callable[[str], bool]  # a run in this process is waiting on that call id
     is_worker_call: Callable[[str], bool]  # the call id belongs to a background worker
@@ -42,7 +42,7 @@ class ChatService:
     create_conversation: Callable[[str], str]  # (title) -> the new conversation's id
     conversation_exists: Callable[[str], bool]
     conversation_title: Callable[[str], str | None]
-    mark_conversation: Callable[[str, bool], None]  # (conversation id, is the channel's chat)
+    mark_conversation: Callable[[str, bool], None]  # (conversation id, is the channel's chat, channel name)
     message_text: Callable[[str], str | None]
     message_attachments: Callable[[str], list[dict[str, Any]]]
     attachment_path: Callable[[str], Path | None]

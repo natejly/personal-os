@@ -65,7 +65,6 @@ TOO_BIG = "That file is too big: Telegram lets bots download files up to 20 MB."
 FETCH_FAILED = "Couldn't fetch that attachment from Telegram."
 _OTHER_MEDIA = ("voice", "audio", "video", "video_note", "animation", "sticker")
 ALLOWED_UPDATES = ["message", "callback_query"]
-APP_ONLY_TOOLS = frozenset({"propose_plan", "ask_user", "desk_ask"})  # a plan or a question is answered in the app
 
 # The Texts conversation is answered on the user's phone.
 HINT = ("You are talking over Telegram on the user's phone. Reply first in one or two lines, then work. At meaningful milestones send a "
@@ -214,10 +213,6 @@ def _mask(i: Any) -> str:
 
 # ---------------------------------------------------------------- the bridge
 
-async def _unchanged(text: str, atts: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
-    return text, atts
-
-
 @dataclass
 class Deps:
     get_settings: Callable[[], dict[str, Any]]
@@ -234,7 +229,8 @@ class Deps:
     conversation_exists: Callable[[str], bool]
     message_text: Callable[[str], str | None]
     conversation_title: Callable[[str], str | None]
-    app_only_tools: frozenset[str] = APP_ONLY_TOOLS
+    app_only_tools: frozenset[str]  # tools answered in the app, never on the phone
+    outbound: Callable[[str, list[dict[str, Any]]], Awaitable[tuple[str, list[dict[str, Any]]] | None]]  # a reply about to go out -> what to send, None = nothing
     api: Callable[..., Awaitable[Any]] = field(default_factory=HttpApi)  # (token, method, params, timeout[, files]) -> result; raises TelegramError
     lock_path: Path | None = None  # tests; the default is keyed on the token (lock_path())
     message_attachments: Callable[[str], list[dict[str, Any]]] = lambda mid: []  # message id -> [{id, name, mime, size}]
@@ -244,7 +240,6 @@ class Deps:
     mark_texts_conversation: Callable[[str, bool], None] = lambda cid, flag: None  # (conversation id, is the Texts chat): the app labels it
     call_label: Callable[[str, Any], str | None] = lambda tool, args: None  # (tool, args) -> the email/event/task the call acts on, by name; blocking
     computer_name: Callable[[], str] | None = None  # set = one bot per Mac: name the bot and claim it; None leaves the bot alone
-    outbound: Callable[[str, list[dict[str, Any]]], Awaitable[tuple[str, list[dict[str, Any]]] | None]] = _unchanged  # a reply about to go out -> what to send, None = nothing
 
 
 @dataclass

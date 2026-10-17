@@ -68,7 +68,11 @@ class Env:
             get_token=lambda: self.token, start_turn=self._turn, stop=self._stop, decide=self._decide,
             pending_approvals=lambda: list(self.pending), is_live=lambda c: c in self.live, active_runs=lambda: self.active,
             create_texts_conversation=self._new_conv, conversation_exists=lambda c: True, message_text=lambda mid: self.texts.get(mid),
-            conversation_title=lambda c: "Chat", api=self.api, lock_path=tmp / "t.lock"))
+            conversation_title=lambda c: "Chat", app_only_tools=frozenset({"propose_plan", "ask_user", "desk_ask"}),
+            outbound=self._outbound, api=self.api, lock_path=tmp / "t.lock"))
+
+    async def _outbound(self, text: str, atts: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+        return text, atts
 
     def _save(self, st: dict[str, Any]) -> None:
         self.state = dict(st)

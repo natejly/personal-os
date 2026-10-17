@@ -1,0 +1,16 @@
+{
+  "id": "telegram",
+  "name": "Telegram",
+  "description": "Text Grain from your phone over a Telegram bot you own: messages and files in, replies and approvals out.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "kind": "extension",
+  "enabled": true,
+  "activation": ["startup"],
+  "requires": { "services": ["chat"] },
+  "contributes": {
+    "routes": { "prefix": "/telegram" }
+  },
+  "hooks": { "app.start": {}, "settings.changed": {}, "approval.requested": {} },
+  "permissions": ["conversation:read", "service:chat"]
+}

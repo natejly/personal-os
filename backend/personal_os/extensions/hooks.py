@@ -54,6 +54,11 @@ class Ask:
     reason: str
 
 
+@dataclass(frozen=True)
+class Cancel:
+    """What a pipe handler returns to drop the value altogether (a message that must not be sent); the chain stops there."""
+
+
 @dataclass(eq=False)
 class Subscription:
     hook: str
@@ -214,9 +219,13 @@ class HookBus:
         return [r for ok, r in done if ok and r is not None]
 
     async def pipe(self, hook: str, value: Any) -> Any:
+        """Handlers run one after another, each on the previous result. A handler may return Cancel, which stops the chain
+        and is returned as it is."""
         self._known(hook)
         for sub in self._subs.get(hook, ()):
             ok, out = await self._try(sub, value, "pipe")
+            if ok and isinstance(out, Cancel):
+                return out
             if ok and out is not None:
                 value = out
         return value

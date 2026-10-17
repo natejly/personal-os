@@ -65,7 +65,11 @@ TOO_BIG = "That file is too big: Telegram lets bots download files up to 20 MB."
 FETCH_FAILED = "Couldn't fetch that attachment from Telegram."
 _OTHER_MEDIA = ("voice", "audio", "video", "video_note", "animation", "sticker")
 ALLOWED_UPDATES = ["message", "callback_query"]
-APP_ONLY_TOOLS = frozenset({"propose_plan", "ask_user", "desk_ask"})  # a plan or a question is answered in the app
+
+# The Texts conversation is answered on the user's phone.
+HINT = ("You are talking over Telegram on the user's phone. Reply first in one or two lines, then work. At meaningful milestones send a "
+        "brief update with send_files (a screenshot when it shows more than words; not every step). Images and files you send_files "
+        "reach the phone; the final reply may carry them too.")
 
 NAME_MAX = 64  # Bot API: setMyName
 CLAIM_RE = re.compile(r"^Grain on (.+) · ([0-9a-f]{8})$")  # the short description a Grain leaves on the bot it polls
@@ -225,7 +229,8 @@ class Deps:
     conversation_exists: Callable[[str], bool]
     message_text: Callable[[str], str | None]
     conversation_title: Callable[[str], str | None]
-    app_only_tools: frozenset[str] = APP_ONLY_TOOLS
+    app_only_tools: frozenset[str]  # tools answered in the app, never on the phone
+    outbound: Callable[[str, list[dict[str, Any]]], Awaitable[tuple[str, list[dict[str, Any]]] | None]]  # a reply about to go out -> what to send, None = nothing
     api: Callable[..., Awaitable[Any]] = field(default_factory=HttpApi)  # (token, method, params, timeout[, files]) -> result; raises TelegramError
     lock_path: Path | None = None  # tests; the default is keyed on the token (lock_path())
     message_attachments: Callable[[str], list[dict[str, Any]]] = lambda mid: []  # message id -> [{id, name, mime, size}]
@@ -321,6 +326,9 @@ GONE = "No longer pending."
 
 
 class TelegramBridge:
+    name = "telegram"
+    hint = HINT
+
     def __init__(self, deps: Deps, *, rate_limit: int = 20) -> None:
         self.deps = deps
         self.limiter = RateLimiter(rate_limit)
@@ -1056,6 +1064,9 @@ class TelegramBridge:
             text = "" if raw and not run.error else RUN_ERROR if run.error else "Stopped."  # the error text itself stays off the phone
         await self.flush_updates(run.conversation_id)  # progress waiting out its window goes before the answer
         atts = self._unsent(self.deps.message_attachments(run.message_id) if run.message_id else [])
+        if (sent := await self.deps.outbound(text, atts)) is None:
+            return
+        text, atts = sent
         async with self._order_lock:  # and a delivery still in flight finishes first
             if text:
                 await self._send_all(chat_id, text)
@@ -1125,7 +1136,14 @@ class TelegramBridge:
             return
         owner, md, atts = self._state().get("ownerChatId"), strip_no_reply(text), self._unsent(attachments)
         if owner is not None and (to_plain(md) or atts):
-            self._spawn(self._deliver_in_order(owner, md, atts))
+            self._spawn(self._push(owner, md, atts))
+
+    async def _push(self, chat_id: int, text: str, atts: list[dict[str, Any]]) -> None:
+        if (sent := await self.deps.outbound(text, atts)) is not None:
+            await self._deliver_in_order(chat_id, *sent)
+
+    def wants_worker_results(self) -> bool:
+        return bool(self._settings().get("telegramPushWorkerResults"))
 
     def is_texts_conversation(self, conv_id: str | None) -> bool:
         return bool(conv_id) and conv_id == self._state().get("textsConversationId")

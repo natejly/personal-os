@@ -28,7 +28,7 @@ from personal_os import app as appmod  # noqa: E402
 from personal_os import llm  # noqa: E402
 
 client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
-bridge = appmod.telegram_bridge
+bridge = appmod.host.channels["telegram"]
 TOKEN = "123456789:" + "AbC-dEf_GhI" * 3 + "xyz"
 OWNER, BOT = 4242, "grain_test_bot"
 SEEN: list[list[dict[str, Any]]] = []   # the messages of every model request

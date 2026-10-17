@@ -156,7 +156,7 @@ def test_post_sees_the_piped_result_and_error_fires_for_an_error_result() -> Non
     go(box)
     assert posts[0]["name"] == "t" and posts[0]["args"] == {"a": 1} and posts[0]["error"] == "disk full"
     assert "disk full" in posts[0]["result_preview"] and posts[0]["duration_ms"] >= 0
-    assert errors == [{"name": "t", "call_id": "id1", "error": "disk full"}]
+    assert errors == [{"name": "t", "call_id": "id1", "run_id": "r", "error": "disk full"}]
 
 
 def test_a_raised_exception_fires_error_and_post_and_still_raises() -> None:

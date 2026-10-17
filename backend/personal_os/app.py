@@ -440,7 +440,7 @@ def _publish_event(name: str, data: Any) -> None:
 
 
 ext_drafts = Drafts(db.data_dir)
-# sid/wsid are defined further down, so the contexts look them up late.
+# sid/wsid/owe_wake are defined further down, so the contexts look them up late.
 _ext_ctx = ExtensionContext(db=db, hidden_views=lambda: settings().get("hiddenViews") or (), services={"mcp": lambda: mcp, "extundo": lambda: extundo, "memories": lambda: memories},
                             settings=settings, set_settings=db.set_settings, sid=lambda p: sid(p), wsid=lambda p: wsid(p), publish=_publish_event,
                             widget_kinds=lambda: (*host.widget_kinds(), *ext_drafts.widget_kinds()), owe_wake=lambda c, t, w: owe_wake(c, t, w))

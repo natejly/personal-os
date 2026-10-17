@@ -160,6 +160,19 @@ def test_a_script_that_writes_into_a_repo_is_reverted_and_refused_after_the_fact
     assert r.coding.snapshots == {}  # the snapshot is gone with the call
 
 
+def test_snapshots_are_per_run_and_go_with_the_run_that_left_them(repo_rig):
+    import asyncio
+    import types
+    r = repo_rig
+    r.coding.snapshots[("r1", "call_0")] = {"a": 1}
+    r.coding.snapshots[("r2", "call_0")] = {"b": 2}  # another run reusing the same provider call id
+    asyncio.run(r.coding.drop_snapshot({"run_id": "r1", "call_id": "call_0"}))
+    assert list(r.coding.snapshots) == [("r2", "call_0")]
+    r.coding.snapshots[("r1", "call_1")] = {"c": 3}  # left by a later tool.pre refusal
+    asyncio.run(r.coding.run_ended(types.SimpleNamespace(run_id="r1", stop=types.SimpleNamespace(is_set=lambda: False))))
+    assert list(r.coding.snapshots) == [("r2", "call_0")]
+
+
 def test_a_snapshot_is_dropped_when_the_call_fails(repo_rig):
     r = repo_rig
     subprocess.run(["git", "init", "-q", str(r.home / "repo")], check=True)

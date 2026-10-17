@@ -201,6 +201,7 @@ class Terminals:
         self.scratch: dict[str, tuple[str, str | None]] = {}  # terminal id -> (its temp folder, its proxy run token)
         self.cursors: dict[str, int] = {}  # terminal id -> where the agent last read to
         self.partial: dict[str, str] = {}  # terminal id -> text typed without Enter, so the whole line is judged
+        self.edited: set[str] = set()  # terminals whose line was changed by a key, so what is on it is no longer what was judged
         self.sent: dict[str, deque[float]] = {}  # terminal id -> when it was last typed into
         self.waiting: dict[str, int] = {}  # owner -> waits in progress
 
@@ -358,6 +359,11 @@ class Terminals:
                 raise TerminalError(f"key must be one of {', '.join(KEYS)}.")
             data = KEYS[key]
         else:
+            if not str(text):
+                raise TerminalError("`text` is empty. A line is run by sending its text.")
+            if terminal_id in self.edited:
+                raise TerminalError("A key changed the line since it was judged, so it may not hold what you typed. Send key=ctrl-c to "
+                                    "clear it first.", "terminal_send key=ctrl-c")
             if not judged and (why := self.judge(ctx, row["cwd"], str(text), self.partial.get(terminal_id, ""))):
                 raise TerminalError(why)
             self._rate(terminal_id)
@@ -367,6 +373,10 @@ class Terminals:
             self._touch(row, {"attached": blocked == "attached", "dirty": blocked == "dirty"})
             raise TerminalError("The user is using this terminal, so it was not typed into." if blocked == "attached"
                                 else "The user typed into this terminal first; send key=ctrl-c to clear the line.")
+        if key in ("ctrl-c", "ctrl-d"):
+            self.edited.discard(terminal_id)
+        elif key is not None:
+            self.edited.add(terminal_id)
         if key is not None or submit:
             self.partial.pop(terminal_id, None)
         else:
@@ -433,13 +443,15 @@ class Terminals:
     async def _wait(self, ctx: dict[str, Any], row: dict[str, Any], cfg: dict[str, Any], compiled: re.Pattern[str] | None,
                     literal: str | None, idle_ms: int | None, start: int, timeout_s: float) -> dict[str, Any]:
         deadline = time.monotonic() + timeout_s
-        text, cursor, last_output = "", start, time.monotonic()
+        text, cursor, last_output, dropped = "", start, time.monotonic(), 0
         reason, extra = "timeout", {}
         while True:
             reply = await self._fetch(row, False, cursor)
             fresh = clean_output(str(reply.get("text") or ""), cfg)
             if fresh:
                 text, last_output = text + fresh, time.monotonic()
+                if len(text) > MATCH_CAP:  # a noisy process cannot grow the wait without bound
+                    dropped, text = dropped + len(text) - MATCH_CAP, text[-MATCH_CAP:]
             cursor = int(reply["cursor"])
             quiet = time.monotonic() - last_output
             hit = compiled.search(text[-MATCH_CAP:]) if compiled and text else None
@@ -459,6 +471,7 @@ class Terminals:
             break
         self.cursors[row["id"]] = cursor
         shown, cut = tail(text)
+        cut += dropped
         if shown:
             shell.taint(ctx, f"terminal:{row['id']}")
         return {"reason": reason, "text": shown, "cursor": cursor, **({"dropped": cut} if cut else {}), **extra}
@@ -484,6 +497,7 @@ class Terminals:
             self._release(*scratch)
         for memory in (self.cursors, self.partial, self.sent):
             memory.pop(row["id"], None)
+        self.edited.discard(row["id"])
         return {"closed": True, **({"exit_code": code} if code is not None else {})}
 
     async def close_where(self, where: str, *args: Any) -> None:

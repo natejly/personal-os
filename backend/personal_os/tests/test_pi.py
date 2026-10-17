@@ -1,4 +1,4 @@
-"""pi as a coding agent (pi.py + the pi branch of codingagents.py): argv, `--mode json` parsing, detection, follow-ups."""
+"""pi as a coding agent (extensions/coding/pi.py + the pi branch of sessions.py): argv, `--mode json` parsing, detection, follow-ups."""
 from __future__ import annotations
 
 import json

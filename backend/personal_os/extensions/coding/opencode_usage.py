@@ -2,7 +2,7 @@
 
 OpenCode keeps every assistant message in ~/.local/share/opencode/opencode.db (session_message, type 'assistant',
 data = JSON with model, cost and tokens). Grain launches OpenCode with that same default data dir and records none
-of its calls itself (opencode.py, codingagents.py write no usage), so importing every message counts each call once,
+of its calls itself (opencode.py, sessions.py write no usage), so importing every message counts each call once,
 whether Grain or a terminal started it. external_id is the message id and unique, so an import never doubles a row.
 """
 from __future__ import annotations

@@ -139,6 +139,17 @@ def test_keys_are_a_short_fixed_list_and_exactly_one_of_text_or_key(tmp_path, mo
     assert hub.terms[tid]["written"] == []
 
 
+def test_empty_text_and_a_line_changed_by_a_key_are_refused_until_ctrl_c(tmp_path, monkeypatch):
+    tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
+    tid = opened(tb, ctx_of(cfg), str(home / "work"))
+    assert "empty" in send(tb, cfg, tid, "")["error"]  # a bare Enter would run whatever the line editor holds
+    assert call(tb, "terminal_send", ctx_of(cfg), terminal_id=tid, key="up")["ok"] is True
+    assert "ctrl-c" in send(tb, cfg, tid, "ls")["error"]  # history recall changed the line, so it is no longer the judged text
+    assert call(tb, "terminal_send", ctx_of(cfg), terminal_id=tid, key="ctrl-c")["ok"] is True
+    assert send(tb, cfg, tid, "ls")["ok"] is True
+    assert hub.terms[tid]["written"] == ["\x1b[A", "\x03", "ls\r"]
+
+
 @pytest.mark.parametrize("line, why", [
     ("echo a\nrm -rf x", "one line"),
     ("echo \x1b[31mhi", "one line"),
@@ -337,6 +348,14 @@ def test_wait_for_needs_a_timeout_in_range_and_one_matcher(tmp_path, monkeypatch
         assert "timeout_s is required" in wait(tb, cfg, tid, literal="x", timeout_s=bad)["error"]
     assert "not both" in wait(tb, cfg, tid, literal="x", pattern="y", timeout_s=1)["error"]
     assert "idle_ms" in wait(tb, cfg, tid, idle_ms=10, timeout_s=1)["error"]
+
+
+def test_wait_for_keeps_only_a_bounded_tail_of_a_noisy_process(tmp_path, monkeypatch, quick):
+    tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
+    tid = opened(tb, ctx_of(cfg), str(home / "work"))
+    hub.feed(tid, "x" * (terms.MATCH_CAP * 2))
+    out = wait(tb, cfg, tid, idle_ms=200, timeout_s=3)
+    assert out["reason"] == "idle" and len(out["text"]) == terms.READ_MAX and out["dropped"] == terms.MATCH_CAP * 2 - terms.READ_MAX
 
 
 def test_wait_for_reports_one_of_five_reasons(tmp_path, monkeypatch, quick):

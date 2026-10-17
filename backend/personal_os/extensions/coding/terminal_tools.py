@@ -88,7 +88,8 @@ def tools(coding: Coding) -> list[ToolSpec]:
                  "it is sent (submit=false types it without Enter), or `key` is one of " + ", ".join(KEYS) + ". It is judged exactly like a "
                  "shell_run command: the same rules, refusals and cards, and a line that starts an interpreter, shell, editor or pager inside a "
                  "git work tree is refused because it cannot be judged. While the user has the terminal open you cannot type into it; once "
-                 "they typed, send key=ctrl-c first. There is no bare Enter: a line is run by sending it. Returns the cursor to read from.",
+                 "they typed, or after a key other than ctrl-c/ctrl-d changed the line, send key=ctrl-c first. There is no bare Enter: a line "
+                 "is run by sending it, and empty text is refused. Returns the cursor to read from.",
                  _obj({**tid, "text": {"type": "string"}, "key": {"type": "string", "enum": list(KEYS)},
                        "submit": {"type": "boolean", "default": True}}, ["terminal_id"]), terminal_send, "shell", "executes"),
         ToolSpec("terminal_read", "Read a terminal. mode 'new' (default) is the output since `cursor` (default where you last read); mode 'screen' "

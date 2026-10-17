@@ -73,7 +73,7 @@ class Coding:
         self.sessions: CodingSessions
         self.recipes: Recipes
         self.terminals: Terminals
-        self.snapshots: dict[str, dict[str, Any]] = {}  # tool call id -> the repos a shell_run may touch (route.guard_start)
+        self.snapshots: dict[tuple[Any, str], dict[str, Any]] = {}  # (run id, tool call id) -> the repos a shell_run may touch (route.guard_start)
 
     def bind(self, tb: Toolbox) -> None:
         """Start the sessions over the app's Toolbox: they run agents through its shell registry and recover live ones."""
@@ -121,23 +121,26 @@ class Coding:
         if text := self.refusal(ev["name"], ev["args"], ev["ctx"]):
             return Deny(text)
         if ev["name"] == "shell_run" and (snap := await asyncio.to_thread(route.guard_start, self.tb, ev["args"], ev["ctx"])):
-            self.snapshots[ev["call_id"]] = snap
+            self.snapshots[ev["ctx"]["run_id"], ev["call_id"]] = snap
         return None
 
     async def check_result(self, ev: dict[str, Any]) -> dict[str, Any] | None:
         """tool.result: what a shell_run really changed in a repo is put back, and the whole result becomes the refusal."""
-        if (snap := self.snapshots.pop(ev["call_id"], None)) and (text := await asyncio.to_thread(route.guard_finish, snap)):
+        if (snap := self.snapshots.pop((ev["run_id"], ev["call_id"]), None)) and (text := await asyncio.to_thread(route.guard_finish, snap)):
             return {**ev, "result": tool_error(text, alternative="coding_session_start")}
         return None
 
     async def drop_snapshot(self, ev: dict[str, Any]) -> None:
         """tool.error and tool.post: a call that failed, or that no pipe settled, leaves no snapshot behind."""
-        self.snapshots.pop(ev["call_id"], None)
+        self.snapshots.pop((ev["run_id"], ev["call_id"]), None)
 
     # ---- sessions that stop with the run that started them ----
     async def run_ended(self, run: Any) -> None:
         """run.after: a stopped reply stops its coding sessions; a finished one leaves them running. A stopped desk or job
-        run also closes the terminals it opened (a chat's terminals outlive its replies)."""
+        run also closes the terminals it opened (a chat's terminals outlive its replies). Snapshots a later tool.pre refusal
+        left behind go with the run."""
+        for key in [k for k in self.snapshots if k[0] == run.run_id]:
+            del self.snapshots[key]
         if run.stop.is_set():
             await self.sessions.stop_owned(run.run_id, f"the {'desk run' if run.desk_id else 'reply'} that started it was stopped")
             if run.desk_id or run.kind == "job":

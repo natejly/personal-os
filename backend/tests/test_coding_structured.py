@@ -139,6 +139,13 @@ def test_the_answer_is_only_trusted_after_five_checks_in_order(rig):
     assert rig.run(max_steps=5)["error"] == "step_cap"
 
 
+def test_the_value_and_denials_are_credential_scrubbed(rig):
+    secret = "sk-abcdefghijklmnopqrstuvwxyz0123456789"
+    rig.stage(ok_result(structured_output={"n": 1, "note": f"key {secret}"}, permission_denials=[{"tool_input": {"command": f"echo {secret}"}}]))
+    out = rig.run(schema={"type": "object"})
+    assert secret not in json.dumps(out) and out["ok"] is True
+
+
 def test_the_text_form_of_the_result_is_never_used_in_place_of_the_structured_one(rig):
     rig.stage(ok_result(structured_output=None, result='{"n": 7}'))
     assert rig.run()["error"] == "no_structured_output"
@@ -196,7 +203,7 @@ def test_a_run_that_can_write_needs_the_tool_named_and_stays_out_of_a_work_tree(
     rig.stage(ok_result())
     repo, plain = str(rig.home / "repo"), str(rig.home / "plain")
     assert rig.run(cwd=repo, tools=["Read"])["ok"] is True  # reading a repo is fine
-    for tools in (["Edit"], ["Write"], ["Bash(git log:*)"], ["Read", "WebFetch"], ["NotebookEdit"]):
+    for tools in (["Edit"], ["Write"], ["Bash(git log:*)"], ["Read", "WebFetch"], ["NotebookEdit"], ["MultiEdit"], ["Task"]):
         assert "coding_session_start" in rig.run(cwd=repo, tools=tools)["error"], tools
     assert rig.run(cwd=plain, tools=["Edit", "Bash(echo:*)"])["ok"] is True
     assert rig.run(tools=["Bash(echo:*)"])["ok"] is True  # the default folder is a fresh temp one

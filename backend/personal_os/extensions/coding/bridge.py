@@ -96,8 +96,8 @@ def bridge_router(coding: Coding) -> APIRouter:
         row = coding.sessions.get(session_id)
         key = request.headers.get(KEY_HEADER, "")
         ended = row is not None and row["status"] not in LIVE and row["status"] != "blocked" and time.time() - (row.get("ended_at") or 0) > RESUME_GRACE
-        if (row is None or not row.get("hook_key") or row["id"] != session_id or ended
-                or not secrets.compare_digest(key, row["hook_key"]) or not request.client or request.client.host not in LOOPBACK):
+        if (not request.client or request.client.host not in LOOPBACK or row is None or not row.get("hook_key") or row["id"] != session_id
+                or ended or not secrets.compare_digest(key.encode(), row["hook_key"].encode())):
             raise HTTPException(403, "Forbidden")
         return row
 

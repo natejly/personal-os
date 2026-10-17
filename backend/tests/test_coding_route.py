@@ -1,4 +1,4 @@
-"""Coding goes to OpenCode / Claude Code (coding_route.py): Grain's own file writers and file-changing shell commands are
+"""Coding goes to OpenCode / Claude Code (coding/route.py): Grain's own file writers and file-changing shell commands are
 refused inside a git work tree under every permission mode and for every agent, with a message naming coding_session_start;
 reads, tests and publishing stay allowed, edits outside a repo are untouched, the setting turns it off, and the Allow
 everything floor still decides its own cases. Offline: a fake HOME in a tmpdir.

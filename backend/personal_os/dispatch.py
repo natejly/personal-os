@@ -32,11 +32,12 @@ def _refused(name: str, verdict: Deny | Ask) -> dict[str, Any]:
                       alternative="ask the user whether to go ahead")
 
 
-async def _observe(bus: HookBus, name: str, args: dict[str, Any], result: Any, error: str | None, started: float, call_id: str) -> None:
+async def _observe(bus: HookBus, name: str, args: dict[str, Any], result: Any, error: str | None, started: float, call_id: str,
+                   run_id: str | None) -> None:
     if error and bus.active("tool.error"):
-        await bus.emit("tool.error", {"name": name, "call_id": call_id, "error": redact.scrub_command_output(error)})
+        await bus.emit("tool.error", {"name": name, "call_id": call_id, "run_id": run_id, "error": redact.scrub_command_output(error)})
     if bus.active("tool.post"):
-        await bus.emit("tool.post", {"name": name, "call_id": call_id, "args": scrub_strings(args),
+        await bus.emit("tool.post", {"name": name, "call_id": call_id, "run_id": run_id, "args": scrub_strings(args),
                                      "result_preview": redact.scrub_command_output(summarize_result(result)),
                                      "error": redact.scrub_command_output(error) if error else None,
                                      "duration_ms": int((time.monotonic() - started) * 1000)})
@@ -68,15 +69,15 @@ async def dispatch_tool(toolbox: Toolbox, ctx: dict[str, Any], name: str, args: 
     try:
         result = await (connector() if connector is not None else toolbox.call(name, args, ctx))
     except Exception as e:
-        await _observe(bus, name, args, None, f"{type(e).__name__}: {e}", started, call_id)
+        await _observe(bus, name, args, None, f"{type(e).__name__}: {e}", started, call_id, ctx.get("run_id"))
         raise
     if bus.active("tool.result"):
-        piped = await bus.pipe("tool.result", {"name": name, "call_id": call_id, "result": copy.deepcopy(result),
+        piped = await bus.pipe("tool.result", {"name": name, "call_id": call_id, "run_id": ctx.get("run_id"), "result": copy.deepcopy(result),
                                                "tainted": connector is not None or bool(ctx.get("tainted"))})
         if isinstance(piped, dict) and "result" in piped:
             result = piped["result"]
     error = result.get("error") if isinstance(result, dict) else None
-    await _observe(bus, name, args, result, str(error) if error else None, started, call_id)
+    await _observe(bus, name, args, result, str(error) if error else None, started, call_id, ctx.get("run_id"))
     if bus.active("tool.taint"):
         sources = [name] if connector is not None else list(ctx.get("taint_sources") or ())[sources_before:]
         for source in sources:

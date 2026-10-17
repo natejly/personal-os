@@ -26,6 +26,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 from ... import mac, shell
+from ...tools import scrub_strings
 from . import route
 from .sessions import CLAUDE_HINT, MODEL_RE, claude_binary, claude_env, floor_settings
 
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
 SCHEMA_MAX = 16_000  # bytes of schema
 READ_TOOLS = ("Read", "Grep", "Glob")
 TOOL_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*(\([^\n]{1,200}\))?")
-WRITING = re.compile(r"Edit|Write|NotebookEdit|WebFetch|Bash.*")  # the names a read-only run does not have
+READ_ONLY = re.compile(r"Read|Grep|Glob|LS|NotebookRead|WebSearch|TodoWrite")  # every other tool may write, run or spawn
 STEPS = (1, 100, 20)  # min, max, default
 TIMEOUT_S = (5, 900, 300)
 DEFAULT_BUDGET_USD = 1.0  # when neither the call nor ext.coding.structuredBudgetUsd names one
@@ -94,7 +95,7 @@ def check_tools(tools: Any, cfg: dict[str, Any], cwd: Path, own_worktrees: list[
     if not isinstance(tools, list) or not tools or not all(isinstance(t, str) and TOOL_RE.fullmatch(t) for t in tools):
         raise ValueError("tools must be a list of Claude Code tool names or patterns such as 'Read' or 'Bash(git log:*)'.")
     root = route.repo_root(str(cwd))
-    if root and route.enabled(cfg) and root not in own_worktrees and any(WRITING.fullmatch(t.split("(")[0]) for t in tools):
+    if root and route.enabled(cfg) and root not in own_worktrees and not all(READ_ONLY.fullmatch(t.split("(")[0]) for t in tools):
         raise ValueError(f"{root} is a git work tree, and coding there goes to a coding session (coding_session_start); "
                          "a structured run may write or execute only outside a repository or in a worktree a session made.")
     return list(dict.fromkeys(tools))
@@ -128,8 +129,8 @@ def interpret(out: str, schema: dict[str, Any], max_steps: int, counted: int) ->
               for e in Draft202012Validator(schema).iter_errors(value)]  # where and which rule, never the offending value
     if errors:
         raise StructuredError("schema_mismatch", "the answer does not fit the schema", errors=errors[:ERRORS_SHOWN])
-    return {"ok": True, "value": value, "num_turns": result.get("num_turns"), "cost_usd": result.get("total_cost_usd"),
-            "permission_denials": result.get("permission_denials") or []}
+    return {"ok": True, "value": scrub_strings(value), "num_turns": result.get("num_turns"), "cost_usd": result.get("total_cost_usd"),
+            "permission_denials": scrub_strings(result.get("permission_denials") or [])}
 
 
 async def run(coding: Any, ctx: dict[str, Any], prompt: str, schema: dict[str, Any], cwd: str | None, tools: list[str] | None,

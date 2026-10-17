@@ -270,7 +270,7 @@ def routes() -> Any:
     return type("R", (), {"app": appmod, "local": local, "remote": remote, "Deny": Deny, "Ask": Ask})
 
 
-def make_session(r: Any, sid: str, *, key: str | None = "the-session-key", status: str = "working", ended_at: float | None = None) -> None:
+def make_session(r: Any, sid: str, *, key: str | bytes | None = "the-session-key", status: str = "working", ended_at: float | None = None) -> None:
     now = time.time()
     with r.app.db.tx() as c:
         c.execute("INSERT OR REPLACE INTO coding_sessions(id, agent, repo_path, worktree, branch, conversation_id, run_id, name, prompt, status, "
@@ -278,7 +278,7 @@ def make_session(r: Any, sid: str, *, key: str | None = "the-session-key", statu
                   (sid, "claude", "/r", "/r/wt", "grain/x", "conv1", "run1", "n", "p", status, now, now, ended_at, key))
 
 
-def hook_post(client: Any, sid: str, path: str, key: str | None = "the-session-key", **body: Any) -> Any:
+def hook_post(client: Any, sid: str, path: str, key: str | bytes | None = "the-session-key", **body: Any) -> Any:
     return client.post(f"/coding-hooks/{sid}/{path}", json={"tool": "Bash", "input": {"command": "ls"}, "call_id": "tu1", **body},
                        headers={"X-Grain-Hook-Key": key} if key is not None else {})
 
@@ -293,6 +293,7 @@ def test_the_route_opens_for_the_sessions_key_only(routes):
     assert ok.status_code == 200 and ok.json() == {"verdict": None, "reason": ""}
     assert hook_post(routes.local, "sess-live", "pre", key="wrong").status_code == 403
     assert hook_post(routes.local, "sess-live", "pre", key=None).status_code == 403
+    assert hook_post(routes.local, "sess-live", "pre", key="caf\u00e9".encode("latin-1")).status_code == 403  # not a 500 that tells a real id from a made-up one
     assert hook_post(routes.local, "no-such-session", "pre").status_code == 403  # the same answer: ids cannot be probed
     make_session(routes, "sess-nokey", key=None)
     assert hook_post(routes.local, "sess-nokey", "pre", key="").status_code == 403

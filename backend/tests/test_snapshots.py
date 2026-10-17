@@ -84,6 +84,7 @@ check(not any(sn.read_only_shell(c) for c in ("sort -o notes.txt notes.txt", "un
                                                 "git diff --output=patch.diff")), "commands that write by flag are mutating")
 check(S.wants("shell_run", {"command": "rm draft.md && python build.py", "cwd": str(ROOT)}, None), "mutating shell in a plain folder is snapshotted")
 check(S.roots_for_call("shell_run", {"command": "rm x", "cwd": str(ROOT)}, None) == [ROOT], "the folder it runs in is the root")
+check(S.roots_for_call("terminal_open", {"command": "rm x", "cwd": str(ROOT)}, None) == [ROOT] and S.wants("terminal_send", {"terminal_id": "t", "text": "rm x"}, "d1"), "terminals and structured coding runs are snapshotted like shell_run")
 check(not S.wants("shell_run", {"command": "rm draft.md && python build.py"}, None), "no folder named (home, or where the last cd ended): not")
 check(not S.wants("shell_run", {"command": "rm x", "cwd": str(HOME)}, None) and not S.wants("shell_run", {"command": "rm x", "cwd": "sub"}, None),
       "home and a relative folder are not")

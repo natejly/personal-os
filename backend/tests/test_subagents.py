@@ -1356,6 +1356,18 @@ def test_a_token_in_a_subagent_root_is_stripped() -> None:
     check(msg is not None and pat not in msg and "[github-pat]" in msg, "a token in a confined path is stripped")
 
 
+def test_a_confined_worker_cannot_open_a_terminal_elsewhere() -> None:
+    root = tempfile.mkdtemp()
+    ch = sa.Child(
+        id="c", parent_id="p", role=sa.BUILTIN_ROLES["worker"], task="look", model="m",
+        depth=1, conversation_id=None, message_id=None, desk_id=None,
+        ctx={}, modes={}, meter=sa.Meter(), roots=(Path(root).resolve(),), confine=True,
+    )
+    for name in ("terminal_open", "coding_run_structured"):
+        assert "outside" in (mgr._confine(ch, name, {"cwd": "/tmp"}) or "")
+        assert mgr._confine(ch, name, {"cwd": root}) is None
+
+
 def test_a_token_in_a_subagent_id_is_stripped() -> None:
     pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
     ctx = mkctx(new_conv())

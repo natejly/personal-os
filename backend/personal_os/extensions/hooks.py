@@ -28,6 +28,12 @@ from .disposables import Disposable
 log = logging.getLogger(__name__)
 
 DEFAULT_PRIORITY = 50
+_CTX_KEYS = ("run_id", "conversation_id", "project_id", "agent_id", "desk_id")
+
+
+def hook_ctx(ctx: dict[str, Any]) -> dict[str, Any]:
+    """The stable subset of a loop's tool context that a handler may read."""
+    return {**{k: ctx.get(k) for k in _CTX_KEYS}, "tainted": bool(ctx.get("tainted"))}
 MUTE_AFTER = 5  # consecutive emit failures before a handler is muted for the session
 STATS_WINDOW = 200  # latencies kept per handler for the dev panel's p50 and p95
 ERROR_WINDOW = 10  # failures kept per handler

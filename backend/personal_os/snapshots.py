@@ -55,7 +55,8 @@ PATH_KEYS = ("path", "to", "from", "src", "dst", "dest", "destination", "source"
 # run_python and desk_fetch_file can write the workspace too (run_python only inside a desk: roots_for_call needs a desk id).
 # shell_run is judged by its command (see read_only_shell).
 DESK_TOOLS = frozenset({"desk_write_file", "desk_trash_file", "run_python", "desk_fetch_file"})
-SHELL_TOOLS = frozenset({"shell_run", "opencode_run", "coding_session_start", "coding_session_send"})
+SHELL_TOOLS = frozenset({"shell_run", "opencode_run", "coding_session_start", "coding_session_send",
+                         "coding_run_structured", "terminal_open", "terminal_send"})
 
 READ_ONLY_COMMANDS = frozenset({
     "ls", "cat", "head", "tail", "pwd", "echo", "grep", "egrep", "fgrep", "rg", "wc", "stat", "file", "which",

@@ -267,7 +267,8 @@ class ExtensionScope:
 
     def precheck(self, fn: Precheck) -> Disposable:
         """Refuse a tool call before any approval card: `fn(name, args, ctx)` returns the refusal text or None. It cannot
-        approve, and it is silent while the extension is disabled."""
+        approve, and it is silent while the extension is disabled. Needs `hooks:gate`, like the `tool.pre` gate it mirrors."""
+        self._require("hooks:gate")
         return self.disposables.add(self.prechecks.register(fn, self.enabled))
 
     def directive(self, fn: Directive, *, version: int) -> Disposable:

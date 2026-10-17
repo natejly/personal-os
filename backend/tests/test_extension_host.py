@@ -616,6 +616,21 @@ class BuiltinExtensionTests(unittest.TestCase):
         for hook in ("tool.pre", "tool.permission", "turn.accept", "memory.before_write"):
             granted.on(hook, lambda p: None)
 
+    def test_a_precheck_needs_the_gate_permission_and_sees_copies(self) -> None:
+        with self.assertRaises(ValueError):
+            self.scope().precheck(lambda n, a, c: None)
+        scope = self.scope(permissions=["hooks:gate"])
+        args = {"path": "/a"}
+
+        def meddle(name: str, a: dict[str, Any], ctx: dict[str, Any]) -> str | None:
+            a["path"] = "/elsewhere"
+            ctx["settings"] = {"x": 1}
+            return None
+        scope.precheck(meddle)
+        live = {"run_id": "r", "settings": {}, "secret": "s"}
+        self.assertIsNone(scope.prechecks.refusal("t", args, live))
+        self.assertEqual((args, live["settings"]), ({"path": "/a"}, {}))
+
     def test_a_disabled_extension_handlers_have_no_opinion_but_lifecycle_hooks_still_arrive(self) -> None:
         seen: list[str] = []
         hidden: list[str] = []

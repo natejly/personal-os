@@ -6,10 +6,12 @@ same check below the approval wait, and that gate fails toward asking.
 """
 from __future__ import annotations
 
+import copy
 import logging
 from typing import Any, Callable
 
 from .disposables import Disposable
+from .hooks import hook_ctx
 
 log = logging.getLogger(__name__)
 
@@ -26,12 +28,13 @@ class Prechecks:
         return Disposable(lambda: self._checks.remove(entry))
 
     def refusal(self, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> str | None:
-        """The first refusal of an enabled extension's precheck, or None."""
+        """The first refusal of an enabled extension's precheck, or None. Each gets its own copy of the arguments and the
+        hook context subset, so a precheck cannot change what permission rules already judged."""
         for fn, enabled in list(self._checks):
             if not enabled():
                 continue
             try:
-                if text := fn(name, args, ctx):
+                if text := fn(name, copy.deepcopy(args), hook_ctx(ctx)):
                     return text
             except Exception:  # noqa: BLE001 - see the module docstring
                 log.warning("precheck %s failed", getattr(fn, "__name__", fn), exc_info=True)

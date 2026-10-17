@@ -13,6 +13,7 @@ from typing import Any
 
 from ..permissions import CHOICES
 from ..repos import EFFORTS
+from ..runtime.slots import PERMISSIONS as RUNTIME_PERMISSIONS, SLOTS
 from .hooks import HOOKS
 
 API_VERSION = 1
@@ -22,14 +23,15 @@ _SEMVER = re.compile(r"\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?")
 _ACTIVATION = re.compile(r"startup|onSchedule|(onView|onCommand|onChannel):.+")
 _TOP_KEYS = {"id", "name", "description", "version", "apiVersion", "kind", "enabled", "activation", "requires", "provides",
              "contributes", "hooks", "permissions", "settings", "data"}
-_CONTRIBUTES = {"tools", "routes", "views", "slots", "settings", "commands", "keybindings", "theme", "defaults", "layout"}
+_CONTRIBUTES = {"tools", "routes", "views", "slots", "settings", "commands", "keybindings", "theme", "defaults", "layout", "runtime"}
+_RUNTIME_KEYS = {"slot", "id", "label", "meta"}
 _HOOK_KEYS = {"priority", "timeoutMs", "onFailure"}
 SETTING_TYPES = ("string", "number", "integer", "boolean", "secret")  # a secret is a string kept in the secret store
 _FIELD = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 _TABLE = re.compile(r"[a-z_][a-z0-9_]*")
 _PROFILE_CONTRIBUTES = {"theme", "defaults"}  # all a profile may contribute: it runs nothing
 _PROFILE_FORBIDDEN = ("requires", "provides", "hooks", "permissions", "settings", "data")
-_DEFAULTS = {"views", "model", "effort", "theme", "permissions"}
+_DEFAULTS = {"views", "model", "effort", "theme", "permissions", "runtime"}
 PERMISSION_MODES = CHOICES["permissionMode"]
 _THEMES = ("dark", "light", "system")
 _TOKEN = re.compile(r"--[a-z0-9-]+")
@@ -38,7 +40,7 @@ _TOKEN_VALUE = re.compile(r"(?![\s\S]*/\*)[^;{}<>@\\]{1,200}")  # one declaratio
 _TOKEN_FUNCTIONS = {"", "rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch", "color", "color-mix", "calc",
                     "var", "min", "max", "clamp", "linear-gradient", "radial-gradient", "conic-gradient"}  # none fetches anything
 _PERMISSIONS = {"db:own", "context:volatile", "conversation:read", "input:rewrite", "hooks:gate", "memory:gate",
-                "prompt:inject", "ui:unsupported-css", "coding:read", "terminal:control"}  # plus "service:<name>"
+                "prompt:inject", "ui:unsupported-css", "coding:read", "terminal:control", *RUNTIME_PERMISSIONS}  # plus "service:<name>"
 
 
 class ManifestError(ValueError):
@@ -87,6 +89,7 @@ class Manifest:
         _check(all(_ACTIVATION.fullmatch(a) for a in activation), "activation has an unknown event")
         requires, provides = _object(raw, "requires", {"services", "extensions"}), _object(raw, "provides", {"services"})
         permissions = _strings(raw, "permissions", ())
+        _check(all("." not in svc for svc in _strings(provides, "services", ())), "a service name has no dot: dotted names are runtime slots")
         if raw.get("kind") == "profile":
             _check_profile(raw)
         _check(all(p in _PERMISSIONS or p.startswith("service:") for p in permissions), "permissions has an unknown capability")
@@ -153,7 +156,23 @@ def _contributes(raw: dict[str, Any]) -> dict[str, Any]:
            "contributes.slots['canvas.widget'] entries need an id of the form ext:<extension id>:<name>")
     _theme(c)
     _defaults(c)
+    _runtime(c, raw.get("permissions", ()))
     return c
+
+
+def _runtime(c: dict[str, Any], permissions: list[str]) -> None:
+    """contributes.runtime: the slot providers the extension offers, listed before any code runs."""
+    entries = c.get("runtime", [])
+    _check(isinstance(entries, list) and all(isinstance(e, dict) for e in entries), "contributes.runtime must be a list of objects")
+    seen: set[tuple[str, str]] = set()
+    for e in entries:
+        _check(set(e) <= _RUNTIME_KEYS and {"slot", "id", "label"} <= set(e), "contributes.runtime entries take slot, id, label and meta")
+        _check(e["slot"] in SLOTS, f"contributes.runtime: {e['slot']!r} is not a runtime slot")
+        _check(isinstance(e["id"], str) and _ID.fullmatch(e["id"]), "contributes.runtime: id must match [a-z0-9-]+")
+        _check(_is_str(e["label"]) and isinstance(e.get("meta", {}), dict), "contributes.runtime: label must be text and meta an object")
+        _check((e["slot"], e["id"]) not in seen, f"contributes.runtime lists {e['slot']} {e['id']} twice")
+        _check(SLOTS[e["slot"]].permission in permissions, f"providing {e['slot']} needs the permission {SLOTS[e['slot']].permission!r}")
+        seen.add((e["slot"], e["id"]))
 
 
 def _check_profile(raw: dict[str, Any]) -> None:
@@ -184,6 +203,14 @@ def _defaults(c: dict[str, Any]) -> None:
     _check(d.get("effort", "high") in EFFORTS, f"defaults.effort must be one of {', '.join(EFFORTS)}")
     _check(d.get("theme", "dark") in _THEMES, f"defaults.theme must be one of {', '.join(_THEMES)}")
     _check(d.get("permissions", "auto") in PERMISSION_MODES, f"defaults.permissions must be one of {', '.join(PERMISSION_MODES)}")
+    runtime = d.get("runtime", {})
+    _check(isinstance(runtime, dict) and set(runtime) <= set(SLOTS), "defaults.runtime must map a runtime slot to a provider")
+    for slot, value in runtime.items():
+        if SLOTS[slot].multi:
+            _check(isinstance(value, dict) and set(value) <= {"enable", "disable"} and all(isinstance(v, list) and all(_is_str(i) for i in v) for v in value.values()),
+                   f"defaults.runtime.{slot} must be {{enable, disable}} lists of provider ids")
+        else:
+            _check(_is_str(value), f"defaults.runtime.{slot} must be a provider id")
 
 
 def _settings(raw: dict[str, Any]) -> dict[str, Any]:

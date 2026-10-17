@@ -269,7 +269,11 @@ class Terminals:
         env = shell.scrubbed_env(tmp)
         env.pop("NO_COLOR", None)  # a terminal shows colours; the main process sets TERM
         argv = [login_shell(), "-l"]
-        confined = await shell.confine(tb.shell, argv, env, cfg, [str(where), tmp])
+        try:
+            confined = await shell.confine(tb.shell, argv, env, cfg, [str(where), tmp], str(where))
+        except shell.ShellError as e:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise TerminalError(shell._scrub(str(e))) from e
         terminal_id = "tm_" + secrets.token_hex(8)
         try:
             await self.bridge.call({"type": "open", "terminal_id": terminal_id, "argv": confined.argv, "env": env, "cwd": str(where),

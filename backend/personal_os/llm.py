@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import email.utils
+import ipaddress
 import json
 import logging
 import random
@@ -13,11 +14,15 @@ import uuid
 import weakref
 from contextvars import ContextVar
 from typing import Any, AsyncIterator, Callable
+from urllib.parse import urlparse
 
 import httpx
 
-from . import anthropic_native, auth_breaker, provider_route, providers, repos
+from . import anthropic_native, auth_breaker, provider_route, providers, repos, runtime
 from .extensions.hooks import HookBus
+from .runtime import checked
+from .runtime.protocols import ModelReply, ModelRequest
+from .runtime.slots import Refused, at_least_as_private
 from .limits import (VOLATILE_HEADER, CODING_SESSION_MAX_CONCURRENT, COMPACT_AT, COMPACT_AT_TOKENS, COMPACT_KEEP_RECENT, COMPACT_KEEP_TOKENS, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, LLM_IDLE_SECONDS, LLM_RETRIES, MICRO_AT, MICRO_KEEP, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, TOOL_DEFER_ABOVE, WORKER_MAX_CONCURRENT)
 from .permissions import DEFAULTS as PERMISSION_DEFAULTS
 log = logging.getLogger("personal_os.llm")
@@ -115,6 +120,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "modelMedium": "",
     "modelLow": "",
     "defaultEffort": repos.DEFAULT_EFFORT,  # the reasoning effort a new chat starts on (a chat's own choice wins)
+    # The global runtime slot selections ({slot: provider id}, tools.source {enable, disable}) and the sandbox dimensions the user
+    # accepted a backend to enforce only partly; written only through PUT /runtime (runtime/routes.py).
+    "runtime": {},
     "workerEffort": "medium",  # reasoning effort of workers' rounds: low | medium | high, or "chat" to follow the chat's
     "workerModel": "",  # "" = workers run on the chat model; an agent definition's own model still wins
     "autoRoute": False,  # new chats start on Auto: the fast or the default model per message
@@ -1215,11 +1223,11 @@ async def _close_when(cancel: asyncio.Event, response: httpx.Response) -> None:
     await response.aclose()
 
 
-async def stream_chat(
+async def _stream_openai(
     settings: dict[str, Any], model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, kind: str = "chat",
     effort: str = "default", tool_choice: str = "auto", fast: bool = False, cancel: asyncio.Event | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
-    """Stream a chat completion.
+    """Stream a chat completion over the OpenAI-compatible HTTP API: the built-in model client's chat body.
 
     Yields {"type": "delta", "text": str} for content, {"type": "reasoning", "text": str} for a
     reasoning model's chain-of-thought, and finally
@@ -1603,8 +1611,8 @@ def _finish_calls(calls: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], kind: str = "other", *,
-                   effort: str = "default", cancel: asyncio.Event | None = None, deadline: float | None = None) -> str:
+async def _complete_openai(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], kind: str = "other", *,
+                           effort: str = "default", cancel: asyncio.Event | None = None, deadline: float | None = None) -> str:
     """Non-streaming completion (used for extraction, and for vision: `content` may be a list of text/image_url parts).
 
     `cancel` (Stop) and `deadline` (a time.monotonic() value) end the call early as an LLMError of kind 'cancelled' /
@@ -1643,6 +1651,202 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
         raise LLMError("The provider returned an empty reply. Try again, or pick another model.", kind="server")
     text = strip_think(_content_text(choices[0].get("message") or {}))
     _emit_usage(model, kind, parse_usage(data["usage"]) if isinstance(data.get("usage"), dict) else None, int((time.time() - t0) * 1000), _prompt_chars(messages), len(text))
+    return text
+
+
+# ---- model.client slot (design doc section 10.7.2) ----
+def _loopback_or_private(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    if host == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_private
+
+
+class OpenAICompatible:
+    """core/openai-compatible: this module's HTTP client behind the model.client interface. `settings` is the app's settings()."""
+    id = "core/openai-compatible"
+    kinds = frozenset({"chat", "complete"})
+    settings: Callable[[], dict[str, Any]] = dict
+
+    @property
+    def locality(self) -> str:
+        """Where prompts go: local when every configured provider sits on this computer or the local network."""
+        cfg = self.settings()
+        urls = [e["baseUrl"] for e in provider_route.usable(cfg)] or [str(cfg.get("baseUrl") or "")]
+        return "local" if all(u and _loopback_or_private(u) for u in urls) else "remote"
+
+    def stream(self, req: ModelRequest) -> AsyncIterator[dict[str, Any]]:
+        return _stream_openai(self.settings(), req.model, req.messages, req.tools, kind=req.kind, effort=req.effort,
+                              tool_choice=req.tool_choice, fast=req.fast)
+
+    async def complete(self, req: ModelRequest) -> ModelReply:
+        return ModelReply(await _complete_openai(self.settings(), req.model, req.messages, req.kind, effort=req.effort))
+
+
+default_client = OpenAICompatible()
+
+
+def _alternative_client(entry: str) -> Any | None:
+    """The selected non-default model client when it serves `entry` ("chat" or "complete"), else None. A selection that is gone
+    while the default is less private fails the call."""
+    try:
+        chosen = runtime.active.alternative("model.client")
+    except Refused as e:
+        raise LLMError(str(e), kind="unavailable") from None
+    return chosen if chosen is not None and entry in chosen.impl.kinds else None
+
+
+def _client_error(chosen: Any, e: Exception) -> LLMError:
+    return e if isinstance(e, LLMError) else LLMError(f"The model client '{chosen.label}' failed: {type(e).__name__}: {str(e)[:200]}", kind="server")
+
+
+def _fall_back(chosen: Any, e: Exception) -> str:
+    """Why the call goes to the default instead, or raises the error when it must not: only a default no less private than the
+    selected client may be sent the prompt."""
+    err = _client_error(chosen, e)
+    if err.kind == "cancelled" or not at_least_as_private(default_client.locality, chosen.impl.locality):
+        raise err from e
+    why = f"The model client '{chosen.label}' failed before replying ({str(err)[:120]}); the default client answered."
+    runtime.active.announce("model.client", chosen.id, default_client.id, why, False)
+    return why
+
+
+def _stopped(reason: str) -> dict[str, Any]:
+    return {"type": "end", "finish_reason": reason, "tool_calls": [], "usage": None}
+
+
+async def _drop(task: asyncio.Future[Any]) -> None:
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
+def _left(idle: float, deadline_at: float | None) -> float:
+    return idle if deadline_at is None else min(idle, deadline_at - time.monotonic())
+
+
+async def _first(work: asyncio.Future[Any], stopper: asyncio.Future[Any] | None, timeout: float) -> str:
+    """Wait for `work`, Stop or the timeout, whichever comes first: "done", "stopped" or "timeout". If the caller is cancelled
+    meanwhile, `work` is dropped with it."""
+    try:
+        await asyncio.wait({work, *([stopper] if stopper else [])}, timeout=max(timeout, 0.01), return_when=asyncio.FIRST_COMPLETED)
+    except asyncio.CancelledError:
+        await _drop(work)
+        raise
+    if stopper is not None and stopper.done():
+        return "stopped"
+    return "done" if work.done() else "timeout"
+
+
+async def _bounded(events: AsyncIterator[Any], idle: float, cancel: asyncio.Event | None, deadline_at: float | None) -> AsyncIterator[Any]:
+    """A client's events, ended early (finish_reason cancelled or timeout, no tool calls) by Stop or the deadline. A client silent
+    for `idle` seconds raises LLMError, as a provider that stops answering does."""
+    stopper = asyncio.ensure_future(cancel.wait()) if cancel is not None else None
+    try:
+        while True:
+            nxt = asyncio.ensure_future(events.__anext__())
+            outcome = await _first(nxt, stopper, _left(idle, deadline_at))
+            if outcome != "done":
+                await _drop(nxt)
+            if outcome == "stopped":
+                yield _stopped("cancelled")
+                return
+            if outcome == "timeout":
+                if deadline_at is not None and time.monotonic() >= deadline_at:
+                    yield _stopped("timeout")
+                    return
+                raise LLMError(f"The provider stopped responding: no data for {int(idle)}s. Try again.", kind="timeout")
+            try:
+                ev = nxt.result()
+            except StopAsyncIteration:
+                return
+            yield ev
+    finally:
+        if stopper is not None:
+            stopper.cancel()
+
+
+async def _stream_client(client: Any, settings: dict[str, Any], req: ModelRequest, cancel: asyncio.Event | None) -> AsyncIterator[dict[str, Any]]:
+    """One chat call on a swapped-in client: its events held to the stream shape, with the usage row, the model hooks, the idle
+    limit, Stop and the deadline applied here, so no client can skip them."""
+    t0, p_chars = time.time(), _prompt_chars(req.messages, req.tools)
+    _emit_request(req.model, req.messages, req.tools)
+    events = client.stream(req).__aiter__()
+    try:
+        async for ev in checked.checked(_bounded(events, _idle_s(settings), cancel, stream_deadline.get()), p_chars):
+            if ev["type"] == "end":
+                _emit_usage(req.model, req.kind, ev["usage"], int((time.time() - t0) * 1000), p_chars, ev["usage_est"]["completion_tokens"] * 4)
+            yield ev
+    finally:
+        if close := getattr(events, "aclose", None):
+            await close()
+
+
+async def stream_chat(
+    settings: dict[str, Any], model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, kind: str = "chat",
+    effort: str = "default", tool_choice: str = "auto", fast: bool = False, cancel: asyncio.Event | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    """Stream a chat completion from the model client the chat selects: the built-in HTTP client (`_stream_openai`, which
+    documents the events) unless an extension's client is selected. That client gets the request without `settings`. If it
+    fails before its first event the default answers instead, but only when the default is no less private; after an event
+    nothing is replayed and the error ends the turn."""
+    chosen = _alternative_client("chat")
+    if chosen is None:
+        async for ev in _stream_openai(settings, model, messages, tools, kind=kind, effort=effort, tool_choice=tool_choice, fast=fast, cancel=cancel):
+            yield ev
+        return
+    started = False
+    try:
+        async for ev in _stream_client(chosen.impl, settings, ModelRequest(model, messages, tools, kind, effort, tool_choice, fast), cancel):
+            started = True
+            yield ev
+        return
+    except Exception as e:  # noqa: BLE001 - a client may fail any way it likes; the core decides what the turn sees
+        if started:
+            raise _client_error(chosen, e) from e
+        notice = _fall_back(chosen, e)
+    async for ev in _stream_openai(settings, model, messages, tools, kind=kind, effort=effort, tool_choice=tool_choice, fast=fast, cancel=cancel):
+        yield {**ev, "notice": notice} if ev["type"] == "end" else ev
+
+
+async def _client_complete(client: Any, settings: dict[str, Any], req: ModelRequest, cancel: asyncio.Event | None,
+                           deadline: float | None) -> str:
+    task = asyncio.ensure_future(client.complete(req))
+    stopper = asyncio.ensure_future(cancel.wait()) if cancel is not None else None
+    try:
+        outcome = await _first(task, stopper, _left(_idle_s(settings), deadline))
+        if outcome == "stopped":
+            raise LLMError("Stopped.", kind="cancelled")
+        if outcome == "timeout":
+            raise LLMError("The model provider took too long.", kind="timeout")
+        reply = task.result()
+    finally:
+        task.cancel()
+        if stopper is not None:
+            stopper.cancel()
+    if not isinstance(reply, ModelReply) or not isinstance(reply.text, str):
+        raise LLMError(f"The model client '{client.id}' did not return a ModelReply.", kind="server")
+    return reply.text
+
+
+async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], kind: str = "other", *,
+                   effort: str = "default", cancel: asyncio.Event | None = None, deadline: float | None = None) -> str:
+    """A non-streaming completion from the selected model client (see `_complete_openai` for the built-in one's contract).
+    A failing extension client is replaced by the default once, only when the default is no less private."""
+    chosen = _alternative_client("complete")
+    if chosen is None:
+        return await _complete_openai(settings, model, messages, kind, effort=effort, cancel=cancel, deadline=deadline)
+    t0 = time.time()
+    _emit_request(model, messages)
+    try:
+        text = await _client_complete(chosen.impl, settings, ModelRequest(model, messages, None, kind, effort), cancel, deadline)
+    except Exception as e:  # noqa: BLE001
+        _fall_back(chosen, e)
+        return await _complete_openai(settings, model, messages, kind, effort=effort, cancel=cancel, deadline=deadline)
+    _emit_usage(model, kind, None, int((time.time() - t0) * 1000), _prompt_chars(messages), len(text))
     return text
 
 

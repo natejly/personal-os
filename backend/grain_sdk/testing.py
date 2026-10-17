@@ -9,6 +9,9 @@
             h.assert_context_contains("a note")
             h.assert_prefix_stable()
 
+`FakeModelClient`, `FakeRouter`, `FakeToolSource` and `FakeSandbox` stand in for a runtime slot provider, and `slot_contract(slot,
+factory)` runs the slot's contract suite against any provider; `Harness.select(slot, provider_id)` selects one for a chat turn.
+
 The backend is the app singleton, so a test process needs a data dir of its own: the Harness makes a temporary one
 unless PERSONAL_OS_DATA_DIR is already set (`grain ext test` sets it). One extension per Harness; a model call that is
 not scripted answers "ok".
@@ -21,9 +24,10 @@ import json
 import os
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .types import HOOK_KINDS
 
@@ -53,7 +57,8 @@ class Harness:
         self._script: list[Any] = []
         self._requests: list[list[dict[str, Any]]] = []
         self._tools: list[str] = []
-        self._stream = llm.stream_chat
+        self._stream = llm._stream_openai
+        self._runtime = appmod.db.get_settings().get("runtime") or {}
         self.turns: list[Turn] = []
         self.conversation_id: str | None = None
         appmod.db.set_settings({**SETTINGS, **(settings or {})})
@@ -71,7 +76,8 @@ class Harness:
         self.close()
 
     def close(self) -> None:
-        self._llm.stream_chat = self._stream
+        self._llm._stream_openai = self._stream
+        self._app.db.set_settings({"runtime": self._runtime})
         self._app.toolbox.drop_extension_tools(self.scope.tools)
         self._run(self._app.host.unload(self.scope.manifest.id))
         self._loop.close()
@@ -91,6 +97,11 @@ class Harness:
             case _:
                 return self._run(bus.gate(hook, payload))
 
+    def select(self, slot: str, provider: str | dict[str, list[str]]) -> None:
+        """Select a provider (its full id, `<extension id>/<id>`; for `tools.source` an `{"enable": [...]}` object) for every chat until
+        this Harness closes, as the user would in Settings."""
+        self._app.db.set_settings({"runtime": {**(self._app.db.get_settings().get("runtime") or {}), slot: provider}})
+
     # ---- chat ----
     async def _fake(self, settings: dict[str, Any], model: str, messages: list[dict[str, Any]], tools: Any = None, **kw: Any) -> Any:
         self._requests.append([dict(m) for m in messages])
@@ -107,7 +118,7 @@ class Harness:
         """Send a message to the conversation this Harness keeps. `model_script` has one entry per model call: a reply
         string, or {"text": ..., "tool_calls": [{"id", "name", "arguments"}]}."""
         app = self._app
-        self._llm.stream_chat = self._fake
+        self._llm._stream_openai = self._fake
         self._script, self._requests = list(model_script or []), []
         self.conversation_id = self.conversation_id or app.convos.create(None, "Harness", "test-model")["id"]
         events: list[tuple[str, Any]] = []
@@ -135,3 +146,86 @@ class Harness:
         for n, turn in enumerate(self.turns[1:], start=2):
             assert turn.requests[0][0]["content"].encode() == first.requests[0][0]["content"].encode(), f"the system prompt changed on turn {n}"
             assert turn.tools == first.tools, f"the tool list changed on turn {n}"
+
+
+# ---- runtime slot providers ----
+class FakeModelClient:
+    """A scripted `model.client`: `script` is the event dicts `stream` yields; it raises after `fail_at` events when set."""
+    kinds = frozenset({"chat", "complete"})
+
+    def __init__(self, script: list[dict[str, Any]] | None = None, *, fail_at: int | None = None, locality: str = "remote",
+                 text: str = "ok", id: str = "fake") -> None:
+        self.id, self.locality, self.script, self.fail_at, self.text = id, locality, script, fail_at, text
+        self.requests: list[Any] = []
+
+    async def stream(self, req: Any) -> Any:
+        self.requests.append(req)
+        for n, ev in enumerate(self.script if self.script is not None else
+                               [{"type": "delta", "text": self.text}, {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None}]):
+            if self.fail_at == n:
+                raise RuntimeError("scripted failure")
+            yield ev
+
+    async def complete(self, req: Any) -> Any:
+        from personal_os.runtime.protocols import ModelReply  # lazy: the app is not importable until the data dir is set
+        self.requests.append(req)
+        if self.fail_at == 0:
+            raise RuntimeError("scripted failure")
+        return ModelReply(self.text)
+
+
+class FakeRouter:
+    """A `model.router` answering `choice`, or raising `error`, after sleeping `delay_s`."""
+
+    def __init__(self, choice: dict[str, Any] | None = None, *, error: Exception | None = None, delay_s: float = 0.0, id: str = "fake") -> None:
+        self.id, self.choice, self.error, self.delay_s = id, choice, error, delay_s
+
+    def route(self, turn: dict[str, Any]) -> dict[str, Any]:
+        time.sleep(self.delay_s)
+        if self.error is not None:
+            raise self.error
+        return self.choice or {"model": turn["default_model"], "effort": turn["effort"], "reason": "fake router", "no_think": False}
+
+
+class FakeToolSource:
+    """A `tools.source` offering `tools` (dicts with name, description, schema); `call` fails once it has been called `fail_after` times."""
+
+    def __init__(self, tools: list[dict[str, Any]], *, fail_after: int | None = None, id: str = "fake") -> None:
+        self.id, self.tools, self.fail_after, self.calls = id, tools, fail_after, []
+
+    def list(self) -> list[dict[str, Any]]:
+        return self.tools
+
+    async def call(self, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+        if self.fail_after is not None and len(self.calls) >= self.fail_after:
+            raise RuntimeError("scripted failure")
+        self.calls.append((name, args))
+        return {"content": f"{name} done"}
+
+
+class FakeSandbox:
+    """A `sandbox.backend` listing `support`. It confines nothing (`wrap` returns the argv as it is), so a contract run catches a
+    `support` that claims more than that."""
+
+    def __init__(self, support: dict[str, dict[str, str]] | None = None, *, wrap_fails: bool = False, start_fails: bool = False,
+                 id: str = "fake") -> None:
+        self.id, self._support, self.wrap_fails, self.start_fails = id, support or {}, wrap_fails, start_fails
+        self.wrapped: list[Any] = []
+
+    def support(self) -> dict[str, dict[str, str]]:
+        return self._support
+
+    def wrap(self, req: Any, argv: list[str]) -> list[str]:
+        if self.wrap_fails or req.mode not in self._support:
+            raise OSError("scripted failure" if self.wrap_fails else f"{req.mode} is not supported")
+        self.wrapped.append(req)
+        return argv
+
+    def failed_to_start(self, exit_code: int | None, output: str) -> bool:
+        return self.start_fails
+
+
+def slot_contract(slot: str, factory: Callable[[], Any]) -> None:
+    """Run the contract suite of a runtime slot against the provider `factory()` makes; AssertionError says what it got wrong."""
+    from personal_os.runtime.slots import SLOTS
+    asyncio.run(SLOTS[slot].contract(factory()))

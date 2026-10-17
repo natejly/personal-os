@@ -22,6 +22,7 @@ import GeneralTab, { THEMES } from './settings/GeneralTab'
 import SidebarTab from './settings/SidebarTab'
 import SystemTab from './settings/SystemTab'
 import AdvancedTab from './settings/AdvancedTab'
+import './settings/RuntimeTab'
 import { useShortcuts } from './settings/useShortcuts'
 
 type Tab = SettingsTab

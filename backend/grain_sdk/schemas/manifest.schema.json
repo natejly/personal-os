@@ -50,7 +50,11 @@
         "keybindings": {"type": "array", "items": {"type": "object"}},
         "theme": {"type": "object"},
         "defaults": {"type": "object"},
-        "layout": {"type": "object"}
+        "layout": {"type": "object"},
+        "runtime": {
+          "type": "array",
+          "items": {"type": "object", "required": ["slot", "id", "label"], "properties": {"slot": {"type": "string"}, "id": {"type": "string"}, "label": {"type": "string"}, "meta": {"type": "object"}}}
+        }
       }
     },
     "hooks": {

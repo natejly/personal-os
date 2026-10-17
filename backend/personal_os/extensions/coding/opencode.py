@@ -44,7 +44,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ... import limits, mac, osplat, sandbox, shell
+from ... import limits, mac, sandbox, shell
 
 if TYPE_CHECKING:
     from ...tools import ToolSpec
@@ -244,11 +244,11 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
     if dr:
         writable.append(str(dr))
     # loopback: `opencode run` spawns a private server on a random local port and talks to it
-    profile = sandbox.shell_profile(writable, network=False, allow_hosts=ALLOW_HOSTS, loopback=True)
+    req = sandbox.shell_request(str(where), writable, allow_hosts=ALLOW_HOSTS, loopback=True)
     shell.taint(ctx, "opencode_run:network")  # a model with network access wrote whatever comes back
     shown_cmd = f"opencode run {prompt[:160]!r}"
     try:
-        job = await tb.shell.start(osplat.current().sandbox.wrap(argv, profile), command=shown_cmd, cwd=str(where), env=env, tmp=tmp,
+        job = await tb.shell.start(shell.wrap_confined(req, argv), command=shown_cmd, cwd=str(where), env=env, tmp=tmp,
                                    conversation_id=conversation_id if conversation_id is not None else ctx.get("conversation_id"),
                                    run_id=run_id if run_id is not None else ctx.get("run_id"),
                                    background=bool(background), timeout=timeout, notify=notify,
@@ -323,7 +323,7 @@ def tool(coding: Any) -> ToolSpec:
             return {"output": shown, "truncated": cut, "still_running": True, "job_id": job.id, "session_id": session,
                     "duration_s": round(time.time() - t0, 2), **info,
                     "note": f"Still running after {timeout}s, so it carries on in the background (job_id {job.id}). {poll}"}
-        if osplat.current().sandbox.failed_to_start(job.exit_code, raw):
+        if sandbox.failed_to_start(job.exit_code, raw):
             return tool_error(shell._scrub("The OS sandbox refused to start (" + raw.strip()[:200] + "), so nothing was run."))
         text, session = summarize(raw)
         shown, cut = shell.truncate(text)

@@ -135,6 +135,9 @@ function assertUnique(list: { id: string }[], what: string, id: string): void {
   if (list.some((x) => x.id === id)) throw new Error(`${what} "${id}" is already registered`)
 }
 
+export const registerSettingsPanel = (owner: string, def: SettingsPanelDef): Disposable =>
+  add(settingsPanels, { ...def, tab: `ext:${owner}:${def.id}`, extension: owner })
+
 function addUnique<T extends { id: string }>(list: T[], what: string, item: T): Disposable {
   assertUnique(list, what, item.id)
   return add(list, item)
@@ -202,7 +205,7 @@ export function activateExtension(id: string, ext: ExtensionModule): Disposable 
       const row = def.nav && registerSlot(id, 'sidebar.row', { id: def.id, order: def.nav.order, view: def.id, label: def.label, description: def.description, icon: def.icon, kind: def.widget?.kind, badge: def.nav.badge })
       return keep({ dispose: () => { view.dispose(); row?.dispose() } })
     },
-    settingsPanel: (def) => keep(add(settingsPanels, { ...def, tab: `ext:${id}:${def.id}`, extension: id })),
+    settingsPanel: (def) => keep(registerSettingsPanel(id, def)),
     slot: (slot, item) => keep(registerSlot(id, slot, item)),
     command: (def) => keep(registerCommand(id, def)),
     keybinding: (def) => keep(registerKeybinding(id, def)),

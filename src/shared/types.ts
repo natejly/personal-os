@@ -59,6 +59,8 @@ export interface ContextUsed {
   trimmed?: Record<string, number>
   /** Built-in tools held out of the request until tool_search loads them (toolDeferAbove). Absent on older messages. */
   tools_deferred?: number
+  /** The runtime slots a provider other than the built-in served this turn, with why. Absent when every slot was its default. */
+  runtime?: RuntimeResolution[]
   /** The workspace map block of the prompt. Null or absent when it is off. */
   map?: WorkspaceMapUsed | null
   /** Context previews only: a saved reply drops it (its Exact request shows the prompt it was sent). */
@@ -719,7 +721,7 @@ export interface ToolEvent {
 /** Why a reply stopped early. `rounds`, `tokens`, `time` and `cost` only appear on rows stored by an older version. */
 export type PartialReason = 'rounds' | 'tokens' | 'time' | 'cost' | 'loop' | 'stuck' | 'stuck_nudge'
 
-export type SpanKind = 'context' | 'llm' | 'tool' | 'learn' | 'compact'
+export type SpanKind = 'context' | 'llm' | 'tool' | 'learn' | 'compact' | 'runtime'
 
 /** One timed step in the execution trace of an assistant reply. */
 export interface Span {
@@ -1553,8 +1555,49 @@ export interface Profile {
   theme: { light?: Record<string, string>; dark?: Record<string, string> }
 }
 
-/** A default a profile would change but that needs the user's click first: a looser permission preset. */
-export interface ProfileHeld { key: string; was: string; set: string }
+/** A default a profile would change but that needs the user's click first: a looser permission preset, or a runtime provider that loosens something (`diff`). */
+export interface ProfileHeld { key: string; was: string; set: string; diff?: string[] }
+
+/** One runtime slot's winner and why (design doc section 10.7.3). `source` is chat, project, profile:<id>, global or default. */
+export interface RuntimeResolution {
+  slot: string
+  provider: string
+  extra: string[]
+  source: string
+  reason: string
+  default: boolean
+  fell_back_from: string | null
+  refused: boolean
+  locality: 'local' | 'remote' | null
+  /** Sandbox backend only: how far it enforces each dimension (fs_write, fs_read_deny, network, process), per mode. */
+  enforcement: Record<string, Record<string, 'full' | 'partial' | 'none'>> | null
+}
+export interface RuntimeProvider {
+  id: string
+  label: string
+  tier: 'built-in' | 'user'
+  extension: string | null
+  core: boolean
+  available: boolean
+  locality: 'local' | 'remote' | null
+  enforcement: RuntimeResolution['enforcement']
+}
+export type RuntimeSelection = string | { enable?: string[]; disable?: string[] } | null
+export interface RuntimeSlot {
+  id: string
+  noun: string
+  multi: boolean
+  default_id: string
+  providers: RuntimeProvider[]
+  resolution: RuntimeResolution
+  selected: { global: RuntimeSelection; project: RuntimeSelection; chat: RuntimeSelection }
+}
+export interface RuntimeView {
+  slots: RuntimeSlot[]
+  /** Per sandbox backend, the dimensions the user accepted it to enforce only partly. */
+  accept_partial: Record<string, string[]>
+  withheld_tools: { slug: string; name: string; source: string }[]
+}
 
 export interface Settings {
   baseUrl: string

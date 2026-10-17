@@ -43,7 +43,7 @@ test('a slot keeps its items sorted by order, earlier registration first on a ti
 test('the shell registers its own items in the slots', () => {
   assert.deepEqual(ids('sidebar.section'), ['spaces'])
   assert.deepEqual(ids('composer.toolbar'), ['mic'])
-  assert.deepEqual(ids('message.footer'), ['model-tag', 'trace'])
+  assert.deepEqual(ids('message.footer'), ['model-tag', 'runtime', 'trace'])
   assert.deepEqual(ids('sidepanel.tab'), ['context', 'files', 'changes', 'review', 'traces', 'terminal'])  // the last is the coding extension's
   assert.deepEqual(ids('sidebar.row'), ['todos', 'calendar', 'mail', 'health', 'library', 'jobs'])
 })

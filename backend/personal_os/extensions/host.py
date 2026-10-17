@@ -20,6 +20,8 @@ from fastapi import Depends, HTTPException
 
 from .. import backups, migrations
 from ..context import Block, Contribution, RetrievalSources, Slot
+from ..runtime.defaults import core_providers
+from ..runtime.slots import SLOTS, Provider, Runtime
 from .channels import ChannelAdapter, Channels
 from .defaults import DEFAULT_KEYS, Defaults
 from .directives import Directive, Directives
@@ -123,6 +125,7 @@ class ExtensionScope:
     triggers: Triggers
     prechecks: Prechecks
     directives: Directives
+    runtime: Runtime
     module: Module | None = None  # set for an adapted Module
     root: Path | None = None  # the extension's folder, where data.migrations is looked up
     _ctx: ExtensionContext | None = None  # set for an extension loaded from its folder
@@ -244,8 +247,12 @@ class ExtensionScope:
         """Send the open windows an `ext:<id>:<name>` event; the extension's frontend half receives it."""
         self._ctx.publish(f"ext:{self.manifest.id}:{name}", data)
 
-    def provide(self, service: str, impl: Any) -> Disposable:
-        """Offer a service the manifest declares under provides.services, to the app and to extensions that require it."""
+    def provide(self, service: str, impl: Any, *, id: str | None = None, label: str | None = None) -> Disposable:
+        """Offer a service the manifest declares under provides.services, to the app and to extensions that require it. A dotted
+        name is a runtime slot (`sandbox.backend`): `id` and `label` must match an entry of the manifest's contributes.runtime, the
+        slot's permission must be declared, and only the user's settings can select the provider."""
+        if "." in service:
+            return self._provide_slot(service, impl, id, label)
         if service not in self.manifest.provides_services:
             raise ValueError(f"extension {self.manifest.id!r} did not declare service {service!r} under provides")
         services = self._ctx.services
@@ -253,6 +260,16 @@ class ExtensionScope:
             raise ValueError(f"service {service!r} is already provided")
         services[service] = lambda: impl
         return self.disposables.add(Disposable(lambda: services.pop(service, None)))
+
+    def _provide_slot(self, slot: str, impl: Any, provider_id: str | None, label: str | None) -> Disposable:
+        if slot not in SLOTS:
+            raise ValueError(f"{slot!r} is not a runtime slot")
+        declared = next((e for e in self.manifest.contributes.get("runtime", ()) if e["slot"] == slot and e["id"] == provider_id), None)
+        if declared is None:
+            raise ValueError(f"extension {self.manifest.id!r} did not declare provider {provider_id!r} for {slot} under contributes.runtime")
+        if label != declared["label"]:
+            raise ValueError(f"provider {provider_id!r} is labelled {label!r}, its manifest entry says {declared['label']!r}")
+        return self.disposables.add(self.runtime.attach(slot, f"{self.manifest.id}/{provider_id}", impl))
 
     def channel(self, adapter: ChannelAdapter) -> Disposable:
         """Offer a channel adapter: the app routes its chat, run changes and shutdown through it while the extension runs."""
@@ -350,6 +367,7 @@ class ExtensionHost:
         self.triggers = Triggers()
         self.prechecks = Prechecks()
         self.directives = Directives()
+        self.runtime = Runtime(self.bus, core_providers())
         self.routes = ExtensionRoutes(self)  # mounted at /ext by the app: where folder-loaded extensions' routers are served
         self.extensions: dict[str, ExtensionScope] = {}  # in start order
         self.failed: dict[Path, str] = {}  # folders `load_dev` could not load, with the reason
@@ -401,8 +419,7 @@ class ExtensionHost:
         manifest = load_manifest(root / "extension.json")
         if "service:chat" in manifest.permissions:
             raise ValueError("only a built-in extension may use the chat service: it can answer an approval")
-        scope = self._add(manifest, root=root, ctx=ctx)
-        scope.dev = True
+        scope = self._add(manifest, root=root, ctx=ctx, dev=True)
         try:
             self._activate(scope, _import_extension(root, scope))
         except BaseException:
@@ -465,10 +482,19 @@ class ExtensionHost:
         return (sec for scope in self.extensions.values() if scope.enabled() for sec in scope.recap_sections)
 
     def _add(self, manifest: Manifest, module: Module | None = None, root: Path | None = None,
-             ctx: ExtensionContext | None = None) -> ExtensionScope:
+             ctx: ExtensionContext | None = None, dev: bool = False) -> ExtensionScope:
         if manifest.id in self.extensions:
             raise ValueError(f"duplicate extension id {manifest.id!r}")
-        scope = ExtensionScope(manifest, len(self.extensions), self.bus, self.retrieval, self.channels, self.triggers, self.prechecks, self.directives, module, root, ctx)
+        scope = ExtensionScope(manifest, len(self.extensions), self.bus, self.retrieval, self.channels, self.triggers, self.prechecks,
+                               self.directives, self.runtime, module, root, ctx, dev)
+        try:
+            for entry in manifest.contributes.get("runtime", ()):  # listed while the extension is idle; selectable once it provides code
+                scope.disposables.add(self.runtime.declare(Provider(
+                    f"{manifest.id}/{entry['id']}", entry["slot"], entry["label"], "user" if dev else "built-in", manifest.id,
+                    entry.get("meta", {}), enabled=scope.enabled)))
+        except (ValueError, PermissionError):
+            scope.disposables.dispose()
+            raise
         self.extensions[manifest.id] = scope
         self._enabled[manifest.id] = scope.enabled()
         return scope

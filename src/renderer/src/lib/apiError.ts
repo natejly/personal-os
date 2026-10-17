@@ -2,11 +2,14 @@
 export class ApiError extends Error {
   status: number | null
   kind: 'http' | 'timeout' | 'stalled'
-  constructor(message: string, opts?: { status?: number | null; kind?: ApiError['kind'] }) {
+  /** The response's raw `detail`, for a caller that reads more than the message from it (a 409 that carries a diff). */
+  detail: unknown
+  constructor(message: string, opts?: { status?: number | null; kind?: ApiError['kind']; detail?: unknown }) {
     super(message)
     this.name = 'ApiError'
     this.status = opts?.status ?? null
     this.kind = opts?.kind ?? 'http'
+    this.detail = opts?.detail
   }
 }
 

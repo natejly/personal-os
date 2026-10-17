@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from personal_os.extensions.coding import sessions as ca
-from personal_os import migrations
+from personal_os import migrations, osplat
 from personal_os.db import Database
 
 SID = "0b7e6f2a-1c3d-4e5f-8a9b-0c1d2e3f4a5b"
@@ -440,7 +440,7 @@ class OpencodeDriver(CodingTestCase):
                       "created_at, updated_at) VALUES('s9','pi','j9',?,?,'n','p','working','',?,?)", (wt, wt, t, t))
         self.jobs.jobs["j9"] = SimpleNamespace(status="exited", exit_code=65, buf="sandbox-exec: profile error\n", total=30,
                                                live=lambda: False)
-        with unittest.mock.patch.object(ca.osplat.current().sandbox, "failed_to_start", lambda code, out: code == 65):
+        with unittest.mock.patch.object(osplat.current().sandbox, "failed_to_start", lambda code, out: code == 65):
             row = self.cs.refresh(self.cs.get("s9"))
         self.assertEqual(row["status"], "failed")
         self.assertIn("OS sandbox refused to start", row["detail"])

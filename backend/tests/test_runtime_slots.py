@@ -208,6 +208,17 @@ def test_an_unknown_selection_for_a_slot_with_a_safety_dimension_is_refused(host
     assert client.refused
 
 
+def test_after_a_restart_a_gone_selection_is_judged_as_the_strictest(host: ExtensionHost) -> None:
+    """Nothing has been seen of the provider this process (the extension was disabled before it started)."""
+    full = {"workspace-write": dict.fromkeys(("fs_write", "fs_read_deny", "network", "process"), "full")}
+    client, box = (host.runtime.provider(slot, f"core/{name}") for slot, name in (("model.client", "openai-compatible"), ("sandbox.backend", "os-default")))
+    sel = Scopes(global_={"model.client": "gone/client", "sandbox.backend": "gone/box"})
+    assert host.runtime.resolve("model.client", sel).refused and host.runtime.resolve("sandbox.backend", sel).refused  # remote, enforcing nothing
+    client.impl, box.impl = FakeModelClient(locality="local"), FakeSandbox(full)
+    resolved = {slot: host.runtime.resolve(slot, sel) for slot in ("model.client", "sandbox.backend")}
+    assert not any(r.refused for r in resolved.values()) and resolved["model.client"].provider == "core/openai-compatible"
+
+
 def test_a_disabled_local_client_does_not_fall_back_to_a_remote_default(tmp_path: Path) -> None:
     hidden: list[str] = []
     host = ExtensionHost()
@@ -268,7 +279,6 @@ def test_a_tool_source_always_loosens_and_a_router_never_does(host: ExtensionHos
 def test_the_default_router_and_client_shapes_pass_their_contracts() -> None:
     from personal_os.router import Heuristic
     slot_contract("model.router", Heuristic)
-    slot_contract("agent.loop", lambda: type("Loop", (), {"id": "x"})())
 
 
 def test_a_client_that_needs_repair_fails_its_contract() -> None:

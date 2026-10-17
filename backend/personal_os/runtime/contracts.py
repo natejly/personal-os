@@ -64,10 +64,6 @@ async def tool_source(impl: Any) -> None:
     assert len({t["name"] for t in tools}) == len(tools), "tool names must be unique"
 
 
-async def agent_loop(impl: Any) -> None:
-    assert isinstance(impl.id, str) and impl.id, "a loop has an id"
-
-
 # A write outside the allowed roots, then one inside: the first must fail and the second succeed under a confining backend.
 _PROBE = ("import sys\n"
           "outside, inside = sys.argv[1:3]\n"

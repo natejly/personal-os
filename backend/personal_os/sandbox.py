@@ -51,7 +51,7 @@ def _warm_mpl(py: str) -> None:
         if any(n.startswith("fontlist-") for n in os.listdir(MPL_CACHE)):
             return
         cmd = [py, "-I", "-B", "-c", "import matplotlib.font_manager"]
-        if osplat.current().sandbox.python_available():
+        if python_confined():
             cmd = sandbox_wrap(python_request(MPL_CACHE, py, None, None), cmd)
         subprocess.run(cmd, capture_output=True, timeout=180,
                        env={"PATH": "/usr/bin:/bin", "HOME": MPL_CACHE, "MPLBACKEND": "Agg", "MPLCONFIGDIR": MPL_CACHE})
@@ -129,15 +129,22 @@ def python_request(work: str, py: str, socket_path: str | None, workspace: str |
 
 
 def _current_backend() -> tuple[str, Any]:
-    chosen = runtime.active.alternative("sandbox.backend") if runtime.active is not None else None
+    chosen = runtime.active.alternative("sandbox.backend")
     return (chosen.id, chosen.impl) if chosen is not None else (OS_DEFAULT.id, OS_DEFAULT)
 
 
+def python_confined() -> bool:
+    """Does run_python go through sandbox_wrap: the platform sandbox is there, or the user selected a backend (which then
+    confines the script or refuses it)."""
+    try:
+        return osplat.current().sandbox.python_available() or runtime.active.alternative("sandbox.backend") is not None
+    except Refused:
+        return True
+
+
 def _refuse(req: SandboxRequest, backend: str, why: str, dimension: str, enforcement: dict[str, Any]) -> SandboxRefused:
-    if runtime.active is not None:
-        scopes = runtime.active.scopes()
-        runtime.active.bus.emit_sync("sandbox.refused", {"tool": req.purpose, "mode": req.mode, "backend": backend, "dimension": dimension,
-                                                         "enforcement": enforcement, "run_id": scopes.run_id})
+    runtime.active.bus.emit_sync("sandbox.refused", {"tool": req.purpose, "mode": req.mode, "backend": backend, "dimension": dimension,
+                                                     "enforcement": enforcement, "run_id": runtime.active.scopes().run_id})
     return SandboxRefused(why)
 
 
@@ -153,7 +160,7 @@ def sandbox_wrap(req: SandboxRequest, argv: list[str]) -> list[str]:
     except Refused as e:
         raise _refuse(req, "", f"{req.purpose} needs {req.mode} confinement; {e}", "setup", {}) from None
     support = support_of(backend)
-    accepted = runtime.active.accepted(backend_id) if runtime.active is not None else frozenset()
+    accepted = runtime.active.accepted(backend_id)
     for dimension, level in shortfalls(support, req.mode, req.network):
         if level != "partial" or dimension not in accepted:
             raise _refuse(req, backend_id, f"{req.purpose} needs {req.mode} confinement; the selected sandbox backend '{backend_id}' "
@@ -424,7 +431,7 @@ def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: 
     if any(k in code for k in ("matplotlib", "pyplot", "seaborn")):
         _warm_mpl(py)
     env["MPLCONFIGDIR"] = _seed_mpl(work)
-    if osplat.current().sandbox.python_available():
+    if python_confined():
         try:
             cmd = sandbox_wrap(python_request(work, py, sock, workspace), cmd)
         except SandboxRefused:

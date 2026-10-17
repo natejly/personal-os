@@ -1693,8 +1693,6 @@ default_client = OpenAICompatible()
 def _alternative_client(entry: str) -> Any | None:
     """The selected non-default model client when it serves `entry` ("chat" or "complete"), else None. A selection that is gone
     while the default is less private fails the call."""
-    if runtime.active is None:
-        return None
     try:
         chosen = runtime.active.alternative("model.client")
     except Refused as e:

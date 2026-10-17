@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest  # noqa: E402
 
 from grain_sdk.testing import FakeSandbox  # noqa: E402
-from personal_os import osplat, runtime, sandbox, shell  # noqa: E402
+from personal_os import mac as mac_paths, osplat, runtime, sandbox, shell  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.extensions.host import ExtensionContext, ExtensionHost  # noqa: E402
 from personal_os.extensions.manifest import load_manifest  # noqa: E402
@@ -187,7 +187,6 @@ def test_a_missing_backend_falls_back_to_the_default_only_when_it_is_as_strong(t
 
 
 def test_with_no_sandbox_on_the_platform_a_confined_request_is_refused_not_run_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(runtime, "active", None)
     with osplat.use("linux"):
         err = str(refuse())
     assert err == REFUSAL.format(id="core/os-default", dim="fs_write", level="none")
@@ -200,22 +199,31 @@ def test_the_default_adapter_reports_only_what_it_can_enforce(mac: Any) -> None:
         assert sandbox.OsDefault().support() == {}
 
 
-def test_the_default_adapter_builds_the_seatbelt_profile_text_unchanged(tmp_path: Path, mac: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(runtime, "active", None)
+GOLDEN = Path(__file__).parent / "golden" / "seatbelt_profiles.json"
+
+
+def golden_cases() -> dict[str, SandboxRequest]:
     work = ["/work", "/tmp/t"]
-    cases = [
-        (sandbox.shell_request("/work", work), seatbelt.shell_profile(work, network=False)),
-        (sandbox.shell_request("/work", work, network="open"), seatbelt.shell_profile(work, network=True)),
-        (sandbox.shell_request("/work", work, network="proxy", proxy_port=8123), seatbelt.shell_profile(work, network=False, proxy_port=8123)),
-        (sandbox.shell_request("/work", work, confine=True), seatbelt.shell_profile(work, network=False, confine=True)),
-        (sandbox.shell_request("/work", ["/t"], allow_hosts=("*:443",), loopback=True),
-         seatbelt.shell_profile(["/t"], network=False, allow_hosts=["*:443"], loopback=True)),
-        (sandbox.python_request(str(tmp_path), sys.executable, "/tmp/sock", "/desk"),
-         seatbelt.python_profile(str(tmp_path), sys.executable, "/tmp/sock", "/desk")),
-        (sandbox.python_request(str(tmp_path), sys.executable, None, None), seatbelt.python_profile(str(tmp_path), sys.executable, None, None)),
-    ]
-    for req, profile in cases:
-        assert sandbox.sandbox_wrap(req, ["/bin/echo", "hi"]) == ["sandbox-exec", "-p", profile, "/bin/echo", "hi"]
+    return {
+        "shell": sandbox.shell_request("/work", work),
+        "shell_open_network": sandbox.shell_request("/work", work, network="open"),
+        "shell_proxy": sandbox.shell_request("/work", work, network="proxy", proxy_port=8123),
+        "shell_confine": sandbox.shell_request("/work", work, confine=True),
+        "shell_allow_hosts_loopback": sandbox.shell_request("/work", ["/t"], allow_hosts=("*:443",), loopback=True),
+        "python_bridge_workspace": sandbox.python_request("/work", "/usr/bin/python3", "/tmp/sock", "/desk"),
+        "python": sandbox.python_request("/work", "/usr/bin/python3", None, None),
+    }
+
+
+def test_the_default_adapter_builds_the_seatbelt_profile_text_unchanged(mac: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pinned against profile text stored from the builders as they were before the slot existed (paths fixed so it is portable)."""
+    monkeypatch.setenv("HOME", "/Users/u")
+    monkeypatch.setattr(seatbelt, "_paths", lambda: ("/Users/u", "/repo", "/Users/u/data"))
+    monkeypatch.setattr(mac_paths, "protected_paths", lambda: [Path("/Applications/Grain.app"), Path("/repo/backend")])
+    golden = json.loads(GOLDEN.read_text())
+    assert golden.keys() == golden_cases().keys()
+    for name, req in golden_cases().items():
+        assert sandbox.sandbox_wrap(req, ["/bin/echo", "hi"]) == ["sandbox-exec", "-p", golden[name], "/bin/echo", "hi"], name
 
 
 def test_requests_carry_the_core_deny_list_and_the_purpose() -> None:
@@ -289,3 +297,14 @@ def test_run_python_refuses_before_running_and_removes_its_work_dir(rig: Rig, mo
     with pytest.raises(sandbox.SandboxRefused, match="python needs workspace-write confinement"):
         sandbox.run_python("open('x','w')", 5)
     assert made and not os.path.exists(made[0])
+
+
+def test_run_python_uses_a_selected_backend_where_the_platform_has_no_sandbox(rig: Rig) -> None:
+    fake = rig.backend(FakeSandbox({"workspace-write": FULL}))
+    with osplat.use("linux"):
+        out = sandbox.run_python("print(1)", 5)
+    assert out["stdout"].strip() == "1" and len(fake.wrapped) == 1
+    rig.selected.clear()
+    with osplat.use("linux"):
+        sandbox.run_python("print(1)", 5)
+    assert len(fake.wrapped) == 1  # the default backend on a platform without a sandbox runs it as before

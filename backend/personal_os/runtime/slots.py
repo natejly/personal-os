@@ -16,7 +16,7 @@ from typing import Any, Callable, Iterable, Iterator
 
 from ..extensions.disposables import Disposable
 from ..extensions.hooks import HookBus
-from ..osplat.base import weaker
+from ..osplat.base import DIMENSIONS, weaker
 from . import contracts, protocols
 
 log = logging.getLogger(__name__)
@@ -25,17 +25,18 @@ run_id: ContextVar[str | None] = ContextVar("runtime_run_id", default=None)  # t
 USER_SLOTS = frozenset({"model.router", "model.client", "tools.source"})  # a user extension may not provide the others
 CLIENT_KINDS = frozenset({"chat", "complete", "embed", "image", "audio"})
 _LOCALITY = {"remote": 0, "local": 1}
+_STRICTEST: dict[str, Any] = {"model.client": "local", "sandbox.backend": {"workspace-write": dict.fromkeys(DIMENSIONS, "full")}}
 ACCEPT_PARTIAL = "accept_partial"  # the global selection's record of what the user accepted a backend not to enforce
 
 
 @dataclass(frozen=True)
 class SlotDef:
     id: str
-    protocol: type
+    protocol: type | None   # None for agent.loop: its interface ships with the first alternative loop
     multi: bool          # tools.source only: several providers active at once
     default_id: str
     permission: str
-    contract: Callable[[Any], Any]  # a suite any provider must pass (async; raises AssertionError)
+    contract: Callable[[Any], Any] | None  # a suite any provider must pass (async; raises AssertionError)
     noun: str
 
 
@@ -44,7 +45,7 @@ SLOTS: dict[str, SlotDef] = {d.id: d for d in (
     SlotDef("model.router", protocols.ModelRouter, False, "core/heuristic", "runtime:router", contracts.model_router, "model router"),
     SlotDef("tools.source", protocols.ToolSource, True, "core/builtin", "runtime:tools", contracts.tool_source, "tool source"),
     SlotDef("sandbox.backend", protocols.SandboxBackend, False, "core/os-default", "runtime:sandbox", contracts.sandbox_backend, "sandbox backend"),
-    SlotDef("agent.loop", protocols.AgentLoop, False, "core/chat-loop", "runtime:loop", contracts.agent_loop, "agent loop"),
+    SlotDef("agent.loop", None, False, "core/chat-loop", "runtime:loop", None, "agent loop"),
 )}
 PERMISSIONS = frozenset(d.permission for d in SLOTS.values())
 
@@ -265,9 +266,7 @@ class Runtime:
     def _no_less_safe(self, slot: str, default: Provider, missing_id: str) -> bool:
         if slot not in ("model.client", "sandbox.backend"):
             return True
-        was = self._seen.get(missing_id)
-        if was is None:
-            return False  # never reported: nothing shows the default is as safe
+        was = self._seen.get(missing_id, _STRICTEST[slot])  # never reported (a restart): judged as the strictest, so only a default as safe stands in
         now = self.traits(slot, default.id)[0 if slot == "model.client" else 1]
         return at_least_as_private(now, was) if slot == "model.client" else not weaker(now or {}, was)
 

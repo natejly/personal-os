@@ -78,7 +78,7 @@ class Defaults:
 
     @staticmethod
     def _loosens(stored: dict[str, Any], key: str, value: Any) -> tuple[str, ...]:
-        if not key.startswith(RUNTIME) or runtime.active is None:
+        if not key.startswith(RUNTIME):
             return ()
         slot = key.removeprefix(RUNTIME)
         return tuple(runtime.active.loosening(slot, runtime.active.resolve(slot, runtime_scopes(stored)), value))
@@ -98,7 +98,7 @@ class Defaults:
 
     @staticmethod
     def _announce(ext_id: str, changes: list[Change]) -> None:
-        for c in changes if runtime.active is not None else ():
+        for c in changes:
             runtime.active.bus.emit_sync("runtime.changed", {"slot": c.key.removeprefix(RUNTIME), "scope": "profile", "scope_id": ext_id,
                                                              "old": c.was, "new": c.value, "by": f"profile:{ext_id}"})
 

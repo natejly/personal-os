@@ -60,8 +60,3 @@ class ToolSource(Protocol):
     id: str
     def list(self) -> list[ToolDecl]: ...
     async def call(self, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]: ...
-
-
-@runtime_checkable
-class AgentLoop(Protocol):
-    id: str

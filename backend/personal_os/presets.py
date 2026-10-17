@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 from . import permissions, setting_sources
 from .db import Database
+from .extensions.hooks import HookBus
 from .mcp_servers import MODES as MCP_MODES, McpServers
 from .repos import Conversations, Projects
 from .tools import DEFAULT_MODE, Toolbox
@@ -151,9 +152,9 @@ def slug_of(name: str) -> str:
 class Presets:
     def __init__(self, db: Database, toolbox: Toolbox, mcp: McpServers, projects: Projects, convos: Conversations,
                  shipped: Callable[[], list[tuple[str, str, dict[str, Any]]]], rule_check: Callable[[Any], None],
-                 fire: Callable[[str, Any], None]) -> None:
+                 bus: HookBus) -> None:
         self.db, self.toolbox, self.mcp, self.projects, self.convos = db, toolbox, mcp, projects, convos
-        self.shipped, self.rule_check, self.fire = shipped, rule_check, fire  # shipped: [(profile id, profile name, preset)]
+        self.shipped, self.rule_check, self.bus = shipped, rule_check, bus  # shipped: [(profile id, profile name, preset)]
 
     # ---- the list
     def catalog(self) -> list[dict[str, Any]]:
@@ -289,7 +290,7 @@ class Presets:
         body = validate(self.get(preset_id)["body"], rule_check=self.rule_check)
         self._write(body, preset_id, scope, scope_id, plan)
         changed = sorted({k.split(".")[0] if k.startswith(("tools.", "connectors.")) else k for k in plan.changes})
-        self.fire("preset.applied", {"preset_id": preset_id, "scope": scope, "scope_id": scope_id, "changed_keys": changed,
+        self.bus.fire("preset.applied", {"preset_id": preset_id, "scope": scope, "scope_id": scope_id, "changed_keys": changed,
                                      "loosened": plan.loosened, "by": by})
         return diff
 

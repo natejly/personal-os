@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from . import fsx, mac, permissions, permrules
 from .mcp_servers import RESERVED_PREFIX
 from .extensions.hooks import Ask, Deny, HookBus
+from .runtime.sources import is_source_tool
 
 if TYPE_CHECKING:
     from .tools import Toolbox
@@ -84,16 +85,21 @@ def plan_refusal(danger: str, *, planning: bool, propose_without_run: bool) -> s
     return None
 
 
+def _connector_shaped(name: str) -> bool:
+    """A connector slug or a tool from an extension's tool source: neither is in the toolbox's specs."""
+    return name.startswith(RESERVED_PREFIX) or is_source_tool(name)
+
+
 def rule_refusal(name: str, args: dict[str, Any], rules: Any, *, roots: list[str], cwd: str | None, hardline: bool) -> str | None:
     """Why the hardline list (`hardline`) or a deny rule (not) refuses this call. A connector slug is judged by `mcp_denied`."""
-    if name.startswith(RESERVED_PREFIX):
+    if _connector_shaped(name):
         return None if hardline else permrules.mcp_denied(name, rules)
     v = permrules.evaluate(name, args, rules, roots=roots, cwd=cwd)
     return v.refusal if v.action == "deny" and v.hardline == hardline else None
 
 
 def _unknown_or_off(c: Call) -> str | None:
-    if c.toolbox.specs.get(c.name) is None and not c.name.startswith(RESERVED_PREFIX):
+    if c.toolbox.specs.get(c.name) is None and not _connector_shaped(c.name):
         return "not a tool in this request"
     modes = c.ctx.get("modes")
     return "turned off for this run" if isinstance(modes, dict) and modes.get(c.name) == "off" else None

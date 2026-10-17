@@ -195,6 +195,7 @@ def swap_gate(r: Any, fn: Any) -> None:
 def test_a_gate_that_fails_never_lets_a_routed_call_through(repo_rig, gate, monkeypatch):
     r = repo_rig
     monkeypatch.setitem(hooks.TIMEOUT_S, "gate", 0.2)
+    monkeypatch.setattr(hooks, "STRICT", False)  # "allows" and "returns junk" are answers the strict bus would raise on
     sub = next(s for s in r.host.bus._subs["tool.pre"] if s.owner == "coding")
     sub.timeout_s = None
 

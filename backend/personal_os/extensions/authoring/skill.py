@@ -57,10 +57,10 @@ Unknown keys are refused.
 api members:
 - api.tool(ToolSpec(name, description, schema_dict, async_fn, group, danger=...)): the manifest must declare the same tools, danger and group. async_fn(ctx, **arguments) returns a dict.
 - api.context(fn, slot="volatile" | "stable" | "tail"): fn(payload) returns Contribution(text) or None; needs the context.contribute hook declared and context:volatile (volatile) or prompt:inject (other slots).
-- api.on(hook, fn): fn(payload) returns None for no opinion. A gating hook (tool.pre, tool.permission) may return Deny(reason) or Ask(reason) and never allows.
+- api.on(hook, fn): fn(payload) returns None for no opinion. A gating hook (tool.pre, tool.permission, coding.tool.pre) may return Deny(reason) or Ask(reason) and never allows.
 - api.router(APIRouter), api.emit_ui(name, data), api.spawn(coro), api.log, api.db (db:own), api.services.get(name).
 
-Hooks: app.start, app.stop, settings.changed, chat.created, turn.accept, turn.start, turn.settled, reply.complete, tool.pre, tool.post, tool.result, tool.error, tool.permission, model.request, model.response, context.contribute, memory.written, job.done, notify, and others; `grain ext check` rejects an unknown name.
+Hooks: app.start, app.stop, settings.changed, chat.created, turn.settled, reply.complete, tool.pre, tool.post, tool.result, tool.error, model.request, model.response, context.contribute, memory.written, job.done, and others; `grain ext check` rejects an unknown name.
 
 ## Tests
     from grain_sdk.testing import Harness

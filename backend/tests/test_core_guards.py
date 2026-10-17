@@ -224,15 +224,15 @@ def test_no_public_surface_returns_accepts_or_exposes_the_guards() -> None:
 
 
 def test_no_hook_is_named_after_a_guard() -> None:
-    from personal_os.extensions.hooks import HOOKS
-    assert not {g.id for g in guards.CORE_GUARDS} & HOOKS
+    from personal_os.extensions.catalog import HOOKS
+    assert not {g.id for g in guards.CORE_GUARDS} & set(HOOKS)
     with pytest.raises(ValueError):
         HookBus().subscribe("hardline", lambda ev: None, owner="x", order=0)
 
 
 # ---- the pin ----
 PIN = {
-    "unknown_or_off": "c2189f52913888bc",
+    "unknown_or_off": "a646e50da94a41da",
     "proposal_only": "46c1f42a0ded442c",
     "plan_block": "362dc4de4fab91a0",
     "hardline": "4fa41c559109e24d",
@@ -240,7 +240,7 @@ PIN = {
     "protected_paths": "9c45e0f8a550e978",
     "floor_block": "82ed412f8b4b40c8",
     "plan_refusal": "6c85d9ed539305f3",
-    "rule_refusal": "0357461af618da1f",
+    "rule_refusal": "6aafff6b44a6cd7d",
     "protected_reason": "d3658be23894fff2",
     "floor_refusal": "fc2574a5faf1ffb6",
 }

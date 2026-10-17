@@ -33,6 +33,8 @@ import pytest
 
 # Tests never touch the login Keychain: secrets go to a file in each test's temp data dir (children inherit it).
 os.environ["GRAIN_SECRETS_BACKEND"] = "file"
+# The hook bus checks every payload and handler return against the catalog and raises on a mismatch (personal_os/extensions/hooks.py).
+os.environ["GRAIN_HOOKS_STRICT"] = "1"
 # Nor the user's OpenCode data: the usage import reads a missing file unless a test points it at its own fake.
 os.environ["PERSONAL_OS_OPENCODE_DB"] = os.path.join(tempfile.mkdtemp(prefix="no-opencode-"), "opencode.db")
 

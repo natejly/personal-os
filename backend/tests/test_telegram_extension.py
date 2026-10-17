@@ -116,13 +116,14 @@ def test_pipe_chains_every_handler_and_cancel_stops_the_chain() -> None:
                 seen.append((tag, v))
                 return out(v) if callable(out) else out
             hooks.subscribe("channel.outbound", fn, owner="t", order=0, priority=priority)
-        add("one", 10, lambda v: v + "1")
-        add("two", 20, lambda v: v + "2")
-        assert await hooks.pipe("channel.outbound", "x") == "x12"
+        first = {"channel": "telegram", "text": "x", "files": []}
+        add("one", 10, lambda v: {**v, "text": v["text"] + "1"})
+        add("two", 20, lambda v: {**v, "text": v["text"] + "2"})
+        assert (await hooks.pipe("channel.outbound", first))["text"] == "x12"
         add("cancel", 30, Cancel())
-        add("never", 40, "never")
-        assert await hooks.pipe("channel.outbound", "x") == Cancel()
-        assert ("never", "x12") not in seen
+        add("never", 40, {**first, "text": "never"})
+        assert await hooks.pipe("channel.outbound", first) == Cancel()
+        assert not any(tag == "never" for tag, _ in seen)
     asyncio.run(go())
 
 

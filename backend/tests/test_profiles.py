@@ -189,7 +189,7 @@ class RoutesTests(unittest.TestCase):
 
     def test_enable_reports_ext_changed_for_the_profile_and_the_views_it_flips(self) -> None:
         fired: list[Any] = []
-        self.host.fire = lambda hook, payload=None: fired.append((hook, payload))  # type: ignore[method-assign]
+        self.host.bus.fire = lambda hook, payload=None: fired.append((hook, payload))  # type: ignore[method-assign]
         self.client.post("/profiles/lean/enable")
         self.assertIn(("ext.changed", {"id": "lean", "enabled": True}), fired)
 
@@ -240,7 +240,7 @@ class ExtensionDefaultsTests(unittest.TestCase):
         ctx = ExtensionContext(db=db, hidden_views=lambda: db.get_settings().get("hiddenViews") or (), services={},
                                settings=db.get_settings, set_settings=db.set_settings, sid=lambda p: p, wsid=lambda p: p, publish=lambda _n, _d: None)
         host, fired = ExtensionHost(), []
-        host.fire = lambda hook, payload=None: fired.append((hook, payload))  # type: ignore[method-assign]
+        host.bus.fire = lambda hook, payload=None: fired.append((hook, payload))  # type: ignore[method-assign]
         host._add(Manifest.from_dict({**BASE, "id": "b"}), ctx=ctx)
         host._add(Manifest.from_dict({**BASE, "id": "a", "contributes": {"defaults": {"views": {"b": False}}}}), ctx=ctx)
         db.set_settings({"hiddenViews": []})

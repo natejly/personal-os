@@ -20,7 +20,7 @@ from typing import Any
 from .. import mac
 from .authoring.check import check
 from .authoring.pack import content_hash, digest, shipped
-from .host import HOOK_PERMISSION
+from .catalog import HOOKS
 from .manifest import Manifest, ManifestError, load_manifest
 
 log = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ ID = re.compile(r"[a-z0-9-]+")
 MAX_FILES = 200
 MAX_BYTES = 2_000_000
 TAINT_REFUSED = frozenset({"prompt:inject", "hooks:gate"})  # a session that read untrusted content may not write these in
-GATE_PERMISSIONS = frozenset(p for needed in HOOK_PERMISSION.values() for p in needed)  # the permissions that can narrow or change what the user did: granted by name at enable
+GATE_PERMISSIONS = frozenset(p for spec in HOOKS.values() for p in spec.permission)  # the permissions that can narrow or change what the user did: granted by name at enable
 
 
 class DraftError(ValueError):

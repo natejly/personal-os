@@ -1062,7 +1062,7 @@ def _shipped_presets() -> list[tuple[str, str, dict[str, Any]]]:
     return [(m.id, m.name, doc) for scope in host.extensions.values() if (m := scope.manifest) for doc in m.contributes.get("presets", ())]
 
 
-presets = Presets(db, toolbox, mcp_store, projects, convos, _shipped_presets, _rule_tool_known, host.fire)
+presets = Presets(db, toolbox, mcp_store, projects, convos, _shipped_presets, _rule_tool_known, host.bus)
 _ext_ctx.preset_keys = presets.keys
 app.include_router(permissions_routes.router(presets, lambda project_id, conversation_id: config.effective(
     db, toolbox, config.declared_settings(s.manifest for s in host.extensions.values()), project_id=project_id, conversation_id=conversation_id,

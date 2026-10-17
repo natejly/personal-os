@@ -384,7 +384,7 @@ def test_a_confirmed_defaults_preset_applies_the_looser_value() -> None:
 # ---- the hook and the provenance
 def test_preset_applied_fires_with_key_names_only(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[dict[str, Any]] = []
-    monkeypatch.setattr(P, "fire", lambda hook, payload: seen.append(payload) if hook == "preset.applied" else None)
+    monkeypatch.setattr(P.bus, "fire", lambda hook, payload: seen.append(payload) if hook == "preset.applied" else None)
     pid = user_preset(permissionMode="manual", alwaysAsk=[*permissions.DEFAULTS["alwaysAsk"], "preset_probe"])
     assert apply(pid).status_code == 200
     assert len(seen) == 1 and seen[0]["preset_id"] == pid and seen[0]["scope"] == "global" and seen[0]["by"] == "user"

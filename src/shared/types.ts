@@ -1,3 +1,5 @@
+import type { HookId } from './extensionHooks'
+
 export type Role = 'system' | 'user' | 'assistant'
 
 export interface Project {
@@ -750,7 +752,7 @@ export interface OtelExportConfig {
 
 /** One hook an extension is subscribed to, as the dev panel shows it (GET /dev/extensions). */
 export interface ExtensionHookStats {
-  hook: string
+  hook: HookId
   calls: number
   p50Ms: number | null
   p95Ms: number | null

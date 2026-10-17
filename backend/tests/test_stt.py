@@ -66,7 +66,7 @@ class proxy_replies:
     """Answer the transcription POST without a network, and keep what was sent.
 
     `httpx.Client` is constructed inside `stt._proxy`, so the only seam is the class itself; it
-    is restored on exit because the same module object is shared with llm.py and google.py.
+    is restored on exit because the same module object is shared with llm.py and extensions/google/client.py.
     """
 
     def __init__(self, status: int = 200, payload: object = None, text: str = "",

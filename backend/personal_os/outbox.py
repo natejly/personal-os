@@ -23,7 +23,7 @@ something was sent that never was.
 
 Firing and cancelling race on one atomic UPDATE ... WHERE status='holding', so a send is
 cancellable right up to the instant it is claimed and never after. Once it goes out, the
-verification in google.py runs on it and its verdict is stored on the row: the UI shows
+verification in extensions/google/client.py runs on it and its verdict is stored on the row: the UI shows
 "sent, verified" or a loud unconfirmed warning, never a bare success.
 
 A send that errors out at the API is marked `failed` and left in the list with its error. It is
@@ -40,7 +40,7 @@ from typing import Any, Callable
 
 from .db import Database, new_id, row_to_dict
 from . import mail_attachments, mail_edits, redact, verify
-from .google import GoogleNotConnected, NotSent
+from .extensions.google.client import GoogleNotConnected, NotSent
 
 log = logging.getLogger(__name__)
 

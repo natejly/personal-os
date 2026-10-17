@@ -11,7 +11,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os.google import Google, _drive_query  # noqa: E402
+from personal_os.extensions.google.client import Google, _drive_query  # noqa: E402
 
 
 class _Req:

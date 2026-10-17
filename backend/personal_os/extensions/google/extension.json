@@ -1,0 +1,11 @@
+{
+  "id": "google",
+  "name": "Google",
+  "description": "Google account sign-in and the Calendar, Gmail, Tasks, Drive, Docs and Sheets client, offered as the google service.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "kind": "extension",
+  "enabled": "always",
+  "activation": ["startup"],
+  "provides": { "services": ["google"] }
+}

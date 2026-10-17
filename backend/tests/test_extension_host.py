@@ -588,6 +588,25 @@ class BuiltinExtensionTests(unittest.TestCase):
         self.assertFalse(scope.enabled())
         self.assertTrue({"todos", "tasks_sync"} <= set(ctx.services))
 
+    def test_load_builtin_google_provides_the_client_to_requirers_only(self) -> None:
+        host = ExtensionHost()
+        ctx = builtin_ctx({"mcp": lambda: None})
+        google = host.load_builtin("google", ctx)
+        todos = host.load_builtin("todos", ctx)
+        health = host.load_builtin("health", ctx)
+        client = ctx.services["google"]()
+        self.assertIs(todos.services.get("google"), client)
+        self.assertEqual(client._reads.path, Path(ctx.db.data_dir) / "google-reads.json")
+        with self.assertRaises(KeyError):
+            health.services.get("google")
+        run(google.stop())
+        self.assertNotIn("google", ctx.services)
+
+    def test_google_stays_on_when_the_user_hides_every_view(self) -> None:
+        ctx = builtin_ctx({})
+        ctx.hidden_views = lambda: ("google",)
+        self.assertTrue(ExtensionHost().load_builtin("google", ctx).enabled())
+
     def test_load_builtin_refuses_tools_the_manifest_does_not_declare(self) -> None:
         real = load_manifest(Path(__file__).resolve().parents[1] / "personal_os" / "extensions" / "health" / "extension.json")
         short = Manifest.from_dict({"id": "health", "name": "Health", "version": "1.0.0", "apiVersion": 1,

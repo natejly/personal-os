@@ -1,6 +1,6 @@
 """Scheduling logic with no network in it: busy time, free slots, and change-batch validation.
 
-google.py fetches events and free/busy; this module decides what they mean. Keeping it pure (every
+extensions/google/client.py fetches events and free/busy; this module decides what they mean. Keeping it pure (every
 function takes its inputs, including "now" and the timezone) is what lets the awkward cases be
 tested exactly: all-day events, DST days, buffers, working hours, declined invitations.
 

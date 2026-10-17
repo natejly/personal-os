@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fake_google_api import FakeGoogle, FakeServer  # noqa: E402
 from personal_os import outbox as outbox_mod, verify  # noqa: E402
 from personal_os.db import Database  # noqa: E402
-from personal_os.google import NotSent  # noqa: E402
+from personal_os.extensions.google.client import NotSent  # noqa: E402
 from personal_os.outbox import Outbox  # noqa: E402
 
 

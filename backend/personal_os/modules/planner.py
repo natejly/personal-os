@@ -19,7 +19,7 @@ from ..todos import UNTRUSTED_SOURCES
 
 from .. import planner as pl
 from .. import redact
-from ..google import GoogleNotConnected
+from ..extensions.google.client import GoogleNotConnected
 from ..todos import Todos
 from ..tools import ToolSpec, _obj
 from . import Module, ModuleContext

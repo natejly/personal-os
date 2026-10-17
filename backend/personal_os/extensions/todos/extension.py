@@ -12,10 +12,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ... import redact, todo_rules
-from ...google import GoogleNotConnected
 from ...gtasks import TasksSync
 from ...todos import UNTRUSTED_SOURCES, Todos
 from ...tools import ToolSpec, _obj, page, tool_error
+from ..google.client import GoogleNotConnected
 
 if TYPE_CHECKING:
     from ..host import ExtensionScope

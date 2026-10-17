@@ -115,7 +115,7 @@ def _missing() -> dict[str, Any]:
 
 
 class GoogleWriteTests(unittest.TestCase):
-    """The real google.py write methods, with the Google transport faked out."""
+    """The real extensions/google/client.py write methods, with the Google transport faked out."""
 
     def setUp(self) -> None:
         self.server = FakeServer()

@@ -27,7 +27,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import app as appmod, blobs, mail_attachments as ma, mail_edits, verify  # noqa: E402
 from personal_os.db import Database  # noqa: E402
-from personal_os.google import NotSent, _raw_message  # noqa: E402
+from personal_os.extensions.google.client import NotSent, _raw_message  # noqa: E402
 from personal_os.outbox import Outbox  # noqa: E402
 from personal_os.repos import Documents  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402

@@ -2,7 +2,7 @@
 
 A write's own 200 is not evidence, and neither is the model's report of it: measured on real
 tasks, agents claim completion they did not achieve about 45% of the time, and an independent
-re-read of the remote state cuts that to about 3%. So every external write in google.py comes
+re-read of the remote state cuts that to about 3%. So every external write in extensions/google/client.py comes
 back through check(), which fetches the object from the server again and compares the fields
 that were written.
 

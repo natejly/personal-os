@@ -366,7 +366,7 @@ Grain has native integrations that overlap with connectors. This is what could m
 |---|---|
 | Web fetch / search (`firecrawl.py`) | Candidate: replace with the official Firecrawl MCP server. Today a key in Settings makes it the primary backend for `web_search` and `fetch_url`; as a connector its tools would ask by default, so web lookups would need a grant to run unattended. |
 | GitHub (`github_search`, `github_read`) | Candidate: replace with the official GitHub MCP server, which is a far larger surface (issues, pull requests, actions). Needs deferred search, which is already in place, and a read-only token recommendation. |
-| Google (Mail, Calendar, Drive, Docs, Sheets, Tasks) | Keep native for now. OAuth scopes, the read cache, write verification and undo live in `google.py`, and a connector would bypass them. |
+| Google (Mail, Calendar, Drive, Docs, Sheets, Tasks) | Keep native for now. OAuth scopes, the read cache, write verification and undo live in the Google extension (`extensions/google/client.py`), and a connector would bypass them. |
 | Telegram texting (`telegram.py`) | Stays native. It long-polls its own bot and routes messages into chat runs and approvals; it is a channel into Grain, not a tool Grain calls. |
 | Health (COROS, Garmin) | Already connectors: `health_sync.py` creates and drives these servers through the same `McpServers` store. |
 | Coding agents (`coding_session_*`, `opencode_run`) | Stay native. They own process lifetime, worktrees and approvals that a tool call cannot express. |

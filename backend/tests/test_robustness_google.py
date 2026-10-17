@@ -15,9 +15,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os import google as google_mod  # noqa: E402
+from personal_os.extensions.google import client as google_mod  # noqa: E402
 from personal_os.db import Database  # noqa: E402
-from personal_os.google_store import ReadStore  # noqa: E402
+from personal_os.extensions.google.store import ReadStore  # noqa: E402
 from personal_os.gtasks import TasksSync  # noqa: E402
 from personal_os.todos import Todos, clean_due  # noqa: E402
 
@@ -168,7 +168,7 @@ def test_a_todo_deleted_during_the_insert_is_not_resurrected() -> None:
     assert sync.sync_once()["created_local"] == 0
 
 
-# ---- google.py helpers ----
+# ---- extensions/google/client.py helpers ----
 def test_recipient_names_are_encoded_without_swallowing_the_address() -> None:
     raw = base64.urlsafe_b64decode(google_mod._raw_message("Zoë <a@b.com>, plain@y.com", "Hi", "body")).decode()
     to = next(line for line in raw.splitlines() if line.lower().startswith("to:"))
@@ -200,7 +200,7 @@ def test_a_body_is_decoded_in_the_charset_it_names() -> None:
 
 
 def test_puts_are_written_together_not_one_rewrite_each() -> None:
-    from personal_os import google_store
+    from personal_os.extensions.google import store as google_store
 
     path = Path(tempfile.mkdtemp()) / "reads.json"
     store = ReadStore(path)

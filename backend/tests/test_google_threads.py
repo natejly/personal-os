@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import googleapiclient.discovery as discovery  # noqa: E402
 
-from personal_os.google import Google  # noqa: E402
+from personal_os.extensions.google.client import Google  # noqa: E402
 
 
 def main() -> None:

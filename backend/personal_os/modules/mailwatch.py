@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from .. import mailwatch as mw
 from .. import redact
 from ..cache import bypass
-from ..google import GoogleNotConnected
+from ..extensions.google.client import GoogleNotConnected
 from ..mailwatch import MailWatch
 from ..todos import Todos
 from ..tools import ToolSpec, _obj, page, tool_error

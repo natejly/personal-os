@@ -1,6 +1,6 @@
 """A stand-in for the Google discovery clients, good enough to exercise the read-back path.
 
-Only the calls google.py actually makes are implemented, in the same chained shape
+Only the calls extensions/google/client.py actually makes are implemented, in the same chained shape
 (`svc.events().get(...).execute()`), over plain dicts. The knobs are what the verification tests
 need: hide an object from read-backs, 404 it a few times (eventual consistency), fail the read
 with a server error, or report a different value than was written (a mismatch).
@@ -14,7 +14,7 @@ import copy
 import email
 from typing import Any
 
-from personal_os.google import Google
+from personal_os.extensions.google.client import Google
 
 
 class _Resp:

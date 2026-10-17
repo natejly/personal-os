@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from personal_os import app as appmod  # noqa: E402
 appmod.db.set_settings({"toolDeferAbove": 0})  # these tests drive their own tools; deferral is test_tool_search.py
 from personal_os import llm  # noqa: E402
+from personal_os.extensions.hooks import Deny  # noqa: E402
 from personal_os.subagents import parallel_safe  # noqa: E402
 from personal_os.tools import ToolSpec, _obj  # noqa: E402
 
@@ -199,3 +200,13 @@ def test_auto_review_sees_network_reads_before_they_run() -> None:
         appmod.autoreview.review = prev
         appmod.db.set_settings({"permissionMode": "manual"})
     assert not [a for _, a, _ in LOG if a.startswith("pr_net")]
+
+
+def test_a_permission_gate_sees_a_read_before_it_runs() -> None:
+    sub = appmod.toolbox.bus.subscribe("tool.permission", lambda ev: Deny("spend cap"), owner="x", order=0)
+    try:
+        events, _ = run([c("1", "pr_net", tag="a"), c("2", "pr_net", tag="b")])
+    finally:
+        sub.dispose()
+    assert not [a for _, a, _ in LOG if a.startswith("pr_net")]
+    assert all("spend cap" in d["error"] for e, d in events if e == "tool_result")

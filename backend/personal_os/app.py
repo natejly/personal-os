@@ -2843,7 +2843,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             that does not qualify ends the run, so a write is a barrier and later reads wait for it. A reply that is
             tainted by an earlier call of the run is simulated, so a call that would then ask is not started."""
             width = limits.slots(cfg, "parallelReads")
-            if width < 2 or planning or active_plan is not None or plan_seen or proposal_only(run) or delegation_forced:
+            # A call starts before the loop settles it, so a permission gate could not stop a warmed read.
+            if width < 2 or toolbox.bus.active("tool.permission") or planning or active_plan is not None or plan_seen or proposal_only(run) or delegation_forced:
                 return 1
             sim = dict(tool_ctx)
             seg: list[tuple[dict[str, Any], dict[str, Any]]] = []
@@ -6550,6 +6551,17 @@ async def accept_proposal(pid: str, body: ProposalIn | None = None) -> dict[str,
     ctx: dict[str, Any] = {"project_id": (conv or {}).get("project_id"), "conversation_id": claimed["conversation_id"],
                            "tainted": False, "taint_sources": [], "allowed_urls": set(), "settings": settings(),
                            "proposal_only": False, "message_id": claimed["message_id"]}
+
+    # The chat's permission scope is not set in a route: judge the call as that chat would, then offer it to the extension gate.
+    conv_settings = (conv or {}).get("settings") or {}
+    project = projects.get(conv["project_id"]) if conv and conv["project_id"] else None
+    ctx["settings"] = permissions.overlay(ctx["settings"], project["permissions"] if project else None, conv_settings.get("permissions"))
+    spec = toolbox.specs.get(claimed["tool"])
+    danger = spec.danger if spec else MCP_DANGER
+    why, _ = await guards.settle(toolbox, ctx, claimed["tool"], claimed["args"], danger=danger, mode="on")
+    if why:
+        proposals.reopen(pid)  # refused before anything ran: it stays pending
+        raise HTTPException(403, why)
 
     async def _execute() -> Any:
         # A connector is not a built-in. toolbox.call would report it as unknown and the accept would die.

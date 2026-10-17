@@ -373,3 +373,18 @@ def test_a_success_resets_the_failure_count(rig: Rig) -> None:
     for _ in range(router.MUTE_AFTER - 1):
         assert choose(rig)[1]
     assert router.wanted("auto", "", {}) and not router.wanted("m", "explicit", {"autoRoute": True, "defaultModel": "m"})
+
+
+def test_the_safety_reviewer_is_never_served_by_an_extension_client(rig: Rig, monkeypatch: pytest.MonkeyPatch) -> None:
+    ext = FakeModelClient(text='{"verdict": "allow"}')
+    rig.select("model.client", rig.add("model.client", "c", ext))
+    seen: list[str] = []
+
+    async def builtin(settings: Any, model: str, messages: Any, kind: str = "other", **kw: Any) -> str:
+        seen.append(kind)
+        return "core"
+
+    monkeypatch.setattr(llm, "_complete_openai", builtin)
+    assert run(llm.complete(REMOTE, "m", [{"role": "user", "content": "x"}], kind="review")) == "core"
+    assert run(llm.complete(REMOTE, "m", [{"role": "user", "content": "x"}], kind="title")) == '{"verdict": "allow"}'
+    assert seen == ["review"]

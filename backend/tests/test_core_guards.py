@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pytest  # noqa: E402
 
 from personal_os import app as appmod  # noqa: E402
+from fastapi import HTTPException  # noqa: E402
 from personal_os import guards, llm, mac, toolbridge  # noqa: E402
 from personal_os.dispatch import dispatch_tool  # noqa: E402
 from personal_os.extensions.hooks import Ask, Deny, HookBus  # noqa: E402
@@ -398,3 +399,35 @@ def test_the_chat_loop_a_workflow_and_the_bridge_refuse_with_the_guards_reason(
         assert ref.reason in bridge(name, args)
     worker(name, args, monkeypatch)
     assert RAN == []
+
+
+# ---- a proposal is judged as its chat would, and offered to the extension gate ----
+def _proposal(rules: dict[str, Any] | None = None) -> dict[str, Any]:
+    cid = appmod.convos.create(None, "t", "m")["id"]
+    if rules:
+        appmod.convos.update(cid, {"settings": {"permissions": {"permissionRules": rules}}})
+    return appmod.proposals.create(run_id=None, tool="guard_probe", args={"tag": "p"}, conversation_id=cid)
+
+
+def _refused_accept(pid: str) -> str:
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(appmod.accept_proposal(pid))
+    return e.value.detail
+
+
+def test_accepting_a_proposal_applies_the_chat_deny_rules() -> None:
+    p = _proposal({**NO_RULES, "deny": ["guard_probe"]})
+    assert "guard_probe" in _refused_accept(p["id"])
+    assert RAN == [] and appmod.proposals.get(p["id"])["status"] == "pending"
+    ok = _proposal()
+    assert asyncio.run(appmod.accept_proposal(ok["id"]))["ok"] and RAN == ["p"]
+
+
+def test_accepting_a_proposal_offers_it_to_the_extension_gate() -> None:
+    p = _proposal()
+    sub = appmod.toolbox.bus.subscribe("tool.permission", lambda ev: Deny("spend cap"), owner="x", order=0)
+    try:
+        assert "spend cap" in _refused_accept(p["id"])
+    finally:
+        sub.dispose()
+    assert RAN == [] and appmod.proposals.get(p["id"])["status"] == "pending"

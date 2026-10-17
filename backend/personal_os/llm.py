@@ -1835,8 +1835,9 @@ async def _client_complete(client: Any, settings: dict[str, Any], req: ModelRequ
 async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], kind: str = "other", *,
                    effort: str = "default", cancel: asyncio.Event | None = None, deadline: float | None = None) -> str:
     """A non-streaming completion from the selected model client (see `_complete_openai` for the built-in one's contract).
-    A failing extension client is replaced by the default once, only when the default is no less private."""
-    chosen = _alternative_client("complete")
+    A failing extension client is replaced by the default once, only when the default is no less private. The safety reviewer
+    (kind "review") always uses the default: no extension may answer "allow" for a call."""
+    chosen = _alternative_client("complete") if kind != "review" else None
     if chosen is None:
         return await _complete_openai(settings, model, messages, kind, effort=effort, cancel=cancel, deadline=deadline)
     t0 = time.time()

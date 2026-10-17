@@ -315,3 +315,14 @@ def test_the_author_extension_skill_waits_for_the_users_approval_with_the_sdk_re
     assert str(review.drafts.drafts) in row["procedure"] and "DRAFTS" not in row["procedure"]
     skill.ensure(appmod.skills, review.drafts.drafts)
     assert len([s for s in appmod.skills.list() if s["name"] == skill.NAME]) == 1
+
+
+def test_an_installed_extensions_widget_kinds_are_known_while_it_is_disabled_so_its_windows_survive_the_start_sweep() -> None:
+    root = draft()
+    manifest = json.loads((root / "extension.json").read_text("utf-8"))
+    manifest["contributes"]["slots"] = {"canvas.widget": [{"id": "ext:rl-notes:board"}]}
+    (root / "extension.json").write_text(json.dumps(manifest), "utf-8")
+    propose()
+    assert accept().status_code == 200
+    assert "rl-notes" not in appmod.host.extensions
+    assert "ext:rl-notes:board" in appmod._ext_ctx.widget_kinds()

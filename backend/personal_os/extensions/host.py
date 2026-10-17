@@ -253,8 +253,11 @@ class ExtensionScope:
         return self.disposables.add(self.channels.register(adapter, self.enabled))
 
     def trigger(self, kind: str, adapter: TriggerAdapter) -> Disposable:
-        """Offer a scheduled-job kind: the scheduler asks the adapter for a look when a job of that kind is due."""
-        return self.disposables.add(self.triggers.register(kind, adapter))
+        """Offer a scheduled-job kind: while the extension is enabled, the scheduler asks the adapter for a look when a job of
+        that kind is due. Built-in only: the adapter is handed the scheduler and writes text into the run's prompt."""
+        if self.dev:
+            raise PermissionError(f"extension {self.manifest.id!r} cannot offer a trigger kind: only a built-in extension may")
+        return self.disposables.add(self.triggers.register(kind, adapter, self.enabled))
 
     def spawn(self, coro: Awaitable[Any]) -> asyncio.Task[Any]:
         """Run a background task that is cancelled and awaited when the extension stops."""

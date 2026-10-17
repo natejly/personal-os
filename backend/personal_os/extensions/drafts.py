@@ -180,6 +180,17 @@ class Drafts:
     def installed_ids(self) -> list[str]:
         return sorted(p.name for p in self.installed.iterdir() if p.is_dir() and not p.name.startswith(".")) if self.installed.is_dir() else []
 
+    def widget_kinds(self) -> tuple[str, ...]:
+        """The canvas widget kinds the installed extensions declare, loaded or not: a turned-off one keeps its windows."""
+        kinds: list[str] = []
+        for ext_id in self.installed_ids():
+            try:
+                manifest = load_manifest(self.installed / ext_id / "extension.json")
+            except ManifestError:
+                continue
+            kinds += (i["id"] for i in manifest.contributes.get("slots", {}).get("canvas.widget", ()))
+        return tuple(kinds)
+
     def intact(self, ext_id: str) -> bool:
         """The folder still has the content that was accepted."""
         pin = self._pins / f"{ext_id}.json"

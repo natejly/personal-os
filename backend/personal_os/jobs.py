@@ -944,7 +944,7 @@ class Scheduler:
         nobody serves, or a look that raises, fires nothing."""
         nxt = at + TRIGGER_RETRY_S
         fire = None
-        if job["kind"] in self.jobs.triggers:
+        if self.jobs.triggers.enabled(job["kind"]):
             try:
                 fire, nxt = await self.jobs.triggers[job["kind"]].poll(self.jobs, job, at)
             except Exception as e:  # noqa: BLE001 - a failed look skips this pass, it never fires blind

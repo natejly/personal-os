@@ -6,7 +6,7 @@ when the look found something.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Iterator, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Protocol
 
 from .disposables import Disposable
 
@@ -31,7 +31,7 @@ class Triggers:
     """The trigger kinds extensions registered, by name."""
 
     def __init__(self) -> None:
-        self._adapters: dict[str, TriggerAdapter] = {}
+        self._adapters: dict[str, tuple[TriggerAdapter, Callable[[], bool]]] = {}
 
     def __iter__(self) -> Iterator[str]:
         return iter(list(self._adapters))
@@ -40,10 +40,14 @@ class Triggers:
         return kind in self._adapters
 
     def __getitem__(self, kind: str) -> TriggerAdapter:
-        return self._adapters[kind]
+        return self._adapters[kind][0]
 
-    def register(self, kind: str, adapter: TriggerAdapter) -> Disposable:
+    def enabled(self, kind: str) -> bool:
+        """Whether the extension that registered `kind` is on: a disabled one is not asked for a look."""
+        return kind in self._adapters and self._adapters[kind][1]()
+
+    def register(self, kind: str, adapter: TriggerAdapter, enabled: Callable[[], bool]) -> Disposable:
         if kind in self._adapters:
             raise ValueError(f"trigger kind {kind!r} is already registered")
-        self._adapters[kind] = adapter
+        self._adapters[kind] = adapter, enabled
         return Disposable(lambda: self._adapters.pop(kind, None))

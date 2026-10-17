@@ -515,6 +515,20 @@ class BuiltinExtensionTests(unittest.TestCase):
         run(scope.stop())
         self.assertEqual(list(scope.triggers), [])
 
+    def test_a_folder_extension_cannot_offer_a_trigger_kind(self) -> None:
+        scope = self.scope()
+        scope.dev = True
+        with self.assertRaises(PermissionError):
+            scope.trigger("demo-kind", mock.Mock())
+        self.assertEqual(list(scope.triggers), [])
+
+    def test_a_trigger_kind_is_polled_only_while_its_extension_is_enabled(self) -> None:
+        scope = self.scope(["demo"])
+        scope.trigger("demo-kind", mock.Mock())
+        self.assertEqual((scope.triggers.enabled("demo-kind"), scope.triggers.enabled("other")), (False, False))
+        scope._ctx.hidden_views = lambda: ()
+        self.assertTrue(scope.triggers.enabled("demo-kind"))
+
     def recap_scope(self, hidden: list[str] | None = None) -> tuple[ExtensionHost, Any]:
         host, scope = ExtensionHost(), self.scope(hidden, contributes={"slots": {"recap.section": [{"id": "demo"}]}})
         host.extensions["demo"] = scope

@@ -438,10 +438,11 @@ def _publish_event(name: str, data: Any) -> None:
             _loop.call_soon_threadsafe(events.publish, name, data)
 
 
+ext_drafts = Drafts(db.data_dir)
 # sid/wsid are defined further down, so the contexts look them up late.
 _ext_ctx = ExtensionContext(db=db, hidden_views=lambda: settings().get("hiddenViews") or (), services={"mcp": lambda: mcp, "extundo": lambda: extundo, "memories": lambda: memories},
                             settings=settings, set_settings=db.set_settings, sid=lambda p: sid(p), wsid=lambda p: wsid(p), publish=_publish_event,
-                            widget_kinds=lambda: host.widget_kinds())
+                            widget_kinds=lambda: (*host.widget_kinds(), *ext_drafts.widget_kinds()))
 host.load_builtin("google", _ext_ctx)
 google: Google = _ext_ctx.services["google"]()
 app.include_router(setup_router(settings, db.set_settings, lambda: google.status()["connected"]))
@@ -631,7 +632,7 @@ host.bus.subscribe("run.after", _snapshot_after, owner="core", order=0, timeout_
 host.bus.subscribe("run.after", lambda run: subagent_mgr.end_of_run(run), owner="core", order=0)
 app.include_router(backups.router(db.data_dir, host.data_tables))
 app.include_router(devapi.router(host, _ext_ctx, lambda: toolbox))
-ext_review = review_routes.Review(Drafts(db.data_dir), host, _ext_ctx, lambda: toolbox)
+ext_review = review_routes.Review(ext_drafts, host, _ext_ctx, lambda: toolbox)
 app.include_router(review_routes.router(ext_review))
 host.on_start(ext_review.load_installed)
 app.mount("/ext", host.routes)

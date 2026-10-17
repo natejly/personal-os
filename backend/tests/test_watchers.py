@@ -42,7 +42,7 @@ class Rig:
         self.db = Database(tempfile.mkdtemp(prefix="watchers-"))
         self.events: list[dict[str, Any]] = []
         self.triggers = Triggers()
-        self.triggers.register("calendar", CalendarTrigger(SimpleNamespace(calendar_events=lambda *_a, **_k: list(self.events))))
+        self.triggers.register("calendar", CalendarTrigger(SimpleNamespace(calendar_events=lambda *_a, **_k: list(self.events))), lambda: True)
         self.jobs = Jobs(self.db, self.triggers)
         self.store = RunStore(self.db)
         self.now = T0
@@ -225,7 +225,7 @@ class _Probe:
 
 def _probe_rig() -> tuple[Rig, _Probe, dict[str, Any]]:
     r, probe = Rig(), _Probe()
-    r.triggers.register("probe", probe)
+    r.triggers.register("probe", probe, lambda: True)
     return r, probe, r.jobs.create("p", "", "go", kind="probe", timezone="UTC", enabled=True, at=T0 - 10)
 
 
@@ -266,7 +266,7 @@ def test_an_adapter_that_raises_fires_nothing_and_does_not_stop_the_other_jobs()
 
 def test_a_job_whose_kind_lost_its_adapter_is_looked_at_again_later_and_never_fires() -> None:
     r, probe = Rig(), _Probe()
-    registered = r.triggers.register("probe", probe)
+    registered = r.triggers.register("probe", probe, lambda: True)
     jb = r.jobs.create("p", "", "go", kind="probe", timezone="UTC", enabled=True, at=T0 - 10)
     probe.found = {"kind": "probe", "trigger": "probe"}
     registered.dispose()
@@ -283,7 +283,7 @@ def test_the_prompt_block_of_a_registered_kind_leads_the_run_s_prompt() -> None:
         def prompt_block(self, fire: dict[str, Any]) -> str:
             return "FOUND: x\n\n"
 
-    registered = appmod.host.triggers.register("probe", Block())
+    registered = appmod.host.triggers.register("probe", Block(), lambda: True)
     try:
         assert appmod._job_prompt({"prompt": "go"}, {"trigger": "probe"}) == "FOUND: x\n\ngo"
         assert appmod._job_prompt({"prompt": "go"}, {"trigger": "cron"}) == "go"

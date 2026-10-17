@@ -104,7 +104,7 @@ from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .style import WritingStyle
 from .extensions.channels import ChatService
-from .extensions import profiles as profile_routes
+from .extensions import devapi, profiles as profile_routes
 from .extensions.defaults import Defaults
 from .extensions.host import ExtensionContext, ExtensionHost, builtin_manifest
 from .modules import Module, ModuleContext, build_modules
@@ -624,6 +624,8 @@ async def _snapshot_after(run: Run) -> None:
 host.bus.subscribe("run.after", _snapshot_after, owner="core", order=0, timeout_ms=limits.SNAPSHOT_AFTER_MS)
 host.bus.subscribe("run.after", lambda run: subagent_mgr.end_of_run(run), owner="core", order=0)
 app.include_router(backups.router(db.data_dir, host.data_tables))
+app.include_router(devapi.router(host, _ext_ctx, lambda: toolbox))
+app.mount("/ext", host.routes)
 # Supportability: GET /diagnostics, POST /maintenance/sweep, and the daily retention sweep (retention.py).
 retention = RetentionWorker(db, settings)
 app.include_router(reliability_router(db, settings, retention, lambda: system_access.permissions()))

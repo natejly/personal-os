@@ -20,6 +20,7 @@ import type {
 } from '@shared/types'
 import type { SavedDashboard, DashboardRender, DashboardViewSpec } from '@shared/types'
 import type { CodingSession, CodingSessionDiff, CodingSessionEvent, DuelWinner, ModelStanding, ShipChecklist } from '@shared/types'
+import type { ExtensionInfo, ExtensionsDev } from '@shared/types'
 import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
 import { ApiError, detailText } from './apiError'
 import type { ChatRunChanges } from './deskFiles'
@@ -645,6 +646,12 @@ export const api = {
   },
   messageOtlp: (messageId: string) => req<unknown>(`/messages/${messageId}/otlp`),
   testTraceExport: () => req<{ sent: boolean; reason?: string; status: number | null; error: string | null }>('/traces/export-test', { method: 'POST' }),
+  devExtensions: {
+    list: () => req<ExtensionsDev>('/dev/extensions'),
+    enable: (id: string) => req<ExtensionInfo>(`/dev/extensions/${encodeURIComponent(id)}/enable`, { method: 'POST' }),
+    disable: (id: string) => req<ExtensionInfo>(`/dev/extensions/${encodeURIComponent(id)}/disable`, { method: 'POST' }),
+    reload: (id: string) => req<ExtensionInfo>(`/dev/extensions/${encodeURIComponent(id)}/reload`, { method: 'POST' })
+  },
   conversationUsage: (conversationId: string) => req<ConversationUsage>(`/conversations/${conversationId}/usage`),
   messageRequests: (messageId: string) =>
     req<{ round: number; model: string; tool_choice: string; tokens: number; messages: unknown[]; tools: unknown[] }[]>(`/messages/${messageId}/requests`),

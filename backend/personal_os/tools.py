@@ -23,7 +23,7 @@ import time
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterable
 
 import httpx
 
@@ -811,12 +811,13 @@ class Toolbox:
         self.fs_reads = fsx.ReadLedger()  # what each conversation has read of each file (fsx.py): the baseline for edits
         self.conversations = conversations  # past replies, so skill_from_run can read one run
         self.specs: dict[str, ToolSpec] = {}
+        self.tool_owner: dict[str, str] = {}  # extension tool name -> extension id: turning the extension off takes its tools with it
         self._register()
         self._register_working()
         for e in self.extensions:
             if e.module:
                 e.module.register_tools(self)
-            self.specs.update(e.tools)
+            self.set_extension_tools(e)
         if docs is not None:
             self._register_docs()
         if google is not None:
@@ -876,11 +877,23 @@ class Toolbox:
     def _google_ok(self) -> bool:
         return bool(self.google and self.google.status()["connected"])
 
+    def set_extension_tools(self, scope: ExtensionScope) -> None:
+        taken = [n for n in scope.tools if n in self.specs and self.tool_owner.get(n) != scope.manifest.id]
+        if taken:
+            raise ValueError(f"extension {scope.manifest.id!r} registers {taken}, which the app already has")
+        self.specs.update(scope.tools)
+        self.tool_owner.update(dict.fromkeys(scope.tools, scope.manifest.id))
+
+    def drop_extension_tools(self, names: Iterable[str]) -> None:
+        for name in names:
+            self.specs.pop(name, None)
+            self.tool_owner.pop(name, None)
+
     def available(self, name: str, google_ok: bool | None = None, hidden: list[str] | None = None) -> bool:
         """Some tools need an integration to be connected, and a view turned off in Settings → Sidebar takes its tools with it.
         Pass google_ok and hidden to avoid one settings read per tool."""
         spec = self.specs.get(name)
-        if (view := llm.tool_view(name)) and view in (self.settings().get("hiddenViews") or () if hidden is None else hidden):
+        if (view := llm.tool_view(name) or self.tool_owner.get(name)) and view in (self.settings().get("hiddenViews") or () if hidden is None else hidden):
             return False
         if spec and spec.group == "google":
             if name.startswith("google_tasks_"):  # two-way sync makes them todos; todo_* is the one way in

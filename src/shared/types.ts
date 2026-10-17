@@ -749,7 +749,6 @@ export interface OtelExportConfig {
 }
 
 /** One hook an extension is subscribed to, as the dev panel shows it (GET /dev/extensions). */
-/** A hook handler of one extension, with its call statistics. */
 export interface ExtensionHookStats {
   hook: HookId
   calls: number

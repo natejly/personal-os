@@ -85,4 +85,3 @@ def members(tp: Any) -> tuple[Any, ...]:
 
 def type_name(tp: Any) -> str:
     return " | ".join(getattr(t, "__name__", str(t)) for t in members(tp))
-

@@ -14,9 +14,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import get_type_hints
 
+from .. import hookgen
 from ..catalog import CATALOG_VERSION, HOOKS
 from ..hooks import CALL_KIND
-from .. import hookgen
 
 PACKAGE = Path(__file__).parents[2]  # personal_os
 GOLDEN = Path(__file__).parents[1] / "hooks.golden.json"

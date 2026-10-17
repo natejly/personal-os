@@ -69,7 +69,7 @@ This file is under `docs/research/`, where comparative write-ups may name their 
 
 ### 2.4 One message through the loop, with hook points
 
-Hook ids match section 5. Dashed boxes are the `U` hooks: they depend on the tool-path seam (section 5.0).
+Hook ids match section 5. `turn.accept`, `turn.start`, `tools.offer` and `tool.permission` have no call site yet: they are planned hooks (5.16), not in the registry. Dashed boxes are the `U` hooks: they depend on the tool-path seam (section 5.0).
 
 ```mermaid
 flowchart TD
@@ -698,17 +698,17 @@ Class: **Core**, **Svc** (core service), **BI-on** (built-in extension, default 
 | # | Feature | Class | Hooks and contributions consumed |
 |---|---|---|---|
 | 1 | Chat turn loop, streaming, models | Core | provides all hooks; `model.select`; slots `model.client`, `model.router`, `agent.loop` (phases 18, 21) |
-| 2 | Tool system (Toolbox, specs, danger) | Core | provides `tools.offer`, `tool.*` |
+| 2 | Tool system (Toolbox, specs, danger) | Core | provides `tool.*`; planned: `tools.offer` |
 | 3 | Persistence, migrations, backups, secrets | Svc | extension migrations, backup include list |
 | 4 | Context assembly, compaction | Core | `context.contribute`, `compaction.*` |
-| 5 | Permissions, approvals, safety | Core/Svc | `tool.permission` (narrow only), `approval.*`, presets and `guards.py` (phase 19) |
+| 5 | Permissions, approvals, safety | Core/Svc | planned `tool.permission` (narrow only), `approval.*`, presets and `guards.py` (phase 19) |
 | 6 | Runs, attention, inbox | Svc | `api.inbox`, `run.after` |
 | 7 | Sandbox: shell, Python, file tools | Svc | `tool.pre/post`, sandbox profile, slot `sandbox.backend` (phase 18) |
 | 8 | Memory (facts, auto-learn) | Svc first, learners BI-on later | `context.contribute`, `turn.settled`, `memory.*`, settings panel, footer chip |
 | 9 | Knowledge graph | BI-on | `context.contribute`, `turn.settled`, retrieval source, view, widget |
 | 10 | Writing style | BI-on | `context.contribute` (draft turns), `turn.settled`, tool |
-| 11 | Notes / docs editor | BI-on | view, tools, routes, retrieval source, `review.accepted`, widget |
-| 12 | Uploads, chat files, extract_text | Svc | `input.attachment`, `file.written` |
+| 11 | Notes / docs editor | BI-on | view, tools, routes, retrieval source, widget; planned: `review.accepted` |
+| 12 | Uploads, chat files, extract_text | Svc | planned: `input.attachment`, `file.written` |
 | 13 | Artifacts view | BI-on | view |
 | 14 | RAG, retrieval, citations | Svc | retrieval source registry, citation renderer |
 | 15 | Projects | Core | scope provider |
@@ -717,7 +717,7 @@ Class: **Core**, **Svc** (core service), **BI-on** (built-in extension, default 
 | 18 | Slash commands | Svc | command registry (built-ins register) |
 | 19 | Workflows | Opt | library tab, tools, routes, job |
 | 20 | MCP connectors | Core | tool source (default of slot `tools.source`, phase 18), settings panel |
-| 21 | Workers, delegate, subagents | Core | `subagent.*`, `worker.report`, widget |
+| 21 | Workers, delegate, subagents | Core | `subagent.*`, widget; planned: `worker.report` |
 | 22 | Autonomous chats / desks | BI-on | side-panel tab, `tool.pre` (stage writes), inbox item, settings panel |
 | 23 | Side panel, Review, show panel | Svc | `sidepanel.tab` host |
 | 24 | Traces | Svc | span emitter, context-panel tab |
@@ -771,8 +771,8 @@ Class: **Core**, **Svc** (core service), **BI-on** (built-in extension, default 
 | Linear / GitHub issues | Tools, review queue, trigger kind for new assignments | A (tools); trigger kind needs `api.trigger` |
 | Home automation | Tools with danger `external`, ask by default | A |
 | Alternative model router | Picks model by task, time or budget | A (`model.select`) |
-| Cost guard | Narrow-only gate: ask or deny after a spend threshold | B: `tool.permission` / `model.select` gate (built-in or user-granted) |
-| PII redaction | Redacts outgoing request text and tool results | B: `tool.result` (A) plus `turn.accept` rewrite (needs `input:rewrite`) |
+| Cost guard | Narrow-only gate: ask or deny after a spend threshold | B: planned `tool.permission` / `model.select` gate (built-in or user-granted) |
+| PII redaction | Redacts outgoing request text and tool results | B: `tool.result` (A) plus a planned `turn.accept` rewrite (needs `input:rewrite`) |
 | Audit log | Append-only log of tool calls, approvals, models | A (`tool.post`, `approval.*`) |
 | Per-project prompt packs | Context blocks keyed by project | A |
 | Daily standup generator | Job plus recap plus todos, Telegram delivery | A |
@@ -1510,6 +1510,7 @@ Hook payload versioning beyond `since` and `deprecated`; generated documentation
 - The manifest check rejects a hook whose `permission` is not among the manifest's `permissions`; `api.on` no longer repeats it. `subscribers: "builtin"` is refused to a folder-loaded extension (no hook uses it yet).
 - Dead names (10.6.1): `turn.accept`, `turn.start`, `input.attachment`, `tools.offer`, `tool.permission`, `worker.report`, `schedule.tick`, `file.written`, `review.accepted` and `notify` have no call site and are removed from `HOOKS`; their rows are in 5.16, and none was implemented here. With them gone `input:rewrite` gates no hook, so it no longer counts as a permission that needs the user's grant at enable. `app.stop` is emitted with `{}` instead of `None`.
 - Outputs: the tables between the `hooks:begin` markers of sections 5.1, 5.3 to 5.10 and 5.12, `docs/extension-hooks.md`, `backend/grain_sdk/hooks.py` (payload TypedDicts, `HookId`, the `On` and `Fire` overloads that type `api.on` and `Harness.fire`) and `src/shared/extensionHooks.ts` (`HookId`, `HookPayloads`, `HookKinds`; `ExtensionHookStats.hook` in `shared/types.ts` is a `HookId`, so a renamed hook fails `npm run typecheck`). Hook types left the `@grain/ext-sdk` package; it holds the manifest type.
+- A plain `grain ext check <folder>` does not run the staleness check of 10.9.3 item 3; `grain ext check --catalog` and `test_generated_files_are_current` do.
 - Not built: `host.ts` does not import the generated file (nothing in `UiApi.on` carries a backend hook payload), and the sections 5.13 to 5.15 tables stay hand-written until PRs 18, 19 and 21 add their hooks to the catalog.
 
 ### 10.10 PR 21: Swappable agent loop

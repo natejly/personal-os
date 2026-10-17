@@ -1,7 +1,8 @@
-"""The `grain` command: `grain ext new | check | dev | test | pack`."""
+"""The `grain` command: `grain ext new | check | dev | test | pack` and `grain config dump`."""
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -113,9 +114,37 @@ def cmd_pack(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_config_dump(args: argparse.Namespace) -> int:
+    """The settings in force, with the source of each value, read from a data folder with the server stopped or running.
+    Opens the database read-only: no migrations, no recovery, nothing written."""
+    from ... import config, provider_keys, provider_route
+    from ...db import ReadOnlyDatabase
+    from ...tools import Toolbox
+    from ..host import BUILTIN_ROOT
+    data_dir = Path(args.data_dir or os.environ.get("PERSONAL_OS_DATA_DIR") or "./data").expanduser().resolve()
+    if not (data_dir / "personal-os.db").exists():
+        print(f"error: no Grain database in {data_dir}")
+        return 1
+    db = ReadOnlyDatabase(data_dir)
+    provider_route.set_key_source(lambda: provider_keys.load(db.secrets))
+    declared = config.declared_settings(load_manifest(p) for p in sorted(BUILTIN_ROOT.glob("*/extension.json")))
+    dump = config.effective(db, Toolbox(None, None, None, lambda: config.assemble(db)), declared,  # type: ignore[arg-type]
+                            project_id=args.project, conversation_id=args.chat)
+    print(json.dumps(dump, indent=2, ensure_ascii=False, default=str) if args.json else config.render(dump))
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     top = argparse.ArgumentParser(prog="grain")
-    ext = top.add_subparsers(dest="group", required=True).add_parser("ext", help="write extensions").add_subparsers(dest="cmd", required=True)
+    groups = top.add_subparsers(dest="group", required=True)
+    cfg = groups.add_parser("config", help="inspect the settings").add_subparsers(dest="cmd", required=True)
+    p = cfg.add_parser("dump", help="print the settings in force and where each value came from")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--project", help="a project id: its overrides apply")
+    p.add_argument("--chat", help="a chat id: its overrides apply")
+    p.add_argument("--data-dir", help="the data folder (default $PERSONAL_OS_DATA_DIR)")
+    p.set_defaults(run=cmd_config_dump)
+    ext = groups.add_parser("ext", help="write extensions").add_subparsers(dest="cmd", required=True)
     p = ext.add_parser("new", help="scaffold an extension")
     p.add_argument("id")
     p.add_argument("--profile", action="store_true", help="a profile: theme and defaults, no code")

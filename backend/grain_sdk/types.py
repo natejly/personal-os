@@ -33,6 +33,12 @@ class ManifestContributesSettings(TypedDict):
     panel: NotRequired[str]
 
 
+class ManifestContributesPresetsItem(TypedDict):
+    id: str
+    name: str
+    description: NotRequired[str]
+
+
 class ManifestContributes(TypedDict):
     tools: NotRequired[list[ManifestContributesToolsItem]]
     routes: NotRequired[ManifestContributesRoutes]
@@ -44,6 +50,7 @@ class ManifestContributes(TypedDict):
     theme: NotRequired[dict[str, Any]]
     defaults: NotRequired[dict[str, Any]]
     layout: NotRequired[dict[str, Any]]
+    presets: NotRequired[list[ManifestContributesPresetsItem]]
 
 
 class ManifestHooksValue(TypedDict):
@@ -369,6 +376,16 @@ class ApprovalResolvedPayload(TypedDict):
     by: str
 
 
+class PresetAppliedPayload(TypedDict):
+    """A permission preset was applied at a scope. Key names only, never values."""
+    preset_id: str
+    scope: str
+    scope_id: str
+    changed_keys: list[str]
+    loosened: list[str]
+    by: str
+
+
 class JobFiredPayload(TypedDict):
     """A scheduled job started."""
     job_id: str
@@ -455,7 +472,7 @@ class CodingToolPostPayload(TypedDict):
     duration_ms: int | None
 
 
-HookName = Literal["app.start", "app.stop", "settings.changed", "chat.created", "chat.deleted", "project.created", "project.deleted", "ext.changed", "turn.accept", "turn.start", "input.attachment", "context.contribute", "model.select", "model.request", "model.response", "tools.offer", "tool.permission", "tool.pre", "tool.post", "tool.result", "tool.taint", "tool.error", "reply.complete", "turn.settled", "run.after", "subagent.start", "subagent.stop", "worker.report", "memory.before_write", "memory.written", "memory.deleted", "compaction.before", "compaction.after", "approval.requested", "approval.resolved", "job.fired", "job.done", "schedule.tick", "channel.inbound", "channel.outbound", "file.written", "review.accepted", "notify", "coding.tool.pre", "coding.tool.post"]
+HookName = Literal["app.start", "app.stop", "settings.changed", "chat.created", "chat.deleted", "project.created", "project.deleted", "ext.changed", "turn.accept", "turn.start", "input.attachment", "context.contribute", "model.select", "model.request", "model.response", "tools.offer", "tool.permission", "tool.pre", "tool.post", "tool.result", "tool.taint", "tool.error", "reply.complete", "turn.settled", "run.after", "subagent.start", "subagent.stop", "worker.report", "memory.before_write", "memory.written", "memory.deleted", "compaction.before", "compaction.after", "approval.requested", "approval.resolved", "preset.applied", "job.fired", "job.done", "schedule.tick", "channel.inbound", "channel.outbound", "file.written", "review.accepted", "notify", "coding.tool.pre", "coding.tool.post"]
 
 # How the host calls the handlers of each hook: emit and collect pass the payload, pipe and gate the current value.
 HOOK_KINDS: dict[str, Literal["emit", "collect", "pipe", "gate"]] = {
@@ -494,6 +511,7 @@ HOOK_KINDS: dict[str, Literal["emit", "collect", "pipe", "gate"]] = {
     "compaction.after": "emit",
     "approval.requested": "emit",
     "approval.resolved": "emit",
+    "preset.applied": "emit",
     "job.fired": "emit",
     "job.done": "emit",
     "schedule.tick": "emit",

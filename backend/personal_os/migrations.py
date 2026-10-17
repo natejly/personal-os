@@ -730,6 +730,17 @@ def _provider_refs(c: sqlite3.Connection) -> None:
         put("autoReviewModel", canon(stored["autoReviewModel"]))
 
 
+def _permission_presets(c: sqlite3.Connection) -> None:
+    """Named permission presets, where each setting's value came from (setting_sources), and a project's own permission
+    overrides (projects.permissions). A chat keeps its overrides in conversations.settings."""
+    c.execute("CREATE TABLE IF NOT EXISTS permission_presets(id TEXT PRIMARY KEY, name TEXT NOT NULL, body TEXT NOT NULL, "
+              "source TEXT NOT NULL DEFAULT 'user', created_at REAL NOT NULL, updated_at REAL NOT NULL)")
+    c.execute("CREATE TABLE IF NOT EXISTS setting_sources(key TEXT NOT NULL, scope TEXT NOT NULL, scope_id TEXT NOT NULL DEFAULT '', "
+              "source TEXT NOT NULL, prev TEXT, set_at REAL NOT NULL, PRIMARY KEY (key, scope, scope_id))")
+    if "permissions" not in _cols(c, "projects"):
+        c.execute("ALTER TABLE projects ADD COLUMN permissions TEXT NOT NULL DEFAULT '{}'")
+
+
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
     (2, "messages_fts", _messages_fts),
@@ -776,6 +787,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (43, "learn_pending", _learn_pending),
     (44, "dashboard_binding_cache", _dashboard_binding_cache),
     (45, "provider_refs", _provider_refs),
+    (46, "permission_presets", _permission_presets),
 ]
 
 

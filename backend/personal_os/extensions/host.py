@@ -73,6 +73,7 @@ class ExtensionContext:
     publish: Callable[[str, Any], None]  # an app-topic event, from any thread
     widget_kinds: Callable[[], tuple[str, ...]] = lambda: ()  # the canvas widget kinds the loaded extensions declare
     owe_wake: Callable[[str, str, dict[str, Any]], None] = lambda *_: None  # (conversation id, text, wake record): the chat is owed a hidden turn
+    preset_keys: Callable[[str], dict[str, Any]] | None = None  # a permission preset id -> the permission keys it sets (Presets.keys), for defaults.permissionPreset
 
 
 _generation = itertools.count(1)
@@ -162,7 +163,7 @@ class ExtensionScope:
     @property
     def defaults(self) -> Defaults:
         assert self._ctx is not None
-        return Defaults(self._ctx.db)
+        return Defaults(self._ctx.db, self._ctx.preset_keys)
 
     @property
     def services(self) -> Services:

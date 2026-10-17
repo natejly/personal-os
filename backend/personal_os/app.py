@@ -34,12 +34,14 @@ from . import auth_breaker, blobs, system_access
 from .bounds import clamp_limit
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
 from . import branch_summary, compaction, side_question, followups, otel_export, replay_trace, router, thinking_summary, titles
-from . import chatlink, duel, fsx, guards, labels, request_log, toolcore
+from . import chatlink, config, duel, fsx, guards, labels, permissions_routes, request_log, setting_sources, toolcore
 from .fsx import sensitive_reason
 from . import context_map
 from .dispatch import Contact, dispatch_tool
 from .context import Block, build_context, cite_slim, compose, context_taints, estimate_tokens, layout_messages, prefix_hash, retrieval_query
 from .drive_backup import DriveBackup
+from .config import PRIVATE_SETTINGS
+from .presets import Presets
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .kinds import is_internal
 from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_index, has_readable_text, safe_upload_name
@@ -399,26 +401,9 @@ _seed_hidden_modules()
 
 
 def settings() -> dict[str, Any]:
-    """Defaults < stored rows, with the permissions store (permissions.py) both nested under `permissions` and flattened
-    to the top level, so a reader that still does cfg.get("tools") sees the same value as permissions.get(cfg, "tools")."""
-    stored = db.get_settings()
-    perms = permissions.load(stored)
-    out = {**llm.DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if k not in permissions.KEYS},
-           **perms, permissions.KEY: {"version": permissions.VERSION, **perms}}
-    if out.get("providers"):
-        # The first usable provider stands in for the old single "active" one, for readers that still want a baseUrl and key
-        # (speech to text, usage import, setup cards); a model's own provider is resolved per call (provider_route.resolve).
-        first = next(iter(provider_route.usable(out)), None)
-        out.update(provider=first["kind"] if first else None, baseUrl=first["baseUrl"] if first else "", apiKey=first["apiKey"] if first else "")
-    if not out.get("defaultModel"):  # nothing saved: the provider's chat default (a saved model always wins)
-        out["defaultModel"] = providers.default_model(out)
-    # The legacy helper and fast knobs are the low and medium tiers (providers.TASK_TIERS); a stored value still wins.
-    if not out.get("extractionModel"):
-        out["extractionModel"] = providers.tier_model(out, "low")
-    if not out.get("fastModel"):
-        fast = providers.tier_model(out, "medium")
-        out["fastModel"] = "" if fast == out["defaultModel"] else fast  # same model: nothing for Auto to route to
-    return out
+    """config.assemble, with the project's and chat's permission overrides of the turn this task is running (permissions.SCOPE)."""
+    out = config.assemble(db)
+    return permissions.overlay(out, *scope) if (scope := permissions.SCOPE.get()) else out
 
 
 ensure_embedding_model(local=False)  # a key already saved before any embedding model was
@@ -954,8 +939,6 @@ def health() -> dict[str, Any]:
     return {"ok": True}
 
 
-# Google OAuth material lives in settings but never leaves the backend.
-PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "modelCaps", "telegramState", "extDefaults"}
 # Readable through /settings, but only writable through its own route: a plain PUT would replace the
 # whole nested dict and silently drop the signal switches and exclusion lists.
 SETTINGS_READ_ONLY = {"googleTasksSync", "voice",
@@ -1025,6 +1008,17 @@ def _store_permissions(fn: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[s
 
 
 toolbox.permission_store = _store_permissions
+
+
+def _shipped_presets() -> list[tuple[str, str, dict[str, Any]]]:
+    """The permission presets the loaded profiles and extensions ship (contributes.presets): (owner id, owner name, preset)."""
+    return [(m.id, m.name, doc) for scope in host.extensions.values() if (m := scope.manifest) for doc in m.contributes.get("presets", ())]
+
+
+presets = Presets(db, toolbox, mcp_store, projects, convos, _shipped_presets, _rule_tool_known, host.fire)
+_ext_ctx.preset_keys = presets.keys
+app.include_router(permissions_routes.router(presets, lambda project_id, conversation_id: config.effective(
+    db, toolbox, config.declared_settings(s.manifest for s in host.extensions.values()), project_id=project_id, conversation_id=conversation_id)))
 HOST_LIST_SETTINGS = set(permissions.HOST_LISTS)
 
 
@@ -1085,6 +1079,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
     if perm:
         permissions.save(db, perm)
     db.set_settings({**clean, **ext_values})
+    with db.tx() as c:
+        setting_sources.stamp(c, [*clean, *ext_values, *ext_secrets], "user")
     for k, v in ext_secrets.items():
         if v:
             db.secrets.set(k, v)
@@ -1558,6 +1554,7 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
     settings_patch = patch.get("settings") if isinstance(patch.get("settings"), dict) else {}
     if isinstance(settings_patch.get("tools"), dict):
         settings_patch["tools"] = toolbox.cap_modes(settings_patch["tools"])  # external and schedules tools top out at ask
+    settings_patch.pop("permissions", None)  # set by the preset routes only: a PATCH must not loosen a chat unasked
     settings_patch.pop("deskId", None)  # bound and unbound by the cowork routes only, never by a settings PATCH
     settings_patch.pop("workingFolder", None)  # retired: the file tools reach the whole Mac, so a chat needs no folder bound to it
     new_title = (patch.get("title") or "").strip()
@@ -2057,6 +2054,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     if not conv:
         yield "error", {"message": "Conversation not found"}
         return
+    project = projects.get(conv["project_id"]) if conv["project_id"] else None
+    permissions.SCOPE.set((project["permissions"] if project else None, conv["settings"].get("permissions")))  # settings() overlays them
     cfg = settings()
     is_wake = bool(body.wake)  # a hidden turn that hands finished workers' reports to the assistant: not the user's words
     internal = is_wake or bool(body.kind)  # any turn whose "user" text is the backend's: never titled from, learned from or trusted as the user's
@@ -2197,7 +2196,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     llm.usage_context.set(_ucx)
     llm.session_affinity.set(conv_id)  # every turn of this chat shares one cached prefix: keep it on one replica
     await pricing.ensure(cfg)
-    project = projects.get(conv["project_id"]) if conv["project_id"] else None
     cspan = tracer.start("context", "Assemble context", {"model": model, **({"routed_from": "auto", "reason": routed[1]} if routed else {})})
     # A follow-up is searched with the turn before it in view; the model still sees user_text as typed.
     # On the new-message path conv["messages"] is the history before this turn; on resume and regenerate it ends

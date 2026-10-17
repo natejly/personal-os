@@ -100,11 +100,11 @@ class Projects:
     def list(self) -> list[dict[str, Any]]:
         with self.db.tx() as c:
             rows = c.execute("SELECT * FROM projects WHERE deleted_at IS NULL ORDER BY created_at").fetchall()
-        return [row_to_dict(r, ("tools",)) for r in rows]  # type: ignore[misc]
+        return [row_to_dict(r, ("tools", "permissions")) for r in rows]  # type: ignore[misc]
 
     def get(self, id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
-            return row_to_dict(c.execute("SELECT * FROM projects WHERE id=? AND deleted_at IS NULL", (id,)).fetchone(), ("tools",))
+            return row_to_dict(c.execute("SELECT * FROM projects WHERE id=? AND deleted_at IS NULL", (id,)).fetchone(), ("tools", "permissions"))
 
     def create(self, name: str, description: str = "", system_prompt: str = "", color: str = "#d97757",
                memory_mode: str = "shared") -> dict[str, Any]:
@@ -117,9 +117,10 @@ class Projects:
         return self.get(sid)  # type: ignore[return-value]
 
     def update(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
-        allowed = {k: v for k, v in patch.items() if k in {"name", "description", "system_prompt", "color", "tools", "memory_mode"} and v is not None}
-        if "tools" in allowed:
-            allowed["tools"] = json.dumps(allowed["tools"])
+        allowed = {k: v for k, v in patch.items() if k in {"name", "description", "system_prompt", "color", "tools", "permissions", "memory_mode"} and v is not None}
+        for key in ("tools", "permissions"):
+            if key in allowed:
+                allowed[key] = json.dumps(allowed[key])
         if allowed:
             sets = ", ".join(f"{k}=?" for k in allowed)
             with self.db.tx() as c:

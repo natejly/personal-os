@@ -57,13 +57,14 @@ class ToolTests(unittest.TestCase):
     def test_health_tools_keep_their_place_after_the_modules_tools(self) -> None:
         names = list(toolbox.specs)
         i = names.index("health_summary")
-        self.assertEqual(names[i - 2:i + 4], ["mail_followups", "schedule_suggest", "health_summary", "health_log", "health_delete_entry", "calendar_events"])
+        self.assertEqual(names[i - 2:i + 4], ["mail_followups", "schedule_suggest", "health_summary", "health_log", "health_delete_entry", "doc_list"])
 
-    def test_calendar_tools_follow_the_health_tools_in_their_own_order(self) -> None:
+    def test_calendar_tools_keep_their_place_before_the_gmail_tools(self) -> None:
         names = list(toolbox.specs)
         i = names.index("calendar_events")
         self.assertEqual(names[i:i + 10], CALENDAR_TOOLS)
-        self.assertEqual(names[i + 10], "doc_list")
+        self.assertEqual(names[i - 1], "dashboard_pin")
+        self.assertEqual(names[i + 10], "gmail_search")
 
     def test_tool_metadata_unchanged(self) -> None:
         for n in TODO_TOOLS:

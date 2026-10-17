@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from ... import approval_edits, redact, scheduling, verify
 from ...jobs import local_tz_name
 from ...tools import ToolSpec, _first_line, _obj, page, scrub_strings, tool_error, undoable
+from ..disposables import Disposable
 from ..google.client import NOT_CONNECTED_FACT, json_safe
 from ..google.http import gcall
 from .trigger import CalendarTrigger
@@ -451,5 +452,6 @@ def activate(api: ExtensionScope) -> None:
     api.router(ext.router())
     ext.register_tools()
     approval_edits.register_validator("calendar_propose", _validate_changes)
+    api.disposables.add(Disposable(lambda: approval_edits.unregister_validator("calendar_propose", _validate_changes)))
     api.trigger("calendar", CalendarTrigger(ext.google))
     api.recap_section("calendar", card=ext.card, facts=ext.facts)

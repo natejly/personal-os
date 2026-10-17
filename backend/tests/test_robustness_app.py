@@ -327,13 +327,22 @@ def test_recap_skips_the_model_when_there_is_nothing_to_recap(monkeypatch: pytes
 
 def test_recap_reads_every_visible_calendar_not_only_primary(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, Any] = {}
+    facts: list[dict[str, Any]] = []
 
     def events(*args: Any, **kw: Any) -> list[dict[str, Any]]:
         seen["args"], seen["kw"] = args, kw
         return []
 
+    async def fake(cfg: dict[str, Any], model: str, got: dict[str, Any]) -> str:
+        facts.append(got)
+        return "recap"
+
+    monkeypatch.setattr(appmod, "generate_recap", fake)
     monkeypatch.setattr(appmod.google, "status", lambda: {"connected": True})
     monkeypatch.setattr(appmod.google, "calendar_events", events)
     monkeypatch.setattr(appmod.google, "gmail_search", lambda *a, **k: [], raising=False)
-    assert appmod.host.extensions["calendar"].recap_sections[0].facts() == {"calendar_next_3_days": []}
+    appmod.db.set_settings({"apiKey": "", "defaultModel": "m"})
+    new_conv()
+    assert client.get("/recap?force=true").json()["content"] == "recap"
+    assert facts[0]["calendar_next_3_days"] == []
     assert seen["kw"].get("calendar_ids") == ["all"]

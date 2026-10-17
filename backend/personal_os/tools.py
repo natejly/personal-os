@@ -762,6 +762,10 @@ def doc_edit_applies(ctx: dict[str, Any]) -> bool:
     return _allow_all(ctx) or str(permissions.get(s, "docEditMode") or "review") == "apply"
 
 
+# Extensions whose tools sit where the Google tools are registered, so the tool order (part of the cached prompt prefix) is unchanged.
+GOOGLE_BLOCK_EXTENSIONS = ("calendar",)
+
+
 class Toolbox:
     web_cache: Any = None  # webread.WebCache, wired in app.py; fetch_url runs uncached without it
     subagents: Any = None  # subagents.Subagents, wired in app.py; the agent_* tools say so without it
@@ -816,7 +820,8 @@ class Toolbox:
         for e in self.extensions:
             if e.module:
                 e.module.register_tools(self)
-            self.set_extension_tools(e)
+            if e.manifest.id not in GOOGLE_BLOCK_EXTENSIONS:
+                self.set_extension_tools(e)
         if docs is not None:
             self._register_docs()
         if google is not None:
@@ -2082,6 +2087,9 @@ async def undoable(extundo: Any, tool: str, ctx: dict[str, Any], where: dict[str
 
 
 def _register_google(self: Toolbox) -> None:
+    for e in self.extensions:
+        if e.manifest.id in GOOGLE_BLOCK_EXTENSIONS:
+            self.set_extension_tools(e)
     R = self.specs.__setitem__
     g = self.google
     run = asyncio.to_thread

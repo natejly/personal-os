@@ -89,7 +89,7 @@ class CalendarTrigger:
         return None
 
     def _events(self, calendar_id: str | None) -> list[dict[str, Any]]:
-        """The next two days from the read cache (the 24 h look-ahead is cut in `due`). Without a named calendar, every
+        """The next two days from the read cache (the 24 h look-ahead is cut in `due_events`). Without a named calendar, every
         calendar the user has checked on."""
         return self.google.calendar_events(2, calendar_ids=[calendar_id] if calendar_id else ["enabled"], max_results=0)
 

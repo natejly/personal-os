@@ -66,6 +66,13 @@ class RegistrationTests(unittest.TestCase):
         asyncio.run(scope.stop())
         self.assertEqual((list(scope.triggers), scope.recap_sections, scope.tools), ([], [], {}))
 
+    def test_stopping_it_takes_the_proposal_validator_back(self) -> None:
+        before = list(approval_edits._validators.get("calendar_propose", []))
+        scope = calendar_scope(Google())
+        self.assertEqual(len(approval_edits._validators["calendar_propose"]), len(before) + 1)
+        asyncio.run(scope.stop())
+        self.assertEqual(approval_edits._validators["calendar_propose"], before)
+
     def test_an_edited_calendar_proposal_is_held_to_the_rules_of_the_model_s(self) -> None:
         scope = calendar_scope(Google())
         params = scope.tools["calendar_propose"].parameters

@@ -8007,10 +8007,10 @@ def _google_has(status: dict[str, Any], scope_tail: str) -> bool:
 async def dashboard() -> dict[str, Any]:
     st = google.status()
     cfg = settings()
+    cards = asyncio.create_task(asyncio.to_thread(host.recap_cards))  # reads Google, so it runs beside the fetches below
     out: dict[str, Any] = {
         "google": st,
         **{k: v for m in modules if m.enabled() for k, v in m.today().items()},
-        **await asyncio.to_thread(host.recap_cards),
         "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
         "recent_memories": memories.list(ALL)[:6],
         "recent_conversations": convos.list(ALL)[:6],
@@ -8038,6 +8038,7 @@ async def dashboard() -> dict[str, Any]:
         if out["tasks"] and tasks_sync.config()["enabled"]:
             linked = {t["external_id"] for t in todos.list("__all__", True) if t.get("external_id")}
             out["tasks"] = [t for t in out["tasks"] if t.get("id") not in linked]
+    out.update(await cards)
     return out
 
 

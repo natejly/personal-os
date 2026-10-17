@@ -11,7 +11,7 @@ from typing import Any, Iterator
 
 from ...mcp_servers import RESERVED_TOOL_NAMES
 from ...skillbuild import _authority
-from ..hooks import HOOKS
+from ..catalog import HOOKS
 from ..manifest import Manifest, ManifestError, load_manifest
 
 BUILTINS = Path(__file__).parents[1]  # the built-in extensions, one folder each

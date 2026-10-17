@@ -320,7 +320,9 @@ def test_a_session_that_ended_no_longer_opens_it_unless_it_is_being_resumed(rout
     assert hook_post(routes.local, "sess-wait", "post").status_code == 200
 
 
-def test_a_gate_subscriber_answers_deny_or_ask_and_nothing_else_gets_through(routes):
+def test_a_gate_subscriber_answers_deny_or_ask_and_nothing_else_gets_through(routes, monkeypatch):
+    from personal_os.extensions import hooks
+    monkeypatch.setattr(hooks, "STRICT", False)  # the bad returns below are the point; the strict bus would raise on them
     make_session(routes, "sess-gate")
     seen: list[dict[str, Any]] = []
     answers: list[Any] = []
@@ -399,7 +401,7 @@ def test_a_finished_call_is_emitted_once_and_added_to_the_feed_unless_the_timeli
 def test_subscribing_needs_the_permissions(routes):
     from personal_os.extensions.hooks import HookBus
     from personal_os.extensions.host import ExtensionHost
-    from personal_os.extensions.manifest import Manifest
+    from personal_os.extensions.manifest import Manifest, ManifestError
     host = ExtensionHost()
 
     def scope(perms: list[str], hook: str = "coding.tool.pre") -> Any:
@@ -407,11 +409,11 @@ def test_subscribing_needs_the_permissions(routes):
                                        "hooks": {hook: {}}})
         return host._add(manifest)
     for missing in ([], ["hooks:gate"], ["coding:read"]):
-        with pytest.raises(ValueError, match="did not declare permission"):
-            scope(missing).on("coding.tool.pre", lambda p: None)
+        with pytest.raises(ManifestError, match="needs the permission"):
+            scope(missing)
     scope(["hooks:gate", "coding:read"]).on("coding.tool.pre", lambda p: None)
-    with pytest.raises(ValueError, match="coding:read"):
-        scope([], "coding.tool.post").on("coding.tool.post", lambda p: None)
+    with pytest.raises(ManifestError, match="coding:read"):
+        scope([], "coding.tool.post")
     scope(["coding:read"], "coding.tool.post").on("coding.tool.post", lambda p: None)
     assert isinstance(host.bus, HookBus)
 

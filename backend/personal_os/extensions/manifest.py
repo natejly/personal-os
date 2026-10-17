@@ -13,7 +13,7 @@ from typing import Any
 
 from ..permissions import CHOICES
 from ..repos import EFFORTS
-from .hooks import HOOKS
+from .catalog import HOOKS
 
 API_VERSION = 1
 
@@ -206,8 +206,11 @@ def _data(raw: dict[str, Any]) -> dict[str, Any]:
 
 def _hooks(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
     hooks = _object(raw, "hooks")
+    permissions = _strings(raw, "permissions", ())
     for name, opts in hooks.items():
         _check(name in HOOKS, f"hooks declares unknown hook {name!r}")
+        _check(all(p in permissions for p in HOOKS[name].permission),
+               f"hooks.{name} needs the permission(s) {', '.join(HOOKS[name].permission)} in permissions")
         _check(isinstance(opts, dict) and set(opts) <= _HOOK_KEYS, f"hooks.{name} takes only {', '.join(sorted(_HOOK_KEYS))}")
         _check(_is_int(opts.get("priority", 0)), f"hooks.{name}: priority must be an integer")
         _check(_is_int(opts.get("timeoutMs", 1)) and opts.get("timeoutMs", 1) > 0,

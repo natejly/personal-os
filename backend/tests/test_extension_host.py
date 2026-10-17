@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os.db import Database  # noqa: E402
 from personal_os.extensions.disposables import Disposable, Scope  # noqa: E402
+from personal_os.extensions import hooks as hooks_mod  # noqa: E402
 from personal_os.extensions.hooks import MUTE_AFTER, Ask, Deny, HookBus  # noqa: E402
 from personal_os.extensions.host import ExtensionContext, ExtensionHost  # noqa: E402
 from personal_os.extensions.manifest import ManifestError, Manifest, load_manifest  # noqa: E402
@@ -33,6 +34,17 @@ def manifest(**over: Any) -> dict[str, Any]:
 
 def run(coro: Any) -> Any:
     return asyncio.run(coro)
+
+
+CHAT = {"id": "c1", "project_id": None}
+
+
+class Loose(unittest.TestCase):
+    """The bus mechanics (order, timeouts, muting, fail-toward-ask) are exercised with stand-in payloads and returns, which
+    the strict catalog check would refuse; the checks themselves are in test_hook_catalog."""
+
+    def setUp(self) -> None:
+        self.enterContext(mock.patch.object(hooks_mod, "STRICT", False))
 
 
 class ManifestTests(unittest.TestCase):
@@ -77,7 +89,7 @@ class ManifestTests(unittest.TestCase):
             "canvas widget in another extension's namespace": manifest(contributes={"slots": {"canvas.widget": [{"id": "ext:other:clock"}]}}),
             "unknown hook": manifest(hooks={"tool.preee": {}}),
             "unknown hook option": manifest(hooks={"app.start": {"retries": 3}}),
-            "onFailure allow": manifest(hooks={"tool.pre": {"onFailure": "allow"}}),
+            "onFailure allow": manifest(hooks={"tool.pre": {"onFailure": "allow"}}, permissions=["hooks:gate"]),
             "unknown permission": manifest(permissions=["root"]),
             "unknown requires key": manifest(requires={"packages": []}),
             "not an object": [],
@@ -122,7 +134,7 @@ def sub(bus: HookBus, hook: str, fn: Any, owner: str = "x", order: int = 0, **kw
     return bus.subscribe(hook, fn, owner=owner, order=order, **kw)
 
 
-class EmitTests(unittest.TestCase):
+class EmitTests(Loose):
     def test_empty_bus_emit_is_cheap(self) -> None:
         bus = HookBus()
 
@@ -231,7 +243,7 @@ class EmitTests(unittest.TestCase):
         self.assertEqual(len(calls), (MUTE_AFTER - 1) + 1 + MUTE_AFTER)
 
 
-class CollectPipeTests(unittest.TestCase):
+class CollectPipeTests(Loose):
     def test_collect_orders_by_priority_then_load_order_and_drops_none_and_failures(self) -> None:
         bus = HookBus()
         sub(bus, "context.contribute", lambda p: "late", order=5)
@@ -265,19 +277,19 @@ class CollectPipeTests(unittest.TestCase):
 
     def test_pipe_chains_in_order_and_skips_a_failing_or_silent_step(self) -> None:
         bus = HookBus()
-        sub(bus, "turn.accept", lambda v: v + "b", priority=20)
-        sub(bus, "turn.accept", lambda v: v + "a", priority=10)
-        sub(bus, "turn.accept", lambda v: 1 / 0, priority=30)
-        sub(bus, "turn.accept", lambda v: None, priority=40)
-        sub(bus, "turn.accept", lambda v: v + "c", priority=50)
+        sub(bus, "model.select", lambda v: v + "b", priority=20)
+        sub(bus, "model.select", lambda v: v + "a", priority=10)
+        sub(bus, "model.select", lambda v: 1 / 0, priority=30)
+        sub(bus, "model.select", lambda v: None, priority=40)
+        sub(bus, "model.select", lambda v: v + "c", priority=50)
         with self.assertLogs("personal_os.extensions.hooks", "WARNING"):
-            self.assertEqual(run(bus.pipe("turn.accept", "x")), "xabc")
+            self.assertEqual(run(bus.pipe("model.select", "x")), "xabc")
 
     def test_pipe_without_handlers_returns_the_value(self) -> None:
-        self.assertEqual(run(HookBus().pipe("turn.accept", "x")), "x")
+        self.assertEqual(run(HookBus().pipe("model.select", "x")), "x")
 
 
-class GateTests(unittest.TestCase):
+class GateTests(Loose):
     def test_no_handlers_or_no_opinion_is_none(self) -> None:
         bus = HookBus()
         self.assertIsNone(run(bus.gate("tool.pre", {})))
@@ -334,13 +346,13 @@ class ScopeAndHostTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             scope.on("chat.deleted", seen.append)
         scope.on("chat.created", seen.append)
-        run(host.bus.emit("chat.created", 1))
-        self.assertEqual(seen, [1])
+        run(host.bus.emit("chat.created", CHAT))
+        self.assertEqual(seen, [CHAT])
         sub_ = host.bus._subs["chat.created"][0]
         self.assertEqual((sub_.priority, sub_.timeout_s, sub_.owner), (7, 0.04, "demo"))
         run(scope.stop())
-        run(host.bus.emit("chat.created", 2))
-        self.assertEqual(seen, [1])
+        run(host.bus.emit("chat.created", CHAT))
+        self.assertEqual(seen, [CHAT])
         self.assertNotIn("chat.created", host.bus._subs)
 
     def test_a_module_runs_as_an_extension(self) -> None:
@@ -605,16 +617,16 @@ class BuiltinExtensionTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.scope(requires={"services": ["mcp"]}).services.get("mcp")
 
-    def test_a_gating_hook_needs_its_permission(self) -> None:
-        hooks = {"tool.pre": {}, "tool.permission": {}, "turn.accept": {}, "memory.before_write": {}, "chat.created": {}}
-        scope = self.scope(hooks=hooks)
-        scope.on("chat.created", lambda p: None)
-        for hook in ("tool.pre", "tool.permission", "turn.accept", "memory.before_write"):
-            with self.assertRaises(ValueError):
-                scope.on(hook, lambda p: None)
-        granted = self.scope(hooks=hooks, permissions=["hooks:gate", "input:rewrite", "memory:gate"])
-        for hook in ("tool.pre", "tool.permission", "turn.accept", "memory.before_write"):
-            granted.on(hook, lambda p: None)
+    def test_a_gating_hook_needs_its_permission_in_the_manifest(self) -> None:
+        gated = {"tool.pre": ["hooks:gate"], "memory.before_write": ["memory:gate"], "coding.tool.pre": ["hooks:gate", "coding:read"],
+                 "coding.tool.post": ["coding:read"]}
+        self.scope(hooks={"chat.created": {}}).on("chat.created", lambda p: None)
+        for hook, needed in gated.items():
+            with self.assertRaises(ManifestError):
+                self.scope(hooks={hook: {}})
+            with self.assertRaises(ManifestError):
+                self.scope(hooks={hook: {}}, permissions=needed[1:])
+            self.scope(hooks={hook: {}}, permissions=needed).on(hook, lambda p: None)
 
     def test_a_precheck_needs_the_gate_permission_and_sees_copies(self) -> None:
         with self.assertRaises(ValueError):
@@ -635,26 +647,29 @@ class BuiltinExtensionTests(unittest.TestCase):
         seen: list[str] = []
         hidden: list[str] = []
         hooks = {"chat.created": {}, "model.select": {}, "tool.pre": {}, "ext.changed": {}}
+        select = {"model": "core", "effort": "high", "reason": "", "tier": "default"}
+        pre = {"name": "t", "args": {}, "call_id": "k", "ctx": {"run_id": None, "conversation_id": None, "project_id": None,
+                                                              "agent_id": None, "desk_id": None, "tainted": False}}
         scope = self.scope(hidden, hooks=hooks, permissions=["hooks:gate"])
 
         async def late(p: Any) -> None:
             seen.append("async")
         scope.on("chat.created", lambda p: seen.append("sync"))
-        scope.on("model.select", lambda p: {"model": "mine"})
+        scope.on("model.select", lambda p: {**select, "model": "mine"})
         scope.on("tool.pre", lambda p: Deny("no"))
         scope.on("ext.changed", lambda p: seen.append("changed"))
         scope.on("chat.created", late)
         hidden.append("demo")
 
         async def go() -> None:
-            await scope.bus.emit("chat.created", {})
-            await scope.bus.emit("ext.changed", {})
-            self.assertEqual(await scope.bus.pipe("model.select", {"model": "core"}), {"model": "core"})
-            self.assertIsNone(await scope.bus.gate("tool.pre", {}))
+            await scope.bus.emit("chat.created", CHAT)
+            await scope.bus.emit("ext.changed", {"id": "demo", "enabled": False})
+            self.assertEqual(await scope.bus.pipe("model.select", select), select)
+            self.assertIsNone(await scope.bus.gate("tool.pre", pre))
         run(go())
         self.assertEqual(seen, ["changed"])
         hidden.clear()
-        run(scope.bus.emit("chat.created", {}))
+        run(scope.bus.emit("chat.created", CHAT))
         self.assertCountEqual(seen, ["changed", "sync", "async"])
 
     def test_a_disabled_extension_channel_and_routes_are_out_of_reach(self) -> None:

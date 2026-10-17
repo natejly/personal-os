@@ -29,6 +29,7 @@ from personal_os.extensions.authoring import cli  # noqa: E402
 from personal_os.extensions.authoring.scaffold import scaffold  # noqa: E402
 
 client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
+CTX = {"run_id": None, "conversation_id": None, "project_id": None, "agent_id": None, "desk_id": None, "tainted": False}
 HOOKED = '''
     from grain_sdk import Deny
     api.on("tool.pre", lambda p: Deny("no shell") if p["name"] == "shell_run" else None)
@@ -90,7 +91,7 @@ def test_the_api_needs_the_token() -> None:
 
 def test_enable_and_disable_write_the_hidden_views_and_fire_ext_changed(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[Any] = []
-    monkeypatch.setattr(appmod.host, "fire", lambda hook, payload=None: seen.append((hook, payload)))
+    monkeypatch.setattr(appmod.host.bus, "fire", lambda hook, payload=None: seen.append((hook, payload)))
     try:
         on = client.post("/dev/extensions/health/enable").json()  # a fresh install has Health off
         assert on["enabled"] is True and "health" not in appmod.settings()["hiddenViews"] and appmod.toolbox.available("health_log")
@@ -256,9 +257,9 @@ def test_harness_fire_follows_the_hook_kind(ext: Path) -> None:
     declare(ext, "tool.pre", "model.select", "chat.created", permissions=("hooks:gate",))
     edit(ext, "extension.py", lambda t: t + HOOKED)
     with Harness(ext) as h:
-        verdict = h.fire("tool.pre", {"name": "shell_run", "args": {}, "call_id": "c", "ctx": {}})
+        verdict = h.fire("tool.pre", {"name": "shell_run", "args": {}, "call_id": "c", "ctx": CTX})
         assert isinstance(verdict, Deny) and verdict.reason == "no shell"
-        assert h.fire("tool.pre", {"name": "current_time", "args": {}, "call_id": "c", "ctx": {}}) is None
+        assert h.fire("tool.pre", {"name": "current_time", "args": {}, "call_id": "c", "ctx": CTX}) is None
         assert h.fire("model.select", {"model": "m", "effort": "low", "reason": "", "tier": "default"})["effort"] == "high"
         assert h.fire("chat.created", {"id": "c", "project_id": None}) is None
         [block] = h.fire("context.contribute", {"conversation_id": "c", "project_id": None})

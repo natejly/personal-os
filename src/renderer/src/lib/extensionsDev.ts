@@ -1,3 +1,4 @@
+import type { HookId } from '@shared/extensionHooks'
 import type { ExtensionInfo } from '@shared/types'
 
 /** A handler latency for the dev panel: "—" before the first call, whole ms from 10, one decimal below. */
@@ -18,6 +19,6 @@ export function contributionSummary(ext: Pick<ExtensionInfo, 'contributes' | 'to
 }
 
 /** Handlers that have been switched off after repeated failures. */
-export function mutedHooks(ext: Pick<ExtensionInfo, 'hooks'>): string[] {
+export function mutedHooks(ext: Pick<ExtensionInfo, 'hooks'>): HookId[] {
   return ext.hooks.filter((h) => h.muted).map((h) => h.hook)
 }

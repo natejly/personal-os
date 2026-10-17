@@ -40,7 +40,14 @@ def sub(bus: HookBus, hook: str, fn: Any, **kw: Any) -> Any:
     return bus.subscribe(hook, fn, owner=kw.pop("owner", "test"), order=kw.pop("order", 1), **kw)
 
 
+@pytest.fixture
+def loose(monkeypatch: Any) -> None:
+    """The bus mechanics below run with stand-in payloads and returns, which the strict catalog check would refuse."""
+    monkeypatch.setattr(hooks_mod, "STRICT", False)
+
+
 # ---- emit_sync and pipe_sync ----
+@pytest.mark.usefixtures("loose")
 def test_emit_sync_runs_sync_handlers_before_it_returns_in_order() -> None:
     bus, seen = HookBus(), []
     sub(bus, "memory.written", lambda p: seen.append(("b", p)), priority=60)
@@ -49,6 +56,7 @@ def test_emit_sync_runs_sync_handlers_before_it_returns_in_order() -> None:
     assert seen == [("a", 1), ("b", 1)]
 
 
+@pytest.mark.usefixtures("loose")
 def test_emit_sync_starts_an_async_handler_on_the_loop_without_waiting() -> None:
     bus, seen = HookBus(), []
 
@@ -66,6 +74,7 @@ def test_emit_sync_starts_an_async_handler_on_the_loop_without_waiting() -> None
     asyncio.run(go())
 
 
+@pytest.mark.usefixtures("loose")
 def test_emit_sync_drops_an_async_handler_when_no_loop_is_bound() -> None:
     bus = HookBus()
 
@@ -75,6 +84,7 @@ def test_emit_sync_drops_an_async_handler_when_no_loop_is_bound() -> None:
     bus.emit_sync("subagent.start", 1)
 
 
+@pytest.mark.usefixtures("loose")
 def test_emit_sync_failing_handler_is_logged_and_muted_after_five() -> None:
     bus, calls = HookBus(), []
 
@@ -88,6 +98,7 @@ def test_emit_sync_failing_handler_is_logged_and_muted_after_five() -> None:
     assert calls.count("p") == hooks_mod.MUTE_AFTER and calls.count("good") == hooks_mod.MUTE_AFTER + 2
 
 
+@pytest.mark.usefixtures("loose")
 def test_close_cancels_the_async_handlers_it_started() -> None:
     bus, state = HookBus(), []
 
@@ -109,6 +120,7 @@ def test_close_cancels_the_async_handlers_it_started() -> None:
     assert state == ["cancelled"] and bus.loop is None
 
 
+@pytest.mark.usefixtures("loose")
 def test_pipe_sync_chains_returns_deny_as_is_and_skips_async_handlers() -> None:
     bus = HookBus()
     sub(bus, "memory.before_write", lambda v: {**v, "n": v["n"] + 1}, priority=10)
@@ -123,6 +135,7 @@ def test_pipe_sync_chains_returns_deny_as_is_and_skips_async_handlers() -> None:
     assert bus.pipe_sync("memory.before_write", {"n": 0}) == Deny("no")
 
 
+@pytest.mark.usefixtures("loose")
 def test_a_core_handler_is_never_muted_and_has_no_default_timeout() -> None:
     bus, calls = HookBus(), []
 
@@ -148,6 +161,7 @@ def test_a_core_handler_is_never_muted_and_has_no_default_timeout() -> None:
     assert calls.count("p") == hooks_mod.MUTE_AFTER + 2 and calls.count("v") == hooks_mod.MUTE_AFTER + 2 and "slow" in calls
 
 
+@pytest.mark.usefixtures("loose")
 def test_pipe_sync_mutes_a_handler_that_keeps_failing() -> None:
     bus, calls = HookBus(), []
 
@@ -160,6 +174,7 @@ def test_pipe_sync_mutes_a_handler_that_keeps_failing() -> None:
     assert len(calls) == hooks_mod.MUTE_AFTER
 
 
+@pytest.mark.usefixtures("loose")
 def test_emit_sync_times_out_an_async_handler_and_counts_it_as_a_failure() -> None:
     bus, started = HookBus(), []
 
@@ -402,6 +417,7 @@ def test_model_select_can_swap_the_model_and_effort(monkeypatch: Any) -> None:
     assert payloads[-1]["model"] == "chat-model" and set(payloads[-1]) == {"model", "effort", "reason", "tier"} and payloads[-1]["reason"] == ""
 
 
+@pytest.mark.usefixtures("loose")
 def test_model_select_ignores_a_model_no_provider_serves_and_nonsense(monkeypatch: Any) -> None:
     providers = [{"id": "custom-1", "kind": "custom", "name": "P", "baseUrl": "http://x/v1"}]
     appmod.db.set_settings({"providers": providers})

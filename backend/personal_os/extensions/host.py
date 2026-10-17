@@ -20,6 +20,7 @@ from fastapi import Depends, HTTPException
 
 from .. import backups, migrations
 from ..context import Block, Contribution, RetrievalSources, Slot
+from .catalog import HOOKS
 from .channels import ChannelAdapter, Channels
 from .defaults import DEFAULT_KEYS, Defaults
 from .directives import Directive, Directives
@@ -45,9 +46,6 @@ SETTING_PREFIX = "ext."  # a setting `ext.<id>.<field>` belongs to the extension
 STOP_BUDGET_S = 5.0  # what one extension's app.stop handlers get before they are cancelled
 STABLE_CONTEXT_TIMEOUT_MS = 100  # a stable block reads cached state: it is built in the turn path, before the first token
 LIFECYCLE_HOOKS = frozenset({"app.start", "app.stop", "ext.changed"})  # fired whether or not the extension is enabled: its handlers start and stop its own work
-HOOK_PERMISSION = {"tool.permission": ("hooks:gate",), "tool.pre": ("hooks:gate",), "turn.accept": ("input:rewrite",),
-                   "memory.before_write": ("memory:gate",), "coding.tool.pre": ("hooks:gate", "coding:read"),
-                   "coding.tool.post": ("coding:read",)}  # the hooks that can narrow or change what the user did, or read what a session does
 
 
 @dataclass
@@ -207,12 +205,10 @@ class ExtensionScope:
             raise HTTPException(404, "Not Found")
 
     def on(self, hook: str, fn: Callable[[Any], Any], *, priority: int | None = None, timeout_ms: int | None = None) -> Disposable:
-        """Subscribe to a hook the manifest declares (and holds the permission for, if it is a gating one); priority, timeout
+        """Subscribe to a hook the manifest declares (the manifest check has already seen to its permissions); priority, timeout
         and failure policy default to its entry. Only the lifecycle hooks reach `fn` while the extension is disabled."""
         if hook not in self.manifest.hooks:
             raise ValueError(f"extension {self.manifest.id!r} did not declare hook {hook!r}")
-        for permission in HOOK_PERMISSION.get(hook, ()):
-            self._require(permission)
         declared = self.manifest.hooks[hook]
         sub = self._bus.subscribe(
             hook, fn if hook in LIFECYCLE_HOOKS else self._while_enabled(fn), owner=self.manifest.id, order=self.index,
@@ -322,7 +318,7 @@ class ExtensionScope:
     async def stop(self) -> None:
         try:
             try:
-                await asyncio.wait_for(self._bus.emit("app.stop", None, owner=self.manifest.id), STOP_BUDGET_S)
+                await asyncio.wait_for(self._bus.emit("app.stop", {}, owner=self.manifest.id), STOP_BUDGET_S)
             except asyncio.TimeoutError:
                 log.warning("extension %s: app.stop handlers cancelled after %.0f s", self.manifest.id, STOP_BUDGET_S)
             if self.module:
@@ -401,6 +397,8 @@ class ExtensionHost:
         manifest = load_manifest(root / "extension.json")
         if "service:chat" in manifest.permissions:
             raise ValueError("only a built-in extension may use the chat service: it can answer an approval")
+        if builtin_only := sorted(h for h in manifest.hooks if HOOKS[h].subscribers == "builtin"):
+            raise ValueError(f"only a built-in extension may subscribe to {', '.join(builtin_only)}")
         scope = self._add(manifest, root=root, ctx=ctx)
         scope.dev = True
         try:
@@ -506,14 +504,14 @@ class ExtensionHost:
                     else:
                         scope.defaults.revert(ext_id)
                     self._settings_changed(before, db.get_settings())
-                self.fire("ext.changed", {"id": ext_id, "enabled": now})
+                self.bus.fire("ext.changed", {"id": ext_id, "enabled": now})
         return changed
 
     def _settings_changed(self, before: dict[str, Any], after: dict[str, Any]) -> None:
         """Fire settings.changed for the settings a defaults write touched."""
         keys = [k for k in DEFAULT_KEYS if before.get(k) != after.get(k)]
         if keys:
-            self.fire("settings.changed", {"keys": keys, "old": {k: before.get(k) for k in keys}, "new": {k: after.get(k) for k in keys}})
+            self.bus.fire("settings.changed", {"keys": keys, "old": {k: before.get(k) for k in keys}, "new": {k: after.get(k) for k in keys}})
 
     # ---- data ----
     def migrate(self, db: Database) -> None:

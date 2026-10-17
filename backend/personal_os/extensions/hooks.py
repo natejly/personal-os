@@ -11,6 +11,10 @@ thread) or async. Returning None means "no opinion". Code that is not a coroutin
 callback that runs on any thread) fires through emit_sync / pipe_sync instead. Handlers that raise or time out are logged and skipped, except
 in a gate, where silence never means yes: the call turns into an approval question (or a denial, if the subscriber
 asked for that), never an allow.
+
+Every hook is cataloged in catalog.HOOKS with its kind, payload and return type. A call whose method does not match the
+hook's kind is logged once; under GRAIN_HOOKS_STRICT=1 (the tests) it raises, and so does a payload or a handler's return
+that does not match the catalog.
 """
 from __future__ import annotations
 
@@ -18,12 +22,17 @@ import asyncio
 import inspect
 import itertools
 import logging
+import os
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine, Literal
+from typing import TYPE_CHECKING, Any, Callable, Coroutine, Literal
 
+from . import hookschema
 from .disposables import Disposable
+
+if TYPE_CHECKING:
+    from .catalog import HookSpec
 
 log = logging.getLogger(__name__)
 
@@ -38,21 +47,12 @@ MUTE_AFTER = 5  # consecutive emit failures before a handler is muted for the se
 STATS_WINDOW = 200  # latencies kept per handler for the dev panel's p50 and p95
 ERROR_WINDOW = 10  # failures kept per handler
 TIMEOUT_S = {"emit": 2.0, "collect": 1.0, "pipe": 1.0, "gate": 2.0}
+STRICT = os.environ.get("GRAIN_HOOKS_STRICT") == "1"
+CALL_KIND = {"emit": "emit", "emit_sync": "emit", "fire": "emit", "collect": "collect", "pipe": "pipe", "pipe_sync": "pipe", "gate": "gate"}
 
-HOOKS = frozenset({
-    "app.start", "app.stop", "settings.changed", "chat.created", "chat.deleted", "project.created", "project.deleted",
-    "ext.changed",
-    "turn.accept", "turn.start", "input.attachment",
-    "context.contribute",
-    "model.select", "model.request", "model.response",
-    "tools.offer", "tool.permission", "tool.pre", "tool.post", "tool.result", "tool.taint", "tool.error",
-    "reply.complete", "turn.settled", "run.after", "subagent.start", "subagent.stop", "worker.report",
-    "memory.before_write", "memory.written", "memory.deleted", "compaction.before", "compaction.after",
-    "approval.requested", "approval.resolved",
-    "job.fired", "job.done", "schedule.tick",
-    "channel.inbound", "channel.outbound", "file.written", "review.accepted", "notify",
-    "coding.tool.pre", "coding.tool.post",
-})
+
+class HookContractError(ValueError):
+    """A hook was called by the wrong method, or a payload or a handler's return does not match the catalog (strict mode only for the last two)."""
 
 
 @dataclass(frozen=True)
@@ -109,6 +109,7 @@ class HookBus:
         self._seq = itertools.count()
         self.loop: asyncio.AbstractEventLoop | None = None  # where `start` runs coroutines; set while the app runs
         self._pending: set[asyncio.Task[None]] = set()
+        self._misused: set[tuple[str, str]] = set()  # (hook, method) pairs already logged
 
     def subscribe(self, hook: str, fn: Callable[[Any], Any], *, owner: str, order: int,
                   priority: int | None = None, timeout_ms: int | None = None,
@@ -127,9 +128,30 @@ class HookBus:
             self._subs.pop(sub.hook, None)
 
     @staticmethod
-    def _known(hook: str) -> None:
+    def _known(hook: str) -> HookSpec:
+        from .catalog import HOOKS  # catalog imports this module, so it cannot be imported at the top
         if hook not in HOOKS:
             raise ValueError(f"unknown hook {hook!r}")
+        return HOOKS[hook]
+
+    def _enter(self, hook: str, method: str, payload: Any) -> None:
+        """What every call does first: the hook must exist and be called the way its kind says; strict mode checks the payload."""
+        spec = self._known(hook)
+        if spec.kind != CALL_KIND[method]:
+            message = f"{hook} is a {spec.kind} hook, called with {method}"
+            if STRICT:
+                raise HookContractError(message)
+            if (hook, method) not in self._misused:
+                self._misused.add((hook, method))
+                log.error(message)
+        if STRICT and (reason := hookschema.problem(spec.payload, spec.payload_of(payload) if spec.payload_of else payload)):
+            raise HookContractError(f"payload of {hook}: {reason}")
+
+    def _returned(self, hook: str, out: Any) -> None:
+        """Strict mode: what a pipe, collect or gate handler returned must be what the catalog says (None is no opinion)."""
+        spec = self._known(hook)
+        if STRICT and out is not None and (reason := hookschema.problem(spec.returns, out)):
+            raise HookContractError(f"return of a {hook} handler: {reason}")
 
     @staticmethod
     def _timeout(sub: Subscription, kind: str) -> float | None:
@@ -150,6 +172,8 @@ class HookBus:
             sub.record(started, e)
             return False, None
         sub.record(started)
+        if kind != "emit":
+            self._returned(sub.hook, out)
         return True, out
 
     def subscriptions(self, owner: str) -> list[Subscription]:
@@ -165,7 +189,7 @@ class HookBus:
                    public: Callable[[Any], Any] | None = None) -> None:
         """`owner` limits the call to one extension's handlers, for the hooks the host fires one extension at a time.
         `public` builds what every handler but a core one receives in place of `payload`, once and only if there is one."""
-        self._known(hook)
+        self._enter(hook, "emit", payload)
         subs = self._subs.get(hook)
         if not subs:
             return
@@ -205,7 +229,7 @@ class HookBus:
     def emit_sync(self, hook: str, payload: Any = None) -> None:
         """emit for synchronous code on any thread. A sync handler has finished before this returns, in order and without
         a timeout, so it must be quick. An async one is started on `loop` and not waited for (dropped when there is none)."""
-        self._known(hook)
+        self._enter(hook, "emit_sync", payload)
         for sub in self._subs.get(hook, ()):
             if sub.muted:
                 continue
@@ -231,6 +255,7 @@ class HookBus:
     def fire(self, hook: str, payload: Any = None) -> None:
         """emit from any thread without waiting for the handlers: a sync route runs in the threadpool, and a slow
         handler must not hold up its response."""
+        self._enter(hook, "fire", payload)
         self.start(self.emit(hook, payload))
 
     def close(self) -> None:
@@ -241,7 +266,7 @@ class HookBus:
 
     async def collect(self, hook: str, payload: Any = None, *, skipped: list[str] | None = None) -> list[Any]:
         """`skipped` gains the owner of every handler that failed or timed out, for a caller that reports what was dropped."""
-        self._known(hook)
+        self._enter(hook, "collect", payload)
         subs = self._subs.get(hook)
         if not subs:
             return []
@@ -253,7 +278,7 @@ class HookBus:
     async def pipe(self, hook: str, value: Any) -> Any:
         """Handlers run one after another, each on the previous result. A handler may return Cancel, which stops the chain
         and is returned as it is."""
-        self._known(hook)
+        self._enter(hook, "pipe", value)
         for sub in self._subs.get(hook, ()):
             ok, out = await self._try(sub, value, "pipe")
             if ok and isinstance(out, Cancel):
@@ -265,12 +290,14 @@ class HookBus:
     def pipe_sync(self, hook: str, value: Any) -> Any:
         """pipe for synchronous code: handlers run inline and must be sync (an async one is skipped). A handler may return
         Deny, which stops the chain and is returned as it is."""
-        self._known(hook)
+        self._enter(hook, "pipe_sync", value)
         for sub in self._subs.get(hook, ()):
             if sub.muted:
                 continue
             ok, out = self._inline(sub, value)
             self._settle(sub, ok)
+            if ok:
+                self._returned(hook, out)
             if isinstance(out, Deny):
                 return out
             if ok and out is not None:
@@ -279,7 +306,7 @@ class HookBus:
 
     async def gate(self, hook: str, payload: Any = None) -> Deny | Ask | None:
         """None means no handler objected, not that the call is allowed: the permission stack still decides."""
-        self._known(hook)
+        self._enter(hook, "gate", payload)
         for sub in self._subs.get(hook, ()):
             ok, out = await self._try(sub, payload, "gate")
             if ok and out is None:

@@ -1,4 +1,4 @@
-"""The `grain` command: `grain ext new | check | dev | test | pack`."""
+"""The `grain` command: `grain ext new | check | dev | test | pack | gen-hooks`."""
 from __future__ import annotations
 
 import argparse
@@ -12,8 +12,9 @@ from typing import Any, Sequence
 
 import httpx
 
+from .. import hookgen
 from ..manifest import ManifestError, load_manifest
-from . import pack as packing
+from . import hookscan, pack as packing
 from .check import CODE_EXCLUDED, check
 from .scaffold import scaffold
 
@@ -69,7 +70,17 @@ def cmd_new(args: argparse.Namespace) -> int:
 
 
 def cmd_check(args: argparse.Namespace) -> int:
+    if args.catalog:
+        problems = hookscan.catalog_problems()
+        print("\n".join([*problems, f"{len(problems)} problem(s) in the hook catalog"]))
+        return 1 if problems else 0
+    if not args.folder:
+        raise SystemExit("grain ext check: give a folder, or --catalog")
     return _print(check(Path(args.folder).resolve(), Path(args.previous) if args.previous else None))
+
+
+def cmd_gen_hooks(args: argparse.Namespace) -> int:
+    return hookgen.main(["--check"] if args.check else [])
 
 
 def cmd_dev(args: argparse.Namespace) -> int:
@@ -121,10 +132,14 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--profile", action="store_true", help="a profile: theme and defaults, no code")
     p.add_argument("--dir", default=".", help="where to create the folder")
     p.set_defaults(run=cmd_new)
-    p = ext.add_parser("check", help="validate an extension folder; exits 1 on an error")
-    p.add_argument("folder")
+    p = ext.add_parser("check", help="validate an extension folder, or the hook catalog; exits 1 on an error")
+    p.add_argument("folder", nargs="?")
     p.add_argument("--previous", help="an earlier extension.json or extension.lock.json to diff the permissions against")
+    p.add_argument("--catalog", action="store_true", help="check the hook catalog against every call site and the generated files, not a folder")
     p.set_defaults(run=cmd_check)
+    p = ext.add_parser("gen-hooks", help="regenerate the hook tables, SDK types and TypeScript types from the hook catalog")
+    p.add_argument("--check", action="store_true", help="exit 1 if a generated file is out of date, change nothing")
+    p.set_defaults(run=cmd_gen_hooks)
     p = ext.add_parser("dev", help="reload the folder in a running dev backend on every edit")
     p.add_argument("folder")
     p.add_argument("--url", default=os.environ.get("PERSONAL_OS_BACKEND_URL", "http://127.0.0.1:8765"))

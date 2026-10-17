@@ -28,10 +28,13 @@ from personal_os.extensions import manifest as manifest_mod  # noqa: E402
 from personal_os.extensions.authoring import cli, pack  # noqa: E402
 from personal_os.extensions.authoring.check import BUILTINS, check  # noqa: E402
 from personal_os.extensions.authoring.scaffold import scaffold  # noqa: E402
-from personal_os.extensions.hooks import HOOKS, Deny, HookBus  # noqa: E402
+from personal_os.extensions.hooks import Deny, HookBus  # noqa: E402
 from personal_os.extensions.host import ExtensionContext, ExtensionHost  # noqa: E402
 
 SCHEMAS = Path(grain_sdk.__file__).parent / "schemas"
+
+
+CHAT = {"id": "c1", "project_id": None}
 
 
 def run(coro: Any) -> Any:
@@ -73,14 +76,6 @@ def test_the_generated_files_are_up_to_date() -> None:
     assert generate.main(["--check"]) == 0
 
 
-def test_the_hook_schema_covers_exactly_the_hooks_the_host_knows() -> None:
-    hooks = json.loads((SCHEMAS / "hooks.schema.json").read_text("utf-8"))["x-hooks"]
-    assert set(hooks) == HOOKS == set(types.HOOK_KINDS)
-    assert set(types.HOOK_KINDS.values()) <= {"emit", "collect", "pipe", "gate"}
-    assert {h for h, k in types.HOOK_KINDS.items() if k == "gate"} == {"tool.pre", "tool.permission", "coding.tool.pre"}
-    assert set(typing.get_args(types.HookName)) == HOOKS
-
-
 def test_the_manifest_schema_matches_the_manifest_parser() -> None:
     schema = json.loads((SCHEMAS / "manifest.schema.json").read_text("utf-8"))
     assert set(schema["properties"]) == manifest_mod._TOP_KEYS
@@ -94,12 +89,7 @@ def test_generated_typeddicts_describe_a_real_manifest_and_payload() -> None:
     hints = typing.get_type_hints(types.Manifest, include_extras=True)
     assert {"id", "apiVersion", "contributes", "hooks"} <= set(hints)
     assert types.Manifest.__required_keys__ == {"id", "name", "version", "apiVersion"}
-    assert {"name", "args", "call_id", "ctx"} == set(types.ToolPrePayload.__annotations__)
-
-
-def test_the_ts_types_name_every_hook() -> None:
-    ts = generate.TS_OUT.read_text("utf-8")
-    assert all(f'"{h}":' in ts for h in HOOKS)
+    assert {"name", "args", "call_id", "ctx"} == set(grain_sdk.hooks.ToolPrePayload.__annotations__)
 
 
 def test_the_sdk_reexports_what_an_extension_needs() -> None:
@@ -356,7 +346,7 @@ def test_a_handler_records_calls_latency_and_errors() -> None:
     bus.subscribe("chat.created", slow, owner="a", order=0)
     bus.subscribe("chat.created", boom, owner="a", order=0)
     for _ in range(3):
-        run(bus.emit("chat.created", {}))
+        run(bus.emit("chat.created", CHAT))
     ok, bad = sorted(bus.subscriptions("a"), key=lambda s: len(s.errors))
     assert (ok.calls, bad.calls) == (3, 3)
     assert all(s >= 0.01 for s in ok.latencies) and len(ok.errors) == 0
@@ -368,7 +358,7 @@ def test_stats_cover_sync_sites_timeouts_and_muting() -> None:
     bus = HookBus()
     sub = bus.subscribe("memory.written", lambda p: 1 / 0, owner="a", order=0, timeout_ms=50)
     for _ in range(5):
-        bus.emit_sync("memory.written", {})
+        bus.emit_sync("memory.written", {"memory": {}, "source": "user"})
     [s] = bus.subscriptions("a")
     assert s.muted and s.calls == 5 and s.errors[-1].startswith("ZeroDivisionError")
     bus2 = HookBus()
@@ -376,7 +366,7 @@ def test_stats_cover_sync_sites_timeouts_and_muting() -> None:
     async def hang(p: Any) -> None:
         await asyncio.sleep(5)
     bus2.subscribe("chat.created", hang, owner="a", order=0, timeout_ms=20)
-    run(bus2.emit("chat.created", {}))
+    run(bus2.emit("chat.created", CHAT))
     assert bus2.subscriptions("a")[0].errors[-1] == "TimeoutError"
     sub.dispose()
 
@@ -385,7 +375,7 @@ def test_the_error_and_latency_windows_are_bounded() -> None:
     bus = HookBus()
     bus.subscribe("chat.created", lambda p: 1 / 0, owner="core", order=0)
     for _ in range(300):
-        bus.emit_sync("chat.created", {})
+        bus.emit_sync("chat.created", CHAT)
     [s] = bus.subscriptions("core")
     assert s.calls == 300 and len(s.latencies) == 200 and len(s.errors) == 10
 
@@ -449,7 +439,7 @@ def test_a_folder_extension_reaches_neither_the_bus_nor_the_app_nor_an_undeclare
     with pytest.raises(KeyError):
         scope.services.get("chat")
     with pytest.raises(ValueError, match="did not declare hook"):
-        scope.on("tool.permission", lambda p: Deny("x"))
+        scope.on("tool.pre", lambda p: Deny("x"))
 
 
 def test_a_tool_the_manifest_does_not_declare_is_refused(ext: Path) -> None:

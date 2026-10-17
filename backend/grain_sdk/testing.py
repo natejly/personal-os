@@ -25,7 +25,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .types import HOOK_KINDS
+from personal_os.extensions.catalog import HOOKS
+
+from .hooks import Fire
 
 SETTINGS: dict[str, Any] = {"autoLearn": False, "baseUrl": "http://127.0.0.1:9/v1", "provider": "custom", "autoTitle": False,
                             "followUps": False, "learnStyle": False, "permissionMode": "manual"}
@@ -42,6 +44,8 @@ class Turn:
 
 
 class Harness:
+    fire: Fire  # the hook-typed face of _fire
+
     def __init__(self, folder: Path | str, settings: dict[str, Any] | None = None) -> None:
         if "PERSONAL_OS_DATA_DIR" not in os.environ:
             os.environ["PERSONAL_OS_DATA_DIR"] = scratch = tempfile.mkdtemp(prefix="grain-harness-")
@@ -55,6 +59,7 @@ class Harness:
         self._tools: list[str] = []
         self._stream = llm.stream_chat
         self.turns: list[Turn] = []
+        self.fire = self._fire
         self.conversation_id: str | None = None
         appmod.db.set_settings({**SETTINGS, **(settings or {})})
         self.scope = self._run(appmod.host.load_dev(Path(folder).resolve(), appmod._ext_ctx))
@@ -77,11 +82,11 @@ class Harness:
         self._loop.close()
 
     # ---- hooks ----
-    def fire(self, hook: str, payload: Any = None) -> Any:
+    def _fire(self, hook: str, payload: Any = None) -> Any:
         """Fire a hook the way the host does and return what its handlers made of it: nothing for an emit, the merged
         list for a collect, the final value for a pipe, and None or the Deny/Ask for a gate."""
         bus = self._app.host.bus
-        match HOOK_KINDS[hook]:
+        match HOOKS[hook].kind:
             case "emit":
                 return self._run(bus.emit(hook, payload))
             case "collect":

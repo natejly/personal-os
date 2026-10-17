@@ -346,30 +346,32 @@ The fail-open default on gating hooks elsewhere is a documented pitfall (section
 
 ### 5.1 App and session
 
-| Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
+<!-- hooks:begin 5.1 -->
+| Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
-| `app.start` | replaces the `@app.on_event("startup")` handlers (`app.py:614`..`10234`, `_modules_startup` `8084`); run after DB and core services exist | `{api}` | none (spawn tasks) | `emit`, topological by `requires` | session start/gateway start in all four agent systems; VS Code `onStartupFinished` |
-| `app.stop` | `_modules_shutdown` (`app.py:8090`) and `_shutdown` | none | none | reverse order; 5 s budget then cancel | session shutdown (pi), SessionEnd (Claude Code), gateway_stop (OpenClaw) |
-| `settings.changed` | `put_settings` (`app.py:993`) after validation | `{keys, old, new}` | none | `emit`; today each side effect is hand-coded by key | ConfigChange (Claude Code) |
-| `chat.created` / `chat.deleted` | `POST /conversations` (`app.py:1457`), delete (`1581`) | `{id, project_id}` | none | `emit` | session.created/deleted (OpenCode) |
-| `project.created` / `project.deleted` | `app.py:1403`, `1419` | `{id}` | none | `emit` | n/a |
-| `ext.changed` | host, when an extension enables or disables | `{id, enabled}` | none | `emit` | installation.updated (OpenCode) |
+| `app.start` | an extension is loaded and the database and core services exist | `{}`. Nothing: a handler starts its loops here. | none | topological by `requires`; the extension's handlers run even while it is disabled | any enabled extension |
+| `app.stop` | the app shuts down, or the extension is unloaded | `{}`. Nothing: a handler finishes its work here. | none | reverse order; 5 s budget, then cancelled; run even while the extension is disabled | any enabled extension |
+| `settings.changed` | after `PUT /settings` has validated and stored a patch | `{keys, old, new}`. Secret keys are listed in `keys`, without values. | none | `emit` | any enabled extension |
+| `chat.created` | a conversation was created | `{id, project_id}` | none | `emit` | any enabled extension |
+| `chat.deleted` | a conversation was deleted | `{id, project_id}` | none | `emit` | any enabled extension |
+| `project.created` | a project was created | `{id}` | none | `emit` | any enabled extension |
+| `project.deleted` | a project was deleted | `{id}` | none | `emit` | any enabled extension |
+| `ext.changed` | an extension was enabled or disabled | `{id, enabled}` | none | `emit`; run even while the extension is disabled | any enabled extension |
+<!-- hooks:end 5.1 -->
 
 ### 5.2 Input
 
-| Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
-|---|---|---|---|---|---|
-| `turn.accept` | `chat()` before `bus.start` (`app.py:4546-4577`) | `{conversation_id, origin, content, attachments}` | `Deny(reason)` / `pipe` content rewrite | `pipe`+`gate`; only built-ins and user extensions with `input:rewrite`. Rewrites never apply to `wake`/internal turns. | input (pi), UserPromptSubmit (Claude Code, block or context only), before_agent_run (OpenClaw) |
-| `turn.start` | after user row persisted (`app.py:2069`) | `{conversation_id, message_id, origin}` | none | `emit` | before_agent_start (pi) |
-| `input.attachment` | `_resolve_attachments` (`app.py:1640`) | `{file}` | extracted text or `Deny` | `pipe` | n/a |
+No hook of this phase exists yet; the ones planned are in 5.16.
 
 ### 5.3 Context and prompt
 
-| Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
+<!-- hooks:begin 5.3 -->
+| Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
-| `context.retrieve` | `asyncio.gather(_doc_hits, _memory_hits, _graph_hits)` (`app.py:2136-2139`) | `{query, vec, project_id, conv_settings}` | list of `{id, text, ref}` (registered as `retrieval_source`, not a free hook) | `collect`; each source already tolerates failure by returning None | n/a |
-| `context.contribute` | `build_context` (`context.py:247`) and the `hints` tuple (`app.py:2560-2574`) | `{conversation_id, project_id}` (ids only: a handler reads what it needs, and raw message text is not handed out) | `Block{text, slot: stable|volatile|tail, share}` | `collect` ordered by priority; fitted by `_fit` (`context.py:49`) to the extension's share; failure drops the block | before_prompt_build (OpenClaw), before_agent_start (pi), additionalContext (Claude Code), heartbeat_prompt_contribution (OpenClaw) |
-| `context.history` | after `compaction.prepare_history` (`app.py:2164`) | `{messages}` | `pipe` over the **volatile segment only** | v2. Rewriting the stable prefix is refused. | context (pi) |
+| `context.contribute` | `build_context`, while the turn's prompt is assembled | `{conversation_id, project_id}`. Ids only: a handler reads what it needs, and raw message text is not handed out. | `Block` | `collect` ordered by priority; fitted to the extension's share of the window; a failure or timeout drops the block and is listed in `context_used.skipped`; a stable block gets 100 ms | any enabled extension |
+<!-- hooks:end 5.3 -->
+
+Retrieval sources are a registration, not a hook: an extension adds a place a turn looks with `api.retrieval_source` (payload `{query, vec, project_id, conv_settings}`, a list of `{id, text, ref}` back; a source that fails returns nothing).
 
 **Cache contract.** The stable prefix is byte-identical per chat and is asserted by a golden test (`stable_hash` is already recorded at `app.py:2574`).
 - A `stable` block must be a pure function of (chat settings, extension settings version, a monotonic extension content version). The extension bumps the version explicitly when its text changes; the host includes the version in `stable_hash` and logs a cache-bust reason. No clocks, counters or random ids. Day-granular text is the existing precedent (`_today_hint`, `app.py:1708`).
@@ -379,12 +381,13 @@ The fail-open default on gating hooks elsewhere is a documented pitfall (section
 
 ### 5.4 Model request and response
 
-| Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
+<!-- hooks:begin 5.4 -->
+| Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
-| `model.select` | `_select_model` in `_chat_stream`, after the router | `{model, effort, reason, tier}`; `reason` is the router's (empty when it did not run), `tier` is `fast` or `default` | `pipe` `(model, effort)` | one winner chain; a model whose provider is not configured is ignored, and so is anything but a `{model, effort}` dict; cost guard and alternative routers use this | before_model_resolve (OpenClaw), PreModelSwitch (Claude Code), virtual models (pi) |
-| `model.request` | `llm.stream_chat` and `llm.complete`, once per call before the first send (retries do not repeat it) | `{model, message_count, tool_names, tokens_est}` (bodies need `conversation:read`) | observe; v2 may add request headers | `emit_sync`: sync handlers run inline on the calling thread, an async one is started on the loop | llm_input (OpenClaw), model_call_started |
-| `model.response` | `llm._emit_usage`, whenever a model call (chat, helper, embedding, image, audio) records its usage | the usage record: `{model, kind, duration_ms, estimated, prompt_tokens, completion_tokens, cached_tokens, cache_write_tokens, reasoning_tokens}` plus `conversation_id`, `project_id`, `tag`, `round` when the caller set them | observe | `emit_sync`, as `model.request`; the core subscriber writes the usage row (`llm.on_usage` is gone). Deliberately not the section 5.4 draft `{usage, finish_reason, latency_ms, cost}` at end of round: the usage record is the one place every model call passes (helpers, embeddings, images, audio too), `duration_ms` is the latency, and the cost is worked out by the subscriber that stores the row | llm_output (OpenClaw), provider_stream_event (pi) |
-| `text.delta` | `buf.append` / `yield "delta"` (`app.py:3165-3171`) | `{text}` | `pipe` (v2) | strict 5 ms budget; off by default | message_sending (OpenClaw), MessageDisplay (Claude Code, display only) |
+| `model.select` | `_select_model` in the chat loop, after the router | `{model, effort, reason, tier}`. `reason` is the router's (empty when it did not run); `tier` is `fast` or `default`. | `ModelSelectPayload` | one winner chain; a model whose provider is not configured is ignored, and so is anything but a `{model, effort}` dict | any enabled extension |
+| `model.request` | `llm.stream_chat` and `llm.complete`, once per call before the first send (retries do not repeat it) | `{model, message_count, tool_names, tokens_est}`. Request bodies are not handed out. | none | `emit_sync`: a sync handler runs inline on the calling thread, an async one is started on the loop | any enabled extension |
+| `model.response` | whenever a model call records its usage | `{model, kind, duration_ms, estimated, prompt_tokens, completion_tokens, cached_tokens, cache_write_tokens, reasoning_tokens, conversation_id?, project_id?, tag?, round?}`. The usage record of one model call (chat, helper, embedding, image or audio); the optional keys are set when the caller knew them. | none | `emit_sync`, as `model.request`; the core subscriber writes the usage row | any enabled extension |
+<!-- hooks:end 5.4 -->
 
 ### 5.5 Tool call (the unification-sensitive phase)
 
@@ -393,64 +396,70 @@ All `U` hooks attach at `dispatch_tool`, which wraps `Toolbox.call` (`tools.py:1
 - Side-effecting calls triggered from a hook must use the same journaled path.
 - `tool_ctx` is shared by reference with parallel read-only warm calls (copies for reads at `app.py:2721`); hook payloads are snapshots for that reason.
 
-| Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
+<!-- hooks:begin 5.5 -->
+| Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
-| `tools.offer` | end of `_schemas_all` (`app.py:2494`/`2506`) | `{names}` | `pipe`: hide names (built-ins/user), or add own | hide-only for third-party | tool exposure modes (pi), hidden tools |
-| `tool.args` **U** | before the gate chain (`app.py:~3430`, after `precheck`) | `{name, args, ctx}` | `pipe` args | **Not in the first cut.** Mutating args after permission resolution would bypass the permission check; this hook is only valid before the gate in each loop, so it needs full loop unification. | tool_call mutate (pi), updatedInput (Claude Code), tool.execute.before (OpenCode) |
-| `tool.permission` **U** | `permrules.resolve` (`app.py:3402`, `permrules.py:1280`) and `autoreview.route` (`app.py:3496-3516`) | `{name, args, danger, mode, tainted}` | `gate`: `Deny`/`Ask` only | built-ins and user extensions with `hooks:gate`; fail toward ask; consistent with "rules can only narrow" (`app.py:3365-3367`) | PermissionRequest/PermissionDenied (Claude Code), permission.asked (OpenCode), before_tool_call (OpenClaw) |
-| `tool.pre` **U** | top of `dispatch_tool`, after the gate chain, before the body | `{name, args, call_id, ctx}`; `ctx` is `{run_id, conversation_id, project_id, agent_id, desk_id, tainted}` | `gate`: `Deny`/`Ask` (cannot mutate args) | fail toward ask | tool_call (pi), PreToolUse (Claude Code), tool.execute.before (OpenCode), before_tool_call (OpenClaw) |
-| `tool.post` **U** | after `checked()` (`tools.py:1140`) / after MCP return | `{name, call_id, run_id, args, result_preview, error, duration_ms}` | observe | `emit` | tool_result (pi), PostToolUse (Claude Code), tool.execute.after (OpenCode) |
-| `tool.result` **U** | before `tool_results.render` (`app.py:3951`, `working.py:253`) | `{name, call_id, run_id, result, tainted}` | `pipe` result for the model (redaction, trimming) | must cover every channel: model-bound text, the UI-only side-channel keys (`images`, `show`, `research`, `dashboard`, `app.py:3881-3885`) and the stored preview. A redactor that misses one channel leaks. | tool_result modify (pi, must also redact structured content), updatedToolOutput (Claude Code) |
-| `tool.taint` | `app.py:3897-3902` | `{name, source}` | add a taint source | `emit`; monotonic, cleared only by the user | n/a |
-| `tool.error` | `_call` exception path (`tools.py:1096-1147`) | `{name, call_id, run_id, error}` | observe | `emit` | PostToolUseFailure (Claude Code) |
+| `tool.pre` | top of `dispatch_tool`, after the gate chain, before the body | `{name, args, call_id, ctx}` | `Deny` or `Ask` | `gate`: `Deny` or `Ask`, never a rewrite of the arguments; fails toward ask | built-in extensions, or one that declares `hooks:gate` |
+| `tool.post` | after the call returns, or fails | `{name, call_id, run_id, args, result_preview, error, duration_ms}`. Strings are credential-scrubbed. | none | `emit` | any enabled extension |
+| `tool.result` | after the call, before the result is rendered for the model | `{name, call_id, run_id, result, tainted}`. The whole result, so every channel a loop later splits out of it is covered. | `ToolResultPayload` | `pipe` over the whole result, so every channel a loop later splits out of it is covered | any enabled extension |
+| `tool.taint` | a call brought third-party text into the run | `{name, source}` | none | `emit`; the taint is monotonic and cleared only by the user | any enabled extension |
+| `tool.error` | a call raised or returned an error | `{name, call_id, run_id, error}` | none | `emit` | any enabled extension |
+<!-- hooks:end 5.5 -->
 
 ### 5.6 Turn and run end
 
-| Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
+<!-- hooks:begin 5.6 -->
+| Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
-| `reply.complete` | after `done` is yielded, before the run's background jobs end | `{message_id, text, tool_events, usage: {tokens, cost, rounds}, trace, taint: {tainted, sources}, outcome}`, a deep copy with the text credential-scrubbed | observe | `emit`; carries the full reply; not fired for a silent wake turn | agent_end (pi, OpenClaw), Stop (Claude Code), session.idle (OpenCode) |
-| `turn.settled` | after `reply.complete`, on the same task: the four former blocks (style learn, auto-learn, follow-ups, title) are now its built-in subscribers (`settled.py`) | a `Settled` record (an extension gets a copy without the live trace and `publish`, with the secret settings blanked and the reply scrubbed): ids, the conversation as loaded, settings, model, user text, reply, error/stopped/gone/internal/in-side/proposal-only flags, taint, tool events, the trace and the run's `publish` | none (jobs submit themselves) | `emit`; each subscriber keeps its own gate conditions; slow work goes to a worker, so the chat is busy only as long as the handlers take. Style learning is subscribed first because auto-learn copies the trace it extends | agent_settled (pi), SessionEnd |
-| `turn.continue` | where desk chaining decides (`_should_chain`, `app.py:4288`) | `{reply, desk}` | `RequestTurn(note)` at most once | v2; loop guard mandatory | agent_before_settle `continue:true` (pi), Stop block (Claude Code) |
-| `run.after` | `RunBus._drive`'s `finally`, before the run is closed (the after-snapshot and the child clean-up are its core subscribers) | `Run` | observe | `emit`; the snapshot subscriber has a 120 s budget (`limits.SNAPSHOT_AFTER_MS`), so a closing run still waits for its after-snapshot | n/a |
-| `subagent.start` / `subagent.stop` | `Subagents.begin` (a queued worker starts when it begins running), `Subagents._finish` | `{child_id, role, parent, exit_reason, error, detached}` (the last three are empty at start; at stop they say why it ended and whether it was a worker) | observe | `emit_sync` | SubagentStart/Stop (Claude Code) |
-| `worker.report` | `workers_mod.build_wake` (feeds `_wake_conversation`, `app.py:4609`) | `{worker, summary}` | add note | `collect` | n/a |
+| `reply.complete` | after `done` is yielded, before the run's background jobs end | `{message_id, text, tool_events, usage, trace, taint, outcome}`. A deep copy with every string credential-scrubbed. | none | `emit`; not fired for a silent wake turn | any enabled extension |
+| `turn.settled` | after `reply.complete`, on the same task | `{conversation_id, message_id, user_message_id, conv, cfg, model, user_text, run_user_texts, reply, error, stopped, gone, internal, in_side, proposal_only, desk_id, tainted, tool_events, used, placeholder_title}`. Delivered as an object with these attributes. An extension gets a copy with the secret settings blanked and the reply scrubbed. | none | `emit`; the built-in subscribers (style learning first, then auto-learn, follow-ups, title) each keep their own conditions; the chat is busy until the handlers return, so slow work goes to a worker | any enabled extension |
+| `run.after` | `RunBus._drive`'s `finally`, before the run is closed | `{run_id, conversation_id, kind, desk_id, turn, status, error, message_id, input, cost, rounds}`. Delivered as the run object, which has these attributes. | none | `emit`; the after-snapshot subscriber has a 120 s budget, so a closing run waits for it | any enabled extension |
+| `subagent.start` | a queued worker or subagent begins running | `{child_id, role, parent, exit_reason, error, detached}`. `exit_reason` and `error` are empty at start; at stop they say why the child ended. `detached` is true for a background worker. | none | `emit_sync` | any enabled extension |
+| `subagent.stop` | a worker or subagent finished | `{child_id, role, parent, exit_reason, error, detached}`. `exit_reason` and `error` are empty at start; at stop they say why the child ended. `detached` is true for a background worker. | none | `emit_sync` | any enabled extension |
+<!-- hooks:end 5.6 -->
 
 ### 5.7 Memory and compaction
 
-| Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
+<!-- hooks:begin 5.7 -->
+| Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
-| `memory.before_write` | `Memories.create/supersede/update`, before the write | `{content, kind, source, project_id}` | `Deny` / `pipe` content: a handler returns the payload with `content` changed, or `Deny(reason)` | `pipe_sync` (sync handlers only); a denial raises `MemoryRefused` (HTTP 403 on the memory routes); built-ins and `memory:gate` only. PII or sensitivity filters. Tainted chats can only save user-backed content already (`tools.py:998`). | n/a |
-| `memory.written` / `memory.deleted` | `Memories.create/supersede/update` after commit; `delete` and `invalidate` fire `memory.deleted` | `{memory, source}` (`memory` is a copy of the row) | observe | `emit_sync` | n/a |
-| `compaction.before` | `Compactor.compact`, before the summarizer is called | `{messages, window, summary}` | `pipe` over the payload: a handler sets `summary` to replace the built-in summarizer's text | one winner (the last to set `summary`); a failing or empty one changes nothing, so the built-in summarizer runs | PreCompact (Claude Code, can block), compaction entries (pi) |
-| `compaction.after` | `Compactor.compact`, after the summary is saved | `{summary}` | observe | `emit` | PostCompact, session.compacted |
+| `memory.before_write` | `Memories.create`, `supersede` and `update`, before the write | `{content, kind, source, project_id}` | `MemoryBeforeWritePayload` or `Deny` | `pipe_sync` (sync handlers only); a denial raises `MemoryRefused` (HTTP 403 on the memory routes) | built-in extensions, or one that declares `memory:gate` |
+| `memory.written` | `Memories.create`, `supersede` and `update`, after commit | `{memory, source}`. `memory` is a copy of the row. | none | `emit_sync` | any enabled extension |
+| `memory.deleted` | `Memories.delete` and `invalidate` | `{memory, source}`. `memory` is a copy of the row. | none | `emit_sync` | any enabled extension |
+| `compaction.before` | `Compactor.compact`, before the summarizer is called | `{messages, window, summary}`. A handler returns the payload with `summary` set to replace the built-in summarizer's text. | `CompactionBeforePayload` | one winner (the last to set `summary`); a failing or empty one changes nothing, so the built-in summarizer runs | any enabled extension |
+| `compaction.after` | `Compactor.compact`, after the summary is saved | `{summary}` | none | `emit` | any enabled extension |
+<!-- hooks:end 5.7 -->
 
 ### 5.8 Approvals
 
-| Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
+<!-- hooks:begin 5.8 -->
+| Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
-| `approval.requested` | `RunStore.open_approval`, when the card is newly opened | `{call_id, tool, args_digest, run_id}` | observe | `emit_sync`. Used by Telegram and notifiers. Not mutable: first-decision-wins and `args_digest` binding are security invariants. | permission.asked (OpenCode) |
-| `approval.resolved` | `RunStore.decide`, when this call won the decision | `{call_id, decision, by}` | observe | `emit_sync` | permission.replied |
+| `approval.requested` | `RunStore.open_approval`, when the card is newly opened | `{call_id, tool, args_digest, run_id}` | none | `emit_sync`; not mutable: first-decision-wins and the `args_digest` binding are security invariants | any enabled extension |
+| `approval.resolved` | `RunStore.decide`, when this call won the decision | `{call_id, decision, by}` | none | `emit_sync` | any enabled extension |
+<!-- hooks:end 5.8 -->
 
 No hook may decide an approval. A channel extension relays the user's decision through the same `POST /approvals/{call_id}` route (`app.py:5542`), exactly as Telegram does now.
 
 ### 5.9 Background and schedule
 
-| Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
+<!-- hooks:begin 5.9 -->
+| Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
-| `job.fired` | `_launch_job` and `_launch_desk_job`, once the run (or desk) has started | `{job_id, kind, trigger}`; `trigger` is the fire's own (`dir`, `mail`, `calendar`, `clock+dir`), else `manual` or `clock` | observe | `emit` | heartbeat (OpenClaw) |
-| `job.done` | the run task's done callback (`_job_finished`), after the row is final and `job_finished` is on the app topic; desk jobs have no such callback | `{job_id, run_id, outcome}`; `outcome` is the run row's status | observe | `emit` | n/a |
-| `schedule.tick` | manifest `job(every=...)` | `{name}` | none | minimum interval 60 s, visible in dev panel | Raycast interval commands, monitors (Claude Code) |
-| trigger kinds | registration, not a hook | `TriggerAdapter.poll()` | fires `job` | replaces the closed kind set in `jobs.py` | n/a |
+| `job.fired` | `_launch_job` and `_launch_desk_job`, once the run (or desk) has started | `{job_id, kind, trigger}`. `trigger` is the fire's own (`dir`, `mail`, `calendar`, `clock+dir`), else `manual` or `clock`. | none | `emit` | any enabled extension |
+| `job.done` | the run task's done callback, after the row is final | `{job_id, run_id, outcome}`. `outcome` is the run row's status. | none | `emit` | any enabled extension |
+<!-- hooks:end 5.9 -->
+
+Trigger kinds are a registration, not a hook: a `TriggerAdapter.poll()` fires `job`, replacing the closed kind set in `jobs.py`.
 
 ### 5.10 Channels and I/O
 
-| Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
+<!-- hooks:begin 5.10 -->
+| Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
-| `channel.inbound` | adapter calls `chat()`/`steer_run()` (`_telegram_turn`, `app.py:10172`) | `{channel, sender, text, files}` | adapter-owned | owner check stays in the adapter's `_call` | inbound_claim, message_received (OpenClaw), channels (Claude Code) |
-| `channel.outbound` | after `done` (`_push_wake_reply`, `app.py:4071`; `telegram_bridge.push`, `4744`) | `{channel, text, files}` | `pipe` text, or `Cancel` | last-wins is rejected: chained | message_sending, reply_payload_sending (OpenClaw) |
-| `file.written` | `chat_files.record_*`, `Workspace.on_save` (`app.py:646-647`) | `{path, owner, kind}` | observe | `emit`; generalizes the one-slot `on_save` / `on_chunks` callables | file.edited, FileChanged |
-| `review.accepted` | `Docs.accept` (`docs.py:864`), `accept_outputs` (`app.py:10026`) | `{kind, id}` | observe | `emit` | n/a |
-| `notify` | `api.notify` | `{title, body, target}` | none | published as app-topic event; renderer calls `lib/notify.ts` | Notification (Claude Code), tui.toast |
+| `channel.inbound` | a channel adapter hands the user's message to a chat | `{channel, sender, text, files}` | none | `emit`; the owner check stays in the adapter | any enabled extension |
+| `channel.outbound` | a channel adapter is about to send a reply | `{channel, text, files}`. A handler returns the payload with `text` and `files` changed, or Cancel. | `ChannelOutboundPayload` or `Cancel` | `pipe`, chained (the last handler does not simply win) | any enabled extension |
+<!-- hooks:end 5.10 -->
 
 ### 5.11 UI hooks (frontend)
 
@@ -465,10 +474,12 @@ No hook may decide an approval. A channel extension relays the user's decision t
 
 Reported from Claude Code's own tool calls in Grain-started sessions through the session's `--settings` hooks and a per-session loopback route (section 10.5.5). Distinct from `tool.pre/post`, which see Grain's own tool calls.
 
+<!-- hooks:begin 5.12 -->
 | Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
-| `coding.tool.pre` | `claude_hook` PreToolUse, via `POST /coding-hooks/{session}/pre` | `{session_id, agent, tool, input, cwd, worktree, permission_mode, lifted, call_id?, conversation_id, run_id}`; strings scrubbed, 2 KB each, 16 KB total | `gate`: `Deny`/`Ask` only; strictest of this and the local floor wins; never `allow` or `updatedInput` | 2 s bus budget, 3 s socket timeout; failure, timeout or a bad return becomes `Ask`; with the app unreachable and a gate subscriber at session start the hook asks; `lifted` sessions honor `Deny` only | built-in and user with `hooks:gate` and `coding:read`; third-party only if decision 5 is taken, narrow-only |
-| `coding.tool.post` | PostToolUse, via `POST /coding-hooks/{session}/post` | the pre payload plus `{result_preview, duration_ms}` | observe | `emit`, 1 s hook timeout, never affects the session | any enabled extension with `coding:read` |
+| `coding.tool.pre` | a Grain-started coding session is about to run a tool, via `POST /coding-hooks/{session}/pre` | `{session_id, agent, tool, input, cwd, worktree, permission_mode, lifted, call_id, conversation_id, run_id}`. Strings are credential-scrubbed and cut to 2 KB each, the whole to 16 KB. | `Deny` or `Ask` | `gate`: `Deny` or `Ask`, the strictest of this and the local floor wins; 2 s bus budget, 3 s socket timeout; a failure, timeout or bad return becomes `Ask`; `lifted` sessions honor `Deny` only | built-in extensions, or one that declares `hooks:gate` and `coding:read` |
+| `coding.tool.post` | a coding session finished a tool call, via `POST /coding-hooks/{session}/post` | `{session_id, agent, tool, input, cwd, worktree, permission_mode, lifted, call_id, conversation_id, run_id, result_preview?, duration_ms?}` | none | `emit`, 1 s hook timeout, never affects the session | built-in extensions, or one that declares `coding:read` |
+<!-- hooks:end 5.12 -->
 
 As built (PR 17): the payload has exactly the fields listed, strings credential-scrubbed and cut to 2 KB, the whole cut to 16 KB. A gate subscriber needs `hooks:gate` and `coding:read` in its manifest; a post subscriber needs `coding:read`. The hook sends the per-session key in `X-Grain-Hook-Key`; `GET`/`POST` routes other than the two above never accept it.
 
@@ -498,6 +509,67 @@ Fired only by the plan-execute-verify loop (section 10.10.4); the default loop f
 |---|---|---|---|---|---|
 | `loop.plan` | after the plan is parsed and validated, before the first step | `{run_id, conversation_id, steps: [{title, done_when}]}`, each string credential-scrubbed | observe | `emit` | extensions with `conversation:read` |
 | `loop.verify` | after each verify call | `{run_id, conversation_id, attempt, ok, gaps}` | observe | `emit` | extensions with `conversation:read` |
+
+### 5.16 Planned hooks
+
+Not in `HOOKS`, so a manifest cannot declare or subscribe to them: none of them fires today. Each is added to the catalog (a `HookSpec`, a call site, a generated table) by the PR that implements it. The rows are the design as drafted; line references are against an older main.
+
+| Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
+|---|---|---|---|---|---|
+| `turn.accept` | `chat()` before `bus.start` (`app.py:4546-4577`) | `{conversation_id, origin, content, attachments}` | `Deny(reason)` / `pipe` content rewrite | `pipe`+`gate`; only built-ins and user extensions with `input:rewrite`. Rewrites never apply to `wake`/internal turns. | input (pi), UserPromptSubmit (Claude Code, block or context only), before_agent_run (OpenClaw) |
+| `turn.start` | after user row persisted (`app.py:2069`) | `{conversation_id, message_id, origin}` | none | `emit` | before_agent_start (pi) |
+| `input.attachment` | `_resolve_attachments` (`app.py:1640`) | `{file}` | extracted text or `Deny` | `pipe` | n/a |
+| `context.history` | after `compaction.prepare_history` (`app.py:2164`) | `{messages}` | `pipe` over the **volatile segment only** | v2. Rewriting the stable prefix is refused. | context (pi) |
+| `text.delta` | `buf.append` / `yield "delta"` (`app.py:3165-3171`) | `{text}` | `pipe` (v2) | strict 5 ms budget; off by default | message_sending (OpenClaw), MessageDisplay (Claude Code, display only) |
+| `tools.offer` | end of `_schemas_all` (`app.py:2494`/`2506`) | `{names}` | `pipe`: hide names (built-ins/user), or add own | hide-only for third-party | tool exposure modes (pi), hidden tools |
+| `tool.args` **U** | before the gate chain (`app.py:~3430`, after `precheck`) | `{name, args, ctx}` | `pipe` args | **Not in the first cut.** Mutating args after permission resolution would bypass the permission check; this hook is only valid before the gate in each loop, so it needs full loop unification. | tool_call mutate (pi), updatedInput (Claude Code), tool.execute.before (OpenCode) |
+| `tool.permission` **U** | `permrules.resolve` (`app.py:3402`, `permrules.py:1280`) and `autoreview.route` (`app.py:3496-3516`) | `{name, args, danger, mode, tainted}` | `gate`: `Deny`/`Ask` only | built-ins and user extensions with `hooks:gate`; fail toward ask; consistent with "rules can only narrow" (`app.py:3365-3367`) | PermissionRequest/PermissionDenied (Claude Code), permission.asked (OpenCode), before_tool_call (OpenClaw) |
+| `turn.continue` | where desk chaining decides (`_should_chain`, `app.py:4288`) | `{reply, desk}` | `RequestTurn(note)` at most once | v2; loop guard mandatory | agent_before_settle `continue:true` (pi), Stop block (Claude Code) |
+| `worker.report` | `workers_mod.build_wake` (feeds `_wake_conversation`, `app.py:4609`) | `{worker, summary}` | add note | `collect` | n/a |
+| `schedule.tick` | manifest `job(every=...)` | `{name}` | none | minimum interval 60 s, visible in dev panel | Raycast interval commands, monitors (Claude Code) |
+| `file.written` | `chat_files.record_*`, `Workspace.on_save` (`app.py:646-647`) | `{path, owner, kind}` | observe | `emit`; generalizes the one-slot `on_save` / `on_chunks` callables | file.edited, FileChanged |
+| `review.accepted` | `Docs.accept` (`docs.py:864`), `accept_outputs` (`app.py:10026`) | `{kind, id}` | observe | `emit` | n/a |
+| `notify` | `api.notify` | `{title, body, target}` | none | published as app-topic event; renderer calls `lib/notify.ts` | Notification (Claude Code), tui.toast |
+
+### 5.17 Equivalents
+
+What the cataloged hooks correspond to elsewhere (the generated tables above leave this column out, because the feature docs do not name other products).
+
+| Hook | Equivalents |
+|---|---|
+| `app.start` | session start/gateway start in all four agent systems; VS Code `onStartupFinished` |
+| `app.stop` | session shutdown (pi), SessionEnd (Claude Code), gateway_stop (OpenClaw) |
+| `settings.changed` | ConfigChange (Claude Code) |
+| `chat.created` | session.created/deleted (OpenCode) |
+| `chat.deleted` | session.created/deleted (OpenCode) |
+| `project.created` | n/a |
+| `project.deleted` | n/a |
+| `ext.changed` | installation.updated (OpenCode) |
+| `context.contribute` | before_prompt_build (OpenClaw), before_agent_start (pi), additionalContext (Claude Code), heartbeat_prompt_contribution (OpenClaw) |
+| `model.select` | before_model_resolve (OpenClaw), PreModelSwitch (Claude Code), virtual models (pi) |
+| `model.request` | llm_input (OpenClaw), model_call_started |
+| `model.response` | llm_output (OpenClaw), provider_stream_event (pi) |
+| `tool.pre` | tool_call (pi), PreToolUse (Claude Code), tool.execute.before (OpenCode), before_tool_call (OpenClaw) |
+| `tool.post` | tool_result (pi), PostToolUse (Claude Code), tool.execute.after (OpenCode) |
+| `tool.result` | tool_result modify (pi, must also redact structured content), updatedToolOutput (Claude Code) |
+| `tool.taint` | n/a |
+| `tool.error` | PostToolUseFailure (Claude Code) |
+| `reply.complete` | agent_end (pi, OpenClaw), Stop (Claude Code), session.idle (OpenCode) |
+| `turn.settled` | agent_settled (pi), SessionEnd |
+| `run.after` | n/a |
+| `subagent.start` | SubagentStart/Stop (Claude Code) |
+| `subagent.stop` | SubagentStart/Stop (Claude Code) |
+| `memory.before_write` | n/a |
+| `memory.written` | n/a |
+| `memory.deleted` | n/a |
+| `compaction.before` | PreCompact (Claude Code, can block), compaction entries (pi) |
+| `compaction.after` | PostCompact, session.compacted |
+| `approval.requested` | permission.asked (OpenCode) |
+| `approval.resolved` | permission.replied |
+| `job.fired` | heartbeat (OpenClaw) |
+| `job.done` | n/a |
+| `channel.inbound` | inbound_claim, message_received (OpenClaw), channels (Claude Code) |
+| `channel.outbound` | message_sending, reply_payload_sending (OpenClaw) |
 
 ## 6. Customization and authoring tooling
 
@@ -534,7 +606,7 @@ Extensions fill **fixed named slots** and set **design tokens**; they do not rea
 
 As built (PR 15). Not yet built, the rows above still stand: `new` registering the folder (`dev` does it); recent redacted payloads in the dev panel; frontend hot reload with registry disposal (no loader for a packed renderer half until PR 17; built-ins use plain Vite HMR); slot items in the generated types (no slots exist yet); the harness reusing the Playwright e2e fixture (it runs in process against a scratch data dir and a scripted model instead).
 - `grain` is a console script (`personal_os.extensions.authoring.cli`). `new` writes a working extension (a tool, a context block, a migration, a renderer stub and two tests) or, with `--profile`, just a manifest; 
-- `backend/grain_sdk/schemas/manifest.schema.json` and `hooks.schema.json` are the one source. `python -m grain_sdk.generate` writes `grain_sdk/types.py` (TypedDicts, `HOOK_KINDS`) and `packages/ext-sdk/index.d.ts`; a test fails when either is stale or when the hook schema and `HOOKS` disagree.
+- `backend/grain_sdk/schemas/manifest.schema.json` is the source of the manifest type: `python -m grain_sdk.generate` writes `grain_sdk/types.py` and `packages/ext-sdk/index.d.ts`, and a test fails when either is stale. The hook payload types come from the hook catalog (PR 20, section 10.9).
 - `dev` polls the folder and asks a backend started with `GRAIN_EXT_DEV=1` (the only way code is loaded from a folder in this phase) to load or reload it: `ExtensionHost.load_folder` imports `extension.py` into a package namespace of its own that is dropped on dispose, `reload` is unload plus load, and routers are served under `/ext/<id>/` by one dispatcher. The frontend half of a built-in keeps using Vite HMR; there is no loader for a packed renderer half yet.
 - The dev panel is Settings > Advanced > Developer (with Developer tools on), over `GET /dev/extensions`: contributions, per-hook call count, p50 and p95, the last ten errors, muted handlers, and enable, disable, reload.
 - `check` reports an error for a bad manifest, an id or tool name the app already has, an unmet `requires`, an undeclared or unknown `api.on` hook, `api.context` without `context.contribute`, any `personal_os` import (or a relative import out of the folder), a missing or mis-shaped `activate`, tool declarations and tool schema files that do not lint, authority-claiming text, and a profile that carries code. It warns about unused hooks and lists permissions, hooks and tools added or removed against `extension.lock.json` (or `--previous`). `pack` runs `check`, bundles `extension.tsx` with esbuild, and writes the lock (content hash, declared permissions, hooks and tools, per-file hashes; tests are not hashed).
@@ -1429,6 +1501,16 @@ Repo gates: backend suite, `npm run typecheck`, `npm test`, no new red.
 #### 10.9.5 Not in this step
 
 Hook payload versioning beyond `since` and `deprecated`; generated documentation for contribution types or the manifest; a runtime hook-introspection API for extensions.
+
+#### 10.9.6 As built (PR 20)
+
+- The registry is `extensions/catalog.py` (`HookSpec`, one TypedDict per payload, `HOOKS`, `CATALOG_VERSION`), not `hooks.py`: its return types (`Block`, `Deny`) import modules that import the bus. `HookBus` looks the spec up lazily; the manifest, the host and `grain ext check` import `HOOKS` from the catalog. `HookSpec.permission` is a tuple (`coding.tool.pre` needs `hooks:gate` and `coding:read`), `equivalents` is left out (code does not name other products; the research doc keeps them in 5.17), and `payload_of` is a field (`turn.settled` and `run.after` deliver objects).
+- `extensions/hookschema.py` converts a TypedDict to JSON Schema (and checks a value with it); `extensions/hookgen.py` is the one generator (`grain ext gen-hooks [--check]`); `authoring/hookscan.py` is the call-site scan, the dead-hook check and the golden-file check, run by `grain ext check --catalog` and `tests/test_hook_catalog.py`. The golden file is `extensions/hooks.golden.json`: a new hook adds its line there. A call that forwards its own parameter (`def fire(self, hook, payload)`) is skipped by the scan, because its callers are scanned. The scan also checks that a `sync` hook is fired through `emit_sync`/`pipe_sync` and no other is.
+- The bus raises `HookContractError` under `GRAIN_HOOKS_STRICT=1` (`conftest.py` sets it) for a payload or a handler return that does not match, and for a call of the wrong kind; outside strict mode the wrong-kind call is logged once and runs. Tests of the bus mechanics that use stand-in payloads switch it off with a patch.
+- The manifest check rejects a hook whose `permission` is not among the manifest's `permissions`; `api.on` no longer repeats it. `subscribers: "builtin"` is refused to a folder-loaded extension (no hook uses it yet).
+- Dead names (10.6.1): `turn.accept`, `turn.start`, `input.attachment`, `tools.offer`, `tool.permission`, `worker.report`, `schedule.tick`, `file.written`, `review.accepted` and `notify` have no call site and are removed from `HOOKS`; their rows are in 5.16, and none was implemented here. With them gone `input:rewrite` gates no hook, so it no longer counts as a permission that needs the user's grant at enable. `app.stop` is emitted with `{}` instead of `None`.
+- Outputs: the tables between the `hooks:begin` markers of sections 5.1, 5.3 to 5.10 and 5.12, `docs/extension-hooks.md`, `backend/grain_sdk/hooks.py` (payload TypedDicts, `HookId`, the `On` and `Fire` overloads that type `api.on` and `Harness.fire`) and `src/shared/extensionHooks.ts` (`HookId`, `HookPayloads`, `HookKinds`; `ExtensionHookStats.hook` in `shared/types.ts` is a `HookId`, so a renamed hook fails `npm run typecheck`). Hook types left the `@grain/ext-sdk` package; it holds the manifest type.
+- Not built: `host.ts` does not import the generated file (nothing in `UiApi.on` carries a backend hook payload), and the sections 5.13 to 5.15 tables stay hand-written until PRs 18, 19 and 21 add their hooks to the catalog.
 
 ### 10.10 PR 21: Swappable agent loop
 

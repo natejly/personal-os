@@ -124,7 +124,7 @@ def test_stopping_disposes_the_subscriptions() -> None:
 def test_fire_does_nothing_before_the_loop_runs() -> None:
     host, seen = ExtensionHost(), []
     host._add(declared("chat.created")).on("chat.created", seen.append)
-    host.fire("chat.created", {"id": "c"})
+    host.fire("chat.created", {"id": "c", "project_id": None})
     assert seen == []
 
 
@@ -139,7 +139,7 @@ def test_fire_from_a_thread_returns_at_once_and_a_slow_handler_finishes_later() 
     async def main() -> float:
         async with host.lifespan(None):  # type: ignore[arg-type]
             t0 = time.monotonic()
-            await asyncio.to_thread(host.fire, "chat.created", {"id": "c"})
+            await asyncio.to_thread(host.fire, "chat.created", {"id": "c", "project_id": None})
             fired_in = time.monotonic() - t0
             assert not done.is_set()
             await asyncio.to_thread(done.wait, 3)
@@ -161,7 +161,7 @@ def test_pending_fired_tasks_are_cancelled_at_shutdown() -> None:
 
     async def main() -> None:
         async with host.lifespan(None):  # type: ignore[arg-type]
-            host.fire("chat.created", {})
+            host.fire("chat.created", {"id": "c", "project_id": None})
             await asyncio.sleep(0.05)
     asyncio.run(main())
     assert state["cancelled"]

@@ -34,12 +34,14 @@ from . import auth_breaker, blobs, system_access
 from .bounds import clamp_limit
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
 from . import branch_summary, compaction, side_question, followups, otel_export, replay_trace, router, thinking_summary, titles
-from . import chatlink, duel, fsx, labels, request_log, runtime, toolcore
+from . import chatlink, config, duel, fsx, guards, labels, permissions_routes, request_log, runtime, setting_sources, toolcore
 from .fsx import sensitive_reason
 from . import context_map
 from .dispatch import Contact, dispatch_tool
 from .context import Block, build_context, cite_slim, compose, context_taints, estimate_tokens, layout_messages, prefix_hash, retrieval_query
 from .drive_backup import DriveBackup
+from .config import PRIVATE_SETTINGS
+from .presets import Presets
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .kinds import is_internal
 from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_index, has_readable_text, safe_upload_name
@@ -73,7 +75,7 @@ from .cowork import (AUTO_RESUME_FROM, internal_kind, AUTONOMY, CHAT_HANDOFF, CO
                      OUTPUT_KINDS, checklist_items, mail_parts, origin_report, parked_report)
 from .workspace import MAX_PREVIEW, OVERLAY as WORKSPACE_OVERLAY, Workspace, WorkspaceError
 from .envs import WorkEnv
-from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
+from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, Plans,
                     normalize_plan, parse_plan_edits, plan_voided_by_taint, taint_expected)
 from .chat_files import ChatFiles, router as chat_files_router
 from .filesnap import FileSnapshots, router as filesnap_router
@@ -96,7 +98,7 @@ from .commands import expand as expand_command
 from .commands import expand_history as expand_commands
 from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
 from .attention import for_job, for_run
-from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, args_digest
+from .runs import ACTIVE, PROMOTE_STEP, STATUSES, CoreRefused, Run, RunBus, RunStore, Topic, args_digest
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
 from .style import WritingStyle
@@ -402,26 +404,9 @@ _seed_hidden_modules()
 
 
 def settings() -> dict[str, Any]:
-    """Defaults < stored rows, with the permissions store (permissions.py) both nested under `permissions` and flattened
-    to the top level, so a reader that still does cfg.get("tools") sees the same value as permissions.get(cfg, "tools")."""
-    stored = db.get_settings()
-    perms = permissions.load(stored)
-    out = {**llm.DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if k not in permissions.KEYS},
-           **perms, permissions.KEY: {"version": permissions.VERSION, **perms}}
-    if out.get("providers"):
-        # The first usable provider stands in for the old single "active" one, for readers that still want a baseUrl and key
-        # (speech to text, usage import, setup cards); a model's own provider is resolved per call (provider_route.resolve).
-        first = next(iter(provider_route.usable(out)), None)
-        out.update(provider=first["kind"] if first else None, baseUrl=first["baseUrl"] if first else "", apiKey=first["apiKey"] if first else "")
-    if not out.get("defaultModel"):  # nothing saved: the provider's chat default (a saved model always wins)
-        out["defaultModel"] = providers.default_model(out)
-    # The legacy helper and fast knobs are the low and medium tiers (providers.TASK_TIERS); a stored value still wins.
-    if not out.get("extractionModel"):
-        out["extractionModel"] = providers.tier_model(out, "low")
-    if not out.get("fastModel"):
-        fast = providers.tier_model(out, "medium")
-        out["fastModel"] = "" if fast == out["defaultModel"] else fast  # same model: nothing for Auto to route to
-    return out
+    """config.assemble, with the project's and chat's permission overrides of the turn this task is running (permissions.SCOPE)."""
+    out = config.assemble(db)
+    return permissions.overlay(out, *scope) if (scope := permissions.SCOPE.get()) else out
 
 
 ensure_embedding_model(local=False)  # a key already saved before any embedding model was
@@ -674,6 +659,15 @@ toolbox = Toolbox(memories, graph, documents, settings, extensions=list(host.ext
                   work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, desks=desks, workspace=workspace, filesnap=filesnap,
                   conversations=convos, extundo=extundo, bus=host.bus, prechecks=host.prechecks)
+
+
+def _core_refusal(tool: str, args: dict[str, Any], where: dict[str, Any]) -> str | None:
+    """RunStore.open_approval's last look: the core guards, judged from the desk and chat the card belongs to."""
+    refusal = guards.run_core_guards(toolbox, {"settings": settings(), **where}, tool, args)
+    return refusal.reason if refusal else None
+
+
+run_store.core_refusal = _core_refusal
 # Which chat each file belongs to (chat_files.py): triggers record uploads, local writes and coding sessions; these hooks the rest.
 chat_files = ChatFiles(db, toolbox.chat_outputs.root if toolbox.chat_outputs is not None else None)
 app.include_router(chat_files_router(chat_files))
@@ -992,8 +986,6 @@ def health() -> dict[str, Any]:
     return {"ok": True}
 
 
-# Google OAuth material lives in settings but never leaves the backend.
-PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "modelCaps", "telegramState", "extDefaults", "toolSourceHashes"}
 # Readable through /settings, but only writable through its own route: a plain PUT would replace the
 # whole nested dict and silently drop the signal switches and exclusion lists.
 SETTINGS_READ_ONLY = {"googleTasksSync", "voice", "runtime",
@@ -1063,6 +1055,18 @@ def _store_permissions(fn: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[s
 
 
 toolbox.permission_store = _store_permissions
+
+
+def _shipped_presets() -> list[tuple[str, str, dict[str, Any]]]:
+    """The permission presets the loaded profiles and extensions ship (contributes.presets): (owner id, owner name, preset)."""
+    return [(m.id, m.name, doc) for scope in host.extensions.values() if (m := scope.manifest) for doc in m.contributes.get("presets", ())]
+
+
+presets = Presets(db, toolbox, mcp_store, projects, convos, _shipped_presets, _rule_tool_known, host.fire)
+_ext_ctx.preset_keys = presets.keys
+app.include_router(permissions_routes.router(presets, lambda project_id, conversation_id: config.effective(
+    db, toolbox, config.declared_settings(s.manifest for s in host.extensions.values()), project_id=project_id, conversation_id=conversation_id,
+    runtime={slot: r.to_dict() for slot, r in host.runtime.resolve_all(runtime_selections.scopes(conversation_id, project_id)).items()})))
 HOST_LIST_SETTINGS = set(permissions.HOST_LISTS)
 
 
@@ -1123,6 +1127,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
     if perm:
         permissions.save(db, perm)
     db.set_settings({**clean, **ext_values})
+    with db.tx() as c:
+        setting_sources.stamp(c, [*clean, *ext_values, *ext_secrets], "user")
     for k, v in ext_secrets.items():
         if v:
             db.secrets.set(k, v)
@@ -1596,6 +1602,7 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
     settings_patch = patch.get("settings") if isinstance(patch.get("settings"), dict) else {}
     if isinstance(settings_patch.get("tools"), dict):
         settings_patch["tools"] = toolbox.cap_modes(settings_patch["tools"])  # external and schedules tools top out at ask
+    settings_patch.pop("permissions", None)  # set by the preset routes only: a PATCH must not loosen a chat unasked
     settings_patch.pop("deskId", None)  # bound and unbound by the cowork routes only, never by a settings PATCH
     settings_patch.pop("runtime", None)  # chosen only through PUT /runtime, which checks the provider and confirms any loosening
     settings_patch.pop("workingFolder", None)  # retired: the file tools reach the whole Mac, so a chat needs no folder bound to it
@@ -2104,6 +2111,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     if not conv:
         yield "error", {"message": "Conversation not found"}
         return
+    project = projects.get(conv["project_id"]) if conv["project_id"] else None
+    permissions.SCOPE.set((project["permissions"] if project else None, conv["settings"].get("permissions")))  # settings() overlays them
     cfg = settings()
     is_wake = bool(body.wake)  # a hidden turn that hands finished workers' reports to the assistant: not the user's words
     internal = is_wake or bool(body.kind)  # any turn whose "user" text is the backend's: never titled from, learned from or trusted as the user's
@@ -2249,7 +2258,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     runtime.slots.run_id.set(run.run_id if run else None)
     llm.session_affinity.set(conv_id)  # every turn of this chat shares one cached prefix: keep it on one replica
     await pricing.ensure(cfg)
-    project = projects.get(conv["project_id"]) if conv["project_id"] else None
     cspan = tracer.start("context", "Assemble context", {"model": model, **({"routed_from": "auto", "reason": routed[1]} if routed else {})})
     # A follow-up is searched with the turn before it in view; the model still sees user_text as typed.
     # On the new-message path conv["messages"] is the history before this turn; on resume and regenerate it ends
@@ -2477,8 +2485,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 return False
             bridge_n += 1
             uid = f"{am['id']}:bridge{bridge_n}"
-            run.store.open_approval(uid, run.run_id, name, args, conversation_id=conv_id, message_id=am["id"], forced=forced,
-                                    desk_id=run.desk_id, danger=spec.danger if spec else "external")
+            try:
+                run.store.open_approval(uid, run.run_id, name, args, conversation_id=conv_id, message_id=am["id"], forced=forced,
+                                        desk_id=run.desk_id, danger=spec.danger if spec else "external")
+            except CoreRefused:
+                return False
             if proposal_only(run) or (run.kind in UNATTENDED_KINDS and (
                     pmode != "manual" or permissions.get(cfg, "unattendedApprovals") == "deny")):
                 # Nobody is at the keyboard: refuse with a recorded reason, as the reply loop does, rather than park.
@@ -2562,6 +2573,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # True while a plan is being drafted and nothing consequential may run. 'plan' autonomy starts a
         # desk here; an approved plan ends it, which is why `active_plan` turns it off.
         planning = bool(desk) and autonomy == "plan" and active_plan is None
+        propose_without_run = autonomy == "propose" and run is None
+        tool_ctx["planning"], tool_ctx["propose_without_run"] = planning, propose_without_run  # guards.plan_block
         # Cards this desk let go of and the user has since answered: told to this turn once, then marked.
         parked_note = ""
         if desk_id:
@@ -3516,18 +3529,15 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # ---- plan mode, in priority order. Each rule can only ever make a call ask or stop;
                 # none of them can turn a card off, so this is a narrowing of the gate above.
                 if c["name"] != PLAN_TOOL and raw_mode != "off":
-                    if planning and danger not in PLAN_SAFE_DANGER:
-                        # Nothing consequential runs while a plan is being drafted. `forced` rides out
-                        # on the tool_call event so the UI can say "blocked while planning" rather than
-                        # "turned off".
-                        mode, forced, blocked_reason = "off", True, PLAN_BLOCKED
-                    elif autonomy == "propose" and danger == "external":
-                        # A propose-only desk never performs an external action: it is filed as a proposal below
-                        # (`proposing`), or refused when there is no run to file it under.
-                        if run is None:
-                            mode, forced, blocked_reason = "off", True, PROPOSE_ONLY
-                    elif plan_voided_by_taint(danger, bool(tool_ctx["tainted"]),
-                                              taint_expected(active_plan, tool_ctx["taint_sources"])):
+                    # Nothing consequential runs while a plan is being drafted. `forced` rides out
+                    # on the tool_call event so the UI can say "blocked while planning" rather than
+                    # "turned off". A propose-only desk never performs an external action: it is filed as a proposal
+                    # below (`proposing`), or refused when there is no run to file it under.
+                    blocked_reason = guards.plan_refusal(danger, planning=planning, propose_without_run=propose_without_run)
+                    if blocked_reason:
+                        mode, forced = "off", True
+                    elif (autonomy != "propose" or danger != "external") and plan_voided_by_taint(
+                            danger, bool(tool_ctx["tainted"]), taint_expected(active_plan, tool_ctx["taint_sources"])):
                         # Taint the approved plan did not predict voids the pre-approval: ask, and
                         # consume nothing. A web fetch is included: its address can carry what was read.
                         # Checked before any claim, because a step burnt on a call the
@@ -3643,7 +3653,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # known safe to the reviewer; allow_all lifts every card except the floor (a destructive shell command, a settings change)
                 # and the user's own questions. In manual the floor alone is routed: destructiveDefaults blocks or asks. Refusals, proposals
                 # and approved plan steps are already settled, so they never get here.
-                floor = toolbox.floor_action(c["name"], args, tool_ctx, kind="items" if mcp_is(c["name"]) and (_mcp_event(c["name"]) or {}).get("destructive") else None)
+                floor_hint = "items" if mcp_is(c["name"]) and (_mcp_event(c["name"]) or {}).get("destructive") else None
+                floor = toolbox.floor_action(c["name"], args, tool_ctx, kind=floor_hint)
                 if (pmode != "manual" or floor) and claimed is None and pre is None and not proposing and mode != "off":
                     explicit = explicit_modes.get(c["name"]) if not mcp_is(c["name"]) else ("on" if raw_mode == "on" else None)
                     locked_spec = bool(spec and toolbox.ask_locked(spec))
@@ -3666,7 +3677,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         question=c["name"] in permrules.STILL_ASK or c["name"] == PLAN_TOOL,
                         floor=floor)
                     if rt == "block":
-                        pre = tools.denied(c["name"], permissions.blocked_reason(toolbox.floor_kind(c["name"], args, tool_ctx) or "items"))
+                        pre = tools.denied(c["name"], guards.floor_text(toolbox, tool_ctx, c["name"], args, floor_hint))
                         _log_mode(c["name"], args, uid, "deny", "destructive", "blocked by destructiveDefaults")
                     elif rt == "run":
                         if mode == "ask":
@@ -3687,6 +3698,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         else:
                             mode, forced = "ask", forced or rt == "review_strict"
                             _log_mode(c["name"], args, uid, "review-ask", "auto-review", "mode: auto", review)
+                if pre is None and mode != "off" and not proposing:
+                    # The core has settled on run or card: its guards refuse what they refuse, then an extension may only narrow.
+                    why, narrowed = await guards.settle(toolbox, tool_ctx, c["name"], args, danger=danger, mode=mode,
+                                                        kind=floor_hint)
+                    if why:
+                        pre = tools.denied(c["name"], why)
+                    elif narrowed and mode == "on" and claimed is None:  # an approved plan step is the user's answer to this very call
+                        mode, forced = "ask", True
                 # A background run never waits on a card. Manual mode keeps unattendedApprovals; in the other modes a card that
                 # survives routing becomes a proposal when the call can be one, else a recorded refusal.
                 if (mode == "ask" and claimed is None and pre is None and not proposing and run is not None and is_background
@@ -3700,9 +3719,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                else "it needs an approval and no one is available to give it in a background run")
                         pre = tools.denied(c["name"], f"refused: {why}")
                         if run.store is not None:
-                            run.store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
-                                                    forced=forced, desk_id=run.desk_id, danger=danger)
-                            run.store.decide(uid, "deny", by="unattended", note=why)
+                            with contextlib.suppress(CoreRefused):  # refused outright: the refusal above stands, no row to record
+                                run.store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
+                                                        forced=forced, desk_id=run.desk_id, danger=danger)
+                                run.store.decide(uid, "deny", by="unattended", note=why)
                 if proposal_only(run) and mode == "ask" and claimed is None and pre is None:
                     # A background run has nobody to answer a card, and only external calls can become proposals.
                     # Opening one here would park the run forever (and every later fire behind it).
@@ -3750,8 +3770,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     store = run.store if run is not None else None
                     mine = False  # whether the row on file is the one this wait opened (a reused id returns the old row)
                     if store is not None:
-                        opened = store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
-                                                     forced=forced, desk_id=run.desk_id, danger=danger, review=review)
+                        try:
+                            opened = store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
+                                                         forced=forced, desk_id=run.desk_id, danger=danger, review=review)
+                        except CoreRefused as refused:  # settle cleared it, so only a context mismatch gets here: a refusal, not a card
+                            opened = None
+                            fut.set_result("deny")
+                            _approval_notes[uid] = str(refused)
                         mine = bool(opened and opened.get("status") == "pending" and opened.get("run_id") == run.run_id
                                     and opened.get("tool") == c["name"] and opened.get("args_digest") == args_digest(args))
                         if not mine:
@@ -3955,6 +3980,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                             # consequential calls lifts with it - otherwise the plan the user just
                             # approved could never be carried out.
                             active_plan, planning = plan, False
+                            tool_ctx["planning"] = False
                             # Drafting is over: the tools held back above are offered again.
                             tool_schemas = _schemas()
                         # Published on the run's own stream, so a window that was watching the card
@@ -7875,6 +7901,8 @@ def google_tasklists() -> Any:
 
 @host.on_start
 async def _modules_startup() -> None:
+    if not guards.sealed():
+        log.critical("%s before start: every tool call will be refused", guards.TAMPERED)
     await host.start()
 
 

@@ -38,6 +38,12 @@ export interface ManifestContributesRuntimeItem {
   meta?: Record<string, unknown>
 }
 
+export interface ManifestContributesPresetsItem {
+  id: string
+  name: string
+  description?: string
+}
+
 export interface ManifestContributes {
   tools?: ManifestContributesToolsItem[]
   routes?: ManifestContributesRoutes
@@ -50,6 +56,7 @@ export interface ManifestContributes {
   defaults?: Record<string, unknown>
   layout?: Record<string, unknown>
   runtime?: ManifestContributesRuntimeItem[]
+  presets?: ManifestContributesPresetsItem[]
 }
 
 export interface ManifestHooksValue {
@@ -375,6 +382,16 @@ export interface ApprovalResolvedPayload {
   by: string
 }
 
+/** A permission preset was applied at a scope. Key names only, never values. */
+export interface PresetAppliedPayload {
+  preset_id: string
+  scope: string
+  scope_id: string
+  changed_keys: string[]
+  loosened: string[]
+  by: string
+}
+
 /** A scheduled job started. */
 export interface JobFiredPayload {
   job_id: string
@@ -492,7 +509,7 @@ export interface SandboxRefusedPayload {
   run_id: string | null
 }
 
-export type HookName = "app.start" | "app.stop" | "settings.changed" | "chat.created" | "chat.deleted" | "project.created" | "project.deleted" | "ext.changed" | "turn.accept" | "turn.start" | "input.attachment" | "context.contribute" | "model.select" | "model.request" | "model.response" | "tools.offer" | "tool.permission" | "tool.pre" | "tool.post" | "tool.result" | "tool.taint" | "tool.error" | "reply.complete" | "turn.settled" | "run.after" | "subagent.start" | "subagent.stop" | "worker.report" | "memory.before_write" | "memory.written" | "memory.deleted" | "compaction.before" | "compaction.after" | "approval.requested" | "approval.resolved" | "job.fired" | "job.done" | "schedule.tick" | "channel.inbound" | "channel.outbound" | "file.written" | "review.accepted" | "notify" | "coding.tool.pre" | "coding.tool.post" | "runtime.changed" | "runtime.fallback" | "sandbox.refused"
+export type HookName = "app.start" | "app.stop" | "settings.changed" | "chat.created" | "chat.deleted" | "project.created" | "project.deleted" | "ext.changed" | "turn.accept" | "turn.start" | "input.attachment" | "context.contribute" | "model.select" | "model.request" | "model.response" | "tools.offer" | "tool.permission" | "tool.pre" | "tool.post" | "tool.result" | "tool.taint" | "tool.error" | "reply.complete" | "turn.settled" | "run.after" | "subagent.start" | "subagent.stop" | "worker.report" | "memory.before_write" | "memory.written" | "memory.deleted" | "compaction.before" | "compaction.after" | "approval.requested" | "approval.resolved" | "preset.applied" | "job.fired" | "job.done" | "schedule.tick" | "channel.inbound" | "channel.outbound" | "file.written" | "review.accepted" | "notify" | "coding.tool.pre" | "coding.tool.post" | "runtime.changed" | "runtime.fallback" | "sandbox.refused"
 
 /** The payload each hook's handlers receive. */
 export interface HookPayloads {
@@ -531,6 +548,7 @@ export interface HookPayloads {
   "compaction.after": CompactionAfterPayload
   "approval.requested": ApprovalRequestedPayload
   "approval.resolved": ApprovalResolvedPayload
+  "preset.applied": PresetAppliedPayload
   "job.fired": JobFiredPayload
   "job.done": JobDonePayload
   "schedule.tick": ScheduleTickPayload

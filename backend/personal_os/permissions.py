@@ -22,7 +22,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextvars import ContextVar
 from typing import Any, Callable
+
+from . import setting_sources
 
 
 VERSION = 2  # 2: permissionMode added; migrate_mode stamps it
@@ -144,6 +147,91 @@ def get(cfg: dict[str, Any] | None, key: str) -> Any:
     return DEFAULTS[key]
 
 
+# ---------------------------------------------------------------- scopes narrower than global
+# The keys a project or a chat may override (projects.permissions and conversations.settings.permissions).
+SCOPED_KEYS = ("permissionMode", "permissionRules", "alwaysAsk", "destructiveDefaults", "unattendedApprovals")
+# The project's and the chat's overrides for the turn running on this task. settings() overlays them, so every gate that
+# reads a permission value from the settings sees the value in force for the turn without being changed.
+SCOPE: ContextVar[tuple[dict[str, Any] | None, dict[str, Any] | None] | None] = ContextVar("permission_scope", default=None)
+
+
+def narrowed(key: str, wider: Any, own: Any) -> Any:
+    """A narrower scope's value on top of the wider one: rules and always-ask entries are added to the wider scope's (a
+    narrower scope cannot remove a global deny); the other keys replace it."""
+    if key == "permissionRules":
+        return {k: list(dict.fromkeys([*((wider or {}).get(k) or []), *((own or {}).get(k) or [])])) for k in ("allow", "ask", "deny")}
+    if key == "alwaysAsk":
+        return list(dict.fromkeys([*(wider or []), *(own or [])]))
+    return own
+
+
+def overlay(cfg: dict[str, Any], *scopes: dict[str, Any] | None) -> dict[str, Any]:
+    """A copy of the settings with each scope's overrides applied, widest scope first (project, then chat)."""
+    out = {**cfg, KEY: dict(cfg.get(KEY) or {})}
+    for scope in scopes:
+        for key in SCOPED_KEYS:
+            if scope and key in scope:
+                out[key] = out[KEY][key] = narrowed(key, get(out, key), scope[key])
+    return out
+
+
+# ---------------------------------------------------------------- what loosens
+MODE_RANK = {"off": 0, "ask": 1, "on": 2}  # a tool's mode, by how much runs without a card
+_ORDERS = {"permissionMode": ("manual", "auto", "allow_all"), "unattendedApprovals": ("deny", "ask"),
+           "docEditMode": ("review", "apply"), "destructive": ("block", "ask", "allow")}
+
+
+def _raised(order: str) -> Callable[[Any, Any], bool]:
+    return lambda old, new: _ORDERS[order].index(new) > _ORDERS[order].index(old)
+
+
+def _rules_loosen(old: dict[str, Any], new: dict[str, Any]) -> bool:
+    """A removed deny or ask rule, or an added allow rule."""
+    def side(d: dict[str, Any], k: str) -> set[str]:
+        return set((d or {}).get(k) or ())
+    return bool(side(old, "deny") - side(new, "deny") or side(old, "ask") - side(new, "ask") or side(new, "allow") - side(old, "allow"))
+
+
+def _destructive_loosen(old: dict[str, Any], new: dict[str, Any]) -> bool:
+    old, new = {**DEFAULTS["destructiveDefaults"], **old}, {**DEFAULTS["destructiveDefaults"], **new}
+    return any(_raised("destructive")(old[k], new[k]) for k in DESTRUCTIVE_KINDS)
+
+
+def _tools_loosen(old: dict[str, Any], new: dict[str, Any]) -> bool:
+    """Any tool whose mode rises; a tool the old map does not mention counts as off, so a rise is never missed."""
+    return any(MODE_RANK.get(m, 0) > MODE_RANK.get(old.get(n), 0) for n, m in new.items())
+
+
+def _opens(old: bool, new: bool) -> bool:
+    return bool(new) and not old
+
+
+def _closes(old: bool, new: bool) -> bool:
+    return bool(old) and not new
+
+
+def _grows(old: list[str], new: list[str]) -> bool:
+    return bool(set(new) - set(old))
+
+
+# Per key: does going from the old value to the new one let more run without a card, or more reach out? A key with no
+# comparator must be named in NEUTRAL (a test enforces it), so a new permission key cannot be forgotten here.
+COMPARATORS: dict[str, Callable[[Any, Any], bool]] = {
+    "tools": _tools_loosen, "alwaysAsk": lambda old, new: bool(set(old) - set(new)), "permissionRules": _rules_loosen,
+    "permissionMode": _raised("permissionMode"), "destructiveDefaults": _destructive_loosen,
+    "unattendedApprovals": _raised("unattendedApprovals"), "fetchAllowlist": _grows, "docEditMode": _raised("docEditMode"),
+    "shellNetwork": _opens, "shellRegistryAccess": _opens, "shellAllowedDomains": _grows, "deskShellAuto": _opens,
+    "browserEnabled": _opens, "browserAllowlist": _grows, "deskDoneGate": _closes, "deskSelfReview": _closes,
+    "allowAllConnections": _opens, "trustExternalContent": _opens, "codingRoute": _closes,
+}
+NEUTRAL = frozenset({"autoReviewModel", "codingAgent"})  # a model name and a harness choice open nothing
+
+
+def loosening(current: dict[str, Any], proposed: dict[str, Any]) -> list[str]:
+    """The keys of `proposed` that open more than `current` does. Keys `current` lacks read as their defaults."""
+    return [k for k, new in proposed.items() if k in COMPARATORS and COMPARATORS[k](current.get(k, DEFAULTS[k]), new)]
+
+
 def _json(raw: Any) -> Any:
     try:
         return json.loads(raw)
@@ -157,6 +245,11 @@ def _nested(raw: Any) -> dict[str, Any]:
     except ValueError:
         return {}
     return {k: x for k, x in v.items() if k in KEYS} if isinstance(v, dict) else {}
+
+
+def stored_keys(stored: dict[str, Any]) -> set[str]:
+    """The permission keys the settings rows hold a value for, as opposed to the ones that read as their default."""
+    return set(_nested(stored.get(KEY))) | {k for k in KEYS if k in stored}
 
 
 def load(stored: dict[str, Any]) -> dict[str, Any]:
@@ -196,19 +289,24 @@ def migrate_mode(c: sqlite3.Connection) -> None:
     _write(c, {"permissionMode": "auto"})
 
 
-def update(db: Any, fn: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:
+def update(db: Any, fn: Callable[[dict[str, Any]], dict[str, Any]], *, source: str = "user",
+           prev: dict[str, Any] | None = None) -> dict[str, Any]:
     """Read-modify-write under one write lock: `fn` gets every current value and returns the keys to change.
-    For a grant that merges into a map or list (an approval card's always / allow host) so a concurrent save is not lost."""
+    For a grant that merges into a map or list (an approval card's always / allow host) so a concurrent save is not lost.
+    The keys it writes are recorded as coming from `source` (setting_sources.py); `prev` maps a key to the value it replaced."""
     with db.tx() as c:
         c.execute("BEGIN IMMEDIATE")
         stored = {r[0]: _json(r[1]) for r in c.execute(
             f"SELECT key, value FROM settings WHERE key IN ({','.join('?' * (len(KEYS) + 1))})", (KEY, *KEYS)).fetchall()}
-        return _write(c, fn(load(stored)))
+        patch = fn(load(stored))
+        out = _write(c, patch)
+        setting_sources.stamp(c, [k for k in patch if k in KEYS], source, prev=prev)
+        return out
 
 
-def save(db: Any, patch: dict[str, Any]) -> dict[str, Any]:
+def save(db: Any, patch: dict[str, Any], *, source: str = "user", prev: dict[str, Any] | None = None) -> dict[str, Any]:
     """Write already-validated values (see validate)."""
-    return update(db, lambda _cur: patch)
+    return update(db, lambda _cur: patch, source=source, prev=prev)
 
 
 def validate(key: str, v: Any, *, cap_modes: Callable[[dict[str, Any]], dict[str, Any]] | None = None,

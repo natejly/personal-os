@@ -1,16 +1,15 @@
 import { useEffect, useState } from 'react'
 import type { Profile, ProfileHeld } from '@shared/types'
 import { api } from '../../lib/api'
-import { MODES } from '../../lib/permissionMode'
+import { heldText } from '../../lib/presets'
 import { slotNoun } from '../../lib/runtime'
 import { applyProfileThemes } from '../../extensions/profiles'
 import { useStore } from '../../store'
 import Switch from './Switch'
 import { Sec } from './shared'
 
-const modeName = (id: string): string => MODES.find((m) => m.id === id)?.label ?? id
 const describe = (c: ProfileHeld): string =>
-  c.key.startsWith('runtime:') ? `choose ${c.set} for the ${slotNoun(c.key.slice('runtime:'.length)).toLowerCase()} (${(c.diff ?? []).join('; ')})` : `set permissions from ${modeName(c.was)} to ${modeName(c.set)}`
+  c.key.startsWith('runtime:') ? `choose ${c.set} for the ${slotNoun(c.key.slice('runtime:'.length)).toLowerCase()} (${(c.diff ?? []).join('; ')})` : `change ${heldText(c)}`
 
 /**
  * Profiles: each switch applies or reverts a bundle of defaults at once, so it is an action and not part of the Save draft.

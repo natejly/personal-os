@@ -1372,6 +1372,20 @@ Effective config
 
 Repo gates: backend suite, `npm run typecheck`, `npm test`, the permissions and settings e2e specs, no new red against the baseline.
 
+#### 10.8.5a As built (PR 19)
+
+What exists: `guards.py` (guards, `run_core_guards`, `settle`, `extension_gate`, `sealed`), `presets.py` and `permissions_routes.py` (`/permissions/presets*`, `/config/effective`), `config.py` (`assemble`, `effective`, `render`), `setting_sources.py`, `permissions.overlay/loosening/COMPARATORS`, `Toolbox.explain`, `db.ReadOnlyDatabase`, migration 46 (`permission_presets`, `setting_sources`, `projects.permissions`), the `preset.applied` hook, `contributes.presets` and `defaults.permissionPreset`, `grain config dump` (in `extensions/authoring/cli.py`, the existing dispatcher), and in the renderer the Presets section, `PresetEditor` and the Effective configuration group.
+
+Where it differs from the text above, on purpose:
+- The scoped overrides reach the gates through `permissions.SCOPE`, a context variable the chat loop sets: `settings()` overlays it, so even the toolbox's own reads (`floor_action`, `always_ask`) see the chat's values. Workers started from the turn inherit it.
+- The guard chain is the same in every loop only through `guards.settle`, called once a loop's own chain has settled on run or card (the loops keep their ordering, cards and reviewer). `permrules.resolve` still folds the hardline and deny verdicts into the loops' modes; `guards` calls the same `permrules.evaluate`, so there is one implementation of each rule. A plan step already approved no longer runs a call Manual mode blocks (`floor_block` refuses it).
+- `protected_paths` judges the path arguments of the file tools (`mac.protected_reason`, a desk's own workspace exempt); the shell is judged by the sandbox and the hardline list, as before.
+- `tool.permission` is now fired (it was a name without a call site) by `guards.settle`; the payload is `{name, args, danger, mode, tainted}`.
+- A tamper is detected and fails closed with a critical log line; there is no inbox note, because the inbox has no extension-raised notes yet.
+- Presets write only what changes (a key that already holds the preset's value keeps its source), and an added allow rule at any scope counts as loosening even when a deny rule beats it.
+- `grain config dump` lists the tool catalog a bare Toolbox knows (the core tools) plus every tool with an explicit mode; a running backend lists extension tools too. `runtime` holds each runtime slot's resolution on a running backend and is an empty object in `grain config dump`.
+- The composer pill is unchanged: it still opens Settings > Permissions, where a preset applies to everywhere, the open project or the open chat.
+
 #### 10.8.6 Not in this step
 
 A preset that creates a connector grant or sets `on` for a connector tool; presets for schedules' `allowed_tools` or an agent's `tool_modes`; editing settings from the effective view; a UI for `setting_sources` history; per-run preset overrides; changing what any individual permission key means.

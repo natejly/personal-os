@@ -960,13 +960,20 @@ class Toolbox:
     def effective(self, global_tools: dict[str, Any], project_tools: dict[str, str] | None, chat_tools: dict[str, str] | None,
                   agent_tools: dict[str, str] | None = None) -> dict[str, str]:
         """Resolve chat override → agent override → project override → global setting → tool default, alwaysAsk tools capped at ask."""
-        out: dict[str, str] = {}
+        return {name: v["mode"] for name, v in self.explain(global_tools, project_tools, chat_tools, agent_tools).items()}
+
+    def explain(self, global_tools: dict[str, Any], project_tools: dict[str, str] | None, chat_tools: dict[str, str] | None,
+                agent_tools: dict[str, str] | None = None) -> dict[str, dict[str, str]]:
+        """`effective` with where each mode came from: {tool: {"mode", "source"}}, source one of chat, agent, project, global, default."""
+        out: dict[str, dict[str, str]] = {}
         for name, spec in self.specs.items():
-            v = self._norm(global_tools.get(name)) or self.default_mode(spec)
-            v = self._norm((project_tools or {}).get(name)) or v
-            v = self._norm((agent_tools or {}).get(name)) or v
-            v = self._norm((chat_tools or {}).get(name)) or v
-            out[name] = "ask" if v == "on" and self.ask_locked(spec) else v
+            v, source = self._norm(global_tools.get(name)), "global"
+            if v is None:
+                v, source = self.default_mode(spec), "default"
+            for layer, tools in (("project", project_tools), ("agent", agent_tools), ("chat", chat_tools)):
+                if (own := self._norm((tools or {}).get(name))):
+                    v, source = own, layer
+            out[name] = {"mode": "ask" if v == "on" and self.ask_locked(spec) else v, "source": source}
         return out
 
     def explicit(self, global_tools: dict[str, Any], project_tools: dict[str, str] | None, chat_tools: dict[str, str] | None,

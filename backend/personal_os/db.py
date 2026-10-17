@@ -727,6 +727,21 @@ class Database:
                 )
 
 
+class ReadOnlyDatabase(Database):
+    """An existing data folder opened for reading only (`grain config dump`): no folders made, no migrations, no repair,
+    no secret migration, and every connection refuses a write."""
+
+    def __init__(self, data_dir: str | Path):
+        self.data_dir = Path(data_dir)
+        self.path = self.data_dir / "personal-os.db"
+        self.secrets = SecretStore(self.data_dir)
+
+    def connect(self) -> sqlite3.Connection:
+        c = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=30, check_same_thread=False)
+        c.row_factory = sqlite3.Row
+        return c
+
+
 def row_to_dict(r: sqlite3.Row | None, json_fields: tuple[str, ...] = ()) -> dict[str, Any] | None:
     if r is None:
         return None

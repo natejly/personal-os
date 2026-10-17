@@ -266,7 +266,7 @@ export default function SettingsModal(): JSX.Element {
           <div className="settings-pane" id="settings-pane" role="tabpanel" aria-labelledby={`settings-tab-${tab}`}>
             {tab === 'model' && <ModelTab {...tabProps} onProvidersChanged={providersChanged} />}
             {tab === 'usage' && <UsageTab />}
-            {tab === 'permissions' && <PermissionsTab {...tabProps} />}
+            {tab === 'permissions' && <PermissionsTab {...tabProps} onPresetApplied={providersChanged} />}
             {tab === 'integrations' && <IntegrationsTab {...tabProps} onSaveCreds={saveGoogleCreds} />}
             {tab === 'agents' && <AgentsTab {...tabProps} />}
             {tab === 'memory' && <MemoryTab {...tabProps} {...gp} />}

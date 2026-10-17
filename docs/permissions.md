@@ -61,8 +61,48 @@ Narrower scopes stay where they are, because they are scopes, not copies:
 - the in-memory session grants (`permrules.SESSION`, "allow for this chat session")
 - `desks.autonomy` and `jobs.desk_autonomy`, `jobs.allowed_tools` (these only narrow)
 
+A project (`projects.permissions`) and a chat (`conversations.settings.permissions`) may also override five keys:
+`permissionMode`, `permissionRules`, `alwaysAsk`, `destructiveDefaults` and `unattendedApprovals`. During a turn
+`settings()` overlays them (`permissions.overlay`), so every gate that reads `permissions.get(cfg, key)` sees the value in
+force for that chat. The mode, destructive defaults and unattended setting replace the wider value; rules and Always ask
+entries are added to the wider scope's, so a narrower scope cannot remove a global deny. Network, host-list and trust
+keys are global only. They change through presets (below), never through a chat settings PATCH.
+
 A tool's mode resolves chat, then agent, then project, then global, then the tool's default. A deny rule refuses over
 any of them, and an Always ask tool tops out at ask whatever a map says.
+
+## Presets
+
+A preset is a named bundle of permission settings (`grain.preset/1`, `presets.py`): the mode, rules, Always ask list,
+destructive and unattended defaults, tool modes by group, danger tier or name, connector modes (`ask` or `off`, never
+`on`: a connector grant stays the user's) and the network keys. Built in: Auto, Manual, Allow everything and Read only
+(Manual with every tool that writes, runs, reaches out or schedules turned off, which also covers tools added later).
+Create, duplicate, edit, rename, delete, export and import them in Settings > Permissions > Presets. A profile or
+extension may ship presets under `contributes.presets`; they list as read-only, and `defaults.permissionPreset` applies
+one when the profile is turned on.
+
+Applying works at global, project or chat scope (`POST /permissions/presets/{id}/apply`). The backend computes what would
+change against what is in force at that scope. If anything allows more (`permissions.loosening`: a higher mode, a removed
+deny or ask rule, an added allow rule, a tool going off to on, a removed Always ask entry, a raised destructive default, an
+opened network key) the answer is 409 with the diff and a `diff_hash`; only a second call quoting that hash applies it.
+Anything stricter or equal applies at once. Importing never applies. A preset has no field for the floor, the hardline
+list, protected paths or the two trust switches, so it cannot loosen them, and they hold under every preset.
+
+## Core guards
+
+`guards.py` holds the refusals that need no card: an unknown or switched-off tool, a proposal-only run, plan mode, the
+hardline list, deny rules, Grain's protected paths and a destructive call Manual mode blocks. They run in a fixed order,
+first in `dispatch_tool` (before any `tool.pre` handler), again when a loop settles a call on run or card, and in
+`RunStore.open_approval`, which refuses to open a card for a call they refuse. The extension hook `tool.permission` runs
+only after them and can only narrow (deny, or turn a run into a card). No extension is handed the guards, and `guards.sealed`
+checks at start and on every call that they are unchanged; if not, every call is refused.
+
+## Effective configuration
+
+`GET /config/effective?project_id=&conversation_id=`, `grain config dump [--json] [--project ID] [--chat ID] [--data-dir PATH]`
+and Settings > Advanced > Effective configuration show every setting with its source (`default`, `profile:<id>`, `ext:<id>`,
+`preset:<id>`, `user`, `project`, `chat`), the values it shadows, each tool's mode and where that mode was set, and whether
+each secret is set (never more). The CLI opens the database read-only and needs no server.
 
 ## Allow everything
 

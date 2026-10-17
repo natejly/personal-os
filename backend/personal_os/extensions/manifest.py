@@ -23,15 +23,15 @@ _SEMVER = re.compile(r"\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?")
 _ACTIVATION = re.compile(r"startup|onSchedule|(onView|onCommand|onChannel):.+")
 _TOP_KEYS = {"id", "name", "description", "version", "apiVersion", "kind", "enabled", "activation", "requires", "provides",
              "contributes", "hooks", "permissions", "settings", "data"}
-_CONTRIBUTES = {"tools", "routes", "views", "slots", "settings", "commands", "keybindings", "theme", "defaults", "layout", "runtime"}
+_CONTRIBUTES = {"tools", "routes", "views", "slots", "settings", "commands", "keybindings", "theme", "defaults", "layout", "runtime", "presets"}
 _RUNTIME_KEYS = {"slot", "id", "label", "meta"}
 _HOOK_KEYS = {"priority", "timeoutMs", "onFailure"}
 SETTING_TYPES = ("string", "number", "integer", "boolean", "secret")  # a secret is a string kept in the secret store
 _FIELD = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 _TABLE = re.compile(r"[a-z_][a-z0-9_]*")
-_PROFILE_CONTRIBUTES = {"theme", "defaults"}  # all a profile may contribute: it runs nothing
+_PROFILE_CONTRIBUTES = {"theme", "defaults", "presets"}  # all a profile may contribute: it runs nothing
 _PROFILE_FORBIDDEN = ("requires", "provides", "hooks", "permissions", "settings", "data")
-_DEFAULTS = {"views", "model", "effort", "theme", "permissions", "runtime"}
+_DEFAULTS = {"views", "model", "effort", "theme", "permissions", "permissionPreset", "runtime"}
 PERMISSION_MODES = CHOICES["permissionMode"]
 _THEMES = ("dark", "light", "system")
 _TOKEN = re.compile(r"--[a-z0-9-]+")
@@ -157,6 +157,7 @@ def _contributes(raw: dict[str, Any]) -> dict[str, Any]:
     _theme(c)
     _defaults(c)
     _runtime(c, raw.get("permissions", ()))
+    _presets(c, str(raw.get("id")))
     return c
 
 
@@ -179,7 +180,7 @@ def _check_profile(raw: dict[str, Any]) -> None:
     """A profile has no code: only theme and defaults, which the host reads as data."""
     _check(not (used := [k for k in _PROFILE_FORBIDDEN if raw.get(k)]), f"a profile cannot declare {', '.join(used)}")
     _check(raw.get("activation", ["startup"]) == ["startup"], "a profile has no code to activate")
-    _check(set(_object(raw, "contributes")) <= _PROFILE_CONTRIBUTES, "a profile contributes only theme and defaults")
+    _check(set(_object(raw, "contributes")) <= _PROFILE_CONTRIBUTES, "a profile contributes only theme, defaults and presets")
 
 
 def _theme(c: dict[str, Any]) -> None:
@@ -191,6 +192,24 @@ def _theme(c: dict[str, Any]) -> None:
             _check(_TOKEN.fullmatch(name), f"contributes.theme.{scheme}: {name!r} is not a custom property name")
             _check(isinstance(value, str) and _TOKEN_VALUE.fullmatch(value) and _TOKEN_FUNCTIONS.issuperset(_CALL.findall(value.lower())),
                    f"contributes.theme.{scheme}.{name} must be a plain CSS value")
+
+
+def _presets(c: dict[str, Any], ext_id: str) -> None:
+    """contributes.presets: permission presets (presets.validate) with an id of their own, and defaults.permissionPreset naming one."""
+    from .. import presets
+    items = c.get("presets", [])
+    _check(isinstance(items, list) and all(isinstance(p, dict) and isinstance(p.get("id"), str) and presets.SLUG.fullmatch(p["id"]) for p in items),
+           "contributes.presets must be a list of presets, each with an id of [a-z0-9-]+")
+    _check(len({p["id"] for p in items}) == len(items), "contributes.presets ids must be unique")
+    for p in items:
+        try:
+            presets.validate({**p, "id": f"user:{p['id']}"})
+        except presets.PresetError as e:
+            raise ManifestError(f"contributes.presets.{p['id']}: {e}") from e
+    wanted = c.get("defaults", {}).get("permissionPreset")
+    if wanted is not None:
+        own = {f"profile:{ext_id}:{p['id']}" for p in items}
+        _check(wanted in own or wanted in presets.BUILTINS, "defaults.permissionPreset must name a built-in preset or one of this manifest's presets")
 
 
 def _defaults(c: dict[str, Any]) -> None:

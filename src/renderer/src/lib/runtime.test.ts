@@ -42,9 +42,9 @@ test('tool sources switch on and off per scope with enable and disable lists', (
 })
 
 test('a 409 with a diff asks for a confirmation; any other error does not', () => {
-  const asked = new ApiError('Request failed: Conflict.', { status: 409, detail: { needs_confirm: true, diff: ['Box enforces less: network: partial instead of full'] } })
+  const asked = new ApiError('Request failed: Conflict.', { status: 409, body: { detail: { needs_confirm: true, diff: ['Box enforces less: network: partial instead of full'] } } })
   assert.deepEqual(confirmDiff(asked), ['Box enforces less: network: partial instead of full'])
-  assert.equal(confirmDiff(new ApiError('x', { status: 409, detail: 'plain' })), null)
-  assert.equal(confirmDiff(new ApiError('x', { status: 422, detail: { needs_confirm: true, diff: [] } })), null)
+  assert.equal(confirmDiff(new ApiError('x', { status: 409, body: { detail: 'plain' } })), null)
+  assert.equal(confirmDiff(new ApiError('x', { status: 422, body: { detail: { needs_confirm: true, diff: [] } } })), null)
   assert.equal(confirmDiff(new Error('x')), null)
 })

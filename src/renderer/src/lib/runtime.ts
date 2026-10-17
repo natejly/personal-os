@@ -48,6 +48,6 @@ export function toggleSource(sel: RuntimeSelection | undefined, id: string, on: 
 
 /** The lines a looser choice would loosen, when the backend asked for a confirmation (409 with a diff); null for any other error. */
 export function confirmDiff(e: unknown): string[] | null {
-  const d = e instanceof ApiError && e.status === 409 ? (e.detail as { needs_confirm?: boolean; diff?: string[] } | undefined) : undefined
+  const d = e instanceof ApiError && e.status === 409 ? (e.body as { detail?: { needs_confirm?: boolean; diff?: string[] } } | null)?.detail : undefined
   return d?.needs_confirm && Array.isArray(d.diff) ? d.diff : null
 }

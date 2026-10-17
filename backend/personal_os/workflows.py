@@ -37,9 +37,10 @@ import re
 import time
 from typing import Any, Callable
 
-from . import limits, permrules
+from . import guards, limits, permrules
 from .db import new_id, now
 from .dispatch import dispatch_tool
+from .runs import CoreRefused
 from .tools import ASK_LOCKED_DANGER
 
 log = logging.getLogger(__name__)
@@ -927,6 +928,11 @@ class Engine:
         if perm.refusal:
             raise _StepFailed(f"{name} was refused: {perm.refusal}")
         mode, forced = perm.mode, perm.forced
+        why, narrowed = await guards.settle(self.toolbox, ctx, name, args, danger=spec.danger, mode=mode)
+        if why:
+            raise _StepFailed(f"{name} was refused: {why}")
+        if narrowed and mode == "on":
+            mode, forced = "ask", True
         uid = f"{run['id']}:{step['id']}"
         if mode == "ask" and (forced or step.get("approval") != "required"):
             if not await self._ask(run, ctx, uid + ":call", name, args, forced, spec.danger, stop):
@@ -1064,7 +1070,10 @@ class Engine:
             while (old := self.runs.approval(attempt)) and old["status"] != "pending":
                 n += 1
                 attempt = f"{uid}#{n}"  # a resumed run asks again; the old answer does not carry over
-            self.runs.open_approval(attempt, run["id"], tool, args, conversation_id=run.get("conversation_id"), forced=forced, danger=danger)
+            try:
+                self.runs.open_approval(attempt, run["id"], tool, args, conversation_id=run.get("conversation_id"), forced=forced, danger=danger)
+            except CoreRefused:
+                return False
             self.runs.update(run["id"], status="awaiting_approval")
         self.store.set_step(run["id"], sid, status="waiting_approval", approval_call_id=attempt)
         self.store.set_run(run["id"], status="waiting_approval")

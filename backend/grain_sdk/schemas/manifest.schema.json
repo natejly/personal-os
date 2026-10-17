@@ -54,7 +54,8 @@
         "runtime": {
           "type": "array",
           "items": {"type": "object", "required": ["slot", "id", "label"], "properties": {"slot": {"type": "string"}, "id": {"type": "string"}, "label": {"type": "string"}, "meta": {"type": "object"}}}
-        }
+        },
+        "presets": {"type": "array", "items": {"type": "object", "required": ["id", "name"], "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}}}}
       }
     },
     "hooks": {

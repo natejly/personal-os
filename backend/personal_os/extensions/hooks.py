@@ -48,7 +48,7 @@ HOOKS = frozenset({
     "tools.offer", "tool.permission", "tool.pre", "tool.post", "tool.result", "tool.taint", "tool.error",
     "reply.complete", "turn.settled", "run.after", "subagent.start", "subagent.stop", "worker.report",
     "memory.before_write", "memory.written", "memory.deleted", "compaction.before", "compaction.after",
-    "approval.requested", "approval.resolved",
+    "approval.requested", "approval.resolved", "preset.applied",
     "job.fired", "job.done", "schedule.tick",
     "channel.inbound", "channel.outbound", "file.written", "review.accepted", "notify",
     "coding.tool.pre", "coding.tool.post",

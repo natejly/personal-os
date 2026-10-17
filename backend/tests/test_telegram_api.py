@@ -310,8 +310,8 @@ def test_an_approval_answered_by_a_button_is_decided_as_telegram() -> None:
     wait_until(lambda: "Started a new conversation." in fake.sent(), "the new conversation")
     conv = target()
     appmod.run_store.create("run-fake", conv, "chat", {})
-    appmod.run_store.open_approval("call-tg-1", "run-fake", "send_email", {"to": "a@b.co", "subject": "Hi"}, conversation_id=conv)
-    appmod.run_store.open_approval("call-orphan", "run-fake", "send_email", {"to": "gone@b.co"}, conversation_id=conv)  # no run waits on it
+    appmod.run_store.open_approval("call-tg-1", "run-fake", "gmail_draft", {"to": "a@b.co", "subject": "Hi"}, conversation_id=conv)
+    appmod.run_store.open_approval("call-orphan", "run-fake", "gmail_draft", {"to": "gone@b.co"}, conversation_id=conv)  # no run waits on it
 
     async def waiter() -> asyncio.Future:
         return asyncio.get_running_loop().create_future()
@@ -322,7 +322,7 @@ def test_an_approval_answered_by_a_button_is_decided_as_telegram() -> None:
                                                ended_at=None, live=True, replied=False, status="awaiting_approval",
                                                message_id=None, error=None))
     ask = wait_until(lambda: next((p for p in fake.of("sendMessage") if p["text"].startswith("Approval needed [")), None), "the approval card")
-    assert "Send email" in ask["text"] and "to=a@b.co" in ask["text"] and not any("gone@b.co" in t for t in fake.sent())
+    assert "Gmail draft" in ask["text"] and "to=a@b.co" in ask["text"] and not any("gone@b.co" in t for t in fake.sent())
     approve = ask["reply_markup"]["inline_keyboard"][0][0]
     assert approve["text"] == "Approve" and approve["callback_data"].startswith("ap:")
     fake.push({"update_id": 7000, "callback_query": {"id": "cq-1", "from": {"id": OWNER}, "data": approve["callback_data"],
@@ -334,16 +334,16 @@ def test_an_approval_answered_by_a_button_is_decided_as_telegram() -> None:
     assert fake.of("answerCallbackQuery") == [{"callback_query_id": "cq-1", "text": "Approved."}]
     assert fake.of("editMessageText") == [{"chat_id": OWNER, "message_id": 31, "text": ask["text"] + "\n\nApproved."}]
     assert appmod.run_store.approval("call-orphan")["status"] == "pending"
-    hist = j("GET", "/approvals/history?tool=send_email")["items"]
+    hist = j("GET", "/approvals/history?tool=gmail_draft")["items"]
     assert hist and hist[0]["decision"] == "allow_once" and "(telegram)" in hist[0]["note"]
 
 
 def test_the_approval_route_defaults_to_the_user_and_only_accepts_the_telegram_marker() -> None:
     appmod.run_store.create("run-fake-ui", None, "chat", {})
-    appmod.run_store.open_approval("call-ui-1", "run-fake-ui", "send_email", {"to": "a@b.co"})
+    appmod.run_store.open_approval("call-ui-1", "run-fake-ui", "gmail_draft", {"to": "a@b.co"})
     j("POST", "/approvals/call-ui-1", {"decision": "deny"})
     assert appmod.run_store.approval("call-ui-1")["decided_by"] == "user"
-    appmod.run_store.open_approval("call-ui-2", "run-fake-ui", "send_email", {"to": "a@b.co"})
+    appmod.run_store.open_approval("call-ui-2", "run-fake-ui", "gmail_draft", {"to": "a@b.co"})
     j("POST", "/approvals/call-ui-2", {"decision": "deny", "via": OLD}, expect=422)
     j("POST", "/approvals/call-ui-2", {"decision": "deny", "via": "carrier-pigeon"}, expect=422)
     assert appmod.run_store.approval("call-ui-2")["status"] == "pending"

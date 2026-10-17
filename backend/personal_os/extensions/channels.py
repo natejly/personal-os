@@ -52,21 +52,28 @@ class ChatService:
 
 
 class Channels:
-    """The adapters extensions registered, by name."""
+    """The adapters extensions registered, by name. Iterating and looking up skip the adapters whose extension is disabled."""
 
     def __init__(self) -> None:
-        self._adapters: dict[str, ChannelAdapter] = {}
+        self._adapters: dict[str, tuple[ChannelAdapter, Callable[[], bool]]] = {}
 
     def __iter__(self) -> Iterator[ChannelAdapter]:
-        return iter(list(self._adapters.values()))
+        return iter([a for a, enabled in list(self._adapters.values()) if enabled()])
 
     def __getitem__(self, name: str) -> ChannelAdapter:
-        return self._adapters[name]
+        adapter, enabled = self._adapters[name]
+        if not enabled():
+            raise KeyError(name)
+        return adapter
 
-    def register(self, adapter: ChannelAdapter) -> Disposable:
+    def registered(self) -> list[ChannelAdapter]:
+        """Every adapter, disabled ones included, for a check that must not depend on the extension's current state."""
+        return [a for a, _ in self._adapters.values()]
+
+    def register(self, adapter: ChannelAdapter, enabled: Callable[[], bool]) -> Disposable:
         if adapter.name in self._adapters:
             raise ValueError(f"channel {adapter.name!r} is already registered")
-        self._adapters[adapter.name] = adapter
+        self._adapters[adapter.name] = adapter, enabled
         return Disposable(lambda: self._adapters.pop(adapter.name, None))
 
     def owner_of(self, conv_id: str | None) -> ChannelAdapter | None:
@@ -74,5 +81,5 @@ class Channels:
         return next((a for a in self if a.is_texts_conversation(conv_id)), None)
 
     async def stop(self) -> None:
-        for adapter in self:
+        for adapter in self.registered():
             await adapter.stop()

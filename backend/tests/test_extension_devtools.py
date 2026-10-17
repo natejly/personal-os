@@ -53,9 +53,10 @@ def edit(root: Path, name: str, fn: Any) -> None:
     (root / name).write_text(fn((root / name).read_text("utf-8")), "utf-8")
 
 
-def declare(root: Path, *hooks: str) -> None:
+def declare(root: Path, *hooks: str, permissions: tuple[str, ...] = ()) -> None:
     m = json.loads((root / "extension.json").read_text("utf-8"))
     m["hooks"] |= {h: {} for h in hooks}
+    m["permissions"] += permissions
     (root / "extension.json").write_text(json.dumps(m), "utf-8")
 
 
@@ -95,7 +96,7 @@ def test_enable_and_disable_write_the_hidden_views_and_fire_ext_changed(monkeypa
 
 
 def test_loading_a_folder_registers_its_tools_and_hooks_and_reload_picks_up_edits(ext: Path) -> None:
-    declare(ext, "tool.pre")
+    declare(ext, "tool.pre", permissions=("hooks:gate",))
     edit(ext, "extension.py", lambda t: t + '\n    api.on("tool.pre", lambda p: None)\n')
     got = load(ext).json()
     assert got["reloadable"] and got["tools"] == ["sample_note"] and got["folder"] == str(ext.resolve())
@@ -225,6 +226,7 @@ def test_harness_drives_context_prefix_and_the_tool(ext: Path) -> None:
 
 
 def test_harness_prefix_check_needs_two_turns_and_catches_a_moving_prefix(ext: Path) -> None:
+    declare(ext, permissions=("prompt:inject",))
     edit(ext, "extension.py", lambda t: t.replace("slot=\"volatile\")", "slot=\"stable\")").replace("Contribution(f\"The user", "Contribution(f\"{count()}: The user"))
     with Harness(ext) as h:
         h.chat("one")
@@ -238,7 +240,7 @@ def test_harness_prefix_check_needs_two_turns_and_catches_a_moving_prefix(ext: P
 
 
 def test_harness_fire_follows_the_hook_kind(ext: Path) -> None:
-    declare(ext, "tool.pre", "model.select", "chat.created")
+    declare(ext, "tool.pre", "model.select", "chat.created", permissions=("hooks:gate",))
     edit(ext, "extension.py", lambda t: t + HOOKED)
     with Harness(ext) as h:
         verdict = h.fire("tool.pre", {"name": "shell_run", "args": {}, "call_id": "c", "ctx": {}})

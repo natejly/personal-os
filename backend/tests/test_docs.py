@@ -14,10 +14,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os.app import AUTH_TOKEN, app, docs, toolbox  # noqa: E402
+from personal_os.app import AUTH_TOKEN, app, db, docs, toolbox  # noqa: E402
 from personal_os.docs import diff_stat, unified_diff, word_count  # noqa: E402
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
+db.set_settings({"hiddenViews": []})  # a fresh install has Lists off, and its routes answer 404
 passed = 0
 
 

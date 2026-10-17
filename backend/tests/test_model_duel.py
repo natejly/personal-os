@@ -25,6 +25,7 @@ from personal_os import app as appmod  # noqa: E402
 from personal_os import duel, llm, migrations  # noqa: E402
 
 client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
+appmod.db.set_settings({"hiddenViews": []})  # a fresh install has Lists off, and its routes answer 404
 CALLS: list[str] = []  # the model of every stream_chat call, in order
 
 

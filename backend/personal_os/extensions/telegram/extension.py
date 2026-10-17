@@ -71,8 +71,13 @@ class TelegramExtension:
         return sent["text"], files if isinstance(files, list) else atts
 
     async def start(self, _: Any) -> None:
-        if self.api.app.settings().get("telegramEnabled") and self.db.secrets.get(telegram.SECRET_NAME):
+        if self.api.enabled() and self.api.app.settings().get("telegramEnabled") and self.db.secrets.get(telegram.SECRET_NAME):
             await self.bridge.start()
+
+    async def ext_changed(self, ev: dict[str, Any]) -> None:
+        """Turning the extension off stops the poller; turning it on starts it again if the settings and token ask for it."""
+        if ev["id"] == self.api.manifest.id:
+            await (self.bridge.reconcile() if ev["enabled"] else self.bridge.stop())
 
     async def settings_changed(self, ev: dict[str, Any]) -> None:
         if "telegramEnabled" in ev["keys"]:
@@ -155,4 +160,5 @@ def activate(api: ExtensionScope) -> None:
     api.router(ext.router())
     api.on("app.start", ext.start)
     api.on("settings.changed", ext.settings_changed)
+    api.on("ext.changed", ext.ext_changed)
     api.on("approval.requested", ext.approval_requested)

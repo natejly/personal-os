@@ -1136,11 +1136,7 @@ class TelegramBridge:
             return
         owner, md, atts = self._state().get("ownerChatId"), strip_no_reply(text), self._unsent(attachments)
         if owner is not None and (to_plain(md) or atts):
-            self._spawn(self._push(owner, md, atts))
-
-    async def _push(self, chat_id: int, text: str, atts: list[dict[str, Any]]) -> None:
-        if (sent := await self.deps.outbound(text, atts)) is not None:
-            await self._deliver_in_order(chat_id, *sent)
+            self._spawn(self._deliver_outbound(owner, md, atts))
 
     def wants_worker_results(self) -> bool:
         return bool(self._settings().get("telegramPushWorkerResults"))
@@ -1165,7 +1161,7 @@ class TelegramBridge:
             self._spawn(self._typing_loop(run_id, owner))
         atts = [a for a in attachments or [] if a.get("id")]
         if text or atts:
-            self._spawn(self._deliver_in_order(owner, f"From Grain: {text}".rstrip(), atts))
+            self._spawn(self._deliver_outbound(owner, f"From Grain: {text}".rstrip(), atts))
         log.info("telegram chat=%s app turn len=%s files=%s", _mask(owner), len(text), len(atts))
 
     def send_update(self, conversation_id: str | None, text: str, attachments: list[dict[str, Any]] | None = None) -> bool:
@@ -1213,7 +1209,12 @@ class TelegramBridge:
         if owner is None or not (texts or atts):
             return
         u.last = time.monotonic()
-        await self._deliver_in_order(owner, "\n\n".join(texts), atts)
+        await self._deliver_outbound(owner, "\n\n".join(texts), atts)
+
+    async def _deliver_outbound(self, chat_id: int, text: str, atts: list[dict[str, Any]]) -> None:
+        """Deliver after `channel.outbound` has had its say: a reply, a progress update, a mirrored app message or a file."""
+        if (sent := await self.deps.outbound(text, atts)) is not None:
+            await self._deliver_in_order(chat_id, *sent)
 
     async def _deliver_in_order(self, chat_id: int, text: str, atts: list[dict[str, Any]] | None) -> None:
         async with self._order_lock:

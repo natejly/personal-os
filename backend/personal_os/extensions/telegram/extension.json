@@ -11,6 +11,6 @@
   "contributes": {
     "routes": { "prefix": "/telegram" }
   },
-  "hooks": { "app.start": {}, "settings.changed": {}, "approval.requested": {} },
+  "hooks": { "app.start": {}, "settings.changed": {}, "ext.changed": {}, "approval.requested": {} },
   "permissions": ["conversation:read", "service:chat"]
 }

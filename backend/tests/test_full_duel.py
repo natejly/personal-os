@@ -25,6 +25,7 @@ from personal_os import duel, llm  # noqa: E402
 from personal_os.tools import ToolSpec, _obj  # noqa: E402
 
 client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
+appmod.db.set_settings({"hiddenViews": []})  # a fresh install has Lists off, and its routes answer 404
 CALLS: list[str] = []  # the model of every stream_chat call, in order
 SENT: list[dict[str, Any]] = []  # what the fake outside-world tool really did
 

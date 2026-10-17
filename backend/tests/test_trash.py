@@ -290,7 +290,8 @@ class GoogleTasksTests(_Base):
 class RouteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        from personal_os.app import AUTH_TOKEN, app
+        from personal_os.app import AUTH_TOKEN, app, db
+        db.set_settings({"hiddenViews": []})  # a fresh install has Lists off, and its routes answer 404
         cls.client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 
     def j(self, method: str, path: str, body: object = None, expect: int = 200):

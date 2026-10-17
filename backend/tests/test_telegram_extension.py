@@ -21,7 +21,7 @@ from personal_os import app as appmod  # noqa: E402
 from personal_os.extensions.channels import Channels  # noqa: E402
 from personal_os.extensions.hooks import Cancel, HookBus  # noqa: E402
 from personal_os.extensions.host import ExtensionHost  # noqa: E402
-from test_telegram_api import OWNER, _portal, _reset, bridge, fake, j, pair, wait_until  # noqa: E402,F401
+from test_telegram_api import OWNER, _portal, _reset, bridge, fake, j, pair, target, wait_until  # noqa: E402,F401
 
 bus = appmod.host.bus
 
@@ -53,8 +53,8 @@ class _Adapter:
 def test_the_registry_finds_the_adapter_that_owns_a_conversation_and_stops_them_all() -> None:
     channels = Channels()
     a, b = _Adapter("a", home="chat-a"), _Adapter("b", home="chat-b")
-    channels.register(a)  # type: ignore[arg-type]
-    channels.register(b)  # type: ignore[arg-type]
+    channels.register(a, lambda: True)  # type: ignore[arg-type]
+    channels.register(b, lambda: True)  # type: ignore[arg-type]
     assert channels.owner_of("chat-b") is b and channels.owner_of("elsewhere") is None and channels.owner_of(None) is None
     assert channels["a"] is a
     asyncio.run(channels.stop())
@@ -63,18 +63,18 @@ def test_the_registry_finds_the_adapter_that_owns_a_conversation_and_stops_them_
 
 def test_a_channel_name_is_taken_once_and_free_again_after_dispose() -> None:
     channels = Channels()
-    first = channels.register(_Adapter("a"))  # type: ignore[arg-type]
+    first = channels.register(_Adapter("a"), lambda: True)  # type: ignore[arg-type]
     with pytest.raises(ValueError):
-        channels.register(_Adapter("a"))  # type: ignore[arg-type]
+        channels.register(_Adapter("a"), lambda: True)  # type: ignore[arg-type]
     first.dispose()
     assert list(channels) == []
-    channels.register(_Adapter("a"))  # type: ignore[arg-type]
+    channels.register(_Adapter("a"), lambda: True)  # type: ignore[arg-type]
 
 
 def test_the_extension_registers_the_bridge_as_a_channel_with_its_routes() -> None:
     scope = appmod.host.extensions["telegram"]
     assert appmod.host.channels["telegram"] is bridge and bridge.name == "telegram" and "Telegram" in bridge.hint
-    assert scope.manifest.hooks.keys() == {"app.start", "settings.changed", "approval.requested"}
+    assert scope.manifest.hooks.keys() == {"app.start", "settings.changed", "ext.changed", "approval.requested"}
     assert [r.prefix for r in scope.routers] == ["/telegram"]
     assert j("GET", "/telegram/status")["status"] == "no_token"
 
@@ -87,6 +87,22 @@ def test_a_channel_is_removed_when_its_extension_stops() -> None:
     assert host.channels.owner_of("chat-a") is not None
     asyncio.run(host.stop())
     assert list(host.channels) == [] and host.channels.owner_of("chat-a") is None
+
+
+def test_turning_the_extension_off_stops_the_bridge_and_silences_its_routes_and_channel() -> None:
+    pair()
+    cid = target()
+    assert appmod.host.channels.owner_of(cid) is bridge
+    hidden = appmod.settings()["hiddenViews"]
+    j("PUT", "/settings", {"hiddenViews": [*hidden, "telegram"]})
+    try:
+        wait_until(lambda: bridge._task is None, "the poller to stop")
+        j("GET", "/telegram/status", expect=404)
+        assert appmod.host.channels.owner_of(cid) is None and "telegram" not in {c.name for c in appmod.host.channels}
+    finally:
+        j("PUT", "/settings", {"hiddenViews": hidden})
+    wait_until(lambda: bridge._task is not None, "the poller to start again")
+    assert j("GET", "/telegram/status")["paired"] is True
 
 
 # ---- hooks ----
@@ -167,6 +183,27 @@ def test_a_pushed_worker_reply_goes_through_outbound_too(subscribe) -> None:  # 
     bridge.push("quiet result")
     asyncio.run(asyncio.sleep(0.2))
     assert fake.sent() == ["LOUD RESULT"]
+
+
+def test_progress_and_the_from_grain_mirror_go_through_outbound_too(subscribe) -> None:  # type: ignore[no-untyped-def]
+    subscribe("channel.outbound", lambda ev: {**ev, "text": ev["text"].replace("secret", "[redacted]")})
+    pair()
+    cid = target()
+    assert bridge.send_update(cid, "the secret halfway")
+    wait_until(lambda: "the [redacted] halfway" in fake.sent(), "the redacted progress")
+    bridge.from_app(cid, "run-mirror", "my secret", [])
+    wait_until(lambda: "From Grain: my [redacted]" in fake.sent(), "the redacted mirror")
+    assert not any("secret" in t for t in fake.sent())
+
+
+def test_a_cancelled_progress_update_and_mirror_are_not_sent(subscribe) -> None:  # type: ignore[no-untyped-def]
+    subscribe("channel.outbound", lambda ev: Cancel())
+    pair()
+    cid = target()
+    bridge.send_update(cid, "halfway")
+    bridge.from_app(cid, "run-mirror", "typed in Grain", [])
+    asyncio.run(asyncio.sleep(0.3))
+    assert fake.sent() == []
 
 
 # ---- approval.requested ----

@@ -570,11 +570,71 @@ class BuiltinExtensionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             scope.provide("demo", object())
 
-    def test_services_must_be_declared_and_are_looked_up_late(self) -> None:
-        scope = self.scope(requires={"services": ["mcp"]})
+    def test_services_must_be_declared_with_their_permission_and_are_looked_up_late(self) -> None:
+        scope = self.scope(requires={"services": ["mcp"]}, permissions=["service:mcp"])
         self.assertEqual(scope.services.get("mcp"), "client")
         with self.assertRaises(KeyError):
             self.scope().services.get("mcp")
+        with self.assertRaises(KeyError):
+            self.scope(requires={"services": ["mcp"]}).services.get("mcp")
+
+    def test_a_gating_hook_needs_its_permission(self) -> None:
+        hooks = {"tool.pre": {}, "tool.permission": {}, "turn.accept": {}, "memory.before_write": {}, "chat.created": {}}
+        scope = self.scope(hooks=hooks)
+        scope.on("chat.created", lambda p: None)
+        for hook in ("tool.pre", "tool.permission", "turn.accept", "memory.before_write"):
+            with self.assertRaises(ValueError):
+                scope.on(hook, lambda p: None)
+        granted = self.scope(hooks=hooks, permissions=["hooks:gate", "input:rewrite", "memory:gate"])
+        for hook in ("tool.pre", "tool.permission", "turn.accept", "memory.before_write"):
+            granted.on(hook, lambda p: None)
+
+    def test_a_disabled_extension_handlers_have_no_opinion_but_lifecycle_hooks_still_arrive(self) -> None:
+        seen: list[str] = []
+        hidden: list[str] = []
+        hooks = {"chat.created": {}, "model.select": {}, "tool.pre": {}, "ext.changed": {}}
+        scope = self.scope(hidden, hooks=hooks, permissions=["hooks:gate"])
+
+        async def late(p: Any) -> None:
+            seen.append("async")
+        scope.on("chat.created", lambda p: seen.append("sync"))
+        scope.on("model.select", lambda p: {"model": "mine"})
+        scope.on("tool.pre", lambda p: Deny("no"))
+        scope.on("ext.changed", lambda p: seen.append("changed"))
+        scope.on("chat.created", late)
+        hidden.append("demo")
+
+        async def go() -> None:
+            await scope.bus.emit("chat.created", {})
+            await scope.bus.emit("ext.changed", {})
+            self.assertEqual(await scope.bus.pipe("model.select", {"model": "core"}), {"model": "core"})
+            self.assertIsNone(await scope.bus.gate("tool.pre", {}))
+        run(go())
+        self.assertEqual(seen, ["changed"])
+        hidden.clear()
+        run(scope.bus.emit("chat.created", {}))
+        self.assertCountEqual(seen, ["changed", "sync", "async"])
+
+    def test_a_disabled_extension_channel_and_routes_are_out_of_reach(self) -> None:
+        from fastapi import APIRouter, FastAPI
+        from fastapi.testclient import TestClient
+        hidden: list[str] = []
+        host = ExtensionHost()
+        scope = self.scope(hidden)
+        host.extensions["demo"] = scope
+        adapter = mock.Mock(is_texts_conversation=lambda c: c == "chat")
+        adapter.name = "demo-chan"
+        scope.channel(adapter)
+        router = APIRouter(prefix="/demo")
+        router.add_api_route("/ping", lambda: {"ok": True})
+        scope.router(router)
+        app = FastAPI()
+        host.mount(app, scope)
+        client = TestClient(app)
+        self.assertEqual((scope.channels.owner_of("chat"), client.get("/demo/ping").json()), (adapter, {"ok": True}))
+        hidden.append("demo")
+        self.assertEqual((list(scope.channels), scope.channels.owner_of("chat"), client.get("/demo/ping").status_code), ([], None, 404))
+        self.assertEqual(scope.channels.registered(), [adapter])
 
     def test_load_builtin_activates_health_and_starts_and_stops_its_loop(self) -> None:
         host = ExtensionHost()

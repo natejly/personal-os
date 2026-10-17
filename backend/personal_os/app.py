@@ -443,8 +443,7 @@ host.load_builtin("google", _ext_ctx)
 google: Google = _ext_ctx.services["google"]()
 app.include_router(setup_router(settings, db.set_settings, lambda: google.status()["connected"]))
 app.include_router(providers_router(db.get_settings, db.set_settings, db.secrets, ensure_embedding_model))
-for _r in host.load_builtin("todos", _ext_ctx).routers:
-    app.include_router(_r)
+host.mount(app, host.load_builtin("todos", _ext_ctx))
 todos, tasks_sync = _ext_ctx.services["todos"](), _ext_ctx.services["tasks_sync"]()
 modules: list[Module] = build_modules(ModuleContext(
     db=db, settings=settings, set_settings=db.set_settings, google=google,
@@ -453,8 +452,7 @@ for _m in modules:
     host.add_module(_m)
     if (_r := _m.router()) is not None:
         app.include_router(_r)
-for _r in host.load_builtin("health", _ext_ctx).routers:
-    app.include_router(_r)
+host.mount(app, host.load_builtin("health", _ext_ctx))
 for _p in _PROFILES:
     host.load_builtin(_p, _ext_ctx)
 
@@ -10257,9 +10255,8 @@ _chat_service = ChatService(
     app_only_tools=frozenset({PLAN_TOOL, *QUESTION_TOOLS}),
 )
 _ext_ctx.services["chat"] = lambda: _chat_service
-for _r in host.load_builtin("telegram", _ext_ctx).routers:
-    app.include_router(_r)
-toolbox.setup_probes.update({**{c.name: c.paired for c in host.channels}, "mcp": lambda: bool(mcp_store.servers())})  # setup_request's checks
+host.mount(app, host.load_builtin("telegram", _ext_ctx))
+toolbox.setup_probes.update({**{c.name: c.paired for c in host.channels.registered()}, "mcp": lambda: bool(mcp_store.servers())})  # setup_request's checks
 
 
 async def _channel_user_update(ctx: dict[str, Any], text: str, atts: list[dict[str, Any]]) -> bool:

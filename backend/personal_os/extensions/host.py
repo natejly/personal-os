@@ -16,6 +16,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Iterable, Iterator, get_args
 
+from fastapi import Depends, HTTPException
+
 from .. import backups, migrations
 from ..context import Block, Contribution, RetrievalSources, Slot
 from .channels import ChannelAdapter, Channels
@@ -39,6 +41,9 @@ Handler = Callable[[], Awaitable[None]]
 SETTING_PREFIX = "ext."  # a setting `ext.<id>.<field>` belongs to the extension that declares <field>
 STOP_BUDGET_S = 5.0  # what one extension's app.stop handlers get before they are cancelled
 STABLE_CONTEXT_TIMEOUT_MS = 100  # a stable block reads cached state: it is built in the turn path, before the first token
+LIFECYCLE_HOOKS = frozenset({"app.start", "app.stop", "ext.changed"})  # fired whether or not the extension is enabled: its handlers start and stop its own work
+HOOK_PERMISSION = {"tool.permission": "hooks:gate", "tool.pre": "hooks:gate", "turn.accept": "input:rewrite",
+                   "memory.before_write": "memory:gate"}  # the hooks that can narrow or change what the user did
 
 
 @dataclass
@@ -90,12 +95,14 @@ def _import_extension(root: Path, scope: ExtensionScope) -> ModuleType:
 class Services:
     """The services an extension declared under `requires`."""
 
-    def __init__(self, declared: tuple[str, ...], lookups: dict[str, Callable[[], Any]]) -> None:
-        self._declared, self._lookups = declared, lookups
+    def __init__(self, declared: tuple[str, ...], permissions: tuple[str, ...], lookups: dict[str, Callable[[], Any]]) -> None:
+        self._declared, self._permissions, self._lookups = declared, permissions, lookups
 
     def get(self, name: str) -> Any:
         if name not in self._declared:
             raise KeyError(f"service {name!r} is not declared under requires.services")
+        if f"service:{name}" not in self._permissions:
+            raise KeyError(f"service {name!r} needs the permission 'service:{name}'")
         return self._lookups[name]()
 
 
@@ -138,7 +145,7 @@ class ExtensionScope:
     @property
     def services(self) -> Services:
         assert self.ctx is not None
-        return Services(self.manifest.requires_services, self.ctx.services)
+        return Services(self.manifest.requires_services, self.manifest.permissions, self.ctx.services)
 
     def enabled(self) -> bool:
         if self.module:
@@ -155,13 +162,38 @@ class ExtensionScope:
         folder = self.manifest.data.get("migrations")
         return migrations.sql_steps(self.root / folder) if folder and self.root else []
 
+    def _require(self, permission: str) -> None:
+        if permission not in self.manifest.permissions:
+            raise ValueError(f"extension {self.manifest.id!r} did not declare permission {permission!r}")
+
+    def _while_enabled(self, fn: Callable[[Any], Any]) -> Callable[[Any], Any]:
+        """`fn` as the bus should call it: a disabled extension has no opinion. Sync stays sync, so the bus runs it where it ran."""
+        if inspect.iscoroutinefunction(fn):
+            async def guarded_async(arg: Any) -> Any:
+                if self.enabled():
+                    return await fn(arg)
+            return guarded_async
+
+        def guarded(arg: Any) -> Any:
+            if self.enabled():
+                return fn(arg)
+        return guarded
+
+    def require_enabled(self) -> None:
+        """A dependency of the extension's routes: while it is disabled they answer 404."""
+        if not self.enabled():
+            raise HTTPException(404, "Not Found")
+
     def on(self, hook: str, fn: Callable[[Any], Any], *, priority: int | None = None, timeout_ms: int | None = None) -> Disposable:
-        """Subscribe to a hook the manifest declares; priority, timeout and failure policy default to its entry."""
+        """Subscribe to a hook the manifest declares (and holds the permission for, if it is a gating one); priority, timeout
+        and failure policy default to its entry. Only the lifecycle hooks reach `fn` while the extension is disabled."""
         if hook not in self.manifest.hooks:
             raise ValueError(f"extension {self.manifest.id!r} did not declare hook {hook!r}")
+        if hook in HOOK_PERMISSION:
+            self._require(HOOK_PERMISSION[hook])
         declared = self.manifest.hooks[hook]
         sub = self.bus.subscribe(
-            hook, fn, owner=self.manifest.id, order=self.index,
+            hook, fn if hook in LIFECYCLE_HOOKS else self._while_enabled(fn), owner=self.manifest.id, order=self.index,
             priority=declared.get("priority") if priority is None else priority,
             timeout_ms=declared.get("timeoutMs") if timeout_ms is None else timeout_ms,
             on_failure=declared.get("onFailure", "ask"))
@@ -202,7 +234,7 @@ class ExtensionScope:
 
     def channel(self, adapter: ChannelAdapter) -> Disposable:
         """Offer a channel adapter: the app routes its chat, run changes and shutdown through it while the extension runs."""
-        return self.disposables.add(self.channels.register(adapter))
+        return self.disposables.add(self.channels.register(adapter, self.enabled))
 
     def spawn(self, coro: Awaitable[Any]) -> asyncio.Task[Any]:
         """Run a background task that is cancelled and awaited when the extension stops."""
@@ -220,10 +252,9 @@ class ExtensionScope:
             raise ValueError(f"unknown context slot {slot!r}")
         if share is not None and not 0 < share <= 1:
             raise ValueError(f"context share must be in (0, 1], got {share!r}")
+        self._require("context:volatile" if slot == "volatile" else "prompt:inject")
 
         async def contribute(payload: dict[str, Any]) -> Block | None:
-            if not self.enabled():
-                return None
             out = await asyncio.to_thread(fn, payload)  # an async fn only builds its coroutine there, whatever kind of callable it is
             if inspect.isawaitable(out):
                 out = await out
@@ -322,7 +353,10 @@ class ExtensionHost:
     def load_folder(self, root: Path, ctx: ExtensionContext) -> ExtensionScope:
         """Load an extension from any folder holding extension.json and extension.py, in a fresh module namespace. If its
         manifest or `activate` is wrong, nothing stays registered."""
-        scope = self._add(load_manifest(root / "extension.json"), root=root, ctx=ctx)
+        manifest = load_manifest(root / "extension.json")
+        if "service:chat" in manifest.permissions:
+            raise ValueError("only a built-in extension may use the chat service: it can answer an approval")
+        scope = self._add(manifest, root=root, ctx=ctx)
         scope.dev = True
         try:
             self._activate(scope, _import_extension(root, scope))
@@ -332,13 +366,17 @@ class ExtensionHost:
             raise
         return scope
 
-    async def load_dev(self, root: Path, ctx: ExtensionContext) -> ExtensionScope:
-        """Load and start the extension in `root` (the dev panel and the dev server). A failure is kept in `failed` and raised."""
+    async def load_dev(self, root: Path, ctx: ExtensionContext, *, first_load: bool = True) -> ExtensionScope:
+        """Load and start the extension in `root` (the dev panel and the dev server). A manifest that ships `enabled: false`
+        starts disabled on a first load, not on a reload. A failure is kept in `failed` and raised."""
         if loaded := next((s for s in self.extensions.values() if s.root == root), None):
             raise ValueError(f"{root} is already loaded as {loaded.manifest.id!r}")
         scope: ExtensionScope | None = None
         try:
             scope = self.load_folder(root, ctx)
+            if first_load and scope.manifest.enabled is False and scope.manifest.id not in ctx.hidden_views():
+                ctx.set_settings({"hiddenViews": [*ctx.hidden_views(), scope.manifest.id]})
+                self.refresh_enabled()
             self.migrate(ctx.db)
             await scope.start()
         except Exception as e:
@@ -360,7 +398,7 @@ class ExtensionHost:
         if not old.dev or old.root is None or old.ctx is None:
             raise ValueError(f"extension {ext_id!r} is not loaded from a folder, so it cannot be reloaded")
         await self.unload(ext_id)
-        return await self.load_dev(old.root, old.ctx)
+        return await self.load_dev(old.root, old.ctx, first_load=False)
 
     @staticmethod
     def _activate(scope: ExtensionScope, module: ModuleType) -> None:
@@ -389,6 +427,11 @@ class ExtensionHost:
         self.extensions[manifest.id] = scope
         self._enabled[manifest.id] = scope.enabled()
         return scope
+
+    def mount(self, app: FastAPI, scope: ExtensionScope) -> None:
+        """Include a built-in extension's routers at their own prefixes; they answer 404 while the extension is disabled."""
+        for router in scope.routers:
+            app.include_router(router, dependencies=[Depends(scope.require_enabled)])
 
     def fire(self, hook: str, payload: Any = None) -> None:
         self.bus.fire(hook, payload)

@@ -31,7 +31,8 @@ HOOKS = {"context.contribute": {}}
 
 
 def scope(host: ExtensionHost, ext_id: str = "demo", hooks: dict[str, Any] | None = HOOKS) -> Any:
-    return host._add(Manifest.from_dict({"id": ext_id, "name": ext_id, "version": "1.0.0", "apiVersion": 1, "hooks": hooks or {}}))
+    return host._add(Manifest.from_dict({"id": ext_id, "name": ext_id, "version": "1.0.0", "apiVersion": 1, "hooks": hooks or {},
+                                           "permissions": ["context:volatile", "prompt:inject"]}))
 
 
 def collect(host: ExtensionHost, skipped: list[str] | None = None) -> list[Block]:
@@ -81,6 +82,15 @@ def test_layout_puts_the_tail_after_the_newest_user_message() -> None:
 
 
 # ---- the context.contribute hook ----
+def test_a_slot_needs_its_permission() -> None:
+    manifest = {"id": "bare", "name": "b", "version": "1.0.0", "apiVersion": 1, "hooks": HOOKS, "permissions": ["context:volatile"]}
+    bare = ExtensionHost()._add(Manifest.from_dict(manifest))
+    bare.context(lambda p: None, slot="volatile")
+    for slot in ("stable", "tail"):
+        with pytest.raises(ValueError, match="prompt:inject"):
+            bare.context(lambda p: None, slot=slot)
+
+
 def test_a_handler_contributes_in_priority_order() -> None:
     host = ExtensionHost()
     a, b = scope(host, "late"), scope(host, "early")

@@ -416,6 +416,26 @@ def test_a_failing_load_leaves_nothing_behind(ext: Path) -> None:
     run(host.stop())
 
 
+def test_a_folder_extension_may_not_use_the_chat_service(ext: Path) -> None:
+    set_manifest(ext, requires={"services": ["chat"]}, permissions=["service:chat"])
+    host = ExtensionHost()
+    with pytest.raises(ValueError, match="only a built-in extension"):
+        host.load_folder(ext, context())
+    assert host.extensions == {}
+
+
+def test_a_folder_that_ships_disabled_loads_disabled_and_a_reload_keeps_the_users_choice(ext: Path) -> None:
+    hidden: list[str] = []
+    ctx = context()
+    ctx.hidden_views, ctx.set_settings = lambda: hidden, lambda v: hidden.__setitem__(slice(None), v["hiddenViews"])
+    set_manifest(ext, enabled=False)
+    host = ExtensionHost()
+    scope = run(host.load_dev(ext, ctx))
+    assert hidden == ["sample"] and not scope.enabled()
+    hidden.clear()
+    assert run(host.reload("sample")).enabled()
+
+
 def test_a_tool_the_manifest_does_not_declare_is_refused(ext: Path) -> None:
     host = ExtensionHost()
     set_manifest(ext, contributes={"tools": []})

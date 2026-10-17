@@ -43,7 +43,7 @@ def stub_module(cls: Any) -> Any:
 
 
 def loaded_extensions() -> list[ExtensionScope]:
-    """The todos extension, the two modules and the health extension, in the app's load order."""
+    """The todos extension, the two modules, and the health and spaces extensions, in the app's load order."""
     host = ExtensionHost()
     ctx = ExtensionContext(db=Database(tempfile.mkdtemp(prefix="mcpreserved-")), hidden_views=lambda: (), services={"google": lambda: Stub()},
                            settings=lambda: {}, set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p, publish=lambda _n, _d: None)
@@ -51,6 +51,7 @@ def loaded_extensions() -> list[ExtensionScope]:
     host.add_module(stub_module(MailWatchModule))
     host.add_module(stub_module(PlannerModule))
     host.load_builtin("health", ctx)
+    host.load_builtin("spaces", ctx)
     return list(host.extensions.values())
 
 

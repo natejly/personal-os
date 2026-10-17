@@ -3,7 +3,7 @@ import { Lock, X } from '../icons'
 import type { Canvas, CanvasWindow, Rect } from '@shared/types'
 import { useProject } from '../store'
 import { useCanvas } from './store'
-import { KIND_LABEL } from './WindowHost'
+import { kindLabel } from './WindowHost'
 import { tip } from '../lib/tip'
 
 /** Which window is being dragged between thumbnails. Not a shared `DragKind`: it never leaves here. */
@@ -73,7 +73,7 @@ function Thumb({ canvas }: { canvas: Canvas }): JSX.Element {
             }}
           >
             {/* The frame is chromeless now, so the proxy is where a window's title still reads. */}
-            <span className="overview-proxy-label">{w.title || KIND_LABEL[w.kind]}</span>
+            <span className="overview-proxy-label">{w.title || kindLabel(w.kind)}</span>
           </div>
         ))}
       </div>

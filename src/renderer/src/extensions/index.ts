@@ -2,8 +2,10 @@
 import { activateExtension, extensionModules } from './host'
 import * as todos from './todos/extension'
 import * as health from './health/extension'
+import * as spaces from './spaces/extension'
 
 activateExtension('todos', todos)
 activateExtension('health', health)
+activateExtension('spaces', spaces)
 
 export { extensionModules }

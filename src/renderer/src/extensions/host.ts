@@ -78,6 +78,8 @@ export interface UiApi {
   toolCard(toolName: string, Component: FC<ToolCardProps>, display?: ToolCardDisplay): Disposable
   fenceRenderer(lang: string, Component: FC<FenceRendererProps>): Disposable
   selectionAction(def: SelectionActionDef): Disposable
+  /** A canvas window kind, `ext:<id>:<name>` and declared in the manifest's `canvas.widget` slot; offered while the extension is on. */
+  widget(def: WidgetDef): Disposable
   /** This extension's slice of the app store; `ext:<id>:<name>` events from its backend half land in it under `<name>`. */
   store: ExtStore
   /** `ext:<id>:<name>` is the `ui.event` hook for that name. */
@@ -116,6 +118,9 @@ export const paletteCommands: OwnedPaletteCommand[] = []
 export const keybindings: OwnedKeybinding[] = []
 export const selectionActions: OwnedSelectionAction[] = []
 const fences = new Map<string, FC<FenceRendererProps>>()
+/** The canvas catalog: every widget kind a window can host, whoever registered it. */
+export const WIDGETS = {} as Record<WidgetKind, WidgetDef>
+const widgetOwners = new Map<WidgetKind, string>()
 
 function add<T>(list: T[], item: T): Disposable {
   list.push(item)
@@ -165,6 +170,16 @@ export function registerFenceRenderer(lang: string, Component: FC<FenceRendererP
   return { dispose: () => { if (fences.get(lang) === Component) fences.delete(lang) } }
 }
 
+export function registerWidget(owner: string, def: WidgetDef): Disposable {
+  if (WIDGETS[def.kind]) throw new Error(`a widget of kind "${def.kind}" is already registered`)
+  WIDGETS[def.kind] = def
+  widgetOwners.set(def.kind, owner)
+  return { dispose: () => { if (WIDGETS[def.kind] === def) { delete WIDGETS[def.kind]; widgetOwners.delete(def.kind) } } }
+}
+
+/** Whether the kind can be added to a canvas: the shell's own always, an extension's while the user has it on. */
+export const widgetOn = (settings: Settings, kind: WidgetKind): boolean => ownerOn(settings, widgetOwners.get(kind) ?? CORE)
+
 export const fenceRenderer = (lang: string): FC<FenceRendererProps> | undefined => fences.get(lang)
 
 /**
@@ -191,6 +206,7 @@ export function activateExtension(id: string, ext: ExtensionModule): Disposable 
     toolCard: (name, Component, display) => keep(registerToolCard(name, Component, display)),
     fenceRenderer: (lang, Component) => keep(registerFenceRenderer(lang, Component)),
     selectionAction: (def) => keep(registerSelectionAction(id, def)),
+    widget: (def) => keep(registerWidget(id, def)),
     store: extStore(id),
     on: ((event: string, fn: never) => keep(
       event === 'ui.view.opened' ? onViewOpened(fn) : event === 'ui.message.display' ? onMessageDisplay(fn) : onExtEvent(event, fn)

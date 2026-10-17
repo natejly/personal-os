@@ -4,6 +4,7 @@ import type { WidgetKind } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import ContextMenu, { type MenuEntry } from './Menu'
+import { widgetOn } from '../extensions/host'
 import { WIDGETS } from './registry'
 import type { Point } from './snapping'
 import { useCanvas, useSpaceLocked } from './store'
@@ -111,7 +112,8 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
     crew
   }
 
-  return (Object.keys(WIDGETS) as WidgetKind[]).map((kind): MenuEntry => {
+  const settings = useStore.getState().settings
+  return (Object.keys(WIDGETS) as WidgetKind[]).filter((kind) => widgetOn(settings, kind)).map((kind): MenuEntry => {
     const { label } = WIDGETS[kind]
     const picker = pickers[kind]
     if (picker) return { kind: 'submenu', label, icon: iconOf(kind), items: safe(picker) }

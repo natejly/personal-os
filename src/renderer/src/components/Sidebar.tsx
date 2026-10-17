@@ -4,11 +4,9 @@ import { ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Setti
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { chatAttentionOf, useStore, type View } from '../store'
-import SidebarSpaces from './SidebarSpaces'
 import ResizeHandle from './ResizeHandle'
 import { rowHidden } from '../moduleToggles'
 import { navEntries, navTitle } from '../shell/nav'
-import { CORE, registerSlot } from '../extensions/host'
 import { Slot } from '../extensions/slot'
 import { dragProps } from '../canvas/dnd'
 import { useCanvas } from '../canvas/store'
@@ -82,7 +80,6 @@ type NavEntry = { view?: View; label: string; description?: string; icon: JSX.El
 const TOP: NavEntry[] = [
   { view: 'docs', description: 'Documents and folders', label: 'Files', icon: <Files size={15} /> }
 ]
-registerSlot(CORE, 'sidebar.section', { id: 'spaces', order: 10, Component: SidebarSpaces, when: (s) => !rowHidden(s.settings, 'spaces') })
 
 /** Sidebar view to the id of its Go-to shortcut. */
 const NAV_SHORTCUT: Partial<Record<string, string>> = {

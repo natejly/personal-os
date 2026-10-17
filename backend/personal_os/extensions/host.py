@@ -67,6 +67,7 @@ class ExtensionContext:
     sid: Callable[[str | None], Any]
     wsid: Callable[[str | None], str | None]
     publish: Callable[[str, Any], None]  # an app-topic event, from any thread
+    widget_kinds: Callable[[], tuple[str, ...]] = lambda: ()  # the canvas widget kinds the loaded extensions declare
 
 
 _generation = itertools.count(1)
@@ -432,6 +433,10 @@ class ExtensionHost:
         """Include a built-in extension's routers at their own prefixes; they answer 404 while the extension is disabled."""
         for router in scope.routers:
             app.include_router(router, dependencies=[Depends(scope.require_enabled)])
+
+    def widget_kinds(self) -> tuple[str, ...]:
+        """The canvas widget kinds the extensions declare, enabled or not: a turned-off extension keeps its windows."""
+        return tuple(i["id"] for s in self.extensions.values() for i in s.manifest.contributes.get("slots", {}).get("canvas.widget", ()))
 
     def fire(self, hook: str, payload: Any = None) -> None:
         self.bus.fire(hook, payload)

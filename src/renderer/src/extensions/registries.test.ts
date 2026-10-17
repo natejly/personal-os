@@ -6,9 +6,10 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { FullDesk, Message } from '@shared/types'
 import { useStore } from '../store'
 import {
-  activateExtension, fenceRenderer, keybindings, paletteCommands, registerSlot, selectionActions, slotItems, type UiApi
+  activateExtension, fenceRenderer, keybindings, paletteCommands, registerSlot, selectionActions, slotItems, WIDGETS, widgetOn, type UiApi
 } from './host'
 import { Slot } from './slot'
+import type { WidgetDef } from '../canvas/registry'
 import '../components/Sidebar'
 import '../components/Composer'
 import '../components/Message'
@@ -73,6 +74,24 @@ test('palette commands: the shell registers its own, an extension adds more, ids
   assert.equal(paletteCommands.find((c) => c.id === 'cmddemo:go')?.extension, 'cmddemo')
   gone()
   assert.equal(paletteCommands.some((c) => c.id === 'cmddemo:go'), false)
+})
+
+const clock = (kind: WidgetDef['kind']): WidgetDef => ({
+  kind, label: 'Clock', icon: createElement('i'), defaultSize: { w: 300, h: 200 }, minSize: { w: 200, h: 100 }, chrome: 'full', Component
+})
+
+test('a canvas widget is added with its extension, offered while it is on, and a repeated kind is refused', () => {
+  const kind = 'ext:widgetdemo:clock'
+  const gone = withExtension('widgetdemo', (ui) => {
+    ui.widget(clock(kind))
+    assert.throws(() => ui.widget(clock(kind)), /already registered/)
+  })
+  assert.equal(WIDGETS[kind].label, 'Clock')
+  assert.equal(widgetOn({ hiddenViews: [] } as never, kind), true)
+  assert.equal(widgetOn({ hiddenViews: ['widgetdemo'] } as never, kind), false)
+  assert.equal(widgetOn({ hiddenViews: ['widgetdemo'] } as never, 'chat'), true)
+  gone()
+  assert.equal(kind in WIDGETS, false)
 })
 
 test('a keybinding that collides with a core shortcut or another binding is a validation error', () => {

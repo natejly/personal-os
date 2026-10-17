@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { WIDGETS } from './registry'
 import StatusRing from './StatusRing'
 import { useCanvas, useSpaceLocked, useWindows } from './store'
-import { KIND_ICON, KIND_LABEL } from './WindowHost'
+import { kindIcon, kindLabel } from './WindowHost'
 
 /** 1.35 under the pointer, 1.175 for its neighbour, 1.0 beyond — the Dock falloff. */
 const magnify = (i: number, hover: number): number => (hover < 0 ? 1 : 1 + 0.35 * Math.max(0, 1 - Math.abs(i - hover) / 2))
@@ -34,10 +34,10 @@ export default function Dock(): JSX.Element | null {
             focusWindow(w.id)
           }}
         >
-          {KIND_ICON[w.kind]}
+          {kindIcon(w.kind)}
           {/* §8: the tile reads the same `useRingStatus` as the window, so a minimized chat still shows amber. */}
           {WIDGETS[w.kind]?.statusful && <StatusRing conversationId={w.ref_id} size={12} />}
-          <span className="dock-tile-label">{w.title || KIND_LABEL[w.kind]}</span>
+          <span className="dock-tile-label">{w.title || kindLabel(w.kind)}</span>
         </button>
       ))}
     </div>

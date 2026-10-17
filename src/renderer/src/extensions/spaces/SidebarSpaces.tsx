@@ -1,13 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronRight, LayoutGrid, Lock, MoreHorizontal } from '../icons'
-import { useProject, useStore } from '../store'
+import { ChevronRight, LayoutGrid, Lock, MoreHorizontal } from '../../icons'
+import { useProject, useStore } from '../../store'
 import type { DragKind } from '@shared/types'
-import { useCanvas } from '../canvas/store'
-import { useDropTarget } from '../canvas/dnd'
-import { openPayload } from '../canvas/drops'
-import { focusFirstItem, menuKeyDown, useReturnFocus } from '../canvas/Menu'
-import { rowButton } from '../lib/rowButton'
+import { useCanvas } from '../../canvas/store'
+import { useDropTarget } from '../../canvas/dnd'
+import { openPayload } from '../../canvas/drops'
+import { focusFirstItem, menuKeyDown, useReturnFocus } from '../../canvas/Menu'
+import { rowButton } from '../../lib/rowButton'
 
 /** A space row takes everything the plane does. A project opens a Project window; binding stays a tab gesture. */
 const ALL: DragKind[] = ['conversation', 'todo', 'document', 'memory', 'project', 'file', 'nav', 'doc']

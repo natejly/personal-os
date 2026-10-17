@@ -3,7 +3,7 @@
 A canvas is a desktop of live windows that sits beside the ordinary views. Open one from the
 **Canvases** section of the sidebar, toggle in and out with ⌘⇧C, and jump between canvases with
 ⌃1 … ⌃9 or ⌥⌘← / ⌥⌘→ (⌥⌘↑ shows them all side by side). ⌃⌘N makes a new one. Canvases are stored
-in the `canvases` and `canvas_windows` tables (`backend/personal_os/canvas.py`).
+in the `canvases` and `canvas_windows` tables (`backend/personal_os/extensions/spaces/store.py`).
 
 ## First run and empty canvases
 
@@ -18,7 +18,7 @@ Each window is a widget of one kind: `chat`, `todos`, `calendar`,
 `memory`, `graph`, `documents`, `recap`, `project`, `usage`, `doc`,
 `face` or `crew` (a `todos` window has a list and a board view; a `face` window is just the assistant's
 creature, thinking while any chat answers and surprised while something waits on you; a `crew` window is a
-desk or a workflow run with the agents under it, see below). Add one by dragging a row from the sidebar (a chat, a doc, a nav row) onto the plane,
+desk or a workflow run with the agents under it, see below). An extension can add kinds of its own: it declares `ext:<id>:<name>` under `contributes.slots["canvas.widget"]` in its manifest and registers the widget with `ui.widget`. Add one by dragging a row from the sidebar (a chat, a doc, a nav row) onto the plane,
 from the **+** on the Canvases bar, or by right-clicking the plane. Several chats can stream at once,
 each with a status ring. A chat window can also shrink to a blob: the face button in its head (or
 **Shrink to a face** in the right-click menu) folds the window to just the chat's creature with no
@@ -71,4 +71,4 @@ The assistant can add to a canvas but never close or delete anything on one.
 | `space_add_widget` | Puts a view, or an existing chat, doc or project, in the next free grid cell of a canvas. |
 | `space_arrange` | Tiles (`grid`) or stacks (`cascade`) a canvas's open windows. Moves and resizes only. |
 
-`space_*` live in `backend/personal_os/space_tools.py`, `widget_*` in `widget_tools.py`.
+`space_*` live in `backend/personal_os/extensions/spaces/tools.py`, `widget_*` in `widget_tools.py`.

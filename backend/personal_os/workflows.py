@@ -54,7 +54,7 @@ RESERVED_IDS = frozenset({"item", "index", "params", "result"})
 # the user something mid-run. A workflow expresses delegation with `agent` and `fan_out` steps instead.
 TOOL_BLOCK = frozenset({
     "workflow_run", "workflow_resume", "workflow_list", "command_run", "command_list", "propose_plan", "agent_spawn", "agent_wait",
-    "delegate", "message_worker", "check_worker", "stop_worker", "resume_worker", "agent_stop", "desk_start", "desk_ask", "ask_user", "desk_done", "desk_deliver", "schedule_task", "cancel_scheduled_task", "todo_write", "agent_create", "agent_message",
+    "delegate", "message_worker", "check_worker", "stop_worker", "resume_worker", "agent_stop", "desk_start", "desk_ask", "ask_user", "desk_done", "desk_deliver", "schedule_task", "cancel_scheduled_task", "todo_write", "agent_create", "agent_message", "ext_propose",
 })
 
 REF = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+|\[\d+\])*)\s*\}\}")

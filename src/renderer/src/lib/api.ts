@@ -20,7 +20,7 @@ import type {
 } from '@shared/types'
 import type { SavedDashboard, DashboardRender, DashboardViewSpec } from '@shared/types'
 import type { CodingSession, CodingSessionDiff, CodingSessionEvent, DuelWinner, ModelStanding, ShipChecklist } from '@shared/types'
-import type { ExtensionInfo, ExtensionsDev } from '@shared/types'
+import type { ExtensionInfo, ExtensionsDev, ExtensionsReview } from '@shared/types'
 import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
 import { ApiError, detailText } from './apiError'
 import type { ChatRunChanges } from './deskFiles'
@@ -651,6 +651,13 @@ export const api = {
     enable: (id: string) => req<ExtensionInfo>(`/dev/extensions/${encodeURIComponent(id)}/enable`, { method: 'POST' }),
     disable: (id: string) => req<ExtensionInfo>(`/dev/extensions/${encodeURIComponent(id)}/disable`, { method: 'POST' }),
     reload: (id: string) => req<ExtensionInfo>(`/dev/extensions/${encodeURIComponent(id)}/reload`, { method: 'POST' })
+  },
+  extensions: {
+    list: () => req<ExtensionsReview>('/extensions'),
+    accept: (id: string, digest: string) => req<ExtensionsReview>(`/extensions/${encodeURIComponent(id)}/accept`, { method: 'POST', body: json({ digest }) }),
+    reject: (id: string) => req<ExtensionsReview>(`/extensions/${encodeURIComponent(id)}/reject`, { method: 'POST' }),
+    enable: (id: string, grants: string[]) => req<ExtensionsReview>(`/extensions/${encodeURIComponent(id)}/enable`, { method: 'POST', body: json({ grants }) }),
+    disable: (id: string) => req<ExtensionsReview>(`/extensions/${encodeURIComponent(id)}/disable`, { method: 'POST' })
   },
   conversationUsage: (conversationId: string) => req<ConversationUsage>(`/conversations/${conversationId}/usage`),
   messageRequests: (messageId: string) =>

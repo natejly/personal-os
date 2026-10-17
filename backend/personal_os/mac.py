@@ -75,6 +75,9 @@ def mcp_media_dir() -> Path | None:
     return data / "mcp_media" if data is not None else None
 
 
+EXT_DRAFTS = "ext-drafts"  # under the data folder: where the assistant stages an extension it is writing (extensions/drafts.py)
+
+
 def _under(path: Path, root: Path) -> bool:
     """True when `path` is `root` or a directory inside it.
 
@@ -130,6 +133,8 @@ def _spelled(raw: str | Path) -> Path:
 def protected_reason(*paths: str | Path) -> str | None:
     """Why a path is off limits to every agent file tool, or None. Judged on the spelled path and the resolved one."""
     prot = protected_paths()
+    data = _app_data_dir()
+    drafts = [data / EXT_DRAFTS, (data / EXT_DRAFTS).resolve()] if data is not None else []
     for raw in paths:
         if not str(raw).strip():
             continue
@@ -140,7 +145,7 @@ def protected_reason(*paths: str | Path) -> str | None:
             resolved = spelled
         for p in (spelled, resolved):
             for root in prot:
-                if _under(p, root):
+                if _under(p, root) and not any(_under(p, d) for d in drafts):
                     return "Grain's own data folder and app are off limits" if root.suffix.lower() != ".app" \
                         else "the Grain app is off limits"
     return None

@@ -777,6 +777,45 @@ export interface ExtensionsDev {
   failed: { path: string; error: string }[]
 }
 
+/** What the user sees before accepting or enabling an extension the assistant drafted (GET /extensions). */
+export interface ExtensionCard {
+  id: string
+  name: string
+  description: string
+  version: string
+  contributes: { tools?: { name: string; danger: string }[]; views?: { id: string; label: string }[] }
+  hooks: string[]
+  permissions: string[]
+  settings: string[]
+  /** The drafting session read untrusted content, from these tools. */
+  tainted: boolean
+  taintSources: string[]
+  /** Permissions the extension declares that this provenance forbids. */
+  refused: string[]
+  /** Permissions that can narrow or change what the user did: enabling needs each granted by name. */
+  needsGrant: string[]
+}
+
+export interface ExtensionProposal extends ExtensionCard {
+  /** Replaces an installed version. */
+  update: boolean
+  /** Identifies this proposal; accepting sends it back so that only the version that was shown is installed. */
+  digest: string
+  findings: string[]
+  changes: { path: string; status: 'added' | 'changed' | 'removed'; diff: string }[]
+}
+
+export interface InstalledExtension extends ExtensionCard {
+  enabled: boolean
+  /** The files are no longer the ones that were accepted. */
+  changed: boolean
+}
+
+export interface ExtensionsReview {
+  proposals: ExtensionProposal[]
+  installed: InstalledExtension[]
+}
+
 /** GET /conversations/{id}/context-meter: the replayed history against the model window (estimates, len/4). */
 export interface ContextMeter {
   window: number

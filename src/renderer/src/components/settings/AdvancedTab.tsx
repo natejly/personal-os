@@ -1,6 +1,7 @@
 import SupportSettings from '../SupportSettings'
 import TraceExportSettings from '../TraceExportSettings'
 import ExtensionsDev from './ExtensionsDev'
+import ExtensionsReview from './ExtensionsReview'
 import DataSettings from '../DataSettings'
 import TrashPanel from '../TrashPanel'
 import NumberField from './NumberField'
@@ -21,6 +22,10 @@ export default function AdvancedTab({ draft, patch, openGroups, toggle }: TabPro
           <TrashPanel />
           <h4>Diagnostics</h4>
           <SupportSettings />
+      </AdvGroup></Sec>
+
+      <Sec id="extensions"><AdvGroup id="extensions" title="Extensions" {...gp}>
+          <ExtensionsReview />
       </AdvGroup></Sec>
 
       <Sec id="developer"><AdvGroup id="developer" title="Developer" {...gp}>

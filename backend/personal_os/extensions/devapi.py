@@ -37,6 +37,22 @@ def describe(host: ExtensionHost, scope: ExtensionScope) -> dict[str, Any]:
             "permissions": list(m.permissions), "hooks": [_hook(s) for s in host.bus.subscriptions(m.id)]}
 
 
+async def adopt(host: ExtensionHost, toolbox: Toolbox, scope: ExtensionScope) -> None:
+    """Offer a loaded extension's tools to the model; unload it (and raise ValueError) when they clash with the app's own."""
+    try:
+        toolbox.set_extension_tools(scope)
+    except ValueError:
+        await host.unload(scope.manifest.id)
+        raise
+
+
+def set_hidden_view(host: ExtensionHost, ctx: ExtensionContext, ext_id: str, hidden: bool) -> None:
+    """Turn an extension off (listed in `hiddenViews`) or on, and apply it."""
+    views = [v for v in ctx.hidden_views() if v != ext_id]
+    ctx.set_settings({"hiddenViews": [*views, ext_id] if hidden else views})
+    host.refresh_enabled()
+
+
 def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Toolbox]) -> APIRouter:
     r = APIRouter(prefix="/dev/extensions")
     live = os.environ.get("GRAIN_EXT_DEV") == "1"
@@ -52,9 +68,7 @@ def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Too
 
     def set_hidden(ext_id: str, hidden: bool) -> dict[str, Any]:
         scope = known(ext_id)
-        views = [v for v in ctx.settings().get("hiddenViews") or () if v != ext_id]
-        ctx.set_settings({"hiddenViews": [*views, ext_id] if hidden else views})
-        host.refresh_enabled()
+        set_hidden_view(host, ctx, ext_id, hidden)
         return describe(host, scope)
 
     @r.get("")
@@ -70,12 +84,10 @@ def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Too
     def disable(ext_id: str) -> dict[str, Any]:
         return set_hidden(ext_id, True)
 
-    async def adopt(scope: ExtensionScope) -> dict[str, Any]:
-        """Offer a loaded extension's tools to the model; unload it when they clash with the app's own."""
+    async def adopted(scope: ExtensionScope) -> dict[str, Any]:
         try:
-            toolbox().set_extension_tools(scope)
+            await adopt(host, toolbox(), scope)
         except ValueError as e:
-            await host.unload(scope.manifest.id)
             raise HTTPException(400, f"ValueError: {e}") from e
         return describe(host, scope)
 
@@ -86,7 +98,7 @@ def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Too
             scope = await host.load_dev(Path(body.path).expanduser().resolve(), ctx)
         except Exception as e:  # noqa: BLE001 - the reason goes to the panel
             raise HTTPException(400, f"{type(e).__name__}: {e}") from e
-        return await adopt(scope)
+        return await adopted(scope)
 
     @r.post("/{ext_id}/reload")
     async def reload(ext_id: str) -> dict[str, Any]:
@@ -99,6 +111,6 @@ def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Too
             scope = await host.reload(ext_id)
         except Exception as e:  # noqa: BLE001
             raise HTTPException(400, f"{type(e).__name__}: {e}") from e
-        return await adopt(scope)
+        return await adopted(scope)
 
     return r

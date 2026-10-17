@@ -33,6 +33,10 @@ test('search matches every typed word against titles and keywords', () => {
   assert.deepEqual(searchSettings('zzzz'), [])
 })
 
+test('the review of assistant-drafted extensions is found by "drafted" and "enable"', () => {
+  for (const q of ['drafted', 'enable extension']) assert.ok(searchSettings(q).some((e) => e.tab === 'advanced' && e.sec === 'extensions'), q)
+})
+
 test('the Telegram bot section is found by "bot" and "texting"', () => {
   for (const q of ['bot', 'texting']) {
     const hit = searchSettings(q).find((e) => e.sec === 'texting')

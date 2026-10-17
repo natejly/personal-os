@@ -1,6 +1,6 @@
 # Extensions and hooks: a small core and everything else as extensions
 
-Status: design and research proposal, 2026-10-14. Nothing here is built. File and line references are against `main` at `e8263a46` unless marked otherwise; the lean-default work is on the unmerged branch `feat/default-off-views` (commit `0cb17f37`).
+Status: design and research proposal, 2026-10-14; PRs 18 to 21 (sections 10.6 to 10.10) specified 2026-10-16. Nothing here is built beyond the steps recorded as done in the PR notes. File and line references are against `main` at `e8263a46` unless marked otherwise; the lean-default work is on the unmerged branch `feat/default-off-views` (commit `0cb17f37`).
 
 This file is under `docs/research/`, where comparative write-ups may name their sources. Sections 3 to 7 describe the proposed API in terms of mechanisms only. External systems are named in the "equivalents" columns, section 7's comparison tables and section 12.
 
@@ -122,13 +122,13 @@ One file, `extension.json`, read by both halves. JSON because Python and TypeScr
 | `name`, `description` | string | Display. |
 | `version` | semver | Extension version. |
 | `apiVersion` | integer | Host API major it targets. Host refuses a higher value and warns on a lower one past the deprecation window. |
-| `kind` | `"extension"` or `"profile"` | A profile has no code files; only `contributes.theme/defaults/layout`. |
+| `kind` | `"extension"` or `"profile"` | A profile has no code files; only `contributes.theme/defaults/layout/presets`. |
 | `tier` | derived, not declared | `builtin`, `user`, `thirdparty`. Set by where the folder lives and how it arrived. |
 | `enabled` | `"always"`, `true`, `false` | Default for a fresh install. Existing installs keep their current state (the rule on `feat/default-off-views`). |
 | `activation` | `["startup"]` or any of `onView:<id>`, `onCommand:<id>`, `onChannel:<id>`, `onSchedule` | When the code half loads. Declared contributions exist before the code does. |
 | `requires` | `{ services: [...], extensions: [...] }` | e.g. Calendar requires service `google`. Start order is a topological sort. |
 | `provides` | `{ services: [...] }` | e.g. the Google extension provides `google`. |
-| `contributes` | object | Declarative registrations (section 4): tools with schemas, routes prefix, views, slots, settings panel, commands, keybindings, theme, defaults. |
+| `contributes` | object | Declarative registrations (section 4): tools with schemas, routes prefix, views, slots (UI), settings panel, commands, keybindings, theme, defaults, runtime slot providers (`runtime`, PR 18), permission presets (`presets`, PR 19). |
 | `hooks` | `{ "<hook.name>": { priority?, timeoutMs?, onFailure? } }` | Every hook the code may subscribe to. Subscribing to an undeclared hook is an error. |
 | `permissions` | string list | Capabilities, section 7. |
 | `settings` | JSON Schema subset | Typed settings. Values live under `settings.ext.<id>.*`; secret-typed fields go to the Keychain, never to the settings table. |
@@ -215,6 +215,8 @@ class Extension(Protocol):
     def provide(self, service: str, impl: object) -> Disposable: ...
     def precheck(self, fn: Callable[[str, dict, dict], str | None]) -> Disposable: ...   # PR 17: refusal text before any card; narrow only
     def directive(self, fn: Callable[[dict], str], *, version: int) -> Disposable: ...  # PR 17: built-in only; unwrapped stable prompt text
+    # PR 18: `provide` with a dotted slot id ("sandbox.backend") registers a runtime provider; the user selects it, the extension cannot
+    def provide(self, slot: str, impl: object, *, id: str, label: str) -> Disposable: ...
 
     # hooks
     def on(self, hook: str, fn: HookFn, *, priority: int | None = None, timeout_ms: int | None = None) -> Disposable: ...
@@ -298,7 +300,9 @@ Two frontend openings are prerequisites, because today's design blocks them: `Vi
 | Channel adapter | B | `api.channel(ChannelAdapter)` | No (Telegram is hard-wired: `_telegram_turn` `app.py:10172`) | Inbound to `ChatIn`, outbound from `done`, approvals, file send. |
 | Trigger kind (scheduler) | B | `api.trigger(kind, adapter)` | No (closed kind set in `jobs.py`) | Mail and calendar triggers become provided by those extensions. |
 | Service | B | `api.provide("google", impl)` | No | Replaces module-level imports of `google`. |
-| Model provider | B | `api.provider(...)` | No (`provider_route.py` fixed) | Later; alternative routers use `model.select` first. |
+| Runtime slot provider | B | `api.provide("<area>.<name>", impl, id=, label=)`; manifest `contributes.runtime`; permission `runtime:<slot>` | Partial: `model.select` can already override a model choice; the client, tool source, sandbox backend and loop are fixed | PR 18 (slots `model.client`, `model.router`, `tools.source`, `sandbox.backend`; `agent.loop` is filled by PR 21). Selected per chat, project, profile and global, never by the extension; fixed envelope in 10.6.0. Section 10.7. |
+| Agent loop | B | provider of the `agent.loop` slot; interface `AgentLoop.run(turn, harness)` | No (`_chat_stream` is one generator) | PR 21; built-in tier only, reaches tools, context and approvals only through the harness. Section 10.10. |
+| Permission preset | B/F | manifest `contributes.presets` (profiles and extensions); user presets in `permission_presets` | Partial: three modes in `lib/permissionMode.ts`, no named bundles | PR 19; applied by the user, loosening needs a confirmed diff. Section 10.8. |
 | Inbox item | B | `api.inbox(item)` | Partial: proposals and approvals only | |
 | Migration / owned tables | B | manifest `data` | No (tables in each store's `SCHEMA`; `migrations.py` imports 11 features) | Ledger id `ext:<id>:<n>` in `schema_migrations`. |
 | Trash restore handler | B | `api.trash_handler(kind, fn)` | No (trash imports docs, todos, mcp_client) | |
@@ -332,7 +336,7 @@ Two frontend openings are prerequisites, because today's design blocks them: `Vi
 
 The fail-open default on gating hooks elsewhere is a documented pitfall (section 7.3).
 
-**Payloads** are frozen snapshots with `redact` applied. Raw conversation content needs the `conversation:read` permission. Payload schemas are defined once as JSON Schema and generated into Python `TypedDict`s and TypeScript types.
+**Payloads** are frozen snapshots with `redact` applied. Raw conversation content needs the `conversation:read` permission. Payload schemas are defined once, as a `TypedDict` per hook in the `HOOKS` registry (`HookSpec`, PR 20), and the JSON Schema, the SDK types and the tables in this section are generated from it (section 10.9).
 
 **Loop guards.** A tool call made by a hook handler carries `via_hook` depth; depth above 2 is refused, and a handler cannot re-trigger its own hook. Any "request another turn" return is capped at one per turn.
 
@@ -466,6 +470,33 @@ Reported from Claude Code's own tool calls in Grain-started sessions through the
 | `coding.tool.pre` | `claude_hook` PreToolUse, via `POST /coding-hooks/{session}/pre` | `{session_id, agent, tool, input, cwd, worktree, permission_mode, lifted, call_id?, conversation_id, run_id}`; strings scrubbed, 2 KB each, 16 KB total | `gate`: `Deny`/`Ask` only; strictest of this and the local floor wins; never `allow` or `updatedInput` | 2 s bus budget, 3 s socket timeout; failure, timeout or a bad return becomes `Ask`; with the app unreachable and a gate subscriber at session start the hook asks; `lifted` sessions honor `Deny` only | built-in and user with `hooks:gate` and `coding:read`; third-party only if decision 5 is taken, narrow-only |
 | `coding.tool.post` | PostToolUse, via `POST /coding-hooks/{session}/post` | the pre payload plus `{result_preview, error?, duration_ms?}` | observe | `emit`, 1 s hook timeout, never affects the session | any enabled extension with `coding:read` |
 
+### 5.13 Runtime slots (PR 18)
+
+Fired by the slot registry and the settings route (section 10.7). All are observe-only; none can change a selection or a fallback.
+
+| Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
+|---|---|---|---|---|---|
+| `runtime.changed` | `PUT /runtime` after a selection is stored, at chat, project or global scope; a profile apply | `{slot, scope, scope_id, old, new, by}`; `by` is `user` or `profile:<id>` | observe | `emit` | any enabled extension |
+| `runtime.fallback` | `resolve()` when the selected provider is disabled, removed or failed and the default was used, or when the fallback was refused | `{slot, wanted, used, why, refused, conversation_id, run_id}`; `used` is null when `refused` | observe | `emit`; also raises the turn notice and one inbox note per change | any enabled extension |
+| `sandbox.refused` | `sandbox_wrap` when a confined request is refused (mode unsupported, partial enforcement, wrap or start failure) | `{tool, mode, backend, dimension, enforcement, run_id}`; no command text | observe | `emit` | any enabled extension |
+
+### 5.14 Presets (PR 19)
+
+| Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
+|---|---|---|---|---|---|
+| `preset.applied` | `POST /permissions/presets/{id}/apply`, after the write and the `setting_sources` stamp | `{preset_id, scope, scope_id, changed_keys, loosened, by}`; key names only, never values | observe | `emit` | any enabled extension |
+
+There is deliberately no gate hook on applying a preset: the diff-and-confirm step is core, and no extension can approve, veto-by-default or rewrite it.
+
+### 5.15 Agent loop (PR 21)
+
+Fired only by the plan-execute-verify loop (section 10.10.4); the default loop fires neither. Titles and gaps can quote the user's request, so subscribing needs `conversation:read`.
+
+| Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
+|---|---|---|---|---|---|
+| `loop.plan` | after the plan is parsed and validated, before the first step | `{run_id, conversation_id, steps: [{title, done_when}]}`, each string credential-scrubbed | observe | `emit` | extensions with `conversation:read` |
+| `loop.verify` | after each verify call | `{run_id, conversation_id, attempt, ok, gaps}` | observe | `emit` | extensions with `conversation:read` |
+
 ## 6. Customization and authoring tooling
 
 ### 6.1 Layer 1: the customization surface
@@ -578,13 +609,13 @@ Class: **Core**, **Svc** (core service), **BI-on** (built-in extension, default 
 
 | # | Feature | Class | Hooks and contributions consumed |
 |---|---|---|---|
-| 1 | Chat turn loop, streaming, models | Core | provides all hooks; `model.select` |
+| 1 | Chat turn loop, streaming, models | Core | provides all hooks; `model.select`; slots `model.client`, `model.router`, `agent.loop` (phases 18, 21) |
 | 2 | Tool system (Toolbox, specs, danger) | Core | provides `tools.offer`, `tool.*` |
 | 3 | Persistence, migrations, backups, secrets | Svc | extension migrations, backup include list |
 | 4 | Context assembly, compaction | Core | `context.contribute`, `compaction.*` |
-| 5 | Permissions, approvals, safety | Core/Svc | `tool.permission` (narrow only), `approval.*` |
+| 5 | Permissions, approvals, safety | Core/Svc | `tool.permission` (narrow only), `approval.*`, presets and `guards.py` (phase 19) |
 | 6 | Runs, attention, inbox | Svc | `api.inbox`, `run.after` |
-| 7 | Sandbox: shell, Python, file tools | Svc | `tool.pre/post`, sandbox profile |
+| 7 | Sandbox: shell, Python, file tools | Svc | `tool.pre/post`, sandbox profile, slot `sandbox.backend` (phase 18) |
 | 8 | Memory (facts, auto-learn) | Svc first, learners BI-on later | `context.contribute`, `turn.settled`, `memory.*`, settings panel, footer chip |
 | 9 | Knowledge graph | BI-on | `context.contribute`, `turn.settled`, retrieval source, view, widget |
 | 10 | Writing style | BI-on | `context.contribute` (draft turns), `turn.settled`, tool |
@@ -597,7 +628,7 @@ Class: **Core**, **Svc** (core service), **BI-on** (built-in extension, default 
 | 17 | Agents / personas | BI-on | library tab, view, `@mention`, widget |
 | 18 | Slash commands | Svc | command registry (built-ins register) |
 | 19 | Workflows | Opt | library tab, tools, routes, job |
-| 20 | MCP connectors | Core | tool source, settings panel |
+| 20 | MCP connectors | Core | tool source (default of slot `tools.source`, phase 18), settings panel |
 | 21 | Workers, delegate, subagents | Core | `subagent.*`, `worker.report`, widget |
 | 22 | Autonomous chats / desks | BI-on | side-panel tab, `tool.pre` (stage writes), inbox item, settings panel |
 | 23 | Side panel, Review, show panel | Svc | `sidepanel.tab` host |
@@ -699,9 +730,15 @@ All steps edit `app.py` or `tools.py`, so they are sequential, not parallel. Eac
 | 15 | Authoring tooling | `grain ext new/check/dev/test/pack`, SDK generation, dev panel | A sample extension built end to end by CLI |
 | 16 | Authoring skill and Review flow | `author-extension` skill, `ext_propose`, diff in Review, disabled install | A drafted extension enabled by hand |
 | 17 | Coding extension | Port coding sessions to a built-in extension (default on); terminal control tools over the existing PTY hub; recipes with verify; headless structured runs; hook bridge (`coding.tool.pre/post`). Specified in section 10.5 | Section 10.5.7 "Done when" |
-| 18 | Third-party loading | Out-of-process host, content-hash pinning, approval card | Separate design review first |
+| 18 | Runtime slots and swappable providers | Slot registry (`api.provide`, manifest `contributes.runtime`) for `model.client`, `model.router`, `tools.source`, `sandbox.backend` (and `agent.loop`, declared); selection chat > project > profile > global with a visible source; fail-closed sandbox modes; fallback rules; Settings > Runtime. Specified in section 10.7 | Section 10.7.8 "Done when" |
+| 19 | Permission presets, core guard order, effective config | Named presets with scoped apply and a confirmed diff for anything looser; `guards.py` so core checks always precede extension gates; effective config route, `grain config dump` and a read-only view. Section 10.8 | Section 10.8.5 "Done when" |
+| 20 | Generated hook catalog | `HOOKS` becomes a registry (kind, payload, subscribers, since); a test and `grain ext check` verify every call site; section 5 tables and the SDK hook types are generated. Section 10.9 | Section 10.9.4 "Done when" |
+| 21 | Swappable agent loop | `AgentLoop` interface, `ToolStep` extracted from `_chat_stream`, default loop byte-identical, one alternative loop (plan-execute-verify), confinement enforced by capability passing, an import fence and a parity check. Section 10.10 | Section 10.10.5 "Done when" |
+| 22 | Third-party loading | Out-of-process host, content-hash pinning, approval card | Separate design review first |
 
 PRs 0 through 9 are the core of the effort. PRs 10 to 13 can slip without blocking anything else. PR 17 needs PRs 3 and 9 (and 11 for recipe jobs) and slips independently.
+
+PRs 18 to 21 and their dependencies: **18 after 9 and 14** (the settings-panel and footer slots, and profile `defaults`); **19 after 14** (profiles ship presets; its CLI part registers `config` on the `grain` dispatcher that PR 15 creates, and either PR can create the dispatcher first); **20 after 15** (it re-points PR 15's SDK generator and extends `grain ext check`); **21 after 18** (the `agent.loop` slot and selection), and it relies on PR 19's `guards.py` for its tool step and on PR 3's `dispatch_tool`. PR 19 and PRs 18 and 20 are independent of each other apart from the diff-and-confirm machinery, which PR 18's looser-selection rule reuses from PR 19 (until PR 19 lands, PR 18 ships its own check and PR 19 replaces it). PR 22 (third-party loading) needs a separate design review and is out of scope here.
 
 ### 10.3 Risks
 
@@ -963,14 +1000,495 @@ Repo gates: backend suite, `npm run typecheck`, `npm test`, the e2e suite for te
 
 #### 10.5.8 Not in this step
 
-Third-party loading (PR 18); structured runs on `opencode`/`pi`; terminal access for non-coding extensions; any hook that can allow or approve; `stream-json` turn-kill for headless runs (a follow-up once it is confirmed to carry `structured_output`); merging or pushing a recipe's branch (the main agent still does that with `git push`/`gh`).
+Third-party loading (PR 22); structured runs on `opencode`/`pi`; terminal access for non-coding extensions; any hook that can allow or approve; `stream-json` turn-kill for headless runs (a follow-up once it is confirmed to carry `structured_output`); merging or pushing a recipe's branch (the main agent still does that with `git push`/`gh`).
+
+### 10.6 PRs 18 to 21: swappable runtime pieces inside a fixed envelope
+
+PRs 0 to 17 move features out of the core. PRs 18 to 21 do the opposite kind of work: they let an extension or a profile replace pieces of the core's own runtime (the model client, the router, a tool source, the sandbox backend, the turn loop), and give the user the means to see and control which piece is in use (selection, presets, an effective-config view, a generated hook catalog). Facts below are checked against the `feat/extensions` worktree at `d57265d9` (PRs 0 to 7 built, PR 17 specified); PRs 8 to 16 are being built in parallel, so API names from them are taken from this document, not from code.
+
+#### 10.6.0 The principle: swap the piece, never the envelope
+
+Everything around the core can be swapped, but a fixed invariant envelope sits outside every swappable piece:
+
+- the permission stack and its floor (`permissions.py`, `permrules.py` including the hardline list and the deny-wins evaluation, `autoreview.route`, `Toolbox.floor_action`, the destructive floor, the protected paths),
+- `dispatch_tool` and its hooks (section 5.5),
+- redaction (`redact.scrub_command_output`, `tools.scrub_strings`, the post-pipe scrub in `tool_results.render`),
+- the `executed_calls` journal (`RunStore.call_once`),
+- approvals: no provider and no hook decides one (section 5.8); the card, the stored decision and `POST /approvals/{call_id}` are core,
+- the stable-prefix rules (section 5.3: byte-identical per chat, `stable_hash`, contributors declare `stable`/`volatile`/`tail`).
+
+A swapped provider changes how Grain works, never what it is allowed to do. Each slot in 10.7 is defined by what is on its far side from the envelope: a model client returns text and tool calls and nothing else; a tool source returns results that are tainted data like a connector's; a sandbox backend can only narrow what a process may do; a loop sequences calls but reaches tools, context and approvals only through core objects (10.10).
+
+**Contrast with the "no fixed core" design.** The systems surveyed in section 12 (pi and OpenCode in particular, as the survey describes them; details marked unverified there stay unverified) treat nearly everything as an event a plugin can hook: a handler may rewrite a tool call's arguments or result, and an approval prompt is an ordinary event on the same bus that a listener can answer. That makes the host very small and very flexible, and it also means the host cannot say what a given install is allowed to do without reading every plugin. Grain keeps the host small by moving features out (PRs 1 to 17), but it keeps a fixed envelope, so the answer to "what can this install do" stays computable from the permission settings alone. The concrete differences are the ones section 2.3 already states for hooks (they may observe, add context, narrow or transform data, never widen) extended to providers: a provider can be replaced wholesale, but the thing around it that decides and records what happens cannot.
+
+**What is borrowed.** (1) Providers are registered by name and chosen by configuration at several scopes, with the choice visible (PR 18). (2) Events are an enumerated catalog with typed payloads, not free-form strings (PR 20). (3) Settings are layered by scope, and the user can see which layer a value came from (PR 19). (4) Named permission modes are the unit users think in, so bundles of permission settings get names, can be shared and are applied by one click (PR 19, section 10.5.0 lists the modes the Claude Code CLI itself offers). Each is re-expressed in terms of the mechanisms in this document; none changes the narrowing rule.
+
+#### 10.6.1 Facts from the code that shape PRs 18 to 21
+
+| Fact (checked in the worktree) | Consequence |
+|---|---|
+| Model calls go through two module functions, `llm.stream_chat` (`llm.py:1218`) and `llm.complete` (`llm.py:1606`). Both call `provider_route.resolve(settings, ref)` first (`llm.py:1247`, `1613`): a model ref is `<providerId>/<model>`, each provider's key sits in the `providerKeys` secret, and every provider is an OpenAI-compatible endpoint except the native Anthropic branch chosen inside `llm` by `anthropic_native.is_native`. `model.request` and `model.response` fire inside `llm` (PR 5). Routing is `router.route` (pure heuristics, 48 lines) followed by `_select_model` and the `model.select` pipe (`app.py:2001`). | The model slot sits below `resolve` and above the HTTP code, and the core wrapper, not the provider, fires the two hooks, writes the usage row and applies the auth breaker, so a swapped client cannot skip accounting. The router slot replaces `router.route` only; `model.select` stays a pipe after it. |
+| Built-in and extension tools are `Toolbox.specs`. Connector tools are not in `specs`: they reach `dispatch_tool` through its `connector=` argument (`_mcp_call`, `Subagents._exec_mcp`), are danger `external` by construction (`MCP_DANGER`), taint the run when contacted (`dispatch.Contact`) and are quarantined on schema drift (`mcp_drift`). | A tool source is a connector-shaped thing: it gets exactly the connector treatment, so no new trust model is needed. `core/mcp` becomes its default implementation by wrapping `McpClient`, not by rewriting it. |
+| The sandbox protocol is `osplat.Sandbox` (`osplat/base.py:57`): `wrap(argv, profile)` where `profile` is backend-specific text (Seatbelt policy on macOS), built by `shell_profile(writable, network, proxy_port, allow_hosts, loopback)` and `python_profile(...)`. There is no mode vocabulary: each caller picks a `writable` list. Linux uses `NoSandbox` (`shell_available()` false): `shell_run` then runs unsandboxed only after a per-command approval with `unsandboxed=true` (`shell.unsandboxed_description`). `failed_to_start(exit_code, output)` already exists. | The slot needs a mode-based request type; the macOS adapter is the default; the unsandboxed path is a different request (mode `full`, always a card), never a fallback from a confined request. |
+| There is no loop interface. `_chat_stream` is one async generator of about 2,130 lines (`app.py:2019` to `4146`) that holds the gate chain inline (`app.py:3396-3563`: plan-mode blocks, `permrules.resolve`, floors, `autoreview.route`, the approval wait). Copies of that chain exist in `subagents.py:1205-1270` and `1350-1390`, `workflows.py:914-926` and `toolbridge.py:187-196`. `dispatch_tool` itself contains **no permission check**; each loop decides before calling it. | PR 19(b) needs one core function that the copies share, and PR 21 needs the tool step extracted from `_chat_stream` before any alternative loop can exist. Both are mechanical, golden-tested refactors, listed as host additions. |
+| `limits.py` states "There are no budgets": nothing caps a reply's rounds, tokens, cost or wall-clock time. What does bound a turn: `REPEAT_LIMIT`, `TOOL_ERROR_LIMIT`, the stuck detector, the denial streak, the hang clocks, the user's stop and steering. | "The same budgets and turn caps" means those breakers and clocks, and they must live in core objects the loop cannot replace (10.10). An alternative loop that needs bounded rounds declares its own bound in addition. |
+| Settings have no provenance. `settings()` (`app.py:391`) merges `llm.DEFAULT_SETTINGS` with stored rows and the permission store; the whitelist is `DEFAULT_SETTINGS` (unknown keys are dropped). The project row has only `tools` and `memory_mode` (`db.py:35`); a chat has a free `settings` JSON; narrower scopes carry tool modes (`Toolbox.effective`: chat, agent, project, global, default) but not `permissionMode`, rules or `alwaysAsk`, which are global only. `Toolbox.explicit` flattens the layers and loses which one set a mode. `settings()` lives in `app.py`, and importing `app` builds the whole backend. | Provenance needs a side table. Scoped permission overrides need new storage. The CLI cannot import `app`: `settings()` assembly is extracted to `config.py` first. |
+| `permissions.validate(key, value, cap_modes=, rule_check=)` validates one permission key; the frontend knows three modes (`lib/permissionMode.ts`: Auto, Manual, Allow everything) and `needsConfirm(from, to)`. Connector tools have grants in `mcp_grants` (scope `global`/`project`/`chat`, bound to a schema hash). | Presets reuse `validate` per key and `needsConfirm` generalizes to a diff. A grant carries a schema hash the user approved, so a preset can never create one. |
+| The manifest key `contributes.slots` already means UI layout slots (section 6.1); `api.provide(name, impl)` already means a named service (section 3.4, PR 7). | Runtime slots use the id form `<area>.<name>` (always contains a dot; service names never do, a validate error otherwise) and the manifest key `contributes.runtime`; "slot" alone in this section always means a runtime slot. |
+| `hooks.HOOKS` is a `frozenset` of names (`extensions/hooks.py:32`). Nothing records a hook's kind, payload or subscribers, and `HookBus.emit/collect/pipe/gate` do not check that the method matches the hook. At least ten names in the set have no call site anywhere (`turn.accept`, `turn.start`, `input.attachment`, `tools.offer`, `tool.permission`, `worker.report`, `channel.inbound`, `channel.outbound`, `file.written`, `review.accepted`, `schedule.tick`); a manifest may declare and subscribe to them, and they never fire. | PR 20 turns the set into a registry, and the audit removes or implements every dead name. |
+| There is no `grain` command. `backend/pyproject.toml` has one script, `grain-backend`; `__main__.py` is a flat argparse for the server. PR 15 introduces `grain ext ...`. | PRs 19 and 20 add subcommands to the dispatcher PR 15 creates (`personal_os/cli.py`). If PR 19 merges first it creates the dispatcher with only `config`, and PR 15 registers `ext` into it. |
+
+### 10.7 PR 18: Runtime slots and swappable providers
+
+PR 18 adds a slot registry for the core's runtime seams. Each slot has a typed, small interface, a built-in default, and a place for extensions to contribute alternatives. It needs PR 9 (settings-panel and message-footer slots for the UI) and PR 14 (profiles can name a provider in `defaults`).
+
+#### 10.7.1 The registry
+
+```python
+@dataclass(frozen=True)
+class SlotDef:
+    id: str                         # "model.client", "model.router", "tools.source", "sandbox.backend", "agent.loop"
+    protocol: type                  # the typing.Protocol a provider implements
+    multi: bool                     # tools.source only: several providers active at once
+    default_id: str                 # always "core/<name>"
+    permission: str                 # "runtime:model" | "runtime:router" | "runtime:tools" | "runtime:sandbox" | "runtime:loop"
+    contract: Callable              # a pytest suite any provider must pass (test doubles, 10.7.6)
+```
+
+Core declares slots at import (`runtime/slots.py`), an extension supplies a provider through the API object, and neither side can change the other's half:
+
+```python
+api.provide("sandbox.backend", MyBackend(), id="acme-box", label="Acme Box")   # id becomes "<ext id>/acme-box"
+```
+
+The manifest declares it before any code runs, so the Settings UI can list it while the extension is idle: `contributes.runtime: [{ "slot": "sandbox.backend", "id": "acme-box", "label": "...", "meta": {...} }]`, and `permissions` must contain the slot's permission. `api.provide` with an undeclared slot, a missing permission, a duplicate id or a slot that does not exist is a validate error. Providers are Disposables like every other registration, so disabling the extension removes them. Third-party tier may not provide any slot in this phase (PR 22 revisits it); user tier may provide `model.router`, `model.client` and `tools.source` but not `sandbox.backend` or `agent.loop`; built-in tier may provide all. Neither tier has an API to select a provider: only the user's settings route (10.7.3) and a profile's `defaults` (under the looser-needs-a-click rule) write a selection.
+
+#### 10.7.2 The slots
+
+**`model.client`: how a model call is sent.**
+
+```python
+class ModelClient(Protocol):
+    id: str
+    kinds: frozenset[str]            # which call kinds it serves: "chat", "complete", "embed", "image", "audio"
+    locality: Literal["local", "remote"]   # where the prompt goes; the default derives it from the provider entry's host
+    def stream(self, req: ModelRequest) -> AsyncIterator[ModelEvent]: ...
+    async def complete(self, req: ModelRequest) -> ModelReply: ...
+```
+
+`ModelRequest` is the argument list of `llm.stream_chat` minus `settings`: `{model, messages, tools, kind, effort, tool_choice, fast}`. `ModelEvent` is exactly the event dicts `stream_chat` yields today (`delta`, `reasoning`, `retry`, `end` with `tool_calls`, `usage`, `usage_est`, `incomplete`). Default `core/openai-compatible` is the current body of `llm.py` below `provider_route.resolve`, including the native Anthropic branch, moved behind the protocol with no behavior change. The core wrapper around any client: validates every event (unknown types dropped, `end` required exactly once, `tool_calls` shaped `{id, name, arguments}` and named only from the offered schemas, anything else goes down the existing invalid-call path), fires `model.request`/`model.response`, records usage, applies `auth_breaker`, `LLM_IDLE_SECONDS` and the stop event. The client never receives the `settings` dict, `providerKeys` or another provider's entry; it reads its own secrets through `api.secrets`. A client serves only the kinds it declares; every other kind keeps using the default, so installing a chat-only client leaves embeddings and titles untouched. It cannot see tool results as anything but message text and cannot return an approval, a permission, or a tool result.
+
+**`model.router`: which model and effort a turn uses.**
+
+```python
+class ModelRouter(Protocol):
+    id: str
+    def route(self, turn: RouteInput) -> RouteChoice: ...   # sync, 50 ms budget; RouteChoice = {model, effort, reason, no_think}
+```
+
+`RouteInput` is the keyword arguments of `router.route` plus `{conversation_id, project_id}`. Default `core/heuristic` is `router.route` unchanged. The result goes through the same validation `_select_model` applies to a `model.select` result (a model of an unconfigured provider is ignored, anything but a valid choice falls back to the default router's answer) and then through the `model.select` pipe. An explicit model pick by the user is never routed, exactly as now.
+
+**`tools.source`: where extra tools come from (multi).**
+
+```python
+class ToolSource(Protocol):
+    id: str
+    def list(self) -> list[ToolDecl]: ...                      # {name, schema, danger, group}; may change at runtime
+    async def call(self, name: str, args: dict, ctx: HookCtx) -> dict: ...
+```
+
+Defaults are `core/builtin` (the `Toolbox.specs`, including extension tools registered by `api.tool`) and `core/mcp` (a thin adapter over `McpClient`); both are always on and cannot be deselected. An extension source is treated as a connector: names are `x__<ext id>__<tool>` and collide-check against the live registry, danger is at least `external` (a source cannot declare lower), default mode `ask`, every result taints the run, every call goes through `dispatch_tool(connector=...)` so the permission stack, the journal and the hooks apply, and a changed `list()` result (schema hash) quarantines the changed tools until the user accepts, as `mcp_drift` does. "Selecting" a source means enabling it per scope; a disabled or removed source's tools leave the next schema list (the append-only tool order of section 3.3 is preserved by hiding).
+
+**`sandbox.backend`: how a confined process is confined.**
+
+```python
+Mode = Literal["read-only", "workspace-write", "full"]
+
+@dataclass(frozen=True)
+class SandboxRequest:
+    mode: Mode
+    cwd: str
+    writable: tuple[str, ...]          # only for workspace-write: extra roots beyond cwd and the temp dir
+    network: Literal["none", "proxy", "open"]
+    proxy_port: int | None
+    allow_hosts: tuple[str, ...]
+    deny: tuple[str, ...]              # core-owned: credential stores, Grain's data folder and app bundle, protected paths
+    purpose: Literal["shell", "python", "terminal"]
+
+class SandboxBackend(Protocol):
+    id: str
+    def support(self) -> dict[Mode, Enforcement]: ...         # absent mode = cannot enforce it
+    def wrap(self, req: SandboxRequest, argv: list[str]) -> list[str]: ...
+    def failed_to_start(self, exit_code: int | None, output: str) -> bool: ...
+```
+
+`Enforcement` is `{"fs_write": "full"|"partial"|"none", "fs_read_deny": ..., "network": ..., "process": ...}`: the dimensions a mode needs are `read-only`: `fs_write`, `fs_read_deny`; `workspace-write`: the same plus `network` whenever the request's `network` is not `open`; `full`: none (it asks for no confinement). A backend is `full` for a request when every needed dimension is `full`, `partial` when at least one is `partial` or `none`. The core owns `deny` and the network policy text: the macOS adapter turns them into Seatbelt rules, another backend must enforce them itself or report the dimension as partial.
+
+Fail closed, in this order, before anything is spawned:
+1. The selected backend does not list the requested mode, or lists it partial: **the call is refused** with `"<tool> needs <mode> confinement; the selected sandbox backend '<id>' cannot enforce <dimension> here (<full|partial>). It was not run."` The call is never retried unconfined, on another backend, or on the default one.
+2. A partial result is accepted only when the user's selection record carries `accept_partial: [dimension, ...]` for that backend, written in Settings with the text of what is not enforced shown. Neither an extension nor a profile can write it.
+3. `wrap` raising, or `failed_to_start(...)` true after the run: the call fails with the same error shape. `shell_run` keeps its existing profile-failed handling (`sandbox.profile_failed`) and does not retry unconfined.
+4. `mode: "full"` is not a backend capability: it is today's explicit unsandboxed request (`shell_run` with `unsandboxed=true`, the Allow-everything path), judged by the permission stack as now (a card, `force_ask` when tainted). Selecting a backend never turns a confined request into a `full` one and never turns `full` into an approval-free one.
+
+The default `core/os-default` adapts `osplat.current().sandbox`. On macOS it reports `workspace-write` and `read-only` as full for filesystem and network, and no `full` entry is needed. On a platform with `NoSandbox` it reports nothing, which is the existing behavior: confined requests are refused and the unsandboxed route needs the card it needs today. Current callers map to modes as follows: `shell_run` and `run_fixed(sandboxed=True)` and the desk shell are `workspace-write` (`writable` = the desk or working folder), `run_python` is `workspace-write` with the temp work dir, the PR 17 agent terminals are `workspace-write`. Nothing requests `read-only` today; it is in the contract so a backend that only does read-only is expressed and judged correctly, and so recipes or a later read-only tool group can ask for it.
+
+**`agent.loop`: declared here, filled in PR 21.** The slot, its `SlotDef` and the selection plumbing exist and resolve to `core/chat-loop`; the registry refuses any other provider until PR 21 ships the interface.
+
+#### 10.7.3 Selection and the visible source
+
+Resolution order, highest first: **chat, project, profile, global, default**.
+
+| Scope | Where it is stored | Written by |
+|---|---|---|
+| chat | `conversations.settings.runtime.<slot>` (the chat's free JSON; no migration) | the user, in the chat's runtime menu |
+| project | new `projects.runtime` JSON column (core ledger step; same shape as the existing `projects.tools`) | the user, in the project's settings |
+| profile | an enabled profile's `contributes.defaults.runtime` | applied once on enable under the permission floor rule (6.1); recorded with source `profile:<id>` |
+| global | new settings key `runtime` (added to `DEFAULT_SETTINGS`, default `{}`) | the user, Settings > Runtime |
+| default | `SlotDef.default_id` | n/a |
+
+A single slot resolves to one provider id. `tools.source` resolves per scope to `{enable: [...], disable: [...]}` lists merged from global up to chat (a narrower scope can disable what a wider one enabled, and the defaults are never disableable).
+
+`resolve(slot, scopes) -> Resolution{slot, provider, source, reason, fell_back_from?, locality?, enforcement?}` is the one function every consumer calls (the model wrapper, `Toolbox`, the shell, the loop runner). `source` is one of `chat`, `project`, `profile:<id>`, `global`, `default`; `reason` is the human sentence "Using Acme Box (sandbox backend) because this project selects it." The sentence is shown wherever the choice matters and never hidden when it differs from the default: `GET /runtime/resolve?conversation_id=&project_id=`, the `context_used["runtime"]` of each turn, a trace span `runtime` on turns where any slot is non-default, a message-footer chip (`message.footer` slot) naming each non-default slot, and Settings > Runtime. A run records its resolution (`agent_runs.input.runtime`) so a replay or an audit knows which providers produced it.
+
+Selecting a provider that is **looser** than the one in effect needs an explicit click that shows the difference, using the same machinery as PR 19's preset diff (10.8.1): a sandbox backend with weaker enforcement than the one it replaces, a model client with `locality: remote` replacing a `local` one (the prompt would leave the machine), a tool source (adds tools). Profile defaults are subject to the same rule: a profile may select an equal or stricter provider silently and must show the diff otherwise.
+
+#### 10.7.4 What happens when a selected provider disappears or fails
+
+| Slot | Disabled or removed (extension off, uninstalled) | Fails at call time |
+|---|---|---|
+| `model.client` | Next turn resolves to the default with a notice in the turn (`runtime.fallback` hook, an inbox note once per change, the `reason` text says "selected 'x' is not available; using the default"). A selection stays stored, so re-enabling restores it. | Failure before the first event: the wrapper retries once on the default and says so, **only if** the default's `locality` is at least as private as the selected one's. A `local` selection never falls back to a `remote` default: the turn ends with the error and a notice. Failure after events were emitted: no replay on another client (it would duplicate output and send the prompt twice); the turn ends with the error and `incomplete` set, as for any provider failure today. |
+| `model.router` | Default router. | A raise, a timeout past 50 ms or an invalid choice: the default router's answer for that turn, a notice, and the handler counts toward muting like an `emit` handler (5 consecutive failures mute it for the session). |
+| `tools.source` | Its tools disappear from the next schema list; a tool already offered in a running turn stays callable until the turn ends, then answers "No such tool". | `list()` failing keeps the last accepted list; `call` failing returns a tool error result. Nothing else runs in its place. |
+| `sandbox.backend` | Resolves to the default backend **only if** the default's `support()` for the call's mode is at least as strong (per dimension) as the missing backend's last recorded support; otherwise the call is refused as in 10.7.2 rule 1. | Rule 3 of 10.7.2: refused, never unconfined. |
+| `agent.loop` | Default loop, with a notice, before the turn starts. | A loop that raises ends the turn with the error as any loop failure does; there is no mid-turn handover to another loop. |
+
+The common rule: a fallback is allowed only when the target is the built-in default **and** is not less safe along the slot's safety dimension (locality for models, enforcement for the sandbox). Where that cannot be shown, the operation fails with a visible error. Fallbacks are always announced; none is silent.
+
+#### 10.7.5 Settings UI
+
+Settings > Runtime (a core panel through the settings-panel slot): one card per slot showing the effective provider with its source and reason, badges for tier (built-in, user), locality, and sandbox enforcement per mode, and a per-scope picker: Global always; Project when a project is open; Chat from the chat's menu. The picker lists the default and every provider declared in a manifest of an enabled extension. Choosing a looser provider opens the diff dialog (10.7.3). A sandbox card also shows a table of modes against `full`/`partial`/`none` per dimension and the `accept_partial` toggles. Each card has a Test button that runs the slot's contract smoke test against the provider (10.7.6) and shows pass or fail, so a bad provider is found before a turn depends on it. Nothing in the panel is writable from the agent: there is no tool for selection, as there is no tool that enables an extension.
+
+#### 10.7.6 Test doubles
+
+`grain_sdk.testing` (PR 15) gains `FakeModelClient(script=[...])` (scripted events, a failure point, a locality), `FakeRouter`, `FakeToolSource(tools, fail_after=)` and `FakeSandbox(support={...}, wrap_fails=)`, plus `slot_contract(slot, factory)` which runs the slot's contract suite against any provider: event-shape validity and exactly-one `end` for a client, 50 ms and validity for a router, namespacing and danger floor for a source, and for a backend that a request it lists as full is confined (a probe writes outside the allowed roots and reads a denied path inside a real child process) and that a request it does not list raises. The default providers pass the same suite in the core test run. The harness (`Harness`) accepts `h.select(slot, provider_id)` so an extension test can run a turn against its provider or a double.
+
+#### 10.7.7 Host additions this step needs
+
+| Addition | Where | Rule |
+|---|---|---|
+| `runtime/slots.py` registry, `SlotDef`, `Resolution`, `resolve()` | new | Core only; providers register through the scope. |
+| `ExtensionScope.provide(slot, impl, *, id, label)` | `host.py` | Same method as service `provide`; a dotted name is a slot; permission, manifest and duplicate checks; Disposable. |
+| Manifest `contributes.runtime` and permissions `runtime:model`, `runtime:router`, `runtime:tools`, `runtime:sandbox`, `runtime:loop` | `manifest.py` (`_CONTRIBUTES`, `_PERMISSIONS`) | Strict keys; a profile may use `contributes.defaults.runtime` but not `contributes.runtime`. |
+| Model wrapper | `llm.py` | `stream_chat` and `complete` resolve `model.client` for the call's kind, then validate, account and break as in 10.7.2. The existing body becomes `core/openai-compatible`. |
+| `SandboxRequest`/`SandboxBackend` and the adapter | `osplat/base.py`, `shell.py`, `sandbox.py`, `extensions/coding` | Callers build a `SandboxRequest`; the one place that turns a request into a wrapped argv is `sandbox_wrap(req, argv)`, factored out of `shell_run`, `run_fixed` and `run_python` (the same factoring 10.5.2 asks for). The Seatbelt profile text is unchanged byte for byte. |
+| `Toolbox` source registry | `tools.py`, `app.py` | Source tools take the connector path; `mcp_is` becomes `is_source_tool`. |
+| `projects.runtime` column, settings key `runtime` | core ledger step, `llm.DEFAULT_SETTINGS` | The column default is `'{}'`. |
+| `GET/PUT /runtime`, `GET /runtime/resolve` | `runtime/routes.py` | PUT validates ids against the registry and applies the looser-needs-confirm check server-side (a 409 with the diff). |
+| Hooks `runtime.changed`, `runtime.fallback`, `sandbox.refused` | section 5.13 | `emit`. |
+
+#### 10.7.8 Done when
+
+1. With no extension providing a slot, behavior is unchanged: `backend/tests/golden/chat_prefix.txt` byte-identical, the tool-name list and order identical, a recorded stream of a scripted chat identical, `model.request`/`model.response` payloads identical, the Seatbelt profile text identical for a fixed request (golden).
+2. Every slot resolves in the order chat, project, profile, global, default, with the right `source` string; a table test covers each pair of scopes and `tools.source` merging; the sentence in `reason` appears in `/runtime/resolve`, `context_used`, the trace and the footer chip exactly when a slot is non-default.
+3. A provider can be registered only with the slot's permission, a manifest entry, a unique id and the right tier; each violation is a validate error; disabling the extension removes the provider and a stored selection falls back as in 10.7.4 with a notice, then returns when it is re-enabled.
+4. `model.client`: a fake client with a malformed event stream (no `end`, two `end`s, an unknown tool name, an unknown event type) never reaches the loop malformed; usage rows and both model hooks fire for a fake client; the client is never handed `settings` or another provider's key (introspection test); a `local` selection whose client fails before the first event does not retry on a `remote` default, and a `remote` selection does retry on a `remote` default; a failure after events does not replay.
+5. `model.router`: a router that raises, hangs past 50 ms or names an unconfigured model is replaced by the default's answer for that turn with a notice; an explicit model pick is not routed; `model.select` still runs after it.
+6. `tools.source`: an extension source's tool is named `x__<id>__<tool>`, cannot declare danger below `external`, defaults to `ask`, taints the run on a result, goes through `dispatch_tool` (a `tool.pre` deny and the journal apply) and is quarantined when its list changes; a name colliding with a built-in is a validate error; disabling it hides the tools from the next schema list and not from a running turn.
+7. `sandbox.backend`, fail closed: a fake backend that lacks `workspace-write` makes a `shell_run` refuse with the 10.7.2 text and spawn nothing; a backend that is partial on `network` makes a request with `network: "none"` refuse unless `accept_partial` for that dimension is set by the settings route (the same call from a profile or an extension cannot set it); `wrap` raising and `failed_to_start` true never lead to an unconfined run; a missing backend falls back to the default only when the default is at least as strong per dimension; `mode: "full"` still needs the card it needs today under every selection; the contract probe confirms the macOS adapter really denies a write outside the roots.
+8. Looser selections need a click: a remote client over a local one, a weaker sandbox, a profile `defaults.runtime` that is looser each return 409 with a diff until confirmed; a stricter one applies silently.
+9. Settings > Runtime shows source, reason, badges and the Test button; the per-scope pickers write the right store; a project and a chat override a global choice and show it; the e2e settings and sidebar specs pass.
+10. Section 4 and 5.13, this section and the manifest permission list agree with the implementation (hook ids, payloads, permissions).
+
+Repo gates: backend suite, `npm run typecheck`, `npm test`, the settings and chat e2e specs, no new red against the recorded baseline.
+
+#### 10.7.9 Not in this step
+
+Third-party providers of any slot (PR 22); a user-tier `sandbox.backend` or `agent.loop`; picking a model client per call kind from the UI (a client's `kinds` decides); changing the provider list format or `providerKeys`; a backend for `terminal` PTYs other than the existing hub; making the default loop selectable against anything but itself (PR 21).
+
+### 10.8 PR 19: Permission presets, core guard order, effective config
+
+Three things that make permissions a thing the user can reason about as extensions multiply: named bundles of permission settings, a guarantee about the order in which core checks and extension checks run, and one view of the settings that are really in force and where each came from. It needs PR 14 (profiles ship presets and defaults name them). The CLI part uses the `grain` dispatcher (see 10.6.1).
+
+#### 10.8.1 Part 1: presets
+
+A preset is a named bundle of permission settings. It is data: a JSON document with a schema, validated on save, on import and on apply.
+
+**What exists to derive from.** The built-in bundles are the three modes the app already offers (`permissionMode` auto, manual, allow_all, with their companion defaults in `permissions.DEFAULTS`), and `docs/permissions.md` describes the rest of the surface: per-tool modes, `alwaysAsk`, argument rules (`permissionRules`), `destructiveDefaults`, `unattendedApprovals`, and per-connector modes. Section 6.1 and PR 14 add only the rule that a preset set through `defaults` must be equal or stricter, otherwise it needs a click. PR 19 defines no new permission concept.
+
+**Schema** (`grain.preset/1`, unknown keys rejected, 64 KB cap):
+
+| Field | Rule |
+|---|---|
+| `id`, `name`, `description` | `id` is `[a-z0-9-]+`, unique; built-ins are `builtin:auto`, `builtin:manual`, `builtin:allow-all`, `builtin:read-only`; user presets `user:<slug>`; profile presets `profile:<profile id>:<slug>`. |
+| `permissionMode` | `auto`, `manual` or `allow_all`. |
+| `permissionRules` | `{allow, ask, deny}` lists of rule strings, each parsed by `permrules.parse_rule`; evaluated deny, then ask, then allow, as always. |
+| `alwaysAsk` | Tool names; validated against the registry (an unknown name of a disabled extension is kept and listed as pending, not dropped). |
+| `destructiveDefaults`, `unattendedApprovals` | As in `permissions.py`. |
+| `tools` | `{groups: {<group>: on\|ask\|off}, danger: {<danger>: on\|ask\|off}, tools: {<name>: on\|ask\|off}}`. Resolved to a per-tool map at apply time in that order (`danger`, then `groups`, then `tools`, most specific last), so a tool added later is covered by a group or danger entry. |
+| `connectors` | `{<server id>: ask\|off}`. `on` is not expressible: a connector's `on` is a grant bound to a schema hash the user approved (`mcp_grants`), and a preset can never create a grant. |
+| `network` | `shellNetwork`, `shellRegistryAccess`, `shellAllowedDomains`, `fetchAllowlist`. Optional. |
+
+There are no fields for the floor, the hardline list, protected paths, `trustExternalContent` or `allowAllConnections`: a preset cannot loosen what is enforced regardless of settings, and the two trust switches stay explicit settings. The floor and the hardline list apply on top of every preset, always.
+
+**Built-ins.** `Auto` and `Manual` and `Allow everything` carry exactly today's mode with `destructiveDefaults` and `unattendedApprovals` at the defaults in `permissions.py` (so applying `Auto` to an untouched install changes nothing). `Read only` is the one new bundle and is expressed only in existing terms: `permissionMode: manual`, `tools.danger: {writes: off, executes: off, external: off, schedules: off}`, `connectors` unset. Built-ins cannot be edited or deleted; Duplicate makes a user preset.
+
+**Operations.** Create, duplicate, edit, rename, delete (user presets), export and import as JSON (`POST /permissions/presets/import` validates the whole document before storing anything; an import is a user preset with `source: import` and is never applied by being imported). Storage: `permission_presets(id, name, body, source, created_at, updated_at)` plus the built-ins in code. A profile (PR 14) may ship presets under `contributes.presets`; they appear read-only in the list with the profile's name and are applied only by a click or by `defaults.permissionPreset`, which obeys the floor rule in 6.1.
+
+**Scopes.** A preset applies at global, project or chat scope. Today only tool modes exist below global (10.6.1), so PR 19 adds scoped overrides for five keys: `permissionMode`, `permissionRules`, `alwaysAsk`, `destructiveDefaults`, `unattendedApprovals`, stored in `projects.permissions` (JSON column) and `conversations.settings.permissions`. The turn's `cfg` passed to gates is `settings()` overlaid with these (a copy made by `permissions.overlay(cfg, project, conv)`), so every gate that reads `permissions.get(cfg, key)` sees the effective value with no gate changed. Overlay rules keep the stack narrow: `permissionMode` and `destructiveDefaults` and `unattendedApprovals` replace the wider value; `permissionRules` entries are unioned with the wider scope's (a narrower scope can add rules, and cannot remove a global deny); `alwaysAsk` is unioned (removal only at global scope). Network, host-list and trust keys are global only; a preset that sets them can be applied at global scope only (the other scopes list them as "not applied" in the diff).
+
+**Applying and the diff.** `POST /permissions/presets/{id}/apply {scope, scope_id, confirm}` computes the change set against the effective permissions at that scope, then `loosening(current, proposed)`: a per-key comparator table in `permissions.py` (`permissionMode` manual < auto < allow_all; tool modes off < ask < on; rules: a removed `deny` or `ask`, an added `allow`; a removed `alwaysAsk` entry; `destructiveDefaults` block < ask < allow; `unattendedApprovals` deny < ask; booleans and allowlists by what they open). A test asserts every key in `permissions.DEFAULTS` has a comparator or is marked neutral, so a new key cannot be forgotten. If `loosening` is empty the preset applies immediately. Otherwise the response is 409 with the diff (every changed key, old, new, and which changes loosen) and a `diff_hash`; the UI shows it, and only a second call with `confirm == diff_hash` applies. `Allow everything` is always loosening from the other two and keeps the existing confirm text. Writes go through the same validators as `PUT /settings` and `permissions_update` (`permissions.validate`, `cap_modes`), stamp `setting_sources` with `preset:<id>` (10.8.3) and fire `preset.applied`. Applying never touches grants, session grants or approval history.
+
+**UI.** Settings > Permissions gains a Presets section at its top: the list (built-ins, yours, from profiles), a scope selector, Apply, and an editor that reuses the existing mode cards, rules editor and tool table. The composer pill's menu gains the preset for the current chat.
+
+#### 10.8.2 Part 2: core guard order
+
+The envelope says the permission stack comes before any extension gate. Today that is true only by convention (10.6.1: `dispatch_tool` has no permission check; the chain is copied in five places). PR 19 makes it structural.
+
+**One module, `guards.py`.** It holds `CORE_GUARDS`, a module-level tuple of frozen `Guard(id, fn)` entries built at import, in this order: `unknown_or_off` (tool absent or effective mode `off`), `proposal_only` (a background run's outward call is proposed, not run), `plan_block` (planning and propose-only desks), `hardline` (`permrules.hardline`), `deny_rules` (`permrules.evaluate` deny, `mcp_denied`), `protected_paths` (`Toolbox.touches_protected`), `floor_block` (`Toolbox.floor_action` == block). `run_core_guards(ctx, name, args) -> Refusal | None` runs them in order and returns the first refusal. They are the stateless refusals, those that never need a card; asks, cards, the reviewer and the approval wait stay in each loop, unchanged. The five existing copies of those refusals are replaced by calls to the functions behind these guards, so there is one implementation.
+
+**Where it runs.**
+1. `dispatch_tool` calls `run_core_guards` first, before `tool.pre`, for every caller (chat, workers, workflows, the `run_python` bridge, proposal accept). A refusal is returned as the call's result; no extension hook sees a call the core would refuse.
+2. Each loop still runs the full gate chain before its approval wait, so a refused call never opens a card. The extension permission hook `tool.permission` (section 5.5, narrow only) is called by `guards.extension_gate(resolution)` strictly after the core chain has settled on run or card, and its `Deny`/`Ask` can only narrow.
+3. `RunStore.open_approval` re-checks `run_core_guards` and refuses to open a card for a call the core refuses, so a path that skipped the loop's check still cannot raise an approval (`approval.requested` therefore fires only for calls the core allowed to ask).
+
+**Protected identity.** An extension cannot reorder, replace or unregister a core guard:
+- `CORE_GUARDS` is never passed to an `ExtensionScope`, `ExtensionContext`, `HookBus` or any service; no `api` method accepts a guard id; there is no hook named after a guard, and `HookBus.subscribe` rejects any hook id outside `HOOKS`.
+- Priority on `tool.pre`/`tool.permission` orders extension handlers among themselves only; they run after the core chain whatever their priority.
+- `guards.sealed()` compares the tuple, each `Guard`'s function identity and its code-object hash against values computed at import and is called at host start and on every `dispatch_tool`; a mismatch (an in-process tamper) fails closed: every call is refused with "core guards were modified" and an inbox alert is raised. In-process tiers are installed software (section 7.4), so this is detection and fail-closed, not isolation; out-of-process tiers (PR 22) cannot reach the module.
+
+**The proving test** (`tests/test_core_guards.py`), required for merge:
+1. A hostile built-in extension subscribes `tool.pre` and `tool.permission` at priority `-1000` and records the order; for a call the hardline list, a deny rule and a protected path each refuse, its handlers never run, and for a call that passes, they run after the core chain.
+2. An introspection test walks every public attribute of `ExtensionScope`, `ExtensionContext`, `HookBus`, `Services` and the `grain_sdk` surface and asserts none returns, accepts or exposes `CORE_GUARDS` or a `Guard`.
+3. A pin test records the guard ids, their order and their code hashes; changing any of them fails the test until the pin is edited in the same diff, which is visible in review.
+4. A tamper test replaces one guard function through `monkeypatch`-free assignment on the module and asserts `dispatch_tool` refuses everything.
+5. Copy-parity: for a table of calls (hardline, deny rule, protected path, plan block, floor block, off tool), the chat loop, a worker, a workflow step and the `run_python` bridge all refuse with the same text as `run_core_guards`.
+
+#### 10.8.3 Part 3: effective config
+
+The final layered settings, with the source of every value, as a backend route, a CLI command and a read-only Settings view.
+
+**Sources.** `default`, `profile:<id>`, `ext:<id>`, `preset:<id>`, `user`, `project`, `chat`. Scope decides precedence (chat over project over global); within the global scope the last writer wins and is what is recorded. A side table `setting_sources(key, scope, scope_id, source, prev, set_at)` (core ledger step) is written by `put_settings` (`user`), preset apply (`preset:<id>`), PR 14 defaults and profile apply (`profile:<id>` for a profile, `ext:<id>` for an extension's `contributes.defaults` or its declared `ext.<id>.*` settings defaults), and the scoped writers for project and chat. `prev` holds the value before a profile or extension default overwrote it, which is what a disable reverts to (6.1). A stored value with no row, written before this table existed, is reported `user` with `legacy: true`; a key with no stored value is `default`.
+
+**Per-tool modes** come from `Toolbox.explain(global, project, chat, agent)`, a new method beside `effective`/`explicit` that returns `{tool: {mode, source}}` with `source` in `chat | agent | project | global | default`, because `explicit` throws the origin away.
+
+**Shape.**
+
+```json
+{ "scope": {"project_id": null, "conversation_id": null},
+  "values": { "permissionMode": {"value": "auto", "source": "preset:builtin:auto", "scope": "global",
+                                 "shadowed": [{"source": "default", "value": "auto"}]}, "...": {} },
+  "tools": { "gmail_send": {"mode": "ask", "source": "default"} },
+  "runtime": { "sandbox.backend": {"provider": "core/os-default", "source": "default", "reason": "..."} },
+  "secrets": { "braveApiKey": "set", "providerKeys": {"openai": "set"} } }
+```
+
+Secrets (`SECRET_SETTINGS`, `host.secret_setting_keys()`, `providerKeys`) appear as `"set"` or `"unset"` and nothing else: no length, prefix or hash.
+
+**Surfaces.**
+- `GET /config/effective?project_id=&conversation_id=` returns the JSON above.
+- `grain config dump [--json] [--project ID] [--chat ID] [--data-dir PATH]`: human-readable grouped table by default (key, value, source, scope), JSON with `--json`. It does not start the server or import `app`: it opens the SQLite file read-only (`mode=ro`, no migrations, no recovery) through `config.assemble(db)`, the function extracted from `app.settings()` so both read the same code. Against a live data directory it never writes. The data directory follows `PERSONAL_OS_DATA_DIR` and `--data-dir`, as the repo's dev guidance for the real data folder requires.
+- Settings > Advanced > Effective config: read-only table with a search box, source filter chips (including "only what differs from default") and Copy as JSON. A row links to the panel that edits it; nothing edits here.
+
+#### 10.8.4 Host additions this step needs
+
+| Addition | Where | Rule |
+|---|---|---|
+| `guards.py`, `run_core_guards`, `extension_gate`, `sealed` | new | 10.8.2. |
+| `permissions.overlay`, `permissions.loosening`, comparator table | `permissions.py` | Pure functions; the table is tested for completeness. |
+| `permission_presets`, `setting_sources` tables; `projects.permissions` column | core ledger steps | New tables and a nullable column with a default; idempotent. |
+| `config.assemble(db)` extracted from `settings()` | `config.py`, `app.py` | `settings()` becomes a one-line call; golden test on the returned dict for a fixed database. |
+| `Toolbox.explain` | `tools.py` | Same precedence as `effective`. |
+| Routes `/permissions/presets*`, `/config/effective` | `permissions_routes.py` | Server-side loosening check; 409 with `diff_hash`. |
+| `grain config dump` | `cli.py` | Subcommand on the PR 15 dispatcher. |
+| Manifest `contributes.presets` | `manifest.py` | Allowed for `kind: "profile"` and for extensions; validated with the preset schema. |
+| Hook `preset.applied` | section 5.14 | `emit`. |
+
+#### 10.8.5 Done when
+
+Presets
+1. The preset schema rejects unknown keys, a rule that `parse_rule` rejects, a connector value of `on`, a field for the floor or hardline list, and a body over 64 KB; the same validator runs on create, edit, import and apply.
+2. Applying `builtin:auto` to a database with default permissions changes nothing (the diff is empty); `Manual`, `Allow everything` and `Read only` produce the expected stored values; `Read only` covers a tool added after the preset was written, through its danger class.
+3. A preset looser than the effective permissions at that scope is never applied without a confirm that quotes its `diff_hash`: tests for a mode raise, a removed deny rule, an added allow rule, a tool `off -> on`, a removed `alwaysAsk` entry, a raised `destructiveDefaults`, a profile's `defaults.permissionPreset`, and an import (import alone never applies). A stricter preset applies without a click.
+4. Scoped overrides: a project preset's rules are unioned with the global rules and cannot remove a global deny; `permissionMode` at chat scope changes the gate for that chat only; keys that are global-only are listed "not applied" at narrower scopes; all gates see the overlaid `cfg` with no gate edited (grep test).
+5. Floor and hardline: with every built-in preset applied, `rm -rf /`-class hardline commands, protected paths and the destructive floor behave as before (existing floor tests run once per preset).
+6. Duplicate, rename, edit, delete, export and import round-trip; a profile's preset appears read-only; built-ins cannot be edited or deleted.
+
+Guard order
+7. The five tests of 10.8.2 pass; `grep` shows no copy of the hardline/deny/protected-path/floor-block logic outside `guards.py`'s callees; existing permission, approval and floor tests pass unchanged; `approval.requested` never fires for a call `run_core_guards` refuses.
+
+Effective config
+8. `GET /config/effective`, `grain config dump` and `grain config dump --json` return the same data; every key of `llm.DEFAULT_SETTINGS`, the permission keys, the tool modes and the runtime selections appear with a source from the list in 10.8.3; a value set by preset, by profile, by extension default, by the user in Settings, on a project and on a chat each shows the right source and scope, and a shadowed value is listed.
+9. A secret value planted in each of `SECRET_SETTINGS`, an `ext.<id>.*` secret field and `providerKeys` never appears in the JSON or the human output (sentinel grep test); they show `set`/`unset`.
+10. The CLI opens the database read-only: running it against a database in use writes nothing (file hash before and after, WAL aside) and runs no migration; it works with the server stopped.
+11. The Settings view renders from the route, is read-only, filters by source, and is covered by an e2e spec.
+12. `config.assemble` returns exactly what `settings()` returned before the extraction (golden).
+
+Repo gates: backend suite, `npm run typecheck`, `npm test`, the permissions and settings e2e specs, no new red against the baseline.
+
+#### 10.8.6 Not in this step
+
+A preset that creates a connector grant or sets `on` for a connector tool; presets for schedules' `allowed_tools` or an agent's `tool_modes`; editing settings from the effective view; a UI for `setting_sources` history; per-run preset overrides; changing what any individual permission key means.
+
+### 10.9 PR 20: Generated hook catalog
+
+Section 5 is hand-written today, `HOOKS` is a bare set of names (10.6.1), and the two have already drifted: names exist that never fire, the section 5 tables carry payloads the code does not match until a PR notes it (PR 5 and PR 4 each corrected a table). PR 20 makes the registry in code the single source of the catalog and checks it in tests and in `grain ext check`. It needs PR 15 (the CLI, the SDK generator and `grain ext check`).
+
+#### 10.9.1 The registry
+
+`extensions/hooks.py` replaces the `frozenset` with `HOOKS: dict[str, HookSpec]`:
+
+```python
+@dataclass(frozen=True)
+class HookSpec:
+    id: str                              # "tool.pre"
+    kind: Literal["emit", "collect", "pipe", "gate"]
+    sync: bool                           # fires through emit_sync / pipe_sync (section 5.0)
+    payload: type                        # a TypedDict (NotRequired for optional keys)
+    returns: type | None                 # TypedDict or Verdict type for pipe/collect/gate; None for emit
+    subscribers: Literal["any", "builtin", "grant"]   # who may subscribe
+    permission: str | None               # "hooks:gate", "coding:read", ...
+    since: str                           # catalog version that introduced it, "1.0"
+    section: str                         # "5.5": which table of the doc it renders into
+    fires_at: str                        # prose cell
+    order_failure: str                   # prose cell
+    equivalents: str                     # prose cell, research doc only
+    deprecated: str | None = None
+```
+
+The payload types are `TypedDict` classes next to the registry, so the call sites type-check in an editor and the generator derives JSON Schema from them with a small converter (str, int, float, bool, None, `list[T]`, `dict[str, T]`, `Literal`, `NotRequired`, nested `TypedDict`, `Any`; anything else raises at generation time). Hook ids are never reused. The manifest validator reads `HOOKS` as before, and `HookBus` now rejects a call whose method does not match `spec.kind` (an `emit` of a `gate` hook is a programming error that raises in tests and logs once in production).
+
+#### 10.9.2 What is verified, and by what
+
+`tests/test_hook_catalog.py` runs in the normal backend suite, and `grain ext check --catalog` runs the same code against the working tree (so an author sees it before CI):
+
+1. **Static call-site scan.** An AST pass over `backend/personal_os/**/*.py` finds every call of `emit`, `emit_sync`, `fire`, `collect`, `pipe`, `pipe_sync`, `gate` on a bus, host, `hooks` attribute or `toolbox.bus`. The first argument must be a string literal or a module-level constant naming a cataloged hook; any other form needs a `# hook: <id>` comment on the call, and a call with neither fails the test. Each site is checked: the id is in `HOOKS`; the method belongs to the hook's kind; and, when the payload argument is a dict literal, its keys are a subset of the TypedDict's keys and a superset of its required keys. (`emit`/`emit_sync`/`fire` are `emit`; `pipe`/`pipe_sync` are `pipe`.)
+2. **No dead hooks.** Every id in `HOOKS` has at least one call site found by the scan. At PR 20 time, ids with none (the ones in 10.6.1 plus whatever PRs 8 to 16 left unimplemented) are either implemented by the PR that owns them or moved to a `PLANNED` list in the doc (not in `HOOKS`, so a manifest cannot declare or subscribe to a name that never fires). The test fails if a registry entry has no site.
+3. **Runtime payload check for non-literal payloads.** With `GRAIN_HOOKS_STRICT=1` (set by `conftest.py`) `HookBus` validates every payload at fire time against the derived schema and every `pipe`/`gate`/`collect` return against `returns`, raising in tests. The existing suite therefore exercises most payloads; a payload built far from its call (a `Settled` record, a `Run`) is covered by a `payload_of` adapter that the registry names, and the strict check validates the adapter's output.
+4. **Subscribers.** A subscription is rejected at manifest validation if the extension's tier or permissions do not satisfy `subscribers` and `permission` (the `hooks:gate`, `memory:gate`, `input:rewrite`, `coding:read` rules scattered through section 5 become fields).
+5. **Catalog stability.** Hook ids are append-only: a golden file of `(id, kind, since)` triples fails if one disappears or changes kind without `deprecated` set and a catalog version bump (the two-release deprecation rule of section 11).
+
+#### 10.9.3 Generated outputs and drift
+
+One generator, `extensions/hookgen.py` (run as `grain ext gen-hooks`, check mode `--check`), reads `HOOKS` and writes:
+
+| Output | Content |
+|---|---|
+| Section 5 tables of this document | The body of each table between `<!-- hooks:begin 5.x -->` and `<!-- hooks:end 5.x -->` markers, columns Hook, Fires at, Payload, Returns, Order and failure, Who may subscribe (and Equivalents in this document only). The prose of each 5.x section outside the markers stays hand-written. The test fails if a registry hook names a `section` that has no marked table. |
+| `docs/extension-hooks.md` | The same tables without the Equivalents column (feature docs do not name other products). |
+| `grain_sdk/hooks.py` | `TypedDict`s, a `HookId` literal union and `overload`s for `api.on` and `Harness.fire`, so a handler's argument and return are typed. |
+| `src/shared/extensionHooks.ts` | The same as TypeScript types, used by `UiApi.on` for the `ext:` events and by the dev panel. |
+
+PR 15's SDK generator already promises types "generated from the one set of JSON Schemas" (6.2); PR 20 moves that generator's input to the registry. There is one generator, not two.
+
+Drift is caught in three places, all in the existing CI jobs (`.github/workflows/ci.yml` runs `pytest` for the backend and `npm run typecheck` and `npm test` for the frontend, so no new job is needed): (1) `test_generated_files_are_current` regenerates all four outputs to a temp directory and fails on any byte difference with the committed files, printing the command that fixes it; (2) the TypeScript file is imported by `src/renderer/src/extensions/host.ts`, so a stale or hand-edited file fails `npm run typecheck`; (3) `grain ext check` runs `--check` for the repo it is in. A contributor adds a hook by adding a `HookSpec` and a TypedDict, adding the call site, and running `grain ext gen-hooks`.
+
+#### 10.9.4 Done when
+
+1. `HOOKS` is a dict of `HookSpec`; every id in the doc's section 5 tables, the registry and the SDK files is the same set (generated).
+2. The scan finds every `emit`/`emit_sync`/`fire`/`collect`/`pipe`/`pipe_sync`/`gate` call site in `backend/personal_os`; a deliberately added bad site (unknown id, wrong method, wrong payload key, non-literal id without the comment) in a fixture file fails the test with the file and line; a registry entry with no site fails it.
+3. The dead names of 10.6.1 are implemented or removed before this PR merges; the PR description lists which.
+4. The strict bus raises on a payload that does not match in the full backend suite, and on a wrong-kind call; a test shows each.
+5. Subscription checks reject a tier or permission mismatch at manifest validation.
+6. `grain ext gen-hooks --check` and `grain ext check --catalog` exit non-zero on a stale file and zero on a clean tree; editing a generated file by hand or a `HookSpec` without regenerating fails the pytest and, for the TypeScript file, `npm run typecheck`.
+7. Sections 3.4, 4, 5, 6.2 and 8 agree with the registry (the tables are generated; the rest is checked by the PR author).
+
+Repo gates: backend suite, `npm run typecheck`, `npm test`, no new red.
+
+#### 10.9.5 Not in this step
+
+Hook payload versioning beyond `since` and `deprecated`; generated documentation for contribution types or the manifest; a runtime hook-introspection API for extensions.
+
+### 10.10 PR 21: Swappable agent loop
+
+The chat turn loop becomes the default provider of the `agent.loop` slot (PR 18) behind a small `AgentLoop` interface, and one alternative built-in loop ships to prove the seam: plan-execute-verify. It needs PR 18 for the slot and selection, PR 3 for `dispatch_tool`, and benefits from PR 19's guards, which it relies on.
+
+#### 10.10.1 Why the tool step comes out first
+
+An alternative loop must reach tools only through `dispatch_tool`, but `dispatch_tool` sits below the gate chain and the approval wait (10.6.1), and those are inline in `_chat_stream`. A loop handed only `dispatch_tool` would skip the cards; a loop handed the chain would be handed the permission stack. So this PR first extracts, from `_chat_stream`, a core `ToolStep`: given the model's tool calls for a round, it runs, per call and in order, the invalid-call check, the plan and propose blocks, the core guards (PR 19), `permrules.resolve`, floors, `autoreview.route` and the reviewer, the approval card and wait, the `executed_calls` journal, `dispatch_tool`, result rendering, taint, the breakers (`REPEAT_LIMIT`, `TOOL_ERROR_LIMIT`, doom loop, denial streak) and the events (`tool_call`, `tool_result`, `span`, `tool_decision`), and returns the tool messages. This is the unification that section 11 #12 deferred, scoped to the chat loop: workers and workflows keep their loops, and already share the PR 19 guards. The extraction is mechanical and golden-tested (10.10.5, item 1).
+
+#### 10.10.2 The interface
+
+```python
+class AgentLoop(Protocol):
+    id: str
+    def run(self, turn: TurnInput, h: LoopHarness) -> AsyncIterator[LoopEvent]: ...
+
+@dataclass(frozen=True)
+class TurnInput:                    # what the loop receives, all plain data
+    conversation_id: str
+    text: str
+    attachments: tuple[AttachmentRef, ...]
+    origin: str | None
+    resumed: bool
+    model: str                      # chosen by the model.router slot; the loop never chooses a provider
+    effort: str
+    cfg: PublicSettings             # redacted view, not the settings store
+
+@dataclass(frozen=True)
+class LoopHarness:                  # what the loop may call, each a narrow object
+    context: ContextBuilder         # build(extra_tail: list[Block]) -> Messages: runs the contributor pipeline (stable, volatile, tail), compaction check included
+    model: ModelStream              # stream(messages, *, tools: bool, tool_choice) -> events: the model.client slot behind the core wrapper
+    tools: ToolStep                 # run(calls) -> list[ToolMessage]: gates, cards, journal and dispatch_tool (10.10.1)
+    events: EventSink               # emit(event): the same SSE vocabulary the UI already reads
+    hooks: LoopHooks                # emit("loop.plan" | "loop.verify", payload) only
+    limits: TurnLimits              # the core breakers and clocks; round counter; stop event; steering queue (read)
+```
+
+What the loop may not touch, and what it never receives: the `Toolbox`, `dispatch_tool` itself, `tool_ctx`, the settings store, the database, `RunStore`/approvals, the `HookBus` (beyond `LoopHooks`), the model client directly, the extension host, and the permission modules. It cannot write the stable prefix (the context builder returns messages; extra text enters only as `tail` blocks, which are never cached), decide an approval, or change a tool's mode.
+
+**The default loop.** `_chat_stream` moves, body unchanged except that the extracted `ToolStep` replaces the inline chain, to `runtime/chat_loop.py` as `ChatLoop`, id `core/chat-loop`. It implements `AgentLoop` and is handed a `CoreHarness` (the narrow harness plus the internals the 2,130 lines use today: `tool_ctx`, `run`, retrieval, titles, the settled emit). Core loops may use `CoreHarness`; every other loop gets `LoopHarness` only. Re-expressing the default loop through the narrow harness alone is deliberately not part of this PR, because it would put the byte-identical guarantee at risk for no safety gain: it is core code.
+
+#### 10.10.3 How the confinement is enforced
+
+Documentation alone would not hold a loop that is written to misbehave or simply sloppy. Four mechanisms, each tested:
+
+1. **Capability passing.** A non-core loop is constructed with, and can only reach, `LoopHarness`. The harness objects are closures over private state (`__slots__`, no public attribute holds a `Toolbox`, `ctx`, DB, bus or run), so there is nothing to reach for. The tool dispatcher it receives is `ToolStep`, which always runs the core guards, the approval flow and `dispatch_tool`; there is no method on it that runs a tool without them.
+2. **Import fence.** A module that defines an `AgentLoop` may import from `personal_os` only `personal_os.runtime.loop_api` (the types above) and the standard library. The same AST scan that enforces `grain_sdk`-only imports for extensions (section 3.4) runs on every module containing an `AgentLoop` subclass or `agent.loop` registration and fails on `personal_os.tools`, `.toolcore`, `.dispatch`, `.permrules`, `.permissions`, `.guards`, `.app`, `.llm`, `.db`, `.runs`, `.mcp_client`, `.mcp_servers`, `.extensions.host` and `.extensions.hooks`, in the test suite, in `grain ext check`, and at registration time (the registry imports the module's AST, not only its bytecode, before accepting it).
+3. **Tier gate.** Only built-in extensions may provide `agent.loop` (the `runtime:loop` permission is refused to the other tiers), so a loop is first-party code reviewed with the fence. User and third-party tiers are a later decision (section 11 #13).
+4. **Runtime parity check.** `ToolStep` counts the calls it ran per turn. At turn end the core compares that count with the `executed_calls` rows and the `tool_call` events of the run; a side-effecting row that `ToolStep` did not account for ends the run `failed` with `loop_violation`, raises an inbox alert and records the loop id. This is defense in depth against a bypass the fence missed, not the primary control.
+
+**Budgets and caps.** Because nothing caps a reply's rounds today (10.6.1), "the same budgets and turn caps" is the same breakers and clocks, owned by core: `REPEAT_LIMIT`, `TOOL_ERROR_LIMIT`, the doom-loop and denial-streak checks live inside `ToolStep`; `LLM_IDLE_SECONDS`, `FINAL_ROUND_SECONDS`, the stop event and steering live in `ModelStream`/`TurnLimits`. A loop cannot raise, replace or skip them because it never holds the objects that evaluate them. Any budget added to `limits.py` later applies to both loops automatically because it is checked in those objects. An alternative loop additionally declares and obeys its own round bound (10.10.4), enforced by `TurnLimits.next_round()` raising `LimitReached`, so the bound is the core's, not the loop's.
+
+**Stable prefix and tools.** The loop id and any loop-specific instructions never enter the stable prefix: they enter only as `tail` blocks or as part of messages after the prefix. The tool schema list and its order are built by core and are the same for any loop on a given chat, so switching loops between turns does not bust the cache. A loop cannot narrow or reorder the offered tools (a plan's tool hints are text only).
+
+**Plan mode stays advisory.** Plan mode (desk autonomy `plan`, `PLAN_BLOCKED`, the propose-only rules) is enforced by the permission chain inside `ToolStep`, not by any loop. A loop that plans does not make anything allowed, and a loop that ignores a plan does not make anything blocked. The plan produced by plan-execute-verify is a display and steering aid, like `todo_write`; it is not an approval and is not the `propose_plan` approval record in `plans.py`.
+
+#### 10.10.4 The alternative loop: plan-execute-verify
+
+Id `core/plan-execute-verify`, built-in, selectable per chat, project and profile through PR 18 (it appears in Settings > Runtime as "Plan, execute, verify"). Bounded rounds, all through the harness:
+
+1. **Plan** (one model call, `tools=False`). Messages from `context.build(extra_tail=[plan_instruction])`; the model returns at most 8 steps `{title, done_when}` as JSON, parsed and validated; an invalid plan gets one repair call, then the loop proceeds with a single step "do the task". The plan is emitted as the existing `plan` event (the same panel `todo_write` feeds) and as `loop.plan`. Nothing in the plan is executed or approved by existing.
+2. **Execute** (per step, at most 6 tool rounds each). The current step and its `done_when` are a `tail` block; the model calls tools; `h.tools.run(calls)` does everything the default loop's tool step does, including cards and refusals. A refused or failed call becomes a result the model sees; the loop records it as a gap for the verify step. A step ends when the model answers without tool calls or after 6 rounds.
+3. **Verify** (one model call, `tools=False`, at most 2 attempts in the turn). Input is the plan, each step's tool result previews (already scrubbed), and the recorded gaps. Output is `{ok, gaps: [..]}`. If `ok`, the model writes the final answer. If not and a repair is left (one), the loop runs one more Execute pass for the gaps, then verifies once more. A second failure ends with a final answer that states what is not verified; it never claims success. A verify call can also run read-only checks, but only as tool calls through `h.tools.run`, so they are judged like any other call.
+4. **Bounds.** At most 1 plan call (plus 1 repair), 8 steps, 6 rounds per step, 2 verify attempts, 1 repair pass, and a hard ceiling of 60 model calls per turn counted by `TurnLimits`. Exceeding any bound ends the turn with an explanatory final message. Stop and steering behave as in the default loop (a steer is read by `limits` between rounds and added as a tail message).
+5. **Streaming.** The events are the existing vocabulary only: `status` (phase text), `plan`, `span` (named `plan`, `execute`, `verify`), the tool events from `ToolStep`, `delta` for the final answer only (plan and verify calls are not streamed as the reply), and `done`. `reply.complete`, `turn.settled` and the learners run after `done` from core, so they see this loop's turn exactly like the default's.
+6. **Hooks.** `loop.plan` and `loop.verify` (section 5.15) fire only from this loop. Every other hook in the catalog fires at the same places for both loops, because it fires in core objects.
+
+#### 10.10.5 Done when
+
+1. **Default loop, byte-identical (golden).** For a fixed scripted-model chat with a tool round, a refused call, an approval card and a stop: the stable prefix (`chat_prefix.txt` with `codingRoute` on and off), the offered tool-name list and order, the full sequence of streaming events (names and key sets, with ids normalized), the sequence of hook emissions (name and payload digest), the stored run events and the `executed_calls` rows are identical to the parent commit. The test is recorded on the parent commit before the extraction.
+2. The extracted `ToolStep` is the only place that runs the gate chain for the chat loop; `app.py` no longer contains the inline chain; workers, workflows and the bridge still pass their parity tests.
+3. `AgentLoop`, `LoopHarness` and the harness objects are as in 10.10.2; the harness holds no reference to `Toolbox`, `tool_ctx`, the DB, the bus, the run store or the settings store (introspection test over every attribute, recursively, up to depth 4).
+4. **Confinement tests with a hostile loop.** A test loop attempts, one at a time: importing `personal_os.tools`/`dispatch`/`permrules`/`llm`; calling `globals()`/`gc.get_referrers` to find a `Toolbox`; reading `h.tools.__dict__`; calling `ToolStep` with a call that a deny rule, the hardline list or a protected path refuses; opening an approval; writing text into the stable prefix; widening the offered tools; and raising a round bound. Each is refused at registration (import fence), impossible (no reachable object) or answered by the same refusal the default loop gives, and none changes a permission outcome. The parity check fires `loop_violation` when a test deliberately bypasses `ToolStep` through a monkeypatch.
+5. Breakers and caps: `REPEAT_LIMIT`, `TOOL_ERROR_LIMIT`, doom loop, denial streak, the stop event and steering end an alternative-loop turn exactly as they end the default's (table test, both loops); a budget added to `TurnLimits` in a test applies to both.
+6. Plan-execute-verify: tests with a scripted model for a good plan, an invalid plan then repair, a step that hits a refusal (the gap reaches verify and the final answer says so), a verify failure with one repair then success, a verify failure twice (no claim of success), each bound (steps, rounds per step, verify attempts, 60 calls), a stop mid-step, and a steer. The events are the existing vocabulary; `loop.plan`/`loop.verify` fire only from this loop.
+7. The stable prefix is byte-identical with either loop selected on the same chat (golden), the tool schema list is identical, and switching loops between turns causes no `stable_hash` change.
+8. Plan mode: with desk autonomy `plan` and the alternative loop, a mutating tool is blocked by the permission chain with `PLAN_BLOCKED`, a plan step does not turn into an approval, and the same call under the default loop gets the same refusal.
+9. Selection: the loop is selectable per chat, project and profile; a stored selection of a removed loop falls back to the default before the turn with a notice; a loop cannot be selected mid-turn.
+10. Section 4, 5.15 and 10.10 agree with the implementation; decision #12 in section 11 is updated to say what was unified.
+
+Repo gates: backend suite, `npm run typecheck`, `npm test`, the chat, approvals, plan and stop e2e specs, no new red.
+
+#### 10.10.6 Not in this step
+
+Re-expressing the default loop through the narrow harness; alternative loops from the user or third-party tier; alternative loops for workers, subagents, workflows or jobs; a loop that edits the system prompt or the tool list; any new event type for the UI; per-loop budgets beyond the bounds above; unifying the worker and workflow loops with `ToolStep` (they keep their own loops and share the PR 19 guards).
 
 ## 11. Open questions and decisions for the user
 
 | # | Question | Options | Recommendation |
 |---|---|---|---|
 | 1 | Language for third-party backend extensions | Python (matches the backend; SDK is natural) / TypeScript (matches the frontend half; one language to author) / language-neutral JSON-RPC over stdio | Define the wire protocol first (JSON-RPC over stdio, the same shape MCP uses), ship the Python SDK first. Built-ins stay Python in-process. |
-| 2 | Built-in only first? | Built-in only now / load third-party in the same release | Built-in only. Third-party loading is PR 18 after a separate design review. |
+| 2 | Built-in only first? | Built-in only now / load third-party in the same release | Built-in only. Third-party loading is PR 22 after a separate design review. |
 | 3 | Fixed slots vs raw CSS/React access | Slots plus tokens / raw access to component internals | Slots plus design tokens. Slots survive refactors; raw access breaks on every one. Raw CSS only as the opt-in "unsupported" escape hatch, never for the third-party tier. |
 | 4 | In-process vs out-of-process | All in-process / third-party out-of-process / all out-of-process | Built-ins in-process; user tier in-process in phase 1 with a clear "installed software" label; third-party out-of-process. |
 | 5 | Narrowing gate hooks for third-party | None / narrow-only with explicit grant | Narrow-only with an explicit grant, fail toward ask. A spend guard and an audit gate need it; nothing can ever return Allow. |
@@ -980,7 +1498,11 @@ Third-party loading (PR 18); structured runs on `opencode`/`pi`; terminal access
 | 9 | Extension distribution | Folder drop / git URL with hash pin / registry | Folder and git URL with pinned hash; no registry until the review process exists. |
 | 10 | `hooks:conversation` / raw content access | Always granted to enabled extensions / per-extension grant | Per-extension grant, off by default, shown on the card. |
 | 11 | Telegram default | Built-in off until paired / on | Optional extension, enabled when a bot token exists; existing installs unchanged. |
-| 12 | Full loop unification | Do it before hooks / do the seam only | Seam only now; full unification as a separate effort after PR 9. |
+| 12 | Full loop unification | Do it before hooks / do the seam only | Seam only now; full unification as a separate effort after PR 9. PR 21 does the part it needs: the chat loop's tool step is extracted as `ToolStep` (section 10.10.1); workers and workflows keep their loops and share only the PR 19 guards. |
+| 13 | Who may provide `agent.loop` and `sandbox.backend` | Built-in only / user tier too / third-party | Built-in only through PR 21. A loop or a sandbox backend is the code closest to the envelope; revisit with the out-of-process design (PR 22). |
+| 14 | Accepting a partial sandbox | Never / per backend and dimension, by the user / per extension | Per backend and dimension, only from Settings, with the unenforced part shown (section 10.7.2). Never from a profile or an extension. |
+| 15 | Fallback when a selected provider disappears | Always the default / default only when not less safe / never | Default only when not less safe (locality for models, per-dimension enforcement for the sandbox), always announced; otherwise fail visibly (section 10.7.4). |
+| 16 | Preset scopes below global | Global only / project and chat with the five keys of section 10.8.1 | Project and chat for the five keys, with rules unioned so a narrower scope cannot remove a global deny; trust and network keys stay global. |
 
 ## 12. Sources
 

@@ -71,13 +71,17 @@ class RecipeTrigger:
         return out["run_id"]
 
     async def poll(self, jobs: Jobs, job: dict[str, Any], at: float) -> tuple[None, float]:
-        """One look: when the slot after the last run (or after the job was made) has come, start a run and book the next.
-        Always returns no fire record, because the run is not a chat turn."""
+        """One look: when the slot after the last run (or after the job was last saved, which re-arms it) has come, start a
+        run and book the next. A slot that finds the job's previous run still going is skipped. Always returns no fire
+        record, because the run is not a chat turn."""
         cfg = config(job)
-        due = next_fire(cfg["cron"], job["timezone"], job.get("last_fired_at") or job["created_at"])
+        due = next_fire(cfg["cron"], job["timezone"], max(job.get("last_fired_at") or 0, job["updated_at"]))
         if due > at:
             return None, due
         nxt = next_fire(cfg["cron"], job["timezone"], at)
+        if self.coding.recipes.has_live_run(job["id"]):
+            jobs.record_skip(job["id"], "previous run still running", at, due)
+            return None, nxt
         try:
             run_id = await self.start_run(job, "job")
         except (RecipeError, CodingError) as e:  # this slot is spent; the next one tries again

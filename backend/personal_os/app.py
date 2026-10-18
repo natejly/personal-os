@@ -4199,22 +4199,28 @@ async def _wake_conversation(conv_id: str) -> None:
             workers_mgr.mark_delivered(r["run_id"] for r in pending)
             _job_wakes.pop(conv_id, None)
         return
-    text, wake = workers_mod.build_wake(await _noted_reports(_wake_reports(pending)) + booked)
+    claimed = [r["run_id"] for r in pending]
+    _wake_inflight.update(claimed)  # held across the handlers' awaits: a second worker ending meanwhile must not rebuild this wake
+    try:
+        text, wake = workers_mod.build_wake(await _noted_reports(_wake_reports(pending)) + booked)
+    except BaseException:
+        _wake_inflight.difference_update(claimed)
+        raise
     if desk_id := row["settings"].get("deskId"):
         # A desk-bound chat is woken through its desk, so the turn runs under the desk runtime, supervisor and settle.
         started = _launch_desk(desk_id, text, MESSAGE_FROM, wake=wake)
         if started is None:  # a run is still live on the conversation (its learn tail), or the desk is in no status that takes a message
             _wake_waiting.add(conv_id)
-        elif isinstance(started, Run):
+        if isinstance(started, Run):
             _job_wakes.pop(conv_id, None)
-            _wake_inflight.update(wake["ids"])
-            started.task.add_done_callback(lambda _t: _wake_inflight.difference_update(wake["ids"]))
+            started.task.add_done_callback(lambda _t: _wake_inflight.difference_update(claimed))
+        else:
+            _wake_inflight.difference_update(claimed)
         return
     body = ChatIn(content=text, wake=wake)
-    _wake_inflight.update(wake["ids"])
     run = bus.start(conv_id, lambda r: _run_chat(r, body), input=body.model_dump())
     _job_wakes.pop(conv_id, None)
-    run.task.add_done_callback(lambda _t: _wake_inflight.difference_update(wake["ids"]))
+    run.task.add_done_callback(lambda _t: _wake_inflight.difference_update(claimed))
 
 
 # Wake turns an extension owes a chat (a coding session that settled), and the chats whose wake waits for a reply to end.

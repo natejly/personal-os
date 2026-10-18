@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { dialog, openMemory, openSettings, save } from './helpers/home.mjs'
+import { dialog, openAdvanced, openMemory, openSettings, save, setToggle, tabBtn } from './helpers/home.mjs'
 
 const benign = (e) => /ResizeObserver|favicon/i.test(e)
 const noErrors = (grain) => expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
@@ -30,6 +30,20 @@ test('a sidebar row turns off on Save, stays off after a relaunch, and comes bac
   await save(p2)
   await expect(row(p2, 'Lists')).toHaveCount(1)
   await expect.poll(async () => (await api('/settings')).hiddenViews).toEqual([])
+  noErrors(grain)
+})
+
+test('disabling an extension in Developer is not undone by a later Sidebar Save', async ({ grain }) => {
+  const { page, api } = grain
+  await openAdvanced(page, 'Developer')
+  await setToggle(dialog(page).getByLabel('Developer tools').first())
+  await dialog(page).locator('.adv-group > summary', { hasText: /^Coding/ }).click()
+  await dialog(page).getByRole('button', { name: 'Disable', exact: true }).click()
+  await expect.poll(async () => (await api('/settings')).hiddenViews).toEqual(['coding'])
+  await tabBtn(page, 'Sidebar').click()
+  await toggle(page, 'Lists').locator('xpath=following-sibling::span[contains(@class,"switch")]').click()
+  await save(page)
+  await expect.poll(async () => (await api('/settings')).hiddenViews.sort()).toEqual(['coding', 'todos'])
   noErrors(grain)
 })
 

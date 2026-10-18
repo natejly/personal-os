@@ -296,6 +296,42 @@ def test_several_finished_workers_fold_into_one_wake() -> None:
     assert len(seat("wake")) == 1
 
 
+def test_a_second_trigger_during_a_slow_report_handler_does_not_rebuild_the_wake() -> None:
+    cid = new_conv()
+    for g in ("Job alpha", "Job beta"):
+        GATES[g] = threading.Event()
+        WORKER[g] = [{"text": f"{g} result"}]
+    FRONT[:] = [{"text": "Two jobs.", "calls": [call("d1", "delegate", {"goal": "Job alpha"}), call("d2", "delegate", {"goal": "Job beta"})]},
+                {"text": "Both started."}]
+    WAKE[:] = [{"text": "Both are done."}]
+    say(cid)
+    wait(lambda: len(workers_of(cid)) == 2, "two workers")
+    wait(lambda: not appmod.bus.live(cid), "the reply to end")
+    real = mgr.on_end
+    mgr.on_end = None
+    for g in GATES.values():
+        g.set()
+    wait(lambda: all(w["status"] == "done" for w in workers_of(cid)), "both workers done")
+    mgr.on_end = real
+
+    async def slow(_p: dict[str, Any]) -> dict[str, str]:
+        await asyncio.sleep(0.3)
+        return {"text": "note"}
+    h = appmod.host.bus.subscribe("worker.report", slow, owner="test", order=1)
+
+    async def twice() -> None:
+        first = asyncio.ensure_future(appmod._wake_conversation(cid))
+        await asyncio.sleep(0.1)  # the first is inside its handlers when the second worker's end triggers again
+        await appmod._wake_conversation(cid)
+        await first
+    try:
+        on_loop(twice)
+        msgs = settle(cid)
+    finally:
+        h.dispose()
+    assert len([m for m in msgs if m.get("kind") == "wake"]) == 1
+
+
 # ---------------- 2. a stale report is silent ----------------
 @pytest.mark.parametrize("reply", ["NO_REPLY", " no_reply. ", ""])
 def test_a_silent_wake_deletes_its_reply_and_pushes_nothing(monkeypatch: pytest.MonkeyPatch, reply: str) -> None:

@@ -518,8 +518,14 @@ def test_the_bridge_raises_the_hubs_error_text_and_times_out():
         bridge._seen = time.monotonic() + 1e9
         with pytest.raises(terms.TerminalError, match="did not answer"):
             await bridge.call({"type": "close", "terminal_id": "tm_y"}, timeout=0.05)
-        assert await bridge.next(hold=0.05) is not None  # the unanswered command is still queued
+        assert await bridge.next(hold=0.05) is None  # a command the caller gave up on is not delivered later
     asyncio.run(go())
+
+
+def test_a_non_string_name_is_taken_as_text_and_leaves_no_terminal_behind(tmp_path, monkeypatch):
+    tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
+    out = call(tb, "terminal_open", ctx_of(cfg), cwd=str(home / "work"), name=5)
+    assert coding.terminals.row(out["terminal_id"])["name"] == "5" and len(hub.opened) == 1
 
 
 def test_the_bridge_and_list_routes_need_the_app_token_and_a_live_extension():

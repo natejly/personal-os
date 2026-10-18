@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../lib/api'
-import { useStore } from '../../store'
-import { viewHidden } from '../../moduleToggles'
 import { contributionSummary, formatEvery, formatMs, mutedHooks, unsupportedWarning } from '../../lib/extensionsDev'
 import type { ExtensionInfo, ExtensionsDev as Listing } from '@shared/types'
 
 /** Settings > Advanced > Developer: every loaded extension with what it registered, how its handlers behave, and enable, disable and reload. */
-export default function ExtensionsDev(): JSX.Element {
+export default function ExtensionsDev({ onChanged }: { onChanged: () => Promise<void> }): JSX.Element {
   const [listing, setListing] = useState<Listing | null>(null)
   const [error, setError] = useState<string | null>(null)
   const load = useCallback((): void => {
@@ -15,11 +13,7 @@ export default function ExtensionsDev(): JSX.Element {
   useEffect(load, [load])
   const act = (run: () => Promise<ExtensionInfo>): void => {
     setError(null)
-    run().then(() => api.settings.get()).then((settings) => {
-      useStore.setState({ settings })
-      if (viewHidden(settings, useStore.getState().view)) useStore.getState().setView('chat') // the app is not left parked on a view that just went away
-      load()
-    }).catch((e: Error) => { setError(e.message); load() }) // a failed reload has already unloaded the extension
+    run().then(onChanged).then(load).catch((e: Error) => { setError(e.message); load() }) // a failed reload has already unloaded the extension
   }
   return (
     <>

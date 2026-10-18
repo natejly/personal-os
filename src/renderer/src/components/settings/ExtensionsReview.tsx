@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../lib/api'
-import { useStore } from '../../store'
 import { unsupportedWarning } from '../../lib/extensionsDev'
 import type { ExtensionCard, ExtensionsReview as Listing } from '@shared/types'
 
@@ -33,7 +32,7 @@ function Facts({ card }: { card: ExtensionCard }): JSX.Element {
 }
 
 /** Settings > Advanced > Extensions: extensions the assistant drafted wait here as a diff; accepting installs one switched off, and only Enable here turns it on. */
-export default function ExtensionsReview(): JSX.Element {
+export default function ExtensionsReview({ onChanged }: { onChanged: () => Promise<void> }): JSX.Element {
   const [listing, setListing] = useState<Listing | null>(null)
   const [granted, setGranted] = useState<Record<string, string[]>>({})
   const [error, setError] = useState<string | null>(null)
@@ -41,7 +40,7 @@ export default function ExtensionsReview(): JSX.Element {
   useEffect(load, [load])
   const act = (run: () => Promise<Listing>): void => {
     setError(null)
-    run().then((next) => { setListing(next); return api.settings.get() }).then((settings) => useStore.setState({ settings })).catch((e: Error) => setError(e.message))
+    run().then((next) => { setListing(next); return onChanged() }).catch((e: Error) => setError(e.message))
   }
   const grant = (id: string, perm: string, on: boolean): void =>
     setGranted((g) => ({ ...g, [id]: on ? [...(g[id] ?? []), perm] : (g[id] ?? []).filter((p) => p !== perm) }))

@@ -273,7 +273,7 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'appearance' && <GeneralTab {...tabProps} shortcuts={shortcuts} />}
             {tab === 'sidebar' && <SidebarTab {...tabProps} onProfileApplied={profileApplied} />}
             {tab === 'system' && <SystemTab />}
-            {tab === 'advanced' && <AdvancedTab {...tabProps} {...gp} />}
+            {tab === 'advanced' && <AdvancedTab {...tabProps} {...gp} onExtensionsChanged={profileApplied} />}
             {panels.map((p) => tab === p.tab && <p.Component key={p.tab} />)}
           </div>
         </div>

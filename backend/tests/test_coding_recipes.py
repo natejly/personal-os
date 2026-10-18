@@ -445,7 +445,7 @@ def rcp_routes(rig: Rig) -> Any:
 
 
 # ---- as a job ----
-JOB = {"id": "j1", "name": "nightly", "timezone": "UTC", "created_at": 1_000_000.0, "last_fired_at": None, "cron": "", "kind": "coding_recipe"}
+JOB = {"id": "j1", "name": "nightly", "timezone": "UTC", "created_at": 1_000_000.0, "updated_at": 1_000_000.0, "last_fired_at": None, "cron": "", "kind": "coding_recipe"}
 
 
 def job_row(rig: Rig, **cfg: Any) -> dict[str, Any]:
@@ -502,6 +502,25 @@ def test_a_job_starts_a_recipe_run_not_a_chat_and_pins_its_version(rig):
 
 def _drain(rig: Rig) -> list[tuple[str, Any]]:
     return rig.events
+
+
+def test_a_job_saved_after_a_slot_does_not_catch_it_up(rig):
+    rig.recipes.save(rig.body(), "user")
+    trigger, jobs = RecipeTrigger(rig.coding), FakeJobs()
+    at = 1_000_000.0 + 86_400
+    fire, nxt = asyncio.run(trigger.poll(jobs, {**job_row(rig), "last_fired_at": 1_000_000.0 + 3600, "updated_at": at - 60}, at))  # type: ignore[arg-type]
+    assert fire is None and rig.started == [] and jobs.fired == [] and jobs.skips == [] and nxt > at
+
+
+def test_a_slot_that_finds_the_jobs_previous_run_still_going_is_skipped(rig):
+    rig.recipes.save(rig.body(), "user")
+    trigger, jobs = RecipeTrigger(rig.coding), FakeJobs()
+    at = 1_000_000.0 + 86_400
+    asyncio.run(trigger.poll(jobs, job_row(rig), at))  # type: ignore[arg-type]
+    assert len(rig.started) == 1
+    fire, nxt = asyncio.run(trigger.poll(jobs, {**job_row(rig), "last_fired_at": at}, at + 86_400))  # type: ignore[arg-type]
+    assert fire is None and len(rig.started) == 1 and len(jobs.fired) == 1 and nxt > at + 86_400
+    assert jobs.skips[0][1:2] == ("previous run still running",)
 
 
 def test_a_job_whose_run_cannot_start_spends_the_slot_and_tries_the_next(rig):

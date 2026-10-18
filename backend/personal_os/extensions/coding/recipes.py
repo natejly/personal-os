@@ -406,6 +406,10 @@ class Recipes:
             r = c.execute("SELECT * FROM coding_recipe_runs WHERE id = ?", (run_id,)).fetchone()
         return self._view(dict(r)) if r else None
 
+    def has_live_run(self, job_id: str) -> bool:
+        with self.db.tx() as c:
+            return c.execute("SELECT 1 FROM coding_recipe_runs WHERE job_id = ? AND status IN ('queued','working','verifying')", (job_id,)).fetchone() is not None
+
     def list_runs(self, recipe_id: str | None = None, limit: int = 30) -> list[dict[str, Any]]:
         with self.db.tx() as c:
             rows = c.execute("SELECT * FROM coding_recipe_runs WHERE (?1 IS NULL OR recipe_id = ?1) ORDER BY created_at DESC LIMIT ?2",

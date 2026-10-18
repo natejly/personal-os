@@ -9,7 +9,7 @@ import NumberField from './NumberField'
 import Switch from './Switch'
 import { AdvGroup, Sec, type GroupProps, type TabProps } from './shared'
 
-export default function AdvancedTab({ draft, patch, openGroups, toggle }: TabProps & GroupProps): JSX.Element {
+export default function AdvancedTab({ draft, patch, openGroups, toggle, onExtensionsChanged }: TabProps & GroupProps & { onExtensionsChanged: () => Promise<void> }): JSX.Element {
   const gp = { openGroups, toggle }
   return (
     <section>
@@ -26,7 +26,7 @@ export default function AdvancedTab({ draft, patch, openGroups, toggle }: TabPro
       </AdvGroup></Sec>
 
       <Sec id="extensions"><AdvGroup id="extensions" title="Extensions" {...gp}>
-          <ExtensionsReview />
+          <ExtensionsReview onChanged={onExtensionsChanged} />
       </AdvGroup></Sec>
 
       <Sec id="effective"><AdvGroup id="effective" title="Effective configuration" {...gp}>
@@ -36,7 +36,7 @@ export default function AdvancedTab({ draft, patch, openGroups, toggle }: TabPro
       <Sec id="developer"><AdvGroup id="developer" title="Developer" {...gp}>
           <Switch title="Developer tools" help="Show traces, the context preview and the system prompt." checked={draft.devTools === true} onChange={(devTools) => patch({ devTools })} />
           <TraceExportSettings value={draft.otelExport} onChange={(otelExport) => patch({ otelExport })} />
-          {draft.devTools === true && <ExtensionsDev />}
+          {draft.devTools === true && <ExtensionsDev onChanged={onExtensionsChanged} />}
       </AdvGroup></Sec>
     </section>
   )

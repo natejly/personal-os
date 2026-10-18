@@ -91,8 +91,12 @@ class TerminalBridge:
             self._commands = asyncio.Queue()
         self._holding += 1
         try:
-            return await asyncio.wait_for(self._commands.get(), hold)
-        except asyncio.TimeoutError:
+            async with asyncio.timeout(hold):
+                while True:
+                    command = await self._commands.get()
+                    if command["id"] in self._replies:  # a command whose caller gave up waiting is never delivered
+                        return command
+        except TimeoutError:
             return None
         finally:
             self._holding -= 1
@@ -275,6 +279,7 @@ class Terminals:
         except shell.ShellError as e:
             shutil.rmtree(tmp, ignore_errors=True)
             raise TerminalError(shell._scrub(str(e))) from e
+        label = str(name or "").strip()[:60]  # before the hub opens anything: a failure after that would leave a terminal with no row
         terminal_id = "tm_" + secrets.token_hex(8)
         try:
             await self.bridge.call({"type": "open", "terminal_id": terminal_id, "argv": confined.argv, "env": env, "cwd": str(where),
@@ -287,7 +292,7 @@ class Terminals:
         with self.db.tx() as c:
             c.execute("INSERT INTO coding_terminals(id, owner_key, owner_run_id, session_id, conversation_id, name, cwd, argv_digest, "
                       "created_at, last_used_at, state) VALUES(?,?,?,?,?,?,?,?,?,?,'open')",
-                      (terminal_id, owner, ctx.get("run_id"), session, ctx.get("conversation_id"), (name or "").strip()[:60], str(where),
+                      (terminal_id, owner, ctx.get("run_id"), session, ctx.get("conversation_id"), label, str(where),
                        hashlib.sha256(" ".join(confined.argv).encode()).hexdigest()[:16], now, now))
         self.scratch[terminal_id] = (tmp, confined.token)
         if confined.network or confined.proxied:

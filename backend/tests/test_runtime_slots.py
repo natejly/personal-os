@@ -76,6 +76,13 @@ def test_with_nothing_selected_every_slot_is_its_default(routers: ExtensionHost)
         assert not res.fell_back_from and "by default" in res.reason
 
 
+@pytest.mark.parametrize("source", ["chat", "project", "global"])
+def test_selecting_the_default_explicitly_says_who_selected_it(routers: ExtensionHost, source: str) -> None:
+    res = routers.runtime.resolve("model.router", scopes_with(**{source: "core/heuristic"}))
+    assert (res.provider, res.source, res.default) == ("core/heuristic", source, True)
+    assert "by default" not in res.reason and "because" in res.reason
+
+
 @pytest.mark.parametrize("high,low", [(a, b) for a, b in itertools.combinations(("chat", "project", "profile", "global"), 2)])
 def test_a_narrower_scope_beats_a_wider_one(routers: ExtensionHost, high: str, low: str) -> None:
     res = routers.runtime.resolve("model.router", scopes_with(**{high: "acme/one", low: "acme/two"}))

@@ -216,3 +216,16 @@ def test_the_cli_opens_the_database_read_only(tmp_path: Path) -> None:
 def test_the_cli_says_so_when_there_is_no_database(tmp_path: Path) -> None:
     out = cli(data_dir=tmp_path / "nowhere")
     assert out.returncode == 1 and "no Grain database" in out.stdout and not (tmp_path / "nowhere").exists()
+
+
+def test_the_cli_refuses_an_unknown_project_or_chat_and_resolves_the_runtime_slots() -> None:
+    for flag in ("--project", "--chat"):
+        out = cli(flag, "nosuch", data_dir=appmod.db.data_dir)
+        assert out.returncode == 1 and "no such" in out.stdout
+    appmod.db.set_settings({"runtime": {"agent.loop": "core/plan-execute-verify"}})
+    try:
+        got = json.loads(cli("--json", data_dir=appmod.db.data_dir).stdout)["runtime"]
+    finally:
+        appmod.db.set_settings({"runtime": {}})
+    assert set(got) == set(appmod.host.runtime.resolve_all())
+    assert got["agent.loop"]["provider"] == "core/plan-execute-verify" and got["agent.loop"]["source"] == "global"

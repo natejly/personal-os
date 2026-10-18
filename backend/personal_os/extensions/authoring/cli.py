@@ -133,17 +133,32 @@ def cmd_config_dump(args: argparse.Namespace) -> int:
     Opens the database read-only: no migrations, no recovery, nothing written."""
     from ... import config, provider_keys, provider_route
     from ...db import ReadOnlyDatabase, data_dir_from_env
+    from ...repos import Conversations, Projects
+    from ...runtime.defaults import core_providers
+    from ...runtime.routes import Selections
+    from ...runtime.slots import Runtime
     from ...tools import Toolbox
     from ..host import BUILTIN_ROOT
+    from ..hooks import HookBus
     data_dir = Path(args.data_dir).expanduser().resolve() if args.data_dir else data_dir_from_env()
     if not (data_dir / "personal-os.db").exists():
         print(f"error: no Grain database in {data_dir}")
         return 1
     db = ReadOnlyDatabase(data_dir)
+    convos, projects = Conversations(db), Projects(db)
+    if args.project and projects.get(args.project) is None:
+        print(f"error: no such project: {args.project}")
+        return 1
+    if args.chat and convos.get(args.chat, with_messages=False) is None:
+        print(f"error: no such chat: {args.chat}")
+        return 1
     provider_route.set_key_source(lambda: provider_keys.load(db.secrets))
     declared = config.declared_settings(load_manifest(p) for p in sorted(BUILTIN_ROOT.glob("*/extension.json")))
+    runtime = Runtime(HookBus(), core_providers())  # the core's providers only: extension code is not loaded here
+    scopes = Selections(db, convos, projects).scopes(args.chat, args.project)
     dump = config.effective(db, Toolbox(None, None, None, lambda: config.assemble(db)), declared,  # type: ignore[arg-type]
-                            project_id=args.project, conversation_id=args.chat)
+                            project_id=args.project, conversation_id=args.chat,
+                            runtime={slot: r.to_dict() for slot, r in runtime.resolve_all(scopes).items()})
     print(json.dumps(dump, indent=2, ensure_ascii=False, default=str) if args.json else config.render(dump))
     return 0
 

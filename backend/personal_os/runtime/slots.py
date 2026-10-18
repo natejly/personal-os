@@ -217,8 +217,10 @@ class Runtime:
     def _single(self, d: SlotDef, scopes: Scopes) -> Resolution:
         default = self._providers[d.id][d.default_id]
         wanted, source = next(((v, src) for src, layer in scopes.layers() if (v := layer.get(d.id)) is not None), (None, "default"))
-        if wanted is None or wanted == d.default_id:
+        if wanted is None:
             return Resolution(d.id, d.default_id, source, f"Using {default.label} ({d.noun}) by default.", True)
+        if wanted == d.default_id:
+            return Resolution(d.id, d.default_id, source, f"Using {default.label} ({d.noun}) because {_phrase(source)}.", True)
         chosen = self._providers[d.id].get(wanted) if isinstance(wanted, str) else None
         if chosen is not None and chosen.available:
             self._remember(chosen)

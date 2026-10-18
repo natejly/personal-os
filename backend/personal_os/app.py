@@ -569,6 +569,7 @@ llm.default_client.settings = settings
 runtime_selections = runtime_routes.Selections(db, convos, projects)
 host.runtime.scopes = runtime_selections.current
 host.runtime.note = lambda title, body: _alert(title, body, "inbox")
+guards.alert = lambda title, body: _alert(title, body, "inbox")
 host.bus.subscribe("model.response", _record_usage, owner="core", order=0)
 
 
@@ -7412,7 +7413,7 @@ def google_tasklists() -> Any:
 @host.on_start
 async def _modules_startup() -> None:
     if not guards.sealed():
-        log.critical("%s before start: every tool call will be refused", guards.TAMPERED)
+        guards.tampered()
     await host.start()
 
 

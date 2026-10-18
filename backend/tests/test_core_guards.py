@@ -269,6 +269,20 @@ def test_a_replaced_guard_tuple_refuses_every_call() -> None:
     assert guards.sealed() and dispatch("guard_probe", {"tag": "t"}).get("ok") and RAN == ["t"]
 
 
+def test_a_tamper_leaves_one_card_for_the_person(monkeypatch: pytest.MonkeyPatch) -> None:
+    cards: list[tuple[str, str]] = []
+    monkeypatch.setattr(guards, "alert", lambda title, body: cards.append((title, body)))
+    monkeypatch.setattr(guards, "_alerted", False)
+    original = guards._deny_rules
+    guards._deny_rules = lambda c: None  # type: ignore[assignment]
+    try:
+        for _ in range(3):
+            assert guards.TAMPERED in dispatch("guard_probe", {})["error"]
+    finally:
+        guards._deny_rules = original  # type: ignore[assignment]
+    assert len(cards) == 1 and guards.TAMPERED in cards[0][1]
+
+
 def test_a_replaced_guard_function_refuses_every_call() -> None:
     original = guards._deny_rules
     guards._deny_rules = lambda c: None  # type: ignore[assignment]

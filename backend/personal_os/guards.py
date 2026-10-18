@@ -31,6 +31,8 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 TAMPERED = "core guards were modified"
+alert: Callable[[str, str], None] = lambda title, body: None  # the app points this at the inbox: (title, body)
+_alerted = False
 
 
 @dataclass(frozen=True)
@@ -180,12 +182,21 @@ CORE_GUARDS: tuple[Guard, ...] = (
 )
 
 
+def tampered() -> Refusal:
+    """The refusal every call gets once the guards were modified. The first time, it also leaves a card for the person."""
+    global _alerted
+    log.critical("%s: every tool call is refused", TAMPERED)
+    if not _alerted:
+        _alerted = True
+        alert("Grain's tool checks were modified", f"{TAMPERED} in this process, so every tool call is refused until Grain restarts.")
+    return Refusal("sealed", TAMPERED)
+
+
 def run_core_guards(toolbox: Toolbox, ctx: dict[str, Any], name: str, args: dict[str, Any], *, roots: list[str] | None = None,
                     cwd: str | None = None, kind: str | None = None) -> Refusal | None:
     """The first refusal, in order, or None. Fails closed when the guards were modified."""
     if not sealed():
-        log.critical("%s: every tool call is refused", TAMPERED)
-        return Refusal("sealed", TAMPERED)
+        return tampered()
     call = Call(toolbox, ctx, name, args if isinstance(args, dict) else {}, None if roots is None else tuple(roots), cwd, kind)
     for g in CORE_GUARDS:
         if reason := g.fn(call):

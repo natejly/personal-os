@@ -146,32 +146,45 @@ export function formatAccelerator(accel: string): string {
   return ORDER.filter((m) => mods.has(m)).join('') + keys.join('')
 }
 
-const MODIFIERS: Record<string, string> = {
-  cmdorctrl: 'mod', commandorcontrol: 'mod', control: 'ctrl', ctrl: 'ctrl', alt: 'alt', option: 'alt', shift: 'shift',
-  command: 'meta', cmd: 'meta', super: 'meta', meta: 'meta'
-}
 const KEY_NAMES: Record<string, string> = { return: 'enter', esc: 'escape', plus: '+' }
 
+/** A modifier spelling → its canonical name. 'mod' is the primary modifier: ⌘ on macOS, Ctrl elsewhere, so there Control and CmdOrCtrl are one key. */
+function modifierName(lower: string, mac: boolean): string | undefined {
+  switch (lower) {
+    case 'cmdorctrl': case 'commandorcontrol': return 'mod'
+    case 'control': case 'ctrl': return mac ? 'ctrl' : 'mod'
+    case 'command': case 'cmd': case 'super': case 'meta': return mac ? 'mod' : 'meta'
+    case 'alt': case 'option': return 'alt'
+    case 'shift': return 'shift'
+    default: return undefined
+  }
+}
+
 /**
- * One spelling for an accelerator, so two spellings of the same chord compare equal: modifiers sorted and named
- * ('mod' is CmdOrCtrl), the key lower-cased. 'Shift+CmdOrCtrl+g' and 'CommandOrControl+Shift+G' both give 'mod+shift+g'.
+ * One spelling for an accelerator on a platform, so two spellings of the same chord compare equal: modifiers sorted and named
+ * ('mod' is the primary modifier), the key lower-cased. 'Shift+CmdOrCtrl+g' and 'CommandOrControl+Shift+G' both give 'mod+shift+g'.
  */
-export function canonicalAccelerator(accel: string): string {
+export function canonicalAccelerator(accel: string, mac: boolean): string {
   const parts = accel.endsWith('++') ? [...accel.slice(0, -2).split('+'), '+'] : accel.split('+')
   const mods = new Set<string>()
   let key = ''
   for (const p of parts) {
     const lower = p.toLowerCase()
-    if (MODIFIERS[lower]) mods.add(MODIFIERS[lower])
+    const mod = modifierName(lower, mac)
+    if (mod) mods.add(mod)
     else key = KEY_NAMES[lower] ?? lower
   }
   return [...[...mods].sort(), key].join('+')
 }
 
+/** Are these two accelerators the same chord on macOS or on any other platform? Checked on both, because a binding is registered before the platform matters. */
+export function sameChord(a: string, b: string): boolean {
+  return [true, false].some((mac) => canonicalAccelerator(a, mac) === canonicalAccelerator(b, mac))
+}
+
 /** The core shortcut that already uses this chord, if any. */
 export function shortcutForKeys(accel: string): Shortcut | undefined {
-  const canonical = canonicalAccelerator(accel)
-  return SHORTCUTS.find((s) => s.keys && canonicalAccelerator(s.keys) === canonical)
+  return SHORTCUTS.find((s) => s.keys && sameChord(s.keys, accel))
 }
 
 /** The canonical accelerator of a key press, to compare with `canonicalAccelerator` of a binding. */

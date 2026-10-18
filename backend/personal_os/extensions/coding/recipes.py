@@ -389,12 +389,17 @@ class Recipes:
             self.coding.api.bus.fire("job.done", {"job_id": run["job_id"], "run_id": run["id"], "outcome": run["status"]})
 
     def _settle_job(self, run: dict[str, Any]) -> None:
-        """A job's run ended: a pass clears the job's failure streak, a failure extends it and shows on the job as its last error."""
+        """A job's run ended: a pass clears the job's failure streak, a failure extends it and shows on the job as its last error.
+        Either way it joins the job's run history, which is where the inbox and notifications look."""
         if run["status"] == "stopped":
             return
         jobs = Jobs(self.db)
+        error = failure_text(run)
+        job = jobs.get(run["job_id"])
+        self.coding.api.app.record_job_run(run["id"], {"job_id": run["job_id"], "job": (job or {}).get("name"), "kind": "coding_recipe"},
+                                           "error" if error else "done", error)
         jobs.record_outcome(run["job_id"], run["status"] == "passed")
-        jobs.mark_launched(run["job_id"], run["id"], failure_text(run))
+        jobs.mark_launched(run["job_id"], run["id"], error)
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { SHORTCUTS, acceleratorOf, canonicalAccelerator, formatAccelerator, shortcut, shortcutForKeys } from './shortcuts'
+import { SHORTCUTS, acceleratorOf, canonicalAccelerator, formatAccelerator, sameChord, shortcut, shortcutForKeys } from './shortcuts'
 
 const inMenu = SHORTCUTS.filter((s) => s.scope === 'menu' || s.scope === 'window')
 
@@ -45,21 +45,32 @@ test('shortcut() throws on an unknown id', () => {
 })
 
 test('two spellings of one chord have one canonical form', () => {
-  assert.equal(canonicalAccelerator('Shift+CmdOrCtrl+G'), canonicalAccelerator('commandorcontrol+shift+g'))
-  assert.equal(canonicalAccelerator('CmdOrCtrl++'), 'mod++')
-  assert.notEqual(canonicalAccelerator('Control+1'), canonicalAccelerator('CmdOrCtrl+1'))
+  assert.equal(canonicalAccelerator('Shift+CmdOrCtrl+G', true), canonicalAccelerator('commandorcontrol+shift+g', true))
+  assert.equal(canonicalAccelerator('CmdOrCtrl++', false), 'mod++')
+  assert.notEqual(canonicalAccelerator('Control+1', true), canonicalAccelerator('CmdOrCtrl+1', true))
+})
+
+test('the primary modifier is Command on macOS and Control elsewhere, whatever the spelling', () => {
+  assert.equal(canonicalAccelerator('Control+Shift+X', false), canonicalAccelerator('CmdOrCtrl+Shift+X', false))
+  assert.equal(canonicalAccelerator('Command+X', true), canonicalAccelerator('CmdOrCtrl+X', true))
+  assert.notEqual(canonicalAccelerator('Command+X', false), canonicalAccelerator('CmdOrCtrl+X', false))
+  assert.ok(sameChord('Ctrl+X', 'CmdOrCtrl+X') && sameChord('Cmd+X', 'CmdOrCtrl+X') && !sameChord('Alt+X', 'CmdOrCtrl+X'))
 })
 
 test('shortcutForKeys finds the core shortcut that owns a chord', () => {
   assert.equal(shortcutForKeys('commandorcontrol+k')?.id, 'palette')
   assert.equal(shortcutForKeys('CmdOrCtrl+Alt+J'), undefined)
   assert.equal(shortcutForKeys(''), undefined)
+  assert.equal(shortcutForKeys('Ctrl+B')?.id, 'toggle-sidebar')
+  assert.equal(shortcutForKeys('Command+B')?.id, 'toggle-sidebar')
 })
 
-test('acceleratorOf names a key press the way a binding is named', () => {
+test('acceleratorOf names a key press the way a binding is named on that platform', () => {
   const press = { key: 'j', metaKey: false, ctrlKey: false, altKey: true, shiftKey: false }
-  assert.equal(acceleratorOf({ ...press, metaKey: true }, true), canonicalAccelerator('CmdOrCtrl+Alt+J'))
-  assert.equal(acceleratorOf({ ...press, ctrlKey: true }, false), canonicalAccelerator('CmdOrCtrl+Alt+J'))
-  assert.equal(acceleratorOf({ ...press, ctrlKey: true }, true), canonicalAccelerator('Control+Alt+J'))
+  assert.equal(acceleratorOf({ ...press, metaKey: true }, true), canonicalAccelerator('CmdOrCtrl+Alt+J', true))
+  assert.equal(acceleratorOf({ ...press, metaKey: true }, true), canonicalAccelerator('Command+Alt+J', true))
+  assert.equal(acceleratorOf({ ...press, ctrlKey: true }, false), canonicalAccelerator('CmdOrCtrl+Alt+J', false))
+  assert.equal(acceleratorOf({ ...press, ctrlKey: true }, false), canonicalAccelerator('Control+Alt+J', false))
+  assert.equal(acceleratorOf({ ...press, ctrlKey: true }, true), canonicalAccelerator('Control+Alt+J', true))
   assert.equal(acceleratorOf({ ...press, key: 'Enter', altKey: false }, true), 'enter')
 })

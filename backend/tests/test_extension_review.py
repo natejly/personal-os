@@ -114,6 +114,13 @@ def test_a_missing_draft_is_refused_and_names_the_folder() -> None:
     assert propose("../escape")["error"].startswith("an extension id")
 
 
+def test_a_draft_without_a_manifest_says_so_and_leaves_no_snapshot() -> None:
+    (review.drafts.drafts / "rl-empty").mkdir(parents=True, exist_ok=True)
+    out = propose("rl-empty")
+    assert "no extension.json" in out["error"] and ".review" not in out["error"]
+    assert review.drafts.proposal("rl-empty") is None
+
+
 def test_a_checked_draft_is_queued_as_a_diff_and_nothing_is_installed() -> None:
     draft()
     out = propose()

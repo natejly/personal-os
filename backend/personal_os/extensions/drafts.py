@@ -68,6 +68,8 @@ def _copy(src: Path, dst: Path) -> None:
 
 def _disable(manifest_path: Path) -> None:
     """An installed extension ships `enabled: false`."""
+    if not manifest_path.is_file():
+        raise DraftError("the draft folder has no extension.json: every extension needs one at its top level")
     try:
         raw = json.loads(manifest_path.read_text("utf-8"))
     except (OSError, ValueError) as e:

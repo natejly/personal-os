@@ -45,7 +45,7 @@ export default function CommandPalette(): JSX.Element {
     ...projects.map((p) => ({ key: `project:${p.id}`, label: p.name, hint: 'Project', run: () => s.openProject(p.id) })),
     ...canvases.map((c) => ({ key: `space:${c.id}`, label: c.name, hint: 'Canvas', run: () => void useCanvas.getState().enterSpace(c.id) })),
     ...paletteCommands.filter((c) => ownerOn(settings, c.extension))
-      .map((c) => ({ key: c.id, label: c.label, hint: c.hint ?? 'Command', run: c.run })),
+      .map((c) => ({ key: `command:${c.id}`, label: c.label, hint: c.hint ?? 'Command', run: c.run })),
     ...recent(conversations).map((c) => ({ key: `chat:${c.id}`, label: plainTitle(c.title) || 'Untitled chat', hint: 'Chat', run: () => void s.selectChat(c.id) })),
     ...recent(docs).map((d) => ({ key: `doc:${d.id}`, label: d.title || 'Untitled', hint: 'File', run: () => void s.openDoc(d.id) })),
     ...SETTINGS_TABS.map((t) => ({ key: `settings:${t.id}`, label: t.label, hint: 'Settings', run: () => s.openSettings(t.id) })),

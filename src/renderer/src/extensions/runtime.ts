@@ -10,7 +10,7 @@ export function startExtensionRuntime(): () => void {
     if (e.defaultPrevented) return
     const chord = acceleratorOf(e, mac)
     const state = useStore.getState()
-    const hit = keybindings.find((k) => canonicalAccelerator(k.keys) === chord && ownerOn(state.settings, k.extension) && (!k.when || k.when(state)))
+    const hit = keybindings.find((k) => canonicalAccelerator(k.keys, mac) === chord && ownerOn(state.settings, k.extension) && (!k.when || k.when(state)))
     if (!hit) return
     e.preventDefault()
     hit.run()

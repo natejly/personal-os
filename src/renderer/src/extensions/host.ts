@@ -6,7 +6,7 @@
  */
 import type { FC, RefObject } from 'react'
 import type { FullDesk, Message, Settings, WidgetKind } from '@shared/types'
-import { canonicalAccelerator, shortcutForKeys } from '@shared/shortcuts'
+import { sameChord, shortcutForKeys } from '@shared/shortcuts'
 import type { ModuleDef, ModuleNav } from '../shell/types'
 import { useStore, type State, type View } from '../store'
 import type { WidgetDef } from '../canvas/registry'
@@ -161,8 +161,7 @@ export const registerCommand = (owner: string, def: PaletteCommandDef): Disposab
 export function registerKeybinding(owner: string, def: KeybindingDef): Disposable {
   const core = shortcutForKeys(def.keys)
   if (core) throw new Error(`keybinding "${def.id}" collides with the core shortcut "${core.label}"`)
-  const canonical = canonicalAccelerator(def.keys)
-  const other = keybindings.find((k) => canonicalAccelerator(k.keys) === canonical)
+  const other = keybindings.find((k) => sameChord(k.keys, def.keys))
   if (other) throw new Error(`keybinding "${def.id}" collides with the keybinding "${other.id}"`)
   return addUnique(keybindings, 'keybinding', { ...def, extension: owner })
 }
@@ -170,7 +169,8 @@ export function registerKeybinding(owner: string, def: KeybindingDef): Disposabl
 export const registerSelectionAction = (owner: string, def: SelectionActionDef): Disposable =>
   addUnique(selectionActions, 'selection action', { ...def, extension: owner })
 
-export function registerFenceRenderer(lang: string, Component: FC<FenceRendererProps>): Disposable {
+export function registerFenceRenderer(language: string, Component: FC<FenceRendererProps>): Disposable {
+  const lang = language.toLowerCase()  // a fence's language is looked up lower-cased
   if (fences.has(lang)) throw new Error(`a fence renderer for "${lang}" is already registered`)
   fences.set(lang, Component)
   return { dispose: () => { if (fences.get(lang) === Component) fences.delete(lang) } }

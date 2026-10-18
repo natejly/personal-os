@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from calendar_ext import calendar_box  # noqa: E402
 from mail_ext import mail_tools  # noqa: E402
+from personal_os import setup_cards  # noqa: E402
+from personal_os.db import Database  # noqa: E402
+from personal_os.extensions.host import ExtensionContext, ExtensionHost  # noqa: E402
 from personal_os.extensions.google.client import GoogleNotConnected  # noqa: E402
+from personal_os.health import Health  # noqa: E402
+from personal_os.health_sync import HealthSources  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 
 
@@ -72,6 +78,15 @@ class SetupCards(unittest.TestCase):
         r = call(mail_tools(StubGoogle(connected=True, needs_reauth=True, reauth_reason="Sign-in expired."))[0], "gmail_search", query="x")
         self.assertTrue(r["setup"]["reauth"])
         self.assertEqual(r["setup"]["title"], "Reconnect Google")
+
+    def test_health_is_set_up_once_a_source_exists(self) -> None:
+        ctx = ExtensionContext(db=Database(tempfile.mkdtemp(prefix="setupcards-")), hidden_views=lambda: (), services={"mcp": lambda: None},
+                               settings=lambda: {}, set_settings=lambda _s: None, sid=lambda p: p, wsid=lambda p: p, publish=lambda _n, _d: None)
+        scope = ExtensionHost().load_builtin("health", ctx)
+        tb = Toolbox(None, None, None, lambda: {}, extensions=[scope])  # type: ignore[arg-type]
+        self.assertFalse(setup_cards.status(tb)["health"])
+        HealthSources(ctx.db, Health(ctx.db), lambda: None).create("coros", "server-1")
+        self.assertTrue(setup_cards.status(tb)["health"])
 
 
 if __name__ == "__main__":

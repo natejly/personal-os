@@ -516,12 +516,16 @@ def test_a_job_runs_failure_shows_on_the_job_and_a_pass_clears_it(rig):
     rig.recipes.save(rig.body(), "user")
     jobs = Jobs(rig.coding.api.db)
     job = jobs.create("nightly", "0 3 * * *", "p")
+    recorded: list[tuple[Any, ...]] = []
+    rig.coding.api.app.record_job_run = lambda *a: recorded.append(a)  # type: ignore[method-assign]
     out = rig.run(origin="job", job_id=job["id"])
     assert finish(rig, out, 1, 1)["status"] == "failed"
     row = jobs.get(job["id"])
+    assert recorded == [(out["run_id"], {"job_id": job["id"], "job": "nightly", "kind": "coding_recipe"}, "error", row["last_error"])]
     assert row["consecutive_failures"] == 1 and row["last_error"].startswith("Recipe run failed") and row["last_run_id"] == out["run_id"]
     out = rig.run(origin="job", job_id=job["id"])
     assert finish(rig, out, 0)["status"] == "passed"
+    assert recorded[-1][2:] == ("done", None)
     row = jobs.get(job["id"])
     assert row["consecutive_failures"] == 0 and row["last_error"] is None
 

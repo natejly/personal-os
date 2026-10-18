@@ -73,6 +73,7 @@ class ExtensionContext:
     publish: Callable[[str, Any], None]  # an app-topic event, from any thread
     widget_kinds: Callable[[], tuple[str, ...]] = lambda: ()  # the canvas widget kinds the loaded extensions declare
     owe_wake: Callable[[str, str, dict[str, Any]], None] = lambda *_: None  # (conversation id, text, wake record): the chat is owed a hidden turn
+    record_job_run: Callable[[str, dict[str, Any], str, str | None], None] = lambda *_: None  # (run id, fire record, status, error): a job run that is not a chat turn, for the history, inbox and notifications
     preset_keys: Callable[[str], dict[str, Any]] | None = None  # a permission preset id -> the permission keys it sets (Presets.keys), for defaults.permissionPreset
     chat_settings: Callable[[str | None], dict[str, Any]] | None = None  # (conversation id) -> the settings with that chat's and its project's permission overrides; the global ones for None
 

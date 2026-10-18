@@ -24,8 +24,11 @@ FEATURES = list(TARGETS)
 
 
 def _health(tb: Any) -> bool:
-    mod = next((m for m in tb.modules if getattr(m, "key", "") == "health"), None)
-    return bool(mod and mod.sources.list())
+    ext = next((e for e in tb.extensions if e.manifest.id == "health"), None)
+    if ext is None:
+        return False
+    with ext.db.tx() as c:
+        return c.execute("SELECT 1 FROM health_sources LIMIT 1").fetchone() is not None
 
 
 def _macos() -> bool:

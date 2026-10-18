@@ -112,6 +112,8 @@ test('a keybinding that collides with a core shortcut or another binding is a va
     assert.throws(() => ui.keybinding({ id: 'k2', keys: 'commandorcontrol+shift+n', run: () => undefined }), /core shortcut "New File"/)
     ui.keybinding({ id: 'k3', keys: 'CmdOrCtrl+Alt+J', run: () => undefined })
     assert.throws(() => ui.keybinding({ id: 'k4', keys: 'Alt+CmdOrCtrl+j', run: () => undefined }), /collides with the keybinding "k3"/)
+    assert.throws(() => ui.keybinding({ id: 'k5', keys: 'Ctrl+B', run: () => undefined }), /core shortcut "Toggle Sidebar"/)  // the same key as CmdOrCtrl+B off macOS
+    assert.throws(() => ui.keybinding({ id: 'k6', keys: 'Control+Alt+J', run: () => undefined }), /collides with the keybinding "k3"/)
   })
   assert.deepEqual(keybindings.map((k) => k.id), ['k3'])
   gone()
@@ -134,10 +136,14 @@ test('fence renderers: the shell registers chart, interactive, mermaid, html and
   const gone = withExtension('fencedemo', (ui) => {
     ui.fenceRenderer('csv', Component)
     assert.throws(() => ui.fenceRenderer('chart', Component), /already registered/)
+    assert.throws(() => ui.fenceRenderer('SVG', Component), /already registered/)  // the markdown lookup lower-cases the language
+    ui.fenceRenderer('Tsv', Component)
   })
   assert.equal(fenceRenderer('csv'), Component)
+  assert.equal(fenceRenderer('tsv'), Component)
   gone()
   assert.equal(fenceRenderer('csv'), undefined)
+  assert.equal(fenceRenderer('tsv'), undefined)
 })
 
 test('a tool card is added and removed with its extension, and its verb titles the call', () => {
@@ -216,7 +222,7 @@ test('the runtime runs a matching keybinding whose `when` holds, and tells subsc
   const opened: string[] = []
   let allowed = false
   const gone = withExtension('rundemo', (ui) => {
-    ui.keybinding({ id: 'rundemo:go', keys: 'CmdOrCtrl+Alt+J', when: () => allowed, run: () => ran.push('go') })
+    ui.keybinding({ id: 'rundemo:go', keys: 'Control+Alt+J', when: () => allowed, run: () => ran.push('go') })
     ui.on('ui.view.opened', (e) => opened.push(e.view))
   })
   const press = (over: Partial<KeyboardEvent>): void => listeners[0]({ key: 'j', ctrlKey: true, altKey: true, metaKey: false, shiftKey: false, defaultPrevented: false, preventDefault: () => ran.push('prevented'), ...over } as KeyboardEvent)

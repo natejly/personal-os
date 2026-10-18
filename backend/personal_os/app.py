@@ -439,6 +439,7 @@ _ext_ctx = ExtensionContext(db=db, hidden_views=lambda: settings().get("hiddenVi
                                       "documents": lambda: documents, "uploads": lambda: _store_upload},
                             settings=settings, set_settings=db.set_settings, sid=lambda p: sid(p), wsid=lambda p: wsid(p), publish=_publish_event,
                             widget_kinds=lambda: (*host.widget_kinds(), *ext_drafts.widget_kinds()), owe_wake=lambda c, t, w: owe_wake(c, t, w),
+                            record_job_run=lambda *a: _record_job_run(*a),
                             chat_settings=chat_settings)
 host.load_builtin("google", _ext_ctx)
 google: Google = _ext_ctx.services["google"]()
@@ -5352,6 +5353,12 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     if run.task is not None:
         run.task.add_done_callback(lambda _t, rid=run.run_id, jid=job["id"]: (_job_ended(rid, jid), events.publish("job_finished", {"run_id": rid, "job_id": jid})))
     return run.run_id
+
+
+def _record_job_run(run_id: str, fire: dict[str, Any], status: str, error: str | None) -> None:
+    """A finished job run that was not a chat turn (a recipe run), as the journal row the history, inbox and notifications read."""
+    run_store.create(run_id, None, "job", fire)
+    run_store.update(run_id, status=status, error=error, ended_at=time.time())
 
 
 async def _job_fired(job: dict[str, Any], fire: dict[str, Any]) -> None:

@@ -269,3 +269,15 @@ def test_clear_inbox_deletes_the_window_and_leaves_running_runs() -> None:
     assert store.get(running) is not None, "a run still going is left alone"
     assert body["deleted"] >= 1 and body["skipped"] >= 1
     assert client.delete(f"/inbox/runs/{done}").status_code == 404, "already gone"
+
+
+def test_a_recipe_job_run_without_a_chat_reaches_history_inbox_and_notifications() -> None:
+    j = mkjob("recipe job")
+    appmod.jobs.update(j["id"], {"max_retries": 0})
+    t = time.time()
+    appmod._record_job_run("recipe-run-1", {"job_id": j["id"], "job": j["name"], "kind": "coding_recipe"}, "error", "Recipe run agent_failed")
+    runs = client.get(f"/jobs/{j['id']}/runs").json()
+    assert [(r["run_id"], r["status"], r["error"]) for r in runs] == [("recipe-run-1", "error", "Recipe run agent_failed")]
+    assert "recipe-run-1" in [a["run_id"] for a in client.get("/inbox").json()["while_you_were_away"]]
+    ev = client.get("/inbox/notify", params={"since": t - 3600}).json()
+    assert any(e["id"] == "run:recipe-run-1:error" and e["target"] == "inbox" for e in ev)

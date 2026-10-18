@@ -131,6 +131,13 @@ def test_saving_on_for_an_external_tool_stores_ask() -> None:
     assert conv["settings"]["tools"] == {"gmail_send": "ask", "todo_add": "off"}
 
 
+def test_a_project_or_chat_tool_map_with_an_invalid_mode_is_refused() -> None:
+    pid = j("POST", "/projects", {"name": "Bogus"})["id"]
+    j("PUT", f"/projects/{pid}", {"tools": {"save_memory": "bogus"}}, expect=422)
+    cid = j("POST", "/conversations", {})["id"]
+    j("PATCH", f"/conversations/{cid}", {"settings": {"tools": {"save_memory": "bogus"}}}, expect=422)
+
+
 def _wait(pred: Any, label: str) -> Any:
     deadline = time.time() + 15
     while time.time() < deadline:

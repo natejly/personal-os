@@ -310,3 +310,19 @@ def test_calendar_job_validation_over_http() -> None:
     patched = client.patch(f"/jobs/{j['id']}", json={"only_on_change": False, "minutes_before": 5})
     assert patched.status_code == 200 and patched.json()["only_on_change"] is False and patched.json()["minutes_before"] == 5
     client.delete(f"/jobs/{j['id']}")
+
+
+def test_enabling_a_calendar_job_is_refused_while_its_view_is_off() -> None:
+    client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
+    body = {"name": "n", "prompt": "p", "kind": "calendar", "calendar_query": "standup"}
+    keep = client.get("/settings").json()["hiddenViews"]
+    try:
+        client.put("/settings", json={"hiddenViews": ["calendar"]})
+        off = client.post("/jobs", json={**body, "enabled": True})
+        assert off.status_code == 400 and "view is turned off" in off.json()["detail"]
+        paused = client.post("/jobs", json=body)
+        assert paused.status_code == 200, paused.text
+        assert client.patch(f"/jobs/{paused.json()['id']}", json={"enabled": True}).status_code == 400
+        client.delete(f"/jobs/{paused.json()['id']}")
+    finally:
+        client.put("/settings", json={"hiddenViews": keep})

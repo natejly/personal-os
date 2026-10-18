@@ -1499,7 +1499,7 @@ def create_project(body: ProjectIn) -> dict[str, Any]:
 def update_project(id: str, body: ProjectPatch) -> dict[str, Any]:
     patch = body.model_dump()
     if patch.get("tools") is not None:
-        patch["tools"] = toolbox.cap_modes(patch["tools"])  # external and schedules tools top out at ask
+        patch["tools"] = _check_permissions({"tools": patch["tools"]})["tools"]  # external and schedules tools top out at ask
     s = projects.update(id, patch)
     if not s:
         raise HTTPException(404)
@@ -1612,7 +1612,7 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
             patch["project_id"] = wsid(body.project_id)
     settings_patch = patch.get("settings") if isinstance(patch.get("settings"), dict) else {}
     if isinstance(settings_patch.get("tools"), dict):
-        settings_patch["tools"] = toolbox.cap_modes(settings_patch["tools"])  # external and schedules tools top out at ask
+        settings_patch["tools"] = _check_permissions({"tools": settings_patch["tools"]})["tools"]  # external and schedules tools top out at ask
     settings_patch.pop("permissions", None)  # set by the preset routes only: a PATCH must not loosen a chat unasked
     settings_patch.pop("deskId", None)  # bound and unbound by the cowork routes only, never by a settings PATCH
     settings_patch.pop("runtime", None)  # chosen only through PUT /runtime, which checks the provider and confirms any loosening
@@ -5636,10 +5636,17 @@ def preview_schedule(cron: str = "", timezone: str | None = None, n: int = 5) ->
     return {"ok": True, "timezone": tz, "next": out}
 
 
+def _check_trigger_on(kind: str, enabled: bool) -> None:
+    """An enabled job of a trigger kind is polled only while the extension that serves it is on: say so instead of accepting a job that never fires."""
+    if enabled and kind in host.triggers and not host.triggers.enabled(kind):
+        raise HTTPException(400, f"A {kind} job is not polled while its view is turned off. Turn the view on in Settings → Sidebar first")
+
+
 @app.post("/jobs")
 async def create_job(body: JobIn) -> dict[str, Any]:
     _check_schedule(body.kind, body.cron, body.timezone, body.run_at, fresh_time=True, watch_dir=body.watch_dir,
                     job=body.model_dump())
+    _check_trigger_on(body.kind, body.enabled)
     _check_allowed_tools(body.allowed_tools)
     await _check_job_model(body.model)
     _check_target(body.target, body.desk_autonomy, body.allowed_tools)
@@ -5685,6 +5692,8 @@ async def update_job(id: str, body: JobPatch) -> dict[str, Any]:
         patch["desk_autonomy"] = "plan"
     _check_schedule(merged["kind"], merged["cron"], patch.get("timezone"), merged["run_at"],
                     fresh_time="run_at" in patch, watch_dir=merged.get("watch_dir"), job=merged)
+    if "enabled" in patch or "kind" in patch:
+        _check_trigger_on(merged["kind"], bool(merged.get("enabled")))
     # Switching a spent one-off back on is the one re-arm that cannot work: it has no instant left to wait for,
     # so say that instead of leaving the toggle on with nothing scheduled behind it.
     if patch.get("enabled") and merged["kind"] == "once" and "run_at" not in patch and spent(cur):

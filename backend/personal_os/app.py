@@ -5170,7 +5170,7 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
             # No run is waiting on a parked card and nothing reads its edit back, so "approved with edits" would be a
             # lie: the resumed desk would not run these arguments. Decide it as it is, or deny it.
             raise HTTPException(400, "This approval is parked and cannot take edits; approve it as proposed or deny it")
-        edited = _checked_edit(pending["tool"], body.arguments, pending.get("desk_id"))
+        edited = _checked_edit(pending["tool"], body.arguments, pending.get("desk_id"), pending.get("conversation_id"))
     fut = _approvals.get(call_id)
     if body.decision == "deny" and body.note and not is_plan and fut and not fut.done():
         _approval_notes[call_id] = body.note.strip()[:500]
@@ -5818,6 +5818,8 @@ async def run_job_now(id: str, test: bool = False) -> dict[str, Any]:
     job = jobs.get(id)
     if not job:
         raise HTTPException(404, "No such job")
+    if job["kind"] in host.triggers and not host.triggers.enabled(job["kind"]):
+        raise HTTPException(409, f"Not started: a {job['kind']} job needs its view turned on in Settings → Sidebar")
     t = time.time()
     fire = {"job_id": job["id"], "job": job["name"], "kind": job["kind"], "cron": job["cron"], "timezone": job["timezone"],
             "due_at": t, "fired_at": t, "late_seconds": 0.0, "missed_slots": 0, "late": False, "manual": True,
@@ -6004,15 +6006,18 @@ toolbox.set_extension_tools(_coding_scope)
 host.mount(app, _coding_scope)
 
 
-def _checked_edit(tool: str, args: dict[str, Any], desk_id: str | None = None) -> dict[str, Any]:
+def _checked_edit(tool: str, args: dict[str, Any], desk_id: str | None = None, conversation_id: str | None = None) -> dict[str, Any]:
     """A user's rewrite of a pending call, as it may run: it passes the tool's schema and validators (400) and no deny
-    rule matches the new arguments (403), e.g. a recipient a rule blocks. Raised before anything is decided."""
+    rule matches the new arguments (403), e.g. a recipient a rule blocks. The rules are the ones in force for the chat
+    the card is in (its project's and its own on top of the global ones). Raised before anything is decided."""
     spec = toolbox.specs.get(tool)
     try:
         edited = approval_edits.validate(tool, args, spec.parameters if spec else None)
     except approval_edits.EditError as e:
         raise HTTPException(400, str(e)) from e
-    cfg = settings()
+    conv = convos.get(conversation_id) if conversation_id else None
+    project = projects.get(conv["project_id"]) if conv and conv["project_id"] else None
+    cfg = permissions.overlay(settings(), project["permissions"] if project else None, conv["settings"].get("permissions") if conv else None)
     perm = permrules.resolve(tool, edited, "ask", True, rules=permrules.load_rules(permissions.get(cfg, "permissionRules")))
     if perm.refusal:
         raise HTTPException(403, f"{tool}: {perm.refusal}")

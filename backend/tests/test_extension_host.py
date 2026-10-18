@@ -645,6 +645,17 @@ class BuiltinExtensionTests(unittest.TestCase):
         run(scope.stop())
         self.assertEqual((host.recap_cards(), host.recap_facts()), ({}, {}))
 
+    def test_a_recap_section_that_raises_is_skipped_and_the_others_still_answer(self) -> None:
+        host, scope = self.recap_scope()
+
+        def boom() -> dict[str, Any]:
+            raise RuntimeError("bad section")
+        scope.recap_section("demo", card=boom, facts=boom)
+        host.extensions["ok"] = ok = self.scope([], contributes={"slots": {"recap.section": [{"id": "ok"}]}})
+        ok.recap_section("ok", card=lambda: {"ok": 1}, facts=lambda: {"ok_facts": 2})
+        with self.assertLogs("personal_os.extensions.host", "WARNING"):
+            self.assertEqual((host.recap_cards(), host.recap_facts()), ({"ok": 1}, {"ok_facts": 2}))
+
     def test_a_recap_section_without_facts_adds_none(self) -> None:
         host, scope = self.recap_scope()
         scope.recap_section("demo", card=lambda: {"demo": 1})

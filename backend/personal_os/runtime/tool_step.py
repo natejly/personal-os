@@ -635,6 +635,11 @@ class ToolStep:
                     # journaled, verified and queued (outbox) in place of the model's. Never read from the model's call.
                     original_args, args = args, arow["edited_args"]
                     edit_info = {"original_arguments": original_args, "edited_arguments": args, "edited_by": "user"}
+                    # The dispatch re-runs the core guards and tool.pre on the edited call, but not tool.permission.
+                    why, _ = await guards.extension_gate(core.toolbox.bus, c["name"], args, danger=danger, mode=mode,
+                                                         tainted=bool(st.tool_ctx.get("tainted")))
+                    if why:
+                        pre = tools.denied(c["name"], why)
                 if st.parked:
                     # The reply ends here, still owing this call an answer. The row stays pending
                     # and decidable; the desk moves from a live waiting state to `blocked`, which

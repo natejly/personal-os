@@ -39,8 +39,8 @@
     "tool.result": {},
     "tool.error": {},
     "tool.post": {},
-    "run.after": {},
-    "subagent.stop": {}
+    "run.after": { "timeoutMs": 60000 },
+    "subagent.stop": { "timeoutMs": 60000 }
   },
   "permissions": ["db:own", "hooks:gate", "terminal:control"],
   "settings": { "structuredBudgetUsd": { "type": "number" } },

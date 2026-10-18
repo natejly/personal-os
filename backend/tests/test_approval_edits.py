@@ -22,9 +22,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+from fastapi import HTTPException  # noqa: E402
+
 from personal_os import app as appmod  # noqa: E402
 appmod.db.set_settings({"hiddenViews": []})  # a fresh install has the PIM views off
 from personal_os import approval_edits, llm  # noqa: E402
+from personal_os.extensions.hooks import Deny  # noqa: E402
 from personal_os.runs import Run, args_digest  # noqa: E402
 
 client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
@@ -147,6 +150,39 @@ def test_an_edit_runs_with_the_edited_arguments_and_records_both(editable) -> No
     assert pe["edited_by"] == "user" and pe["original_arguments"] == {"title": orig}
     # the idempotency journal is keyed by the edited arguments
     assert any(e["args_digest"] == args_digest({"title": new, "priority": 2}) for e in store.executed(rid))
+
+
+def test_an_extension_gate_refuses_the_edited_call(editable) -> None:  # type: ignore[no-untyped-def]
+    orig, banned = f"fine {time.time()}", f"forbidden {time.time()}"
+    sub = appmod.toolbox.bus.subscribe("tool.permission", lambda ev: Deny("no banned titles") if "forbidden" in ev["args"].get("title", "") else None,
+                                       owner="x", order=0)
+    try:
+        ROUNDS.append({"tool_calls": [call("todo_add", {"title": orig})]})
+        ROUNDS.append(["done"])
+        _cid, rid = start({"tools": {"todo_add": "ask"}})
+        a = asked(rid)
+        j("POST", f"/approvals/{a['call_id']}", {"decision": "allow", "arguments": {"title": banned}})
+        assert drain(rid)["status"] == "done"
+    finally:
+        sub.dispose()
+    assert todos_named(banned) == [] and todos_named(orig) == []
+    assert "blocked by an extension" in [r for r in results(rid) if r["name"] == "todo_add"][0]["error"]
+
+
+def test_an_edit_faces_the_permission_rules_of_its_project_and_chat(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(approval_edits, "EDITABLE_TOOLS", {*approval_edits.EDITABLE_TOOLS, "write_local_file"})
+    project = appmod.projects.create("Edits")
+    own = appmod.convos.create(project["id"], "t", "m")["id"]
+    plain = appmod.convos.create(None, "t", "m")["id"]
+    appmod.projects.update(project["id"], {"permissions": {"permissionRules": {"deny": ["Edit(/tmp/edits-denied*)"]}}})
+    args = {"path": "/tmp/edits-denied.txt", "content": "x"}
+    with pytest.raises(HTTPException) as refused:
+        appmod._checked_edit("write_local_file", args, None, own)
+    assert refused.value.status_code == 403
+    assert appmod._checked_edit("write_local_file", args, None, plain) == args  # another chat is outside that project
+    appmod.convos.update(plain, {"settings": {"permissions": {"permissionRules": {"deny": ["Edit(/tmp/edits-denied*)"]}}}})
+    with pytest.raises(HTTPException):
+        appmod._checked_edit("write_local_file", args, None, plain)
 
 
 def test_a_non_editable_tool_rejects_arguments() -> None:

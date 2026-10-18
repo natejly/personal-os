@@ -697,11 +697,22 @@ class ExtensionHost:
 
     def recap_cards(self) -> dict[str, Any]:
         """The dashboard keys contributed by the enabled extensions' recap sections."""
-        return {k: v for s in self._enabled_sections() for k, v in s.card().items()}
+        return self._recap(lambda s: s.card)
 
     def recap_facts(self) -> dict[str, Any]:
         """The recap facts contributed by the enabled extensions' recap sections."""
-        return {k: v for s in self._enabled_sections() if s.facts for k, v in s.facts().items()}
+        return self._recap(lambda s: s.facts)
+
+    def _recap(self, read: Callable[[RecapSection], Callable[[], dict[str, Any]] | None]) -> dict[str, Any]:
+        """What the sections' `read` calls return, merged. A section that raises is skipped, so one extension cannot take down Home."""
+        out: dict[str, Any] = {}
+        for sec in self._enabled_sections():
+            if fn := read(sec):
+                try:
+                    out.update(fn())
+                except Exception:  # noqa: BLE001 - an extension's section never fails the page
+                    log.warning("recap section %r failed", sec.id, exc_info=True)
+        return out
 
     def _enabled_sections(self) -> Iterator[RecapSection]:
         return (sec for scope in self.extensions.values() if scope.enabled() for sec in scope.recap_sections)

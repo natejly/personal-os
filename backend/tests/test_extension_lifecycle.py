@@ -530,3 +530,27 @@ def test_export_includes_the_declared_extension_tables(tmp_path: Path) -> None:
     backups.export_zip(db.data_dir, dest)
     with zipfile.ZipFile(dest) as z:
         assert not [n for n in z.namelist() if n.startswith("export/extensions/")]
+
+
+def test_run_now_refuses_a_job_whose_trigger_extension_is_off() -> None:
+    started: list[str] = []
+
+    class Adapter:
+        async def start_run(self, job: dict[str, Any]) -> str:
+            started.append(job["id"])
+            return "run-1"
+
+    on = [False]
+    sub = appmod.host.triggers.register("probe_kind", Adapter(), lambda: on[0])  # type: ignore[arg-type]
+    job = appmod.jobs.create("nightly", "0 3 * * *", "p")
+    with appmod.db.tx() as c:
+        c.execute("UPDATE jobs SET kind='probe_kind' WHERE id=?", (job["id"],))
+    try:
+        with client() as c:
+            r = c.post(f"/jobs/{job['id']}/run")
+            assert r.status_code == 409 and "view turned on" in r.json()["detail"] and started == []
+            on[0] = True
+            assert c.post(f"/jobs/{job['id']}/run").json()["run_id"] == "run-1" and started == [job["id"]]
+    finally:
+        sub.dispose()
+        appmod.jobs.delete(job["id"])

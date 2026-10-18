@@ -24,6 +24,7 @@ from typing import Any
 
 from . import mac
 from .db import Database, new_id
+from .extensions.hooks import HookBus
 
 DESK_ROOT, DESK_SUBDIRS = "cowork", ("work", "outputs")  # workspace.py's layout; .baseline and .trash are the workspace's own
 RECONCILE_S = 10.0  # the artifacts list rescans the folders at most this often
@@ -135,8 +136,9 @@ def backfill_outputs(c: sqlite3.Connection, data_dir: Path) -> None:
 
 
 class ChatFiles:
-    def __init__(self, db: Database, chats_root: Path | None) -> None:
+    def __init__(self, db: Database, chats_root: Path | None, hooks: HookBus | None = None) -> None:
         self.db = db
+        self.hooks = hooks or HookBus()
         self.root = Path(chats_root) if chats_root is not None else None
         self._reconciled = 0.0
 
@@ -150,6 +152,7 @@ class ChatFiles:
                           (new_id(), conversation_id, kind, ref, name, action, message_id, time.time()))
         except Exception as e:  # noqa: BLE001 - an index row never breaks the write it describes
             log.warning("chat file not recorded (%s): %s", kind, type(e).__name__)
+        self.hooks.fire("file.written", {"path": ref, "owner": conversation_id, "kind": kind})
 
     def record_output(self, owner: str, path: Path) -> None:
         """Workspace.on_save for the chat outbox: `owner` is the conversation id."""

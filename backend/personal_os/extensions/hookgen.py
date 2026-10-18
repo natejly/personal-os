@@ -24,7 +24,7 @@ PY_OUT = REPO / "backend" / "grain_sdk" / "hooks.py"
 TS_OUT = REPO / "src" / "shared" / "extensionHooks.ts"
 COMMAND = "grain ext gen-hooks"
 SECTIONS = {
-    "5.1": "App and session", "5.3": "Context and prompt", "5.4": "Model request and response", "5.5": "Tool call",
+    "5.1": "App and session", "5.2": "Input", "5.3": "Context and prompt", "5.4": "Model request and response", "5.5": "Tool call",
     "5.6": "Turn and run end", "5.7": "Memory and compaction", "5.8": "Approvals", "5.9": "Background and schedule",
     "5.10": "Channels and I/O", "5.12": "Coding bridge", "5.13": "Runtime slots", "5.14": "Presets", "5.15": "Agent loop",
 }

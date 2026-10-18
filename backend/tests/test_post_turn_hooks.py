@@ -580,6 +580,17 @@ def test_a_job_that_fails_reports_fired_first_and_done_with_its_outcome(monkeypa
     assert log[1][1]["run_id"] == run_id and log[1][1]["outcome"] != "done"
 
 
+def test_a_fired_job_creates_a_chat_that_fires_chat_created(monkeypatch: Any) -> None:
+    created: list[Any] = []
+    handle = sub(appmod.host.bus, "chat.created", created.append)
+    try:
+        log, job, run_id = fire_job(monkeypatch, _fake)
+    finally:
+        handle.dispose()
+    (conv_id,) = [r.conversation_id for r in appmod.bus._runs.values() if r.run_id == run_id]
+    assert created == [{"id": conv_id, "project_id": None}]
+
+
 def test_a_manual_or_triggered_fire_names_its_trigger() -> None:
     got: list[Any] = []
     handle = sub(appmod.host.bus, "job.fired", got.append)

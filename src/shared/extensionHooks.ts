@@ -27,10 +27,37 @@ export interface ExtChangedPayload {
   enabled: boolean
 }
 
+export interface AttachedFile {
+  id: string
+  name: string
+  mime: string
+  size: number
+}
+
+/** The message as the person sent it, before any run or row exists. A handler returns the payload with `content` changed, or Deny; changes to the other keys are ignored. */
+export interface TurnAcceptPayload {
+  conversation_id: string
+  origin: string | null
+  content: string
+  attachments: AttachedFile[]
+}
+
+/** The user's row is stored; the reply has not begun. */
+export interface TurnStartPayload {
+  conversation_id: string
+  message_id: string
+  origin: string | null
+}
+
 /** Ids only: a handler reads what it needs, and raw message text is not handed out. */
 export interface ContextContributePayload {
   conversation_id: string
   project_id: string | null
+}
+
+/** The names of the tools offered to the model, in order. A handler returns the payload with names left out; a name it adds is ignored. */
+export interface ToolsOfferPayload {
+  names: string[]
 }
 
 /** `reason` is the router's (empty when it did not run); `tier` is `fast` or `default`. */
@@ -236,6 +263,23 @@ export interface ApprovalResolvedPayload {
   by: string | null
 }
 
+/** `kind` is `doc_revision` (`id` is the revision) or `desk_output` (`id` is the output). */
+export interface ReviewAcceptedPayload {
+  kind: 'doc_revision' | 'desk_output'
+  id: string
+}
+
+/** `summary` is the worker's report as handed to the assistant, credential-scrubbed and cut. */
+export interface WorkerReportPayload {
+  worker: string
+  summary: string
+}
+
+/** A line shown to the assistant under the worker's report, marked as the extension's. */
+export interface WorkerNote {
+  text: string
+}
+
 /** `trigger` is the fire's own (`dir`, `mail`, `calendar`, `clock+dir`), else `manual` or `clock`. */
 export interface JobFiredPayload {
   job_id: string
@@ -262,6 +306,20 @@ export interface ChannelOutboundPayload {
   channel: string
   text: string
   files: Record<string, unknown>[]
+}
+
+/** `owner` is the conversation the file belongs to; `path` is the file, or the document id for a `note`; `kind` is `output` or `note`. */
+export interface FileWrittenPayload {
+  path: string
+  owner: string
+  kind: string
+}
+
+/** `target` is `inbox` or `run:<conversation id>`, where a click goes. */
+export interface NotifyPayload {
+  title: string
+  body: string
+  target: string | null
 }
 
 /** Strings are credential-scrubbed and cut to 2 KB each, the whole to 16 KB. */
@@ -357,7 +415,7 @@ export interface LoopVerifyPayload {
   gaps: string[]
 }
 
-export type HookId = 'app.start' | 'app.stop' | 'settings.changed' | 'chat.created' | 'chat.deleted' | 'project.created' | 'project.deleted' | 'ext.changed' | 'context.contribute' | 'model.select' | 'model.request' | 'model.response' | 'tool.permission' | 'tool.pre' | 'tool.post' | 'tool.result' | 'tool.taint' | 'tool.error' | 'reply.complete' | 'turn.settled' | 'run.after' | 'subagent.start' | 'subagent.stop' | 'memory.before_write' | 'memory.written' | 'memory.deleted' | 'compaction.before' | 'compaction.after' | 'approval.requested' | 'approval.resolved' | 'job.fired' | 'job.done' | 'channel.inbound' | 'channel.outbound' | 'coding.tool.pre' | 'coding.tool.post' | 'runtime.changed' | 'runtime.fallback' | 'sandbox.refused' | 'preset.applied' | 'loop.plan' | 'loop.verify'
+export type HookId = 'app.start' | 'app.stop' | 'settings.changed' | 'chat.created' | 'chat.deleted' | 'project.created' | 'project.deleted' | 'ext.changed' | 'turn.accept' | 'turn.start' | 'context.contribute' | 'tools.offer' | 'model.select' | 'model.request' | 'model.response' | 'tool.permission' | 'tool.pre' | 'tool.post' | 'tool.result' | 'tool.taint' | 'tool.error' | 'reply.complete' | 'turn.settled' | 'run.after' | 'subagent.start' | 'subagent.stop' | 'memory.before_write' | 'memory.written' | 'memory.deleted' | 'compaction.before' | 'compaction.after' | 'approval.requested' | 'approval.resolved' | 'review.accepted' | 'worker.report' | 'job.fired' | 'job.done' | 'channel.inbound' | 'channel.outbound' | 'file.written' | 'notify' | 'coding.tool.pre' | 'coding.tool.post' | 'runtime.changed' | 'runtime.fallback' | 'sandbox.refused' | 'preset.applied' | 'loop.plan' | 'loop.verify'
 
 /** The payload each hook's handlers receive. */
 export interface HookPayloads {
@@ -369,7 +427,10 @@ export interface HookPayloads {
   'project.created': ProjectPayload
   'project.deleted': ProjectPayload
   'ext.changed': ExtChangedPayload
+  'turn.accept': TurnAcceptPayload
+  'turn.start': TurnStartPayload
   'context.contribute': ContextContributePayload
+  'tools.offer': ToolsOfferPayload
   'model.select': ModelSelectPayload
   'model.request': ModelRequestPayload
   'model.response': ModelResponsePayload
@@ -391,10 +452,14 @@ export interface HookPayloads {
   'compaction.after': CompactionAfterPayload
   'approval.requested': ApprovalRequestedPayload
   'approval.resolved': ApprovalResolvedPayload
+  'review.accepted': ReviewAcceptedPayload
+  'worker.report': WorkerReportPayload
   'job.fired': JobFiredPayload
   'job.done': JobDonePayload
   'channel.inbound': ChannelInboundPayload
   'channel.outbound': ChannelOutboundPayload
+  'file.written': FileWrittenPayload
+  'notify': NotifyPayload
   'coding.tool.pre': CodingToolPrePayload
   'coding.tool.post': CodingToolPostPayload
   'runtime.changed': RuntimeChangedPayload
@@ -415,7 +480,10 @@ export interface HookKinds {
   'project.created': 'emit'
   'project.deleted': 'emit'
   'ext.changed': 'emit'
+  'turn.accept': 'pipe'
+  'turn.start': 'emit'
   'context.contribute': 'collect'
+  'tools.offer': 'pipe'
   'model.select': 'pipe'
   'model.request': 'emit'
   'model.response': 'emit'
@@ -437,10 +505,14 @@ export interface HookKinds {
   'compaction.after': 'emit'
   'approval.requested': 'emit'
   'approval.resolved': 'emit'
+  'review.accepted': 'emit'
+  'worker.report': 'collect'
   'job.fired': 'emit'
   'job.done': 'emit'
   'channel.inbound': 'emit'
   'channel.outbound': 'pipe'
+  'file.written': 'emit'
+  'notify': 'emit'
   'coding.tool.pre': 'gate'
   'coding.tool.post': 'emit'
   'runtime.changed': 'emit'

@@ -42,6 +42,13 @@
     ["sandbox.refused", "emit", "1.0"],
     ["preset.applied", "emit", "1.0"],
     ["loop.plan", "emit", "1.0"],
-    ["loop.verify", "emit", "1.0"]
+    ["loop.verify", "emit", "1.0"],
+    ["turn.accept", "pipe", "1.0"],
+    ["turn.start", "emit", "1.0"],
+    ["tools.offer", "pipe", "1.0"],
+    ["review.accepted", "emit", "1.0"],
+    ["worker.report", "collect", "1.0"],
+    ["file.written", "emit", "1.0"],
+    ["notify", "emit", "1.0"]
   ]
 }

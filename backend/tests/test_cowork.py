@@ -41,7 +41,7 @@ if "pytest" in sys.modules:  # pragma: no cover - collection guard, not behaviou
 
 from personal_os import llm  # noqa: E402
 from personal_os.app import (AUTH_TOKEN, _desk_tasks, _missed_wake, _should_chain, app,  # noqa: E402
-                             bus, db, plans, desks, docs, google, run_store, todos, toolbox, workspace)
+                             bus, db, host, plans, desks, docs, google, run_store, todos, toolbox, workspace)
 from personal_os.app import events as topic  # noqa: E402
 from personal_os.cowork import LIVE, NEEDS_YOU, checklist_items  # noqa: E402
 from personal_os.plans import PLAN_TOOL  # noqa: E402
@@ -209,14 +209,19 @@ def delivering_desk(brief: str, path: str = "", content: str = "") -> dict[str, 
 
 
 def test_a_desk_is_a_conversation_the_chat_list_hides() -> None:
+    created: list[str] = []
+    heard = host.bus.subscribe("chat.created", lambda p: created.append(p["id"]), owner="test", order=0)
     made = make_desk("Compare the two vendors", start=False)
     did, cid = made["desk"]["id"], made["conversation_id"]
+    time.sleep(0.2)
+    heard.dispose()
     conv = j("GET", f"/conversations/{cid}")
     check(conv["settings"]["deskId"] == did, "the conversation carries the desk it belongs to")
     check(made["desk"]["autonomy"] == "plan", "and a desk plans its first run by default (§4.1)")
     check(made["desk"]["status"] == "draft" and "run_id" not in made, "start=false creates nothing to watch")
     check(made["desk"]["workspace"] == f"cowork/{did}", f"the row stores a relative root, got {made['desk']['workspace']}")
 
+    check(cid in created, "and the chat.created hook heard of it")
     listed = {c["id"] for c in j("GET", "/conversations")}
     check(cid not in listed, "a desk's conversation is not in Recent chats")
     check(cid in {c["id"] for c in j("GET", "/conversations?include_desks=true")},
@@ -612,9 +617,14 @@ def test_accept_is_exactly_once_and_reads_the_promotion_back() -> None:
     state = delivering_desk("Promote the report")
     did, oid = state["id"], state["outputs"][0]["id"]
     body = {"outputs": [{"output_id": oid, "destination": "doc", "title": "The report"}]}
+    accepted: list[Any] = []
+    heard = host.bus.subscribe("review.accepted", accepted.append, owner="test", order=0)
     j("POST", f"/cowork/desks/{did}/accept", {"outputs": [{"output_id": oid, "destination": "pdf"}]}, expect=422)
     first = j("POST", f"/cowork/desks/{did}/accept", body)["results"][0]
     check(first["ok"] is True and first["verified"] is True, f"the promotion was read back and matched, got {first}")
+    time.sleep(0.2)
+    check(accepted == [{"kind": "desk_output", "id": oid}], f"the review.accepted hook heard of the promoted output, got {accepted}")
+    heard.dispose()
     check(docs.get(first["ref"])["content"] == REPORT, "and the doc really holds the file's bytes")
 
     again = j("POST", f"/cowork/desks/{did}/accept", body)["results"][0]

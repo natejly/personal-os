@@ -21,6 +21,7 @@ from typing import Any
 
 from .chunker import chunk_blocks
 from .db import Database, new_id, now, row_to_dict
+from .extensions.hooks import HookBus
 from .extract_text import markdown_blocks, safe_upload_name
 from .repos import ALL, _scope_clause, cjk_like, fts_query, is_isolated
 
@@ -323,8 +324,9 @@ log = logging.getLogger("personal_os.docs")
 
 
 class Docs:
-    def __init__(self, db: Database):
+    def __init__(self, db: Database, hooks: HookBus | None = None):
         self.db = db
+        self.hooks = hooks or HookBus()
         # Called with a doc id whenever its chunks were rebuilt (app.py wires background embedding to it).
         self.on_chunks: Any = None
         # Serialises `daily`, so a double click cannot find nothing twice and create two notes.
@@ -881,6 +883,7 @@ class Docs:
             c.execute("UPDATE docs SET content=?, title=?, updated_at=? WHERE id=?", (after, title, t, r["doc_id"]))
             self._reindex(c, r["doc_id"], title, after)
             doc_id = r["doc_id"]
+        self.hooks.fire("review.accepted", {"kind": "doc_revision", "id": rev_id})
         return self.get(doc_id)
 
     def reject(self, rev_id: str) -> dict[str, Any] | None:

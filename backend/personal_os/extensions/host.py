@@ -441,6 +441,7 @@ class ExtensionScope:
     def notify(self, title: str, body: str, *, target: str | None = None) -> None:
         """Ask for an operating-system notification. `target` is `inbox` or `run:<conversation id>`, where a click goes."""
         self._raise(InboxItem(title, body, target), inbox=False)
+        self._bus.fire("notify", {"title": title, "body": body, "target": target})
 
     def inbox(self, item: InboxItem) -> None:
         """Leave a card under "Needs you" in the Agent inbox until the person dismisses it."""

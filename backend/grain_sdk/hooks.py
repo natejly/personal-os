@@ -37,10 +37,37 @@ class ExtChangedPayload(TypedDict):
     enabled: bool
 
 
+class AttachedFile(TypedDict):
+    id: str
+    name: str
+    mime: str
+    size: int
+
+
+class TurnAcceptPayload(TypedDict):
+    """The message as the person sent it, before any run or row exists. A handler returns the payload with `content` changed, or Deny; changes to the other keys are ignored."""
+    conversation_id: str
+    origin: str | None
+    content: str
+    attachments: list[AttachedFile]
+
+
+class TurnStartPayload(TypedDict):
+    """The user's row is stored; the reply has not begun."""
+    conversation_id: str
+    message_id: str
+    origin: str | None
+
+
 class ContextContributePayload(TypedDict):
     """Ids only: a handler reads what it needs, and raw message text is not handed out."""
     conversation_id: str
     project_id: str | None
+
+
+class ToolsOfferPayload(TypedDict):
+    """The names of the tools offered to the model, in order. A handler returns the payload with names left out; a name it adds is ignored."""
+    names: list[str]
 
 
 class ModelSelectPayload(TypedDict):
@@ -246,6 +273,23 @@ class ApprovalResolvedPayload(TypedDict):
     by: str | None
 
 
+class ReviewAcceptedPayload(TypedDict):
+    """`kind` is `doc_revision` (`id` is the revision) or `desk_output` (`id` is the output)."""
+    kind: Literal["doc_revision", "desk_output"]
+    id: str
+
+
+class WorkerReportPayload(TypedDict):
+    """`summary` is the worker's report as handed to the assistant, credential-scrubbed and cut."""
+    worker: str
+    summary: str
+
+
+class WorkerNote(TypedDict):
+    """A line shown to the assistant under the worker's report, marked as the extension's."""
+    text: str
+
+
 class JobFiredPayload(TypedDict):
     """`trigger` is the fire's own (`dir`, `mail`, `calendar`, `clock+dir`), else `manual` or `clock`."""
     job_id: str
@@ -272,6 +316,20 @@ class ChannelOutboundPayload(TypedDict):
     channel: str
     text: str
     files: list[dict[str, Any]]
+
+
+class FileWrittenPayload(TypedDict):
+    """`owner` is the conversation the file belongs to; `path` is the file, or the document id for a `note`; `kind` is `output` or `note`."""
+    path: str
+    owner: str
+    kind: str
+
+
+class NotifyPayload(TypedDict):
+    """`target` is `inbox` or `run:<conversation id>`, where a click goes."""
+    title: str
+    body: str
+    target: str | None
 
 
 class CodingToolPrePayload(TypedDict):
@@ -367,7 +425,7 @@ class LoopVerifyPayload(TypedDict):
     gaps: list[str]
 
 
-HookId = Literal["app.start", "app.stop", "settings.changed", "chat.created", "chat.deleted", "project.created", "project.deleted", "ext.changed", "context.contribute", "model.select", "model.request", "model.response", "tool.permission", "tool.pre", "tool.post", "tool.result", "tool.taint", "tool.error", "reply.complete", "turn.settled", "run.after", "subagent.start", "subagent.stop", "memory.before_write", "memory.written", "memory.deleted", "compaction.before", "compaction.after", "approval.requested", "approval.resolved", "job.fired", "job.done", "channel.inbound", "channel.outbound", "coding.tool.pre", "coding.tool.post", "runtime.changed", "runtime.fallback", "sandbox.refused", "preset.applied", "loop.plan", "loop.verify"]
+HookId = Literal["app.start", "app.stop", "settings.changed", "chat.created", "chat.deleted", "project.created", "project.deleted", "ext.changed", "turn.accept", "turn.start", "context.contribute", "tools.offer", "model.select", "model.request", "model.response", "tool.permission", "tool.pre", "tool.post", "tool.result", "tool.taint", "tool.error", "reply.complete", "turn.settled", "run.after", "subagent.start", "subagent.stop", "memory.before_write", "memory.written", "memory.deleted", "compaction.before", "compaction.after", "approval.requested", "approval.resolved", "review.accepted", "worker.report", "job.fired", "job.done", "channel.inbound", "channel.outbound", "file.written", "notify", "coding.tool.pre", "coding.tool.post", "runtime.changed", "runtime.fallback", "sandbox.refused", "preset.applied", "loop.plan", "loop.verify"]
 
 
 class On(Protocol):
@@ -389,7 +447,13 @@ class On(Protocol):
     @overload
     def __call__(self, hook: Literal["ext.changed"], fn: Callable[[ExtChangedPayload], Any | Awaitable[Any]] | Callable[[ExtChangedPayload, HookCtx], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
     @overload
+    def __call__(self, hook: Literal["turn.accept"], fn: Callable[[TurnAcceptPayload], None | TurnAcceptPayload | Deny | Awaitable[None | TurnAcceptPayload | Deny]] | Callable[[TurnAcceptPayload, HookCtx], None | TurnAcceptPayload | Deny | Awaitable[None | TurnAcceptPayload | Deny]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
+    @overload
+    def __call__(self, hook: Literal["turn.start"], fn: Callable[[TurnStartPayload], Any | Awaitable[Any]] | Callable[[TurnStartPayload, HookCtx], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
+    @overload
     def __call__(self, hook: Literal["context.contribute"], fn: Callable[[ContextContributePayload], None | Block | Awaitable[None | Block]] | Callable[[ContextContributePayload, HookCtx], None | Block | Awaitable[None | Block]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
+    @overload
+    def __call__(self, hook: Literal["tools.offer"], fn: Callable[[ToolsOfferPayload], None | ToolsOfferPayload | Awaitable[None | ToolsOfferPayload]] | Callable[[ToolsOfferPayload, HookCtx], None | ToolsOfferPayload | Awaitable[None | ToolsOfferPayload]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
     @overload
     def __call__(self, hook: Literal["model.select"], fn: Callable[[ModelSelectPayload], None | ModelSelectPayload | Awaitable[None | ModelSelectPayload]] | Callable[[ModelSelectPayload, HookCtx], None | ModelSelectPayload | Awaitable[None | ModelSelectPayload]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
     @overload
@@ -433,6 +497,10 @@ class On(Protocol):
     @overload
     def __call__(self, hook: Literal["approval.resolved"], fn: Callable[[ApprovalResolvedPayload], Any | Awaitable[Any]] | Callable[[ApprovalResolvedPayload, HookCtx], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
     @overload
+    def __call__(self, hook: Literal["review.accepted"], fn: Callable[[ReviewAcceptedPayload], Any | Awaitable[Any]] | Callable[[ReviewAcceptedPayload, HookCtx], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
+    @overload
+    def __call__(self, hook: Literal["worker.report"], fn: Callable[[WorkerReportPayload], None | WorkerNote | Awaitable[None | WorkerNote]] | Callable[[WorkerReportPayload, HookCtx], None | WorkerNote | Awaitable[None | WorkerNote]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
+    @overload
     def __call__(self, hook: Literal["job.fired"], fn: Callable[[JobFiredPayload], Any | Awaitable[Any]] | Callable[[JobFiredPayload, HookCtx], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
     @overload
     def __call__(self, hook: Literal["job.done"], fn: Callable[[JobDonePayload], Any | Awaitable[Any]] | Callable[[JobDonePayload, HookCtx], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
@@ -440,6 +508,10 @@ class On(Protocol):
     def __call__(self, hook: Literal["channel.inbound"], fn: Callable[[ChannelInboundPayload], Any | Awaitable[Any]] | Callable[[ChannelInboundPayload, HookCtx], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
     @overload
     def __call__(self, hook: Literal["channel.outbound"], fn: Callable[[ChannelOutboundPayload], None | ChannelOutboundPayload | Cancel | Awaitable[None | ChannelOutboundPayload | Cancel]] | Callable[[ChannelOutboundPayload, HookCtx], None | ChannelOutboundPayload | Cancel | Awaitable[None | ChannelOutboundPayload | Cancel]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
+    @overload
+    def __call__(self, hook: Literal["file.written"], fn: Callable[[FileWrittenPayload], Any | Awaitable[Any]] | Callable[[FileWrittenPayload, HookCtx], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
+    @overload
+    def __call__(self, hook: Literal["notify"], fn: Callable[[NotifyPayload], Any | Awaitable[Any]] | Callable[[NotifyPayload, HookCtx], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
     @overload
     def __call__(self, hook: Literal["coding.tool.pre"], fn: Callable[[CodingToolPrePayload], None | Deny | Ask | Awaitable[None | Deny | Ask]] | Callable[[CodingToolPrePayload, HookCtx], None | Deny | Ask | Awaitable[None | Deny | Ask]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
     @overload
@@ -477,7 +549,13 @@ class Fire(Protocol):
     @overload
     def __call__(self, hook: Literal["ext.changed"], payload: ExtChangedPayload, /) -> None: ...
     @overload
+    def __call__(self, hook: Literal["turn.accept"], payload: TurnAcceptPayload, /) -> TurnAcceptPayload | Deny: ...
+    @overload
+    def __call__(self, hook: Literal["turn.start"], payload: TurnStartPayload, /) -> None: ...
+    @overload
     def __call__(self, hook: Literal["context.contribute"], payload: ContextContributePayload, /) -> list[Block]: ...
+    @overload
+    def __call__(self, hook: Literal["tools.offer"], payload: ToolsOfferPayload, /) -> ToolsOfferPayload: ...
     @overload
     def __call__(self, hook: Literal["model.select"], payload: ModelSelectPayload, /) -> ModelSelectPayload: ...
     @overload
@@ -521,6 +599,10 @@ class Fire(Protocol):
     @overload
     def __call__(self, hook: Literal["approval.resolved"], payload: ApprovalResolvedPayload, /) -> None: ...
     @overload
+    def __call__(self, hook: Literal["review.accepted"], payload: ReviewAcceptedPayload, /) -> None: ...
+    @overload
+    def __call__(self, hook: Literal["worker.report"], payload: WorkerReportPayload, /) -> list[WorkerNote]: ...
+    @overload
     def __call__(self, hook: Literal["job.fired"], payload: JobFiredPayload, /) -> None: ...
     @overload
     def __call__(self, hook: Literal["job.done"], payload: JobDonePayload, /) -> None: ...
@@ -528,6 +610,10 @@ class Fire(Protocol):
     def __call__(self, hook: Literal["channel.inbound"], payload: ChannelInboundPayload, /) -> None: ...
     @overload
     def __call__(self, hook: Literal["channel.outbound"], payload: ChannelOutboundPayload, /) -> ChannelOutboundPayload | Cancel: ...
+    @overload
+    def __call__(self, hook: Literal["file.written"], payload: FileWrittenPayload, /) -> None: ...
+    @overload
+    def __call__(self, hook: Literal["notify"], payload: NotifyPayload, /) -> None: ...
     @overload
     def __call__(self, hook: Literal["coding.tool.pre"], payload: CodingToolPrePayload, /) -> None | Deny | Ask: ...
     @overload

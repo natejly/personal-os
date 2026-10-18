@@ -17,11 +17,19 @@ A hook is a named point where an extension may observe, add, transform or narrow
 | `project.deleted` | a project was deleted | `{id}` | none | `emit` | any enabled extension |
 | `ext.changed` | an extension was enabled or disabled | `{id, enabled}` | none | `emit`; run even while the extension is disabled | any enabled extension |
 
+## Input
+
+| Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
+|---|---|---|---|---|---|
+| `turn.accept` | `chat()`, before the run starts and before anything is stored; not for a wake or other internal turn | `{conversation_id, origin, content, attachments}`. The message as the person sent it, before any run or row exists. A handler returns the payload with `content` changed, or Deny; changes to the other keys are ignored. | `TurnAcceptPayload` or `Deny` | `pipe`: a `Deny` stops the chain and refuses the message with its reason (HTTP 403); a rewritten `content` is checked against the length limit again | built-in extensions, or one that declares `input:rewrite` |
+| `turn.start` | `_chat_stream`, once the user's message row is stored | `{conversation_id, message_id, origin}`. The user's row is stored; the reply has not begun. | none | `emit` | any enabled extension |
+
 ## Context and prompt
 
 | Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
 | `context.contribute` | `build_context`, while the turn's prompt is assembled | `{conversation_id, project_id}`. Ids only: a handler reads what it needs, and raw message text is not handed out. | `Block` | `collect` ordered by priority; fitted to the extension's share of the window; a failure or timeout drops the block and is listed in `context_used.skipped`; a stable block gets 100 ms | any enabled extension |
+| `tools.offer` | `_schemas_all` in the chat loop, once the offered list is built, every time it is recomputed | `{names}`. The names of the tools offered to the model, in order. A handler returns the payload with names left out; a name it adds is ignored. | `ToolsOfferPayload` | `pipe_sync` (sync handlers only); names are only removed, never added or reordered | any enabled extension |
 
 ## Model request and response
 
@@ -68,11 +76,13 @@ A hook is a named point where an extension may observe, add, transform or narrow
 |---|---|---|---|---|---|
 | `approval.requested` | `RunStore.open_approval`, when the card is newly opened | `{call_id, tool, args_digest, run_id}` | none | `emit_sync`; not mutable: first-decision-wins and the `args_digest` binding are security invariants | any enabled extension |
 | `approval.resolved` | `RunStore.decide`, when this call won the decision | `{call_id, decision, by}` | none | `emit_sync` | any enabled extension |
+| `review.accepted` | `Docs.accept` (also when the assistant's edit applies at once) and `POST /cowork/desks/{id}/accept`, for each output promoted and verified | `{kind, id}`. `kind` is `doc_revision` (`id` is the revision) or `desk_output` (`id` is the output). | none | `emit` | any enabled extension |
 
 ## Background and schedule
 
 | Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
+| `worker.report` | `_wake_conversation`, for each finished worker, while the wake turn that hands its report to the assistant is built | `{worker, summary}`. `summary` is the worker's report as handed to the assistant, credential-scrubbed and cut. | `WorkerNote` | `collect`; a failure or timeout drops the note | any enabled extension |
 | `job.fired` | `_launch_job` and `_launch_desk_job`, once the run (or desk) has started | `{job_id, kind, trigger}`. `trigger` is the fire's own (`dir`, `mail`, `calendar`, `clock+dir`), else `manual` or `clock`. | none | `emit` | any enabled extension |
 | `job.done` | the run task's done callback, after the row is final | `{job_id, run_id, outcome}`. `outcome` is the run row's status. | none | `emit` | any enabled extension |
 
@@ -82,6 +92,8 @@ A hook is a named point where an extension may observe, add, transform or narrow
 |---|---|---|---|---|---|
 | `channel.inbound` | a channel adapter hands the user's message to a chat | `{channel, sender, text, files}` | none | `emit`; the owner check stays in the adapter | any enabled extension |
 | `channel.outbound` | a channel adapter is about to send a reply | `{channel, text, files}`. A handler returns the payload with `text` and `files` changed, or Cancel. | `ChannelOutboundPayload` or `Cancel` | `pipe`, chained (the last handler does not simply win) | any enabled extension |
+| `file.written` | `ChatFiles.record`: a file saved into a chat's outbox or a desk's workspace, or a document the assistant created or edited | `{path, owner, kind}`. `owner` is the conversation the file belongs to; `path` is the file, or the document id for a `note`; `kind` is `output` or `note`. | none | `emit` | any enabled extension |
+| `notify` | `api.notify`, after the notification is stored | `{title, body, target}`. `target` is `inbox` or `run:<conversation id>`, where a click goes. | none | `emit` | any enabled extension |
 
 ## Coding bridge
 

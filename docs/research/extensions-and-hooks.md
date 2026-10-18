@@ -385,7 +385,14 @@ The fail-open default on gating hooks elsewhere is a documented pitfall (section
 
 ### 5.2 Input
 
-No hook of this phase exists yet; the ones planned are in 5.16.
+<!-- hooks:begin 5.2 -->
+| Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
+|---|---|---|---|---|---|
+| `turn.accept` | `chat()`, before the run starts and before anything is stored; not for a wake or other internal turn | `{conversation_id, origin, content, attachments}`. The message as the person sent it, before any run or row exists. A handler returns the payload with `content` changed, or Deny; changes to the other keys are ignored. | `TurnAcceptPayload` or `Deny` | `pipe`: a `Deny` stops the chain and refuses the message with its reason (HTTP 403); a rewritten `content` is checked against the length limit again | built-in extensions, or one that declares `input:rewrite` |
+| `turn.start` | `_chat_stream`, once the user's message row is stored | `{conversation_id, message_id, origin}`. The user's row is stored; the reply has not begun. | none | `emit` | any enabled extension |
+<!-- hooks:end 5.2 -->
+
+The rewrite in `turn.accept` applies to a message the person typed; a wake turn or any other internal turn is not offered to it. `input.attachment` is planned (5.16).
 
 ### 5.3 Context and prompt
 
@@ -393,6 +400,7 @@ No hook of this phase exists yet; the ones planned are in 5.16.
 | Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
 | `context.contribute` | `build_context`, while the turn's prompt is assembled | `{conversation_id, project_id}`. Ids only: a handler reads what it needs, and raw message text is not handed out. | `Block` | `collect` ordered by priority; fitted to the extension's share of the window; a failure or timeout drops the block and is listed in `context_used.skipped`; a stable block gets 100 ms | any enabled extension |
+| `tools.offer` | `_schemas_all` in the chat loop, once the offered list is built, every time it is recomputed | `{names}`. The names of the tools offered to the model, in order. A handler returns the payload with names left out; a name it adds is ignored. | `ToolsOfferPayload` | `pipe_sync` (sync handlers only); names are only removed, never added or reordered | any enabled extension |
 <!-- hooks:end 5.3 -->
 
 Retrieval sources are a registration, not a hook: an extension adds a place a turn looks with `api.retrieval_source` (payload `{query, vec, project_id, conv_settings}`, a list of `{id, text, ref}` back; a source that fails returns nothing).
@@ -463,6 +471,7 @@ All `U` hooks attach at `dispatch_tool`, which wraps `Toolbox.call` (`tools.py:1
 |---|---|---|---|---|---|
 | `approval.requested` | `RunStore.open_approval`, when the card is newly opened | `{call_id, tool, args_digest, run_id}` | none | `emit_sync`; not mutable: first-decision-wins and the `args_digest` binding are security invariants | any enabled extension |
 | `approval.resolved` | `RunStore.decide`, when this call won the decision | `{call_id, decision, by}` | none | `emit_sync` | any enabled extension |
+| `review.accepted` | `Docs.accept` (also when the assistant's edit applies at once) and `POST /cowork/desks/{id}/accept`, for each output promoted and verified | `{kind, id}`. `kind` is `doc_revision` (`id` is the revision) or `desk_output` (`id` is the output). | none | `emit` | any enabled extension |
 <!-- hooks:end 5.8 -->
 
 No hook may decide an approval. A channel extension relays the user's decision through the same `POST /approvals/{call_id}` route (`app.py:5542`), exactly as Telegram does now.
@@ -472,6 +481,7 @@ No hook may decide an approval. A channel extension relays the user's decision t
 <!-- hooks:begin 5.9 -->
 | Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
+| `worker.report` | `_wake_conversation`, for each finished worker, while the wake turn that hands its report to the assistant is built | `{worker, summary}`. `summary` is the worker's report as handed to the assistant, credential-scrubbed and cut. | `WorkerNote` | `collect`; a failure or timeout drops the note | any enabled extension |
 | `job.fired` | `_launch_job` and `_launch_desk_job`, once the run (or desk) has started | `{job_id, kind, trigger}`. `trigger` is the fire's own (`dir`, `mail`, `calendar`, `clock+dir`), else `manual` or `clock`. | none | `emit` | any enabled extension |
 | `job.done` | the run task's done callback, after the row is final | `{job_id, run_id, outcome}`. `outcome` is the run row's status. | none | `emit` | any enabled extension |
 <!-- hooks:end 5.9 -->
@@ -485,6 +495,8 @@ Trigger kinds are a registration, not a hook: a `TriggerAdapter.poll()` fires `j
 |---|---|---|---|---|---|
 | `channel.inbound` | a channel adapter hands the user's message to a chat | `{channel, sender, text, files}` | none | `emit`; the owner check stays in the adapter | any enabled extension |
 | `channel.outbound` | a channel adapter is about to send a reply | `{channel, text, files}`. A handler returns the payload with `text` and `files` changed, or Cancel. | `ChannelOutboundPayload` or `Cancel` | `pipe`, chained (the last handler does not simply win) | any enabled extension |
+| `file.written` | `ChatFiles.record`: a file saved into a chat's outbox or a desk's workspace, or a document the assistant created or edited | `{path, owner, kind}`. `owner` is the conversation the file belongs to; `path` is the file, or the document id for a `note`; `kind` is `output` or `note`. | none | `emit` | any enabled extension |
+| `notify` | `api.notify`, after the notification is stored | `{title, body, target}`. `target` is `inbox` or `run:<conversation id>`, where a click goes. | none | `emit` | any enabled extension |
 <!-- hooks:end 5.10 -->
 
 ### 5.11 UI hooks (frontend)
@@ -546,21 +558,19 @@ Fired only by the plan-execute-verify loop (section 10.10.4); the default loop f
 
 Not in `HOOKS`, so a manifest cannot declare or subscribe to them: none of them fires today. Each is added to the catalog (a `HookSpec`, a call site, a generated table) by the PR that implements it. The rows are the design as drafted; line references are against an older main.
 
+`turn.accept`, `turn.start`, `tools.offer`, `worker.report`, `file.written`, `review.accepted` and `notify` were built after PR 21 and are in the tables of 5.2, 5.3, 5.8, 5.9 and 5.10. Differences from the drafted rows: `turn.accept` is a `pipe` whose handler may also return `Deny` (HTTP 403 with its reason) and fires only for a message the person typed; `tools.offer` is a `pipe_sync` that can only remove names (a tool an extension adds is registered with `api.tool`, and the offered order is core's); `worker.report` is a `collect` of `{text}` notes that appear under the report in the wake turn; `file.written` fires from `ChatFiles.record`, the one funnel for a chat output, a desk file and a document the assistant wrote, and leaves the `on_save` / `on_chunks` callables as they are; `review.accepted` carries `kind` `doc_revision` or `desk_output`. The rest stay planned for these reasons:
+- `input.attachment`: the text a model reads for an attached file is composed inside the repository's transaction on every history render, not at attach time, and the row does not say where a rewritten text would be kept. A pipe there would run extension code in a database transaction on every render.
+- `schedule.tick`: `api.job(name, every, fn)` already is the tick (minimum interval, dev panel); a second hook carrying the same tick would be a parallel path.
+- `context.history`, `text.delta`, `turn.continue` are v2 in the table itself, and `tool.args` is marked not in the first cut.
+
 | Hook | Fires at | Payload | Returns | Order and failure | Equivalents |
 |---|---|---|---|---|---|
-| `turn.accept` | `chat()` before `bus.start` (`app.py:4546-4577`) | `{conversation_id, origin, content, attachments}` | `Deny(reason)` / `pipe` content rewrite | `pipe`+`gate`; only built-ins and user extensions with `input:rewrite`. Rewrites never apply to `wake`/internal turns. | input (pi), UserPromptSubmit (Claude Code, block or context only), before_agent_run (OpenClaw) |
-| `turn.start` | after user row persisted (`app.py:2069`) | `{conversation_id, message_id, origin}` | none | `emit` | before_agent_start (pi) |
 | `input.attachment` | `_resolve_attachments` (`app.py:1640`) | `{file}` | extracted text or `Deny` | `pipe` | n/a |
 | `context.history` | after `compaction.prepare_history` (`app.py:2164`) | `{messages}` | `pipe` over the **volatile segment only** | v2. Rewriting the stable prefix is refused. | context (pi) |
 | `text.delta` | `buf.append` / `yield "delta"` (`app.py:3165-3171`) | `{text}` | `pipe` (v2) | strict 5 ms budget; off by default | message_sending (OpenClaw), MessageDisplay (Claude Code, display only) |
-| `tools.offer` | end of `_schemas_all` (`app.py:2494`/`2506`) | `{names}` | `pipe`: hide names (built-ins/user), or add own | hide-only for third-party | tool exposure modes (pi), hidden tools |
 | `tool.args` **U** | before the gate chain (`app.py:~3430`, after `precheck`) | `{name, args, ctx}` | `pipe` args | **Not in the first cut.** Mutating args after permission resolution would bypass the permission check; this hook is only valid before the gate in each loop, so it needs full loop unification. | tool_call mutate (pi), updatedInput (Claude Code), tool.execute.before (OpenCode) |
 | `turn.continue` | where desk chaining decides (`_should_chain`, `app.py:4288`) | `{reply, desk}` | `RequestTurn(note)` at most once | v2; loop guard mandatory | agent_before_settle `continue:true` (pi), Stop block (Claude Code) |
-| `worker.report` | `workers_mod.build_wake` (feeds `_wake_conversation`, `app.py:4609`) | `{worker, summary}` | add note | `collect` | n/a |
 | `schedule.tick` | manifest `job(every=...)` | `{name}` | none | minimum interval 60 s, visible in dev panel | Raycast interval commands, monitors (Claude Code) |
-| `file.written` | `chat_files.record_*`, `Workspace.on_save` (`app.py:646-647`) | `{path, owner, kind}` | observe | `emit`; generalizes the one-slot `on_save` / `on_chunks` callables | file.edited, FileChanged |
-| `review.accepted` | `Docs.accept` (`docs.py:864`), `accept_outputs` (`app.py:10026`) | `{kind, id}` | observe | `emit` | n/a |
-| `notify` | `api.notify` | `{title, body, target}` | none | published as app-topic event; renderer calls `lib/notify.ts` | Notification (Claude Code), tui.toast |
 
 ### 5.17 Equivalents
 
@@ -805,7 +815,7 @@ Class: **Core**, **Svc** (core service), **BI-on** (built-in extension, default 
 | Home automation | Tools with danger `external`, ask by default | A |
 | Alternative model router | Picks model by task, time or budget | A (`model.select`) |
 | Cost guard | Narrow-only gate: ask or deny after a spend threshold | B: planned `tool.permission` / `model.select` gate (built-in or user-granted) |
-| PII redaction | Redacts outgoing request text and tool results | B: `tool.result` (A) plus a planned `turn.accept` rewrite (needs `input:rewrite`) |
+| PII redaction | Redacts outgoing request text and tool results | B: `tool.result` (A) plus a `turn.accept` rewrite (needs `input:rewrite`) |
 | Audit log | Append-only log of tool calls, approvals, models | A (`tool.post`, `approval.*`) |
 | Per-project prompt packs | Context blocks keyed by project | A |
 | Daily standup generator | Job plus recap plus todos, Telegram delivery | A |
@@ -1570,7 +1580,7 @@ Hook payload versioning beyond `since` and `deprecated`; generated documentation
 - `extensions/hookschema.py` converts a TypedDict to JSON Schema (and checks a value with it); `extensions/hookgen.py` is the one generator (`grain ext gen-hooks [--check]`); `authoring/hookscan.py` is the call-site scan, the dead-hook check and the golden-file check, run by `grain ext check --catalog` and `tests/test_hook_catalog.py`. The golden file is `extensions/hooks.golden.json`: a new hook adds its line there. A call that forwards its own parameter (`def fire(self, hook, payload)`) is skipped by the scan, because its callers are scanned. The scan also checks that a `sync` hook is fired through `emit_sync`/`pipe_sync` and no other is.
 - The bus raises `HookContractError` under `GRAIN_HOOKS_STRICT=1` (`conftest.py` sets it) for a payload or a handler return that does not match, and for a call of the wrong kind; outside strict mode the wrong-kind call is logged once and runs. Tests of the bus mechanics that use stand-in payloads switch it off with a patch.
 - The manifest check rejects a hook whose `permission` is not among the manifest's `permissions`; `api.on` no longer repeats it. `subscribers: "builtin"` is refused to a folder-loaded extension (no hook uses it yet).
-- Dead names (10.6.1): `turn.accept`, `turn.start`, `input.attachment`, `tools.offer`, `worker.report`, `schedule.tick`, `file.written`, `review.accepted` and `notify` have no call site and are removed from `HOOKS`; their rows are in 5.16, and none was implemented here (`tool.permission` was one of them until PR 19 gave it a call site, and it is back in `HOOKS`). With them gone `input:rewrite` gates no hook, so it no longer counts as a permission that needs the user's grant at enable. `app.stop` is emitted with `{}` instead of `None`.
+- Dead names (10.6.1): `turn.accept`, `turn.start`, `input.attachment`, `tools.offer`, `worker.report`, `schedule.tick`, `file.written`, `review.accepted` and `notify` have no call site and are removed from `HOOKS`; their rows are in 5.16, and none was implemented here (seven were built later; see 5.16) (`tool.permission` was one of them until PR 19 gave it a call site, and it is back in `HOOKS`). With them gone `input:rewrite` gates no hook, so it no longer counts as a permission that needs the user's grant at enable. `app.stop` is emitted with `{}` instead of `None`.
 - Outputs: the tables between the `hooks:begin` markers of sections 5.1, 5.3 to 5.10 and 5.12, `docs/extension-hooks.md`, `backend/grain_sdk/hooks.py` (payload TypedDicts, `HookId`, the `On` and `Fire` overloads that type `api.on` and `Harness.fire`) and `src/shared/extensionHooks.ts` (`HookId`, `HookPayloads`, `HookKinds`; `ExtensionHookStats.hook` in `shared/types.ts` is a `HookId`, so a renamed hook fails `npm run typecheck`). Hook types left the `@grain/ext-sdk` package; it holds the manifest type.
 - A plain `grain ext check <folder>` does not run the staleness check of 10.9.3 item 3; `grain ext check --catalog` and `test_generated_files_are_current` do.
 - Not built: `host.ts` does not import the generated file (nothing in `UiApi.on` carries a backend hook payload), and the sections 5.13 to 5.15 tables stay hand-written until PRs 18, 19 and 21 add their hooks to the catalog.

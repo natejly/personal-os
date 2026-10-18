@@ -63,6 +63,64 @@ class ExtChangedPayload(TypedDict):
     enabled: bool
 
 
+class AttachedFile(TypedDict):
+    id: str
+    name: str
+    mime: str
+    size: int
+
+
+class TurnAcceptPayload(TypedDict):
+    """The message as the person sent it, before any run or row exists. A handler returns the payload with `content` changed, or Deny; changes to the other keys are ignored."""
+    conversation_id: str
+    origin: str | None
+    content: str
+    attachments: list[AttachedFile]
+
+
+class TurnStartPayload(TypedDict):
+    """The user's row is stored; the reply has not begun."""
+    conversation_id: str
+    message_id: str
+    origin: str | None
+
+
+class ToolsOfferPayload(TypedDict):
+    """The names of the tools offered to the model, in order. A handler returns the payload with names left out; a name it adds is ignored."""
+    names: list[str]
+
+
+class WorkerReportPayload(TypedDict):
+    """`summary` is the worker's report as handed to the assistant, credential-scrubbed and cut."""
+    worker: str
+    summary: str
+
+
+class WorkerNote(TypedDict):
+    """A line shown to the assistant under the worker's report, marked as the extension's."""
+    text: str
+
+
+class FileWrittenPayload(TypedDict):
+    """`owner` is the conversation the file belongs to; `path` is the file, or the document id for a `note`; `kind` is `output` or `note`."""
+    path: str
+    owner: str
+    kind: str
+
+
+class ReviewAcceptedPayload(TypedDict):
+    """`kind` is `doc_revision` (`id` is the revision) or `desk_output` (`id` is the output)."""
+    kind: Literal["doc_revision", "desk_output"]
+    id: str
+
+
+class NotifyPayload(TypedDict):
+    """`target` is `inbox` or `run:<conversation id>`, where a click goes."""
+    title: str
+    body: str
+    target: str | None
+
+
 class ContextContributePayload(TypedDict):
     """Ids only: a handler reads what it needs, and raw message text is not handed out."""
     conversation_id: str
@@ -402,9 +460,17 @@ HOOKS: dict[str, HookSpec] = {s.id: s for s in (
     HookSpec("project.deleted", "emit", ProjectPayload, "5.1", "a project was deleted", "`emit`", "1.0"),
     HookSpec("ext.changed", "emit", ExtChangedPayload, "5.1", "an extension was enabled or disabled",
              "`emit`; run even while the extension is disabled", "1.0"),
+    HookSpec("turn.accept", "pipe", TurnAcceptPayload, "5.2", "`chat()`, before the run starts and before anything is stored; not for a "
+             "wake or other internal turn", "`pipe`: a `Deny` stops the chain and refuses the message with its reason (HTTP 403); a rewritten "
+             "`content` is checked against the length limit again", "1.0", returns=TurnAcceptPayload | Deny, subscribers="grant",
+             permission=("input:rewrite",)),
+    HookSpec("turn.start", "emit", TurnStartPayload, "5.2", "`_chat_stream`, once the user's message row is stored", "`emit`", "1.0"),
     HookSpec("context.contribute", "collect", ContextContributePayload, "5.3", "`build_context`, while the turn's prompt is assembled",
              "`collect` ordered by priority; fitted to the extension's share of the window; a failure or timeout drops the block "
              "and is listed in `context_used.skipped`; a stable block gets 100 ms", "1.0", returns=Block),
+    HookSpec("tools.offer", "pipe", ToolsOfferPayload, "5.3", "`_schemas_all` in the chat loop, once the offered list is built, every time it "
+             "is recomputed", "`pipe_sync` (sync handlers only); names are only removed, never added or reordered", "1.0", sync=True,
+             returns=ToolsOfferPayload),
     HookSpec("model.select", "pipe", ModelSelectPayload, "5.4", "`_select_model` in the chat loop, after the router",
              "one winner chain; a model whose provider is not configured is ignored, and so is anything but a `{model, effort}` dict",
              "1.0", returns=ModelSelectPayload),
@@ -449,6 +515,10 @@ HOOKS: dict[str, HookSpec] = {s.id: s for s in (
              "`emit_sync`; not mutable: first-decision-wins and the `args_digest` binding are security invariants", "1.0", sync=True),
     HookSpec("approval.resolved", "emit", ApprovalResolvedPayload, "5.8", "`RunStore.decide`, when this call won the decision",
              "`emit_sync`", "1.0", sync=True),
+    HookSpec("review.accepted", "emit", ReviewAcceptedPayload, "5.8", "`Docs.accept` (also when the assistant's edit applies at once) and "
+             "`POST /cowork/desks/{id}/accept`, for each output promoted and verified", "`emit`", "1.0"),
+    HookSpec("worker.report", "collect", WorkerReportPayload, "5.9", "`_wake_conversation`, for each finished worker, while the wake turn "
+             "that hands its report to the assistant is built", "`collect`; a failure or timeout drops the note", "1.0", returns=WorkerNote),
     HookSpec("job.fired", "emit", JobFiredPayload, "5.9", "`_launch_job` and `_launch_desk_job`, once the run (or desk) has started",
              "`emit`", "1.0"),
     HookSpec("job.done", "emit", JobDonePayload, "5.9", "the run task's done callback, after the row is final", "`emit`", "1.0"),
@@ -456,6 +526,9 @@ HOOKS: dict[str, HookSpec] = {s.id: s for s in (
              "`emit`; the owner check stays in the adapter", "1.0"),
     HookSpec("channel.outbound", "pipe", ChannelOutboundPayload, "5.10", "a channel adapter is about to send a reply",
              "`pipe`, chained (the last handler does not simply win)", "1.0", returns=ChannelOutboundPayload | Cancel),
+    HookSpec("file.written", "emit", FileWrittenPayload, "5.10", "`ChatFiles.record`: a file saved into a chat's outbox or a desk's "
+             "workspace, or a document the assistant created or edited", "`emit`", "1.0"),
+    HookSpec("notify", "emit", NotifyPayload, "5.10", "`api.notify`, after the notification is stored", "`emit`", "1.0"),
     HookSpec("coding.tool.pre", "gate", CodingToolPrePayload, "5.12", "a Grain-started coding session is about to run a tool, "
              "via `POST /coding-hooks/{session}/pre`",
              "`gate`: `Deny` or `Ask`, the strictest of this and the local floor wins; 2 s bus budget, 3 s socket timeout; a failure, "

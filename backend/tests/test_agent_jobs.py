@@ -1049,6 +1049,25 @@ def test_a_desk_job_refuses_ask_autonomy_and_unknown_targets() -> None:
         j("DELETE", f"/jobs/{x['id']}")
 
 
+def test_a_desk_job_fires_chat_created_and_reports_job_done_when_its_run_ends() -> None:
+    heard: list[tuple[str, Any]] = []
+    handles = [appmod.host.bus.subscribe(h, lambda p, h=h: heard.append((h, p)), owner="test", order=0) for h in ("chat.created", "job.done")]
+    try:
+        job = make_desk_job("desk job hooks")
+        with desk_cap(0):
+            (fired,) = tick(T0 + HOUR + 10)
+        (desk,) = job_desks(job["id"])
+        deadline = time.time() + 15
+        while time.time() < deadline and not any(h == "job.done" for h, _ in heard):
+            time.sleep(0.05)
+    finally:
+        for h in handles:
+            h.dispose()
+    assert ("chat.created", {"id": desk["conversation_id"], "project_id": None}) in heard
+    done = [p for h, p in heard if h == "job.done"]
+    assert len(done) == 1 and done[0]["job_id"] == job["id"] and done[0]["run_id"] == fired["run_id"] and done[0]["outcome"]
+
+
 def test_a_desk_job_at_the_live_cap_creates_its_desk_unstarted_and_says_so() -> None:
     job = make_desk_job("capped desk job")
     conv = appmod.convos.create(None, "busy", "test-model")

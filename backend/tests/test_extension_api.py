@@ -231,6 +231,20 @@ def test_inbox_leaves_a_card_until_dismissed_and_notify_only_an_event(work: Path
     assert notes.dismiss(cards[0]["id"]) and notes.open() == [] and not notes.dismiss(cards[0]["id"])
 
 
+def test_notify_fires_the_notify_hook(work: Path) -> None:
+    rig = Rig(work)
+    got: list[Any] = []
+    rig.host.bus.subscribe("notify", got.append, owner="x", order=0)
+
+    async def go() -> None:
+        rig.host.bus.loop = asyncio.get_running_loop()
+        rig.scope.notify("Done", "All synced", target="run:c1")
+        rig.scope.inbox(InboxItem("Stale", "9 days"))
+        await asyncio.sleep(0.1)
+    run(go())
+    assert got == [{"title": "Done", "body": "All synced", "target": "run:c1"}], "a card is not a notification"
+
+
 def test_a_note_is_trimmed(work: Path) -> None:
     rig = Rig(work)
     rig.scope.inbox(InboxItem("t" * 500, "b" * 5000))

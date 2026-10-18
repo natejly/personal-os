@@ -396,13 +396,13 @@ class HookBus:
         return [r for ok, r in done if ok and r is not None]
 
     async def pipe(self, hook: str, value: Any, *, ctx: HookCtx | None = None) -> Any:
-        """Handlers run one after another, each on the previous result. A handler may return Cancel, which stops the chain
-        and is returned as it is."""
+        """Handlers run one after another, each on the previous result. A handler may return Cancel or Deny, which stops the
+        chain and is returned as it is."""
         self._enter(hook, "pipe", value)
         ctx = ctx or HookCtx.of(value)
         for sub in self._targets(self._subs.get(hook, ()), ctx):
             ok, out = await self._try(sub, value, "pipe", ctx)
-            if ok and isinstance(out, Cancel):
+            if ok and isinstance(out, (Cancel, Deny)):
                 return out
             if ok and out is not None:
                 value = out

@@ -112,7 +112,7 @@ from .runtime.tool_step import Round, ToolStep, TurnState
 from .extensions.authoring import skill as author_extension
 from .extensions.drafts import Drafts
 from .extensions.defaults import Defaults
-from .extensions.hooks import hook_ctx
+from .extensions.hooks import Deny, hook_ctx
 from .extensions.notes import ExtNotes
 from .extensions.host import ExtensionContext, ExtensionHost, builtin_manifest
 from .modules import Module, ModuleContext, build_modules
@@ -133,7 +133,7 @@ convos = Conversations(db)
 memories = Memories(db, host.bus)
 graph = Graph(db)
 documents = Documents(db)
-docs = Docs(db)
+docs = Docs(db, host.bus)
 style = WritingStyle(db)
 
 
@@ -684,7 +684,7 @@ def _core_refusal(tool: str, args: dict[str, Any], where: dict[str, Any]) -> str
 
 run_store.core_refusal = _core_refusal
 # Which chat each file belongs to (chat_files.py): triggers record uploads, local writes and coding sessions; these hooks the rest.
-chat_files = ChatFiles(db, toolbox.chat_outputs.root if toolbox.chat_outputs is not None else None)
+chat_files = ChatFiles(db, toolbox.chat_outputs.root if toolbox.chat_outputs is not None else None, host.bus)
 app.include_router(chat_files_router(chat_files))
 toolbox.chat_files = chat_files
 toolbox.ext_drafts = ext_review.drafts  # ext_propose (ext_tools.py)
@@ -1551,13 +1551,17 @@ def list_conversations(project_id: str | None = None, include_jobs: bool = False
     return convos.list(sid(project_id), include_jobs, include_desks, archived)
 
 
+def _chat_created(conv: dict[str, Any]) -> None:
+    host.fire("chat.created", {"id": conv["id"], "project_id": conv.get("project_id")})
+
+
 @app.post("/conversations")
 def create_conversation(body: ConvIn) -> dict[str, Any]:
     cfg = settings()
     out = convos.create(wsid(body.project_id), body.title, body.model or cfg["defaultModel"])
     if cfg.get("responseStyle", "default") != "default":  # the global choice seeds a new chat; the chat owns it from then on
         out = convos.update(out["id"], {"settings": {"responseStyle": cfg["responseStyle"], "responseStyleText": cfg.get("responseStyleText", "")}}) or out
-    host.fire("chat.created", {"id": out["id"], "project_id": out.get("project_id")})
+    _chat_created(out)
     return out
 
 
@@ -2221,6 +2225,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             replay_trace.followup(db.data_dir, conv_id=conv_id, kind="correction", message_id=conv["messages"][-1]["id"], text=user_text)
         um = convos.add_message(conv_id, "user", user_text, attachments=attachments or None, kind="wake" if is_wake else body.kind)
         user_msg_id = um["id"]
+        await host.bus.emit("turn.start", {"conversation_id": conv_id, "message_id": user_msg_id, "origin": body.origin})
         yield "user_message", {**um, **({"edited_from": edited_from, "had_writes": had_writes} if edited_from else {})}
         if conv["title"] == "New chat" and not internal and not [m for m in conv["messages"] if _said(m)]:
             title = _title_from(user_text or attachments[0]["name"])
@@ -2635,6 +2640,15 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             return workers_mod.restrict_schemas(out) if st.delegation_forced and not withheld else out
 
         def _schemas_all(withheld: bool = False) -> list[dict[str, Any]]:
+            """The offered tools, less what a tools.offer handler hides (the order is core's, so the cached prefix holds)."""
+            out = _offered(withheld)
+            if not host.bus.active("tools.offer"):
+                return out
+            picked = host.bus.pipe_sync("tools.offer", {"names": [s["function"]["name"] for s in out]})
+            kept = picked.get("names") if isinstance(picked, dict) else None
+            return out if not isinstance(kept, list) else [s for s in out if s["function"]["name"] in kept]
+
+        def _offered(withheld: bool) -> list[dict[str, Any]]:
             """One function, because the always_chat/always_global grant path recomputes the schemas; a
             filter applied at only one of the two sites lets a granted write tool reappear mid-plan.
             `modes` is mutated in place by that grant path, so this filters a copy and reads it fresh
@@ -4066,6 +4080,21 @@ def reset_model_votes() -> dict[str, Any]:
     return {"ok": True}
 
 
+async def _accept_turn(row: dict[str, Any], body: ChatIn, atts: list[dict[str, Any]]) -> ChatIn:
+    """The turn.accept hook over a message the person typed: a handler may refuse it or rewrite its text. The rewrite meets the
+    same length limit as the original."""
+    if body.content is None or body.kind:
+        return body
+    out = await host.bus.pipe("turn.accept", {"conversation_id": row["id"], "origin": body.origin, "content": body.content, "attachments": atts})
+    if isinstance(out, Deny):
+        raise HTTPException(403, out.reason)
+    if out["content"] == body.content:
+        return body
+    if too_long := _message_too_long(out["content"], settings(), str(row.get("model") or "")):
+        raise HTTPException(413, too_long)
+    return body.model_copy(update={"content": out["content"]})
+
+
 @app.post("/conversations/{id}/chat")
 async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     """Start the reply as a background task. Watch it on GET /conversations/{id}/stream?since=seq."""
@@ -4097,6 +4126,7 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
             raise HTTPException(404, "No such message to edit")
     if body.wake is not None or body.chat_link is not None:
         raise HTTPException(400, "A wake turn is started by the backend only")
+    body = await _accept_turn(row, body, atts)
     run = bus.start(id, lambda r: _run_chat(r, body), input=body.model_dump())
     # Typed in Grain into a channel's chat (Texts): it runs as a turn of that channel and shows on the phone. Internal turns (wake, ...) never get here.
     if (channel := host.channels.owner_of(id)) and body.origin != channel.name and body.wake is None and body.kind is None and not body.replace_from:
@@ -4129,6 +4159,16 @@ def _wake_reports(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+async def _noted_reports(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Each report with the notes the worker.report handlers added to it."""
+    out = []
+    for r in reports:
+        summary = redact.scrub_secrets(r["text"] or "")[:workers_mod.WAKE_REPORT_CHARS]
+        notes = await host.bus.collect("worker.report", {"worker": r["id"], "summary": summary})
+        out.append({**r, "notes": [n["text"] for n in notes]})
+    return out
+
+
 async def _wake_conversation(conv_id: str) -> None:
     """Hand the reports of this conversation's finished workers to its front agent: a hidden user message (kind 'wake') and
     a reply run started here, so it works with no window open. While a reply is being written the wake waits (_run_changed
@@ -4146,7 +4186,7 @@ async def _wake_conversation(conv_id: str) -> None:
             workers_mgr.mark_delivered(r["run_id"] for r in pending)
             _job_wakes.pop(conv_id, None)
         return
-    text, wake = workers_mod.build_wake(_wake_reports(pending) + booked)
+    text, wake = workers_mod.build_wake(await _noted_reports(_wake_reports(pending)) + booked)
     if desk_id := row["settings"].get("deskId"):
         # A desk-bound chat is woken through its desk, so the turn runs under the desk runtime, supervisor and settle.
         started = _launch_desk(desk_id, text, MESSAGE_FROM, wake=wake)
@@ -5339,6 +5379,7 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     cfg = settings()
     conv = convos.create(job["project_id"], f"{job['name']} · {_stamp(fire['due_at'])}",
                          job.get("model") or cfg.get("defaultModel") or "")
+    _chat_created(conv)
     # job_id keeps this transcript out of the sidebar's chat list; the Agent Inbox links to it instead.
     conv_settings: dict[str, Any] = {"useTools": True, "autoLearn": False, "job_id": job["id"]}
     if job.get("agent_id"):
@@ -5464,6 +5505,9 @@ async def _launch_desk_job(job: dict[str, Any], fire: dict[str, Any]) -> str | N
     log.info("job %s opened desk %s for %s%s", job["name"], desk_id, _stamp(due), "" if run_id else " (not started, at the cap)")
     if run_id:
         await _job_fired(job, fire)
+        if (desk_run := bus.get(out["conversation_id"])) is not None and desk_run.task is not None:
+            desk_run.task.add_done_callback(lambda _t, rid=run_id, jid=job["id"]: host.fire(
+                "job.done", {"job_id": jid, "run_id": rid, "outcome": (run_store.get(rid) or {}).get("status")}))
     return run_id
 
 
@@ -8370,6 +8414,7 @@ async def _create_desk(body: DeskIn, *, origin: str | None = None,
     except ValueError as e:
         convos.delete(conv["id"])        # the conversation exists only to hold this desk's transcript
         raise HTTPException(400, str(e)) from e
+    _chat_created(conv)
     try:
         if inputs:
             workspace.add_inputs(desk["id"], inputs)
@@ -9122,6 +9167,8 @@ async def accept_outputs(id: str, body: AcceptIn) -> dict[str, Any]:
             raise HTTPException(400, str(e)) from e
         results.append({"output_id": item.output_id, "ok": ok, "verified": ok,
                         "kind": item.destination, "ref": ref, **({"error": err} if err else {})})
+        if ok:
+            host.fire("review.accepted", {"kind": "desk_output", "id": item.output_id})
     _close_review(id)
     return {"results": results}
 

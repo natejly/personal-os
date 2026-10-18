@@ -227,7 +227,7 @@ def actions_block(actions: list[dict[str, Any]]) -> str:
 
 def build_wake(reports: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
     """The hidden user message for finished workers, and the wake record the run carries. Each report is
-    {id, title, goal, status, text, tainted?, attachments?}; several fold into one message, oldest first."""
+    {id, title, goal, status, text, notes?, tainted?, attachments?}; several fold into one message, oldest first."""
     blocks = []
     for r in reports:
         lines = [f"{r.get('label') or 'Worker'} {r['id']}" + (f" ({_one_line(r.get('title'), 80)})" if r.get("title") else "") + f": {r['status']}."]
@@ -240,6 +240,7 @@ def build_wake(reports: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         lines.append(fence_report(r["id"], r["status"], r.get("text") or ""))
         if r.get("actions"):
             lines.append(actions_block(r["actions"]))
+        lines.extend(f"Note from an extension: {_one_line(n, 500)}" for n in r.get("notes") or [])
         blocks.append("\n".join(lines))
     wake = {"ids": [r["id"] for r in reports], "tainted": any(r.get("tainted") for r in reports),
             "title": next((str(r["title"]) for r in reports if r.get("title")), ""),

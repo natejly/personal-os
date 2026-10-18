@@ -71,7 +71,7 @@ export default function SettingsModal(): JSX.Element {
   const gp = { openGroups, toggle: toggleGroup }
   const [q, setQ] = useState('')
   const [jump, setJump] = useState<string | null>(null)
-  const hits = searchSettings(q)
+  const hits = searchSettings(q, panels.map((p) => ({ tab: p.tab, sec: '', title: p.label, keys: '' })))
   const google = useStore((s) => s.google)
   /** Go to a search hit: its tab, any collapsed group around it opened, then scrolled to once it has rendered. */
   const goTo = (h: { tab: Tab; sec: string }): void => {
@@ -245,7 +245,7 @@ export default function SettingsModal(): JSX.Element {
               <div className="settings-hits" role="list" aria-label="Search results">
                 {hits.length ? hits.map((h) => (
                   <button key={`${h.tab}-${h.sec}`} type="button" role="listitem" onClick={() => goTo(h)}>
-                    <span>{h.title}</span><small>{TABS.find((t) => t.id === h.tab)?.label}</small>
+                    <span>{h.title}</span><small>{tabs.find((t) => t.id === h.tab)?.label}</small>
                   </button>
                 )) : <p className="muted small">No settings match.</p>}
               </div>

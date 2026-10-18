@@ -512,6 +512,17 @@ def test_reload_imports_the_new_code_and_keeps_the_data(ext: Path) -> None:
     run(host.stop())
 
 
+def test_a_reloaded_extension_gets_a_fresh_load_order_index(ext: Path, work: Path) -> None:
+    other = scaffold("other", work)
+    host, ctx = ExtensionHost(), context()
+    run(host.load_dev(ext, ctx))
+    run(host.load_dev(other, ctx))
+    run(host.reload("sample"))
+    assert [s.index for s in host.extensions.values()] == sorted({s.index for s in host.extensions.values()})
+    assert host.extensions["sample"].index > host.extensions["other"].index
+    run(host.stop())
+
+
 def test_only_a_folder_loaded_extension_can_be_reloaded() -> None:
     from personal_os.extensions.manifest import Manifest
     host = ExtensionHost()

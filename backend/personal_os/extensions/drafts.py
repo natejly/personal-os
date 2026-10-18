@@ -116,15 +116,19 @@ class Drafts:
         if not src.is_dir():
             raise DraftError(f"there is no draft for {ext_id!r}: write its files under {src}, then call ext_propose again")
         snap = self._review / ext_id
-        shutil.rmtree(snap, ignore_errors=True)
+        staging = self.installed / ".review-new" / ext_id  # a draft that fails leaves the proposal under review as it was
+        shutil.rmtree(staging, ignore_errors=True)
         try:
-            _copy(src, snap / "files")
-            _disable(snap / "files" / "extension.json")
-            warnings = self._check(ext_id, snap / "files")
-            (snap / "proposal.json").write_text(json.dumps({"tainted": tainted, "taintSources": taint_sources, "findings": warnings}), "utf-8")
+            _copy(src, staging / "files")
+            _disable(staging / "files" / "extension.json")
+            warnings = self._check(ext_id, staging / "files")
+            (staging / "proposal.json").write_text(json.dumps({"tainted": tainted, "taintSources": taint_sources, "findings": warnings}), "utf-8")
         except BaseException:
-            shutil.rmtree(snap, ignore_errors=True)
+            shutil.rmtree(staging, ignore_errors=True)
             raise
+        shutil.rmtree(snap, ignore_errors=True)
+        snap.parent.mkdir(parents=True, exist_ok=True)
+        staging.rename(snap)
         return self._view(ext_id)
 
     def _check(self, ext_id: str, files: Path) -> list[str]:

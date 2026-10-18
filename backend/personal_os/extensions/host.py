@@ -384,6 +384,7 @@ class ExtensionHost:
         self._startup: list[Handler] = []
         self._shutdown: list[Handler] = []
         self._enabled: dict[str, bool] = {}  # what ext.changed last reported, per extension
+        self._load_order = itertools.count()  # never reused, so a reloaded extension sorts after the ones loaded before it
 
     # ---- the app's start and stop, in registration order ----
     def on_start(self, fn: Handler) -> Handler:
@@ -508,7 +509,7 @@ class ExtensionHost:
              ctx: ExtensionContext | None = None, dev: bool = False) -> ExtensionScope:
         if manifest.id in self.extensions:
             raise ValueError(f"duplicate extension id {manifest.id!r}")
-        scope = ExtensionScope(manifest, len(self.extensions), self.bus, self.retrieval, self.channels, self.triggers, self.prechecks,
+        scope = ExtensionScope(manifest, next(self._load_order), self.bus, self.retrieval, self.channels, self.triggers, self.prechecks,
                                self.directives, self.runtime, module, root, ctx, dev)
         try:
             for entry in manifest.contributes.get("runtime", ()):  # listed while the extension is idle; selectable once it provides code

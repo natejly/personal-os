@@ -74,3 +74,11 @@ test('acceleratorOf names a key press the way a binding is named on that platfor
   assert.equal(acceleratorOf({ ...press, ctrlKey: true }, true), canonicalAccelerator('Control+Alt+J', true))
   assert.equal(acceleratorOf({ ...press, key: 'Enter', altKey: false }, true), 'enter')
 })
+
+test('acceleratorOf matches the spelling of a binding for arrows, shifted symbols and macOS Option+letter', () => {
+  const press = { key: '', metaKey: false, ctrlKey: true, altKey: false, shiftKey: false }
+  assert.equal(acceleratorOf({ ...press, key: 'ArrowLeft' }, false), canonicalAccelerator('CmdOrCtrl+Left', false))
+  assert.equal(acceleratorOf({ ...press, key: '!', shiftKey: true }, false), canonicalAccelerator('CmdOrCtrl+Shift+1', false))
+  assert.equal(acceleratorOf({ ...press, key: '{', shiftKey: true }, false), canonicalAccelerator('CmdOrCtrl+Shift+[', false))
+  assert.equal(acceleratorOf({ ...press, key: 'ø', code: 'KeyO', ctrlKey: false, metaKey: true, altKey: true }, true), canonicalAccelerator('CmdOrCtrl+Alt+O', true))
+})

@@ -54,3 +54,9 @@ test('a tab that is no longer available falls back to General', () => {
   assert.equal(shownTab('ext:health', ['appearance', 'model', 'ext:health']), 'ext:health')
   assert.equal(shownTab('ext:health', ['appearance', 'model']), 'appearance')
 })
+
+test('search also finds the sections extensions contribute', () => {
+  const panel = { tab: 'ext:coding:recipes' as const, sec: '', title: 'Coding recipes', keys: '' }
+  assert.deepEqual(searchSettings('recipe', [panel]), [panel])
+  assert.deepEqual(searchSettings('recipe'), [])
+})

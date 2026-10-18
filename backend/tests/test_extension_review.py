@@ -83,6 +83,16 @@ def installed(ext_id: str = "rl-notes") -> dict[str, Any]:
     return next(e for e in client.get("/extensions").json()["installed"] if e["id"] == ext_id)
 
 
+def test_a_failing_propose_keeps_the_proposal_under_review() -> None:
+    root = draft()
+    propose()
+    before = client.get("/extensions").json()["proposals"]
+    assert [p["id"] for p in before] == ["rl-notes"]
+    (root / "extension.py").unlink()
+    assert "found errors" in str(propose())
+    assert client.get("/extensions").json()["proposals"] == before
+
+
 # ---- the staging folder ----
 def test_the_file_tools_may_write_the_staging_folder_and_nothing_else_in_the_data_folder(tmp_path: Path) -> None:
     assert mac.protected_reason(DATA / "ext-drafts" / "a" / "extension.py") is None

@@ -58,6 +58,22 @@ test('the Developer panel lists extensions with their hooks and flips one at onc
   noErrors(grain)
 })
 
+test('disabling the open view from the Developer panel falls back to chat', async ({ grain }) => {
+  const { page, api } = grain
+  await api('/settings', { method: 'PUT', body: { hiddenViews: [], sidebarHidden: [], devTools: true } })
+  await page.reload()
+  await page.locator('.sidebar .nav-item', { hasText: /^\s*Health/ }).first().click()
+  await expect(page.locator('.sidebar .nav-item[aria-current="page"]', { hasText: 'Health' })).toBeVisible()
+  await openAdvanced(page, 'Developer')
+  const summary = dialog(page).locator('summary', { hasText: 'Health health 1.0.0' })
+  await summary.click()
+  await summary.locator('..').getByRole('button', { name: 'Disable', exact: true }).click()
+  await expect(summary.locator('..').getByRole('button', { name: 'Enable', exact: true })).toBeVisible()
+  await closeSettings(page)
+  await expect(page.locator('.composer-footer')).toBeVisible()
+  await api('/settings', { method: 'PUT', body: { hiddenViews: [] } })
+})
+
 test('toggles and fields persist through PUT /settings and survive relaunch', async ({ grain }) => {
   const { page, api } = grain
   // Advanced groups

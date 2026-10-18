@@ -146,7 +146,12 @@ export function formatAccelerator(accel: string): string {
   return ORDER.filter((m) => mods.has(m)).join('') + keys.join('')
 }
 
-const KEY_NAMES: Record<string, string> = { return: 'enter', esc: 'escape', plus: '+' }
+const KEY_NAMES: Record<string, string> = {
+  return: 'enter', esc: 'escape', plus: '+', arrowup: 'up', arrowdown: 'down', arrowleft: 'left', arrowright: 'right'  // a key event's names → Electron's
+}
+/** What a shifted key press reports (US layout) → the key it is spelled as in a binding ('Shift+1' arrives as '!'). */
+const UNSHIFTED = Object.fromEntries([...'!@#$%^&*()'].map((c, i) => [c, String((i + 1) % 10)]).concat(
+  [['~', '`'], ['_', '-'], ['{', '['], ['}', ']'], ['|', '\\'], [':', ';'], ['"', "'"], ['<', ','], ['>', '.'], ['?', '/']]))
 
 /** A modifier spelling → its canonical name. 'mod' is the primary modifier: ⌘ on macOS, Ctrl elsewhere, so there Control and CmdOrCtrl are one key. */
 function modifierName(lower: string, mac: boolean): string | undefined {
@@ -188,7 +193,9 @@ export function shortcutForKeys(accel: string): Shortcut | undefined {
 }
 
 /** The canonical accelerator of a key press, to compare with `canonicalAccelerator` of a binding. */
-export function acceleratorOf(e: { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }, mac: boolean): string {
+export function acceleratorOf(e: { key: string; code?: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }, mac: boolean): string {
+  const key = e.altKey && e.code?.match(/^(?:Key|Digit)(.)$/)?.[1].toLowerCase()  // macOS Option+letter types another character ('ø'): the physical key names it
+    || (e.shiftKey && UNSHIFTED[e.key]) || e.key
   const mods = [e.shiftKey && 'shift', e.altKey && 'alt', mac ? e.metaKey && 'mod' : e.metaKey && 'meta', mac ? e.ctrlKey && 'ctrl' : e.ctrlKey && 'mod']
-  return [...mods.filter(Boolean).sort(), e.key === ' ' ? 'space' : KEY_NAMES[e.key.toLowerCase()] ?? e.key.toLowerCase()].join('+')
+  return [...mods.filter(Boolean).sort(), key === ' ' ? 'space' : KEY_NAMES[key.toLowerCase()] ?? key.toLowerCase()].join('+')
 }

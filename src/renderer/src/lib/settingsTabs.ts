@@ -69,9 +69,9 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'advanced', sec: 'developer', title: 'Developer tools', keys: 'traces otel telemetry export context preview system prompt debug extensions hooks reload latency' }
 ]
 
-/** Entries whose title or keywords hold every typed word. Empty query: none. */
-export function searchSettings(q: string): SettingsEntry[] {
+/** Entries whose title or keywords hold every typed word; `extra` are entries that exist only at run time (an extension's section). Empty query: none. */
+export function searchSettings(q: string, extra: readonly SettingsEntry[] = []): SettingsEntry[] {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean)
   if (!words.length) return []
-  return SETTINGS_INDEX.filter((e) => { const hay = `${e.title} ${e.keys}`.toLowerCase(); return words.every((w) => hay.includes(w)) })
+  return [...SETTINGS_INDEX, ...extra].filter((e) => { const hay = `${e.title} ${e.keys}`.toLowerCase(); return words.every((w) => hay.includes(w)) })
 }

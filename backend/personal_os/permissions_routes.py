@@ -90,6 +90,10 @@ def router(presets: Presets, effective: Callable[[str | None, str | None], dict[
 
     @r.get("/config/effective")
     def effective_config(project_id: str | None = None, conversation_id: str | None = None) -> dict[str, Any]:
+        if project_id and presets.projects.get(project_id) is None:
+            raise HTTPException(404, "no such project")
+        if conversation_id and presets.convos.get(conversation_id, with_messages=False) is None:
+            raise HTTPException(404, "no such chat")
         return effective(project_id, conversation_id)
 
     return r

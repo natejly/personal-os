@@ -137,6 +137,7 @@ class Writes(unittest.TestCase):
         self.assertEqual(r.json()["unattendedApprovals"], "ask")
         self.assertEqual(client.put("/settings", json={permissions.KEY: {"docEditMode": "sometimes"}}).status_code, 422)
         self.assertEqual(client.put("/settings", json={"tools": "x"}).status_code, 422)
+        self.assertEqual(client.put("/settings", json={"tools": {"run_python": "maybe"}}).status_code, 422)
         # A top-level key wins over the nested copy a client read and sent back unchanged.
         r = client.put("/settings", json={"docEditMode": "apply", permissions.KEY: {"docEditMode": "review"}})
         self.assertEqual(r.json()["docEditMode"], "apply")

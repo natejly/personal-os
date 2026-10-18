@@ -1,7 +1,7 @@
 import { test } from './fixtures.mjs'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { openAdvanced } from './helpers/home.mjs'
+import { openAdvanced, save } from './helpers/home.mjs'
 import { expect, newChat, say, homeScratch, rmScratch, pending, realErrors, resize, SHELL_SANDBOX } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 300_000 })
 
@@ -32,7 +32,7 @@ test('Settings → Advanced → Approvals: add rules in the UI, bad rules are re
   await add('allow', 'Bash(', false)
   await expect(page.getByRole('alert').filter({ hasText: /./ }).first()).toBeVisible()
   await add('allow', 'NoSuchTool(x)', false)
-  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await save(page)
   await expect.poll(async () => (await grain.api('/settings')).permissionRules).toMatchObject({ allow: ['Bash(touch *)'], deny: ['Bash(touch blocked*)'], ask: ['Bash(touch ask*)'] })
   // Save closes the modal: reopen it so the tester runs against what was saved
   await openAdvanced(page, 'Approvals')

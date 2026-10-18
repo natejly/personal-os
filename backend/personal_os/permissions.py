@@ -339,6 +339,8 @@ def validate(key: str, v: Any, *, cap_modes: Callable[[dict[str, Any]], dict[str
             out[k] = list(dict.fromkeys(r.text for r in parsed))
         return out
     if key == "tools":
+        if bad := [k for k, m in v.items() if m not in (True, False, "on", "ask", "off")]:
+            raise ValueError(f"tools.{bad[0]} must be 'on', 'ask' or 'off'")
         # Coerced, not refused: a legacy stored 'on' comes back in every later save of the whole map.
         return cap_modes(v) if cap_modes else v
     if key == "alwaysAsk":

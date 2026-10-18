@@ -462,6 +462,16 @@ def test_an_edited_proposal_faces_the_same_checks_as_an_edited_card() -> None:
     _refused_edit_leaves_it_pending(doc["id"], {"document_id": "d2", "content": "other"}, 400)
 
 
+def test_a_proposal_for_a_tool_turned_off_since_is_refused_and_stays_pending() -> None:
+    p = _one_proposal("gmail_send", {"to": "a@example.com", "subject": "Hi", "body": "Body."})
+    j("PUT", "/settings", {"permissions": {"tools": {"gmail_send": "off"}}})
+    try:
+        j("POST", f"/proposals/{p['id']}/accept", expect=403)
+        assert proposals.get(p["id"])["status"] == "pending"
+    finally:
+        j("PUT", "/settings", {"permissions": {"tools": {"gmail_send": "ask"}}})
+
+
 def test_an_edit_that_adds_a_denied_recipient_is_refused() -> None:
     j("PUT", "/settings", {"permissionRules": {"allow": [], "ask": [], "deny": ["gmail_send(*@blocked.example)"]}})
     try:

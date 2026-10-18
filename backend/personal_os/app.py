@@ -5931,8 +5931,12 @@ async def accept_proposal(pid: str, body: ProposalIn | None = None) -> dict[str,
     if claimed is None:  # lost the race with another accept or a reject
         raise HTTPException(409, "That proposal was just decided somewhere else")
     conv = convos.get(claimed["conversation_id"], with_messages=False) if claimed["conversation_id"] else None
+    project = projects.get(conv["project_id"]) if conv and conv["project_id"] else None
     ctx: dict[str, Any] = {"project_id": (conv or {}).get("project_id"), "conversation_id": claimed["conversation_id"],
                            "tainted": False, "taint_sources": [], "allowed_urls": set(),
+                           # A tool turned off since the proposal was made stays off.
+                           "modes": toolbox.effective(permissions.get(settings(), "tools") or {}, (project or {}).get("tools"),
+                                                      ((conv or {}).get("settings") or {}).get("tools")),
                            # The chat's permission scope is not set in a route: judge the call as that chat would, then offer it to the extension gate.
                            "settings": chat_settings(claimed["conversation_id"]),
                            "proposal_only": False, "message_id": claimed["message_id"]}

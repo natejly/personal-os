@@ -46,6 +46,11 @@ def dump(**params: Any) -> dict[str, Any]:
     return r.json()
 
 
+def test_an_unknown_chat_or_project_is_a_404() -> None:
+    assert client.get("/config/effective", params={"conversation_id": "nope"}).status_code == 404
+    assert client.get("/config/effective", params={"project_id": "nope"}).status_code == 404
+
+
 def source_ok(source: str) -> bool:
     return source in SOURCES or source.startswith(("profile:", "ext:", "preset:"))
 

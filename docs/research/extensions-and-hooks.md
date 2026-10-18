@@ -289,7 +289,7 @@ Two frontend openings are prerequisites, because today's design blocks them: `Vi
 | Palette command | F | `ui.command(...)` | No (inline array in `CommandPalette.tsx:11-52`) | `Entry {key,label,hint,run}` is already registry-shaped. |
 | Keybinding / menu item | F | `ui.keybinding(...)` | Partial: `SHORTCUTS` table (`src/shared/shortcuts.ts`), menu built in `src/main/index.ts` | Menu layout and the `onMenu` if/else chain (`store.ts:1017`) must become table-driven. |
 | Context contributor | B | `api.context(fn, slot, priority, share)` | No: hard-wired in `build_context` and the `hints` tuple (`app.py:2560-2574`) | The strongest new door. Section 5.3. |
-| Retrieval source | B | `api.retrieval_source(name, fn)` | No: docs, memory, graph hard-wired at `app.py:2136-2139` | Yields `{id, text, ref}`; citations flow through `cite_ref`. |
+| Retrieval source | B | `api.retrieval_source(name, fn)` | No: docs, memory, graph hard-wired at `app.py:2136-2139` | Yields `{id, text, ref}`; the items reach the prompt as one volatile block, each line carrying its `ref`; they are not numbered excerpts, so they produce no citation chips. |
 | Recap section / new-chat card | B/F | slot `recap.section` | Partial: `Module.today()` feeds `/dashboard`; recap facts built at `app.py:8178` | The Today view was removed (git `d23e9f8a`), so `docs/module-manifest.md` `home` is stale; recap is the surviving surface. |
 | Message footer chip, header chip | F | slot `message.footer` | No (reply footer chips hard-coded in `Message.tsx`) | |
 | Composer toolbar item | F | slot `composer.toolbar` | No | Mic, duel controls, mode buttons today. |

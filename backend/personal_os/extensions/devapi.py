@@ -43,6 +43,7 @@ async def adopt(host: ExtensionHost, toolbox: Toolbox, scope: ExtensionScope) ->
     try:
         toolbox.set_extension_tools(scope)
     except ValueError:
+        toolbox.drop_extension_tools(n for n in scope.tools if toolbox.tool_owner.get(n) == scope.manifest.id)  # a clash leaves none of its own; a misplaced one may follow some
         await host.unload(scope.manifest.id)
         raise
 

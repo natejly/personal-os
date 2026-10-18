@@ -146,6 +146,19 @@ def test_a_folder_cannot_take_over_a_tool_the_app_already_has(ext: Path) -> None
     assert "sample" not in appmod.settings()["hiddenViews"]
 
 
+def test_a_misplaced_tool_leaves_none_of_the_extensions_tools_behind(ext: Path) -> None:
+    m = json.loads((ext / "extension.json").read_text("utf-8"))
+    m["contributes"]["tools"].append({**m["contributes"]["tools"][0], "name": "sample_two", "after": "nonexistent_tool"})
+    (ext / "extension.json").write_text(json.dumps(m), "utf-8")
+    shutil.copy(ext / "tools" / "sample_note.json", ext / "tools" / "sample_two.json")
+    edit(ext, "extension.py", lambda t: t + '\n    api.tool(ToolSpec("sample_two", "Two.", schema, note, "sample", danger="writes"))\n')
+    r = load(ext)
+    assert r.status_code == 400 and "nonexistent_tool" in r.json()["detail"]
+    assert "sample" not in appmod.host.extensions
+    assert "sample_note" not in appmod.toolbox.specs and "sample_two" not in appmod.toolbox.specs
+    assert "sample_note" not in appmod.toolbox.tool_owner
+
+
 def test_a_profile_folder_loads_and_is_not_toggled_here(tmp_path: Path) -> None:
     root = scaffold("myprof", tmp_path, profile=True)
     try:
@@ -282,6 +295,15 @@ def test_the_panel_sees_handler_stats_and_a_muted_handler(ext: Path) -> None:
         appmod.host.bus.emit_sync("chat.created", {"id": "c", "project_id": None})
     hook = next(h for h in next(e for e in listing()["extensions"] if e["id"] == "sample")["hooks"] if h["hook"] == "chat.created")
     assert hook["muted"] and hook["calls"] == 5 and hook["errors"][-1].startswith("ZeroDivisionError") and hook["p95Ms"] is not None
+
+
+def test_the_panel_lists_hooks_in_the_order_they_were_subscribed(ext: Path) -> None:
+    order = ["chat.created", "tool.pre", "app.start", "chat.created"]
+    declare(ext, "chat.created", "tool.pre", "app.start", permissions=("hooks:gate",))
+    edit(ext, "extension.py", lambda t: t + "".join(f'\n    api.on("{h}", lambda p: None)' for h in order) + "\n")
+    load_on(ext)
+    mine = next(e for e in listing()["extensions"] if e["id"] == "sample")
+    assert [h["hook"] for h in mine["hooks"]] == ["context.contribute", *order]
 
 
 # ---- grain_sdk.testing.Harness ----

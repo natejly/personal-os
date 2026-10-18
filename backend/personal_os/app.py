@@ -6561,7 +6561,7 @@ def update_memory(id: str, body: MemoryPatch) -> dict[str, Any]:
         id = new["id"]
     elif content is not None:
         patch["content"] = content  # unchanged text is a no-op; empty text is refused by update()
-    m = memories.update(id, patch)
+    m = memories.get(id) if id != cur["id"] and not patch else memories.update(id, patch)  # the new version already fired memory.written
     if not m:
         raise HTTPException(404)
     return m

@@ -179,8 +179,8 @@ class HookBus:
         return True, out
 
     def subscriptions(self, owner: str) -> list[Subscription]:
-        """Everything one extension is subscribed with, for the dev panel."""
-        return [s for subs in self._subs.values() for s in subs if s.owner == owner]
+        """Everything one extension is subscribed with, in the order it subscribed, for the dev panel."""
+        return sorted((s for subs in self._subs.values() for s in subs if s.owner == owner), key=lambda s: s.seq)
 
     def active(self, hook: str) -> bool:
         """Whether anything is subscribed, so a hot path can skip building a payload nobody will read."""

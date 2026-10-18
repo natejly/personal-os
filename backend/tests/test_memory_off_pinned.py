@@ -107,6 +107,17 @@ def test_hand_edit_keeps_the_previous_version() -> None:
     assert mem.get(new["id"])["invalid_at"] is not None
 
 
+def test_hand_edit_fires_memory_written_once() -> None:
+    mem, seen = appmod.memories, []
+    old = mem.create(None, "User takes the 7am train")
+    sub = appmod.host.bus.subscribe("memory.written", lambda p: seen.append(p["memory"]["content"]), owner="test", order=0)
+    try:
+        client.put(f"/memories/{old['id']}", json={"content": "User takes the 8am train"})
+    finally:
+        sub.dispose()
+    assert seen == ["User takes the 8am train"]
+
+
 def test_hand_edit_of_a_pinned_row_stays_pinned_and_keeps_history() -> None:
     mem = appmod.memories
     old = mem.create(None, "User's badge number is on the fridge", pinned=True)

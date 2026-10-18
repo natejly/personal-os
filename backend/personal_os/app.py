@@ -7405,11 +7405,6 @@ async def stt_transcribe(audio: UploadFile = File(...), prompt: str = Form("")) 
             "ms": res.get("ms", 0)}
 
 
-@app.get("/integrations/google/tasklists")
-def google_tasklists() -> Any:
-    return _gcall(google.tasks_lists)
-
-
 @host.on_start
 async def _modules_startup() -> None:
     if not guards.sealed():

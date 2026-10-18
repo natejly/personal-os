@@ -193,6 +193,30 @@ class EmitTests(Loose):
         per_call = run(go())
         self.assertLess(per_call, 0.0001, f"empty-bus emit took {per_call * 1e6:.1f} us")
 
+    def test_hooks_on_the_first_token_and_tool_paths_stay_inside_budget(self) -> None:
+        """Doc 10.3: typical 5 hooks < 20 ms p95 on a turn's pre-model path (context.contribute) and per tool dispatch (tool.pre)."""
+        def p95(n_hooks: int, call: Any) -> float:
+            bus = HookBus()
+            for i in range(n_hooks):
+                sub(bus, "context.contribute", lambda p: None, owner=f"x{i}")
+                sub(bus, "tool.pre", lambda p: None, owner=f"x{i}")
+
+            async def go() -> list[float]:
+                took = []
+                for _ in range(50):
+                    t = time.perf_counter()
+                    await call(bus)
+                    took.append(time.perf_counter() - t)
+                return sorted(took)
+
+            return run(go())[47]
+
+        contribute = lambda bus: bus.collect("context.contribute", {"conversation_id": "c"})  # noqa: E731
+        dispatch = lambda bus: bus.gate("tool.pre", {"name": "x", "args": {}})  # noqa: E731
+        for n in (0, 5, 20):
+            for call in (contribute, dispatch):
+                self.assertLess(p95(n, call), 0.02 if n <= 5 else 0.05, f"{n} hooks")
+
     def test_active_follows_subscription_and_disposal(self) -> None:
         bus = HookBus()
         self.assertFalse(bus.active("tool.pre"))

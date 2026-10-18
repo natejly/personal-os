@@ -16,6 +16,7 @@ from ...gtasks import TasksSync
 from ...todos import UNTRUSTED_SOURCES, Todos
 from ...tools import ToolSpec, _obj, page, tool_error
 from ..google.client import GoogleNotConnected
+from ..google.http import gcall
 
 if TYPE_CHECKING:
     from ..host import ExtensionScope
@@ -220,6 +221,11 @@ class TodosExtension:
             except Exception as e:  # noqa: BLE001
                 raise HTTPException(502, f"Google Tasks sync failed: {e}") from e
             return self.tasks_sync.status()
+
+        @r.get("/integrations/google/tasklists")
+        def google_tasklists() -> Any:
+            google = self.api.services.get("google")
+            return gcall(google, google.tasks_lists)
 
         return r
 

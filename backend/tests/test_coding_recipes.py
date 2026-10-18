@@ -147,6 +147,14 @@ def test_a_version_the_agent_saved_waits_for_the_user_and_a_tainted_save_asks(ri
     ({"inputs": [{"name": "e", "type": "enum"}], "prompt": "x"}, "enum needs"),
     ({"allowed_tools": ["Bash(rm -rf /)\nBash"]}, "tool names"),
     ({"surprise": 1}, "unknown recipe field"),
+    ({"inputs": 5}, "inputs must be a list"),
+    ({"verify": {"command": 5}}, "verify.command"),
+    ({"verify": {"command": ["a"]}}, "verify.command"),
+    ({"name": ["a"]}, "name must be text"),
+    ({"prompt": 5}, "prompt must be text"),
+    ({"branch_prefix": "bad prefix!"}, "branch_prefix"),
+    ({"branch_prefix": "../x/"}, "branch_prefix"),
+    ({"branch_prefix": "-x"}, "branch_prefix"),
 ])
 def test_what_a_recipe_cannot_say_is_refused_at_save(rig, over, why):
     body = {**rig.body(), **over}
@@ -170,6 +178,11 @@ def test_a_claude_recipe_has_a_default_step_cap_and_passes_its_options(rig):
     resolved = rig.recipes.preview("fix", {"test": "t1"})
     assert resolved["start"]["cli_opts"] == {"allowed_tools": ["Read", "Bash(npm test:*)"], "denied_tools": ["WebFetch"], "max_steps": 60}
     assert resolved["start"]["permission_mode"] == "acceptEdits"
+
+
+def test_a_recipe_without_a_driver_gets_the_step_cap_when_it_runs_on_claude(rig):
+    rig.recipes.save(rig.body(driver=None), "user")
+    assert rig.recipes.preview("fix", {"test": "t1"})["start"]["cli_opts"] == {"max_steps": 60}
 
 
 def test_inputs_are_typed_capped_and_put_in_as_plain_data(rig):

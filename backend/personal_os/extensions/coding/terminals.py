@@ -553,8 +553,8 @@ class Terminals:
             except TerminalError:
                 pass  # the app is not connected: show what was last known (a terminal it lost is closed, and drops out below)
             if row["state"] == "open":
-                out.append({k: row[k] for k in ("id", "name", "cwd", "session_id", "owner_key", "created_at", "user_attached", "user_dirty")}
-                           | {"sandboxed": True})
+                out.append({k: row[k] for k in ("id", "name", "cwd", "session_id", "owner_key", "created_at")}
+                           | {"user_attached": bool(row["user_attached"]), "user_dirty": bool(row["user_dirty"]), "sandboxed": True})
         return out
 
 

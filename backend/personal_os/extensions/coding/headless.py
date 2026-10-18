@@ -41,6 +41,7 @@ READ_ONLY = re.compile(r"Read|Grep|Glob|LS|NotebookRead|WebSearch|TodoWrite")  #
 STEPS = (1, 100, 20)  # min, max, default
 TIMEOUT_S = (5, 900, 300)
 DEFAULT_BUDGET_USD = 1.0  # when neither the call nor ext.coding.structuredBudgetUsd names one
+BUDGET_MAX_USD = 100.0
 STDERR_TAIL = 500
 ERRORS_SHOWN = 5
 
@@ -66,6 +67,10 @@ def check_schema(schema: Any) -> dict[str, Any]:
         raise ValueError(f"schema is not a valid JSON Schema: {e.message[:200]}") from e
     if remote := _remote_ref(schema):
         raise ValueError(f"schema refers to {remote!r}; only references inside the schema ('#/...') are allowed.")
+    try:
+        Draft202012Validator(schema).is_valid(None)  # a reference loop only shows when validating, after the paid run
+    except RecursionError as e:
+        raise ValueError("schema refers to itself without ever narrowing the value, so it can never be checked.") from e
     return schema
 
 
@@ -185,8 +190,11 @@ def tool(coding: Any) -> ToolSpec:
             return tool_error(f"'{model}' is not a model id this tool accepts.", field="model")
         try:
             check_schema(schema)
+            budget = None if max_budget_usd is None else float(max_budget_usd)
+            if budget is not None and not 0 < budget <= BUDGET_MAX_USD:
+                return tool_error(f"max_budget_usd must be more than 0 and at most {BUDGET_MAX_USD:g}.", field="max_budget_usd")
             value = await run(coding, ctx, prompt, schema, cwd, tools, clamp_int(max_steps, *STEPS), clamp_int(timeout_s, *TIMEOUT_S),
-                              None if max_budget_usd is None else float(max_budget_usd), model)
+                              budget, model)
         except StructuredError as e:
             return {"error": e.code, "detail": e.detail, **e.extra}
         except (ValueError, TypeError, shell.ShellError) as e:

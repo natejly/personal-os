@@ -2161,7 +2161,7 @@ export interface CodingSessionDiff { worktree: string; branch: string | null; st
 /** GET /coding/terminals: a shell an agent opened (in the OS sandbox); the user can take it over in a window. */
 export interface AgentTerminal {
   id: string; name: string; cwd: string; session_id: string | null; owner_key: string; created_at: number
-  user_attached: number; user_dirty: number; sandboxed: boolean
+  user_attached: boolean; user_dirty: boolean; sandboxed: boolean
 }
 /** One input of a coding recipe, filled into its prompt. */
 export interface CodingRecipeInput { name: string; type: 'string' | 'number' | 'boolean' | 'enum'; required: boolean; default?: string | number | boolean; max_len?: number; values?: string[] }

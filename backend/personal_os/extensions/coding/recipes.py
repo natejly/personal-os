@@ -70,6 +70,12 @@ def _tools(body: dict[str, Any], key: str) -> list[str]:
     return list(dict.fromkeys(value))
 
 
+def _text(body: dict[str, Any], key: str) -> str:
+    value = body.get(key)
+    _check(value is None or isinstance(value, str), f"{key} must be text.")
+    return (value or "").strip()
+
+
 def _int(body: dict[str, Any], key: str, lo: int, hi: int, default: int | None) -> int | None:
     value = body.get(key)
     if value is None:
@@ -116,16 +122,17 @@ def validate(body: Any, sessions_: Any) -> dict[str, Any]:
     the repository is checked, a worktree must exist, and settings a driver cannot honor are refused, not ignored."""
     _check(isinstance(body, dict), "a recipe is a JSON object.")
     _check(not (extra := sorted(set(body) - set(FIELDS))), f"unknown recipe field(s): {', '.join(extra)}.")
-    name = str(body.get("name") or "").strip()
+    name = _text(body, "name")
     _check(name and len(name) <= 80, "a recipe needs a name of up to 80 characters.")
-    prompt = str(body.get("prompt") or "").strip()
+    prompt = _text(body, "prompt")
     _check(prompt, "a recipe needs a prompt.")
+    _check(body.get("inputs") is None or isinstance(body["inputs"], list), "inputs must be a list.")
     inputs = [_input_spec(i) for i in body.get("inputs") or []]
     _check(len({i["name"] for i in inputs}) == len(inputs), "input names must be unique.")
     unknown = sorted({m for m in PLACEHOLDER.findall(prompt)} - {i["name"] for i in inputs})
     _check(not unknown, f"the prompt uses {', '.join('{{' + u + '}}' for u in unknown)}, which is not a declared input.")
     verify = body.get("verify")
-    _check(isinstance(verify, dict) and str(verify.get("command") or "").strip(),
+    _check(isinstance(verify, dict) and isinstance(verify.get("command"), str) and verify["command"].strip(),
            "a recipe needs verify.command: without a check that proves the work it is only a task.")
     _check(not PLACEHOLDER.search(verify["command"]), "verify.command cannot use inputs: they are data for the prompt, never part of a command.")
     try:
@@ -134,6 +141,13 @@ def validate(body: Any, sessions_: Any) -> dict[str, Any]:
         raise RecipeError(str(e)) from e
     mode = body.get("worktree", "new")
     _check(mode in ("new", "existing"), "worktree must be 'new' or 'existing'.")
+    prefix = body.get("branch_prefix") or "grain/"
+    _check(isinstance(prefix, str), "branch_prefix must be text.")
+    if mode == "new":
+        try:
+            check_branch(f"{prefix}recipe-0000")
+        except CodingError as e:
+            raise RecipeError(f"branch_prefix '{prefix}' makes branch names a coding session refuses.") from e
     existing = None
     if mode == "existing":
         existing = os.path.realpath(str(body.get("worktree_path") or ""))
@@ -156,7 +170,7 @@ def validate(body: Any, sessions_: Any) -> dict[str, Any]:
     retries = _int(body, "max_retries", 0, 1, 0)
     return {"name": name, "description": str(body.get("description") or "").strip()[:500], "prompt": prompt, "inputs": inputs,
             "repo_path": repo, "worktree": mode, "worktree_path": existing,
-            "branch_prefix": str(body.get("branch_prefix") or "grain/"), "driver": driver, "model": model,
+            "branch_prefix": prefix, "driver": driver, "model": model,
             "permission_mode": body.get("permission_mode"), "allowed_tools": allowed, "denied_tools": denied,
             "max_steps": max_steps, "timeout_s": timeout_s, "max_retries": retries,
             "verify": {"command": verify["command"].strip(), "timeout_s": _int(verify, "timeout_s", 1, VERIFY_TIMEOUT_MAX, VERIFY_TIMEOUT_DEFAULT),
@@ -318,7 +332,7 @@ class Recipes:
             except CodingError as e:
                 raise RecipeError(str(e)) from e
         cli = {k: v for k, v in (("allowed_tools", body["allowed_tools"]), ("denied_tools", body["denied_tools"]),
-                                 ("max_steps", body["max_steps"])) if v} if driver == "claude" else {}
+                                 ("max_steps", body["max_steps"] or STEPS_DEFAULT)) if v} if driver == "claude" else {}
         return {"recipe": recipe["name"], "version": version["version"], "inputs": used, "driver": driver,
                 "start": {"agent": driver, "repo_path": where, "prompt": prompt, "new_worktree": branch is not None, "branch": branch,
                           "model": body["model"], "permission_mode": body["permission_mode"], "name": f"recipe: {recipe['name']}",

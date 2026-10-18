@@ -117,6 +117,14 @@ def test_the_budget_comes_from_the_call_then_the_setting_then_a_default(tmp_path
     assert rig.argv[rig.argv.index("--max-budget-usd") + 1] == "1"
 
 
+def test_a_budget_that_is_not_a_sane_positive_amount_is_refused_before_anything_runs(rig):
+    rig.stage(ok_result())
+    Path(f"{rig.exe}.argv").unlink(missing_ok=True)
+    for budget in (-5, 0, 1e300, float("nan")):
+        assert "max_budget_usd must be" in rig.run(max_budget_usd=budget)["error"], budget
+    assert not Path(f"{rig.exe}.argv").exists()
+
+
 def test_the_answer_is_only_trusted_after_five_checks_in_order(rig):
     cases = [
         ("not json at all", 1, "run_failed"),
@@ -186,9 +194,12 @@ def test_a_bad_schema_is_refused_before_anything_runs(rig):
     for schema, why in (({}, "JSON Schema object"), ("x", "JSON Schema object"), ({"type": "wrong"}, "not a valid"),
                         ({"type": "object", "properties": {"a": {"$ref": "https://evil.example/s.json"}}}, "only references inside"),
                         ({"allOf": [{"$ref": "file:///etc/passwd"}]}, "only references inside"),
-                        ({"type": "object", "description": "x" * 17_000}, "over 16000 bytes")):
+                        ({"type": "object", "description": "x" * 17_000}, "over 16000 bytes"),
+                        ({"$ref": "#"}, "refers to itself"),
+                        ({"$defs": {"a": {"$ref": "#/$defs/a"}}, "$ref": "#/$defs/a"}, "refers to itself")):
         assert why in rig.run(schema=schema)["error"], schema
     assert not Path(f"{rig.exe}.argv").exists()  # nothing was spawned
+    assert headless.check_schema({"type": "array", "items": {"$ref": "#"}})
     assert headless.check_schema({"$defs": {"x": {"type": "string"}}, "properties": {"a": {"$ref": "#/$defs/x"}}})["properties"]
 
 

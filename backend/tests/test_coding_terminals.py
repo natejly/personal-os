@@ -297,6 +297,7 @@ def test_while_the_user_has_it_open_or_has_typed_the_agent_can_read_but_not_type
     assert read["user_attached"] is True and "error" not in read
     assert "open in a window" in send(tb, cfg, tid, "ls")["error"]
     assert hub.terms[tid]["written"] == []
+    assert [(t["user_attached"], t["user_dirty"]) for t in asyncio.run(coding.terminals.live_status())] == [(True, False)]
     hub.terms[tid].update(attached=False, dirty=True)
     call(tb, "terminal_read", ctx_of(cfg), terminal_id=tid)  # the hub's report reaches the row
     assert "typed into this terminal" in send(tb, cfg, tid, "ls")["error"]

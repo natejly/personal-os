@@ -48,7 +48,7 @@ def _card(manifest: Manifest, tainted: bool, sources: list[str]) -> dict[str, An
 
 def _copy(src: Path, dst: Path) -> None:
     """The files of a draft that ship, into `dst`. A link could point the snapshot at a file outside the draft."""
-    if any(p.is_symlink() for p in src.rglob("*")):
+    if src.is_symlink() or any(p.is_symlink() for p in src.rglob("*")):
         raise DraftError("a draft may not contain symbolic links")
     files = shipped(src)
     for p in files:

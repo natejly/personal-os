@@ -69,8 +69,8 @@ def _print(findings: Sequence[Any]) -> int:
 
 def cmd_new(args: argparse.Namespace) -> int:
     try:
-        root = scaffold(args.id, Path(args.dir), args.profile)
-    except (ValueError, FileExistsError) as e:
+        root = scaffold(args.id, Path(args.dir), args.profile).resolve()  # the dev backend resolves a relative path against its own cwd
+    except (ValueError, OSError) as e:
         print(f"error: {e}")
         return 1
     print(f"created {root}")
@@ -124,7 +124,7 @@ def cmd_test(args: argparse.Namespace) -> int:
         env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [backend, os.environ.get("PYTHONPATH")])),
                "PERSONAL_OS_DATA_DIR": scratch, "GRAIN_SECRETS_BACKEND": "file",
                "PERSONAL_OS_OPENCODE_DB": str(Path(scratch) / "no-opencode.db")}  # keeps the run away from the real coding-agent usage database
-        targets = args.pytest_args or [str(root / "tests")]
+        targets = [a for a in args.pytest_args if a != "--"] or [str(root / "tests")]
         return subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *targets], cwd=root, env=env).returncode
 
 
@@ -213,7 +213,7 @@ def parser() -> argparse.ArgumentParser:
     p.set_defaults(run=cmd_dev)
     p = ext.add_parser("test", help="run the extension's tests")
     p.add_argument("folder")
-    p.add_argument("pytest_args", nargs="*")
+    p.add_argument("pytest_args", nargs=argparse.REMAINDER, help="passed to pytest, options included (grain ext test my-ext -k name)")
     p.set_defaults(run=cmd_test)
     p = ext.add_parser("pack", help="check, bundle the renderer half and write the lock file")
     p.add_argument("folder")

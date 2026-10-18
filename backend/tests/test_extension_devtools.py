@@ -397,3 +397,21 @@ def test_a_sample_extension_is_built_end_to_end_by_the_cli(tmp_path: Path, capfd
     assert cli.main(["ext", "pack", str(root)]) == 0
     assert cli.main(["ext", "check", str(root)]) == 0  # against its own lock: nothing changed
     assert "2 passed" in capfd.readouterr().out
+
+
+def test_new_registers_the_absolute_folder_and_reports_an_unwritable_parent(tmp_path: Path, capfd: Any, monkeypatch: Any) -> None:
+    sent: list[Path] = []
+    monkeypatch.setattr(cli, "_token", lambda args: "t")
+    monkeypatch.setattr(cli, "push", lambda client, root: sent.append(root) or "ok")
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["ext", "new", "rel"]) == 0
+    assert sent == [tmp_path / "rel"]
+    (tmp_path / "file").write_text("", "utf-8")
+    assert cli.main(["ext", "new", "x", "--dir", str(tmp_path / "file" / "sub")]) == 1
+    assert "error:" in capfd.readouterr().out
+
+
+def test_ext_test_passes_pytest_options_through(tmp_path: Path, capfd: Any, monkeypatch: Any) -> None:
+    monkeypatch.setattr(cli, "_token", lambda args: None)
+    assert cli.main(["ext", "new", "opts", "--dir", str(tmp_path)]) == 0
+    assert cli.main(["ext", "test", str(tmp_path / "opts"), "-k", "nothing_matches_this"]) == 5  # pytest: no tests selected

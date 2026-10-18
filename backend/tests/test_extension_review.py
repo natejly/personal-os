@@ -388,3 +388,15 @@ def test_a_job_no_extension_serves_can_still_be_renamed_and_disabled_but_not_ena
         assert client.patch(f"/jobs/{job['id']}", json={"enabled": True}).status_code == 400
     finally:
         client.delete(f"/jobs/{job['id']}")
+
+
+def test_a_draft_folder_that_is_itself_a_link_is_refused(tmp_path: Path) -> None:
+    root = draft()
+    outside = tmp_path / "outside"
+    shutil.copytree(root, outside)
+    shutil.rmtree(root)
+    root.symlink_to(outside)
+    try:
+        assert "symbolic links" in propose()["error"]
+    finally:
+        root.unlink()

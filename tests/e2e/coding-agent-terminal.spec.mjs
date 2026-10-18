@@ -50,3 +50,12 @@ test('an agent opens a terminal, types into it and reads it; the user takes it o
     expect(realErrors(grain)).toEqual([])
   } finally { rmScratch(ws) }
 })
+
+test('without an OS sandbox the terminal tools are unavailable and no terminal exists', async ({ grain }) => {
+  test.skip(SHELL_SANDBOX, 'the test above runs the tools where a sandbox exists')
+  const { tools } = await grain.api('/tools')
+  for (const name of ['terminal_open', 'terminal_send', 'terminal_read', 'terminal_wait_for', 'terminal_close']) {
+    expect(tools.find((t) => t.name === name)?.available, name).toBe(false)
+  }
+  expect((await grain.api('/coding/terminals')).terminals).toEqual([])
+})

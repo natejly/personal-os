@@ -106,6 +106,9 @@ def cmd_dev(args: argparse.Namespace) -> int:
 def cmd_test(args: argparse.Namespace) -> int:
     """Run the extension's own tests against a scratch data directory."""
     root = Path(args.folder).resolve()
+    if not (root / "extension.json").is_file():
+        print(f"error: cannot read {root / 'extension.json'}")
+        return 1
     if not args.pytest_args and not (root / "tests").is_dir():
         print(f"{root.name} has no tests directory: nothing to run")
         return 0

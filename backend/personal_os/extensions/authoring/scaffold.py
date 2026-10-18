@@ -1,13 +1,11 @@
 """`grain ext new`: the files of a working extension (or a profile) to start from."""
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from string import Template
 
+from ..manifest import ID
 from .check import BUILTINS
-
-NEW_ID = re.compile(r"[a-z][a-z0-9-]*")
 
 MANIFEST = Template('''{
   "id": "$id",
@@ -110,8 +108,8 @@ def test_the_tool_saves_a_note() -> None:
 
 def scaffold(ext_id: str, parent: Path, profile: bool = False) -> Path:
     """Write `<parent>/<ext_id>/` and return it. Refuses an id that is not a valid new id or is a built-in's, or a folder that exists."""
-    if not NEW_ID.fullmatch(ext_id):
-        raise ValueError("an extension id starts with a letter and holds lowercase letters, digits and dashes")
+    if not ID.fullmatch(ext_id):
+        raise ValueError("an extension id starts with a letter and holds lowercase letters, digits and hyphens")
     if (BUILTINS / ext_id / "extension.json").is_file():
         raise ValueError(f"a built-in extension already has the id {ext_id!r}")
     root = parent / ext_id

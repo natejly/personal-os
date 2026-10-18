@@ -343,6 +343,11 @@ def test_cli_test_runs_the_extensions_own_tests_in_a_scratch_data_dir(ext: Path,
     assert cli.main(["ext", "test", str(ext)]) == 1
 
 
+def test_cli_test_on_a_missing_folder_fails(work: Path, capsys: Any) -> None:
+    assert cli.main(["ext", "test", str(work / "nonexistent")]) == 1
+    assert "cannot read" in capsys.readouterr().out
+
+
 def test_cli_test_on_a_profile_has_nothing_to_run(work: Path, capsys: Any) -> None:
     root = scaffold("quiet", work, profile=True)
     assert cli.main(["ext", "test", str(root)]) == 0

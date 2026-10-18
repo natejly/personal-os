@@ -246,7 +246,18 @@ def test_a_dev_loaded_or_built_in_id_that_is_not_installed_cannot_be_enabled() -
     assert enable("todos").status_code == 404
 
 
+def test_a_draft_id_follows_the_same_rule_as_ext_new() -> None:
+    assert "starts with a letter" in propose("1abc")["error"]
+
+
 # ---- the drafting session's provenance ----
+def test_a_source_that_tainted_the_session_twice_is_listed_once() -> None:
+    draft()
+    propose(tainted=True, taint_sources=["fs_grep", "fs_grep", "fetch_url"])
+    accept()
+    assert installed()["taintSources"] == ["fs_grep", "fetch_url"]
+
+
 def test_a_tainted_session_may_not_hold_prompt_inject_or_hooks_gate() -> None:
     draft(permissions=("prompt:inject",))
     propose(tainted=True, taint_sources=["fetch_url"])

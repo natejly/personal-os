@@ -2,6 +2,7 @@
 user's settings write here; there is no tool for it, and an extension can provide a slot but never select it."""
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
@@ -97,8 +98,15 @@ def router(rt: Runtime, selections: Selections, sources: ToolSources) -> APIRout
         if isinstance(value, dict) and (core := [i for i in value.get("disable", []) if rt.provider(slot, i).core]):
             raise HTTPException(422, f"{', '.join(core)} cannot be turned off")
 
+    def known(conversation_id: str | None, project_id: str | None) -> None:
+        if conversation_id and selections.convos.get(conversation_id, with_messages=False) is None:
+            raise HTTPException(404, "no such chat")
+        if project_id and selections.projects.get(project_id) is None:
+            raise HTTPException(404, "no such project")
+
     @r.get("/runtime")
     def get_runtime(conversation_id: str | None = None, project_id: str | None = None) -> dict[str, Any]:
+        known(conversation_id, project_id)
         scopes = selections.scopes(conversation_id, project_id)
         return {"slots": [{"id": d.id, "noun": d.noun, "multi": d.multi, "default_id": d.default_id,
                            "providers": [provider_row(p) for p in rt.providers(d.id)],
@@ -110,6 +118,7 @@ def router(rt: Runtime, selections: Selections, sources: ToolSources) -> APIRout
 
     @r.get("/runtime/resolve")
     def resolve(conversation_id: str | None = None, project_id: str | None = None) -> dict[str, Any]:
+        known(conversation_id, project_id)
         scopes = selections.scopes(conversation_id, project_id)
         return {slot: resolution(slot, scopes) for slot in SLOTS}
 
@@ -125,7 +134,13 @@ def router(rt: Runtime, selections: Selections, sources: ToolSources) -> APIRout
         layers = {"chat": ("chat", "project"), "project": ("project",), "global": ()}[body.scope]
         scopes = selections.scopes(body.scope_id if body.scope == "chat" else None, body.scope_id if body.scope == "project" else None,
                                    layers=layers)
-        if (diff := rt.loosening(body.slot, rt.resolve(body.slot, scopes), body.value)) and not body.confirm:
+        was = rt.resolve(body.slot, scopes)
+        if body.value is None and not SLOTS[body.slot].multi:  # clearing hands the slot to whatever is next in line
+            layer = "global_" if body.scope == "global" else body.scope
+            wanted = rt.resolve(body.slot, replace(scopes, **{layer: {k: v for k, v in getattr(scopes, layer).items() if k != body.slot}})).provider
+        else:
+            wanted = body.value
+        if (diff := rt.loosening(body.slot, was, wanted)) and not body.confirm:
             raise HTTPException(409, {"needs_confirm": True, "diff": diff})
         current = selections.read(body.scope, body.scope_id)
         new = {k: v for k, v in current.items() if k != body.slot} | ({} if body.value is None else {body.slot: body.value})

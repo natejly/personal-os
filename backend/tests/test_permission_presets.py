@@ -318,6 +318,11 @@ def test_duplicate_rename_edit_delete_export_and_import_round_trip() -> None:
     assert copy["id"] not in {r["id"] for r in client.get("/permissions/presets").json()}
 
 
+def test_duplicating_a_preset_whose_copy_name_is_too_long_is_refused_not_a_500() -> None:
+    long = client.post("/permissions/presets", json={"name": "n" * 80}).json()
+    assert client.post(f"/permissions/presets/{long['id']}/duplicate").status_code == 422
+
+
 def test_built_ins_cannot_be_edited_or_deleted_but_can_be_duplicated() -> None:
     assert client.put("/permissions/presets/builtin:auto", json={"name": "x"}).status_code == 422
     assert client.delete("/permissions/presets/builtin:manual").status_code == 422

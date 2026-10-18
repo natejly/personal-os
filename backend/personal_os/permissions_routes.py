@@ -70,7 +70,10 @@ def router(presets: Presets, effective: Callable[[str | None, str | None], dict[
     @r.post("/permissions/presets/{preset_id}/duplicate")
     def duplicate_preset(preset_id: str) -> dict[str, Any]:
         found(preset_id)
-        return presets.duplicate(preset_id)
+        try:
+            return presets.duplicate(preset_id)
+        except PresetError as e:
+            raise refused(e) from e
 
     @r.get("/permissions/presets/{preset_id}/export")
     def export_preset(preset_id: str) -> dict[str, Any]:

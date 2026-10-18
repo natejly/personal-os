@@ -18,7 +18,7 @@ from .catalog import HOOKS
 
 API_VERSION = 1
 
-_ID = re.compile(r"[a-z0-9-]+")
+ID = re.compile(r"[a-z][a-z0-9-]*")
 _SEMVER = re.compile(r"\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?")
 _ACTIVATION = re.compile(r"startup|onSchedule|(onView|onCommand|onChannel):.+")
 _TOP_KEYS = {"id", "name", "description", "version", "apiVersion", "kind", "enabled", "activation", "requires", "provides",
@@ -75,7 +75,7 @@ class Manifest:
         for key in ("id", "name", "version", "apiVersion"):
             if key not in raw:
                 raise ManifestError(f"missing {key!r}")
-        _check(isinstance(raw["id"], str) and _ID.fullmatch(raw["id"]), "id must match [a-z0-9-]+")
+        _check(isinstance(raw["id"], str) and ID.fullmatch(raw["id"]), "id must match [a-z][a-z0-9-]*")
         _check(_is_str(raw["name"]), "name must be a non-empty string")
         _check(isinstance(raw["version"], str) and _SEMVER.fullmatch(raw["version"]), "version must be semver")
         api = raw["apiVersion"]
@@ -169,7 +169,7 @@ def _runtime(c: dict[str, Any], permissions: list[str]) -> None:
     for e in entries:
         _check(set(e) <= _RUNTIME_KEYS and {"slot", "id", "label"} <= set(e), "contributes.runtime entries take slot, id, label and meta")
         _check(isinstance(e["slot"], str) and e["slot"] in SLOTS, f"contributes.runtime: {e['slot']!r} is not a runtime slot")
-        _check(isinstance(e["id"], str) and _ID.fullmatch(e["id"]), "contributes.runtime: id must match [a-z0-9-]+")
+        _check(isinstance(e["id"], str) and ID.fullmatch(e["id"]), "contributes.runtime: id must match [a-z][a-z0-9-]*")
         _check(_is_str(e["label"]) and isinstance(e.get("meta", {}), dict), "contributes.runtime: label must be text and meta an object")
         _check((e["slot"], e["id"]) not in seen, f"contributes.runtime lists {e['slot']} {e['id']} twice")
         _check(SLOTS[e["slot"]].permission in permissions, f"providing {e['slot']} needs the permission {SLOTS[e['slot']].permission!r}")
@@ -199,7 +199,7 @@ def _presets(c: dict[str, Any], ext_id: str) -> None:
     from .. import presets
     items = c.get("presets", [])
     _check(isinstance(items, list) and all(isinstance(p, dict) and isinstance(p.get("id"), str) and presets.SLUG.fullmatch(p["id"]) for p in items),
-           "contributes.presets must be a list of presets, each with an id of [a-z0-9-]+")
+           "contributes.presets must be a list of presets, each with an id of [a-z][a-z0-9-]*")
     _check(len({p["id"] for p in items}) == len(items), "contributes.presets ids must be unique")
     for p in items:
         try:

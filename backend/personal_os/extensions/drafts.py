@@ -12,7 +12,6 @@ import difflib
 import hashlib
 import json
 import logging
-import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -21,12 +20,11 @@ from .. import mac
 from .authoring.check import check
 from .authoring.pack import content_hash, digest, shipped
 from .catalog import HOOKS
-from .manifest import Manifest, ManifestError, load_manifest
+from .manifest import ID, Manifest, ManifestError, load_manifest
 
 log = logging.getLogger(__name__)
 
 INSTALLED = "extensions"
-ID = re.compile(r"[a-z0-9-]+")
 MAX_FILES = 200
 MAX_BYTES = 2_000_000
 TAINT_REFUSED = frozenset({"prompt:inject", "hooks:gate"})  # a session that read untrusted content may not write these in
@@ -111,7 +109,7 @@ class Drafts:
     def propose(self, ext_id: str, *, tainted: bool, taint_sources: list[str]) -> dict[str, Any]:
         """Snapshot and check the draft `<ext-drafts>/<id>/` and put it up for review. Raises DraftError with the findings when it fails."""
         if not ID.fullmatch(ext_id):
-            raise DraftError("an extension id is lowercase letters, digits and hyphens")
+            raise DraftError("an extension id starts with a letter and holds lowercase letters, digits and hyphens")
         src = self.drafts / ext_id
         if not src.is_dir():
             raise DraftError(f"there is no draft for {ext_id!r}: write its files under {src}, then call ext_propose again")

@@ -207,6 +207,23 @@ def test_a_looser_selection_needs_a_confirmation_that_shows_the_difference(ext: 
         assert put(api, "tools.source", {"enable": ["demo/src"]}, confirm=True).status_code == 200
 
 
+def test_clearing_a_stricter_selection_whose_fallback_is_looser_needs_a_confirmation(ext: Path, api: TestClient) -> None:
+    with Harness(ext, {**SETTINGS, "baseUrl": "http://127.0.0.1:9/v1"}):
+        chat = appmod.convos.create(appmod.projects.create("P")["id"], "C", "test-model")["id"]
+        assert put(api, "model.client", "demo/client", confirm=True).status_code == 200
+        assert put(api, "model.client", "core/openai-compatible", "chat", chat).status_code == 200
+        r = put(api, "model.client", None, "chat", chat)
+        assert r.status_code == 409 and "remote" in r.json()["detail"]["diff"][0]
+        assert put(api, "model.client", None, "chat", chat, confirm=True).status_code == 200
+
+
+def test_the_read_routes_404_on_an_unknown_chat_or_project(ext: Path, api: TestClient) -> None:
+    with Harness(ext, SETTINGS):
+        for path in ("/runtime", "/runtime/resolve"):
+            assert api.get(path, params={"conversation_id": "nope"}).status_code == 404
+            assert api.get(path, params={"project_id": "nope"}).status_code == 404
+
+
 def test_the_routes_refuse_what_cannot_be_selected(ext: Path, api: TestClient) -> None:
     with Harness(ext, SETTINGS):
         assert put(api, "model.nothing", "x").status_code == 404

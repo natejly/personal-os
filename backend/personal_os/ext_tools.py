@@ -19,7 +19,7 @@ def register(tb: Any) -> None:
             return tool_error("Extensions are not available.")
         try:
             proposal = await asyncio.to_thread(drafts.propose, str(id or "").strip(), tainted=bool(ctx.get("tainted")),
-                                               taint_sources=list(ctx.get("taint_sources") or []))
+                                               taint_sources=list(dict.fromkeys(ctx.get("taint_sources") or [])))
         except DraftError as e:
             return {**tool_error(str(e), field="id"), "findings": e.findings}
         return {"ok": True, "id": proposal["id"], "status": "awaiting review", "warnings": proposal["findings"],

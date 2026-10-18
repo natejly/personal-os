@@ -568,6 +568,7 @@ runtime.active = host.runtime
 llm.default_client.settings = settings
 runtime_selections = runtime_routes.Selections(db, convos, projects)
 host.runtime.scopes = runtime_selections.current
+host.runtime.note = lambda title, body: _alert(title, body, "inbox")
 host.bus.subscribe("model.response", _record_usage, owner="core", order=0)
 
 

@@ -187,6 +187,8 @@ def test_a_disabled_provider_falls_back_with_one_announcement_and_returns_when_e
     scope.provide("model.router", FakeRouter(), id="x", label="X")
     seen: list[Any] = []
     host.bus.subscribe("runtime.fallback", seen.append, owner="t", order=0)
+    notes: list[tuple[str, str]] = []
+    host.runtime.note = lambda title, body: notes.append((title, body))
     sel = Scopes(global_={"model.router": "acme/x"}, conversation_id="c1")
     assert host.runtime.resolve("model.router", sel).provider == "acme/x"
     hidden.append("acme")
@@ -195,11 +197,12 @@ def test_a_disabled_provider_falls_back_with_one_announcement_and_returns_when_e
     assert (res.provider, res.fell_back_from, res.refused) == ("core/heuristic", "acme/x", False)
     assert "not available; using the default" in res.reason and not res.default
     assert [(p["slot"], p["wanted"], p["used"], p["refused"], p["conversation_id"]) for p in seen] == [("model.router", "acme/x", "core/heuristic", False, "c1")]
+    assert notes == [("A selected model router is not available", res.reason)], "the inbox is told once per change"
     hidden.clear()
     assert host.runtime.resolve("model.router", sel).provider == "acme/x"
     hidden.append("acme")
     host.runtime.resolve("model.router", sel)
-    assert len(seen) == 2  # a new change is announced again
+    assert len(seen) == 2 and len(notes) == 2  # a new change is announced again
 
 
 def test_an_unknown_selection_for_a_slot_with_a_safety_dimension_is_refused(host: ExtensionHost) -> None:

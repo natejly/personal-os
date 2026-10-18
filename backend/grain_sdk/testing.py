@@ -155,12 +155,13 @@ class Harness:
 
 # ---- runtime slot providers ----
 class FakeModelClient:
-    """A scripted `model.client`: `script` is the event dicts `stream` yields; it raises after `fail_at` events when set."""
+    """A scripted `model.client`: `script` is the event dicts `stream` yields; it raises `error` (a PermissionError is a refusal of its
+    credentials) after `fail_at` events when set."""
     kinds = frozenset({"chat", "complete"})
 
     def __init__(self, script: list[dict[str, Any]] | None = None, *, fail_at: int | None = None, locality: str = "remote",
-                 text: str = "ok", id: str = "fake") -> None:
-        self.id, self.locality, self.script, self.fail_at, self.text = id, locality, script, fail_at, text
+                 text: str = "ok", id: str = "fake", error: type[Exception] = RuntimeError) -> None:
+        self.id, self.locality, self.script, self.fail_at, self.text, self.error = id, locality, script, fail_at, text, error
         self.requests: list[Any] = []
 
     async def stream(self, req: Any) -> Any:
@@ -168,14 +169,14 @@ class FakeModelClient:
         for n, ev in enumerate(self.script if self.script is not None else
                                [{"type": "delta", "text": self.text}, {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None}]):
             if self.fail_at == n:
-                raise RuntimeError("scripted failure")
+                raise self.error("scripted failure")
             yield ev
 
     async def complete(self, req: Any) -> Any:
         from personal_os.runtime.protocols import ModelReply  # lazy: the app is not importable until the data dir is set
         self.requests.append(req)
         if self.fail_at == 0:
-            raise RuntimeError("scripted failure")
+            raise self.error("scripted failure")
         return ModelReply(self.text)
 
 

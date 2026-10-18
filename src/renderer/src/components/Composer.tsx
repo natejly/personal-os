@@ -568,7 +568,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
       <div className="composer-footer">
         {footer}
         {conversationId !== '\u0000page-agent' && (
-          <PermissionModePill />
+          <PermissionModePill conversationId={activeId} />
         )}
       </div>
     </div>

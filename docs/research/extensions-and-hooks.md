@@ -1361,11 +1361,11 @@ What differs from the text above, and what is not built:
 - `mcp_is` keeps its name and now means "connector-shaped" (MCP or extension source); the rename to `is_source_tool` touches forty call sites for nothing. A source's tools are `ask` only: "always allow" on their card is one-shot.
 - `projects.runtime` is added by `Database._migrate` beside `projects.tools`, not by a numbered ledger step, so it cannot collide with another step's number. `accept_partial` lives in the global `runtime` setting under that key; only `PUT /runtime/accept-partial` writes it.
 - `ToolDecl` has a `description`; `schema` is the argument schema. The first listing of a tool is the user's baseline (`toolSourceHashes`); a later change withholds the tool until `POST /runtime/tools/{slug}/accept`.
-- The model wrapper dispatches the `chat` and `complete` call kinds. A client may name `embed`, `image` and `audio` in `kinds`, but those paths are not routed through the slot yet. The auth breaker is keyed on a base URL and API key, which an extension client does not have, so it is not applied to one; the idle limit, Stop and the deadline are.
+- The model wrapper dispatches the `chat` and `complete` call kinds. A client may name `embed`, `image` and `audio` in `kinds`, but those paths are not routed through the slot: `ModelReply` is text, the protocol has no result shape for vectors, images or audio, and the doc gives none, so routing them would mean inventing one. The auth breaker is keyed for an extension client on its id (it has no base URL or API key): a client signals a refusal of its credentials by raising `PermissionError`, two in a row hold it (its calls fail at once, naming it, and fall back like any failure where the default is no less private), and a reply closes the breaker.
 - A tool call that names a tool the request did not offer is kept and goes down the loop's existing invalid-call path. A selected-but-gone model client with a less private default ends the turn with an error; a gone sandbox backend refuses the call.
-- The contract probe for a sandbox backend checks that a write outside the roots fails, that one inside works under `workspace-write`, and that an unlisted mode raises. The denied-read probe is not built (the default adapter builds its deny set itself).
-- The `runtime.fallback` inbox note is not built: no extension-facing inbox exists yet; the turn notice and the hook are.
-- The chat scope is chosen in Settings > Runtime for the focused chat, not in a chat menu.
+- The contract probe for a sandbox backend checks that a write outside the roots fails, that one inside works under `workspace-write`, and that an unlisted mode raises. The denied-read probe is not built: the default adapter ignores `SandboxRequest.deny` and builds its own deny set so that the Seatbelt profile text stays byte for byte as it was (10.7.7), so a probe that reads a path from `deny` would fail the default adapter and say nothing about it; it can be built when an adapter enforces the request's list, and it needs macOS to run.
+- A selection that is gone leaves one card under Needs you per change (the same once-per-change rule as the `runtime.fallback` hook), besides the turn notice and the hook.
+- The chat scope is chosen in the chat's runtime menu (the button beside the model menu under the text box) as well as in Settings > Runtime for the focused chat. The menu lists the single-provider slots that have more than one provider to pick, today the agent loop.
 
 ### 10.8 PR 19: Permission presets, core guard order, effective config
 
@@ -1499,7 +1499,7 @@ Where it differs from the text above, on purpose:
 - A tamper is detected and fails closed with a critical log line; there is no inbox note, because the inbox has no extension-raised notes yet.
 - Presets write only what changes (a key that already holds the preset's value keeps its source), and an added allow rule at any scope counts as loosening even when a deny rule beats it.
 - `grain config dump` lists the tool catalog a bare Toolbox knows (the core tools) plus every tool with an explicit mode; a running backend lists extension tools too. `runtime` holds each runtime slot's resolution on a running backend and is an empty object in `grain config dump`.
-- The composer pill is unchanged: it still opens Settings > Permissions, where a preset applies to everywhere, the open project or the open chat.
+- The composer pill opens a menu: the presets, each applied to the current chat alone (a looser one shows its diff and applies on the second click), and Permission settings, which opens Settings > Permissions, where a preset applies to everywhere, the open project or the open chat.
 
 #### 10.8.6 Not in this step
 

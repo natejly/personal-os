@@ -75,3 +75,17 @@ test('Settings > Runtime picks per scope, confirms a looser choice, tests a prov
   expect(accepts[0]).toEqual({ provider: 'acme/box', dimensions: ['fs_read_deny'] })
   await closeSettings(page)
 })
+
+test('the chat\'s runtime menu picks the agent loop for this chat alone', async ({ grain }) => {
+  const { page, api } = grain
+  await newChat(page)
+  await sayAndWait(page, '!!reply hello', 'hello')
+  const chat = (await api('/conversations'))[0]
+  await page.getByRole('button', { name: 'Runtime for this chat' }).click()
+  await page.getByLabel('Agent loop, this chat').selectOption('core/plan-execute-verify')
+  await expect.poll(async () => (await api(`/conversations/${chat.id}`)).settings.runtime?.['agent.loop']).toBe('core/plan-execute-verify')
+  await expect(page.getByText('because this chat selects it')).toBeVisible()
+  expect((await api('/settings')).runtime?.['agent.loop']).toBeUndefined()
+  await page.getByLabel('Agent loop, this chat').selectOption('')
+  await expect.poll(async () => (await api(`/conversations/${chat.id}`)).settings.runtime?.['agent.loop']).toBeUndefined()
+})

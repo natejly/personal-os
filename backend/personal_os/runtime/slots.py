@@ -131,6 +131,7 @@ class Runtime:
     def __init__(self, bus: HookBus, core: Iterable[Provider]) -> None:
         self.bus = bus
         self.scopes: Callable[[], Scopes] = Scopes  # the app points this at the chat in the current context
+        self.note: Callable[[str, str], None] = lambda title, body: None  # the app points this at the inbox: (title, body) of a selection that is gone
         self._providers: dict[str, dict[str, Provider]] = {slot: {} for slot in SLOTS}
         self._seen: dict[str, Any] = {}  # provider id -> its locality or support when last available: what a fallback is judged against
         self._announced: set[tuple[str, str, bool]] = set()
@@ -236,6 +237,7 @@ class Runtime:
         if (key := (d.id, wanted, refused)) not in self._announced:
             self._announced.add(key)
             self.announce(d.id, wanted, None if refused else default.id, why, refused, scopes)
+            self.note(f"A selected {d.noun} is not available", why)
         return Resolution(d.id, wanted if refused else default.id, "default", why, False, fell_back_from=wanted, refused=refused)
 
     def _multi(self, d: SlotDef, scopes: Scopes) -> Resolution:

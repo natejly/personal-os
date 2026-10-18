@@ -128,6 +128,7 @@ def test_a_selection_whose_extension_is_gone_ends_the_turn_when_the_default_is_l
         h.select("model.client", "gone/client")
         turn = h.chat("hello")
         assert turn.error is None and turn.text == "" and any(ev == "error" and "nothing was run" in d["message"] for ev, d in turn.events)
+        assert any(n["ext_id"] == "core" and "not available" in n["body"] and n["target"] == "inbox" for n in appmod.ExtNotes(appmod.db).open())
 
 
 def test_a_selected_source_offers_its_tool_and_a_call_runs_through_the_loop(ext: Path) -> None:

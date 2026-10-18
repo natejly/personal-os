@@ -18,6 +18,9 @@ count; those keep llm's retry with backoff. Nor does a LiteLLM proxy passing on 
 (see upstream()): the Settings key is fine, and the proxy's other models still work. This is a circuit breaker for a dead key, not a budget: nothing here
 limits how many runs or rounds a working key may make.
 
+An extension's model client is held the same way (`client_key`): two PermissionErrors from it in a row open the breaker, and its
+calls then fail at once with a message naming the client.
+
 State lives in memory and resets on restart, which costs at most FAILS_TO_OPEN failed requests.
 """
 from __future__ import annotations
@@ -54,12 +57,22 @@ def _id(settings: dict[str, Any]) -> tuple[str, str]:
     return str(settings.get("baseUrl") or "").strip().rstrip("/"), fingerprint(settings.get("apiKey"))
 
 
+def client_key(client_id: str, label: str) -> dict[str, Any]:
+    """The breaker key of an extension's model client. It has no URL or API key of its own, so its id stands for both; it signals a
+    refusal of its credentials by raising PermissionError."""
+    return {"baseUrl": f"client:{client_id}", "client": label}
+
+
 def provider_name(settings: dict[str, Any]) -> str:
+    if settings.get("client"):
+        return str(settings["client"])
     p = providers.get(providers.effective(settings))
     return p["name"] if p and p["id"] != "custom" else "model provider"
 
 
 def message(settings: dict[str, Any]) -> str:
+    if settings.get("client"):
+        return f"The model client '{settings['client']}' was refused its credentials. Fix them in its extension's settings."
     return f"The {provider_name(settings)} API key was rejected. Fix it in Settings → Model."
 
 

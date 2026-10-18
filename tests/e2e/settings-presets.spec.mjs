@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures.mjs'
 import { dialog, openAdvanced, openSettings } from './helpers/home.mjs'
+import { newChat, sayAndWait } from './helpers/chat.mjs'
 
 const preset = (page, id) => dialog(page).locator(`.preset-list li[data-preset="${id}"]`)
 
@@ -59,4 +60,26 @@ test('the effective configuration lists every setting with its source and is rea
   await dialog(page).getByRole('group', { name: 'Source' }).getByRole('button', { name: 'preset', exact: true }).click()
   await expect(table.locator('tbody tr').first()).toContainText('preset:builtin:allow-all')
   await expect(table.getByRole('textbox')).toHaveCount(0)
+})
+
+test('the composer pill\'s menu applies a preset to this chat alone', async ({ grain }) => {
+  const { page, api } = grain
+  await newChat(page)
+  await sayAndWait(page, '!!reply hello', 'hello')
+  const chat = (await api('/conversations'))[0]
+  await page.locator('.composer-footer .skip-perms').click()
+  await page.getByRole('button', { name: /^Read only/ }).click()
+  await expect(page.getByText('Read only applied to this chat')).toBeVisible()
+  expect((await api(`/conversations/${chat.id}`)).settings.permissions).toBeTruthy()
+  expect((await api('/settings')).tools?.shell_run).not.toBe('off')
+  // A preset that allows more than the chat has shows what would change and applies on the second click.
+  await page.locator('.composer-footer .skip-perms').click()
+  await page.getByRole('button', { name: /^Allow everything/ }).click()
+  await expect(page.getByRole('alert').filter({ hasText: 'would allow more' })).toBeVisible()
+  await page.getByRole('button', { name: 'Apply anyway' }).click()
+  await expect(page.getByText('Allow everything applied to this chat')).toBeVisible()
+  // The menu still opens Settings > Permissions.
+  await page.locator('.composer-footer .skip-perms').click()
+  await page.getByRole('button', { name: 'Permission settings' }).click()
+  await expect(dialog(page).getByRole('radiogroup', { name: 'Permission mode' })).toBeVisible()
 })

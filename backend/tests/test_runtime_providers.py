@@ -9,7 +9,7 @@ import asyncio
 import inspect
 import sys
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -61,12 +61,14 @@ class Rig:
 
 
 @pytest.fixture
-def rig(monkeypatch: pytest.MonkeyPatch) -> Rig:
+def rig(monkeypatch: pytest.MonkeyPatch) -> Iterator[Rig]:
     r = Rig()
     monkeypatch.setattr(runtime, "active", r.rt)
     monkeypatch.setattr(llm, "bus", r.bus)
     monkeypatch.setattr(llm.default_client, "settings", lambda: REMOTE)
-    return r
+    llm.auth_breaker.reset()
+    yield r
+    llm.auth_breaker.reset()
 
 
 def stream(**kw: Any) -> AsyncIterator[dict[str, Any]]:
@@ -184,6 +186,34 @@ def test_a_remote_client_failing_before_its_first_event_is_retried_once_on_the_d
     assert "default client answered" in events[-1]["notice"]
     [fell] = [p for h, p in rig.events if h == "runtime.fallback"]
     assert (fell["slot"], fell["wanted"], fell["used"], fell["refused"]) == ("model.client", "acme/c", "core/openai-compatible", False)
+
+
+def test_a_client_refused_its_credentials_twice_is_held_and_not_called_again(rig: Rig, monkeypatch: pytest.MonkeyPatch) -> None:
+    used = broken_default(monkeypatch)
+    client = FakeModelClient(fail_at=0, error=PermissionError)
+    rig.select("model.client", rig.add("model.client", "c", client))
+    for _ in range(2):
+        assert run(collect(stream()))[0]["text"] == "default answer"
+    assert len(client.requests) == 2
+    held = run(collect(stream()))
+    assert len(client.requests) == 2, "the third call is refused before the client is reached"
+    assert held[0]["text"] == "default answer" and "refused its credentials" in held[-1]["notice"]
+    assert used == ["default"] * 3
+
+
+def test_a_held_client_fails_the_turn_when_the_default_is_less_private_and_a_reset_reopens_it(rig: Rig) -> None:
+    client = FakeModelClient(fail_at=0, error=PermissionError, locality="local")
+    rig.select("model.client", rig.add("model.client", "c", client))
+    for _ in range(2):
+        with pytest.raises(llm.LLMError, match="PermissionError") as raised:
+            run(collect(stream()))
+        assert raised.value.kind == "auth"
+    with pytest.raises(llm.LLMError, match="'C' was refused its credentials"):
+        run(collect(stream()))
+    assert len(client.requests) == 2
+    llm.auth_breaker.reset()
+    client.fail_at = None
+    assert run(collect(stream()))[-1]["type"] == "end" and len(client.requests) == 3
 
 
 def test_a_local_client_may_fall_back_to_a_local_default(rig: Rig, monkeypatch: pytest.MonkeyPatch) -> None:

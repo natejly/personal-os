@@ -1701,7 +1701,16 @@ def _alternative_client(entry: str) -> Any | None:
 
 
 def _client_error(chosen: Any, e: Exception) -> LLMError:
-    return e if isinstance(e, LLMError) else LLMError(f"The model client '{chosen.label}' failed: {type(e).__name__}: {str(e)[:200]}", kind="server")
+    return e if isinstance(e, LLMError) else LLMError(f"The model client '{chosen.label}' failed: {type(e).__name__}: {str(e)[:200]}",
+                                                       kind="auth" if isinstance(e, PermissionError) else "server")
+
+
+def _hold(chosen: Any) -> dict[str, Any]:
+    """The auth breaker's key for a client; raises while the client is being held for refusing its credentials."""
+    key = auth_breaker.client_key(chosen.id, chosen.label)
+    if (held := auth_breaker.check(key)) is not None:
+        raise LLMError(held, kind="auth")
+    return key
 
 
 def _fall_back(chosen: Any, e: Exception) -> str:
@@ -1769,18 +1778,28 @@ async def _bounded(events: AsyncIterator[Any], idle: float, cancel: asyncio.Even
             stopper.cancel()
 
 
-async def _stream_client(client: Any, settings: dict[str, Any], req: ModelRequest, cancel: asyncio.Event | None) -> AsyncIterator[dict[str, Any]]:
-    """One chat call on a swapped-in client: its events held to the stream shape, with the usage row, the model hooks, the idle
-    limit, Stop and the deadline applied here, so no client can skip them."""
+async def _stream_client(chosen: Any, settings: dict[str, Any], req: ModelRequest, cancel: asyncio.Event | None) -> AsyncIterator[dict[str, Any]]:
+    """One chat call on a swapped-in client: its events held to the stream shape, with the usage row, the model hooks, the auth
+    breaker, the idle limit, Stop and the deadline applied here, so no client can skip them."""
+    key = _hold(chosen)
     t0, p_chars = time.time(), _prompt_chars(req.messages, req.tools)
     _emit_request(req.model, req.messages, req.tools)
-    events = client.stream(req).__aiter__()
+    events = chosen.impl.stream(req).__aiter__()
+    settled = False
     try:
         async for ev in checked.checked(_bounded(events, _idle_s(settings), cancel, stream_deadline.get()), p_chars):
             if ev["type"] == "end":
+                auth_breaker.success(key)
+                settled = True
                 _emit_usage(req.model, req.kind, ev["usage"], int((time.time() - t0) * 1000), p_chars, ev["usage_est"]["completion_tokens"] * 4)
             yield ev
+    except PermissionError:
+        auth_breaker.failure(key, 401, "")
+        settled = True
+        raise
     finally:
+        if not settled:
+            auth_breaker.inconclusive(key)
         if close := getattr(events, "aclose", None):
             await close()
 
@@ -1800,7 +1819,7 @@ async def stream_chat(
         return
     started = False
     try:
-        async for ev in _stream_client(chosen.impl, settings, ModelRequest(model, messages, tools, kind, effort, tool_choice, fast), cancel):
+        async for ev in _stream_client(chosen, settings, ModelRequest(model, messages, tools, kind, effort, tool_choice, fast), cancel):
             started = True
             yield ev
         return
@@ -1812,9 +1831,10 @@ async def stream_chat(
         yield {**ev, "notice": notice} if ev["type"] == "end" else ev
 
 
-async def _client_complete(client: Any, settings: dict[str, Any], req: ModelRequest, cancel: asyncio.Event | None,
+async def _client_complete(chosen: Any, settings: dict[str, Any], req: ModelRequest, cancel: asyncio.Event | None,
                            deadline: float | None) -> str:
-    task = asyncio.ensure_future(client.complete(req))
+    key = _hold(chosen)
+    task = asyncio.ensure_future(chosen.impl.complete(req))
     stopper = asyncio.ensure_future(cancel.wait()) if cancel is not None else None
     try:
         outcome = await _first(task, stopper, _left(_idle_s(settings), deadline))
@@ -1823,12 +1843,19 @@ async def _client_complete(client: Any, settings: dict[str, Any], req: ModelRequ
         if outcome == "timeout":
             raise LLMError("The model provider took too long.", kind="timeout")
         reply = task.result()
+    except PermissionError:
+        auth_breaker.failure(key, 401, "")
+        raise
+    except BaseException:
+        auth_breaker.inconclusive(key)
+        raise
     finally:
         task.cancel()
         if stopper is not None:
             stopper.cancel()
     if not isinstance(reply, ModelReply) or not isinstance(reply.text, str):
-        raise LLMError(f"The model client '{client.id}' did not return a ModelReply.", kind="server")
+        raise LLMError(f"The model client '{chosen.id}' did not return a ModelReply.", kind="server")
+    auth_breaker.success(key)
     return reply.text
 
 
@@ -1843,7 +1870,7 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
     t0 = time.time()
     _emit_request(model, messages)
     try:
-        text = await _client_complete(chosen.impl, settings, ModelRequest(model, messages, None, kind, effort), cancel, deadline)
+        text = await _client_complete(chosen, settings, ModelRequest(model, messages, None, kind, effort), cancel, deadline)
     except Exception as e:  # noqa: BLE001
         _fall_back(chosen, e)
         return await _complete_openai(settings, model, messages, kind, effort=effort, cancel=cancel, deadline=deadline)

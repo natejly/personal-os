@@ -842,6 +842,21 @@ kbd {
 .model-menu-error { color: var(--danger); }
 .model-menu-retry { border: 0; background: none; padding: 0; font: inherit; color: var(--text); text-decoration: underline; cursor: pointer; }
 .model-menu-retry:disabled { opacity: 0.5; cursor: default; }
+.pop-menu { position: relative; display: inline-flex; }
+.pop-menu-panel {
+  position: absolute; z-index: 80; bottom: calc(100% + 6px); left: 0; width: 260px; max-height: min(320px, calc(100vh - 96px)); overflow-y: auto;
+  background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow-float); padding: 4px;
+}
+.pop-menu-title { margin: 0; padding: 6px 8px 2px; font-size: 11px; color: var(--text-faint); }
+.pop-menu-note { margin: 0; padding: 4px 8px; font-size: 12px; color: var(--text-faint); }
+.pop-menu-item {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 5px 8px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--text); font: 13px var(--font); cursor: pointer; text-align: left;
+}
+.pop-menu-item small { color: var(--text-faint); font-size: 11px; }
+.pop-menu-item:hover, .pop-menu-item:focus-visible { background: var(--hover); }
+.pop-menu-field { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; font-size: 12px; color: var(--text-faint); }
+.pop-menu-field select { max-width: 100%; }
 .model-menu-row {
   display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 4px 6px 4px 8px;
   border-radius: 6px; cursor: pointer; color: var(--text); font-size: 13px;

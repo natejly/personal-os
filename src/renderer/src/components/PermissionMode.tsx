@@ -1,6 +1,10 @@
-import { useState, type KeyboardEvent } from 'react'
+import { useEffect, useState, type KeyboardEvent } from 'react'
+import type { PermissionPreset, PresetDiff } from '@shared/types'
 import { ShieldAlert, ShieldCheck } from '../icons'
+import { api } from '../lib/api'
+import { diffRows } from '../lib/presets'
 import { useStore } from '../store'
+import PopMenu from './PopMenu'
 import { MODES, modeOf, needsConfirm, pillLabel, pillTitle, type PermissionMode } from '../lib/permissionMode'
 
 /** The description without its "Label — " lead, as a sentence of its own. */
@@ -60,16 +64,55 @@ export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; on
   )
 }
 
-/** The composer pill: the current mode, in red text under Allow everything and otherwise plain. It opens Settings on
-    Permissions, which also holds the domains and MCP controls. */
-export function PermissionModePill(): JSX.Element {
+/** What the pill's menu offers a chat: each permission preset, applied to this chat alone. One that allows more than the chat has
+    now lists what would change and applies on the second click. */
+function ChatPresets({ conversationId, close }: { conversationId: string; close: () => void }): JSX.Element {
+  const [presets, setPresets] = useState<PermissionPreset[]>([])
+  const [held, setHeld] = useState<{ preset: PermissionPreset; diff: PresetDiff } | null>(null)
+  const toast = useStore((s) => s.toast)
+  useEffect(() => { api.presets.list().then(setPresets).catch(() => undefined) }, [])
+  const apply = (preset: PermissionPreset, confirm?: string): void => {
+    api.presets.apply(preset.id, 'chat', conversationId, confirm).then((r) => {
+      if ('held' in r) { setHeld({ preset, diff: r.held }); return }
+      toast(`${preset.name} applied to this chat`, 'info')
+      close()
+    }).catch((e: Error) => toast(e.message, 'error'))
+  }
+  if (held) {
+    return (
+      <div role="alert">
+        <p className="pop-menu-note"><b>{held.preset.name}</b> would allow more than this chat has now:</p>
+        <ul className="pop-menu-note">{diffRows(held.diff).filter((r) => r.loosens).map((r) => <li key={r.key}>{r.label}: {r.old} to {r.next}</li>)}</ul>
+        <button type="button" className="pop-menu-item" onClick={() => setHeld(null)}>Cancel</button>
+        <button type="button" className="pop-menu-item" onClick={() => apply(held.preset, held.diff.diff_hash)}>Apply anyway</button>
+      </div>
+    )
+  }
+  return (
+    <>
+      <p className="pop-menu-title">Preset for this chat</p>
+      {presets.map((p) => (
+        <button key={p.id} type="button" className="pop-menu-item" onClick={() => apply(p)}>{p.name}{p.description && <small>{p.description}</small>}</button>
+      ))}
+    </>
+  )
+}
+
+/** The composer pill: the current mode, in red text under Allow everything and otherwise plain. Its menu applies a preset to this
+    chat and opens Settings on Permissions, which also holds the domains and MCP controls. */
+export function PermissionModePill({ conversationId = null }: { conversationId?: string | null }): JSX.Element {
   const mode = useStore((s) => modeOf(s.settings))
   const openSettings = useStore((s) => s.openSettings)
   const title = pillTitle(mode)
   return (
-    <button type="button" className={`ghost-btn skip-perms ${mode === 'allow_all' ? 'on' : ''}`} title={title} aria-label={title}
-      data-mode={mode} onClick={() => openSettings('permissions')}>
-      <ShieldCheck size={13} aria-hidden /> {pillLabel(mode)}
-    </button>
+    <PopMenu className={`ghost-btn skip-perms ${mode === 'allow_all' ? 'on' : ''}`} title={title} aria-label={title} data-mode={mode}
+      label={<><ShieldCheck size={13} aria-hidden /> {pillLabel(mode)}</>}>
+      {(close) => (
+        <>
+          {conversationId && <ChatPresets conversationId={conversationId} close={close} />}
+          <button type="button" className="pop-menu-item" onClick={() => { close(); openSettings('permissions') }}>Permission settings</button>
+        </>
+      )}
+    </PopMenu>
   )
 }

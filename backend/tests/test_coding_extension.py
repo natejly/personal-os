@@ -229,6 +229,24 @@ def test_the_gate_is_inert_while_the_extension_is_off(repo_rig):
     assert not r.tb.available("coding_session_start", google_ok=True) and not r.tb.available("opencode_run", google_ok=True)
 
 
+def test_turning_the_extension_off_stops_the_sessions_and_closes_the_terminals_it_left_running(repo_rig, monkeypatch):
+    r, calls = repo_rig, []
+
+    async def stop_all(why: str) -> list:
+        calls.append(("sessions", why))
+        return []
+
+    async def close_where(where: str, *args: Any) -> None:
+        calls.append(("terminals", where))
+    monkeypatch.setattr(r.coding.sessions, "stop_all", stop_all)
+    monkeypatch.setattr(r.coding.terminals, "close_where", close_where)
+    asyncio.run(r.coding.ext_changed({"id": "coding", "enabled": True}))
+    asyncio.run(r.coding.ext_changed({"id": "other", "enabled": False}))
+    assert calls == []
+    asyncio.run(r.coding.ext_changed({"id": "coding", "enabled": False}))
+    assert [c[0] for c in calls] == ["sessions", "terminals"]
+
+
 # ---- the whole app: off takes everything away, on brings it back ----
 def test_turning_the_extension_off_hides_its_tools_routes_and_rule_and_on_restores_them():
     from fastapi.testclient import TestClient

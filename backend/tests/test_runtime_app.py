@@ -284,8 +284,9 @@ def test_accepting_a_partly_enforced_dimension_is_the_users_alone(ext: Path, api
 def test_the_test_button_runs_the_contract_and_a_tool_can_be_accepted_back(ext: Path, api: TestClient) -> None:
     with Harness(ext, SETTINGS):
         assert api.post("/runtime/test", json={"slot": "model.router", "provider": "demo/router"}).json()["ok"] is True
-        assert api.post("/runtime/test", json={"slot": "model.router", "provider": "demo/nope"}).json()["ok"] is False
+        assert api.post("/runtime/test", json={"slot": "model.router", "provider": "demo/nope"}).status_code == 404
         assert api.post("/runtime/test", json={"slot": "model.nothing", "provider": "x"}).status_code == 404
+        assert api.post("/runtime/test", json={"slot": "agent.loop", "provider": "core/chat-loop"}).status_code == 422
         assert api.post("/runtime/tools/x__demo__ghost/accept").status_code == 404
         assert api.get("/runtime").json()["withheld_tools"] == []
 

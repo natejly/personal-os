@@ -446,8 +446,8 @@ _ext_ctx = ExtensionContext(db=db, hidden_views=lambda: settings().get("hiddenVi
                             chat_settings=chat_settings)
 host.load_builtin("google", _ext_ctx)
 google: Google = _ext_ctx.services["google"]()
-app.include_router(setup_router(settings, db.set_settings, lambda: google.status()["connected"]))
-app.include_router(providers_router(db.get_settings, db.set_settings, db.secrets, ensure_embedding_model))
+app.include_router(setup_router(settings, db.set_user_settings, lambda: google.status()["connected"]))
+app.include_router(providers_router(db.get_settings, db.set_user_settings, db.secrets, ensure_embedding_model))
 # Not host.mount: the todos router gates itself, but the Google Tasks sync routes answer with the Lists view off.
 for _r in host.load_builtin("todos", _ext_ctx).routers:
     app.include_router(_r)

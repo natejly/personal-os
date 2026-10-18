@@ -101,6 +101,8 @@ def validate(doc: Any, *, rule_check: Callable[[Any], None] | None = None) -> di
     try:
         for key in permissions.SCOPED_KEYS:
             if key in doc:
+                if key == "permissionRules" and isinstance(doc[key], dict) and (bad := sorted(set(doc[key]) - {"allow", "ask", "deny"})):
+                    raise PresetError(f"unknown permissionRules key {bad[0]!r}; use allow, ask or deny")
                 out[key] = permissions.validate(key, doc[key], rule_check=rule_check)
         if "network" in doc:
             net = doc["network"]

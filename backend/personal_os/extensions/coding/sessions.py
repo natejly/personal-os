@@ -995,10 +995,17 @@ class CodingSessions:
         job ends with the shell registry anyway."""
         if not run_id or self.closing:
             return []
+        return await self._stop_live("run_id = ? AND", (run_id,), why)
+
+    async def stop_all(self, why: str) -> list[dict[str, Any]]:
+        """Stop every live session, because the extension was turned off and its routes and tools with it."""
+        return await self._stop_live("", (), why)
+
+    async def _stop_live(self, where: str, args: tuple[Any, ...], why: str) -> list[dict[str, Any]]:
         live = (*LIVE, "blocked")
         with self.db.tx() as c:
-            rows = [dict(r) for r in c.execute(f"SELECT * FROM coding_sessions WHERE run_id = ? AND status IN ({','.join('?' * len(live))})",
-                                               (run_id, *live))]
+            rows = [dict(r) for r in c.execute(f"SELECT * FROM coding_sessions WHERE {where} status IN ({','.join('?' * len(live))})",
+                                               (*args, *live))]
         out = []
         for row in rows:
             reason = f"stopped: {why}{await self._kept(row)}"

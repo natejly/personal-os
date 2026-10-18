@@ -107,6 +107,9 @@ class PlanExecuteVerify:
         yield "status", {"text": "Planning the work"}
         yield "span", {"name": "plan", "open": True, "meta": {}}
         work.steps = await self._plan(h)
+        if h.limits.stopped:  # a Stop during the plan call leaves the chat's own plan alone
+            yield "span", {"name": "plan", "open": False, "meta": {}}
+            return
         work.status, work.notes, work.said = ["pending"] * len(work.steps), [[] for _ in work.steps], [""] * len(work.steps)
         await h.hooks.emit("loop.plan", {"run_id": turn.run_id, "conversation_id": turn.conversation_id, "steps": [dict(s) for s in work.steps]})
         yield _plan_event(work)
@@ -142,6 +145,8 @@ class PlanExecuteVerify:
             out = _Call()
             async for _event in self._call(h, h.context.build(tail), out, tools=False):
                 pass
+            if h.limits.stopped:
+                return []
             data = _json_object(out.text)
             if not (problem := _plan_problem(data) or ""):
                 return [{"title": s["title"].strip(), "done_when": s["done_when"].strip()} for s in data["steps"]]

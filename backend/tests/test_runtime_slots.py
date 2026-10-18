@@ -345,4 +345,7 @@ def test_the_contract_runs_from_the_registry(host: ExtensionHost, tmp_path: Path
     assert asyncio.run(host.runtime.test("model.router", "acme/ok"))["ok"] is True
     bad = asyncio.run(host.runtime.test("model.router", "acme/slow"))
     assert bad["ok"] is False and "budget" in bad["detail"]
-    assert asyncio.run(host.runtime.test("model.router", "acme/missing"))["ok"] is False
+    with pytest.raises(KeyError):
+        asyncio.run(host.runtime.test("model.router", "acme/missing"))
+    with pytest.raises(ValueError, match="no code to test"):
+        asyncio.run(host.runtime.test("agent.loop", "core/chat-loop"))

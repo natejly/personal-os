@@ -11,7 +11,7 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from . import backups, migrations
+from . import backups, migrations, setting_sources
 from .secrets import SecretStore
 
 log = logging.getLogger("personal_os.db")
@@ -726,6 +726,12 @@ class Database:
                     "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                     (k, json.dumps(v)),
                 )
+
+    def set_user_settings(self, patch: dict[str, Any]) -> None:
+        """set_settings for a write the user made through a dedicated route, recorded as theirs (setting_sources)."""
+        self.set_settings(patch)
+        with self.tx() as c:
+            setting_sources.stamp(c, patch, "user")
 
 
 class ReadOnlyDatabase(Database):

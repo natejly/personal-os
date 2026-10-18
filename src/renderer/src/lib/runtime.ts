@@ -38,6 +38,11 @@ export function sourceOn(sel: RuntimeSelection | undefined, id: string): boolean
   return (s.enable ?? []).includes(id) && !(s.disable ?? []).includes(id)
 }
 
+/** What a tool source's switch shows: at everywhere, that scope's own list; at a project or chat, whether it is in force there, since a wider scope may already have it on. */
+export function sourceShown(at: 'global' | 'project' | 'chat', sel: RuntimeSelection | undefined, resolution: Pick<RuntimeResolution, 'extra'>, id: string): boolean {
+  return at === 'global' ? sourceOn(sel, id) : resolution.extra.includes(id)
+}
+
 /** The selection after switching source `id` on or off at a scope. */
 export function toggleSource(sel: RuntimeSelection | undefined, id: string, on: boolean): RuntimeSelection {
   const s = typeof sel === 'object' && sel ? sel : {}

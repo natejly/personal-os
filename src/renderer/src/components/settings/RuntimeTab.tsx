@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { RuntimeProvider, RuntimeResolution, RuntimeSelection, RuntimeSlot, RuntimeView } from '@shared/types'
 import { api } from '../../lib/api'
-import { confirmDiff, partialDimensions, pickedId, slotNoun, sourceOn, sourceText, toggleSource } from '../../lib/runtime'
+import { confirmDiff, partialDimensions, pickedId, slotNoun, sourceShown, sourceText, toggleSource } from '../../lib/runtime'
 import { CORE, registerSettingsPanel } from '../../extensions/host'
 import { useStore } from '../../store'
 import Switch from './Switch'
@@ -62,7 +62,7 @@ export default function RuntimeTab(): JSX.Element {
       return (
         <>
           {s.providers.filter((p) => !p.core).map((p) => (
-            <Switch key={p.id} title={p.label} help={p.extension ?? undefined} checked={sourceOn(s.selected[at], p.id)} disabled={!p.available}
+            <Switch key={p.id} title={p.label} help={p.extension ?? undefined} checked={sourceShown(at, s.selected[at], s.resolution, p.id)} disabled={!p.available}
               onChange={(on) => select(s.id, toggleSource(s.selected[at], p.id, on))} />
           ))}
           {!s.providers.some((p) => !p.core) && <p className="set-help">No extension offers a {s.noun}.</p>}

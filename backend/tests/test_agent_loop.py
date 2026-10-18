@@ -634,6 +634,16 @@ def test_a_steer_that_cuts_a_model_read_short_asks_the_phase_again() -> None:
     assert done(events)["error"] is None and spans(events) == ["plan", "execute", "verify"]
 
 
+def test_a_stop_during_the_plan_call_leaves_the_chats_plan_alone() -> None:
+    cid = chat(PEV)
+    appmod.work_plans.set(cid, [{"text": "my own step", "status": "pending"}])
+    ROUNDS.extend(["wait", "wait"])
+    events = drive(cid, stop_on="status")
+    assert len(MODEL) == 1, "no second plan attempt after Stop"
+    assert [s["text"] for s in appmod.work_plans.get(cid)["steps"]] == ["my own step"] and not [e for e in events if e[0] == "plan"]
+    assert HOOKS["loop.plan"] == []
+
+
 def test_the_loop_says_which_phase_it_is_in() -> None:
     ROUNDS.extend([plan_of("Read the note", "Write it up"), "read", "wrote", VERIFIED, "Done."])
     events = drive(chat(PEV))

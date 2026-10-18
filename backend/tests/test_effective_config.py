@@ -145,6 +145,16 @@ def test_a_value_stored_before_sources_were_recorded_is_the_users_and_flagged_le
     assert e["source"] == "user" and e["legacy"] is True
 
 
+def test_a_value_written_through_a_dedicated_route_is_the_users_and_not_legacy() -> None:
+    r = client.put("/runtime", json={"slot": "agent.loop", "scope": "global", "scope_id": None, "value": "core/plan-execute-verify", "confirm": False})
+    assert r.status_code == 200
+    try:
+        e = dump()["values"]["runtime"]
+        assert e["source"] == "user" and not e.get("legacy")
+    finally:
+        appmod.db.set_settings({"runtime": {}})
+
+
 # ---- secrets never leave
 def test_a_planted_secret_appears_nowhere_in_the_output() -> None:
     sentinels = {k: f"SENTINEL-{k}-{i}" for i, k in enumerate(SECRET_SETTINGS)}

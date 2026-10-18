@@ -167,6 +167,12 @@ class Coding:
         """chat.deleted: its terminals close."""
         await self.terminals.close_where("conversation_id = ?", ev["id"])
 
+    async def ext_changed(self, ev: dict[str, Any]) -> None:
+        """Turning the extension off takes its controls with it, so the sessions and terminals still running are stopped."""
+        if ev["id"] == self.api.manifest.id and not ev["enabled"]:
+            await self.sessions.stop_all("the Coding extension was turned off")
+            await self.terminals.close_where("1 = 1")
+
     async def start(self, _ev: Any) -> None:
         """app.start: the watchers that notice a Claude Code session finishing and move recipe runs along, for as long as the
         extension runs."""
@@ -195,3 +201,4 @@ def activate(api: ExtensionScope) -> None:
     api.on("subagent.stop", coding.child_ended)
     api.on("chat.deleted", coding.chat_deleted)
     api.on("app.start", coding.start)
+    api.on("ext.changed", coding.ext_changed)

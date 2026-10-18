@@ -67,6 +67,7 @@ def apply(preset_id: str, scope: str = "global", scope_id: str = "", confirm: st
 # ---- the schema
 def test_the_schema_rejects_what_it_should() -> None:
     bad = [{"name": "x", "colour": "red"}, {"name": "x", "permissionMode": "yolo"}, {"name": "x", "permissionRules": {"deny": ["Bash(unclosed"]}},
+           {"name": "x", "permissionRules": {"bogus": []}},
            {"name": "x", "connectors": {"srv": "on"}}, {"name": "x", "floor": {"shell": "allow"}}, {"name": "x", "hardline": []},
            {"name": "x", "protectedPaths": []}, {"name": "x", "trustExternalContent": True}, {"name": "x", "allowAllConnections": True},
            {"name": "x", "network": {"trustExternalContent": True}}, {"name": "x", "tools": {"danger": {"bogus": "off"}}},

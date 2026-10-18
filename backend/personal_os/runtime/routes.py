@@ -62,7 +62,7 @@ class Selections:
 
     def write(self, scope: str, scope_id: str | None, value: dict[str, Any]) -> None:
         if scope == "global":
-            self.db.set_settings({"runtime": value})
+            self.db.set_user_settings({"runtime": value})
         elif scope == "project":
             self.projects.update(scope_id or "", {"runtime": value})
         else:
@@ -174,6 +174,11 @@ def router(rt: Runtime, selections: Selections, sources: ToolSources) -> APIRout
     async def test(body: Probe) -> dict[str, Any]:
         if body.slot not in SLOTS:
             raise HTTPException(404, f"no runtime slot {body.slot!r}")
-        return await rt.test(body.slot, body.provider)
+        try:
+            return await rt.test(body.slot, body.provider)
+        except KeyError:
+            raise HTTPException(404, f"no provider {body.provider!r} in slot {body.slot!r}") from None
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
 
     return r

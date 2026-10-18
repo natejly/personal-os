@@ -296,10 +296,11 @@ class Runtime:
 
     # ---- tests ----
     async def test(self, slot: str, provider_id: str) -> dict[str, Any]:
-        """Run the slot's contract suite against a provider: {ok, detail}."""
-        provider = self._providers[slot].get(provider_id)
-        if provider is None or provider.impl is None:
-            return {"ok": False, "detail": "This provider has no code to test."}
+        """Run the slot's contract suite against a provider: {ok, detail}. KeyError for an unknown provider, ValueError for a
+        built-in one, which has no code behind it."""
+        provider = self._providers[slot][provider_id]
+        if provider.impl is None:
+            raise ValueError("This provider has no code to test.")
         try:
             await SLOTS[slot].contract(provider.impl)
         except Exception as e:  # noqa: BLE001 - any failure of the provider is the answer

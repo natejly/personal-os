@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { ApiError } from './apiError'
-import { confirmDiff, partialDimensions, pickedId, runtimeChip, runtimeReasons, slotNoun, sourceOn, sourceText, toggleSource } from './runtime'
+import { confirmDiff, partialDimensions, pickedId, runtimeChip, runtimeReasons, slotNoun, sourceOn, sourceShown, sourceText, toggleSource } from './runtime'
 import type { RuntimeResolution } from '@shared/types'
 
 const res = (over: Partial<RuntimeResolution>): RuntimeResolution => ({
@@ -39,6 +39,13 @@ test('tool sources switch on and off per scope with enable and disable lists', (
   assert.deepEqual(off, { enable: [], disable: ['a'] })
   assert.equal(sourceOn(off, 'a'), false)
   assert.deepEqual(toggleSource(toggleSource(off, 'b', true), 'a', true), { enable: ['b', 'a'], disable: [] })
+})
+
+test('a narrower scope shows a tool source that a wider one switched on', () => {
+  const inForce = { extra: ['a'] }
+  assert.equal(sourceShown('chat', undefined, inForce, 'a'), true)
+  assert.equal(sourceShown('chat', { enable: [], disable: ['a'] }, { extra: [] }, 'a'), false)
+  assert.equal(sourceShown('global', undefined, inForce, 'a'), false)
 })
 
 test('a 409 with a diff asks for a confirmation; any other error does not', () => {

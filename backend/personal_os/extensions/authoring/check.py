@@ -18,6 +18,7 @@ from ..manifest import Manifest, ManifestError, load_manifest
 BUILTINS = Path(__file__).parents[1]  # the built-in extensions, one folder each
 CORE_SERVICES = frozenset({"mcp", "google"})  # lent by the app through ExtensionContext.services
 TOOL_NAME = re.compile(r"[a-z][a-z0-9_]*")
+CREATE_TABLE = re.compile(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[\"`\[]?(\w+)", re.IGNORECASE)
 CODE_EXCLUDED = {"tests", "dist", "node_modules", "__pycache__"}
 
 
@@ -44,7 +45,10 @@ def check(root: Path, previous: Path | None = None) -> list[Finding]:
         return out  # the manifest loader already refused any code, hooks or tools a profile carries
     out += _tools(root, manifest)
     out += _code(root, manifest)
+    out += _data_tables(root, manifest)
     out += _authority_lint(root, manifest)
+    if previous and not previous.is_file():
+        return [*out, Finding("error", "permission-diff", f"{previous} is not a file to compare permissions against")]
     return [*out, *_permission_diff(manifest, previous or root / "extension.lock.json")]
 
 
@@ -142,6 +146,7 @@ def _code(root: Path, manifest: Manifest) -> list[Finding]:
     if not entry.is_file():
         return [Finding("error", "code", "extension.py is missing")]
     subscribed: set[str] = set()
+    specs: list[dict[str, str | None]] = []
     uses_context = dynamic = False
     provides_loop = any(e["slot"] == "agent.loop" for e in manifest.contributes.get("runtime", ()))
     for path in _python_files(root):
@@ -162,8 +167,10 @@ def _code(root: Path, manifest: Manifest) -> list[Finding]:
                     subscribed.add(call.args[0].value)
                 else:
                     dynamic = True
+        specs += [spec for n in ast.walk(tree) if isinstance(n, ast.Call) and (spec := _tool_spec(n))]
         if path == entry:
             out += _activate(tree)
+    out += _tool_mismatches(manifest, specs)
     for hook in sorted(subscribed):
         if hook not in HOOKS:
             out.append(Finding("error", "unknown-hook", f"api.on({hook!r}): no such hook"))
@@ -177,6 +184,48 @@ def _code(root: Path, manifest: Manifest) -> list[Finding]:
         used = subscribed | ({"context.contribute"} if uses_context else set())
         out += [Finding("warn", "unused-hook", f"extension.json declares {h!r} but the code never subscribes to it") for h in manifest.hooks if h not in used]
     return out
+
+
+def _tool_spec(call: ast.Call) -> dict[str, str | None] | None:
+    """The name, group and danger a `ToolSpec(...)` call gives its tool; None for a field that is not a string literal."""
+    if not (isinstance(call.func, ast.Name) and call.func.id == "ToolSpec" or isinstance(call.func, ast.Attribute) and call.func.attr == "ToolSpec"):
+        return None
+    given = {**dict(zip(("name", "description", "parameters", "fn", "group", "danger"), call.args)), **{k.arg: k.value for k in call.keywords if k.arg}}
+    return {"name": _literal(given.get("name")), "group": _literal(given.get("group")),
+            "danger": _literal(given["danger"]) if "danger" in given else "safe"}
+
+
+def _literal(node: ast.expr | None) -> str | None:
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def _tool_mismatches(manifest: Manifest, specs: list[dict[str, str | None]]) -> list[Finding]:
+    """The tools the code registers against the ones extension.json declares: the host refuses to load an extension where they differ."""
+    declared = {t["name"]: t for t in manifest.contributes.get("tools", ())}
+    out: list[Finding] = []
+    for spec in specs:
+        name = spec["name"]
+        if name is None:
+            continue
+        if name not in declared:
+            out.append(Finding("error", "tool-mismatch", f"the code registers tool {name!r} but extension.json does not declare it"))
+            continue
+        for field in ("group", "danger"):
+            if spec[field] is not None and spec[field] != declared[name].get(field):
+                out.append(Finding("error", "tool-mismatch", f"tool {name!r}: the code says {field} {spec[field]!r}, extension.json says {declared[name].get(field)!r}"))
+    if all(spec["name"] for spec in specs):
+        registered = {spec["name"] for spec in specs}
+        out += [Finding("error", "tool-mismatch", f"extension.json declares tool {name!r} but the code never registers it") for name in declared if name not in registered]
+    return out
+
+
+def _data_tables(root: Path, manifest: Manifest) -> list[Finding]:
+    """With its own migrations folder, every table data.tables names must be created by one of them (a built-in's tables come from the app's own schema)."""
+    folder = manifest.data.get("migrations")
+    if not folder:
+        return []
+    created = {m.group(1) for sql in (root / folder).glob("*.sql") for m in CREATE_TABLE.finditer(sql.read_text("utf-8"))}
+    return [Finding("error", "data-tables", f"data.tables names {t!r} but no migration creates it") for t in manifest.data.get("tables", ()) if t not in created]
 
 
 def _is_api(node: ast.expr) -> bool:

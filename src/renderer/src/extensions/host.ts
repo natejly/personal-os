@@ -8,7 +8,7 @@ import type { FC, RefObject } from 'react'
 import type { FullDesk, Message, Settings, WidgetKind } from '@shared/types'
 import { canonicalAccelerator, shortcutForKeys } from '@shared/shortcuts'
 import type { ModuleDef, ModuleNav } from '../shell/types'
-import type { State, View } from '../store'
+import { useStore, type State, type View } from '../store'
 import type { WidgetDef } from '../canvas/registry'
 import { viewHidden } from '../moduleToggles'
 import { registerToolCard, type ToolCardDisplay, type ToolCardProps } from '../components/toolcards/registry'
@@ -214,9 +214,11 @@ export function activateExtension(id: string, ext: ExtensionModule): Disposable 
     selectionAction: (def) => keep(registerSelectionAction(id, def)),
     widget: (def) => keep(registerWidget(id, def)),
     store: extStore(id),
-    on: ((event: string, fn: never) => keep(
-      event === 'ui.view.opened' ? onViewOpened(fn) : event === 'ui.message.display' ? onMessageDisplay(fn) : onExtEvent(event, fn)
-    )) as UiApi['on'],
+    on: ((event: string, handler: (...a: never[]) => unknown) => {
+      // Handlers run only while the user has the extension on, like the rest of what it registers.
+      const fn = ((...a: never[]) => ownerOn(useStore.getState().settings, id) ? handler(...a) : undefined) as never
+      return keep(event === 'ui.view.opened' ? onViewOpened(fn) : event === 'ui.message.display' ? onMessageDisplay(fn) : onExtEvent(event, fn))
+    }) as UiApi['on'],
     theme: (tokens, opts) => keep(addTheme(tokens, opts?.scheme))
   })
   return { dispose: () => { for (const d of scope.reverse()) d.dispose() } }

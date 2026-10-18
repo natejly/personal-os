@@ -201,6 +201,8 @@ def test_the_routes_refuse_what_cannot_be_selected(ext: Path, api: TestClient) -
         assert put(api, "model.router", {"enable": ["demo/router"]}).status_code == 422
         assert put(api, "tools.source", "demo/src").status_code == 422
         assert put(api, "tools.source", {"disable": ["core/builtin"]}).status_code == 422
+        for junk in ({}, {"foo": []}, {"enable": "demo/src"}, {"enable": [1]}):
+            assert put(api, "tools.source", junk).status_code == 422
         assert put(api, "agent.loop", "demo/router").status_code == 422
         assert put(api, "model.router", "demo/router", "project").status_code == 422
         assert put(api, "model.router", "demo/router", "chat", "nope").status_code == 404
@@ -208,6 +210,7 @@ def test_the_routes_refuse_what_cannot_be_selected(ext: Path, api: TestClient) -
         appmod.db.set_settings({"hiddenViews": ["demo"]})
         assert put(api, "model.router", "demo/router").status_code == 422
         assert not appmod.db.get_settings().get("runtime")
+        assert put(api, "tools.source", {"enable": ["core/builtin"]}).status_code == 200  # always on: nothing to confirm
 
 
 def test_a_plain_settings_write_cannot_select_a_provider_and_the_agent_has_no_tool_for_it(ext: Path) -> None:

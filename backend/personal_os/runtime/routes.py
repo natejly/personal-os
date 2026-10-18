@@ -84,9 +84,12 @@ def router(rt: Runtime, selections: Selections, sources: ToolSources) -> APIRout
     def check(slot: str, value: Any) -> None:
         if slot not in SLOTS:
             raise HTTPException(404, f"no runtime slot {slot!r}")
-        wanted = (value.get("enable", []) + value.get("disable", [])) if isinstance(value, dict) else [] if value is None else [value]
         if SLOTS[slot].multi != isinstance(value, dict) and value is not None:
             raise HTTPException(422, f"{slot} takes " + ("{enable, disable} lists" if SLOTS[slot].multi else "one provider id"))
+        if isinstance(value, dict) and not (value and set(value) <= {"enable", "disable"}
+                                            and all(isinstance(v, list) and all(isinstance(i, str) for i in v) for v in value.values())):
+            raise HTTPException(422, f"{slot} takes {{enable, disable}} lists of provider ids")
+        wanted = (value.get("enable", []) + value.get("disable", [])) if isinstance(value, dict) else [] if value is None else [value]
         for provider_id in wanted:
             p = rt.provider(slot, provider_id)
             if p is None or not p.available:

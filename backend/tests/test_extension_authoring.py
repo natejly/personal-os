@@ -42,7 +42,8 @@ def run(coro: Any) -> Any:
 
 
 def errors(root: Path) -> list[str]:
-    return [f.code for f in check(root) if f.level == "error"]
+    """The error codes, leaving out the code/manifest tool comparison that tests rewriting either half would all trip."""
+    return [f.code for f in check(root) if f.level == "error" and f.code != "tool-mismatch"]
 
 
 @pytest.fixture
@@ -112,6 +113,8 @@ def test_new_refuses_a_bad_id_and_an_existing_folder(work: Path, ext: Path) -> N
             scaffold(bad, work)
     with pytest.raises(FileExistsError):
         scaffold("sample", work)
+    with pytest.raises(ValueError, match="built-in"):
+        scaffold("lean", work)
 
 
 def test_new_profile_has_no_code_and_passes_check(work: Path) -> None:
@@ -148,6 +151,26 @@ def test_check_rejects_an_id_or_tool_name_the_app_already_has(ext: Path) -> None
 
 def test_check_does_not_collide_a_built_in_with_itself() -> None:
     assert not [f for f in check(BUILTINS / "health") if f.code in ("id-collision", "tool-collision")]
+
+
+def test_check_catches_code_and_manifest_that_disagree(ext: Path) -> None:
+    edit(ext, "extension.py", lambda t: t.replace('"sample", danger="writes"', '"sample_group", danger="writes"'))
+    assert [f.message for f in check(ext) if f.code == "tool-mismatch"] == [
+        "tool 'sample_note': the code says group 'sample_group', extension.json says 'sample'"]
+    edit(ext, "extension.py", lambda t: t.replace('"sample_group", danger="writes"', '"sample", danger="safe"'))
+    assert [f.message for f in check(ext) if f.code == "tool-mismatch"] == [
+        "tool 'sample_note': the code says danger 'safe', extension.json says 'writes'"]
+    edit(ext, "extension.py", lambda t: t.replace('ToolSpec("sample_note"', 'ToolSpec("other_note"').replace('"sample", danger="safe"', '"sample", danger="writes"'))
+    assert [f.message for f in check(ext) if f.code == "tool-mismatch"] == [
+        "the code registers tool 'other_note' but extension.json does not declare it",
+        "extension.json declares tool 'sample_note' but the code never registers it"]
+
+
+def test_check_wants_every_data_table_created_by_a_migration(ext: Path) -> None:
+    set_manifest(ext, data={"tables": ["sample_notes", "sample_gone"], "migrations": "migrations/"})
+    assert [f.message for f in check(ext) if f.code == "data-tables"] == ["data.tables names 'sample_gone' but no migration creates it"]
+    set_manifest(ext, data={"tables": ["sample_notes"]})  # no migrations folder: the tables come from elsewhere
+    assert [f.code for f in check(ext) if f.code == "data-tables"] == []
 
 
 def test_check_requires_closure(ext: Path) -> None:
@@ -255,6 +278,8 @@ def test_check_diffs_permissions_against_the_previous_version(ext: Path) -> None
     assert [f.message for f in check(ext, older) if f.level == "warn" and "prompt:inject" in f.message] == ["permissions added since old.json: prompt:inject"]
     lock.write_text("{", "utf-8")
     assert [f.code for f in check(ext) if f.level == "warn"] == ["unused-hook", "permission-diff"]
+    for bad in (ext, ext / "missing.json"):
+        assert [f.level for f in check(ext, bad) if f.code == "permission-diff"] == ["error"]
 
 
 # ---- grain ext pack ----
@@ -315,6 +340,12 @@ def test_cli_test_runs_the_extensions_own_tests_in_a_scratch_data_dir(ext: Path,
     assert cli.main(["ext", "test", str(ext)]) == 0
     (ext / "tests" / "test_extension.py").write_text("def test_red():\n    assert False\n", "utf-8")
     assert cli.main(["ext", "test", str(ext)]) == 1
+
+
+def test_cli_test_on_a_profile_has_nothing_to_run(work: Path, capsys: Any) -> None:
+    root = scaffold("quiet", work, profile=True)
+    assert cli.main(["ext", "test", str(root)]) == 0
+    assert "nothing to run" in capsys.readouterr().out
 
 
 def test_dev_snapshot_notices_edits_but_not_build_output(ext: Path) -> None:

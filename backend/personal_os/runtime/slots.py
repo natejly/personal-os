@@ -279,7 +279,7 @@ class Runtime:
         the resolution in effect: empty when it is equal or stricter. The user sees these lines before confirming."""
         if slot == "tools.source":
             added = [i for i in (wanted or {}).get("enable", ()) if i not in was.extra]
-            return [f"{self._providers[slot][i].label} adds its tools" for i in added if i in self._providers[slot]]
+            return [f"{p.label} adds its tools" for i in added if (p := self._providers[slot].get(i)) and not p.core]  # a core source is always on
         new = self._providers[slot].get(wanted) if isinstance(wanted, str) else None
         if new is None or not new.available:
             return []

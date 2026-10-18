@@ -103,6 +103,9 @@ def cmd_dev(args: argparse.Namespace) -> int:
 def cmd_test(args: argparse.Namespace) -> int:
     """Run the extension's own tests against a scratch data directory."""
     root = Path(args.folder).resolve()
+    if not args.pytest_args and not (root / "tests").is_dir():
+        print(f"{root.name} has no tests directory: nothing to run")
+        return 0
     with tempfile.TemporaryDirectory(prefix="grain-ext-test-") as scratch:
         backend = str(Path(__file__).parents[3])  # where personal_os and grain_sdk are, installed or not
         env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [backend, os.environ.get("PYTHONPATH")])),

@@ -313,6 +313,20 @@ class GateTests(Loose):
         self.assertIn("guard", out.reason)
         self.assertIn("did not answer", out.reason)
 
+    def test_a_failing_handler_does_not_hide_a_later_deny(self) -> None:
+        bus = HookBus()
+        sub(bus, "tool.pre", lambda p: 1 / 0, priority=10)
+        sub(bus, "tool.pre", lambda p: Deny("no"), priority=60)
+        with self.assertLogs("personal_os.extensions.hooks", "WARNING"):
+            self.assertEqual(run(bus.gate("tool.pre", {})), Deny("no"))
+
+    def test_a_later_ask_does_not_soften_an_earlier_failure_to_deny(self) -> None:
+        bus = HookBus()
+        sub(bus, "tool.pre", lambda p: 1 / 0, priority=10, on_failure="deny")
+        sub(bus, "tool.pre", lambda p: Ask("check"), priority=60)
+        with self.assertLogs("personal_os.extensions.hooks", "WARNING"):
+            self.assertIsInstance(run(bus.gate("tool.pre", {})), Deny)
+
     def test_a_timeout_fails_toward_ask(self) -> None:
         bus = HookBus()
 

@@ -27,6 +27,7 @@ from personal_os import app as appmod  # noqa: E402
 from personal_os import backups, migrations  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.extensions import host as host_mod  # noqa: E402
+from personal_os.extensions import hooks as hooks_mod  # noqa: E402
 from personal_os.extensions.host import ExtensionHost  # noqa: E402
 from personal_os.extensions.manifest import Manifest, ManifestError  # noqa: E402
 
@@ -109,6 +110,19 @@ def test_app_stop_handlers_get_a_budget_then_are_cancelled(monkeypatch: pytest.M
     asyncio.run(host.stop())
     assert time.monotonic() - started < 1
     assert state == {"cancelled": True, "later": True}
+
+
+def test_an_app_stop_handler_without_its_own_timeout_gets_the_whole_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(host_mod, "STOP_BUDGET_S", 0.5)
+    host, state = ExtensionHost(), {"finished": False}
+
+    async def slow(_p: Any) -> None:
+        await asyncio.sleep(0.3)  # past the emit default, inside the stop budget
+        state["finished"] = True
+    monkeypatch.setitem(hooks_mod.TIMEOUT_S, "emit", 0.1)
+    host._add(declared("app.stop", ext_id="slow")).on("app.stop", slow)
+    asyncio.run(host.stop())
+    assert state["finished"]
 
 
 def test_stopping_disposes_the_subscriptions() -> None:
@@ -257,7 +271,10 @@ def test_put_settings_accepts_declared_extension_keys_and_keeps_secrets_out_of_t
         assert c.get("/settings").json()["ext.demo.tokenSet"] is False
 
         assert c.put("/settings", json={"ext.demo.limit": "many"}).status_code == 422
-        assert c.put("/settings", json={"ext.demo.label": None}).status_code == 422
+        assert c.put("/settings", json={"ext.demo.limit": None}).status_code == 200  # null unsets any type
+        assert c.get("/settings").json()["ext.demo.limit"] is None
+        r = c.put("/settings", json={"ext.demo.limit": 1.5})
+        assert r.status_code == 422 and "must be an integer" in r.json()["detail"]
 
 
 def test_settings_changed_lists_the_changed_keys_and_never_a_secret_value(demo_extension: list) -> None:

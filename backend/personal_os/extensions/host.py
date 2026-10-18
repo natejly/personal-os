@@ -591,15 +591,15 @@ class ExtensionHost:
         return spec["type"] if spec else None
 
     def check_setting(self, key: str, value: Any) -> Any:
-        """The value as it may be stored for a declared extension setting, or ValueError with the reason."""
+        """The value as it may be stored for a declared extension setting, or ValueError with the reason. None unsets it."""
         kind = self.setting_type(key)
         if kind is None:
             raise ValueError(f"{key} is not a declared setting")
-        ok = {"string": isinstance(value, str), "secret": value is None or isinstance(value, str),
+        ok = {"string": isinstance(value, str), "secret": isinstance(value, str),
               "boolean": isinstance(value, bool), "integer": isinstance(value, int) and not isinstance(value, bool),
               "number": isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)}[kind]
-        if not ok:
-            raise ValueError(f"{key} must be a {kind}")
+        if value is not None and not ok:
+            raise ValueError(f"{key} must be {'an' if kind[0] in 'aeiou' else 'a'} {kind}")
         return value
 
     def secret_setting_keys(self) -> list[str]:

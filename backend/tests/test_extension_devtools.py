@@ -180,6 +180,14 @@ def test_a_broken_folder_is_reported_and_a_fixed_one_loads(ext: Path) -> None:
     assert load(ext).status_code == 200 and listing()["failed"] == []
 
 
+def test_an_empty_path_is_refused_and_failed_loads_can_be_cleared() -> None:
+    assert client.post("/dev/extensions/load", json={"path": "  "}).status_code == 400
+    assert client.post("/dev/extensions/load", json={"path": "/nonexistent"}).status_code == 400
+    assert [f["path"] for f in listing()["failed"]] == ["/nonexistent"]
+    assert client.delete("/dev/extensions/failed").json() == {"ok": True}
+    assert listing()["failed"] == []
+
+
 def test_a_failed_reload_keeps_the_reason_and_drops_the_old_tools(ext: Path) -> None:
     load(ext)
     edit(ext, "extension.py", lambda t: t + "\n    raise RuntimeError('half done')\n")

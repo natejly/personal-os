@@ -14,13 +14,14 @@ export default function ExtensionsDev(): JSX.Element {
   useEffect(load, [load])
   const act = (run: () => Promise<ExtensionInfo>): void => {
     setError(null)
-    run().then(() => api.settings.get()).then((settings) => { useStore.setState({ settings }); load() }).catch((e: Error) => setError(e.message))
+    run().then(() => api.settings.get()).then((settings) => { useStore.setState({ settings }); load() }).catch((e: Error) => { setError(e.message); load() }) // a failed reload has already unloaded the extension
   }
   return (
     <>
       <h4>Extensions</h4>
       <div className="test-row">
         <button type="button" className="ghost-btn" onClick={load}>Refresh</button>
+        {!!listing?.failed.length && <button type="button" className="ghost-btn" onClick={() => api.devExtensions.clearFailed().then(load).catch((e: Error) => setError(e.message))}>Clear failed loads</button>}
         {error && <span className="test-msg" role="status">{error}</span>}
       </div>
       {listing && !listing.live && <p className="set-help">Reloading needs the backend to be started with GRAIN_EXT_DEV=1.</p>}

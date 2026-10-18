@@ -155,10 +155,11 @@ class HookBus:
 
     @staticmethod
     def _timeout(sub: Subscription, kind: str) -> float | None:
-        """Core handlers were never time-limited; only an explicit budget bounds one."""
+        """Core handlers were never time-limited; only an explicit budget bounds one. app.stop handlers share the one
+        budget ExtensionScope.stop puts on the whole emit."""
         if sub.timeout_s is not None:
             return sub.timeout_s
-        return None if sub.owner == "core" else TIMEOUT_S[kind]
+        return None if sub.owner == "core" or sub.hook == "app.stop" else TIMEOUT_S[kind]
 
     async def _invoke(self, sub: Subscription, arg: Any, kind: str) -> Any:
         return await asyncio.wait_for(sub.call(arg), self._timeout(sub, kind))
@@ -305,15 +306,19 @@ class HookBus:
         return value
 
     async def gate(self, hook: str, payload: Any = None) -> Deny | Ask | None:
-        """None means no handler objected, not that the call is allowed: the permission stack still decides."""
+        """None means no handler objected, not that the call is allowed: the permission stack still decides. A handler that
+        fails is not an opinion: the next one is still asked, so a Deny after a broken handler is not lost."""
         self._enter(hook, "gate", payload)
+        unanswered: Deny | Ask | None = None
         for sub in self._subs.get(hook, ()):
             ok, out = await self._try(sub, payload, "gate")
             if ok and out is None:
                 continue
             if ok and isinstance(out, (Deny, Ask)):
-                return out
+                return out if isinstance(out, Deny) or unanswered is None else unanswered
             log.warning("gate %s from %s %s", hook, sub.owner, "returned something other than Deny or Ask" if ok else "failed")
             reason = f"hook {hook} from {sub.owner} did not answer"
-            return Deny(reason) if sub.on_failure == "deny" else Ask(reason)
-        return None
+            stricter = Deny(reason) if sub.on_failure == "deny" else Ask(reason)
+            if unanswered is None or isinstance(stricter, Deny) and isinstance(unanswered, Ask):
+                unanswered = stricter
+        return unanswered

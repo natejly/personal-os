@@ -78,6 +78,11 @@ def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Too
         return {"live": live, "extensions": [describe(host, s) for s in host.extensions.values()],
                 "failed": [{"path": str(p), "error": e} for p, e in host.failed.items()]}
 
+    @r.delete("/failed")
+    def clear_failed() -> dict[str, bool]:
+        host.failed.clear()
+        return {"ok": True}
+
     @r.post("/{ext_id}/enable")
     def enable(ext_id: str) -> dict[str, Any]:
         return set_hidden(ext_id, False)
@@ -96,6 +101,8 @@ def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Too
     @r.post("/load")
     async def load(body: LoadIn) -> dict[str, Any]:
         require_dev()
+        if not body.path.strip():
+            raise HTTPException(400, "a folder path is required")
         try:
             scope = await host.load_dev(Path(body.path).expanduser().resolve(), ctx)
         except Exception as e:  # noqa: BLE001 - the reason goes to the panel

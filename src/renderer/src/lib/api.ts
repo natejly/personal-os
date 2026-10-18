@@ -699,7 +699,8 @@ export const api = {
     list: () => req<ExtensionsDev>('/dev/extensions'),
     enable: (id: string) => req<ExtensionInfo>(`/dev/extensions/${encodeURIComponent(id)}/enable`, { method: 'POST' }),
     disable: (id: string) => req<ExtensionInfo>(`/dev/extensions/${encodeURIComponent(id)}/disable`, { method: 'POST' }),
-    reload: (id: string) => req<ExtensionInfo>(`/dev/extensions/${encodeURIComponent(id)}/reload`, { method: 'POST' })
+    reload: (id: string) => req<ExtensionInfo>(`/dev/extensions/${encodeURIComponent(id)}/reload`, { method: 'POST' }),
+    clearFailed: () => req<{ ok: boolean }>('/dev/extensions/failed', { method: 'DELETE' })
   },
   extensions: {
     list: () => req<ExtensionsReview>('/extensions'),

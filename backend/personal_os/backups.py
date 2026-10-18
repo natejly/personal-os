@@ -281,6 +281,7 @@ export/             The same content as plain text:
   conversations.md / conversations.json
   memories.md / memories.json
   documents.md / documents.json   (extracted text of every document)
+  extensions/<table>.json         (one file per table an extension keeps, e.g. todos)
 """
 
 

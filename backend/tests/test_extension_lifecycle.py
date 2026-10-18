@@ -497,6 +497,7 @@ def test_export_includes_the_declared_extension_tables(tmp_path: Path) -> None:
         names = set(z.namelist())
         assert "export/extensions/demo_t.json" in names and "export/extensions/not_created_yet.json" not in names
         assert json.loads(z.read("export/extensions/demo_t.json"))[0]["x"] == "a"
+        assert "extensions/<table>.json" in z.read("README.txt").decode()
     backups.export_zip(db.data_dir, dest)
     with zipfile.ZipFile(dest) as z:
         assert not [n for n in z.namelist() if n.startswith("export/extensions/")]

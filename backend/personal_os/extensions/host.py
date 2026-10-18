@@ -334,10 +334,14 @@ class ExtensionScope:
         return self.on("context.contribute", contribute, priority=priority,
                        timeout_ms=STABLE_CONTEXT_TIMEOUT_MS if slot == "stable" else None)
 
-    def retrieval_source(self, name: str, fn: Callable[[dict[str, Any]], Awaitable[Any]]) -> Disposable:
-        """Add a place a turn's retrieval looks; `fn` takes {query, vec, project_id, conv_settings} and returns a list of {id, text, ref}."""
+    def retrieval_source(self, name: str, fn: Callable[[dict[str, Any]], Any]) -> Disposable:
+        """Add a place a turn's retrieval looks; `fn` takes {query, vec, project_id, conv_settings} and returns a list of {id, text, ref},
+        sync or async."""
         async def search(payload: dict[str, Any]) -> Any:
-            return await fn(payload) if self.enabled() else None
+            if not self.enabled():
+                return None
+            out = await asyncio.to_thread(fn, payload)  # as in context(): an async fn only builds its coroutine there
+            return await out if inspect.isawaitable(out) else out
         return self.disposables.add(self.retrieval.register(name, search, owner=self.manifest.id))
 
     async def start(self) -> None:

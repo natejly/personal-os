@@ -425,8 +425,8 @@ All `U` hooks attach at `dispatch_tool`, which wraps `Toolbox.call` (`tools.py:1
 | Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
 | `memory.before_write` | `Memories.create`, `supersede` and `update`, before the write | `{content, kind, source, project_id}` | `MemoryBeforeWritePayload` or `Deny` | `pipe_sync` (sync handlers only); a denial raises `MemoryRefused` (HTTP 403 on the memory routes) | built-in extensions, or one that declares `memory:gate` |
-| `memory.written` | `Memories.create`, `supersede` and `update`, after commit | `{memory, source}`. `memory` is a copy of the row. | none | `emit_sync` | any enabled extension |
-| `memory.deleted` | `Memories.delete` and `invalidate` | `{memory, source}`. `memory` is a copy of the row. | none | `emit_sync` | any enabled extension |
+| `memory.written` | `Memories.create`, `supersede` and `update`, and `Trash.restore` of a memory, after commit | `{memory, source}`. `memory` is a copy of the row. | none | `emit_sync` | any enabled extension |
+| `memory.deleted` | `Memories.delete` and `invalidate`, and `Trash.trash` of a memory | `{memory, source}`. `memory` is a copy of the row. | none | `emit_sync` | any enabled extension |
 | `compaction.before` | `Compactor.compact`, before the summarizer is called | `{messages, window, summary}`. A handler returns the payload with `summary` set to replace the built-in summarizer's text. | `CompactionBeforePayload` | one winner (the last to set `summary`); a failing or empty one changes nothing, so the built-in summarizer runs | any enabled extension |
 | `compaction.after` | `Compactor.compact`, after the summary is saved | `{summary}` | none | `emit` | any enabled extension |
 <!-- hooks:end 5.7 -->

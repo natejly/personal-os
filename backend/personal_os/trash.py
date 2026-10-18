@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException
 from . import blobs
 from .db import Database, now
 from .docs import Docs, drop_doc_windows
+from .extensions.hooks import HookBus
 from .migrations import sync_memories_fts
 from .todos import Todos
 from .workspace import Workspace, WorkspaceError
@@ -50,10 +51,11 @@ CHILD_TABLES = ("conversations", "memories", "documents")  # docs and todos are 
 
 
 class Trash:
-    def __init__(self, db: Database, todos: Todos, docs: Docs):
+    def __init__(self, db: Database, todos: Todos, docs: Docs, hooks: HookBus | None = None):
         self.db = db
         self.todos = todos
         self.docs = docs
+        self.hooks = hooks or HookBus()
 
     @staticmethod
     def _check(kind: str) -> tuple[str, str]:
@@ -63,6 +65,12 @@ class Trash:
 
     # ---- trash ----
     def trash(self, kind: str, id: str) -> bool:
+        hit = self._trash(kind, id)
+        if hit and kind == "memory":
+            self._announce_memory("memory.deleted", id)
+        return hit
+
+    def _trash(self, kind: str, id: str) -> bool:
         table, _ = self._check(kind)
         if kind == "todo":
             return self.todos.trash(id)
@@ -81,6 +89,13 @@ class Trash:
             self._demote(c, id)
             c.execute("DELETE FROM doc_folders WHERE scope=?", (id,))  # the tree is gone; the docs' own folder paths are not
         return True
+
+    def _announce_memory(self, hook: str, id: str) -> None:
+        """memory.deleted / memory.written for a memory the person trashed or restored, so a mirror of the memories stays right."""
+        if self.hooks.active(hook):
+            with self.db.tx() as c:
+                row = dict(c.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone())
+            self.hooks.emit_sync(hook, {"memory": row, "source": row["source"]})
 
     @staticmethod
     def _demote(c: Any, project_id: str) -> None:
@@ -120,6 +135,8 @@ class Trash:
                     sync_memories_fts(c, [id])
         if kind == "todo":
             self.todos.restore(id)
+        if kind == "memory":
+            self._announce_memory("memory.written", id)
         return {"ok": True, "type": kind, "id": id, "moved_to_personal": moved}
 
     # ---- permanent delete ----

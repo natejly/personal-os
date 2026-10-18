@@ -63,6 +63,8 @@ class Review:
             try:
                 if not self.drafts.intact(ext_id):
                     raise DraftError("its files are not the ones that were accepted")
+                if refused := (self.drafts.card(ext_id) or {}).get("refused"):  # hiddenViews can be rewritten by hand, so re-check what enable checks
+                    raise DraftError(f"its drafting session read untrusted content, so it may not hold {', '.join(refused)}")
                 await self._load(ext_id)
             except Exception as e:  # noqa: BLE001 - the app starts either way
                 log.warning("installed extension %s is disabled: %s", ext_id, e)

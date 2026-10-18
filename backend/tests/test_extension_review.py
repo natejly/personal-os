@@ -347,3 +347,26 @@ def test_an_installed_extensions_widget_kinds_are_known_while_it_is_disabled_so_
     assert accept().status_code == 200
     assert "rl-notes" not in appmod.host.extensions
     assert "ext:rl-notes:board" in appmod._ext_ctx.widget_kinds()
+
+
+def test_startup_does_not_load_an_installed_extension_whose_session_is_refused_its_permissions() -> None:
+    draft(permissions=("prompt:inject",))
+    propose(tainted=True, taint_sources=["fetch_url"])
+    accept()
+    assert enable().status_code == 409
+    appmod.db.set_settings({"hiddenViews": [v for v in appmod.settings()["hiddenViews"] if v != "rl-notes"]})  # a write that omits it
+    on_loop(review.load_installed())
+    assert "rl-notes" not in appmod.host.extensions and "rl-notes" in appmod.settings()["hiddenViews"]
+    assert installed()["enabled"] is False
+
+
+def test_a_job_no_extension_serves_can_still_be_renamed_and_disabled_but_not_enabled() -> None:
+    job = client.post("/jobs", json={"name": "orphan", "prompt": "p", "cron": "0 8 * * *", "enabled": True}).json()
+    with appmod.db.tx() as c:
+        c.execute("UPDATE jobs SET kind='gone', cron='' WHERE id=?", (job["id"],))
+    try:
+        assert client.patch(f"/jobs/{job['id']}", json={"name": "renamed"}).json()["name"] == "renamed"
+        assert client.patch(f"/jobs/{job['id']}", json={"enabled": False}).json()["enabled"] is False
+        assert client.patch(f"/jobs/{job['id']}", json={"enabled": True}).status_code == 400
+    finally:
+        client.delete(f"/jobs/{job['id']}")

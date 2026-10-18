@@ -274,7 +274,7 @@ class HookBus:
             return []
         done = await asyncio.gather(*(self._try(s, payload, "collect") for s in subs))
         if skipped is not None:
-            skipped.extend(s.owner for s, (ok, _) in zip(subs, done) if not ok)
+            skipped.extend(o for o in dict.fromkeys(s.owner for s, (ok, _) in zip(subs, done) if not ok) if o not in skipped)
         return [r for ok, r in done if ok and r is not None]
 
     async def pipe(self, hook: str, value: Any) -> Any:

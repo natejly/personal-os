@@ -477,7 +477,7 @@ def _profile_changed(before: dict[str, Any]) -> None:
 app.include_router(profile_routes.router(host, _profile_changed))
 host.migrate(db)
 # Soft delete: the DELETE routes below move things here, and /trash restores or erases them (trash.py).
-trash = Trash(db, todos, docs)
+trash = Trash(db, todos, docs, host.bus)
 app.include_router(trash_router(trash))
 app.include_router(system_access.router(settings, lambda: toolbox.shell, lambda: coding))
 usage = Usage(db)
@@ -5697,8 +5697,10 @@ async def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     _check_agent(merged.get("agent_id"), merged.get("target"))
     if merged.get("target") == "desk" and not merged.get("desk_autonomy"):
         patch["desk_autonomy"] = "plan"
-    _check_schedule(merged["kind"], merged["cron"], patch.get("timezone"), merged["run_at"],
-                    fresh_time="run_at" in patch, watch_dir=merged.get("watch_dir"), job=merged)
+    orphaned = not jobs.known(cur["kind"])  # no extension serves its kind now: it can still be renamed, disabled or moved to a kind that is served
+    if not (orphaned and "kind" not in patch and not patch.get("enabled")):
+        _check_schedule(merged["kind"], merged["cron"], patch.get("timezone"), merged["run_at"],
+                        fresh_time="run_at" in patch, watch_dir=merged.get("watch_dir"), job=merged)
     if "enabled" in patch or "kind" in patch:
         _check_trigger_on(merged["kind"], bool(merged.get("enabled")))
     # Switching a spent one-off back on is the one re-arm that cannot work: it has no instant left to wait for,

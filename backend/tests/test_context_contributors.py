@@ -326,3 +326,27 @@ def test_a_slot_or_share_that_cannot_work_is_refused() -> None:
     for kw in ({"slot": "versions"}, {"slot": "tail", "share": 0}, {"slot": "tail", "share": -1}, {"slot": "tail", "share": 2}):
         with pytest.raises(ValueError):
             s.context(lambda p: None, **kw)
+
+
+def test_an_owner_with_two_dropped_handlers_is_reported_once() -> None:
+    host = ExtensionHost()
+
+    def boom(p: Any) -> Contribution:
+        raise RuntimeError("kaput")
+
+    def slow(p: Any) -> Contribution:
+        time.sleep(0.5)
+        return Contribution("late")
+    s = scope(host, "twice")
+    s.context(boom, slot="volatile")
+    s.context(slow, slot="stable")
+    skipped: list[str] = []
+    assert collect(host, skipped) == []
+    assert skipped == ["twice"]
+
+
+def test_a_sync_retrieval_source_works_like_an_async_one() -> None:
+    host = ExtensionHost()
+    scope(host, "sync-src", hooks=None).retrieval_source("notes", lambda p: [{"id": "1", "text": "SYNC-FACT", "ref": "r"}])
+    [block] = asyncio.run(host.retrieval.gather({}))[1]
+    assert "SYNC-FACT" in block.text

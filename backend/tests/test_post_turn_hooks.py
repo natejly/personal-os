@@ -29,6 +29,9 @@ from personal_os.extensions import hooks as hooks_mod  # noqa: E402
 from personal_os.extensions.hooks import Deny, HookBus  # noqa: E402
 from personal_os.repos import Conversations, Memories, MemoryRefused  # noqa: E402
 from personal_os.runs import RunBus, RunStore  # noqa: E402
+from personal_os.docs import Docs  # noqa: E402
+from personal_os.todos import Todos  # noqa: E402
+from personal_os.trash import Trash  # noqa: E402
 
 PROSE = ("I have been thinking about how I want the weekly review to go this year. Most weeks I rush it, and then I regret "
          "that I did not look at what actually happened across the whole seven days. I would like a calmer routine that "
@@ -743,3 +746,18 @@ def test_compaction_without_subscribers_is_unchanged(tmp_path: Path) -> None:
         return "S"
     res = asyncio.run(compactor.compact({"compactKeepRecent": 4}, "m", cid, convos.history_rows(cid), complete=built_in))
     assert res["compacted"] and compactor.get(cid)["summary"] == "S"
+
+
+def test_forgetting_through_the_trash_fires_deleted_and_restoring_fires_written(tmp_path: Path) -> None:
+    db, hooks = Database(tmp_path), HookBus()
+    memories = Memories(db, hooks)
+    trash = Trash(db, Todos(db), Docs(db), hooks)
+    gone: list[Any] = []
+    back: list[Any] = []
+    sub(hooks, "memory.deleted", lambda p: gone.append(p["memory"]["content"]))
+    sub(hooks, "memory.written", lambda p: back.append(p["memory"]["content"]))
+    m = memories.create(None, "alpha", kind="fact", source="user")
+    back.clear()
+    assert trash.trash("memory", m["id"]) and trash.trash("memory", m["id"]) is False
+    assert gone == ["alpha"]
+    assert trash.restore("memory", m["id"]) and back == ["alpha"]

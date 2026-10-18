@@ -194,7 +194,7 @@ export function shortcutForKeys(accel: string): Shortcut | undefined {
 
 /** The canonical accelerator of a key press, to compare with `canonicalAccelerator` of a binding. */
 export function acceleratorOf(e: { key: string; code?: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }, mac: boolean): string {
-  const key = e.altKey && e.code?.match(/^(?:Key|Digit)(.)$/)?.[1].toLowerCase()  // macOS Option+letter types another character ('ø'): the physical key names it
+  const key = mac && e.altKey && e.code?.match(/^(?:Key|Digit)(.)$/)?.[1].toLowerCase()  // macOS Option+letter types another character ('ø'): the physical key names it. Elsewhere e.key is the layout's letter
     || (e.shiftKey && UNSHIFTED[e.key]) || e.key
   const mods = [e.shiftKey && 'shift', e.altKey && 'alt', mac ? e.metaKey && 'mod' : e.metaKey && 'meta', mac ? e.ctrlKey && 'ctrl' : e.ctrlKey && 'mod']
   return [...mods.filter(Boolean).sort(), key === ' ' ? 'space' : KEY_NAMES[key.toLowerCase()] ?? key.toLowerCase()].join('+')

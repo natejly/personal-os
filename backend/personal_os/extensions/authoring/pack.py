@@ -44,6 +44,8 @@ def digest(files: dict[str, str]) -> str:
 def pack(root: Path) -> Path:
     """Bundle extension.tsx into dist/extension.js (when there is one), then write the lock file and return its path."""
     manifest = load_manifest(root / "extension.json")
+    if manifest.kind == "profile":
+        raise ValueError("a profile has no code to pin: it ships as its extension.json alone")
     if (root / "extension.tsx").is_file():
         subprocess.run([esbuild(), "extension.tsx", "--bundle", "--format=esm", "--platform=browser", "--jsx=automatic",
                         *(f"--external:{m}" for m in SHARED), f"--outfile={BUNDLE}", "--log-level=warning"],

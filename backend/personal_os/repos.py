@@ -268,6 +268,7 @@ class Conversations:
     def _hydrate(self, r: Any) -> dict[str, Any]:
         d = row_to_dict(r, ("settings",)) or {}
         d["settings"] = {**DEFAULT_CONV_SETTINGS, **(d.get("settings") or {})}
+        d["settings"]["tools"] = dict(d["settings"].get("tools") or {})  # not the shared default: an 'always allow' edits it in place
         if d["settings"].get("learn") is False:  # stays in history and search; only what it teaches is off
             d["settings"]["autoLearn"] = False
         return d

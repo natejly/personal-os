@@ -119,7 +119,7 @@ def cmd_pack(args: argparse.Namespace) -> int:
         return _print(findings)
     try:
         print(f"wrote {packing.pack(root)}")
-    except (FileNotFoundError, subprocess.CalledProcessError) as e:
+    except (FileNotFoundError, ValueError, subprocess.CalledProcessError) as e:
         print(f"error: {getattr(e, 'stderr', None) or e}")
         return 1
     return 0

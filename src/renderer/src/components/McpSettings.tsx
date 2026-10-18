@@ -226,7 +226,6 @@ export default function McpSettings(): JSX.Element {
   const [grants, setGrants] = useState<McpGrant[]>([])
   const [view, setView] = useState<View>('installed')
   const [confirmTool, setConfirmTool] = useState<string | null>(null)
-  const nameRef = useRef<HTMLInputElement>(null)
   const signPoll = useRef<ReturnType<typeof setInterval> | null>(null)
   useEffect(() => () => { if (signPoll.current) clearInterval(signPoll.current) }, [])
 
@@ -351,7 +350,6 @@ export default function McpSettings(): JSX.Element {
     setDraftReport(null)
     setAdding(true)
     setView('installed')
-    requestAnimationFrame(() => nameRef.current?.focus())
   }
 
   const acceptChange = (slug: string): Promise<void> =>
@@ -507,7 +505,7 @@ export default function McpSettings(): JSX.Element {
           </div>
           <div className="mcp-body">
             <label><span>Name</span>
-              <input ref={nameRef} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Filesystem" spellCheck={false} />
+              <input autoFocus value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Filesystem" spellCheck={false} />
             </label>
             <div className="seg" role="group" aria-label="Transport">
               {(['stdio', 'http', 'sse'] as const).map((t) => (
@@ -579,7 +577,7 @@ export default function McpSettings(): JSX.Element {
           </div>
         </div>
       ) : (
-        <button className="ghost-btn" onClick={() => { setAdding(true); requestAnimationFrame(() => nameRef.current?.focus()) }}>
+        <button className="ghost-btn" onClick={() => setAdding(true)}>
           <Plus size={13} /> Add custom
         </button>
       )}

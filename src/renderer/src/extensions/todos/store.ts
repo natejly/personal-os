@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import type { Todo } from '@shared/types'
 import { api, type Scope } from '../../lib/api'
 import { useStore } from '../../store'
+import { viewHidden } from '../../moduleToggles'
 
 interface TodosState {
   todos: Todo[]
@@ -21,6 +22,8 @@ export const useTodos = create<TodosState>()((set, get) => ({
   tick: 0,
   // Latest request wins: a slower, older fetch (another scope, or the mount's) must not overwrite the one the view asked for last.
   refreshTodos: async (scope = 'all', includeDone = false, sort = 'due') => {
+    // The routes are not mounted while Lists is off; callers that refresh alongside other data must not fail on it.
+    if (viewHidden(useStore.getState().settings, 'todos')) return
     const n = ++seq
     const rows = await api.todos.list(scope, includeDone, '', sort)
     if (n === seq) set({ todos: rows })

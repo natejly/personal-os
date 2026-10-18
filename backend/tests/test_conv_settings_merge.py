@@ -64,6 +64,15 @@ def test_merge_stays_shallow() -> None:
         assert convos.get(cid, with_messages=False)["settings"]["tools"] == {}
 
 
+def test_editing_one_chats_tools_in_place_leaves_new_chats_alone() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        convos = Conversations(Database(d))
+        a = convos.get(convos.create(None, "a", "m")["id"], with_messages=False)
+        a["settings"].setdefault("tools", {})["write_local_file"] = "on"
+        b = convos.get(convos.create(None, "b", "m")["id"], with_messages=False)
+        assert b["settings"]["tools"] == {}
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

@@ -5,6 +5,7 @@ import { insertIntoComposer } from './lib/composerInsert'
 import { getDraft } from './lib/drafts'
 import { ApiError } from './lib/apiError'
 import { api } from './lib/api'
+import { useTodos } from './extensions/todos/store'
 import { mergeConversation } from './sessionStatus'
 import type { ChatEvent, Message } from '@shared/types'
 
@@ -1575,4 +1576,16 @@ test('no component reads the whole store with a bare useStore()', async () => {
   }
   walk(join(process.cwd(), 'src/renderer/src'))
   assert.deepEqual(bad, [])
+})
+
+test('with Lists off the todos are not fetched, so a refresh that rides along other data cannot fail', async (t) => {
+  const orig = useStore.getState().settings
+  t.after(() => useStore.setState({ settings: orig }))
+  const { calls } = stubFetch(t, () => json({ detail: 'Not Found' }, 404))
+  useStore.setState({ settings: { ...orig, hiddenViews: ['todos'] } })
+  await useTodos.getState().refreshTodos()
+  assert.equal(calls.length, 0)
+  useStore.setState({ settings: { ...orig, hiddenViews: [] } })
+  await assert.rejects(useTodos.getState().refreshTodos())
+  assert.equal(calls.length, 1)
 })

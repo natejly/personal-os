@@ -290,6 +290,13 @@ def test_pack_command_refuses_an_extension_with_errors(ext: Path, capsys: Any) -
     assert not (ext / "extension.lock.json").exists() and "id-collision" in capsys.readouterr().out
 
 
+def test_pack_command_refuses_a_profile_and_leaves_it_valid(work: Path, capsys: Any) -> None:
+    root = scaffold("quiet", work, profile=True)
+    assert cli.main(["ext", "pack", str(root)]) == 1
+    assert "no code to pin" in capsys.readouterr().out
+    assert not (root / "extension.lock.json").exists() and cli.main(["ext", "check", str(root)]) == 0
+
+
 # ---- the command line ----
 def test_cli_new_and_check_exit_codes(work: Path, capsys: Any) -> None:
     assert cli.main(["ext", "new", "mine", "--dir", str(work)]) == 0

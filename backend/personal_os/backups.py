@@ -180,6 +180,8 @@ def _check(path: Path) -> None:
     try:
         if c.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise ValueError("backup fails its integrity check")
+    except sqlite3.DatabaseError as e:  # not a SQLite file at all
+        raise ValueError("backup fails its integrity check") from e
     finally:
         c.close()
 

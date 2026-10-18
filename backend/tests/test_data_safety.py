@@ -222,6 +222,12 @@ class BackupTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             backups.stage_restore(self.d, m["name"])
 
+    def test_stage_rejects_a_file_that_is_not_a_database(self) -> None:
+        name = "grain-20261018-070001-manual.db"
+        (self.d / "backups" / name).write_bytes(b"not a database at all" * 100)
+        with self.assertRaises(ValueError):
+            backups.stage_restore(self.d, name)
+
     def test_vanished_staged_backup_does_not_block_startup(self) -> None:
         m = backups.create(self.d, "manual")
         backups.stage_restore(self.d, m["name"])

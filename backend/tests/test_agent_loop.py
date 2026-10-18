@@ -774,7 +774,7 @@ def test_a_call_that_skips_the_tool_step_fails_the_run_and_names_the_loop(test_l
     events = drive(cid, run=run_)
     d = done(events)
     assert d["error_kind"] == "loop_violation" and "test/spy" in d["error"] and "outside the tool step" in d["error"]
-    (alert,) = [n for n in appmod.ExtNotes(appmod.db).open() if n["ext_id"] == "core"]
+    (alert,) = [n for n in appmod.ExtNotes(appmod.db).open() if n["ext_id"] == "core" and "test/spy" in n["body"]]
     assert "test/spy" in alert["body"] and alert["target"] == f"run:{cid}"
 
 

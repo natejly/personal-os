@@ -313,6 +313,31 @@ def prefix_hash(stable: str, versions: list[str]) -> str:
     return hashlib.sha256("\n".join([stable, *versions]).encode()).hexdigest()[:12]
 
 
+class PrefixWatch:
+    """Names why a chat's cached prefix changed between two turns and counts how often it does (the stable_hash churn rate)."""
+
+    def __init__(self) -> None:
+        self._last: dict[str, tuple[str, list[str]]] = {}
+        self.turns = 0
+        self.busts = 0
+
+    def observe(self, chat_id: str, digest: str, versions: list[str]) -> str | None:
+        """Record this turn's prefix; the reason it differs from the chat's last one, or None when it does not (or is the first)."""
+        self.turns += 1
+        before = self._last.get(chat_id)
+        self._last[chat_id] = (digest, versions)
+        if before is None or before[0] == digest:
+            return None
+        self.busts += 1
+        gone, new = sorted(set(before[1]) - set(versions)), sorted(set(versions) - set(before[1]))
+        if gone or new:
+            return f"extension blocks changed ({', '.join(gone) or 'none'} -> {', '.join(new) or 'none'})"
+        return "stable text changed with no version bump"
+
+    def stats(self) -> dict[str, int]:
+        return {"turns": self.turns, "busts": self.busts}
+
+
 class RetrievalSources:
     """The places a turn's retrieval looks (context.retrieve). A source is an async fn taking
     {query, vec, project_id, conv_settings}; an extension's returns a list of {id, text, ref}. Grain's own (docs, memory,

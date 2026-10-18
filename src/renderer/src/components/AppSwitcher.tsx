@@ -2,8 +2,9 @@ import { Inbox, MessageSquare } from '../icons'
 import { useStore } from '../store'
 import { inboxBadge } from '../lib/inboxBadge'
 import { tip } from '../lib/tip'
+import TitleBarSlot from './TitleBarSlot'
 
-/** The last thing in every title bar: the agent inbox (with its unread count), then the ⌘I page agent panel. */
+/** The last thing in every title bar: the extensions' `titlebar.right` items, the agent inbox (with its unread count), then the ⌘I page agent panel. */
 /** `last` replaces the quick-chat button, for a window that gives that slot to its own panel. */
 export default function AppSwitcher({ last }: { last?: React.ReactNode } = {}): JSX.Element {
   const open = useStore((s) => s.pageAgentOpen)
@@ -12,6 +13,7 @@ export default function AppSwitcher({ last }: { last?: React.ReactNode } = {}): 
   const openInbox = useStore((s) => s.openInbox)
   return (
     <div className="app-switcher no-drag">
+      <TitleBarSlot side="right" />
       <button className="icon-btn inbox-btn" title={unread ? `Agent inbox (${unread} new)` : 'Agent inbox'}
         aria-label={unread ? `Agent inbox, ${unread} new` : 'Agent inbox'} onClick={openInbox}>
         <Inbox size={15} />

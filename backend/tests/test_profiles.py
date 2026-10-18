@@ -40,9 +40,18 @@ class ValidatorTests(unittest.TestCase):
         for extra in ({"hooks": {"app.start": {}}}, {"permissions": ["db:own"]}, {"requires": {"services": ["mcp"]}},
                       {"provides": {"services": ["x"]}}, {"settings": {"a": {"type": "string"}}}, {"data": {"tables": ["t"]}},
                       {"activation": ["onSchedule"]}, {"contributes": {"tools": [{"name": "demo_x"}]}},
-                      {"contributes": {"routes": {"prefix": "/demo"}}}, {"contributes": {"layout": {}}}):
+                      {"contributes": {"routes": {"prefix": "/demo"}}}):
             with self.assertRaises(ManifestError, msg=extra):
                 Manifest.from_dict({**BASE, "kind": "profile", **extra})
+
+    def test_layout_hides_known_chrome_and_only_in_a_profile(self) -> None:
+        ok = Manifest.from_dict({**BASE, "kind": "profile", "contributes": {"layout": {"titlebar": False, "sidepanel": False}}})
+        self.assertEqual(ok.contributes["layout"], {"titlebar": False, "sidepanel": False})
+        for bad in ({"titlebar": True}, {"sidebar": False}, ["titlebar"]):
+            with self.assertRaises(ManifestError, msg=bad):
+                Manifest.from_dict({**BASE, "kind": "profile", "contributes": {"layout": bad}})
+        with self.assertRaisesRegex(ManifestError, "for profiles"):
+            Manifest.from_dict({**BASE, "contributes": {"layout": {"titlebar": False}}})
 
     def test_a_profile_folder_holds_only_its_manifest(self) -> None:
         folder = Path(tempfile.mkdtemp(prefix="profile-"))
@@ -176,6 +185,10 @@ class RoutesTests(unittest.TestCase):
     def test_lists_only_profiles_with_their_state_and_theme(self) -> None:
         self.assertEqual(set(self.listed()), {"lean", "focus", "wide"})
         self.assertEqual({k: v["enabled"] for k, v in self.listed().items()}, {"lean": False, "focus": False, "wide": False})
+
+    def test_the_focus_profile_lists_the_chrome_it_closes(self) -> None:
+        self.assertEqual(self.listed()["focus"]["layout"], {"titlebar": False, "statusbar": False, "sidepanel": False})
+        self.assertEqual(self.listed()["lean"]["layout"], {})
 
     def test_enable_applies_and_disable_reverts(self) -> None:
         self.assertEqual(self.client.post("/profiles/focus/enable").json(), {"held": []})

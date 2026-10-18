@@ -22,7 +22,7 @@ import pytest  # noqa: E402
 from personal_os import app as appmod  # noqa: E402
 from personal_os import limits, llm  # noqa: E402
 from personal_os.context import (  # noqa: E402
-    EXTENSION_NOTE, VOLATILE_HEADER, Block, Contribution, RetrievalSources, compose, layout_messages, prefix_hash,
+    EXTENSION_NOTE, VOLATILE_HEADER, Block, Contribution, PrefixWatch, RetrievalSources, compose, layout_messages, prefix_hash,
 )
 from personal_os.extensions.host import ExtensionHost  # noqa: E402
 from personal_os.extensions.manifest import Manifest  # noqa: E402
@@ -226,11 +226,11 @@ async def _fake(settings: dict[str, Any], model: str, messages: list[dict[str, A
     yield {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None}
 
 
-def _turn(monkeypatch: Any, text: str = "hello there") -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _turn(monkeypatch: Any, text: str = "hello there", chat: str | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     appmod.db.set_settings({"autoLearn": False, "baseUrl": "http://127.0.0.1:9/v1", "provider": "custom", "autoTitle": False,
                             "followUps": False, "learnStyle": False, "permissionMode": "manual"})
     monkeypatch.setattr(llm, "stream_chat", _fake)
-    cid = appmod.convos.create(None, "Contrib", "test-model")["id"]
+    cid = chat or appmod.convos.create(None, "Contrib", "test-model")["id"]
     CALLS.clear()
     used: dict[str, Any] = {}
 
@@ -276,6 +276,37 @@ def test_a_stable_version_bump_changes_stable_hash_and_a_failure_is_recorded(mon
     assert used1["stable_hash"] != used2["stable_hash"]
     assert "skipped" not in used2 and used3["skipped"] == ["hash-demo"]
     assert json.dumps(used3["stable_hash"]) == json.dumps(used2["stable_hash"])
+
+
+def test_a_cache_bust_is_logged_with_its_reason_and_counted(monkeypatch: Any, caplog: Any) -> None:
+    s = scope(appmod.host, "bust-demo")
+    version = [1]
+    chat = appmod.convos.create(None, "Bust", "test-model")["id"]
+    before = dict(appmod.prefix_watch.stats())
+    try:
+        s.context(lambda p: Contribution("same text", version[0]), slot="stable")
+        with caplog.at_level("INFO", logger="personal_os"):
+            _turn(monkeypatch, chat=chat)
+            _turn(monkeypatch, chat=chat)
+            assert "cache bust" not in caplog.text
+            version[0] = 2
+            _turn(monkeypatch, chat=chat)
+    finally:
+        s.disposables.dispose()
+        del appmod.host.extensions["bust-demo"]
+    assert "prompt cache bust" in caplog.text and "bust-demo@1" in caplog.text and "bust-demo@2" in caplog.text
+    after = appmod.prefix_watch.stats()
+    assert (after["turns"] - before["turns"], after["busts"] - before["busts"]) == (3, 1)
+
+
+def test_prefix_watch_names_the_reason() -> None:
+    w = PrefixWatch()
+    assert w.observe("c", "a", ["x@1"]) is None  # a chat's first prefix is not a bust
+    assert w.observe("c", "a", ["x@1"]) is None
+    assert w.observe("c", "b", ["x@2"]) == "extension blocks changed (x@1 -> x@2)"
+    assert w.observe("c", "c", ["x@2"]) == "stable text changed with no version bump"
+    assert w.observe("d", "z", []) is None
+    assert w.stats() == {"turns": 5, "busts": 2}
 
 
 def test_an_extension_retrieval_source_reaches_the_volatile_message(monkeypatch: Any) -> None:

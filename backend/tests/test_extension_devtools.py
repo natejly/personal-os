@@ -268,7 +268,7 @@ def test_a_built_in_cannot_be_reloaded_and_keeps_its_tools() -> None:
 def test_loading_code_is_refused_unless_the_backend_was_started_for_it(ext: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GRAIN_EXT_DEV")
     app = FastAPI()
-    app.include_router(devapi.router(appmod.host, appmod._ext_ctx, lambda: appmod.toolbox))
+    app.include_router(devapi.router(appmod.host, appmod._ext_ctx, lambda: appmod.toolbox, appmod.prefix_watch.stats))
     c = TestClient(app)
     assert c.get("/dev/extensions").json()["live"] is False
     for r in (c.post("/dev/extensions/load", json={"path": str(ext)}), c.post("/dev/extensions/health/reload")):

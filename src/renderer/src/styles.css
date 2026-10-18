@@ -574,6 +574,9 @@ kbd {
   position: relative;
 }
 .app.sidebar-collapsed { grid-template-columns: 0 1fr; }
+/* The status bar is the one shell child with a row of its own: the views keep the fixed first row, so it only takes the room it needs. */
+.statusbar { grid-column: 1 / -1; grid-row: 2; display: flex; align-items: center; gap: 12px; min-height: 24px; padding: 0 12px; border-top: 1px solid var(--border); background: var(--sidebar-bg); font-size: 12px; color: var(--text-muted); }
+.titlebar-slot { display: flex; align-items: center; gap: 6px; }
 /* The page agent is a third column of the shell, not a drawer inside one view: ⌘I opens it over
    Files, Calendar, Todos and the canvas alike. */
 .app.page-agent-open { grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--page-agent-w); }

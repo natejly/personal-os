@@ -13,12 +13,15 @@ export function useSlot<K extends SlotName>(slot: K): SlotEntry<K>[] {
   return items.filter((i) => on.has(i.id))
 }
 
-type ComponentSlot = 'sidebar.section' | 'composer.toolbar' | 'message.header' | 'message.footer'
+type ComponentSlot = 'sidebar.section' | 'composer.toolbar' | 'message.header' | 'message.footer' | 'titlebar.left' | 'titlebar.right' | 'statusbar.item'
 interface SlotProps {
   'sidebar.section': Record<string, never>
   'composer.toolbar': ComposerToolbarProps
   'message.header': MessageSlotProps
   'message.footer': MessageSlotProps
+  'titlebar.left': Record<string, never>
+  'titlebar.right': Record<string, never>
+  'statusbar.item': Record<string, never>
 }
 
 /** Every item of a component slot, each given `props`. */

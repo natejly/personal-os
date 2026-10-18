@@ -3,7 +3,6 @@ import type { Profile, ProfileHeld } from '@shared/types'
 import { api } from '../../lib/api'
 import { heldText } from '../../lib/presets'
 import { slotNoun } from '../../lib/runtime'
-import { applyProfileThemes } from '../../extensions/profiles'
 import { useStore } from '../../store'
 import Switch from './Switch'
 import { Sec } from './shared'
@@ -22,7 +21,7 @@ export default function ProfilesSection({ onApplied }: { onApplied: () => Promis
   const refresh = async (): Promise<void> => {
     const list = await api.profiles.list()
     setProfiles(list)
-    applyProfileThemes(list)
+    useStore.getState().applyProfiles(list)
     await onApplied()
   }
   useEffect(() => { api.profiles.list().then(setProfiles).catch(() => undefined) }, [])

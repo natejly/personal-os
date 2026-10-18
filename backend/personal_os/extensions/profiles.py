@@ -29,7 +29,8 @@ def router(host: ExtensionHost, changed: Callable[[dict[str, Any]], None]) -> AP
 
     @r.get("/profiles")
     def list_profiles() -> list[dict[str, Any]]:
-        return [{"id": m.id, "name": m.name, "description": m.description, "enabled": s.enabled(), "theme": m.contributes.get("theme", {})}
+        return [{"id": m.id, "name": m.name, "description": m.description, "enabled": s.enabled(), "theme": m.contributes.get("theme", {}),
+                 "layout": m.contributes.get("layout", {})}
                 for s in host.extensions.values() if (m := s.manifest).kind == "profile"]
 
     @r.post("/profiles/{profile_id}/enable")

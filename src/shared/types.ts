@@ -1566,7 +1566,12 @@ export interface Profile {
   description: string
   enabled: boolean
   theme: { light?: Record<string, string>; dark?: Record<string, string> }
+  /** Chrome the profile closes while it is on; each region is `false`. */
+  layout: Partial<Record<ChromeRegion, false>>
 }
+
+/** The parts of the window a profile's layout can close. */
+export type ChromeRegion = 'titlebar' | 'statusbar' | 'sidepanel'
 
 /** A default a profile would change but that needs the user's click first: a looser permission preset, or a runtime provider that loosens something (`diff`). */
 export interface ProfileHeld { key: string; was: unknown; set: unknown; diff?: string[] }

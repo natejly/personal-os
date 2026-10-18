@@ -13,7 +13,7 @@ import { acceptToast } from './lib/proposalToast'
 import { installRejectionToasts } from './lib/rejections'
 import { busyText, nowText } from './lib/runStatus'
 import { api, backgroundStream, chatStream, getBase, getToken, setBase, type Scope } from './lib/api'
-import { applyProfileThemes } from './extensions/profiles'
+import { applyProfileThemes, closedChrome } from './extensions/profiles'
 import { useTodos } from './extensions/todos/store'
 import { dispatchExtEvent, isAppEvent } from './extensions/events'
 import { currentSelection } from './lib/pageContext'
@@ -29,7 +29,7 @@ import { chainTo, folderKey, groupShutKey, renameKeys } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
 import type { ShowItem, UploadResult } from '@shared/types'
-import type { Attention, Duel, DuelSide, WorkerInfo, RunInfo, ShipChecklist } from '@shared/types'
+import type { Attention, ChromeRegion, Duel, DuelSide, Profile, WorkerInfo, RunInfo, ShipChecklist } from '@shared/types'
 import { attention, chatAttention, wantsYou } from './lib/attention'
 import * as panes from './lib/panelPanes'
 import type { PanelState, Pane } from './lib/panelPanes'
@@ -253,6 +253,8 @@ export interface State {
   contextOpen: boolean
   /** The full-window chat's side panel (DeskPanel), apart from `contextOpen`, which opens it on Context. */
   deskPanel: boolean
+  /** Window chrome the enabled profiles close (their `layout`). */
+  hiddenChrome: ChromeRegion[]
   contextTab: ContextTab
   /** The side panel beside each chat (the `show` tool, or "Open in panel" on a fenced block), by conversation id. */
   shows: Record<string, PanelState>
@@ -384,6 +386,8 @@ export interface State {
   toggleSidebar: () => void
   toggleContext: () => void
   setDeskPanel: (open: boolean) => void
+  /** Take the profile list as the source of the enabled profiles' theme tokens and closed chrome. */
+  applyProfiles: (profiles: Profile[]) => void
   /** ⌘I: close the side panel if either flag has it open, else open it on its default (Context) tab. */
   toggleDeskPanel: () => void
   /** ⌘I. Opening focuses the panel's composer; the thread itself waits for the first message. */
@@ -1858,6 +1862,7 @@ export const useStore = create<State>((set, get) => {
     shows: {},
     contextOpen: false,
     deskPanel: false,
+    hiddenChrome: [],
     contextTab: 'last',
     libraryTab: 'skills',
     openAgentId: null,
@@ -1954,7 +1959,7 @@ export const useStore = create<State>((set, get) => {
       installRejectionToasts((m, kind) => { if (get().backendState === 'ready') get().toast(m, kind) })
       set({ settings, view: 'chat', projects, conversations, ready: true, draftEffort: startEffort(settings) })
       void get().loadModels()
-      void api.profiles.list().then(applyProfileThemes).catch(() => undefined)
+      void api.profiles.list().then(get().applyProfiles).catch(() => undefined)
       void get().loadScope('all')
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
       void get().refreshAgentDefs().catch(() => undefined)
@@ -2029,6 +2034,10 @@ export const useStore = create<State>((set, get) => {
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
     toggleContext: () => set((s) => ({ contextOpen: !s.contextOpen })),
     setDeskPanel: (deskPanel) => set({ deskPanel }),
+    applyProfiles: (profiles) => {
+      applyProfileThemes(profiles)
+      set({ hiddenChrome: closedChrome(profiles) })
+    },
     toggleDeskPanel: () => set((s) => (s.deskPanel || s.contextOpen ? { deskPanel: false, contextOpen: false } : { deskPanel: true })),
     openShow: (conversationId, item) => set((s) => ({ shows: { ...s.shows, [conversationId]: panes.open(s.shows[conversationId], item, Date.now(), item.pane) } })),
     splitShow: (conversationId) => set((s) => (s.shows[conversationId] ? { shows: { ...s.shows, [conversationId]: panes.split(s.shows[conversationId]) } } : s)),

@@ -49,7 +49,7 @@ test('ui.theme registers tokens and its disposable takes them away', () => {
   })
 })
 
-const profile = (over: Partial<Profile>): Profile => ({ id: 'p', name: 'P', description: '', enabled: true, theme: {}, ...over })
+const profile = (over: Partial<Profile>): Profile => ({ id: 'p', name: 'P', description: '', enabled: true, theme: {}, layout: {}, ...over })
 
 test('only enabled profiles apply their tokens, and a new list replaces the old one', () => {
   withDocument((seen) => {

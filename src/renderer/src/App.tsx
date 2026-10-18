@@ -11,6 +11,7 @@ import ProjectView from './components/ProjectView'
 import PendingSends from './components/PendingSends'
 import PageAgentPanel from './components/PageAgentPanel'
 import SelectionToolbar from './components/SelectionToolbar'
+import StatusBar from './components/StatusBar'
 import LibraryView from './components/LibraryView'
 import JobsView from './components/JobsView'
 import RenderBoundary from './components/RenderBoundary'
@@ -298,6 +299,7 @@ export default function App(): JSX.Element {
           {view === 'project' && <ProjectView />}
         </RenderBoundary>
       )}
+      <StatusBar />
       {pageAgentOpen && <PageAgentPanel />}
       {settingsOpen && <SettingsModal />}
       {inboxOpen && <InboxModal />}

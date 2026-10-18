@@ -3,12 +3,14 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { FullDesk, Message } from '@shared/types'
+import type { FullDesk, Message, Profile } from '@shared/types'
 import { useStore } from '../store'
 import {
   activateExtension, fenceRenderer, keybindings, paletteCommands, registerSlot, selectionActions, slotItems, WIDGETS, widgetOn, type UiApi
 } from './host'
 import { Slot } from './slot'
+import { extStore } from './events'
+import { closedChrome } from './profiles'
 import { addWidgetEntries } from '../canvas/AddWidgetMenu'
 import type { WidgetDef } from '../canvas/registry'
 import { kindIcon, kindLabel } from '../canvas/WindowHost'
@@ -237,4 +239,105 @@ test('the runtime runs a matching keybinding whose `when` holds, and tells subsc
   gone()
   assert.deepEqual(ran, ['prevented', 'go'])
   assert.deepEqual(opened, ['jobs'])
+})
+
+test('title bar and status bar items render in their slots, and a profile can close either', async () => {
+  const { default: StatusBar } = await import('../components/StatusBar')
+  const { default: TitleBarSlot } = await import('../components/TitleBarSlot')
+  const item = (label: string) => (): JSX.Element => createElement('i', null, label)
+  const html = (el: JSX.Element): string => renderToStaticMarkup(el)
+  const bars = (): string[] => [html(createElement(StatusBar)), html(createElement(TitleBarSlot, { side: 'left' })), html(createElement(TitleBarSlot, { side: 'right' }))]
+  const chrome = (hiddenChrome: Profile['layout']): void => { Object.assign(useStore.getInitialState(), { settings: { hiddenViews: [] }, hiddenChrome: closedChrome([{ id: 'p', name: 'P', description: '', enabled: true, theme: {}, layout: hiddenChrome }]) }) }  // server rendering reads the initial state
+  chrome({})
+  assert.deepEqual(bars(), ['', '', ''])  // nothing listed, nothing drawn
+  const gone = withExtension('bardemo', (ui) => {
+    ui.slot('statusbar.item', { id: 'bardemo:s', order: 1, Component: item('status') })
+    ui.slot('titlebar.left', { id: 'bardemo:l', order: 1, Component: item('left') })
+    ui.slot('titlebar.right', { id: 'bardemo:r', order: 1, Component: item('right') })
+  })
+  assert.deepEqual(bars().map((h) => h.replace(/<[^>]*>/g, '')), ['status', 'left', 'right'])
+  assert.match(bars()[0], /^<footer class="statusbar">/)
+  chrome({ statusbar: false })
+  assert.deepEqual(bars().map((h) => h.replace(/<[^>]*>/g, '')), ['', 'left', 'right'])
+  chrome({ titlebar: false })
+  assert.deepEqual(bars().map((h) => h.replace(/<[^>]*>/g, '')), ['status', '', ''])
+  gone()
+  chrome({})
+})
+
+test('applyProfiles records the closed chrome in the store', () => {
+  useStore.getState().applyProfiles([{ id: 'p', name: 'P', description: '', enabled: true, theme: {}, layout: { sidepanel: false } }])
+  assert.deepEqual(useStore.getState().hiddenChrome, ['sidepanel'])
+  useStore.getState().applyProfiles([])
+  assert.deepEqual(useStore.getState().hiddenChrome, [])
+})
+
+test('closedChrome lists the regions of enabled profiles only', () => {
+  const p = (enabled: boolean, layout: Profile['layout']): Profile => ({ id: 'p', name: 'P', description: '', enabled, theme: {}, layout })
+  assert.deepEqual(closedChrome([p(true, { sidepanel: false, titlebar: false }), p(true, { sidepanel: false }), p(false, { statusbar: false })]), ['sidepanel', 'titlebar'])
+})
+
+test('ui.call goes to the extension routes with the token, ui.notify and settings follow the extension being on', async () => {
+  const seen: string[] = []
+  const real = globalThis.fetch
+  globalThis.fetch = (async (url: RequestInfo | URL) => { seen.push(String(url)); return new Response('{"n":1}') }) as typeof fetch
+  const changes: string[] = []
+  let ui!: UiApi
+  const gone = withExtension('apidemo', (u) => { ui = u })
+  useStore.setState({ settings: { hiddenViews: [], 'ext.apidemo.mode': 'fast' } as never })
+  try {
+    assert.deepEqual(await ui.call('/status'), { n: 1 })
+    await ui.call('items')
+    assert.deepEqual(seen, ['/ext/apidemo/status', '/ext/apidemo/items'])
+  } finally { globalThis.fetch = real }
+  assert.equal(ui.settings.get('mode'), 'fast')
+  assert.equal(ui.settings.get('absent'), undefined)
+  const off = ui.settings.onChange(() => changes.push('changed'))
+  useStore.setState({ settings: { hiddenViews: [], 'ext.apidemo.mode': 'slow' } as never })
+  useStore.setState({ settings: { hiddenViews: [], 'ext.apidemo.mode': 'slow', other: 1 } as never })
+  useStore.setState({ settings: { hiddenViews: ['apidemo'], 'ext.apidemo.mode': 'steady' } as never })  // off: silent
+  assert.deepEqual(changes, ['changed'])
+  off.dispose()
+  const notices: string[] = []
+  Object.assign(globalThis, { Notification: class { static permission = 'granted'; constructor(title: string, o: { body: string; tag: string }) { notices.push(`${title}|${o.body}|${o.tag}`) } } })
+  useStore.setState({ settings: { hiddenViews: [] } as never })
+  ui.notify('Hello', 'There')
+  useStore.setState({ settings: { hiddenViews: ['apidemo'] } as never })
+  ui.notify('Muted', 'Off')
+  gone()
+  Reflect.deleteProperty(globalThis, 'Notification')
+  assert.deepEqual(notices, ['Hello|There|ext:apidemo'])
+})
+
+test('ui.selection reaches subscribers while the extension is on', async () => {
+  const { emitSelection } = await import('./events')
+  const seen: string[] = []
+  useStore.setState({ settings: { hiddenViews: [] } as never })
+  const gone = withExtension('seldemo', (ui) => {
+    ui.on('ui.selection', (e) => seen.push(`${e.source}:${e.text}`))
+    ui.on('ui.selection', () => { throw new Error('a broken handler') })
+  })
+  emitSelection({ text: 'quote', source: 'mail' })
+  useStore.setState({ settings: { hiddenViews: ['seldemo'] } as never })
+  emitSelection({ text: 'muted', source: 'chat' })
+  gone()
+  emitSelection({ text: 'gone', source: 'note' })
+  assert.deepEqual(seen, ['mail:quote'])
+})
+
+test('an extension store slice is kept across a reload and ignores a broken save', async () => {
+  const saved = new Map<string, string>()
+  Object.assign(globalThis, { localStorage: { getItem: (k: string) => saved.get(k) ?? null, setItem: (k: string, v: string) => void saved.set(k, v) } })
+  try {
+    const first = extStore('persistdemo')
+    first.set('count', 3)
+    assert.equal(saved.get('ext-store:persistdemo'), '{"count":3}')
+    saved.set('ext-store:reloaded', '{"tab":"b"}')  // what an earlier session left
+    assert.equal(extStore('reloaded').get('tab'), 'b')
+    saved.set('ext-store:garbled', '[1,2')
+    assert.equal(extStore('garbled').get('x'), undefined)
+    Object.assign(globalThis, { localStorage: { getItem: () => null, setItem: () => { throw new Error('quota') } } })
+    first.set('count', 4)
+    assert.equal(first.get('count'), 4)
+  } finally { Reflect.deleteProperty(globalThis, 'localStorage') }
 })

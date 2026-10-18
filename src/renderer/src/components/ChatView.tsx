@@ -78,7 +78,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const markDeskSeen = useStore((s) => s.markDeskSeen)
   const deskPanel = useStore((s) => s.deskPanel)
   const setDeskPanel = useStore((s) => s.setDeskPanel)
-  const panelOn = !conversationId && (deskPanel || contextOpen) // the full-window Workspace column; it also hosts the step card and workers
+  const sidePanelClosed = useStore((s) => s.hiddenChrome.includes('sidepanel')) // a profile's layout keeps the Workspace column shut
+  const panelOn = !sidePanelClosed && !conversationId && (deskPanel || contextOpen) // the full-window Workspace column; it also hosts the step card and workers
   useEffect(() => { if (deskId && !conversationId) void openDesk(deskId) }, [deskId, conversationId, openDesk])
   // Looking at the chat is the acknowledgement. Keyed on desk+count so a failed POST /seen is not retried every render.
   const deskUnseen = desk?.unseen ?? 0
@@ -161,7 +162,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           {conversationId && <ChatFilesButton conversationId={convo?.id} />}
         </div>
         {/* The full-window chat gives the last title-bar slot to its own workspace panel; ⌘I opens the quick chat. */}
-        <AppSwitcher last={conversationId ? undefined : (
+        <AppSwitcher last={conversationId || sidePanelClosed ? undefined : (
           <button className={`icon-btn${deskPanel || contextOpen ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={deskPanel || contextOpen} disabled={!convo?.id}
             onClick={() => { if (contextOpen) toggleContext(); setDeskPanel(!(deskPanel || contextOpen)) }}><SlidersHorizontal size={15} /></button>
         )} />

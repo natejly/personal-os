@@ -38,7 +38,7 @@ from . import chatlink, config, duel, fsx, guards, labels, permissions_routes, r
 from .fsx import sensitive_reason
 from . import context_map
 from .dispatch import dispatch_tool
-from .context import Block, build_context, cite_slim, compose, context_taints, estimate_tokens, layout_messages, prefix_hash, retrieval_query
+from .context import Block, PrefixWatch, build_context, cite_slim, compose, context_taints, estimate_tokens, layout_messages, prefix_hash, retrieval_query
 from .drive_backup import DriveBackup
 from .config import PRIVATE_SETTINGS
 from .presets import Presets
@@ -258,6 +258,7 @@ _active: dict[str, asyncio.Event | Run] = {}
 # last turn measured them. History compaction runs before this turn's tools are known, so that figure stands in.
 # ponytail: one int per chat for the process lifetime, 0 after a restart until the chat's next turn.
 _request_extra: dict[str, int] = {}
+prefix_watch = PrefixWatch()
 # Pending tool-call approvals: call_id -> Future[decision]. The durable record is the approvals table; this is
 # only how POST /approvals wakes the run that is waiting in this process.
 _approvals: dict[str, asyncio.Future] = {}
@@ -636,7 +637,7 @@ async def _snapshot_after(run: Run) -> None:
 host.bus.subscribe("run.after", _snapshot_after, owner="core", order=0, timeout_ms=limits.SNAPSHOT_AFTER_MS)
 host.bus.subscribe("run.after", lambda run: subagent_mgr.end_of_run(run), owner="core", order=0)
 app.include_router(backups.router(db.data_dir, host.data_tables))
-app.include_router(devapi.router(host, _ext_ctx, lambda: toolbox))
+app.include_router(devapi.router(host, _ext_ctx, lambda: toolbox, prefix_watch.stats))
 ext_review = review_routes.Review(ext_drafts, host, _ext_ctx, lambda: toolbox)
 app.include_router(review_routes.router(ext_review))
 host.on_start(ext_review.load_installed)
@@ -2759,7 +2760,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
         stable = "\n\n".join(p for p in (used["stable_system"], *slots.stable) if p)
         system = "\n\n".join(p for p in (stable, *used["volatile_blocks"], *slots.tail) if p)
-        used["stable_hash"] = prefix_hash(stable, [*slots.versions, *(host.directives.versions(cfg) if st.tool_schemas else ())])
+        versions = [*slots.versions, *(host.directives.versions(cfg) if st.tool_schemas else ())]
+        used["stable_hash"] = prefix_hash(stable, versions)
+        if bust := prefix_watch.observe(conv_id, used["stable_hash"], versions):
+            log.info("prompt cache bust in chat %s: %s (%d of %d turns)", conv_id, bust, prefix_watch.busts, prefix_watch.turns)
         cspan["meta"]["stable_hash"] = used["stable_hash"]
         used["system_prompt"] = system
         used["tokens_estimate"] = estimate_tokens(system)

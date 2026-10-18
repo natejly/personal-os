@@ -60,7 +60,7 @@ def set_hidden_view(host: ExtensionHost, ctx: ExtensionContext, ext_id: str, hid
     host.refresh_enabled()
 
 
-def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Toolbox]) -> APIRouter:
+def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Toolbox], prefix_stats: Callable[[], dict[str, int]]) -> APIRouter:
     r = APIRouter(prefix="/dev/extensions")
     live = os.environ.get("GRAIN_EXT_DEV") == "1"
 
@@ -82,7 +82,7 @@ def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Too
 
     @r.get("")
     def listing() -> dict[str, Any]:
-        return {"live": live, "extensions": [describe(host, s) for s in host.extensions.values()],
+        return {"live": live, "prefix": prefix_stats(), "extensions": [describe(host, s) for s in host.extensions.values()],
                 "failed": [{"path": str(p), "error": e} for p, e in host.failed.items()]}
 
     @r.delete("/failed")

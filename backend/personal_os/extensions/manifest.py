@@ -29,8 +29,9 @@ _HOOK_KEYS = {"priority", "timeoutMs", "onFailure"}
 SETTING_TYPES = ("string", "number", "integer", "boolean", "secret")  # a secret is a string kept in the secret store
 _FIELD = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 _TABLE = re.compile(r"[a-z_][a-z0-9_]*")
-_PROFILE_CONTRIBUTES = {"theme", "defaults", "presets"}  # all a profile may contribute: it runs nothing
+_PROFILE_CONTRIBUTES = {"theme", "defaults", "layout", "presets"}  # all a profile may contribute: it runs nothing
 _PROFILE_FORBIDDEN = ("requires", "provides", "hooks", "permissions", "settings", "data")
+_LAYOUT_REGIONS = ("titlebar", "statusbar", "sidepanel")  # the chrome a profile's layout can switch off
 _DEFAULTS = {"views", "model", "effort", "theme", "permissions", "permissionPreset", "runtime"}
 PERMISSION_MODES = CHOICES["permissionMode"]
 _THEMES = ("dark", "light", "system")
@@ -156,6 +157,7 @@ def _contributes(raw: dict[str, Any]) -> dict[str, Any]:
            "contributes.slots['canvas.widget'] entries need an id of the form ext:<extension id>:<name>")
     _commands(c)
     _theme(c)
+    _layout(raw, c)
     _defaults(c)
     _runtime(c, raw.get("permissions", ()))
     _presets(c, str(raw.get("id")))
@@ -191,10 +193,18 @@ def _runtime(c: dict[str, Any], permissions: list[str]) -> None:
 
 
 def _check_profile(raw: dict[str, Any]) -> None:
-    """A profile has no code: only theme and defaults, which the host reads as data."""
+    """A profile has no code: only theme, defaults and layout, which the host reads as data."""
     _check(not (used := [k for k in _PROFILE_FORBIDDEN if raw.get(k)]), f"a profile cannot declare {', '.join(used)}")
     _check(raw.get("activation", ["startup"]) == ["startup"], "a profile has no code to activate")
-    _check(set(_object(raw, "contributes")) <= _PROFILE_CONTRIBUTES, "a profile contributes only theme, defaults and presets")
+    _check(set(_object(raw, "contributes")) <= _PROFILE_CONTRIBUTES, "a profile contributes only theme, defaults, layout and presets")
+
+
+def _layout(raw: dict[str, Any], c: dict[str, Any]) -> None:
+    """contributes.layout (profiles only): chrome regions the profile hides, each set to false."""
+    layout = c.get("layout", {})
+    _check(not layout or raw.get("kind") == "profile", "contributes.layout is for profiles")
+    _check(isinstance(layout, dict) and set(layout) <= set(_LAYOUT_REGIONS) and all(v is False for v in layout.values()),
+           f"contributes.layout maps {', '.join(_LAYOUT_REGIONS)} to false")
 
 
 def _theme(c: dict[str, Any]) -> None:

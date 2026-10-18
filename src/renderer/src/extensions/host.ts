@@ -12,7 +12,9 @@ import { useStore, type State, type View } from '../store'
 import type { WidgetDef } from '../canvas/registry'
 import { viewHidden } from '../moduleToggles'
 import { registerToolCard, type ToolCardDisplay, type ToolCardProps } from '../components/toolcards/registry'
-import { extStore, onExtEvent, onMessageDisplay, onViewOpened, type AppEvent, type ExtStore, type HostEvents } from './events'
+import { req } from '../lib/api'
+import { notify } from '../lib/notify'
+import { extStore, onExtEvent, onMessageDisplay, onSelection, onViewOpened, type AppEvent, type ExtStore, type HostEvents } from './events'
 import { addTheme, type Scheme, type Tokens } from './theme'
 
 export interface Disposable { dispose(): void }
@@ -50,6 +52,11 @@ export interface SlotItems {
   'composer.toolbar': { Component: FC<ComposerToolbarProps> }
   'message.header': { Component: FC<MessageSlotProps> }
   'message.footer': { Component: FC<MessageSlotProps> }
+  /** Left of a title bar's own controls, next to the sidebar button; right of them, before the inbox and quick chat buttons. */
+  'titlebar.left': { Component: FC }
+  'titlebar.right': { Component: FC }
+  /** An item of the bar along the window's foot, which is drawn only while an item is listed. */
+  'statusbar.item': { Component: FC }
   /**
    * A card of the chat's side panel; it is listed while `shown` (default: always) and `count` is its badge. `Overlay` is drawn
    * over the chat whenever the card is listed, collapsed or not, so a window the card opens outlives the card closing.
@@ -83,11 +90,18 @@ export interface UiApi {
   selectionAction(def: SelectionActionDef): Disposable
   /** A canvas window kind, `ext:<id>:<name>` and declared in the manifest's `canvas.widget` slot; offered while the extension is on. */
   widget(def: WidgetDef): Disposable
-  /** This extension's slice of the app store; `ext:<id>:<name>` events from its backend half land in it under `<name>`. */
+  /** This extension's slice of the app store, kept across reloads; `ext:<id>:<name>` events from its backend half land in it under `<name>`. */
   store: ExtStore
+  /** A request to this extension's routes (`/ext/<id>/<path>`), with the app's token attached; rejects like any other API call. */
+  call<T>(path: string, init?: RequestInit): Promise<T>
+  /** A system notification, shown only while the user has the extension on. */
+  notify(title: string, body: string): void
+  /** The extension's own settings, as the manifest declares them (a secret never reaches the renderer). */
+  settings: { get<T>(key: string): T | undefined; onChange(fn: () => void): Disposable }
   /** `ext:<id>:<name>` is the `ui.event` hook for that name. */
   on(event: 'ui.view.opened', fn: (e: HostEvents['ui.view.opened']) => void): Disposable
   on(event: 'ui.message.display', fn: (e: HostEvents['ui.message.display']) => string | void): Disposable
+  on(event: 'ui.selection', fn: (e: HostEvents['ui.selection']) => void): Disposable
   on(event: `ext:${string}` | AppEvent, fn: (data: unknown) => void): Disposable
   /** Set existing CSS custom properties for one colour scheme, or both when `scheme` is omitted. */
   theme(tokens: Tokens, opts?: { scheme?: Scheme }): Disposable
@@ -103,6 +117,10 @@ export interface SettingsPanel extends SettingsPanelDef {
   extension: string
 }
 
+/** An extension's setting `<field>` is stored as `ext.<id>.<field>` (the backend's `SETTING_PREFIX`). */
+const SETTING_PREFIX = 'ext.'
+const extSettingValues = (settings: Settings): Record<string, unknown> => settings as unknown as Record<string, unknown>
+
 /** The owner of the shell's own registrations; it is never turned off. */
 export const CORE = 'core'
 
@@ -112,7 +130,8 @@ export const ownerOn = (settings: Settings, owner: string): boolean => owner ===
 export const extensionModules: ModuleDef[] = []
 export const settingsPanels: SettingsPanel[] = []
 const slots: Record<SlotName, unknown[]> = {
-  'sidebar.row': [], 'sidebar.section': [], 'composer.toolbar': [], 'message.header': [], 'message.footer': [], 'sidepanel.tab': []
+  'sidebar.row': [], 'sidebar.section': [], 'composer.toolbar': [], 'message.header': [], 'message.footer': [],
+  'titlebar.left': [], 'titlebar.right': [], 'statusbar.item': [], 'sidepanel.tab': []
 }
 export interface OwnedPaletteCommand extends PaletteCommandDef { extension: string }
 export interface OwnedKeybinding extends KeybindingDef { extension: string }
@@ -214,10 +233,21 @@ export function activateExtension(id: string, ext: ExtensionModule): Disposable 
     selectionAction: (def) => keep(registerSelectionAction(id, def)),
     widget: (def) => keep(registerWidget(id, def)),
     store: extStore(id),
+    call: (path, init) => req(`/ext/${id}/${path.replace(/^\//, '')}`, init),
+    notify: (title, body) => { if (ownerOn(useStore.getState().settings, id)) notify(title, body, { tag: `ext:${id}` }) },
+    settings: {
+      get: <T,>(key: string) => extSettingValues(useStore.getState().settings)[`${SETTING_PREFIX}${id}.${key}`] as T | undefined,
+      onChange: (fn) => keep({
+        dispose: useStore.subscribe((s, prev) => {
+          const [now, before] = [extSettingValues(s.settings), extSettingValues(prev.settings)]
+          if (ownerOn(s.settings, id) && Object.keys(now).some((k) => k.startsWith(`${SETTING_PREFIX}${id}.`) && now[k] !== before[k])) fn()
+        })
+      })
+    },
     on: ((event: string, handler: (...a: never[]) => unknown) => {
       // Handlers run only while the user has the extension on, like the rest of what it registers.
       const fn = ((...a: never[]) => ownerOn(useStore.getState().settings, id) ? handler(...a) : undefined) as never
-      return keep(event === 'ui.view.opened' ? onViewOpened(fn) : event === 'ui.message.display' ? onMessageDisplay(fn) : onExtEvent(event, fn))
+      return keep(event === 'ui.view.opened' ? onViewOpened(fn) : event === 'ui.message.display' ? onMessageDisplay(fn) : event === 'ui.selection' ? onSelection(fn) : onExtEvent(event, fn))
     }) as UiApi['on'],
     theme: (tokens, opts) => keep(addTheme(tokens, opts?.scheme))
   })

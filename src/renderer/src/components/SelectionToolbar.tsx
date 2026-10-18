@@ -4,9 +4,13 @@ import { appendToDraft } from '../lib/drafts'
 import { COMPOSER_INSERT_EVENT } from '../lib/composerInsert'
 import { askDraft, selectionMessage, SELECTION_VERBS, type SelectionVerb } from '../lib/selectionActions'
 import { CORE, ownerOn, registerSelectionAction, selectionActions } from '../extensions/host'
+import { emitSelection, type SelectionSource } from '../extensions/events'
 
 /** Where a selection gets the toolbar: chat transcripts, the page agent panel, the note editor, the mail reader. */
-const SURFACES = '.messages, .page-agent-body, .md-surface, .mail-body'
+const SURFACES: Record<SelectionSource, string> = { chat: '.messages', 'page-agent': '.page-agent-body', note: '.md-surface', mail: '.mail-body' }
+
+const surfaceOf = (node: Element): SelectionSource | undefined =>
+  (Object.keys(SURFACES) as SelectionSource[]).find((source) => node.closest(SURFACES[source]))
 
 /** The highlighted text right now, from a text box or from the page. */
 function selectedText(): string {
@@ -50,7 +54,9 @@ export default function SelectionToolbar(): JSX.Element | null {
         const inBox = el instanceof HTMLTextAreaElement
         const sel = window.getSelection()
         const node = inBox ? el : sel?.anchorNode instanceof Element ? sel.anchorNode : sel?.anchorNode?.parentElement
-        if (!quote || !node || !node.closest(SURFACES)) return setAt(null)
+        const source = node && surfaceOf(node)
+        if (!quote || !source) return setAt(null)
+        emitSelection({ text: quote, source })
         const pointer = e instanceof MouseEvent ? { x: e.clientX, y: e.clientY } : null
         const rect = !inBox && sel && sel.rangeCount ? sel.getRangeAt(0).getBoundingClientRect() : null
         const x = rect ? rect.left + rect.width / 2 : pointer?.x ?? 0

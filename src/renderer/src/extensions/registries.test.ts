@@ -413,3 +413,10 @@ test('an extension store slice is kept across a reload and ignores a broken save
     assert.equal(first.get('count'), 4)
   } finally { Reflect.deleteProperty(globalThis, 'localStorage') }
 })
+
+test('the Lists and Calendar widgets are offered only while those extensions are on', () => {
+  assert.equal(widgetOn({ hiddenViews: [] } as never, 'todos'), true)
+  assert.equal(widgetOn({ hiddenViews: ['todos'] } as never, 'todos'), false)
+  assert.equal(widgetOn({ hiddenViews: ['calendar'] } as never, 'calendar'), false)
+  assert.equal(widgetOn({ hiddenViews: ['todos', 'calendar'] } as never, 'memory'), true)
+})

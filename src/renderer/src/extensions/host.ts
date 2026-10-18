@@ -215,8 +215,9 @@ export function registerWidget(owner: string, def: WidgetDef): Disposable {
   return { dispose: () => { if (WIDGETS[def.kind] === def) { delete WIDGETS[def.kind]; widgetOwners.delete(def.kind) } } }
 }
 
-/** Whether the kind can be added to a canvas: the shell's own always, an extension's while the user has it on. */
-export const widgetOn = (settings: Settings, kind: WidgetKind): boolean => ownerOn(settings, widgetOwners.get(kind) ?? CORE)
+/** Whether the kind can be added to a canvas: the shell's own always, an extension's while the user has it on. A widget a view carries (`ui.view({ widget })`) belongs to that extension. */
+export const widgetOn = (settings: Settings, kind: WidgetKind): boolean =>
+  ownerOn(settings, extensionModules.find((m) => m.widget?.kind === kind)?.key ?? widgetOwners.get(kind) ?? CORE)
 
 export const fenceRenderer = (lang: string): FC<FenceRendererProps> | undefined => fences.get(lang)
 

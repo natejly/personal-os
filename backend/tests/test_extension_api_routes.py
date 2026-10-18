@@ -67,3 +67,8 @@ def test_an_extensions_trash_kind_is_listed_restored_and_erased_through_the_rout
         assert client.delete("/trash/demo:nothing/x").status_code == 404
     finally:
         registration.dispose()
+
+
+def test_recap_facts_list_the_calendar_before_the_unread_mail() -> None:
+    ids = list(host.extensions)
+    assert ids.index("calendar") < ids.index("mail")

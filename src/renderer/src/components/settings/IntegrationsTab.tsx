@@ -34,10 +34,7 @@ export default function IntegrationsTab({ draft, patch, onSaveCreds }: TabProps 
         <label><span className="toggle-text"><b>GitHub token</b><small>Optional. Empty uses your <code>gh</code> login.</small></span><input type="password" value={draft.githubToken ?? ''} onChange={(e) => patch({ githubToken: e.target.value })} placeholder={settings.githubTokenSet ? 'Saved. Type to replace' : 'ghp_…'} spellCheck={false} /></label>
         <Switch title="Retry blocked pages through a reader service" help="For pages that are blocked or need JavaScript. The reader service sees the page address." checked={draft.readerFallback !== false} onChange={(readerFallback) => patch({ readerFallback })} />
       </Sec>
-      <Sec id="texting">
-        <h4>Telegram bot</h4>
-        <TelegramSettings draft={draft} patch={patch} />
-      </Sec>
+      <TelegramSettings draft={draft} patch={patch} />
     </section>
   )
 }

@@ -68,7 +68,7 @@ class TelegramExtension:
         if not isinstance(sent, dict) or not isinstance(sent.get("text"), str):
             return text, atts
         files = sent.get("files")
-        return sent["text"], files if isinstance(files, list) else atts
+        return sent["text"], files if isinstance(files, list) and all(isinstance(f, dict) for f in files) else atts
 
     async def start(self, _: Any) -> None:
         if self.api.enabled() and self.api.app.settings().get("telegramEnabled") and self.db.secrets.get(telegram.SECRET_NAME):

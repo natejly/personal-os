@@ -19,6 +19,7 @@ import pytest  # noqa: E402
 
 from personal_os import app as appmod  # noqa: E402
 from personal_os.extensions.channels import Channels  # noqa: E402
+from personal_os.extensions import hooks  # noqa: E402
 from personal_os.extensions.hooks import Cancel, HookBus  # noqa: E402
 from personal_os.extensions.host import ExtensionHost  # noqa: E402
 from test_telegram_api import OWNER, _portal, _reset, bridge, fake, j, pair, target, wait_until  # noqa: E402,F401
@@ -161,6 +162,14 @@ def test_a_handler_may_drop_the_files_of_a_reply(subscribe) -> None:  # type: ig
     ext_bridge = appmod.host.channels["telegram"]
     sent = asyncio.run(ext_bridge.deps.outbound("hi", [{"id": "d1", "name": "a.txt"}]))
     assert sent == ("hi", [])
+
+
+def test_files_that_are_not_attachment_dicts_leave_the_reply_files_unchanged(subscribe, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(hooks, "STRICT", False)  # the strict bus would raise on the junk before the adapter sees it
+    subscribe("channel.outbound", lambda ev: {**ev, "files": ["bad", 3]})
+    ext_bridge = appmod.host.channels["telegram"]
+    atts = [{"id": "d1", "name": "a.txt"}]
+    assert asyncio.run(ext_bridge.deps.outbound("hi", atts)) == ("hi", atts)
 
 
 def test_a_cancelled_reply_is_not_sent_and_the_next_one_is(subscribe) -> None:  # type: ignore[no-untyped-def]

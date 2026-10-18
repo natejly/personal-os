@@ -452,6 +452,9 @@ app.include_router(providers_router(db.get_settings, db.set_settings, db.secrets
 for _r in host.load_builtin("todos", _ext_ctx).routers:
     app.include_router(_r)
 todos, tasks_sync = _ext_ctx.services["todos"](), _ext_ctx.services["tasks_sync"]()
+# Not host.mount: Lists' time-blocking and the Planner settings read the Calendar routes with the Calendar view off.
+for _r in host.load_builtin("calendar", _ext_ctx).routers:
+    app.include_router(_r)
 # Not host.mount: the send-undo bar and the Planner settings read the Mail routes with the Mail view off.
 for _r in host.load_builtin("mail", _ext_ctx).routers:
     app.include_router(_r)
@@ -463,9 +466,6 @@ for _m in modules:
     if (_r := _m.router()) is not None:
         app.include_router(_r)
 host.mount(app, host.load_builtin("health", _ext_ctx))
-# Not host.mount: Lists' time-blocking and the Planner settings read the Calendar routes with the Calendar view off.
-for _r in host.load_builtin("calendar", _ext_ctx).routers:
-    app.include_router(_r)
 host.mount(app, host.load_builtin("spaces", _ext_ctx))
 canvases = _ext_ctx.services["canvases"]()
 for _p in _PROFILES:

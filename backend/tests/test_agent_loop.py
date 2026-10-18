@@ -123,7 +123,7 @@ def _script(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
 def test_loops():  # type: ignore[no-untyped-def]
     """The fixture loops, registered as built-in providers while a test runs."""
     disposables = []
-    for cls in (fx.Idle, fx.Spy, fx.Greedy, fx.Hostile):
+    for cls in (fx.Idle, fx.Spy, fx.Strict, fx.Greedy, fx.Hostile):
         loop = cls()
         disposables.append(rt.declare(Provider(loop.id, "agent.loop", loop.id.title(), extension="test")))
         disposables.append(rt.attach("agent.loop", loop.id, loop))
@@ -634,6 +634,22 @@ def test_a_steer_that_cuts_a_model_read_short_asks_the_phase_again() -> None:
     assert done(events)["error"] is None and spans(events) == ["plan", "execute", "verify"]
 
 
+def test_the_loop_says_which_phase_it_is_in() -> None:
+    ROUNDS.extend([plan_of("Read the note", "Write it up"), "read", "wrote", VERIFIED, "Done."])
+    events = drive(chat(PEV))
+    phases = [d["text"] for e, d in events if e == "status"]
+    assert phases == ["Planning the work", "Step 1 of 2: Read the note", "Step 2 of 2: Write it up", "Checking the work"]
+    assert all(d["kind"] == "phase" and d["id"] for e, d in events if e == "status")
+
+
+def test_a_loop_asks_for_a_tool_call_it_must_get_and_may_not_ask_without_tools(test_loops: None) -> None:
+    ROUNDS.extend([{"tool_calls": [fx.call("g_read")]}])
+    events = drive(chat("test/strict"))
+    assert MODEL[0]["tool_choice"] == "required" and MODEL[0]["tools"], "the tool list is offered and a call is demanded"
+    assert fx.SEEN["strict"] == {"no_tools": "ValueError", "unknown": "ValueError"}
+    assert done(events)["error"] is None
+
+
 def test_the_events_are_the_vocabulary_the_ui_already_reads() -> None:
     known = {"user_message", "assistant_message", "title", "span", "plan", "tool_call", "tool_result", "tool_decision", "delta", "done",
              "thinking_summary", "status", "taint", "plan_card", "plan_decision", "parked", "removed_message", "learned"}
@@ -758,6 +774,8 @@ def test_a_call_that_skips_the_tool_step_fails_the_run_and_names_the_loop(test_l
     events = drive(cid, run=run_)
     d = done(events)
     assert d["error_kind"] == "loop_violation" and "test/spy" in d["error"] and "outside the tool step" in d["error"]
+    (alert,) = [n for n in appmod.ExtNotes(appmod.db).open() if n["ext_id"] == "core"]
+    assert "test/spy" in alert["body"] and alert["target"] == f"run:{cid}"
 
 
 def _run_for(cid: str) -> Run:

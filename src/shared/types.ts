@@ -849,9 +849,9 @@ export interface ContextMeter {
 export type MessageOutcome = 'stopped' | 'rounds' | 'tokens' | 'time' | 'cost' | 'loop' | 'interrupted' | 'length' | 'incomplete'
 export type ErrorKind = 'rate_limit' | 'quota' | 'auth' | 'not_found' | 'overflow' | 'unsupported_param' | 'content_filter' | 'overloaded' | 'server' | 'bad_request' | 'transport' | 'cancelled' | 'timeout'
 
-/** A transient line under a streaming reply. `retry` counts down to `until` (epoch ms); `compacting` has no end time. */
+/** A transient line under a streaming reply. `retry` counts down to `until` (epoch ms); `compacting` has no end time; `phase` is what an alternative agent loop is doing. */
 export interface MessageStatus {
-  kind: 'retry' | 'compacting' | 'route'
+  kind: 'retry' | 'compacting' | 'route' | 'phase'
   attempt?: number
   max?: number
   until?: number
@@ -859,6 +859,8 @@ export interface MessageStatus {
   /** `route`: the model Auto picked and the short reason. */
   model?: string
   why?: string
+  /** `phase`: the line to show. */
+  text?: string
 }
 
 export interface Message {
@@ -2056,7 +2058,7 @@ export type ChatEvent =
   | { event: 'tool_decision'; data: { message_id: string; id: string; decision: ApprovalDecision } }
   | { event: 'span'; data: { message_id: string; span: Span } }
   /** Transient progress for a reply that has no tokens yet: a provider retry (`until` is epoch ms) or a history summary. `kind: null` clears it. */
-  | { event: 'status'; data: { id: string; kind: MessageStatus['kind'] | null; attempt?: number; max?: number; until?: number; reason?: MessageStatus['reason']; model?: string; why?: string } }
+  | { event: 'status'; data: { id: string; kind: MessageStatus['kind'] | null; attempt?: number; max?: number; until?: number; reason?: MessageStatus['reason']; model?: string; why?: string; text?: string } }
   | { event: 'done'; data: { id: string | null; error: string | null; context_used: ContextUsed | null; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null; outcome?: MessageOutcome | null; error_kind?: ErrorKind | null; notice?: string | null; attachments?: Attachment[] | null } }
   | { event: 'taint'; data: { message_id: string; source: string } }
   | { event: 'subagent'; data: SubagentInfo & { message_id: string | null } }

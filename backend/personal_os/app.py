@@ -113,7 +113,7 @@ from .extensions.authoring import skill as author_extension
 from .extensions.drafts import Drafts
 from .extensions.defaults import Defaults
 from .extensions.hooks import Deny, hook_ctx
-from .extensions.notes import ExtNotes
+from .extensions.notes import ExtNotes, InboxItem
 from .extensions.host import ExtensionContext, ExtensionHost, builtin_manifest
 from .modules import Module, ModuleContext, build_modules
 from .tools import Toolbox, UrlBlocked, guarded_request, page_title, summarize_result, times_body
@@ -1551,6 +1551,12 @@ def list_conversations(project_id: str | None = None, include_jobs: bool = False
     return convos.list(sid(project_id), include_jobs, include_desks, archived)
 
 
+def _alert(title: str, body: str, target: str) -> None:
+    """A card under Needs you for something the core itself caught."""
+    ExtNotes(db).add("core", InboxItem(title, body, target), inbox=True)
+    events.publish("inbox_note", {})
+
+
 def _chat_created(conv: dict[str, Any]) -> None:
     host.fire("chat.created", {"id": conv["id"], "project_id": conv.get("project_id")})
 
@@ -1862,6 +1868,7 @@ TOOL_ERROR_LIMIT = limits.TOOL_ERROR_LIMIT
 PROPOSAL_ONLY_KINDS = ("job",)
 # A model call that is still open after this long while writing the closing answer is abandoned.
 EFFORT_DROPPED_NOTICE = "This model does not accept a reasoning effort; it was sent without one."
+PHASE_TEXT_CHARS = 120  # the line an alternative agent loop shows while it works
 FINAL_ROUND_SECONDS = limits.FINAL_ROUND_SECONDS
 # An unattended run with no model or tool activity this long is stopped (see _run_chat_job): hang detection, never a length cap.
 JOB_IDLE_SECONDS = limits.JOB_IDLE_SECONDS
@@ -3261,6 +3268,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if name == "delta":
                     buf.append(data["text"])
                     return "delta", {"id": am["id"], "text": data["text"]}
+                if name == "status":  # what the loop is doing now, as the line under a reply that has nothing to show yet
+                    return "status", {"id": am["id"], "kind": "phase", "text": str(data["text"])[:PHASE_TEXT_CHARS]}
                 if name == "plan":  # the same panel todo_write feeds; nothing in it is approved by being listed
                     return "plan", {"conversation_id": conv_id, "steps": work_plans.set(conv_id, data["steps"])["steps"]}
                 if data["open"]:
@@ -3283,7 +3292,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 sealed = _prefix_digest()
                 return messages
 
-            async def _model(msgs: list[dict[str, Any]], with_tools: bool) -> AsyncIterator[dict[str, Any]]:
+            async def _model(msgs: list[dict[str, Any]], with_tools: bool, tool_choice: str) -> AsyncIterator[dict[str, Any]]:
                 """One round of the default loop's bookkeeping around a model call: old tool results shrink, finished shell jobs and the
                 plan ride along, the round gets its span and its usage is metered. The loop sees the text and the calls."""
                 nonlocal _round, notice, sealed
@@ -3304,7 +3313,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 text: list[str] = []
                 end: dict[str, Any] = {}
                 first_token: int | None = None
-                async for ev in _stream_round(**({} if with_tools else {"tool_choice": "none"})):
+                choice = tool_choice if with_tools else "none"
+                async for ev in _stream_round(**({} if choice == "auto" else {"tool_choice": choice})):
                     if stop.is_set():
                         break
                     if ev["type"] == "overflow_recovered":
@@ -3381,6 +3391,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 tracer.end(span)
             if run is not None and run.store is not None and any(r["call_id"] not in tool_step.accounted for r in run.store.executed(run.run_id)):
                 log.critical("agent loop %s ran a tool outside the tool step in run %s", loop.id, run.run_id)
+                _alert("An agent loop ran a tool outside the checks", f"The loop {loop.id!r} ran a tool without the tool step in run {run.run_id}, so the reply was stopped.", f"run:{conv_id}")
                 raise LoopViolation(f"the agent loop {loop.id!r} ran a tool outside the tool step, so the reply was stopped")
 
     except asyncio.CancelledError:

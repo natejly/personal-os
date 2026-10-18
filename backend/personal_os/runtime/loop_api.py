@@ -7,14 +7,15 @@ plain data in, narrow capabilities out. The capabilities are built by the core a
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Mapping, Protocol, Sequence, runtime_checkable
+from typing import Any, AsyncIterator, Literal, Mapping, Protocol, Sequence, runtime_checkable
 
 LoopEvent = tuple[str, dict[str, Any]]  # (event name, payload) in the vocabulary the UI already reads
 Messages = list[dict[str, Any]]
 ToolCall = dict[str, Any]  # {"id", "name", "arguments"} as the model produced it
 ToolMessage = dict[str, Any]  # {"role": "tool", "tool_call_id", "content"}: the content is already rendered and scrubbed
 
-LOOP_EVENTS = frozenset({"delta", "plan", "span"})  # what a loop itself may emit; the tool and model objects emit the rest
+ToolChoice = Literal["auto", "required"]  # "required": the model must call a tool this round
+LOOP_EVENTS = frozenset({"delta", "plan", "span", "status"})  # what a loop itself may emit; the tool and model objects emit the rest
 
 
 class LimitReached(Exception):
@@ -53,9 +54,10 @@ class ContextBuilder(Protocol):
 
 
 class ModelStream(Protocol):
-    def stream(self, messages: Messages, *, tools: bool) -> AsyncIterator[dict[str, Any]]:
+    def stream(self, messages: Messages, *, tools: bool, tool_choice: ToolChoice = "auto") -> AsyncIterator[dict[str, Any]]:
         """One model call through the model.client slot, with the idle limit, Stop and steering. Yields `{"type": "delta", "text"}` and
-        ends with one `{"type": "end", "text", "tool_calls", "finish_reason"}`. With `tools` false the model is told not to call any."""
+        ends with one `{"type": "end", "text", "tool_calls", "finish_reason"}`. With `tools` false the model is told not to call any;
+        `tool_choice` only applies when tools are offered."""
 
 
 class Tools(Protocol):
@@ -66,7 +68,7 @@ class Tools(Protocol):
 
 class EventSink(Protocol):
     def emit(self, event: LoopEvent) -> None:
-        """Publish a `delta`, `plan` or `span` event as the loop goes, not when it next yields."""
+        """Publish a `delta`, `plan`, `span` or `status` event as the loop goes, not when it next yields."""
 
 
 class LoopHooks(Protocol):

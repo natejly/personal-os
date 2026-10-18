@@ -1,6 +1,6 @@
 """Agent loops for the tests. Each imports only the loop API, as a registered loop must, so the registry accepts them.
 
-`Spy` keeps what it was handed; `Hostile` tries, one at a time, everything a loop is supposed not to be able to do and records how
+`Spy` keeps what it was handed; `Strict` asks for a tool call it must get; `Hostile` tries, one at a time, everything a loop is supposed not to be able to do and records how
 each attempt ended in `SEEN["attacks"]`; `Greedy` makes more model calls than the turn allows; `Idle` does nothing.
 """
 from __future__ import annotations
@@ -49,6 +49,23 @@ class Spy:
         if end["tool_calls"]:
             SEEN["tool_messages"] = await h.tools.run(end["tool_calls"])
         yield "delta", {"text": "spy"}
+
+
+class Strict:
+    """Asks for a tool call it must get, and then tries a tool choice it may not make."""
+    id = "test/strict"
+    bounds = MappingProxyType({"round": 1})
+
+    async def run(self, turn: TurnInput, h: LoopHarness) -> AsyncIterator[LoopEvent]:
+        messages = h.context.build([])
+        async for _ in h.model.stream(messages, tools=True, tool_choice="required"):
+            pass
+        for name, kw in (("no_tools", {"tools": False, "tool_choice": "required"}), ("unknown", {"tools": True, "tool_choice": "none"})):
+            try:
+                h.model.stream(messages, **kw)
+            except ValueError as e:
+                SEEN.setdefault("strict", {})[name] = type(e).__name__
+        yield "delta", {"text": "strict"}
 
 
 class Greedy:

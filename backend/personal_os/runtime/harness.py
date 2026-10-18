@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import asyncio
 from types import MappingProxyType
-from typing import Any, AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from typing import Any, AsyncIterator, Awaitable, Callable, Mapping, Sequence, get_args
 
 from ..extensions.catalog import LoopPlanPayload, LoopVerifyPayload
 from ..extensions.hooks import HookBus
 from ..tools import scrub_strings
-from .loop_api import AgentLoop, LimitReached, LoopEvent, LoopHarness, Messages, ToolCall, ToolMessage, TurnEnded, TurnInput
+from .loop_api import AgentLoop, LimitReached, LoopEvent, LoopHarness, Messages, ToolCall, ToolChoice, ToolMessage, TurnEnded, TurnInput
 
 LOOP_HOOKS = {"loop.plan": LoopPlanPayload, "loop.verify": LoopVerifyPayload}  # the only hooks a loop may fire
 
@@ -61,11 +61,13 @@ class ContextBuilder(_Sealed):
 class ModelStream(_Sealed):
     __slots__ = ("_stream",)
 
-    def __init__(self, stream: Callable[[Messages, bool], AsyncIterator[dict[str, Any]]]) -> None:
+    def __init__(self, stream: Callable[[Messages, bool, ToolChoice], AsyncIterator[dict[str, Any]]]) -> None:
         self._fill(_stream=stream)
 
-    def stream(self, messages: Messages, *, tools: bool) -> AsyncIterator[dict[str, Any]]:
-        return self._stream(messages, tools)
+    def stream(self, messages: Messages, *, tools: bool, tool_choice: ToolChoice = "auto") -> AsyncIterator[dict[str, Any]]:
+        if tool_choice not in get_args(ToolChoice) or (tool_choice != "auto" and not tools):
+            raise ValueError(f"tool_choice {tool_choice!r} is not one of {get_args(ToolChoice)} or no tools are offered")
+        return self._stream(messages, tools, tool_choice)
 
 
 class Tools(_Sealed):

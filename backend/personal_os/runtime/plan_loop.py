@@ -104,6 +104,7 @@ class PlanExecuteVerify:
             yield "delta", {"text": f"I stopped here: {e}. What was done so far:\n{work.record()}"}
 
     async def _turn(self, turn: TurnInput, h: LoopHarness, work: _Work) -> AsyncIterator[LoopEvent]:
+        yield "status", {"text": "Planning the work"}
         yield "span", {"name": "plan", "open": True, "meta": {}}
         work.steps = await self._plan(h)
         work.status, work.notes, work.said = ["pending"] * len(work.steps), [[] for _ in work.steps], [""] * len(work.steps)
@@ -113,11 +114,13 @@ class PlanExecuteVerify:
         for i in range(len(work.steps)):
             if h.limits.stopped:
                 return
+            yield "status", {"text": f"Step {i + 1} of {len(work.steps)}: {work.steps[i]['title']}"}
             async for event in self._step(h, work, i, STEP_TAIL.format(n=i + 1, total=len(work.steps), **work.steps[i])):
                 yield event
         ok, gaps = False, []
         while not h.limits.stopped:
             attempt = h.limits.next_round("verify")
+            yield "status", {"text": "Checking the work"}
             yield "span", {"name": "verify", "open": True, "meta": {"attempt": attempt}}
             ok, gaps = await self._verify(h, work)
             await h.hooks.emit("loop.verify", {"run_id": turn.run_id, "conversation_id": turn.conversation_id, "attempt": attempt, "ok": ok, "gaps": gaps})

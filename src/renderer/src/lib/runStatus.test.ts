@@ -16,6 +16,10 @@ test('statusText: once the time has passed it says retrying now; compacting has 
   assert.equal(statusText({ kind: 'compacting' }, 0), 'Summarizing earlier messages to make room…')
 })
 
+test('statusText: an alternative agent loop shows the phase it is in', () => {
+  assert.equal(statusText({ kind: 'phase', text: 'Step 1 of 3: Read the note' }, 0), 'Step 1 of 3: Read the note')
+})
+
 test('statusText: a routed reply says which model Auto chose and why', () => {
   assert.equal(statusText({ kind: 'route', model: 'accounts/fireworks/models/kimi-k3', why: 'short follow-up' }, 0), 'Auto → kimi-k3: short follow-up')
 })

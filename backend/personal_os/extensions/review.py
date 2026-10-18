@@ -47,6 +47,8 @@ class Review:
             await self.host.unload(ext_id)
 
     async def enable(self, ext_id: str, grants: list[str]) -> None:
+        if ext_id not in self.drafts.installed_ids():
+            raise KeyError(ext_id)
         if ext_id in self.host.extensions:
             return
         self.drafts.approve(ext_id, grants)

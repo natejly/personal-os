@@ -174,6 +174,11 @@ def test_a_confirm_for_an_earlier_state_is_stale() -> None:
     assert apply(pid, confirm=stale).status_code == 409
 
 
+def test_applying_to_an_unknown_project_or_chat_is_a_404() -> None:
+    assert apply("builtin:read-only", "project", "nope").status_code == 404
+    assert apply("builtin:read-only", "chat", "nope").status_code == 404
+
+
 def test_a_stricter_preset_applies_without_a_click() -> None:
     set_state(permissionMode="allow_all", alwaysAsk=[])
     pid = user_preset(permissionMode="manual", alwaysAsk=["gmail_send"], destructiveDefaults={"files": "block"}, permissionRules={"allow": [], "ask": [], "deny": ["preset_probe"]})

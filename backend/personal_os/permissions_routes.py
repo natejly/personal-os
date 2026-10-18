@@ -85,6 +85,8 @@ def router(presets: Presets, effective: Callable[[str | None, str | None], dict[
             return presets.apply(preset_id, body.scope, body.scope_id, body.confirm)
         except Held as e:
             return JSONResponse(e.diff, status_code=409)
+        except KeyError as e:  # the project or chat the scope names
+            raise HTTPException(404, e.args[0]) from None
         except PresetError as e:
             raise refused(e) from e
 

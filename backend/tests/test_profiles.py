@@ -63,7 +63,7 @@ class ValidatorTests(unittest.TestCase):
     def test_theme_tokens_are_plain_values_over_custom_properties(self) -> None:
         def theme(t: Any) -> Manifest:
             return Manifest.from_dict({**BASE, "kind": "profile", "contributes": {"theme": t}})
-        theme({"dark": {"--bg": "#101010", "--radius": "6px"}, "light": {"--accent": "rgb(1, 2, 3)", "--edge": "calc(var(--r) * 2)"}})
+        theme({"dark": {"--bg": "#101010", "--radius": "6px", "--a_B": "1px"}, "light": {"--accent": "rgb(1, 2, 3)", "--edge": "calc(var(--r) * 2)"}})
         for bad in ({"sepia": {}}, {"dark": {"bg": "#000"}}, {"dark": {"--bg": "red; color: blue"}}, {"dark": {"--bg": "url(http://x)"}},
                     {"dark": {"--bg": "}body{display:none"}}, {"dark": {"--bg": "@import x"}}, {"dark": {"--bg": 3}}, {"dark": ["--bg"]},
                     {"dark": {"--bg": "x/*"}}, {"dark": {"--bg": 'image-set("https://h/x.png" 1x)'}}, {"dark": {"--bg": "src(x)"}}):

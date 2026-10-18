@@ -242,6 +242,10 @@ def test_an_unknown_extension_cannot_be_enabled() -> None:
     assert enable("rl-ghost").status_code == 404 and client.post("/extensions/rl-ghost/disable").status_code == 404
 
 
+def test_a_dev_loaded_or_built_in_id_that_is_not_installed_cannot_be_enabled() -> None:
+    assert enable("todos").status_code == 404
+
+
 # ---- the drafting session's provenance ----
 def test_a_tainted_session_may_not_hold_prompt_inject_or_hooks_gate() -> None:
     draft(permissions=("prompt:inject",))

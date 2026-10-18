@@ -17,6 +17,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import httpx  # noqa: E402
 import pytest  # noqa: E402
 from fastapi import APIRouter, FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -379,6 +380,11 @@ def test_dev_push_reloads_a_loaded_extension_and_loads_a_new_one(ext: Path) -> N
     assert c.calls == ["/dev/extensions/sample/reload", "/dev/extensions/load"]
     (ext / "extension.json").write_text("{", "utf-8")
     assert cli.push(c, ext).startswith("error:")  # type: ignore[arg-type]
+
+
+def test_dev_push_names_an_unreachable_backend_in_one_line(ext: Path) -> None:
+    with httpx.Client(base_url="http://127.0.0.1:9") as c:
+        assert cli.push(c, ext).startswith("error: cannot reach the dev backend")
 
 
 # ---- handler stats for the dev panel ----

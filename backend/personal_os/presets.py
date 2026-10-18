@@ -256,7 +256,7 @@ class Presets:
             return None, None
         row = (self.projects if scope == "project" else self.convos).get(scope_id, **({} if scope == "project" else {"with_messages": False}))
         if row is None:
-            raise PresetError(f"no such {scope}")
+            raise KeyError(f"no such {scope}")
         if scope == "project":
             return row, None
         return (self.projects.get(row["project_id"]) if row.get("project_id") else None), row

@@ -34,9 +34,12 @@ def push(client: httpx.Client, root: Path) -> str:
         ext_id = load_manifest(root / "extension.json").id
     except ManifestError as e:
         return f"error: {e}"
-    r = client.post(f"/dev/extensions/{ext_id}/reload")
-    if r.status_code == 404:
-        r = client.post("/dev/extensions/load", json={"path": str(root)})
+    try:
+        r = client.post(f"/dev/extensions/{ext_id}/reload")
+        if r.status_code == 404:
+            r = client.post("/dev/extensions/load", json={"path": str(root)})
+    except httpx.TransportError as e:
+        return f"error: cannot reach the dev backend: {e}"
     if r.is_success:
         return f"{ext_id}: loaded ({len(r.json()['hooks'])} hook handler(s), {len(r.json()['tools'])} tool(s))"
     return f"{ext_id}: {r.json().get('detail', r.text)}"

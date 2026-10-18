@@ -760,6 +760,14 @@ export interface ExtensionHookStats {
   errors: string[]
 }
 
+/** An interval job an extension registered (api.job), as the dev panel shows it. */
+export interface ExtensionJobStats {
+  name: string
+  everySeconds: number
+  runs: number
+  lastError: string | null
+}
+
 export interface ExtensionInfo {
   id: string
   name: string
@@ -774,6 +782,7 @@ export interface ExtensionInfo {
   tools: string[]
   permissions: string[]
   hooks: ExtensionHookStats[]
+  jobs: ExtensionJobStats[]
 }
 
 export interface ExtensionsDev {
@@ -2090,6 +2099,8 @@ export type BackgroundEvent =
   /** The learn worker re-read a scope's writing samples into a new voice profile. */
   | { event: 'style_learned'; data: { project_id: string | null; profile: StyleProfile } }
   | { event: 'job_finished'; data: { run_id: string; job_id: string } }
+  /** An extension left an inbox card or asked for a notification (api.inbox, api.notify): re-read the inbox and the notification feed. */
+  | { event: 'inbox_note'; data: Record<string, never> }
   /** Every desk write, for desks nobody is watching: the rail, the badge and the Today card stay live. */
   | { event: 'desk_status'; data: Desk }
   /** A run's answering / status state moved: lets every window know about a reply it did not start. */
@@ -2616,8 +2627,11 @@ export interface TrashItem {
   /** Projects only: how many chats / memories / uploads went into the trash with it. */
   contents?: Record<string, number>
 }
+/** A kind an extension keeps in the trash, named `<extension id>:<name>`. */
+export interface ExtensionTrashGroup { kind: string; label: string; items: (Omit<TrashItem, 'type'> & { type: string })[] }
 export interface TrashListing {
   groups: { projects: TrashItem[]; conversations: TrashItem[]; docs: TrashItem[]; documents: TrashItem[]; memories: TrashItem[]; todos: TrashItem[] }
+  extensions: ExtensionTrashGroup[]
   total: number
   retention_days: number
 }
@@ -2979,13 +2993,15 @@ export interface JobStats {
 /** One OS-notification-worthy job event (GET /inbox/notify). Names and counts only, never reply text. */
 export interface JobNotifyEvent {
   id: string
-  kind: 'job_failed' | 'job_done' | 'job_done_with_proposals' | 'job_paused' | 'proposal_pending'
+  kind: 'job_failed' | 'job_done' | 'job_done_with_proposals' | 'job_paused' | 'proposal_pending' | 'ext_note'
   title: string
   body: string
   at: number
   /** Where a click goes: 'inbox' (Today's Agent Inbox) or 'run:<conversation_id>' (that run's transcript). */
   target: string
 }
+
+export interface ExtensionNote { id: string; ext_id: string; title: string; body: string; target: string | null; created_at: number }
 
 export type InboxQueueKey = 'doc_edits' | 'skills' | 'workflows' | 'memory'
 
@@ -3009,6 +3025,8 @@ export interface AgentInbox {
     desks?: DeskEvent[]
     /** Every other review queue, as a count and a key the renderer maps to the place it is decided. */
     elsewhere?: { key: InboxQueueKey; label: string; count: number }[]
+    /** Cards an extension left (api.inbox) until they are dismissed. */
+    notes?: ExtensionNote[]
   }
   while_you_were_away: JobRunSummary[]
   counts: { needs_you: number; approvals: number; proposals: number; paused_jobs: number; runs: number; unseen_runs: number; late: number; failed: number }
@@ -3237,6 +3255,9 @@ export interface CrewView {
   workflow: Workflow | null
   agents: CrewAgent[]
 }
+/** A slash command an extension registers (api.command). */
+export interface ExtensionCommand { name: string; hint: string; owner: string }
+
 export interface Command {
   id: string
   name: string

@@ -50,7 +50,7 @@ Unknown keys are refused.
 - settings: {"<name>": {"type": "string" | "boolean" | "integer" | "number" | "secret"}}; stored as ext.<id>.<name>
 
 ## extension.py
-    from grain_sdk import Contribution, Deny, Extension, ToolSpec
+    from grain_sdk import Contribution, Deny, Extension, InboxItem, ToolSpec, TrashHandler
 
     def activate(api: Extension) -> None: ...
 
@@ -58,7 +58,12 @@ api members:
 - api.tool(ToolSpec(name, description, schema_dict, async_fn, group, danger=...)): the manifest must declare the same tools, danger and group. async_fn(ctx, **arguments) returns a dict.
 - api.context(fn, slot="volatile" | "stable" | "tail"): fn(payload) returns Contribution(text) or None; needs the context.contribute hook declared and context:volatile (volatile) or prompt:inject (other slots).
 - api.on(hook, fn): fn(payload) returns None for no opinion. A gating hook (tool.pre, tool.permission, coding.tool.pre) may return Deny(reason) or Ask(reason) and never allows.
-- api.router(APIRouter), api.emit_ui(name, data), api.spawn(coro), api.log, api.db (db:own), api.services.get(name).
+- api.on(hook, fn) also accepts fn(payload, ctx): ctx is a HookCtx (run_id, conversation_id, project_id, agent_id, tainted, stop, via_hook) whose `await ctx.call_tool(name, args)` runs a read-only built-in tool, at most two hook levels deep. A handler may add at most 10,000 characters of text to what it was given.
+- api.router(APIRouter), api.emit_ui(name, data), api.spawn(coro), api.log, api.db (db:own; only the tables in data.tables), api.services.get(name).
+- api.data_dir (a folder for the extension's files), api.settings.get(name) / .on_change(fn(name)), api.secrets.get/set/delete(name).
+- api.command(name, fn): the manifest lists contributes.commands [{"name", "hint"}]; fn(arguments) returns the text laid under the turn that typed /name.
+- api.job(name, timedelta, fn): runs every interval (at least 60 s) while the extension is on. api.notify(title, body, target=None) asks for a system notification; api.inbox(InboxItem(title, body)) leaves a card under Needs you.
+- api.trash_handler("<id>:<name>", TrashHandler(label, items, restore, purge)): the trash lists, restores and erases the extension's soft-deleted rows.
 
 Hooks: app.start, app.stop, settings.changed, chat.created, turn.settled, reply.complete, tool.pre, tool.post, tool.result, tool.error, model.request, model.response, context.contribute, memory.written, job.done, and others; `grain ext check` rejects an unknown name.
 

@@ -6,8 +6,10 @@ schemas/ (see generate.py); `hooks` holds every hook payload and the typed `api.
 hook catalog (`grain ext gen-hooks`); `testing.Harness` drives an extension in a scratch backend.
 """
 from personal_os.context import Contribution
-from personal_os.extensions.hooks import Ask, Deny
+from personal_os.extensions.hooks import Ask, Deny, HookCtx
 from personal_os.extensions.host import ExtensionScope
+from personal_os.extensions.notes import InboxItem
+from personal_os.extensions.trashkinds import TrashHandler
 from personal_os.tools import ToolSpec
 
 from . import hooks, types
@@ -19,4 +21,4 @@ class Extension(ExtensionScope):
     on: On  # type: ignore[assignment]  # the same method, typed per hook
 
 
-__all__ = ["Ask", "Contribution", "Deny", "Extension", "ToolSpec", "hooks", "types"]
+__all__ = ["Ask", "Contribution", "Deny", "Extension", "HookCtx", "InboxItem", "ToolSpec", "TrashHandler", "hooks", "types"]

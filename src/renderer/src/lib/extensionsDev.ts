@@ -7,6 +7,12 @@ export function formatMs(ms: number | null): string {
   return ms >= 10 ? `${Math.round(ms)} ms` : `${ms.toFixed(1)} ms`
 }
 
+/** A job's interval: whole minutes from a minute up, whole hours when they divide evenly. */
+export function formatEvery(seconds: number): string {
+  const minutes = Math.round(seconds / 60)
+  return minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60} h` : `${minutes} min`
+}
+
 /** What an extension registered, one phrase per kind ("2 tools", "routes /notes", "1 view"). */
 export function contributionSummary(ext: Pick<ExtensionInfo, 'contributes' | 'tools'>): string[] {
   const c = ext.contributes as { routes?: { prefix?: string }; views?: unknown[] }

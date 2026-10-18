@@ -9,11 +9,13 @@ Callers that journal a call put the seam inside the journal, so a replayed resul
 from __future__ import annotations
 
 import copy
+import dataclasses
 import time
+import uuid
 from typing import Any, Awaitable, Callable
 
 from . import guards, redact
-from .extensions.hooks import Ask, Deny, HookBus, hook_ctx
+from .extensions.hooks import Ask, Deny, HookBus, HookCtx, Via, hook_ctx
 from .tools import Toolbox, scrub_strings, denied, summarize_result, tool_error
 
 def _refused(name: str, verdict: Deny | Ask) -> dict[str, Any]:
@@ -26,14 +28,14 @@ def _refused(name: str, verdict: Deny | Ask) -> dict[str, Any]:
 
 
 async def _observe(bus: HookBus, name: str, args: dict[str, Any], result: Any, error: str | None, started: float, call_id: str,
-                   run_id: str | None) -> None:
+                   hctx: HookCtx) -> None:
     if error and bus.active("tool.error"):
-        await bus.emit("tool.error", {"name": name, "call_id": call_id, "run_id": run_id, "error": redact.scrub_command_output(error)})
+        await bus.emit("tool.error", {"name": name, "call_id": call_id, "run_id": hctx.run_id, "error": redact.scrub_command_output(error)}, ctx=hctx)
     if bus.active("tool.post"):
-        await bus.emit("tool.post", {"name": name, "call_id": call_id, "run_id": run_id, "args": scrub_strings(args),
+        await bus.emit("tool.post", {"name": name, "call_id": call_id, "run_id": hctx.run_id, "args": scrub_strings(args),
                                      "result_preview": redact.scrub_command_output(summarize_result(result)),
                                      "error": redact.scrub_command_output(error) if error else None,
-                                     "duration_ms": int((time.monotonic() - started) * 1000)})
+                                     "duration_ms": int((time.monotonic() - started) * 1000)}, ctx=hctx)
 
 
 class Contact:
@@ -49,6 +51,17 @@ class Contact:
         return await self._call()
 
 
+def _hook_ctx(toolbox: Toolbox, ctx: dict[str, Any]) -> HookCtx:
+    """What a handler of this call's hooks is told, with the means to make tool calls of its own: nested calls carry the
+    handlers they are made from, so the hooks of a nested call skip them, and only read-only built-in tools can be called."""
+    async def call(name: str, args: dict[str, Any], via: Via) -> Any:
+        spec = toolbox.specs.get(name)
+        if spec is None or spec.danger != "safe" or spec.taints:
+            return tool_error(f"{name} cannot be called from a hook: only read-only built-in tools can")
+        return await dispatch_tool(toolbox, {**ctx, "via_hook": via}, name, args, call_id=f"hook-{uuid.uuid4().hex[:12]}")
+    return dataclasses.replace(HookCtx.of(ctx), stop=ctx.get("stop"), via=tuple(ctx.get("via_hook") or ()), _call=call)
+
+
 async def dispatch_tool(toolbox: Toolbox, ctx: dict[str, Any], name: str, args: dict[str, Any], *, call_id: str,
                         connector: Callable[[], Awaitable[Any]] | None = None) -> Any:
     """Run one tool call under the hooks. `connector` is the call to make for an MCP tool (Toolbox.call otherwise);
@@ -56,25 +69,26 @@ async def dispatch_tool(toolbox: Toolbox, ctx: dict[str, Any], name: str, args: 
     bus = toolbox.bus
     if refusal := guards.run_core_guards(toolbox, ctx, name, args):
         return refusal.result(name)
+    hctx = _hook_ctx(toolbox, ctx)
     if bus.active("tool.pre") and (verdict := await bus.gate(
-            "tool.pre", {"name": name, "args": copy.deepcopy(args), "call_id": call_id, "ctx": hook_ctx(ctx)})):
+            "tool.pre", {"name": name, "args": copy.deepcopy(args), "call_id": call_id, "ctx": hook_ctx(ctx)}, ctx=hctx)):
         return _refused(name, verdict)
     sources_before = len(ctx.get("taint_sources") or ())
     started = time.monotonic()
     try:
         result = await (connector() if connector is not None else toolbox.call(name, args, ctx))
     except Exception as e:
-        await _observe(bus, name, args, None, f"{type(e).__name__}: {e}", started, call_id, ctx.get("run_id"))
+        await _observe(bus, name, args, None, f"{type(e).__name__}: {e}", started, call_id, hctx)
         raise
     if bus.active("tool.result"):
         piped = await bus.pipe("tool.result", {"name": name, "call_id": call_id, "run_id": ctx.get("run_id"), "result": copy.deepcopy(result),
-                                               "tainted": connector is not None or bool(ctx.get("tainted"))})
+                                               "tainted": connector is not None or bool(ctx.get("tainted"))}, ctx=hctx)
         if isinstance(piped, dict) and "result" in piped:
             result = piped["result"]
     error = result.get("error") if isinstance(result, dict) else None
-    await _observe(bus, name, args, result, str(error) if error else None, started, call_id, ctx.get("run_id"))
+    await _observe(bus, name, args, result, str(error) if error else None, started, call_id, hctx)
     if bus.active("tool.taint"):
         sources = [name] if connector is not None else list(ctx.get("taint_sources") or ())[sources_before:]
         for source in sources:
-            await bus.emit("tool.taint", {"name": name, "source": source})
+            await bus.emit("tool.taint", {"name": name, "source": source}, ctx=hctx)
     return result

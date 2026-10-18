@@ -27,6 +27,7 @@ from . import blobs
 from .db import Database, now
 from .docs import Docs, drop_doc_windows
 from .extensions.hooks import HookBus
+from .extensions.trashkinds import TrashKinds
 from .migrations import sync_memories_fts
 from .todos import Todos
 from .workspace import Workspace, WorkspaceError
@@ -51,11 +52,12 @@ CHILD_TABLES = ("conversations", "memories", "documents")  # docs and todos are 
 
 
 class Trash:
-    def __init__(self, db: Database, todos: Todos, docs: Docs, hooks: HookBus | None = None):
+    def __init__(self, db: Database, todos: Todos, docs: Docs, hooks: HookBus | None = None, kinds: TrashKinds | None = None):
         self.db = db
         self.todos = todos
         self.docs = docs
         self.hooks = hooks or HookBus()
+        self.kinds = kinds or TrashKinds()  # the kinds extensions own: their rows are listed, restored and erased through them
 
     @staticmethod
     def _check(kind: str) -> tuple[str, str]:
@@ -112,6 +114,8 @@ class Trash:
     def restore(self, kind: str, id: str) -> dict[str, Any] | None:
         """Bring an item back. One whose project is itself still in the trash comes back in Personal
         instead, since restoring it into a project nobody can see would lose it a second time."""
+        if handler := self.kinds.get(kind):
+            return {"ok": True, "type": kind, "id": id, "moved_to_personal": False} if handler.restore(id) else None
         table, _ = self._check(kind)
         with self.db.tx() as c:
             row = c.execute(f"SELECT * FROM {table} WHERE id=? AND deleted_at IS NOT NULL", (id,)).fetchone()
@@ -141,6 +145,8 @@ class Trash:
 
     # ---- permanent delete ----
     def purge(self, kind: str, id: str) -> bool:
+        if handler := self.kinds.get(kind):
+            return handler.purge(id)
         table, _ = self._check(kind)
         with self.db.tx() as c:
             if not c.execute(f"SELECT 1 FROM {table} WHERE id=? AND deleted_at IS NOT NULL", (id,)).fetchone():
@@ -217,13 +223,32 @@ class Trash:
                         item["contents"] = {ct: c.execute(f"SELECT COUNT(*) FROM {ct} WHERE deleted_with=?", (r["id"],)).fetchone()[0]
                                             for ct in CHILD_TABLES}
                     groups[GROUPS[kind]].append(item)
-        return {"groups": groups, "total": sum(len(v) for v in groups.values()), "retention_days": RETENTION_DAYS}
+        extensions = self._extension_groups()
+        return {"groups": groups, "extensions": extensions, "retention_days": RETENTION_DAYS,
+                "total": sum(len(v) for v in groups.values()) + sum(len(g["items"]) for g in extensions)}
+
+    def _extension_groups(self) -> list[dict[str, Any]]:
+        """One group per extension kind that has rows in the trash. A handler that fails leaves its group out, never the whole listing."""
+        out = []
+        for kind in self.kinds.kinds():
+            handler = self.kinds.get(kind)
+            assert handler is not None
+            try:
+                rows = handler.items()
+            except Exception:  # noqa: BLE001 - one extension's trash must not blank the rest
+                log.warning("trash: listing %s failed", kind, exc_info=True)
+                continue
+            items = [{"type": kind, "id": r["id"], "title": (r["title"] or "").strip()[:160] or "Untitled", "deleted_at": r["deleted_at"],
+                      "purge_at": r["deleted_at"] + RETENTION_DAYS * DAY, "project_id": None, "project_name": None} for r in rows]
+            if items:
+                out.append({"kind": kind, "label": handler.label, "items": items})
+        return out
 
     def empty(self) -> int:
         n = 0
-        for items in self.list()["groups"].values():
-            for it in items:
-                n += self.purge(it["type"], it["id"])
+        listing = self.list()
+        for it in [*(i for items in listing["groups"].values() for i in items), *(i for g in listing["extensions"] for i in g["items"])]:
+            n += self.purge(it["type"], it["id"])
         return n
 
     def purge_old(self, days: float = RETENTION_DAYS) -> int:
@@ -239,6 +264,8 @@ class Trash:
                     + ("" if kind == "project" else " AND deleted_with IS NULL"), (cutoff,)).fetchall()]
             for i in ids:
                 n += self.purge(kind, i)
+        for group in self._extension_groups():
+            n += sum(self.purge(it["type"], it["id"]) for it in group["items"] if it["deleted_at"] < cutoff)
         return n
 
     async def loop(self) -> None:
@@ -262,7 +289,7 @@ def router(trash: Trash) -> APIRouter:
     r = APIRouter()
 
     def _kind(kind: str) -> str:
-        if kind not in TYPES:
+        if kind not in TYPES and kind not in trash.kinds.kinds():
             raise HTTPException(404, f"unknown trash type '{kind}'")
         return kind
 

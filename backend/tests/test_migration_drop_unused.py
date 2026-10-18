@@ -30,7 +30,7 @@ def test_dead_tables_and_settings_go_and_the_rest_stays() -> None:
     c = _db({"maxRunCost": "1.0", "pimProvider": '"google"', "sandboxNetwork": '"off"', "meetings": "{}", "theme": '"dark"',
              "hiddenViews": '["dashboards","mail"]'})
     assert V in migrations.run(c)
-    tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")} - {"coding_session_events", "dashboard_binding_cache", "model_votes", "permission_presets", "setting_sources", "sqlite_sequence", "schema_migrations"}  # made by later migrations
+    tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")} - {"coding_session_events", "dashboard_binding_cache", "ext_notes", "model_votes", "permission_presets", "setting_sources", "sqlite_sequence", "schema_migrations"}  # made by later migrations
     assert tables == {"settings", "legacy_cards", "learn_pending"}  # shadow tables of turns_fts went with it
     keys = {r[0] for r in c.execute("SELECT key FROM settings")}
     assert keys == {"meetings", "theme", "hiddenViews", "sidebarHidden"}  # sidebarHidden: written by the later default_sidebar_rows migration

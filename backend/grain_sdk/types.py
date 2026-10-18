@@ -33,6 +33,11 @@ class ManifestContributesSettings(TypedDict):
     panel: NotRequired[str]
 
 
+class ManifestContributesCommandsItem(TypedDict):
+    name: str
+    hint: NotRequired[str]
+
+
 class ManifestContributesRuntimeItem(TypedDict):
     slot: str
     id: str
@@ -52,7 +57,7 @@ class ManifestContributes(TypedDict):
     views: NotRequired[list[ManifestContributesViewsItem]]
     slots: NotRequired[dict[str, Any]]
     settings: NotRequired[ManifestContributesSettings]
-    commands: NotRequired[list[dict[str, Any]]]
+    commands: NotRequired[list[ManifestContributesCommandsItem]]
     keybindings: NotRequired[list[dict[str, Any]]]
     theme: NotRequired[dict[str, Any]]
     defaults: NotRequired[dict[str, Any]]

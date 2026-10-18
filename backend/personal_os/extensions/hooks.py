@@ -7,7 +7,9 @@ Four call shapes, chosen by the caller:
 - gate:    sequential, first opinion wins; a handler can only Deny or Ask, never allow
 
 A handler takes one argument (the payload, or the current value for pipe) and may be sync (it then runs in a worker
-thread) or async. Returning None means "no opinion". Code that is not a coroutine (a repository method, a usage
+thread) or async. One whose second parameter is named `ctx` is also given a HookCtx: the ids of the turn it runs in, the
+stop event, and `call_tool`, whose nesting is bounded (MAX_VIA_HOOK) and which never re-enters a handler it is made from.
+A non-core handler may add only MAX_ADDED_TEXT characters of text to what it was given; a longer return is a failure. Returning None means "no opinion". Code that is not a coroutine (a repository method, a usage
 callback that runs on any thread) fires through emit_sync / pipe_sync instead. Handlers that raise or time out are logged and skipped, except
 in a gate, where silence never means yes: the call turns into an approval question (or a denial, if the subscriber
 asked for that), never an allow.
@@ -19,6 +21,7 @@ that does not match the catalog.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import inspect
 import itertools
 import logging
@@ -26,7 +29,7 @@ import os
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Coroutine, Literal
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Coroutine, Literal
 
 from . import hookschema
 from .disposables import Disposable
@@ -38,18 +41,70 @@ log = logging.getLogger(__name__)
 
 DEFAULT_PRIORITY = 50
 _CTX_KEYS = ("run_id", "conversation_id", "project_id", "agent_id", "desk_id")
+MAX_VIA_HOOK = 2  # a tool call nested deeper than this inside hook handlers is refused
 
 
 def hook_ctx(ctx: dict[str, Any]) -> dict[str, Any]:
     """The stable subset of a loop's tool context that a handler may read."""
     return {**{k: ctx.get(k) for k in _CTX_KEYS}, "tainted": bool(ctx.get("tainted"))}
+
+
+Via = tuple[tuple[str, str], ...]  # (owner, hook) of every handler a call is nested in, outermost first
+ToolCaller = Callable[[str, dict[str, Any], Via], Awaitable[Any]]
+
+
+class ToolCallRefused(RuntimeError):
+    """A tool call a hook handler made was not run."""
+
+
+@dataclass(frozen=True)
+class HookCtx:
+    """What a handler that takes a second argument is told about the turn it runs in: the stable face of the loop's tool context."""
+    run_id: str | None = None
+    conversation_id: str | None = None
+    project_id: str | None = None
+    agent_id: str | None = None
+    tainted: bool = False
+    stop: asyncio.Event | None = None  # set when the user stops the reply this hook runs in
+    via: Via = ()
+    _call: ToolCaller | None = field(default=None, repr=False)
+
+    @property
+    def via_hook(self) -> int:
+        """How many handlers deep this one is: 1 for a handler of a call the model made."""
+        return len(self.via)
+
+    @classmethod
+    def of(cls, payload: Any) -> HookCtx:
+        """The context a payload carries: its own ids, or those of the `ctx` a tool hook's payload holds."""
+        src = payload.get("ctx") if isinstance(payload, dict) and isinstance(payload.get("ctx"), dict) else payload
+
+        def get(key: str) -> Any:
+            return src.get(key) if isinstance(src, dict) else getattr(src, key, None)
+        return cls(get("run_id"), get("conversation_id"), get("project_id"), get("agent_id"), bool(get("tainted")))
+
+    async def call_tool(self, name: str, args: dict[str, Any]) -> Any:
+        """Run a tool call from inside a handler. It passes the core guards and every hook but the handlers it is nested in, so
+        a handler cannot re-trigger itself, and it is refused past MAX_VIA_HOOK levels."""
+        if self._call is None:
+            raise ToolCallRefused("this hook cannot call tools")
+        if self.via_hook > MAX_VIA_HOOK:
+            raise ToolCallRefused(f"hook handlers are nested {self.via_hook} deep; tool calls are refused past {MAX_VIA_HOOK}")
+        return await self._call(name, args, self.via)
+
+
 MUTE_AFTER = 5  # consecutive emit failures before a handler is muted for the session
 STATS_WINDOW = 200  # latencies kept per handler for the dev panel's p50 and p95
 ERROR_WINDOW = 10  # failures kept per handler
 TIMEOUT_S = {"emit": 2.0, "collect": 1.0, "pipe": 1.0, "gate": 2.0}
+MAX_ADDED_TEXT = 10_000  # characters of text a handler outside the core may add to a value; a longer return counts as a failure
 GATE_CEILING_S = 3.0  # a declared budget cannot hold a tool call longer than this
 STRICT = os.environ.get("GRAIN_HOOKS_STRICT") == "1"
 CALL_KIND = {"emit": "emit", "emit_sync": "emit", "fire": "emit", "collect": "collect", "pipe": "pipe", "pipe_sync": "pipe", "gate": "gate"}
+
+
+class HookOutputTooLong(ValueError):
+    """A handler returned more text than the host lets it add."""
 
 
 class HookContractError(ValueError):
@@ -81,6 +136,7 @@ class Subscription:
     timeout_s: float | None
     on_failure: Literal["ask", "deny"]
     seq: int
+    with_ctx: bool  # the handler takes a HookCtx as its second argument
     failures: int = field(default=0)
     muted: bool = field(default=False)
     calls: int = field(default=0)
@@ -91,17 +147,46 @@ class Subscription:
         self.calls += 1
         self.latencies.append(time.perf_counter() - started)
         if error is not None:
-            self.errors.append(f"{type(error).__name__}: {error}" if str(error) else type(error).__name__)
+            self.flag(error)
+
+    def flag(self, error: BaseException) -> None:
+        self.errors.append(f"{type(error).__name__}: {error}" if str(error) else type(error).__name__)
 
     @property
     def sort_key(self) -> tuple[int, int, int]:
         return (self.priority, self.order, self.seq)
 
-    async def call(self, arg: Any) -> Any:
+    def args(self, arg: Any, ctx: HookCtx) -> tuple[Any, ...]:
+        return (arg, dataclasses.replace(ctx, via=(*ctx.via, (self.owner, self.hook)))) if self.with_ctx else (arg,)
+
+    async def call(self, arg: Any, ctx: HookCtx) -> Any:
+        args = self.args(arg, ctx)
         if inspect.iscoroutinefunction(self.fn):
-            return await self.fn(arg)
-        out = await asyncio.to_thread(self.fn, arg)
+            return await self.fn(*args)
+        out = await asyncio.to_thread(self.fn, *args)
         return await out if inspect.isawaitable(out) else out  # a partial or callable object wrapping an async def
+
+
+def takes_ctx(fn: Callable[..., Any]) -> bool:
+    """Is the handler's second positional parameter named `ctx`? That is how it asks for a HookCtx."""
+    try:
+        params = [p for p in inspect.signature(fn).parameters.values() if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+    except (TypeError, ValueError):
+        return False
+    return len(params) >= 2 and params[1].name == "ctx"
+
+
+def _text_len(value: Any) -> int:
+    """Characters of text in a handler's return: every string in it, whatever it is nested in."""
+    if isinstance(value, str):
+        return len(value)
+    if isinstance(value, dict):
+        return sum(map(_text_len, value.values()))
+    if isinstance(value, (list, tuple, set)):
+        return sum(map(_text_len, value))
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return sum(_text_len(getattr(value, f.name)) for f in dataclasses.fields(value))
+    return 0
 
 
 class HookBus:
@@ -111,13 +196,15 @@ class HookBus:
         self.loop: asyncio.AbstractEventLoop | None = None  # where `start` runs coroutines; set while the app runs
         self._pending: set[asyncio.Task[None]] = set()
         self._misused: set[tuple[str, str]] = set()  # (hook, method) pairs already logged
+        self.on_mute: Callable[[Subscription], None] | None = None  # told when a handler is muted, so the user can be
 
     def subscribe(self, hook: str, fn: Callable[[Any], Any], *, owner: str, order: int,
                   priority: int | None = None, timeout_ms: int | None = None,
-                  on_failure: Literal["ask", "deny"] = "ask") -> Disposable:
+                  on_failure: Literal["ask", "deny"] = "ask", with_ctx: bool | None = None) -> Disposable:
         self._known(hook)
         sub = Subscription(hook, fn, owner, order, DEFAULT_PRIORITY if priority is None else priority,
-                           None if timeout_ms is None else timeout_ms / 1000, on_failure, next(self._seq))
+                           None if timeout_ms is None else timeout_ms / 1000, on_failure, next(self._seq),
+                           takes_ctx(fn) if with_ctx is None else with_ctx)
         self._subs[hook] = tuple(sorted((*self._subs.get(hook, ()), sub), key=lambda s: s.sort_key))
         return Disposable(lambda: self._remove(sub))
 
@@ -162,13 +249,24 @@ class HookBus:
             return min(sub.timeout_s, GATE_CEILING_S) if kind == "gate" else sub.timeout_s
         return None if sub.owner == "core" or sub.hook == "app.stop" else TIMEOUT_S[kind]
 
-    async def _invoke(self, sub: Subscription, arg: Any, kind: str) -> Any:
-        return await asyncio.wait_for(sub.call(arg), self._timeout(sub, kind))
+    async def _invoke(self, sub: Subscription, arg: Any, kind: str, ctx: HookCtx) -> Any:
+        return await asyncio.wait_for(sub.call(arg, ctx), self._timeout(sub, kind))
 
-    async def _try(self, sub: Subscription, arg: Any, kind: str) -> tuple[bool, Any]:
+    @staticmethod
+    def _oversize(sub: Subscription, out: Any, arg: Any, kind: str) -> str | None:
+        """Why a handler's return is too long, or None. A handler outside the core may add MAX_ADDED_TEXT characters to what it
+        was given (a pipe's value), or return that many in all (a collect or gate)."""
+        if sub.owner == "core":
+            return None
+        added = _text_len(out) - (_text_len(arg) if kind == "pipe" else 0)
+        return f"returned {added} characters of text, over the cap of {MAX_ADDED_TEXT}" if added > MAX_ADDED_TEXT else None
+
+    async def _try(self, sub: Subscription, arg: Any, kind: str, ctx: HookCtx) -> tuple[bool, Any]:
         started = time.perf_counter()
         try:
-            out = await self._invoke(sub, arg, kind)
+            out = await self._invoke(sub, arg, kind, ctx)
+            if kind != "emit" and (why := self._oversize(sub, out, arg, kind)):
+                raise HookOutputTooLong(why)
         except Exception as e:  # noqa: BLE001 - a handler is third-party to the code that fires the hook
             log.warning("hook %s from %s failed", sub.hook, sub.owner, exc_info=True)
             sub.record(started, e)
@@ -177,6 +275,11 @@ class HookBus:
         if kind != "emit":
             self._returned(sub.hook, out)
         return True, out
+
+    @staticmethod
+    def _targets(subs: tuple[Subscription, ...], ctx: HookCtx) -> list[Subscription]:
+        """A handler a call is nested in does not hear that call: it cannot re-trigger itself."""
+        return [s for s in subs if (s.owner, s.hook) not in ctx.via]
 
     def subscriptions(self, owner: str) -> list[Subscription]:
         """Everything one extension is subscribed with, in the order it subscribed, for the dev panel."""
@@ -188,33 +291,36 @@ class HookBus:
         return hook in self._subs
 
     async def emit(self, hook: str, payload: Any = None, *, owner: str | None = None,
-                   public: Callable[[Any], Any] | None = None) -> None:
+                   public: Callable[[Any], Any] | None = None, ctx: HookCtx | None = None) -> None:
         """`owner` limits the call to one extension's handlers, for the hooks the host fires one extension at a time.
-        `public` builds what every handler but a core one receives in place of `payload`, once and only if there is one."""
+        `public` builds what every handler but a core one receives in place of `payload`, once and only if there is one.
+        `ctx` is what a handler that wants one is given; without it, the ids the payload carries."""
         self._enter(hook, "emit", payload)
         subs = self._subs.get(hook)
         if not subs:
             return
-        targets = [s for s in subs if not s.muted and owner in (None, s.owner)]
+        ctx = ctx or HookCtx.of(payload)
+        targets = [s for s in self._targets(subs, ctx) if not s.muted and owner in (None, s.owner)]
         shown = public(payload) if public is not None and any(s.owner != "core" for s in targets) else payload
-        await asyncio.gather(*(self._emit_one(s, payload if s.owner == "core" else shown) for s in targets))
+        await asyncio.gather(*(self._emit_one(s, payload if s.owner == "core" else shown, ctx) for s in targets))
 
-    async def _emit_one(self, sub: Subscription, payload: Any) -> None:
-        ok, _ = await self._try(sub, payload, "emit")
+    async def _emit_one(self, sub: Subscription, payload: Any, ctx: HookCtx) -> None:
+        ok, _ = await self._try(sub, payload, "emit", ctx)
         self._settle(sub, ok)
 
-    @staticmethod
-    def _settle(sub: Subscription, ok: bool) -> None:
+    def _settle(self, sub: Subscription, ok: bool) -> None:
         sub.failures = 0 if ok else sub.failures + 1
         if sub.failures >= MUTE_AFTER and sub.owner != "core":  # built-in work is retried every time, never switched off
             sub.muted = True
             log.error("hook %s from %s muted after %d consecutive failures", sub.hook, sub.owner, sub.failures)
+            if self.on_mute:
+                self.on_mute(sub)
 
     def _inline(self, sub: Subscription, arg: Any) -> tuple[bool, Any]:
         """Call a handler on the caller's thread. One that answers with an awaitable cannot be waited for here."""
         started = time.perf_counter()
         try:
-            out = sub.fn(arg)
+            out = sub.fn(*sub.args(arg, HookCtx.of(arg)))
         except Exception as e:  # noqa: BLE001 - a handler is third-party to the code that fires the hook
             log.warning("hook %s from %s failed", sub.hook, sub.owner, exc_info=True)
             sub.record(started, e)
@@ -236,7 +342,7 @@ class HookBus:
             if sub.muted:
                 continue
             if inspect.iscoroutinefunction(sub.fn):
-                self.start(self._emit_one(sub, payload))
+                self.start(self._emit_one(sub, payload, HookCtx.of(payload)))
             else:
                 self._settle(sub, self._inline(sub, payload)[0])
 
@@ -266,23 +372,25 @@ class HookBus:
         for task in self._pending:
             task.cancel()
 
-    async def collect(self, hook: str, payload: Any = None, *, skipped: list[str] | None = None) -> list[Any]:
+    async def collect(self, hook: str, payload: Any = None, *, skipped: list[str] | None = None, ctx: HookCtx | None = None) -> list[Any]:
         """`skipped` gains the owner of every handler that failed or timed out, for a caller that reports what was dropped."""
         self._enter(hook, "collect", payload)
-        subs = self._subs.get(hook)
+        ctx = ctx or HookCtx.of(payload)
+        subs = self._targets(self._subs.get(hook, ()), ctx)
         if not subs:
             return []
-        done = await asyncio.gather(*(self._try(s, payload, "collect") for s in subs))
+        done = await asyncio.gather(*(self._try(s, payload, "collect", ctx) for s in subs))
         if skipped is not None:
             skipped.extend(o for o in dict.fromkeys(s.owner for s, (ok, _) in zip(subs, done) if not ok) if o not in skipped)
         return [r for ok, r in done if ok and r is not None]
 
-    async def pipe(self, hook: str, value: Any) -> Any:
+    async def pipe(self, hook: str, value: Any, *, ctx: HookCtx | None = None) -> Any:
         """Handlers run one after another, each on the previous result. A handler may return Cancel, which stops the chain
         and is returned as it is."""
         self._enter(hook, "pipe", value)
-        for sub in self._subs.get(hook, ()):
-            ok, out = await self._try(sub, value, "pipe")
+        ctx = ctx or HookCtx.of(value)
+        for sub in self._targets(self._subs.get(hook, ()), ctx):
+            ok, out = await self._try(sub, value, "pipe", ctx)
             if ok and isinstance(out, Cancel):
                 return out
             if ok and out is not None:
@@ -297,6 +405,10 @@ class HookBus:
             if sub.muted:
                 continue
             ok, out = self._inline(sub, value)
+            if ok and (why := self._oversize(sub, out, value, "pipe")):
+                log.warning("hook %s from %s %s", hook, sub.owner, why)
+                sub.flag(HookOutputTooLong(why))
+                ok, out = False, None
             self._settle(sub, ok)
             if ok:
                 self._returned(hook, out)
@@ -306,13 +418,14 @@ class HookBus:
                 value = out
         return value
 
-    async def gate(self, hook: str, payload: Any = None) -> Deny | Ask | None:
+    async def gate(self, hook: str, payload: Any = None, *, ctx: HookCtx | None = None) -> Deny | Ask | None:
         """None means no handler objected, not that the call is allowed: the permission stack still decides. A handler that
         fails is not an opinion: the next one is still asked, so a Deny after a broken handler is not lost."""
         self._enter(hook, "gate", payload)
         unanswered: Deny | Ask | None = None
-        for sub in self._subs.get(hook, ()):
-            ok, out = await self._try(sub, payload, "gate")
+        ctx = ctx or HookCtx.of(payload)
+        for sub in self._targets(self._subs.get(hook, ()), ctx):
+            ok, out = await self._try(sub, payload, "gate", ctx)
             if ok and out is None:
                 continue
             if ok and isinstance(out, (Deny, Ask)):

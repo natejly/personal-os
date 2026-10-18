@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import re
 import shlex
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from .db import new_id, now
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 _PLACE = re.compile(r"\$(ARGUMENTS|[1-9][0-9]?)")
 MAX_BODY = 20_000
+RESERVED = frozenset({"skill", "skills", "schedule", "loop", "research", "clear", "btw", "compact", "commands"})  # the app's own: a saved or registered command cannot take these names
 
 
 def parse(text: str) -> dict[str, Any]:
@@ -136,12 +137,13 @@ def mention_note(text: str, names: Iterable[str] | None, front: bool = False) ->
 
 
 def expand(text: str, store: "Commands | None", skills: Any = None, agents: Iterable[str] | None = None,
-           front: bool = False) -> str:
+           front: bool = False, registered: Callable[[str, str], str | None] | None = None) -> str:
     """A user turn gains its filled slash command and any @agent hint under it; see _expand_slash and mention_note."""
-    return _expand_slash(text, store, skills) + (mention_note(text, agents, front) if isinstance(text, str) else "")
+    return _expand_slash(text, store, skills, registered) + (mention_note(text, agents, front) if isinstance(text, str) else "")
 
 
-def _expand_slash(text: str, store: "Commands | None", skills: Any = None) -> str:
+def _expand_slash(text: str, store: "Commands | None", skills: Any = None,
+                  registered: Callable[[str, str], str | None] | None = None) -> str:
     """A user turn typed as `/name args` gains the filled command under it; the stored row keeps what was typed.
     Unknown names, and text that is not a leading slash command, pass through unchanged. A subtask command is
     not filled here: the model is told to run it with command_run, so the child agent, its approval and its
@@ -158,6 +160,8 @@ def _expand_slash(text: str, store: "Commands | None", skills: Any = None) -> st
         return text + _LOOP_NOTE
     if name == "research":
         return text + _RESEARCH_NOTE
+    if registered is not None and (note := registered(name, args)):
+        return f"{text}\n\n{note}"
     cmd = store.get(name) if store is not None else None
     if not cmd or cmd["name"] != name:
         return text
@@ -168,9 +172,10 @@ def _expand_slash(text: str, store: "Commands | None", skills: Any = None) -> st
 
 
 def expand_history(history: list[dict[str, Any]], store: "Commands | None", skills: Any = None,
-                   agents: Iterable[str] | None = None, front: bool = False) -> list[dict[str, Any]]:
+                   agents: Iterable[str] | None = None, front: bool = False,
+                   registered: Callable[[str, str], str | None] | None = None) -> list[dict[str, Any]]:
     """Every replayed user turn, so a later turn still carries an earlier command's instructions."""
-    return [{**m, "content": expand(m["content"], store, skills, agents, front)} if m.get("role") == "user" and isinstance(m.get("content"), str)
+    return [{**m, "content": expand(m["content"], store, skills, agents, front, registered)} if m.get("role") == "user" and isinstance(m.get("content"), str)
             and (m["content"].startswith("/") or "@" in m["content"]) else m for m in history]
 
 

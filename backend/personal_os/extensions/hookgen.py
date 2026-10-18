@@ -104,7 +104,8 @@ def _py_class(tp: type) -> str:
 
 def _handler(spec: HookSpec) -> str:
     result = " | ".join(["None", *(py_type(m) for m in members(spec.returns))]) if spec.returns is not None else "Any"
-    return f"Callable[[{spec.payload.__name__}], {result} | Awaitable[{result}]]"
+    payload = spec.payload.__name__
+    return f"Callable[[{payload}], {result} | Awaitable[{result}]] | Callable[[{payload}, HookCtx], {result} | Awaitable[{result}]]"
 
 
 def _fire_returns(spec: HookSpec) -> str:
@@ -121,7 +122,7 @@ def _fire_returns(spec: HookSpec) -> str:
 
 def render_py() -> str:
     classes = _return_classes()
-    imports = {"personal_os.extensions.disposables": ["Disposable"]}
+    imports = {"personal_os.extensions.disposables": ["Disposable"], "personal_os.extensions.hooks": ["HookCtx"]}
     for cls in classes:
         imports.setdefault(cls.__module__, []).append(cls.__name__)
     ids = ", ".join(json.dumps(h) for h in HOOKS)
@@ -147,7 +148,7 @@ def render_py() -> str:
         "",
         "",
         "class On(Protocol):",
-        '    """`api.on`: the handler\'s argument and return are those of the hook."""',
+        '    """`api.on`: the handler\'s argument and return are those of the hook; a second parameter named `ctx` receives a HookCtx."""',
         on,
         "",
         "",

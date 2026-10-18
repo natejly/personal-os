@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { Attachment, Command, DeskAutonomy, Skill } from '@shared/types'
+import type { Attachment, Command, DeskAutonomy, ExtensionCommand, Skill } from '@shared/types'
 import { SKILL_PRESETS, type SkillPreset } from '@shared/skillPresets'
 import { api } from '../lib/api'
 import CaretMenu from '../features/notes/CaretMenu'
@@ -104,7 +104,11 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   // types `/name `; a built-in the UI handles runs on send, the rest the backend fills when the turn goes to the
   // model (commands.expand), so nothing runs until the user sends.
   const [commands, setCommands] = useState<Command[]>([])
-  useEffect(() => { api.commands.list().then(setCommands).catch(() => undefined) }, [])
+  const [registered, setRegistered] = useState<ExtensionCommand[]>([])
+  useEffect(() => {
+    api.commands.list().then(setCommands).catch(() => undefined)
+    api.commands.registered().then(setRegistered).catch(() => undefined)
+  }, [])
   const skills = useStore((s) => s.skills)
   const [slashActive, setSlashActive] = useState(0)
   const [slashClosedAt, setSlashClosedAt] = useState<string | null>(null) // Esc hides the menu until the text changes
@@ -131,7 +135,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   }
   const ctx = slashClosedAt === text ? EMPTY_CONTEXT : menuCtx()
   const slash = slashClosedAt === text ? null
-    : slashItems(text, commands, skills, ctx) ?? (onSend ? null : mentionItems(text, caret,
+    : slashItems(text, commands, skills, ctx, registered) ?? (onSend ? null : mentionItems(text, caret,
       rankByContext(agentRows, (a) => overlap(a.description, ctx)), 8, rankChats(chatRows, ctx), dashRows))
   /** `/schedule` or `/loop` without a time: the inline form (ScheduleForm), seeded with the rest of the line. */
   const [sched, setSched] = useState<{ loop: boolean; task: string } | null>(null)

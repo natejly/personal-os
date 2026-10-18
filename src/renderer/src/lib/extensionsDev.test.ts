@@ -1,11 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { contributionSummary, formatMs, mutedHooks } from './extensionsDev'
+import { contributionSummary, formatEvery, formatMs, mutedHooks } from './extensionsDev'
 
 test('latencies read as milliseconds', () => {
   assert.equal(formatMs(null), '—')
   assert.equal(formatMs(0.42), '0.4 ms')
   assert.equal(formatMs(12.6), '13 ms')
+})
+
+test('job intervals read as minutes or hours', () => {
+  assert.equal(formatEvery(60), '1 min')
+  assert.equal(formatEvery(90 * 60), '90 min')
+  assert.equal(formatEvery(2 * 3600), '2 h')
 })
 
 test('contributions are listed by kind', () => {

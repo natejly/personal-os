@@ -1304,7 +1304,7 @@ export const useStore = create<State>((set, get) => {
           } else if (ev.event === 'style_learned') {
             get().toast('Updated how you write', 'learned', { label: 'Review', run: () => get().openMemory('style') })
             void get().refreshStyle()
-          } else if (ev.event === 'job_finished') {
+          } else if (ev.event === 'job_finished' || ev.event === 'inbox_note') {
             void get().refreshAgentInbox()
             window.dispatchEvent(new Event('grain-job-finished'))
           } else if (ev.event === 'provider_auth') {

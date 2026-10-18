@@ -19,6 +19,13 @@ test('a bare slash lists the built-ins first, then saved commands, without a sha
   assert.deepEqual(rows.slice(BUILTIN.length).map((r) => r.insert), ['/standup '])
 })
 
+test("an extension's command follows the built-ins and shadows a saved command of the same name", () => {
+  const registered = [{ name: 'ping', hint: 'say pong', owner: 'demo' }]
+  const rows = slashItems('/', [cmd('standup'), cmd('ping', 'a saved one')], [], undefined, registered)!
+  assert.deepEqual(rows.slice(BUILTIN.length).map((r) => r.insert), ['/ping ', '/standup '])
+  assert.equal(rows[BUILTIN.length].hint, 'say pong')
+})
+
 test('/research is a server-side built-in', () => {
   assert.ok(BUILTIN.some((b) => b.name === 'research' && !b.client))
   assert.deepEqual(slashItems('/res', [], [])!.map((r) => r.insert), ['/research '])

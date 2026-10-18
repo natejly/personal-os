@@ -741,6 +741,13 @@ def _permission_presets(c: sqlite3.Connection) -> None:
         c.execute("ALTER TABLE projects ADD COLUMN permissions TEXT NOT NULL DEFAULT '{}'")
 
 
+def _ext_notes(c: sqlite3.Connection) -> None:
+    """Notes extensions raise for the person (extensions/notes.py): inbox cards and notification events."""
+    from .extensions.notes import SCHEMA
+    for stmt in filter(str.strip, SCHEMA.split(";")):
+        c.execute(stmt)
+
+
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
     (2, "messages_fts", _messages_fts),
@@ -788,6 +795,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (44, "dashboard_binding_cache", _dashboard_binding_cache),
     (45, "provider_refs", _provider_refs),
     (46, "permission_presets", _permission_presets),
+    (47, "ext_notes", _ext_notes),
 ]
 
 

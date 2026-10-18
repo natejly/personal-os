@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { RotateCcw, Trash2 } from '../icons'
-import type { TrashItem, TrashKind, TrashListing } from '@shared/types'
+import type { ExtensionTrashGroup, TrashItem, TrashKind, TrashListing } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import { daysLeft } from '../lib/trashLabels'
@@ -42,7 +42,11 @@ export default function TrashPanel(): JSX.Element {
     await restoreTrashed([{ type: it.type, id: it.id }])
     await load()
   }
-  const purge = async (type: TrashKind, id: string): Promise<void> => {
+  const restoreExtension = async (it: ExtensionTrashGroup['items'][number]): Promise<void> => {
+    try { await api.trash.restore(it.type, it.id) } catch (e) { toast((e as Error).message, 'error') }
+    await load()
+  }
+  const purge = async (type: TrashKind | string, id: string): Promise<void> => {
     try { await api.trash.purge(type, id) } catch (e) { toast((e as Error).message, 'error') }
     await load()
   }
@@ -70,6 +74,19 @@ export default function TrashPanel(): JSX.Element {
               <small>{detail(it)}</small>
               <button className="ghost-btn sm" onClick={() => void restore(it)}><RotateCcw size={13} /> Restore</button>
               <HoldButton className="icon-btn sm danger" aria-label={`Delete ${it.title} forever`} title={it.type === 'project' ? 'Hold to delete forever (its chats, memories and uploads go too)' : 'Hold to delete forever'} confirmText={`Delete “${it.title}” forever? This cannot be undone.${it.type === 'project' ? ' Its chats, memories and uploads go with it.' : ''}`} onConfirm={() => forever(it)}><Trash2 size={13} /></HoldButton>
+            </div>
+          ))}
+        </div>
+      ))}
+      {list?.extensions.map((g) => (
+        <div className="trash-group" key={g.kind}>
+          <h4>{g.label}</h4>
+          {g.items.map((it) => (
+            <div className="trash-row" key={`${it.type}:${it.id}`}>
+              <span className="trash-title" title={it.title}>{it.title}</span>
+              <small>{daysLeft(it.purge_at)}</small>
+              <button className="ghost-btn sm" onClick={() => void restoreExtension(it)}><RotateCcw size={13} /> Restore</button>
+              <HoldButton className="icon-btn sm danger" aria-label={`Delete ${it.title} forever`} title="Hold to delete forever" confirmText={`Delete “${it.title}” forever? This cannot be undone.`} onConfirm={() => void purge(it.type, it.id)}><Trash2 size={13} /></HoldButton>
             </div>
           ))}
         </div>

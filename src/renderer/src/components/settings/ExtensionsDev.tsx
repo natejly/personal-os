@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import { viewHidden } from '../../moduleToggles'
-import { contributionSummary, formatMs, mutedHooks } from '../../lib/extensionsDev'
+import { contributionSummary, formatEvery, formatMs, mutedHooks } from '../../lib/extensionsDev'
 import type { ExtensionInfo, ExtensionsDev as Listing } from '@shared/types'
 
 /** Settings > Advanced > Developer: every loaded extension with what it registered, how its handlers behave, and enable, disable and reload. */
@@ -38,6 +38,18 @@ export default function ExtensionsDev(): JSX.Element {
             {x.reloadable && <button type="button" className="ghost-btn" disabled={!listing.live} onClick={() => act(() => api.devExtensions.reload(x.id))}>Reload</button>}
           </div>
           <p className="set-help">{[...contributionSummary(x), ...x.permissions].join(' · ') || 'Registers nothing.'}</p>
+          {x.jobs.length > 0 && (
+            <table>
+              <thead><tr><th>Job</th><th>Every</th><th>Runs</th><th>State</th></tr></thead>
+              <tbody>
+                {x.jobs.map((j) => (
+                  <tr key={j.name} title={j.lastError ?? ''}>
+                    <td>{j.name}</td><td>{formatEvery(j.everySeconds)}</td><td>{j.runs}</td><td>{j.lastError ? 'failing' : 'ok'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
           {x.hooks.length > 0 && (
             <table>
               <thead><tr><th>Hook</th><th>Calls</th><th>p50</th><th>p95</th><th>State</th></tr></thead>

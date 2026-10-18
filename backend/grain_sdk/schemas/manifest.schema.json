@@ -46,7 +46,10 @@
         },
         "slots": {"type": "object"},
         "settings": {"type": "object", "properties": {"panel": {"type": "string"}}},
-        "commands": {"type": "array", "items": {"type": "object"}},
+        "commands": {
+          "type": "array",
+          "items": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}, "hint": {"type": "string"}}}
+        },
         "keybindings": {"type": "array", "items": {"type": "object"}},
         "theme": {"type": "object"},
         "defaults": {"type": "object"},

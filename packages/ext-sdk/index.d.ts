@@ -31,6 +31,11 @@ export interface ManifestContributesSettings {
   panel?: string
 }
 
+export interface ManifestContributesCommandsItem {
+  name: string
+  hint?: string
+}
+
 export interface ManifestContributesRuntimeItem {
   slot: string
   id: string
@@ -50,7 +55,7 @@ export interface ManifestContributes {
   views?: ManifestContributesViewsItem[]
   slots?: Record<string, unknown>
   settings?: ManifestContributesSettings
-  commands?: Record<string, unknown>[]
+  commands?: ManifestContributesCommandsItem[]
   keybindings?: Record<string, unknown>[]
   theme?: Record<string, unknown>
   defaults?: Record<string, unknown>

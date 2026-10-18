@@ -3,7 +3,7 @@ import type {
   BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, DriveBackupRun, DriveBackupStatus, Recap, Conversation, ConversationSettings, WorkerInfo, ContextUsed, ContextMeter, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
   Memory, MemoryProposal, Profile, ProfileHeld, RuntimeResolution, RuntimeSelection, RuntimeView, PermissionPreset, PresetBody, PresetDiff, PresetScope, EffectiveConfig, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
-  Command, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
+  Command, ExtensionCommand, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasWindow, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskRichPreview,
   DeskQueued, DeskStatus, FullDesk, PromotionKind, PromotionResult,
@@ -276,6 +276,7 @@ export const api = {
   /** The Agent Inbox: pending approvals and proposals, plus what the scheduled jobs did. Built from journal rows. */
   inbox: (hours = 72) => req<AgentInbox>(`/inbox?hours=${hours}`),
   /** Read state for "While you were away" cards. seen_all marks the same window GET /inbox lists. */
+  inboxNoteDismiss: (noteId: string) => req<{ ok: boolean }>(`/inbox/notes/${encodeURIComponent(noteId)}/dismiss`, { method: 'POST' }),
   inboxRunSeen: (runId: string) => req(`/inbox/runs/${encodeURIComponent(runId)}/seen`, { method: 'POST' }),
   inboxSeenAll: (hours = 72) => req<{ ok: boolean; marked: number }>(`/inbox/seen_all?hours=${hours}`, { method: 'POST' }),
   /** Erase one "While you were away" message (the run row and its journal, not the chat). */
@@ -420,8 +421,8 @@ export const api = {
   /** Soft delete: every DELETE above lands here first; these restore it or erase it for good. */
   trash: {
     list: () => req<TrashListing>('/trash'),
-    restore: (type: TrashKind, id: string) => req<{ ok: boolean; moved_to_personal: boolean }>(`/trash/${type}/${id}/restore`, { method: 'POST' }),
-    purge: (type: TrashKind, id: string) => req<{ ok: boolean }>(`/trash/${type}/${id}`, { method: 'DELETE' }),
+    restore: (type: TrashKind | string, id: string) => req<{ ok: boolean; moved_to_personal: boolean }>(`/trash/${type}/${id}/restore`, { method: 'POST' }),
+    purge: (type: TrashKind | string, id: string) => req<{ ok: boolean }>(`/trash/${type}/${id}`, { method: 'DELETE' }),
     empty: () => req<{ ok: boolean; purged: number }>('/trash', { method: 'DELETE' })
   },
   mcp: {
@@ -606,6 +607,8 @@ export const api = {
   /** Saved prompt templates ($ARGUMENTS, $1..$n). */
   commands: {
     list: () => req<Command[]>('/commands'),
+    /** The slash commands enabled extensions register. */
+    registered: () => req<ExtensionCommand[]>('/commands/registered'),
     create: (text: string) => req<Command>('/commands', { method: 'POST', body: json({ text }) }),
     update: (id: string, text: string) => req<Command>(`/commands/${id}`, { method: 'PUT', body: json({ text }) }),
     delete: (id: string) => req<{ ok: boolean }>(`/commands/${id}`, { method: 'DELETE' })

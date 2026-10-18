@@ -154,11 +154,25 @@ def _contributes(raw: dict[str, Any]) -> dict[str, Any]:
     _check(all(_is_str(i.get("id")) for i in slots.get("recap.section", ())), "contributes.slots['recap.section'] entries need an id")
     _check(all(_is_str(i.get("id")) and i["id"].startswith(f"ext:{raw.get('id')}:") for i in slots.get("canvas.widget", ())),
            "contributes.slots['canvas.widget'] entries need an id of the form ext:<extension id>:<name>")
+    _commands(c)
     _theme(c)
     _defaults(c)
     _runtime(c, raw.get("permissions", ()))
     _presets(c, str(raw.get("id")))
     return c
+
+
+def _commands(c: dict[str, Any]) -> None:
+    """contributes.commands: the slash commands the extension registers, listed before any code runs."""
+    from ..commands import NAME_RE, RESERVED
+    entries = c.get("commands", [])
+    _check(isinstance(entries, list) and all(isinstance(e, dict) and set(e) <= {"name", "hint"} for e in entries),
+           "contributes.commands must be a list of objects with a name and a hint")
+    for e in entries:
+        _check(isinstance(e.get("name"), str) and NAME_RE.match(e["name"]), "contributes.commands: name must be lowercase letters, digits, - or _ (max 40)")
+        _check(e["name"] not in RESERVED, f"contributes.commands: /{e['name']} is one of the app's own commands")
+        _check(isinstance(e.get("hint", ""), str), "contributes.commands: hint must be text")
+    _check(len({e["name"] for e in entries}) == len(entries), "contributes.commands lists a name twice")
 
 
 def _runtime(c: dict[str, Any], permissions: list[str]) -> None:

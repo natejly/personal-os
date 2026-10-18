@@ -848,6 +848,7 @@ export default function AgentInbox(): JSX.Element | null {
   const approvalRuns = new Set(approvals.map((a) => a.run_id).filter(Boolean))
   const deskRows = (box.needs_you.desks ?? []).filter((e) => !(e.run_id && approvalRuns.has(e.run_id)))
   const elsewhere = box.needs_you.elsewhere ?? []
+  const notes = box.needs_you.notes ?? []
   // A job with several pending proposals gets one "Reject all" row, so a noisy job is one click to clear.
   const perJob = new Map<string, { name: string; n: number }>()
   for (const p of proposals) {
@@ -960,6 +961,17 @@ export default function AgentInbox(): JSX.Element | null {
               <ProposalCard key={p.id} p={p} onOpen={
                 p.source?.kind === 'desk' ? () => goDesk((p.source as { id: string }).id)
                   : p.conversation_id ? () => void selectChat(p.conversation_id as string) : undefined} />
+            ))}
+            {notes.map((n) => (
+              <li className="inbox-item" key={n.id}>
+                <div className="inbox-row">
+                  <Dot tone="needs-you" label="Waiting on you" />
+                  <span className="inbox-job">{n.title}</span>
+                  <span className="inbox-line" title={n.body}>{n.body}</span>
+                  <span className="muted small inbox-when">{fmtWhen(n.created_at)}</span>
+                  <button className="icon-btn sm" title="Dismiss" aria-label="Dismiss" onClick={() => void api.inboxNoteDismiss(n.id).then(() => useStore.getState().refreshAgentInbox())}><X size={13} /></button>
+                </div>
+              </li>
             ))}
             {elsewhere.map((q) => (
               <li className="inbox-item" key={q.key}>

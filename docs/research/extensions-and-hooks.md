@@ -240,6 +240,20 @@ async def guard(ev: ToolPre, ctx: HookCtx) -> ToolPreResult | None:
 
 `HookCtx` carries `run_id`, `conversation_id`, `project_id`, `agent_id`, `tainted`, the stop event, and `via_hook` depth. It is the typed face of today's `tool_ctx` dict (`app.py:2221-2244`), exposing a stable subset instead of the dict.
 
+#### 3.4a As built (the API object)
+
+`data_dir`, `settings`, `secrets`, `command`, `job`, `notify`, `inbox` and `trash_handler` exist on the backend object, and `db` is a `ScopedDb` for a folder-loaded extension.
+
+- `db`: SQLite's authorizer limits the connection to the tables in `data.tables`; any other table, DDL, `ATTACH` or `PRAGMA` fails. Built-ins keep the whole `Database` (their tables are still created by the core schema, not by their manifests).
+- `settings.get(name)` reads `ext.<id>.<name>` (a secret-typed field from the secret store); `settings.on_change(fn)` calls `fn(name)` when one of the extension's keys changes. `secrets` is the secret store limited to `ext.<id>.*`, the keys the manifest's secret settings use.
+- `command(name, fn)`: the name is listed in `contributes.commands` (`{name, hint}`), and `fn(arguments)` returns the note laid under the turn, as `/research` does. The app's own `/research`, `/schedule`, `/loop` and `/skill` stay in `commands.py`, which section 2.2 lists as a core service; an extension cannot take those names.
+- `job(name, every, fn)`: starts after `app.start`, runs while the extension is enabled, never more often than every 60 s, and is listed with its runs and last error in the dev panel.
+- `inbox(item)` leaves a card under "Needs you" (`ext_notes`, migration 47) until dismissed; `notify(title, body, target=)` is an event on `GET /inbox/notify`, which the renderer turns into a system notification. A handler muted after five failures raises an inbox card naming the hook and the exception type.
+- `trash_handler("<id>:<name>", TrashHandler(label, items, restore, purge))`: the trash lists, restores, erases and sweeps the extension's kind beside the app's.
+- `HookCtx`: a handler whose second parameter is named `ctx` receives it. `ctx.call_tool(name, args)` runs a read-only built-in tool through `dispatch_tool` with the nesting recorded: a call nested more than two handlers deep is refused, and the hooks of a nested call skip the handlers it is nested in. Only `safe` tools that do not taint can be called from a hook, because the seam sits below the approval wait.
+- Text cap: a handler outside the core may add at most 10,000 characters of text to the value it was given (a collect or gate return counts in full); a longer return is treated as a failed handler.
+- `RequestTurn` is not built: its only hook, `turn.continue`, is a planned v2 hook (5.16), and a cap with nothing to cap would be dead code. The once-per-turn limit comes with that hook.
+
 ### 3.5 Frontend API object (TypeScript sketch)
 
 ```ts

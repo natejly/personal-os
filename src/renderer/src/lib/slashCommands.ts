@@ -1,4 +1,4 @@
-import type { Command, Skill } from '@shared/types'
+import type { Command, ExtensionCommand, Skill } from '@shared/types'
 import { detectSlash, filterCommands } from '../features/notes/slash'
 import { overlap, rankByContext, type ComposerContext } from './composerRank'
 
@@ -39,10 +39,10 @@ const skillRow = (s: Skill): SlashItem =>
  * The rows the '/' menu shows for the draft, or null when it should be closed. Only a slash that starts the
  * whole draft opens it. After `/skill ` the rows are the approved skills; after `/skills ` and `/commands ` the
  * skills or saved commands with a last row to manage them in the Library. Otherwise built-ins and saved
- * commands are ranked together (a saved command named like a built-in is shadowed, as the backend shadows it).
+ * commands are ranked together (a saved command named like a built-in or an extension's command is shadowed, as the backend shadows it).
  * With nothing typed after the slash, rows that fit the chat (composerRank) come first.
  */
-export function slashItems(text: string, commands: Command[], skills: Skill[], ctx?: ComposerContext): SlashItem[] | null {
+export function slashItems(text: string, commands: Command[], skills: Skill[], ctx?: ComposerContext, registered: ExtensionCommand[] = []): SlashItem[] | null {
   const fit = <T>(rows: T[], q: string, words: (r: T) => string, bonus: (r: T) => number = () => 0): T[] =>
     !q && ctx ? rankByContext(rows, (r) => overlap(words(r), ctx) + bonus(r)) : rows
   const approved = skills.filter((s) => s.status === 'approved')
@@ -66,7 +66,9 @@ export function slashItems(text: string, commands: Command[], skills: Skill[], c
     ...BUILTIN.map((b) => ({ label: b.name, keywords: b.hint.split(/\s+/), words: b.hint, bonus: b.name === 'research' && ctx?.question ? 2 : 0,
       item: { key: `builtin:${b.name}`, label: `/${b.name}${b.args ? ` ${b.args}` : ''}`, hint: b.hint, insert: `/${b.name} `,
         ...(b.name === 'schedule' || b.name === 'loop' ? { act: 'form' as const } : {}) } })),
-    ...commands.filter((c) => !BUILTIN.some((b) => b.name === c.name))
+    ...registered.map((r) => ({ label: r.name, keywords: r.hint.split(/\s+/).filter(Boolean), words: `${r.name} ${r.hint}`, bonus: 0,
+      item: { key: `ext:${r.name}`, label: `/${r.name}`, hint: r.hint.slice(0, 48), insert: `/${r.name} ` } })),
+    ...commands.filter((c) => !BUILTIN.some((b) => b.name === c.name) && !registered.some((r) => r.name === c.name))
       .map((c) => ({ label: c.name, keywords: c.description.split(/\s+/).filter(Boolean), words: `${c.name} ${c.description}`, bonus: 0,
         item: { key: c.id, label: `/${c.name}`, hint: ((c.subtask ? 'subtask · ' : '') + c.description).slice(0, 48), insert: `/${c.name} ` } }))
   ]

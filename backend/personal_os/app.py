@@ -112,6 +112,7 @@ from .extensions.authoring import skill as author_extension
 from .extensions.drafts import Drafts
 from .extensions.defaults import Defaults
 from .extensions.hooks import hook_ctx
+from .extensions.notes import ExtNotes
 from .extensions.host import ExtensionContext, ExtensionHost, builtin_manifest
 from .modules import Module, ModuleContext, build_modules
 from .tools import Toolbox, UrlBlocked, guarded_request, page_title, summarize_result, times_body
@@ -477,7 +478,7 @@ def _profile_changed(before: dict[str, Any]) -> None:
 app.include_router(profile_routes.router(host, _profile_changed))
 host.migrate(db)
 # Soft delete: the DELETE routes below move things here, and /trash restores or erases them (trash.py).
-trash = Trash(db, todos, docs, host.bus)
+trash = Trash(db, todos, docs, host.bus, host.trash_kinds)
 app.include_router(trash_router(trash))
 app.include_router(system_access.router(settings, lambda: toolbox.shell, lambda: coding))
 usage = Usage(db)
@@ -2384,7 +2385,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # The definition this chat speaks as: a task scheduled from here keeps running as it (schedule_task).
             "agent_id": persona.id if persona is not None else None,
             # The same list as context_used's chunks: search_documents numbers new passages after the prompt's (tools._cite).
-            "citations": used["chunks"],
+            "citations": used["chunks"], "stop": stop,  # what a hook handler's HookCtx offers as its stop event
             # Taint is sticky for the whole conversation: the injected instructions live on in the replayed history, so
             # waiting one turn must not re-arm a standing 'always' grant. Only the user clears it (Context -> this chat).
             "tainted": bool(conv["settings"].get("tainted")) or bool(ctx_taints),
@@ -2789,7 +2790,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         def _assemble(hist: list[dict[str, str]], extra_tail: Sequence[str] = ()) -> list[dict[str, Any]]:
             """Everything before this run's own messages: the layout around `hist`, then the parked / resume notes. `extra_tail` joins the
             tail blocks, which sit after the history and never in the cached prefix."""
-            hist = expand_commands(hist, command_store, skills, _mentionable(), front=front_hint)  # `/name args` turns carry their filled command (commands.py)
+            hist = expand_commands(hist, command_store, skills, _mentionable(), front=front_hint, registered=host.slash.expand)  # `/name args` turns carry their filled command (commands.py)
             head = layout_messages(stable, used["volatile_blocks"], hist, [*slots.tail, *extra_tail])
             if turn_images and (i := max((i for i, m in enumerate(head) if m["role"] == "user"), default=-1)) >= 0:
                 head[i] = {**head[i], "content": [{"type": "text", "text": head[i]["content"]}, *turn_images]}
@@ -4664,6 +4665,12 @@ def list_commands() -> list[dict[str, Any]]:
     return command_store.list()
 
 
+@app.get("/commands/registered")
+def list_registered_commands() -> list[dict[str, str]]:
+    """The slash commands the enabled extensions register (api.command), for the composer's menu."""
+    return host.slash.listing()
+
+
 @app.post("/commands")
 def create_command(body: WorkflowIn) -> dict[str, Any]:
     try:
@@ -6114,11 +6121,12 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
         if e["desk_id"] not in asked and e["desk_id"] not in desk_rows:
             desk_rows[e["desk_id"]] = e
     elsewhere = _review_queues()
+    notes = ExtNotes(db).open()
     return {"needs_you": {"approvals": pending_approvals, "proposals": pending_proposals, "paused_jobs": paused_jobs,
-                          "desks": list(desk_rows.values()), "elsewhere": elsewhere},
+                          "desks": list(desk_rows.values()), "elsewhere": elsewhere, "notes": notes},
             "while_you_were_away": away,
             "counts": {"needs_you": len(pending_approvals) + len(pending_proposals) + len(paused_jobs) + len(desk_rows)
-                       + sum(q["count"] for q in elsewhere),
+                       + sum(q["count"] for q in elsewhere) + len(notes),
                        "paused_jobs": len(paused_jobs),
                        "approvals": len(pending_approvals), "proposals": len(pending_proposals),
                        "runs": len(away), "unseen_runs": sum(1 for a in away if not a["seen"]), "late": sum(1 for a in away if a["late"]),
@@ -6126,6 +6134,13 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
             "scheduler": {"last_tick": scheduler.last_tick, "fires": scheduler.fires,
                           "next_due_at": jobs.earliest_due(), "timezone": local_tz_name(),
                           "wake_unavailable": scheduler.wake_unavailable}}
+
+
+@app.post("/inbox/notes/{note_id}/dismiss")
+def inbox_note_dismiss(note_id: str) -> dict[str, bool]:
+    if not ExtNotes(db).dismiss(note_id):
+        raise HTTPException(404, "No such note")
+    return {"ok": True}
 
 
 @app.post("/inbox/runs/{run_id}/seen")
@@ -6213,7 +6228,8 @@ def inbox_notify(since: float = 0.0) -> list[dict[str, Any]]:
     runs = run_store.of_kind("job", since=max(0.0, since - 86400), limit=100)
     counts = proposals.counts([r["run_id"] for r in runs])
     rows = [job_history.summarize_run(r, None, counts.get(r["run_id"], {})) for r in runs]
-    return job_history.notify_events(rows, by_id, proposals.list("pending", limit=100), since)
+    events = [*job_history.notify_events(rows, by_id, proposals.list("pending", limit=100), since), *ExtNotes(db).notifications(since)]
+    return sorted(events, key=lambda e: e["at"])[-job_history.NOTIFY_CAP:]
 
 
 @app.post("/jobs/wake")

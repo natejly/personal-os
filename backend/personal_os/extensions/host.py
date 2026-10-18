@@ -12,6 +12,7 @@ import logging
 import math
 import sys
 from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Iterable, Iterator, get_args
@@ -27,10 +28,14 @@ from .channels import ChannelAdapter, Channels
 from .defaults import DEFAULT_KEYS, Defaults
 from .directives import Directive, Directives
 from .disposables import Disposable, Scope
-from .hooks import HookBus
+from .hooks import HookBus, Subscription, takes_ctx
 from .manifest import Manifest, load_manifest
+from .notes import ExtNotes, InboxItem
 from .prechecks import Precheck, Prechecks
 from .routes import ExtensionRoutes
+from .scopeddb import ScopedDb
+from .slash import CommandFn, SlashCommands
+from .trashkinds import TrashHandler, TrashKinds
 from .triggers import TriggerAdapter, Triggers
 
 if TYPE_CHECKING:
@@ -38,6 +43,7 @@ if TYPE_CHECKING:
 
     from ..db import Database
     from ..modules import Module
+    from ..secrets import SecretStore
     from ..tools import ToolSpec
 
 log = logging.getLogger(__name__)
@@ -47,6 +53,7 @@ Handler = Callable[[], Awaitable[None]]
 SETTING_PREFIX = "ext."  # a setting `ext.<id>.<field>` belongs to the extension that declares <field>
 STOP_BUDGET_S = 5.0  # what one extension's app.stop handlers get before they are cancelled
 STABLE_CONTEXT_TIMEOUT_MS = 100  # a stable block reads cached state: it is built in the turn path, before the first token
+MIN_JOB_INTERVAL_S = 60.0  # an interval job runs at most this often
 LIFECYCLE_HOOKS = frozenset({"app.start", "app.stop", "ext.changed"})  # fired whether or not the extension is enabled: its handlers start and stop its own work
 
 
@@ -119,6 +126,62 @@ class Services:
         return self._lookups[name]()
 
 
+class ExtSecrets:
+    """The secret store, limited to the names under `ext.<id>.`: the same keys the manifest's secret settings are kept under."""
+
+    def __init__(self, store: SecretStore, ext_id: str) -> None:
+        self._store, self._prefix = store, f"{SETTING_PREFIX}{ext_id}."
+
+    def get(self, name: str) -> str | None:
+        return self._store.get(self._prefix + name)
+
+    def set(self, name: str, value: str) -> None:
+        self._store.set(self._prefix + name, value)
+
+    def delete(self, name: str) -> None:
+        self._store.delete(self._prefix + name)
+
+
+class ExtSettings:
+    """An extension's own settings, typed by its manifest and kept as `ext.<id>.<field>`."""
+
+    def __init__(self, scope: ExtensionScope) -> None:
+        self._scope = scope
+
+    def get(self, name: str) -> Any:
+        """The value, or None while unset. A secret-typed field is read from the secret store."""
+        spec = self._scope.manifest.settings.get(name)
+        if spec is None:
+            raise KeyError(f"setting {name!r} is not declared in the manifest of {self._scope.manifest.id!r}")
+        if spec["type"] == "secret":
+            return self._scope.secrets.get(name)
+        assert self._scope._ctx is not None
+        return self._scope._ctx.settings().get(f"{SETTING_PREFIX}{self._scope.manifest.id}.{name}")
+
+    def on_change(self, fn: Callable[[str], Any]) -> Disposable:
+        """Call `fn(name)`, sync or async, after the person changes one of the extension's settings; read the new value with `get`."""
+        prefix = f"{SETTING_PREFIX}{self._scope.manifest.id}."
+
+        async def changed(payload: dict[str, Any]) -> None:
+            for key in payload["keys"]:
+                if key.startswith(prefix):
+                    out = await asyncio.to_thread(fn, key.removeprefix(prefix))  # as in context(): an async fn only builds its coroutine there
+                    if inspect.isawaitable(out):
+                        await out
+        scope = self._scope
+        return scope.disposables.add(scope._bus.subscribe("settings.changed", scope._while_enabled(changed), owner=scope.manifest.id, order=scope.index))
+
+
+@dataclass
+class Job:
+    """An interval job (`api.job`): the dev panel lists it with how it has been going."""
+    name: str
+    every: timedelta
+    fn: Callable[[], Any]
+    runs: int = 0
+    last_error: str | None = None
+
+
 @dataclass
 class ExtensionScope:
     """One loaded extension: its manifest, and everything it registered, undone together when it stops."""
@@ -130,6 +193,8 @@ class ExtensionScope:
     triggers: Triggers
     prechecks: Prechecks
     directives: Directives
+    slash: SlashCommands
+    trash_kinds: TrashKinds
     runtime: Runtime
     module: Module | None = None  # set for an adapted Module
     root: Path | None = None  # the extension's folder, where data.migrations is looked up
@@ -140,6 +205,7 @@ class ExtensionScope:
     routers: list[APIRouter] = field(default_factory=list)
     recap_sections: list[RecapSection] = field(default_factory=list)
     tasks: set[asyncio.Task[Any]] = field(default_factory=set)
+    jobs: list[Job] = field(default_factory=list)
 
     @property
     def log(self) -> logging.Logger:
@@ -153,11 +219,31 @@ class ExtensionScope:
         return self._bus
 
     @property
-    def db(self) -> Database:
+    def db(self) -> Database | ScopedDb:
+        """The database. A folder extension gets only the tables its manifest lists under data.tables."""
         assert self._ctx is not None
         if self.dev:
             self._require("db:own")
+            return ScopedDb(self._ctx.db, tuple(self.manifest.data.get("tables", ())))
         return self._ctx.db
+
+    @property
+    def data_dir(self) -> Path:
+        """Where the extension keeps files: `<data>/ext/<id>/`, apart from its code so an update never overwrites them."""
+        assert self._ctx is not None
+        path = self._ctx.db.data_dir / "ext" / self.manifest.id
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @property
+    def secrets(self) -> ExtSecrets:
+        assert self._ctx is not None
+        return ExtSecrets(self._ctx.db.secrets, self.manifest.id)
+
+    @property
+    def settings(self) -> ExtSettings:
+        return ExtSettings(self)
+
 
     @property
     def app(self) -> ExtensionContext:
@@ -202,17 +288,19 @@ class ExtensionScope:
         if permission not in self.manifest.permissions:
             raise ValueError(f"extension {self.manifest.id!r} did not declare permission {permission!r}")
 
-    def _while_enabled(self, fn: Callable[[Any], Any]) -> Callable[[Any], Any]:
-        """`fn` as the bus should call it: a disabled extension has no opinion. Sync stays sync, so the bus runs it where it ran."""
+    def _while_enabled(self, fn: Callable[..., Any]) -> Callable[..., Any]:
+        """`fn` as the bus should call it: a disabled extension has no opinion. Sync stays sync, so the bus runs it where it ran.
+        The wrapper takes the HookCtx too, which it passes on only when `fn` asks for one."""
+        with_ctx = takes_ctx(fn)
         if inspect.iscoroutinefunction(fn):
-            async def guarded_async(arg: Any) -> Any:
+            async def guarded_async(arg: Any, ctx: Any) -> Any:
                 if self.enabled():
-                    return await fn(arg)
+                    return await (fn(arg, ctx) if with_ctx else fn(arg))
             return guarded_async
 
-        def guarded(arg: Any) -> Any:
+        def guarded(arg: Any, ctx: Any) -> Any:
             if self.enabled():
-                return fn(arg)
+                return fn(arg, ctx) if with_ctx else fn(arg)
         return guarded
 
     def require_enabled(self) -> None:
@@ -304,6 +392,58 @@ class ExtensionScope:
             raise PermissionError(f"extension {self.manifest.id!r} cannot add a prompt directive: only a built-in extension may")
         return self.disposables.add(self.directives.register(self.manifest.id, fn, version, self.enabled))
 
+    def command(self, name: str, fn: CommandFn) -> Disposable:
+        """Offer the slash command `/name`, which the manifest lists under contributes.commands: while the extension is enabled,
+        `fn(arguments)` returns the text laid under the turn that typed it (None for nothing)."""
+        declared = next((c for c in self.manifest.contributes.get("commands", ()) if c["name"] == name), None)
+        if declared is None:
+            raise ValueError(f"extension {self.manifest.id!r} did not declare command {name!r} under contributes.commands")
+        return self.disposables.add(self.slash.register(self.manifest.id, name, fn, declared.get("hint", ""), self.enabled))
+
+    def job(self, name: str, every: timedelta, fn: Callable[[], Any]) -> Disposable:
+        """Run `fn`, sync or async, every `every` once the extension has started, while it is enabled. The dev panel lists it."""
+        if every.total_seconds() < MIN_JOB_INTERVAL_S:
+            raise ValueError(f"job {name!r} runs every {every}, the shortest interval is {MIN_JOB_INTERVAL_S:.0f} s")
+        if any(j.name == name for j in self.jobs):
+            raise ValueError(f"extension {self.manifest.id!r} already has a job {name!r}")
+        job = Job(name, every, fn)
+        self.jobs.append(job)
+        return self.disposables.add(Disposable(lambda: self.jobs.remove(job)))
+
+    async def _run_job(self, job: Job) -> None:
+        while True:
+            await asyncio.sleep(job.every.total_seconds())
+            if not self.enabled():
+                continue
+            try:
+                out = await asyncio.to_thread(job.fn)  # as in context(): an async fn only builds its coroutine there
+                if inspect.isawaitable(out):
+                    await out
+                job.last_error = None
+            except Exception as e:  # noqa: BLE001 - the next tick runs it again
+                log.warning("extension %s: job %s failed", self.manifest.id, job.name, exc_info=True)
+                job.last_error = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+            job.runs += 1
+
+    def trash_handler(self, kind: str, handler: TrashHandler) -> Disposable:
+        """Let the trash list, restore and erase the rows this extension soft-deletes. `kind` is `<extension id>:<name>`."""
+        if not kind.startswith(f"{self.manifest.id}:") or kind == f"{self.manifest.id}:":
+            raise ValueError(f"trash kind {kind!r} must be named {self.manifest.id}:<name>")
+        return self.disposables.add(self.trash_kinds.register(kind, handler, self.enabled))
+
+    def notify(self, title: str, body: str, *, target: str | None = None) -> None:
+        """Ask for an operating-system notification. `target` is `inbox` or `run:<conversation id>`, where a click goes."""
+        self._raise(InboxItem(title, body, target), inbox=False)
+
+    def inbox(self, item: InboxItem) -> None:
+        """Leave a card under "Needs you" in the Agent inbox until the person dismisses it."""
+        self._raise(item, inbox=True)
+
+    def _raise(self, item: InboxItem, *, inbox: bool) -> None:
+        assert self._ctx is not None
+        ExtNotes(self._ctx.db).add(self.manifest.id, item, inbox=inbox)
+        self._ctx.publish("inbox_note", {})
+
     def spawn(self, coro: Awaitable[Any]) -> asyncio.Task[Any]:
         """Run a background task that is cancelled and awaited when the extension stops."""
         task = asyncio.ensure_future(coro)
@@ -348,6 +488,8 @@ class ExtensionScope:
         if self.module:
             await self.module.start()
         await self._bus.emit("app.start", {}, owner=self.manifest.id)
+        for job in self.jobs:
+            self.spawn(self._run_job(job))
 
     async def stop(self) -> None:
         try:
@@ -375,11 +517,14 @@ def builtin_manifest(ext_id: str) -> Manifest:
 class ExtensionHost:
     def __init__(self) -> None:
         self.bus = HookBus()
+        self.bus.on_mute = self._muted
         self.retrieval = RetrievalSources()
         self.channels = Channels()
         self.triggers = Triggers()
         self.prechecks = Prechecks()
         self.directives = Directives()
+        self.slash = SlashCommands()
+        self.trash_kinds = TrashKinds()
         self.runtime = Runtime(self.bus, core_providers())
         self.routes = ExtensionRoutes(self)  # mounted at /ext by the app: where folder-loaded extensions' routers are served
         self.extensions: dict[str, ExtensionScope] = {}  # in start order
@@ -389,6 +534,18 @@ class ExtensionHost:
         self._shutdown: list[Handler] = []
         self._enabled: dict[str, bool] = {}  # what ext.changed last reported, per extension
         self._load_order = itertools.count()  # never reused, so a reloaded extension sorts after the ones loaded before it
+
+    def _muted(self, sub: Subscription) -> None:
+        """The bus switched a handler off after repeated failures: tell the person, since nothing else will."""
+        scope = self.extensions.get(sub.owner)
+        if scope is None or scope._ctx is None:
+            return
+        error = sub.errors[-1].partition(":")[0] if sub.errors else "an error"
+        try:
+            scope.inbox(InboxItem(f"{scope.manifest.name}: a hook was switched off",
+                                  f"Its {sub.hook} handler failed {sub.failures} times in a row ({error}), so it is muted until Grain restarts."))
+        except Exception:  # noqa: BLE001 - the mute stands even when the note cannot be saved
+            log.warning("extension %s: could not raise the note about muted hook %s", sub.owner, sub.hook, exc_info=True)
 
     # ---- the app's start and stop, in registration order ----
     def on_start(self, fn: Handler) -> Handler:
@@ -514,7 +671,7 @@ class ExtensionHost:
         if manifest.id in self.extensions:
             raise ValueError(f"duplicate extension id {manifest.id!r}")
         scope = ExtensionScope(manifest, next(self._load_order), self.bus, self.retrieval, self.channels, self.triggers, self.prechecks,
-                               self.directives, self.runtime, module, root, ctx, dev)
+                               self.directives, self.slash, self.trash_kinds, self.runtime, module, root, ctx, dev)
         try:
             for entry in manifest.contributes.get("runtime", ()):  # listed while the extension is idle; selectable once it provides code
                 scope.disposables.add(self.runtime.declare(Provider(

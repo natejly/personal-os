@@ -135,9 +135,12 @@ def router(rt: Runtime, selections: Selections, sources: ToolSources) -> APIRout
         scopes = selections.scopes(body.scope_id if body.scope == "chat" else None, body.scope_id if body.scope == "project" else None,
                                    layers=layers)
         was = rt.resolve(body.slot, scopes)
-        if body.value is None and not SLOTS[body.slot].multi:  # clearing hands the slot to whatever is next in line
+        multi = SLOTS[body.slot].multi
+        if body.value is None or multi:  # clearing hands the slot to whatever is next in line; a source list is judged by what it leaves on
             layer = "global_" if body.scope == "global" else body.scope
-            wanted = rt.resolve(body.slot, replace(scopes, **{layer: {k: v for k, v in getattr(scopes, layer).items() if k != body.slot}})).provider
+            after = rt.resolve(body.slot, replace(scopes, **{layer: {k: v for k, v in getattr(scopes, layer).items() if k != body.slot}
+                                                           | ({} if body.value is None else {body.slot: body.value})}))
+            wanted = {"enable": list(after.extra)} if multi else after.provider
         else:
             wanted = body.value
         if (diff := rt.loosening(body.slot, was, wanted)) and not body.confirm:

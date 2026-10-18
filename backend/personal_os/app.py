@@ -4093,6 +4093,15 @@ def reset_model_votes() -> dict[str, Any]:
     return {"ok": True}
 
 
+def _refuse_while_answering(conversation_id: str) -> None:
+    """409 while the chat has a reply being written. `answering`, not `live`: a run still auto-learning has finished its
+    reply, and a new message deserves a run of its own rather than a 409 the caller can only turn into a dropped steer."""
+    if running := bus.answering(conversation_id):
+        raise HTTPException(409, {"message": "That conversation already has a running reply",
+                                 "run_id": running.run_id, "seq": running.seq,
+                                 "message_id": running.message_id, "message_seq": running.message_seq})
+
+
 async def _accept_turn(row: dict[str, Any], body: ChatIn, atts: list[dict[str, Any]]) -> ChatIn:
     """The turn.accept hook over a message the person typed: a handler may refuse it or rewrite its text. The rewrite meets the
     same length limit as the original."""
@@ -4121,13 +4130,7 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     # A chat with a live run is never hidden: writing in an archived one brings it back.
     if row.get("archived_at"):
         convos.update(id, {"archived": False})
-    # `answering`, not `live`: a run still auto-learning has finished its reply, and a new message
-    # deserves a run of its own rather than a 409 the caller can only turn into a dropped steer.
-    running = bus.answering(id)
-    if running:
-        raise HTTPException(409, {"message": "That conversation already has a running reply",
-                                 "run_id": running.run_id, "seq": running.seq,
-                                 "message_id": running.message_id, "message_seq": running.message_seq})
+    _refuse_while_answering(id)
     if body.replace_from:
         conv = convos.get(id)
         if not (body.content or "").strip():
@@ -4140,6 +4143,7 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     if body.wake is not None or body.chat_link is not None:
         raise HTTPException(400, "A wake turn is started by the backend only")
     body = await _accept_turn(row, body, atts)
+    _refuse_while_answering(id)  # a handler that yielded let another message start its run
     run = bus.start(id, lambda r: _run_chat(r, body), input=body.model_dump())
     # Typed in Grain into a channel's chat (Texts): it runs as a turn of that channel and shows on the phone. Internal turns (wake, ...) never get here.
     if (channel := host.channels.owner_of(id)) and body.origin != channel.name and body.wake is None and body.kind is None and not body.replace_from:

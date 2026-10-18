@@ -76,8 +76,14 @@ Hooks: app.start, app.stop, settings.changed, chat.created, turn.settled, reply.
 """}
 
 
+OFFERED = "authorExtensionSkillOffered"
+
+
 def ensure(skills: Any, drafts: Path) -> None:
-    """Offer the skill as a candidate unless a skill of that name exists (the user may have approved, edited or rejected it).
+    """Offer the skill as a candidate once: the user may then approve, edit or delete it, and a deleted one stays gone.
     `drafts` is the folder drafts are written in, named in the procedure."""
+    if skills.db.get_settings().get(OFFERED):
+        return
     if not any(s["name"] == NAME for s in skills.list()):
         skills.propose(NAME, DESCRIPTION, PROCEDURE.replace("DRAFTS", str(drafts)), references=REFERENCES)
+    skills.db.set_settings({OFFERED: True})

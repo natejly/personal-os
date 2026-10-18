@@ -205,6 +205,35 @@ def test_ext_changed_fires_once_per_enabled_flip() -> None:
     assert seen == [{"id": "mod", "enabled": False}, {"id": "mod", "enabled": True}]
 
 
+def test_concurrent_refreshes_report_one_flip_once() -> None:
+    class M:
+        key, label, on = "mod", "Mod", True
+
+        def enabled(self) -> bool:
+            return self.on
+
+    class Slow(dict):
+        def __setitem__(self, key: str, value: bool) -> None:
+            time.sleep(0.05)  # between a pass seeing the change and recording it, where another thread's pass would also see it
+            super().__setitem__(key, value)
+    host, seen, m = ExtensionHost(), [], M()
+    host._add(declared("ext.changed", ext_id="watch")).on("ext.changed", seen.append)
+    host.add_module(m)  # type: ignore[arg-type]
+
+    async def main() -> None:
+        async with host.lifespan(None):  # type: ignore[arg-type]
+            host._enabled = Slow(host._enabled)
+            m.on = False
+            threads = [threading.Thread(target=host.refresh_enabled) for _ in range(4)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            await asyncio.sleep(0.1)
+    asyncio.run(main())
+    assert seen == [{"id": "mod", "enabled": False}]
+
+
 # ---- settings namespace ----
 def test_manifest_settings_and_data_are_validated() -> None:
     m = manifest(settings={"token": {"type": "secret"}, "limit": {"type": "integer"}}, data={"tables": ["demo_t"]})

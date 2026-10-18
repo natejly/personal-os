@@ -11,6 +11,7 @@ import itertools
 import logging
 import math
 import sys
+import threading
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
@@ -543,6 +544,7 @@ class ExtensionHost:
         self._startup: list[Handler] = []
         self._shutdown: list[Handler] = []
         self._enabled: dict[str, bool] = {}  # what ext.changed last reported, per extension
+        self._refresh_lock = threading.RLock()  # sync routes run in the threadpool: a pass must see the last one's _enabled
         self._load_order = itertools.count()  # never reused, so a reloaded extension sorts after the ones loaded before it
 
     def _muted(self, sub: Subscription) -> None:
@@ -738,9 +740,10 @@ class ExtensionHost:
         """Fire ext.changed for each extension whose enabled state differs from the last one reported. An extension's
         contributes.defaults are applied when it turns on and reverted when it turns off (a profile does this itself).
         Those writes can flip an extension already visited, so it goes round again until nothing changes."""
-        for _ in self.extensions:
-            if not self._refresh_pass():
-                return
+        with self._refresh_lock:
+            for _ in self.extensions:
+                if not self._refresh_pass():
+                    return
 
     def _refresh_pass(self) -> bool:
         changed = False

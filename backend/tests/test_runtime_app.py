@@ -218,6 +218,17 @@ def test_clearing_a_stricter_selection_whose_fallback_is_looser_needs_a_confirma
         assert put(api, "model.client", None, "chat", chat, confirm=True).status_code == 200
 
 
+def test_dropping_a_chats_source_override_that_turns_a_source_back_on_needs_a_confirmation(ext: Path, api: TestClient) -> None:
+    with Harness(ext, SETTINGS):
+        chat = appmod.convos.create(appmod.projects.create("P")["id"], "C", "test-model")["id"]
+        assert put(api, "tools.source", {"enable": ["demo/src"]}, confirm=True).status_code == 200
+        assert put(api, "tools.source", {"disable": ["demo/src"]}, "chat", chat).status_code == 200
+        r = put(api, "tools.source", None, "chat", chat)
+        assert r.status_code == 409 and r.json()["detail"]["diff"] == ["Source adds its tools"]
+        assert put(api, "tools.source", {"enable": ["core/builtin"]}, "chat", chat).status_code == 409  # replacing it drops the disable too
+        assert put(api, "tools.source", {"enable": ["core/builtin"]}, "chat", chat, confirm=True).status_code == 200
+
+
 def test_the_read_routes_404_on_an_unknown_chat_or_project(ext: Path, api: TestClient) -> None:
     with Harness(ext, SETTINGS):
         for path in ("/runtime", "/runtime/resolve"):

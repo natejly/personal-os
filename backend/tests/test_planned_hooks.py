@@ -9,6 +9,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -112,6 +113,24 @@ def test_a_rewrite_meets_the_length_limit_again(monkeypatch: pytest.MonkeyPatch)
     finally:
         h.dispose()
     assert r.status_code == 413 and r.json()["detail"] == "too long" and appmod.convos.get(cid)["messages"] == []
+
+
+def test_a_slow_turn_accept_handler_does_not_let_two_messages_start_two_runs() -> None:
+    async def slow(payload: Any) -> None:
+        await asyncio.sleep(0.3)
+    h = sub("turn.accept", slow)
+    try:
+        cid = new_chat()
+        codes: list[int] = []
+        threads = [threading.Thread(target=lambda: codes.append(send(cid, "hi").status_code)) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        messages = settled(cid)
+    finally:
+        h.dispose()
+    assert sorted(codes) == [200, 409] and [m["role"] for m in messages] == ["user", "assistant"]
 
 
 def test_an_internal_turn_is_not_offered_to_turn_accept() -> None:

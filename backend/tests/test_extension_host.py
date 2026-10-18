@@ -92,6 +92,8 @@ class ManifestTests(unittest.TestCase):
             "activation on an undeclared command": manifest(activation=["onCommand:ping"]),
             "lazy with a tool": manifest(activation=["onView:lazy"], contributes={"views": [{"id": "lazy"}], "tools": [{"name": "demo_x"}]}),
             "lazy providing a service": manifest(activation=["onView:lazy"], contributes={"views": [{"id": "lazy"}]}, provides={"services": ["demo"]}),
+            "lazy with views not a list": manifest(activation=["onView:lazy"], contributes={"views": 5}),
+            "lazy with an unhashable view id": manifest(activation=["onView:lazy"], contributes={"views": [{"id": []}]}),
             "unknown contributes key": manifest(contributes={"toolz": []}),
             "tool without a name": manifest(contributes={"tools": [{}]}),
             "tool after not a name": manifest(contributes={"tools": [{"name": "demo_x", "after": 3}]}),

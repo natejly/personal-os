@@ -131,6 +131,17 @@ def test_limits_per_owner_and_overall(tmp_path, monkeypatch):
     assert "terminal_id" in call(tb, "terminal_open", ctx_of(cfg), cwd=str(home / "work"))  # a closed one frees its slot
 
 
+def test_a_terminal_the_hub_lost_is_closed_and_frees_its_slot(tmp_path, monkeypatch):
+    tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
+    ids = [opened(tb, ctx_of(cfg), str(home / "work")) for _ in range(terms.MAX_PER_OWNER)]
+    hub.terms.clear()  # the desktop app restarted: the hub has none of them
+    assert call(tb, "terminal_read", ctx_of(cfg), terminal_id=ids[0])["error"].startswith("No such terminal")
+    assert send(tb, cfg, ids[1], "ls")["error"].startswith("No such terminal")
+    assert [t["id"] for t in asyncio.run(coding.terminals.live_status())] == []
+    assert coding.terminals._live() == 0
+    assert "terminal_id" in call(tb, "terminal_open", ctx_of(cfg), cwd=str(home / "work"))
+
+
 # ---- typing: each judging step, in order ----
 def send(tb: Any, cfg: dict[str, Any], tid: str, text: str, **over: Any) -> Any:
     return call(tb, "terminal_send", ctx_of(cfg, **over), terminal_id=tid, text=text)

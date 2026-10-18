@@ -69,7 +69,8 @@ class TerminalError(ValueError):
         self.alt = alt
 
 
-NO_SUCH = "No such terminal."
+HUB_NO_SUCH = "No such terminal"  # what the hub answers for an id it does not have
+NO_SUCH = HUB_NO_SUCH + "."
 
 
 class TerminalBridge:
@@ -236,6 +237,16 @@ class Terminals:
         with self.db.tx() as c:
             return c.execute("SELECT COUNT(*) FROM coding_terminals WHERE state = 'open' AND (?1 IS NULL OR owner_key = ?1)", (owner,)).fetchone()[0]
 
+    async def _call(self, row: dict[str, Any], command: dict[str, Any]) -> dict[str, Any]:
+        """Ask the hub about a terminal. One it no longer has (the app restarted) is over: close the row, so it stops counting."""
+        try:
+            return await self.bridge.call(command)
+        except TerminalError as e:
+            if str(e) != HUB_NO_SUCH:
+                raise
+            await self._close(row)
+            raise TerminalError(NO_SUCH, "terminal_open starts one") from None
+
     def _save(self, terminal_id: str, **cols: Any) -> None:
         with self.db.tx() as c:
             c.execute(f"UPDATE coding_terminals SET {', '.join(f'{k} = ?' for k in cols)} WHERE id = ?", (*cols.values(), terminal_id))
@@ -381,7 +392,7 @@ class Terminals:
                 raise TerminalError(why)
             self._rate(terminal_id)
             data = str(text) + ("\r" if submit else "")
-        reply = await self.bridge.call({"type": "write", "terminal_id": terminal_id, "data": data, "clear_dirty": key == "ctrl-c"})
+        reply = await self._call(row, {"type": "write", "terminal_id": terminal_id, "data": data, "clear_dirty": key == "ctrl-c"})
         if blocked := reply.get("blocked"):
             self._touch(row, {"attached": blocked == "attached", "dirty": blocked == "dirty"})
             raise TerminalError("The user is using this terminal, so it was not typed into." if blocked == "attached"
@@ -425,8 +436,8 @@ class Terminals:
         return out
 
     async def _fetch(self, row: dict[str, Any], screen: bool, cursor: int) -> dict[str, Any]:
-        reply = await self.bridge.call({"type": "read", "terminal_id": row["id"], "cursor": max(0, cursor), "max_bytes": RAW_MAX,
-                                        "screen": screen})
+        reply = await self._call(row, {"type": "read", "terminal_id": row["id"], "cursor": max(0, cursor), "max_bytes": RAW_MAX,
+                                       "screen": screen})
         self._touch(row, reply)
         return reply
 
@@ -491,7 +502,7 @@ class Terminals:
 
     async def _looks_for_input(self, row: dict[str, Any]) -> bool:
         """Whether the screen's last line ends the way a prompt does while the process is alive."""
-        screen = await self.bridge.call({"type": "read", "terminal_id": row["id"], "cursor": 0, "max_bytes": 1, "screen": True})
+        screen = await self._call(row, {"type": "read", "terminal_id": row["id"], "cursor": 0, "max_bytes": 1, "screen": True})
         lines = [ln for ln in clean_output(str(screen.get("screen") or ""), {}).splitlines() if ln.strip()]
         return bool(lines) and not screen.get("exited") and bool(PROMPT_END.search(lines[-1]))
 
@@ -506,6 +517,7 @@ class Terminals:
         except TerminalError:
             log.info("terminal %s could not be closed in the hub (gone already, or the app is not connected)", row["id"])
         self._save(row["id"], state="closed", exit_code=code)
+        row["state"] = "closed"
         if scratch := self.scratch.pop(row["id"], None):
             self._release(*scratch)
         for memory in (self.cursors, self.partial, self.sent):
@@ -537,9 +549,9 @@ class Terminals:
         out = []
         for row in rows:
             try:
-                self._touch(row, await self.bridge.call({"type": "status", "terminal_id": row["id"]}))
+                self._touch(row, await self._call(row, {"type": "status", "terminal_id": row["id"]}))
             except TerminalError:
-                pass  # the app is not connected: show what was last known
+                pass  # the app is not connected: show what was last known (a terminal it lost is closed, and drops out below)
             if row["state"] == "open":
                 out.append({k: row[k] for k in ("id", "name", "cwd", "session_id", "owner_key", "created_at", "user_attached", "user_dirty")}
                            | {"sandboxed": True})

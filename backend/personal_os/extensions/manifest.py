@@ -221,7 +221,8 @@ def _activation(raw: dict[str, Any], c: dict[str, Any]) -> None:
     events = raw.get("activation", ["startup"])
     if "startup" in events:
         return
-    views = {v.get("id") for v in c.get("views") or () if isinstance(v, dict)}
+    _check(isinstance(c.get("views", []), list), "contributes.views must be a list")
+    views = {v["id"] for v in c.get("views", []) if isinstance(v, dict) and _is_str(v.get("id"))}
     commands = {e.get("name") for e in c.get("commands", ())}
     for event in events:
         kind, _, target = event.partition(":")

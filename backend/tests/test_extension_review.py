@@ -349,6 +349,13 @@ def test_the_author_extension_skill_waits_for_the_users_approval_with_the_sdk_re
     assert len([s for s in appmod.skills.list() if s["name"] == skill.NAME]) == 1
 
 
+def test_a_deleted_author_extension_skill_is_not_offered_again() -> None:
+    [row] = [s for s in appmod.skills.list() if s["name"] == skill.NAME]
+    appmod.skills.delete(row["id"])
+    skill.ensure(appmod.skills, review.drafts.drafts)
+    assert not [s for s in appmod.skills.list() if s["name"] == skill.NAME]
+
+
 def test_an_installed_extensions_widget_kinds_are_known_while_it_is_disabled_so_its_windows_survive_the_start_sweep() -> None:
     root = draft()
     manifest = json.loads((root / "extension.json").read_text("utf-8"))

@@ -41,7 +41,7 @@ def _card(manifest: Manifest, tainted: bool, sources: list[str]) -> dict[str, An
     """What the user sees before approving: contributions, hooks, permissions, settings and the drafting session's provenance."""
     perms = set(manifest.permissions)
     return {"id": manifest.id, "name": manifest.name, "description": manifest.description, "version": manifest.version,
-            "contributes": manifest.contributes, "hooks": sorted(manifest.hooks), "permissions": sorted(perms),
+            "tier": "user", "contributes": manifest.contributes, "hooks": sorted(manifest.hooks), "permissions": sorted(perms),
             "settings": sorted(manifest.settings), "tainted": tainted, "taintSources": sources,
             "refused": sorted(TAINT_REFUSED & perms) if tainted else [], "needsGrant": sorted(GATE_PERMISSIONS & perms)}
 

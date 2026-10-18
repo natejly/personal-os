@@ -20,7 +20,7 @@ test('contributions are listed by kind', () => {
 })
 
 test('muted handlers are named', () => {
-  const hook = { calls: 5, p50Ms: 1, p95Ms: 2, errors: [] }
+  const hook = { calls: 5, p50Ms: 1, p95Ms: 2, errors: [], payloads: [] }
   assert.deepEqual(mutedHooks({ hooks: [{ ...hook, hook: 'tool.pre', muted: true }, { ...hook, hook: 'app.start', muted: false }] }), ['tool.pre'])
 })
 

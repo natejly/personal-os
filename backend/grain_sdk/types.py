@@ -29,6 +29,12 @@ class ManifestContributesViewsItem(TypedDict):
     icon: NotRequired[str]
 
 
+class ManifestContributesSlotsValueItem(TypedDict):
+    id: NotRequired[str]
+    view: NotRequired[str]
+    order: NotRequired[int]
+
+
 class ManifestContributesSettings(TypedDict):
     panel: NotRequired[str]
 
@@ -55,7 +61,7 @@ class ManifestContributes(TypedDict):
     tools: NotRequired[list[ManifestContributesToolsItem]]
     routes: NotRequired[ManifestContributesRoutes]
     views: NotRequired[list[ManifestContributesViewsItem]]
-    slots: NotRequired[dict[str, Any]]
+    slots: NotRequired[dict[str, list[ManifestContributesSlotsValueItem]]]
     settings: NotRequired[ManifestContributesSettings]
     commands: NotRequired[list[ManifestContributesCommandsItem]]
     keybindings: NotRequired[list[dict[str, Any]]]
@@ -74,6 +80,12 @@ class ManifestHooksValue(TypedDict):
 
 class ManifestSettingsValue(TypedDict):
     type: Literal['string', 'number', 'integer', 'boolean', 'secret']
+    title: NotRequired[str]
+    description: NotRequired[str]
+    default: NotRequired[str | float | bool]
+    enum: NotRequired[list[str | float]]
+    minimum: NotRequired[float]
+    maximum: NotRequired[float]
 
 
 class ManifestData(TypedDict):

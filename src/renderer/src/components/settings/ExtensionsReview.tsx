@@ -14,7 +14,8 @@ function Facts({ card }: { card: ExtensionCard }): JSX.Element {
     <>
       {card.description && <p className="set-help">{card.description}</p>}
       <p className="set-help">
-        {[tools.length ? `Tools: ${tools.map((t) => `${t.name} (${t.danger})`).join(', ')}` : '',
+        {[`Tier: ${card.tier}`,
+          tools.length ? `Tools: ${tools.map((t) => `${t.name} (${t.danger})`).join(', ')}` : '',
           card.contributes.views?.length ? `Views: ${card.contributes.views.map((v) => v.label).join(', ')}` : '',
           card.hooks.length ? `Hooks: ${card.hooks.join(', ')}` : '',
           card.permissions.length ? `Permissions: ${card.permissions.join(', ')}` : 'No permissions.',

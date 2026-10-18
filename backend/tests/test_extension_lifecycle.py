@@ -210,7 +210,7 @@ def test_manifest_settings_and_data_are_validated() -> None:
     m = manifest(settings={"token": {"type": "secret"}, "limit": {"type": "integer"}}, data={"tables": ["demo_t"]})
     assert m.settings["token"] == {"type": "secret"} and m.data["tables"] == ["demo_t"]
     for bad in ({"settings": {"x": {"type": "object"}}}, {"settings": {"x": "string"}}, {"settings": {"a.b": {"type": "string"}}},
-                {"settings": {"x": {"type": "string", "default": "y"}}}, {"data": {"tables": ["Bad Name"]}},
+                {"settings": {"x": {"type": "string", "default": 3}}}, {"data": {"tables": ["Bad Name"]}},
                 {"data": {"migrations": 3}}, {"data": {"migrations": "../x"}}, {"data": {"migrations": "/etc"}}):
         with pytest.raises(ManifestError):
             manifest(**bad)

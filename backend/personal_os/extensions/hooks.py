@@ -31,6 +31,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Coroutine, Literal
 
+from .. import redact
 from . import hookschema
 from .disposables import Disposable
 
@@ -96,6 +97,8 @@ class HookCtx:
 MUTE_AFTER = 5  # consecutive emit failures before a handler is muted for the session
 STATS_WINDOW = 200  # latencies kept per handler for the dev panel's p50 and p95
 ERROR_WINDOW = 10  # failures kept per handler
+PAYLOAD_WINDOW = 5  # payloads kept per handler, redacted, for the dev panel
+PAYLOAD_CHARS = 300  # characters of one payload the dev panel shows
 TIMEOUT_S = {"emit": 2.0, "collect": 1.0, "pipe": 1.0, "gate": 2.0}
 MAX_ADDED_TEXT = 10_000  # characters of text a handler outside the core may add to a value; a longer return counts as a failure
 GATE_CEILING_S = 3.0  # a declared budget cannot hold a tool call longer than this
@@ -142,6 +145,12 @@ class Subscription:
     calls: int = field(default=0)
     latencies: deque[float] = field(default_factory=lambda: deque(maxlen=STATS_WINDOW))  # seconds
     errors: deque[str] = field(default_factory=lambda: deque(maxlen=ERROR_WINDOW))
+    payloads: deque[str] = field(default_factory=lambda: deque(maxlen=PAYLOAD_WINDOW))
+
+    def see(self, arg: Any) -> None:
+        """Keep a short, credential-free rendering of what the handler was given. The core's own handlers are not shown."""
+        if self.owner != "core":
+            self.payloads.append(redact.scrub_secrets(repr(arg)[:PAYLOAD_CHARS * 10])[:PAYLOAD_CHARS])
 
     def record(self, started: float, error: BaseException | None = None) -> None:
         self.calls += 1
@@ -263,6 +272,7 @@ class HookBus:
 
     async def _try(self, sub: Subscription, arg: Any, kind: str, ctx: HookCtx) -> tuple[bool, Any]:
         started = time.perf_counter()
+        sub.see(arg)
         try:
             out = await self._invoke(sub, arg, kind, ctx)
             if kind != "emit" and (why := self._oversize(sub, out, arg, kind)):
@@ -319,6 +329,7 @@ class HookBus:
     def _inline(self, sub: Subscription, arg: Any) -> tuple[bool, Any]:
         """Call a handler on the caller's thread. One that answers with an awaitable cannot be waited for here."""
         started = time.perf_counter()
+        sub.see(arg)
         try:
             out = sub.fn(*sub.args(arg, HookCtx.of(arg)))
         except Exception as e:  # noqa: BLE001 - a handler is third-party to the code that fires the hook

@@ -325,6 +325,17 @@ def test_the_panel_sees_handler_stats_and_a_muted_handler(ext: Path) -> None:
     assert hook["muted"] and hook["calls"] == 5 and hook["errors"][-1].startswith("ZeroDivisionError") and hook["p95Ms"] is not None
 
 
+def test_the_panel_shows_the_last_payloads_with_credentials_removed(ext: Path) -> None:
+    declare(ext, "chat.created")
+    edit(ext, "extension.py", lambda t: t + '\n    api.on("chat.created", lambda p: None)\n')
+    load_on(ext)
+    for i in range(7):
+        appmod.host.bus.emit_sync("chat.created", {"id": f"c{i}", "project_id": "sk-abcdefghijklmnopqrstuvwxyz0123456789"})
+    hook = next(h for h in next(e for e in listing()["extensions"] if e["id"] == "sample")["hooks"] if h["hook"] == "chat.created")
+    assert len(hook["payloads"]) == 5 and "'id': 'c6'" in hook["payloads"][-1] and "'id': 'c2'" in hook["payloads"][0]
+    assert not any("sk-abcdefghij" in p for p in hook["payloads"])
+
+
 def test_the_panel_lists_hooks_in_the_order_they_were_subscribed(ext: Path) -> None:
     order = ["chat.created", "tool.pre", "app.start", "chat.created"]
     declare(ext, "chat.created", "tool.pre", "app.start", permissions=("hooks:gate",))
@@ -377,7 +388,8 @@ def test_harness_fire_follows_the_hook_kind(ext: Path) -> None:
 
 
 # ---- the whole path ----
-def test_a_sample_extension_is_built_end_to_end_by_the_cli(tmp_path: Path, capfd: Any) -> None:
+def test_a_sample_extension_is_built_end_to_end_by_the_cli(tmp_path: Path, capfd: Any, monkeypatch: Any) -> None:
+    monkeypatch.setattr(cli, "_token", lambda args: None)  # `new` would register with a dev backend; there is none to find
     assert cli.main(["ext", "new", "journal", "--dir", str(tmp_path)]) == 0
     root = tmp_path / "journal"
     assert cli.main(["ext", "check", str(root)]) == 0

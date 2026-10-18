@@ -29,7 +29,7 @@ from .defaults import DEFAULT_KEYS, Defaults
 from .directives import Directive, Directives
 from .disposables import Disposable, Scope
 from .hooks import HookBus, Subscription, takes_ctx
-from .manifest import Manifest, load_manifest
+from .manifest import Manifest, load_manifest, stale_api_warning
 from .notes import ExtNotes, InboxItem
 from .prechecks import Precheck, Prechecks
 from .routes import ExtensionRoutes
@@ -150,14 +150,14 @@ class ExtSettings:
         self._scope = scope
 
     def get(self, name: str) -> Any:
-        """The value, or None while unset. A secret-typed field is read from the secret store."""
+        """The value, else the field's default, else None. A secret-typed field is read from the secret store."""
         spec = self._scope.manifest.settings.get(name)
         if spec is None:
             raise KeyError(f"setting {name!r} is not declared in the manifest of {self._scope.manifest.id!r}")
         if spec["type"] == "secret":
             return self._scope.secrets.get(name)
         assert self._scope._ctx is not None
-        return self._scope._ctx.settings().get(f"{SETTING_PREFIX}{self._scope.manifest.id}.{name}")
+        return self._scope._ctx.settings().get(f"{SETTING_PREFIX}{self._scope.manifest.id}.{name}", spec.get("default"))
 
     def on_change(self, fn: Callable[[str], Any]) -> Disposable:
         """Call `fn(name)`, sync or async, after the person changes one of the extension's settings; read the new value with `get`."""
@@ -598,6 +598,8 @@ class ExtensionHost:
         """Load an extension from any folder holding extension.json and extension.py, in a fresh module namespace. If its
         manifest or `activate` is wrong, nothing stays registered."""
         manifest = load_manifest(root / "extension.json")
+        if warning := stale_api_warning(manifest):
+            log.warning("extension %s: %s", manifest.id, warning)
         if "service:chat" in manifest.permissions:
             raise ValueError("only a built-in extension may use the chat service: it can answer an approval")
         if builtin_only := sorted(h for h in manifest.hooks if HOOKS[h].subscribers == "builtin"):

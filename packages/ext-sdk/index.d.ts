@@ -27,6 +27,12 @@ export interface ManifestContributesViewsItem {
   icon?: string
 }
 
+export interface ManifestContributesSlotsValueItem {
+  id?: string
+  view?: string
+  order?: number
+}
+
 export interface ManifestContributesSettings {
   panel?: string
 }
@@ -53,7 +59,7 @@ export interface ManifestContributes {
   tools?: ManifestContributesToolsItem[]
   routes?: ManifestContributesRoutes
   views?: ManifestContributesViewsItem[]
-  slots?: Record<string, unknown>
+  slots?: Record<string, ManifestContributesSlotsValueItem[]>
   settings?: ManifestContributesSettings
   commands?: ManifestContributesCommandsItem[]
   keybindings?: Record<string, unknown>[]
@@ -72,6 +78,12 @@ export interface ManifestHooksValue {
 
 export interface ManifestSettingsValue {
   type: "string" | "number" | "integer" | "boolean" | "secret"
+  title?: string
+  description?: string
+  default?: string | number | boolean
+  enum?: (string | number)[]
+  minimum?: number
+  maximum?: number
 }
 
 export interface ManifestData {

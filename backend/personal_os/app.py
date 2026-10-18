@@ -2628,6 +2628,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             not a desk that plans or proposes (its approved steps are its own to carry out), and delegate is on."""
             return not proposal_only(run) and autonomy in ("", "ask") and modes.get("delegate") in ("on", "ask")
 
+        offered_ext_tools: set[str] = set()  # kept offered for the rest of this turn if their extension is turned off meanwhile
+
         def _schemas(withheld: bool = False) -> list[dict[str, Any]]:
             out = _schemas_all(withheld)
             return workers_mod.restrict_schemas(out) if st.delegation_forced and not withheld else out
@@ -2668,7 +2670,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # rest waits for a search. Applied last, after plan mode, desk and off. `modes` itself is untouched:
             # the run_python bridge, agent_spawn and a plan's step check read every enabled tool from it.
             search_on = m.pop("tool_search", "off") in ("on", "ask")
-            built = toolbox.schemas(m)
+            built = toolbox.schemas(m, offered_ext_tools)
+            if not withheld:
+                offered_ext_tools.update(s["function"]["name"] for s in built if s["function"]["name"] in toolbox.tool_owner)
             if withheld or not search_on or not mcp_search.should_defer(len(built), int(cfg.get("toolDeferAbove", 40) or 0)):
                 if not withheld:
                     tool_ctx["deferred"] = tool_ctx["deferrable"] = set()

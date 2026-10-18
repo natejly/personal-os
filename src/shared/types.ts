@@ -759,6 +759,7 @@ export interface ExtensionHookStats {
   p95Ms: number | null
   muted: boolean
   errors: string[]
+  payloads: string[]  // the last few payloads the handler was given, credentials removed
 }
 
 /** An interval job an extension registered (api.job), as the dev panel shows it. */
@@ -801,6 +802,8 @@ export interface ExtensionCard {
   name: string
   description: string
   version: string
+  /** Every reviewed extension is installed from a folder, so it is always the user tier. */
+  tier: 'user'
   contributes: { tools?: { name: string; danger: string }[]; views?: { id: string; label: string }[] }
   hooks: string[]
   permissions: string[]

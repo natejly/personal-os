@@ -53,12 +53,13 @@ export default function ExtensionsDev(): JSX.Element {
           )}
           {x.hooks.length > 0 && (
             <table>
-              <thead><tr><th>Hook</th><th>Calls</th><th>p50</th><th>p95</th><th>State</th></tr></thead>
+              <thead><tr><th>Hook</th><th>Calls</th><th>p50</th><th>p95</th><th>State</th><th>Recent payloads</th></tr></thead>
               <tbody>
                 {x.hooks.map((h) => (
                   <tr key={h.hook} title={h.errors.join('\n')}>
                     <td>{h.hook}</td><td>{h.calls}</td><td>{formatMs(h.p50Ms)}</td><td>{formatMs(h.p95Ms)}</td>
                     <td>{h.muted ? 'muted' : h.errors.length ? `${h.errors.length} recent error(s)` : 'ok'}</td>
+                    <td>{h.payloads.length > 0 && <details><summary>{h.payloads.length}</summary><pre>{h.payloads.join('\n')}</pre></details>}</td>
                   </tr>
                 ))}
               </tbody>

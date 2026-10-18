@@ -13,10 +13,12 @@ from typing import Any
 
 from ..permissions import CHOICES
 from ..repos import EFFORTS
+from ..skillbuild import _authority
 from ..runtime.slots import PERMISSIONS as RUNTIME_PERMISSIONS, SLOTS
 from .catalog import HOOKS
 
 API_VERSION = 1
+API_DEPRECATION_WINDOW = 1  # how many majors below API_VERSION a manifest may target before the host warns
 
 ID = re.compile(r"[a-z][a-z0-9-]*")
 _SEMVER = re.compile(r"\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?")
@@ -27,6 +29,8 @@ _CONTRIBUTES = {"tools", "routes", "views", "slots", "settings", "commands", "ke
 _RUNTIME_KEYS = {"slot", "id", "label", "meta"}
 _HOOK_KEYS = {"priority", "timeoutMs", "onFailure"}
 SETTING_TYPES = ("string", "number", "integer", "boolean", "secret")  # a secret is a string kept in the secret store
+_SETTING_KEYS = {"type", "title", "description", "default", "enum", "minimum", "maximum"}  # the JSON Schema subset a settings field takes
+_SETTING_PYTHON = {"string": (str,), "number": (int, float), "integer": (int,), "boolean": (bool,)}
 _FIELD = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 _TABLE = re.compile(r"[a-z_][a-z0-9_]*")
 _PROFILE_CONTRIBUTES = {"theme", "defaults", "layout", "presets"}  # all a profile may contribute: it runs nothing
@@ -105,15 +109,48 @@ class Manifest:
         )
 
 
+def stale_api_warning(manifest: Manifest) -> str | None:
+    """A manifest that targets an apiVersion older than the deprecation window still loads; the author is told to move on."""
+    if manifest.api_version < API_VERSION - API_DEPRECATION_WINDOW:
+        return f"targets apiVersion {manifest.api_version}, which is past the deprecation window: this host speaks {API_VERSION}"
+    return None
+
+
 def load_manifest(path: Path) -> Manifest:
     try:
         raw = json.loads(path.read_text("utf-8"))
     except (OSError, ValueError) as e:
         raise ManifestError(f"cannot read {path.name}: {e}") from e
     manifest = Manifest.from_dict(raw)
+    _check_static_text(path.parent, manifest)
     if manifest.kind == "profile" and (extra := sorted(p.name for p in path.parent.iterdir() if p.name != path.name)):
         raise ManifestError(f"a profile holds only {path.name}, found {', '.join(extra)}")
     return manifest
+
+
+def _check_static_text(root: Path, manifest: Manifest) -> None:
+    """Static text the model will read (names, descriptions, command hints, tool schemas) must not claim authority: the check a skill's procedure gets."""
+    texts = {"extension.json": [manifest.name, manifest.description, *(c.get("hint", "") for c in manifest.contributes.get("commands", ()))]}
+    for tool in manifest.contributes.get("tools", ()):
+        texts[f"tool {tool['name']}"] = [tool.get("description", "")]
+        path = root / tool["schema"] if isinstance(tool.get("schema"), str) else None
+        if path and path.is_file():
+            try:
+                texts[f"tool {tool['name']}"] += schema_descriptions(json.loads(path.read_text("utf-8")))
+            except ValueError:
+                pass  # reported by the tool-schema lint
+    found = [f"{where}: text that claims a permission or tells the assistant not to ask ({f['excerpt']})"
+             for where, parts in texts.items() for text in parts if text for f in _authority(text, where)]
+    if found:
+        raise ManifestError("; ".join(found))
+
+
+def schema_descriptions(schema: Any) -> list[str]:
+    if isinstance(schema, dict):
+        return [v for k, v in schema.items() if k == "description" and isinstance(v, str)] + [d for v in schema.values() for d in schema_descriptions(v)]
+    if isinstance(schema, list):
+        return [d for v in schema for d in schema_descriptions(v)]
+    return []
 
 
 def _check(ok: object, message: str) -> None:
@@ -275,9 +312,29 @@ def _settings(raw: dict[str, Any]) -> dict[str, Any]:
     fields = _object(raw, "settings")
     for name, spec in fields.items():
         _check(_FIELD.fullmatch(name), f"settings.{name}: the name must match [A-Za-z][A-Za-z0-9_]*")
-        _check(isinstance(spec, dict) and set(spec) == {"type"} and spec["type"] in SETTING_TYPES,
-               f"settings.{name} must be {{\"type\": one of {', '.join(SETTING_TYPES)}}}")
+        _check(isinstance(spec, dict) and set(spec) <= _SETTING_KEYS and spec.get("type") in SETTING_TYPES,
+               f"settings.{name} must be an object with a type of {', '.join(SETTING_TYPES)}, and optionally {', '.join(sorted(_SETTING_KEYS - {'type'}))}")
+        _setting_constraints(name, spec)
     return fields
+
+
+def _setting_constraints(name: str, spec: dict[str, Any]) -> None:
+    kind = spec["type"]
+    _check(all(isinstance(spec.get(k, ""), str) for k in ("title", "description")), f"settings.{name}: title and description must be text")
+    _check(kind != "secret" or not {"default", "enum"} & set(spec), f"settings.{name}: a secret has no default or enum")
+    _check(kind in ("number", "integer") or not {"minimum", "maximum"} & set(spec), f"settings.{name}: minimum and maximum are for numbers")
+    allowed = _SETTING_PYTHON.get(kind, ())
+
+    def fits(v: Any) -> bool:
+        return isinstance(v, allowed) and (kind == "boolean" or not isinstance(v, bool))
+    _check(all(fits(spec[k]) for k in ("minimum", "maximum") if k in spec), f"settings.{name}: minimum and maximum must be {kind}s")
+    if "enum" in spec:
+        _check(isinstance(spec["enum"], list) and spec["enum"] and all(fits(v) for v in spec["enum"]), f"settings.{name}: enum must be a non-empty list of {kind}s")
+    if "default" in spec:
+        v = spec["default"]
+        _check(fits(v), f"settings.{name}: default must be a {kind}")
+        _check("enum" not in spec or v in spec["enum"], f"settings.{name}: default must be one of enum")
+        _check(spec.get("minimum", v) <= v <= spec.get("maximum", v), f"settings.{name}: default is outside minimum and maximum")
 
 
 def _data(raw: dict[str, Any]) -> dict[str, Any]:

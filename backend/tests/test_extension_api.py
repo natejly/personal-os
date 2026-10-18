@@ -91,6 +91,13 @@ def test_settings_are_read_by_declared_name_and_a_secret_field_comes_from_the_st
     assert settings.get("token") is None
 
 
+def test_an_unset_setting_reads_as_its_declared_default(work: Path) -> None:
+    rig = Rig(work, {"settings": {"limit": {"type": "integer", "default": 7}}})
+    assert rig.scope.settings.get("limit") == 7
+    rig.values["ext.demo.limit"] = 3
+    assert rig.scope.settings.get("limit") == 3
+
+
 def test_on_change_hears_only_its_own_settings_and_not_while_disabled(work: Path) -> None:
     rig = Rig(work, {"settings": {"limit": {"type": "integer"}}})
     heard: list[str] = []

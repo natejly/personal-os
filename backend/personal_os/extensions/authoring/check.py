@@ -13,7 +13,7 @@ from ...mcp_servers import RESERVED_TOOL_NAMES
 from ...runtime import loop_fence
 from ...skillbuild import _authority
 from ..catalog import HOOKS
-from ..manifest import Manifest, ManifestError, load_manifest
+from ..manifest import Manifest, ManifestError, load_manifest, stale_api_warning
 
 BUILTINS = Path(__file__).parents[1]  # the built-in extensions, one folder each
 CORE_SERVICES = frozenset({"mcp", "google"})  # lent by the app through ExtensionContext.services
@@ -40,13 +40,14 @@ def check(root: Path, previous: Path | None = None) -> list[Finding]:
     except ManifestError as e:
         return [Finding("error", "manifest", str(e))]
     others = list(_builtin_manifests(root))
-    out = [*_collisions(root, manifest, others), *_requires(manifest, others)]
+    out = [Finding("warn", "api-version", warning)] if (warning := stale_api_warning(manifest)) else []
+    out += [*_collisions(root, manifest, others), *_requires(manifest, others)]
     if manifest.kind == "profile":
         return out  # the manifest loader already refused any code, hooks or tools a profile carries
     out += _tools(root, manifest)
     out += _code(root, manifest)
     out += _data_tables(root, manifest)
-    out += _authority_lint(root, manifest)
+    out += _authority_lint(root)
     if previous and not previous.is_file():
         return [*out, Finding("error", "permission-diff", f"{previous} is not a file to compare permissions against")]
     return [*out, *_permission_diff(manifest, previous or root / "extension.lock.json")]
@@ -261,18 +262,9 @@ def _activate(tree: ast.Module) -> list[Finding]:
 
 
 # ---- text the model will read ----
-def _authority_lint(root: Path, manifest: Manifest) -> list[Finding]:
-    """Static prompt text must not claim authority (the check a skill's procedure gets): descriptions, tool schemas and
-    the literal text handed to Contribution(...) or ToolSpec(...)."""
-    texts = {"extension.json": [manifest.name, manifest.description]}
-    for tool in manifest.contributes.get("tools", ()):
-        texts[f"tool {tool['name']}"] = [tool.get("description", "")]
-        path = root / tool["schema"] if isinstance(tool.get("schema"), str) else None
-        if path and path.is_file():
-            try:
-                texts[f"tool {tool['name']}"] += _descriptions(json.loads(path.read_text("utf-8")))
-            except ValueError:
-                pass  # reported by the tool-schema lint
+def _authority_lint(root: Path) -> list[Finding]:
+    """The literal text handed to Contribution(...) or ToolSpec(...) must not claim authority; the manifest's own text is linted when it loads."""
+    texts: dict[str, list[str]] = {}
     for path in _python_files(root):
         try:
             tree = ast.parse(path.read_text("utf-8"))
@@ -283,14 +275,6 @@ def _authority_lint(root: Path, manifest: Manifest) -> list[Finding]:
             texts.setdefault(f"{path.relative_to(root)}", []).extend(literals)
     return [Finding("error", "authority", f"{where}: text that claims a permission or tells the assistant not to ask ({f['excerpt']})")
             for where, parts in texts.items() for text in parts if text for f in _authority(text, where)]
-
-
-def _descriptions(schema: Any) -> list[str]:
-    if isinstance(schema, dict):
-        return [v for k, v in schema.items() if k == "description" and isinstance(v, str)] + [d for v in schema.values() for d in _descriptions(v)]
-    if isinstance(schema, list):
-        return [d for v in schema for d in _descriptions(v)]
-    return []
 
 
 # ---- permissions ----

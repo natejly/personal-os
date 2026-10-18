@@ -273,7 +273,7 @@ def test_a_clean_session_may_hold_prompt_inject() -> None:
     draft(permissions=("prompt:inject",))
     propose()
     accept()
-    assert installed()["tainted"] is False and installed()["refused"] == []
+    assert installed()["tainted"] is False and installed()["refused"] == [] and installed()["tier"] == "user"
     assert enable().status_code == 200
 
 

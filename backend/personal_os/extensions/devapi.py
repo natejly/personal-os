@@ -28,7 +28,8 @@ def _percentile(sorted_values: list[float], q: float) -> float:
 def _hook(sub: Subscription) -> dict[str, Any]:
     ms = sorted(s * 1000 for s in sub.latencies)
     return {"hook": sub.hook, "calls": sub.calls, "p50Ms": _percentile(ms, 0.5) if ms else None,
-            "p95Ms": _percentile(ms, 0.95) if ms else None, "muted": sub.muted, "errors": list(sub.errors)}
+            "p95Ms": _percentile(ms, 0.95) if ms else None, "muted": sub.muted, "errors": list(sub.errors),
+            "payloads": list(sub.payloads)}
 
 
 def describe(host: ExtensionHost, scope: ExtensionScope) -> dict[str, Any]:

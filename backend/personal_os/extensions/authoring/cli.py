@@ -45,12 +45,16 @@ def push(client: httpx.Client, root: Path) -> str:
     return f"{ext_id}: {r.json().get('detail', r.text)}"
 
 
-def _client(args: argparse.Namespace) -> httpx.Client:
+def _token(args: argparse.Namespace) -> str | None:
     token = args.token or os.environ.get("PERSONAL_OS_AUTH_TOKEN")
     data_dir = args.data_dir or os.environ.get("PERSONAL_OS_DATA_DIR")
     if not token and data_dir and (path := Path(data_dir) / ".auth_token").is_file():
         token = path.read_text("utf-8").strip()
-    if not token:
+    return token
+
+
+def _client(args: argparse.Namespace) -> httpx.Client:
+    if not (token := _token(args)):
         raise SystemExit("no auth token: pass --token, or --data-dir of the dev backend (PERSONAL_OS_DATA_DIR)")
     return httpx.Client(base_url=args.url, headers={"x-personal-os-token": token}, timeout=30)
 
@@ -70,6 +74,9 @@ def cmd_new(args: argparse.Namespace) -> int:
         print(f"error: {e}")
         return 1
     print(f"created {root}")
+    if _token(args):  # a dev backend to register it with is known
+        with _client(args) as client:
+            print(push(client, root))
     return 0
 
 
@@ -169,6 +176,12 @@ def cmd_config_dump(args: argparse.Namespace) -> int:
     return 0
 
 
+def _backend_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--url", default=os.environ.get("PERSONAL_OS_BACKEND_URL", "http://127.0.0.1:8765"))
+    p.add_argument("--token")
+    p.add_argument("--data-dir", help="the dev backend's data directory, where its auth token is")
+
+
 def parser() -> argparse.ArgumentParser:
     top = argparse.ArgumentParser(prog="grain")
     groups = top.add_subparsers(dest="group", required=True)
@@ -184,6 +197,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("id")
     p.add_argument("--profile", action="store_true", help="a profile: theme and defaults, no code")
     p.add_argument("--dir", default=".", help="where to create the folder")
+    _backend_args(p)
     p.set_defaults(run=cmd_new)
     p = ext.add_parser("check", help="validate an extension folder, or the hook catalog; exits 1 on an error")
     p.add_argument("folder", nargs="?")
@@ -195,9 +209,7 @@ def parser() -> argparse.ArgumentParser:
     p.set_defaults(run=cmd_gen_hooks)
     p = ext.add_parser("dev", help="reload the folder in a running dev backend on every edit")
     p.add_argument("folder")
-    p.add_argument("--url", default=os.environ.get("PERSONAL_OS_BACKEND_URL", "http://127.0.0.1:8765"))
-    p.add_argument("--token")
-    p.add_argument("--data-dir", help="the dev backend's data directory, where its auth token is")
+    _backend_args(p)
     p.set_defaults(run=cmd_dev)
     p = ext.add_parser("test", help="run the extension's tests")
     p.add_argument("folder")

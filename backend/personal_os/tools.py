@@ -22,7 +22,7 @@ import time
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Collection, Iterable
 
 import httpx
 
@@ -992,9 +992,14 @@ class Toolbox:
         return {k: "ask" if self._norm(v) == "on" and (s := self.specs.get(k)) and self.ask_locked(s) else v
                 for k, v in tools.items()}
 
-    def schemas(self, modes: dict[str, str]) -> list[dict[str, Any]]:
+    def schemas(self, modes: dict[str, str], retained: Collection[str] = ()) -> list[dict[str, Any]]:
+        """The tools to offer. `retained` are extension tools the running turn was already offered: they stay in the list
+        after their extension is turned off, until the turn ends and the next turn passes none."""
         gok, hid = self._google_ok(), self.settings().get("hiddenViews") or []
-        return [s.schema() for n, s in self.specs.items() if modes.get(n) in ("on", "ask") and self.available(n, gok, hid)]
+
+        def offered(name: str) -> bool:
+            return self.available(name, gok, [v for v in hid if v != self.tool_owner[name]] if name in retained and name in self.tool_owner else hid)
+        return [s.schema() for n, s in self.specs.items() if modes.get(n) in ("on", "ask") and offered(n)]
 
     def list(self) -> list[dict[str, Any]]:
         gok, hid = self._google_ok(), self.settings().get("hiddenViews") or []

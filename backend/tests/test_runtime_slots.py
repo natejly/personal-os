@@ -21,7 +21,7 @@ from grain_sdk.testing import FakeModelClient, FakeRouter, FakeSandbox, FakeTool
 from personal_os.db import Database  # noqa: E402
 from personal_os.extensions.host import ExtensionContext, ExtensionHost  # noqa: E402
 from personal_os.extensions.manifest import Manifest, ManifestError  # noqa: E402
-from personal_os.runtime.slots import SLOTS, Scopes  # noqa: E402
+from personal_os.runtime.slots import SLOTS, Refused, Scopes  # noqa: E402
 
 RUNNER = '''def activate(api):\n    pass\n'''
 
@@ -234,6 +234,13 @@ def test_a_disabled_remote_client_falls_back_to_the_default(tmp_path: Path) -> N
     hidden.append("acme")
     res = host.runtime.resolve("model.client", sel)
     assert not res.refused and res.provider == "core/openai-compatible" and res.fell_back_from == "acme/c"
+
+
+def test_a_gone_selection_is_refused_even_when_no_extension_provider_remains(host: ExtensionHost) -> None:
+    host.runtime.scopes = lambda: Scopes(global_={"model.client": "ext/missing"})
+    assert not host.runtime.has_alternatives("model.client")
+    with pytest.raises(Refused):
+        host.runtime.alternative("model.client")
 
 
 def test_the_alternative_is_none_without_providers_and_for_the_default(host: ExtensionHost, tmp_path: Path) -> None:

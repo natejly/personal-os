@@ -28,7 +28,7 @@ export default function ExtensionsDev(): JSX.Element {
         <details key={x.id} className="adv-group">
           <summary>{x.name} <small>{x.id} {x.version}{x.enabled ? '' : ' (off)'}{mutedHooks(x).length ? ' (muted handlers)' : ''}</small></summary>
           <div className="test-row">
-            <button type="button" className="ghost-btn" onClick={() => act(() => (x.enabled ? api.devExtensions.disable(x.id) : api.devExtensions.enable(x.id)))}>{x.enabled ? 'Disable' : 'Enable'}</button>
+            {x.toggleable && <button type="button" className="ghost-btn" onClick={() => act(() => (x.enabled ? api.devExtensions.disable(x.id) : api.devExtensions.enable(x.id)))}>{x.enabled ? 'Disable' : 'Enable'}</button>}
             {x.reloadable && <button type="button" className="ghost-btn" disabled={!listing.live} onClick={() => act(() => api.devExtensions.reload(x.id))}>Reload</button>}
           </div>
           <p className="set-help">{[...contributionSummary(x), ...x.permissions].join(' · ') || 'Registers nothing.'}</p>

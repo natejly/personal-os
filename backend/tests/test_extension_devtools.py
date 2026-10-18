@@ -131,6 +131,26 @@ def test_a_folder_cannot_take_over_a_tool_the_app_already_has(ext: Path) -> None
     r = load(ext)
     assert r.status_code == 400 and core in r.json()["detail"]
     assert "sample" not in appmod.host.extensions and appmod.toolbox.specs[core] is spec
+    assert "sample" not in appmod.settings()["hiddenViews"]
+
+
+def test_a_profile_folder_loads_and_is_not_toggled_here(tmp_path: Path) -> None:
+    root = scaffold("myprof", tmp_path, profile=True)
+    try:
+        got = load(root)
+        assert got.status_code == 200 and got.json()["toggleable"] is False
+        assert "myprof" in {p["id"] for p in client.get("/profiles").json()}
+        assert client.post("/dev/extensions/myprof/disable").status_code == 400
+        assert "myprof" not in appmod.settings()["hiddenViews"]
+    finally:
+        import asyncio
+        asyncio.run(appmod.host.unload("myprof"))
+
+
+def test_an_always_on_built_in_is_not_toggled_here() -> None:
+    assert next(e for e in listing()["extensions"] if e["id"] == "spaces")["toggleable"] is False
+    before = appmod.settings()["hiddenViews"]
+    assert client.post("/dev/extensions/spaces/disable").status_code == 400 and appmod.settings()["hiddenViews"] == before
 
 
 def test_a_loaded_folder_starts_disabled_whatever_its_manifest_says(ext: Path) -> None:
@@ -155,6 +175,7 @@ def test_a_broken_folder_is_reported_and_a_fixed_one_loads(ext: Path) -> None:
     r = load(ext)
     assert r.status_code == 400 and "ZeroDivisionError" in r.json()["detail"]
     assert listing()["failed"] == [{"path": str(ext.resolve()), "error": "ZeroDivisionError: division by zero"}]
+    assert "sample" not in appmod.settings()["hiddenViews"]
     edit(ext, "extension.py", lambda t: t.replace("\n    1 / 0\n", "\n"))
     assert load(ext).status_code == 200 and listing()["failed"] == []
 

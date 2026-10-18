@@ -211,8 +211,9 @@ class Terminals:
     # ---- rows and ownership ----
     @staticmethod
     def owner_key(ctx: dict[str, Any]) -> str:
-        """Who a terminal belongs to: the chat (or desk, or job's chat) and the agent in it."""
-        who = ctx.get("workflow_run_id") or ctx.get("agent_run_id") or ctx.get("agent_id") or ""
+        """Who a terminal belongs to: the chat (or desk, or job's chat) and the agent in it. A chat's own replies are one owner,
+        though each has a run id of its own: only a subagent's run id (depth above 0) tells it apart."""
+        who = ctx.get("workflow_run_id") or (ctx.get("agent_run_id") if ctx.get("depth") else None) or ctx.get("agent_id") or ""
         return f"{ctx.get('conversation_id') or ctx.get('desk_id') or ''}:{who}"
 
     def row(self, terminal_id: str) -> dict[str, Any] | None:

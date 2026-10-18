@@ -101,20 +101,20 @@ def test_tools_are_offered_only_with_a_connected_desktop_app_and_a_sandbox(tmp_p
 # ---- ownership ----
 @pytest.mark.parametrize("other", [
     {"conversation_id": "c-other"},                       # another chat
-    {"conversation_id": "c-chat", "agent_run_id": "w1"},  # a worker or subagent of this chat
+    {"conversation_id": "c-chat", "agent_run_id": "w1", "depth": 1},  # a subagent of this chat
     {"conversation_id": "c-chat", "workflow_run_id": "wf1"},
     {"conversation_id": "c-chat", "agent_id": "persona"},
 ])
 def test_another_owner_gets_the_not_found_error_for_every_tool(tmp_path, monkeypatch, other):
     tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
-    tid = opened(tb, ctx_of(cfg), str(home / "work"))
+    tid = opened(tb, ctx_of(cfg, agent_run_id="run-1"), str(home / "work"))
     stranger = ctx_of(cfg, **other)
     missing = call(tb, "terminal_read", ctx_of(cfg), terminal_id="tm_0000000000000000")["error"]
     assert missing.startswith("No such terminal")
     for name, args in (("terminal_read", {}), ("terminal_send", {"text": "ls"}), ("terminal_wait_for", {"timeout_s": 1, "literal": "x"}), ("terminal_close", {})):
         assert call(tb, name, stranger, terminal_id=tid, **args)["error"] == missing, name
     assert tid in hub.terms and not any(c["type"] in ("write", "close") for c in hub.calls)  # nothing reached the terminal
-    assert "error" not in call(tb, "terminal_read", ctx_of(cfg, message_id="a-later-reply"), terminal_id=tid)  # the same chat's later reply keeps it
+    assert "error" not in call(tb, "terminal_read", ctx_of(cfg, message_id="a-later-reply", agent_run_id="run-2"), terminal_id=tid)  # the same chat's later reply keeps it, whatever its run id
 
 
 def test_limits_per_owner_and_overall(tmp_path, monkeypatch):
@@ -463,7 +463,7 @@ def test_closing_frees_the_scratch_folder_and_the_slot(tmp_path, monkeypatch):
 def test_terminals_close_with_their_chat_their_child_their_desk_run_and_their_idle_time(tmp_path, monkeypatch):
     tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
     chat = opened(tb, ctx_of(cfg, conversation_id="c-del"), str(home / "work"))
-    child = opened(tb, ctx_of(cfg, agent_run_id="sa_child"), str(home / "work"))
+    child = opened(tb, ctx_of(cfg, agent_run_id="sa_child", depth=1), str(home / "work"))
     desk = opened(tb, ctx_of(cfg, conversation_id="c-desk", run_id="run-desk"), str(home / "work"))
     kept = opened(tb, ctx_of(cfg, conversation_id="c-kept", run_id="run-chat"), str(home / "work"))
     idle = opened(tb, ctx_of(cfg, conversation_id="c-idle"), str(home / "work"))

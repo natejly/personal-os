@@ -32,7 +32,7 @@ def _hook(sub: Subscription) -> dict[str, Any]:
 
 def describe(host: ExtensionHost, scope: ExtensionScope) -> dict[str, Any]:
     m = scope.manifest
-    return {"id": m.id, "name": m.name, "version": m.version, "enabled": scope.enabled(), "reloadable": scope.dev,
+    return {"id": m.id, "name": m.name, "version": m.version, "enabled": scope.enabled(), "toggleable": scope.toggleable, "reloadable": scope.dev,
             "folder": str(scope.root) if scope.dev else None, "contributes": m.contributes, "tools": list(scope.tools),
             "permissions": list(m.permissions), "hooks": [_hook(s) for s in host.bus.subscriptions(m.id)]}
 
@@ -68,6 +68,8 @@ def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Too
 
     def set_hidden(ext_id: str, hidden: bool) -> dict[str, Any]:
         scope = known(ext_id)
+        if not scope.toggleable:
+            raise HTTPException(400, f"extension {ext_id!r} is not turned on or off here")
         set_hidden_view(host, ctx, ext_id, hidden)
         return describe(host, scope)
 
@@ -98,7 +100,11 @@ def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Too
             scope = await host.load_dev(Path(body.path).expanduser().resolve(), ctx)
         except Exception as e:  # noqa: BLE001 - the reason goes to the panel
             raise HTTPException(400, f"{type(e).__name__}: {e}") from e
-        return await adopted(scope)
+        try:
+            return await adopted(scope)
+        except HTTPException:  # unloaded for clashing with the app's tools: not left listed as hidden
+            set_hidden_view(host, ctx, scope.manifest.id, False)
+            raise
 
     @r.post("/{ext_id}/reload")
     async def reload(ext_id: str) -> dict[str, Any]:

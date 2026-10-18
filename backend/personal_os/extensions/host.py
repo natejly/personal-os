@@ -187,6 +187,12 @@ class ExtensionScope:
             return self.manifest.enabled is not False
         return self.manifest.id not in self._ctx.hidden_views()
 
+    @property
+    def toggleable(self) -> bool:
+        """Does `enabled` follow this extension's id in `hiddenViews`? Not for a module (its view decides), a profile (it is applied
+        or not) or a built-in that is always on."""
+        return self.module is None and self._ctx is not None and self.manifest.kind == "extension" and (self.manifest.enabled != "always" or self.dev)
+
     def migration_steps(self) -> list[tuple[int, str, migrations.Step]]:
         folder = self.manifest.data.get("migrations")
         return migrations.sql_steps(self.root / folder) if folder and self.root else []
@@ -424,6 +430,8 @@ class ExtensionHost:
         if builtin_only := sorted(h for h in manifest.hooks if HOOKS[h].subscribers == "builtin"):
             raise ValueError(f"only a built-in extension may subscribe to {', '.join(builtin_only)}")
         scope = self._add(manifest, root=root, ctx=ctx, dev=True)
+        if manifest.kind == "profile":
+            return scope  # a profile is data: nothing to import or activate
         try:
             self._activate(scope, _import_extension(root, scope))
         except BaseException:
@@ -438,9 +446,10 @@ class ExtensionHost:
         if loaded := next((s for s in self.extensions.values() if s.root == root), None):
             raise ValueError(f"{root} is already loaded as {loaded.manifest.id!r}")
         scope: ExtensionScope | None = None
+        hide = False
         try:
             scope = self.load_folder(root, ctx)
-            if first_load and scope.manifest.id not in ctx.hidden_views():
+            if hide := first_load and scope.toggleable and scope.manifest.id not in ctx.hidden_views():
                 ctx.set_settings({"hiddenViews": [*ctx.hidden_views(), scope.manifest.id]})
                 self.refresh_enabled()
             self.migrate(ctx.db)
@@ -449,6 +458,8 @@ class ExtensionHost:
             self.failed[root] = f"{type(e).__name__}: {e}"
             if scope:
                 await self.unload(scope.manifest.id)
+                if hide:  # a load that failed leaves nothing, not even the id in hiddenViews
+                    ctx.set_settings({"hiddenViews": [v for v in ctx.hidden_views() if v != scope.manifest.id]})
             raise
         self.failed.pop(root, None)
         return scope

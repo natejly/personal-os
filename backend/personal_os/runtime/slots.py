@@ -190,10 +190,12 @@ class Runtime:
 
     def alternative(self, slot: str) -> Provider | None:
         """The provider of a single slot the current chat has selected when it is not the default, else None. Raises Refused
-        when the selection is gone and the default is less safe."""
-        if not self.has_alternatives(slot):
-            return None
-        res = self.resolve(slot)
+        when the selection is gone and the default is less safe, which is also the case once the last extension that provided it
+        has been removed."""
+        scopes = self.scopes()
+        if not self.has_alternatives(slot) and not any(layer.get(slot) for _, layer in scopes.layers()):
+            return None  # nothing but the core's providers, and nothing selected
+        res = self.resolve(slot, scopes)
         if res.refused:
             raise Refused(res.reason)
         return None if res.provider == SLOTS[slot].default_id else self._providers[slot][res.provider]

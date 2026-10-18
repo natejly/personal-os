@@ -765,6 +765,8 @@ export interface ExtensionInfo {
   name: string
   version: string
   enabled: boolean
+  /** The dev panel can turn it on or off (a profile, a module and an always-on built-in cannot be). */
+  toggleable: boolean
   /** Loaded from a folder, so it can be reloaded. */
   reloadable: boolean
   folder: string | null

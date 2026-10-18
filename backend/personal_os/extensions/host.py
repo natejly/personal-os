@@ -74,6 +74,11 @@ class ExtensionContext:
     widget_kinds: Callable[[], tuple[str, ...]] = lambda: ()  # the canvas widget kinds the loaded extensions declare
     owe_wake: Callable[[str, str, dict[str, Any]], None] = lambda *_: None  # (conversation id, text, wake record): the chat is owed a hidden turn
     preset_keys: Callable[[str], dict[str, Any]] | None = None  # a permission preset id -> the permission keys it sets (Presets.keys), for defaults.permissionPreset
+    chat_settings: Callable[[str | None], dict[str, Any]] | None = None  # (conversation id) -> the settings with that chat's and its project's permission overrides; the global ones for None
+
+    def __post_init__(self) -> None:
+        if self.chat_settings is None:
+            self.chat_settings = lambda _conversation_id: self.settings()
 
 
 _generation = itertools.count(1)

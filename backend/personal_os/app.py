@@ -410,6 +410,13 @@ def settings() -> dict[str, Any]:
     return permissions.overlay(out, *scope) if (scope := permissions.SCOPE.get()) else out
 
 
+def chat_settings(conv_id: str | None) -> dict[str, Any]:
+    """The settings with the permission overrides of that chat and its project, for a task that is not inside the chat's turn."""
+    conv = convos.get(conv_id, with_messages=False) if conv_id else None
+    project = projects.get(conv["project_id"]) if conv and conv["project_id"] else None
+    return permissions.overlay(settings(), project["permissions"] if project else None, ((conv or {}).get("settings") or {}).get("permissions"))
+
+
 ensure_embedding_model(local=False)  # a key already saved before any embedding model was
 jobs = Jobs(db, host.triggers)
 proposals = Proposals(db)
@@ -431,7 +438,8 @@ ext_drafts = Drafts(db.data_dir)
 _ext_ctx = ExtensionContext(db=db, hidden_views=lambda: settings().get("hiddenViews") or (), services={"mcp": lambda: mcp, "extundo": lambda: extundo, "memories": lambda: memories,
                                       "documents": lambda: documents, "uploads": lambda: _store_upload},
                             settings=settings, set_settings=db.set_settings, sid=lambda p: sid(p), wsid=lambda p: wsid(p), publish=_publish_event,
-                            widget_kinds=lambda: (*host.widget_kinds(), *ext_drafts.widget_kinds()), owe_wake=lambda c, t, w: owe_wake(c, t, w))
+                            widget_kinds=lambda: (*host.widget_kinds(), *ext_drafts.widget_kinds()), owe_wake=lambda c, t, w: owe_wake(c, t, w),
+                            chat_settings=chat_settings)
 host.load_builtin("google", _ext_ctx)
 google: Google = _ext_ctx.services["google"]()
 app.include_router(setup_router(settings, db.set_settings, lambda: google.status()["connected"]))
@@ -5924,13 +5932,10 @@ async def accept_proposal(pid: str, body: ProposalIn | None = None) -> dict[str,
         raise HTTPException(409, "That proposal was just decided somewhere else")
     conv = convos.get(claimed["conversation_id"], with_messages=False) if claimed["conversation_id"] else None
     ctx: dict[str, Any] = {"project_id": (conv or {}).get("project_id"), "conversation_id": claimed["conversation_id"],
-                           "tainted": False, "taint_sources": [], "allowed_urls": set(), "settings": settings(),
+                           "tainted": False, "taint_sources": [], "allowed_urls": set(),
+                           # The chat's permission scope is not set in a route: judge the call as that chat would, then offer it to the extension gate.
+                           "settings": chat_settings(claimed["conversation_id"]),
                            "proposal_only": False, "message_id": claimed["message_id"]}
-
-    # The chat's permission scope is not set in a route: judge the call as that chat would, then offer it to the extension gate.
-    conv_settings = (conv or {}).get("settings") or {}
-    project = projects.get(conv["project_id"]) if conv and conv["project_id"] else None
-    ctx["settings"] = permissions.overlay(ctx["settings"], project["permissions"] if project else None, conv_settings.get("permissions"))
     spec = toolbox.specs.get(claimed["tool"])
     danger = spec.danger if spec else MCP_DANGER
     why, _ = await guards.settle(toolbox, ctx, claimed["tool"], claimed["args"], danger=danger, mode="on")

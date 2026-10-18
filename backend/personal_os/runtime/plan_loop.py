@@ -44,7 +44,7 @@ class _Work:
     """What the turn has done so far, for the verification and the final answer."""
     steps: list[dict[str, str]] = field(default_factory=list)
     status: list[str] = field(default_factory=list)
-    notes: list[list[str]] = field(default_factory=list)  # per step: the previews of what its tool calls returned
+    notes: list[list[str]] = field(default_factory=list)  # per step: which tools it called and whether each worked; never their output, which is data and would ride in a system message
     said: list[str] = field(default_factory=list)  # per step: what the model said when it finished the step
     gaps: list[str] = field(default_factory=list)  # calls that were refused or failed
 
@@ -170,9 +170,10 @@ class PlanExecuteVerify:
             names = {c["id"]: c["name"] for c in out.tool_calls}
             for message in await h.tools.run(out.tool_calls):
                 content, name = str(message.get("content") or ""), names.get(message.get("tool_call_id"), "a tool")
-                work.notes[index].append(f"{name}: {content[:PREVIEW_CHARS]}")
-                if error := _error_of(content):
-                    work.gaps.append(f"{name} failed: {error[:PREVIEW_CHARS]}")
+                failed = bool(_error_of(content))
+                work.notes[index].append(f"{name}: {'failed' if failed else 'ran'}")
+                if failed:
+                    work.gaps.append(f"{name} failed")
             await h.limits.take_steers()
         if not repair:
             work.status[index] = "done"

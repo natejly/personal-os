@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from coding_ext import call, coding_box  # noqa: E402
 from personal_os.extensions.coding import recipes as rcp  # noqa: E402
+from personal_os.extensions.hooks import Ask, Deny  # noqa: E402
 from personal_os.extensions.coding.recipe_job import RecipeTrigger  # noqa: E402
 from personal_os.extensions.coding.sessions import CodingError  # noqa: E402
 from personal_os.tools import ToolSpec  # noqa: E402
@@ -49,6 +50,7 @@ class Rig:
         real = self.tb.specs["shell_run"]
         self.tb.specs["shell_run"] = ToolSpec("shell_run", "x", {"type": "object", "properties": {}}, self._shell, "shell", "executes")
         self.tb.specs["shell_run"].floor = real.floor  # the destructive-command floor is the real one
+        self.coding.api.app.chat_settings = lambda _conversation_id: self.cfg  # type: ignore[method-assign]
         self.coding.api.app.owe_wake = lambda *a: self.events.append(("wake", a))  # type: ignore[method-assign]
         self.host.bus.fire = lambda hook, payload=None: self.events.append((hook, payload))  # type: ignore[method-assign]
         self.posts: list[dict[str, Any]] = []
@@ -299,6 +301,20 @@ def test_a_verify_that_cannot_run_ends_verify_blocked_and_never_runs_unjudged(ri
 
 async def _refusing(ctx: dict[str, Any], **args: Any) -> Any:
     return {"error": "no sandbox here"}
+
+
+def test_the_chats_own_deny_rule_and_an_extension_deny_or_ask_stop_the_verify(rig):
+    rig.recipes.save(rig.body(), "user")
+    scoped = {**rig.cfg, "permissionRules": {"deny": ["Bash(npm test*)"], "ask": [], "allow": []}}
+    rig.coding.api.app.chat_settings = lambda cid: scoped if cid == "c1" else rig.cfg  # type: ignore[method-assign]
+    run = finish(rig, rig.run(), 0)
+    assert run["status"] == "verify_blocked" and "permission rule" in run["verify_tail"] and rig.verify_runs == []
+    rig.coding.api.app.chat_settings = lambda _c: rig.cfg  # type: ignore[method-assign]
+    for verdict, said in ((Deny("no npm"), "blocked by an extension (no npm)"), (Ask("look first"), "an extension asks")):
+        sub = rig.host.bus.subscribe("tool.permission", lambda ev, v=verdict: v, owner="t", order=0)
+        run = finish(rig, rig.run(), 0)
+        sub.dispose()
+        assert run["status"] == "verify_blocked" and said in run["verify_tail"] and rig.verify_runs == []
 
 
 def test_a_stopped_or_failed_or_waiting_session_ends_the_run_without_verifying(rig):

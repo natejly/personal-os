@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ... import permrules, shell
+from ... import guards, permrules, shell
 from ...db import new_id
 from ...dispatch import dispatch_tool
 from ...workers import fence_report
@@ -188,10 +188,10 @@ def render(body: dict[str, Any], raw: Any) -> tuple[str, dict[str, Any]]:
     return PLACEHOLDER.sub(lambda m: show(used[m.group(1)]) if m.group(1) in used else "", body["prompt"]), used
 
 
-def blocked(tb: Any, ctx: dict[str, Any], args: dict[str, Any]) -> str | None:
+async def blocked(tb: Any, ctx: dict[str, Any], args: dict[str, Any]) -> str | None:
     """Why the verify command cannot be run without asking, or None. Starting the run is the user's approval of this exact
     command, which stands in for the shell tool's own card; what no approval buys still stops it: a deny or ask rule, the
-    hardline list, and a command that cannot be taken back."""
+    hardline list, a command that cannot be taken back, the core guards and an extension's `tool.permission` Deny or Ask."""
     roots, cwd = shell.perm_where(tb, ctx)
     perm = permrules.resolve("shell_run", args, "on", False, rules=ctx["settings"].get("permissionRules"), roots=roots,
                              conv=ctx["conversation_id"], cwd=cwd)
@@ -201,7 +201,10 @@ def blocked(tb: Any, ctx: dict[str, Any], args: dict[str, Any]) -> str | None:
         return "your permission rules ask before the verify command, and a recipe run has nobody to ask"
     if tb.floor_action("shell_run", args, ctx):
         return "the verify command cannot be taken back, which always asks, and a recipe run has nobody to ask"
-    return None
+    why, asks = await guards.settle(tb, ctx, "shell_run", args, danger=tb.specs["shell_run"].danger, mode="on", roots=roots, cwd=cwd)
+    if why:
+        return f"the verify command was refused: {why}"
+    return "an extension asks before the verify command, and a recipe run has nobody to ask" if asks else None
 
 
 WAKE_HEADER = ("[A coding recipe run has finished. This message comes from the system, not from the user. Tell the user the outcome in "
@@ -407,7 +410,7 @@ class Recipes:
 
     def _ctx(self, run: dict[str, Any]) -> dict[str, Any]:
         return {"conversation_id": run["conversation_id"] or f"recipe:{run['id']}", "run_id": f"recipe:{run['id']}",
-                "settings": self.coding.tb.settings(), "tainted": False, "taint_sources": []}
+                "settings": self.coding.api.app.chat_settings(run["conversation_id"]), "tainted": False, "taint_sources": []}
 
     async def advance(self, run_id: str) -> None:
         """One step of one run. Several steps never overlap: a run being verified is left alone until that finishes."""
@@ -464,7 +467,7 @@ class Recipes:
         verify = run["resolved"]["verify"]
         ctx = self._ctx(run)
         args = {"command": verify["command"], "cwd": verify["cwd"] or run["resolved"]["worktree"], "timeout_s": verify["timeout_s"]}
-        if why := blocked(self.coding.tb, ctx, args):
+        if why := await blocked(self.coding.tb, ctx, args):
             self._set(run["id"], status="verify_blocked", ended_at=time.time(), verify_tail=why)
             return
         result = await dispatch_tool(self.coding.tb, ctx, "shell_run", args, call_id=f"recipe-{run['id']}-{run['attempt']}")

@@ -28,3 +28,10 @@ export function contributionSummary(ext: Pick<ExtensionInfo, 'contributes' | 'to
 export function mutedHooks(ext: Pick<ExtensionInfo, 'hooks'>): HookId[] {
   return ext.hooks.filter((h) => h.muted).map((h) => h.hook)
 }
+
+/** The permission that gives an extension raw CSS and DOM access. */
+export const UNSUPPORTED_CSS = 'ui:unsupported-css'
+
+/** The line an extension card shows for an extension with raw CSS or DOM access, or null. */
+export const unsupportedWarning = (permissions: readonly string[]): string | null =>
+  permissions.includes(UNSUPPORTED_CSS) ? 'Uses raw CSS and DOM access, which is unsupported and can break with any update.' : null

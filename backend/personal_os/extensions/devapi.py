@@ -33,7 +33,7 @@ def _hook(sub: Subscription) -> dict[str, Any]:
 
 def describe(host: ExtensionHost, scope: ExtensionScope) -> dict[str, Any]:
     m = scope.manifest
-    return {"id": m.id, "name": m.name, "version": m.version, "enabled": scope.enabled(), "toggleable": scope.toggleable, "reloadable": scope.dev,
+    return {"id": m.id, "name": m.name, "version": m.version, "tier": scope.tier, "enabled": scope.enabled(), "toggleable": scope.toggleable, "reloadable": scope.dev,
             "folder": str(scope.root) if scope.dev else None, "contributes": m.contributes, "tools": list(scope.tools),
             "permissions": list(m.permissions), "hooks": [_hook(s) for s in host.bus.subscriptions(m.id)],
             "jobs": [{"name": j.name, "everySeconds": j.every.total_seconds(), "runs": j.runs, "lastError": j.last_error} for j in scope.jobs]}

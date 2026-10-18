@@ -62,6 +62,11 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(m.hooks["context.contribute"]["timeoutMs"], 300)
         self.assertEqual((m.requires_services, m.provides_services), (("mcp",), ("demo",)))
 
+    def test_activation_events_name_declared_contributions(self) -> None:
+        m = Manifest.from_dict(manifest(activation=["onView:lazy", "onCommand:ping"],
+                                        contributes={"views": [{"id": "lazy"}], "commands": [{"name": "ping"}]}))
+        self.assertEqual(m.activation, ("onView:lazy", "onCommand:ping"))
+
     def test_booleans_are_not_integers_or_enabled_flags(self) -> None:
         for bad in (manifest(hooks={"app.start": {"priority": True}}), manifest(hooks={"app.start": {"timeoutMs": True}}),
                     manifest(enabled=1), manifest(enabled=0)):
@@ -79,6 +84,13 @@ class ManifestTests(unittest.TestCase):
             "bad kind": manifest(kind="plugin"),
             "bad enabled": manifest(enabled="yes"),
             "bad activation": manifest(activation=["onTuesday"]),
+            "no activation event": manifest(activation=[]),
+            "no host event for a schedule": manifest(activation=["onSchedule"]),
+            "no host event for a channel": manifest(activation=["onChannel:telegram"]),
+            "activation on an undeclared view": manifest(activation=["onView:lazy"]),
+            "activation on an undeclared command": manifest(activation=["onCommand:ping"]),
+            "lazy with a tool": manifest(activation=["onView:lazy"], contributes={"views": [{"id": "lazy"}], "tools": [{"name": "demo_x"}]}),
+            "lazy providing a service": manifest(activation=["onView:lazy"], contributes={"views": [{"id": "lazy"}]}, provides={"services": ["demo"]}),
             "unknown contributes key": manifest(contributes={"toolz": []}),
             "tool without a name": manifest(contributes={"tools": [{}]}),
             "tool after not a name": manifest(contributes={"tools": [{"name": "demo_x", "after": 3}]}),

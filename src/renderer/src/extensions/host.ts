@@ -6,12 +6,14 @@
  */
 import type { FC, RefObject } from 'react'
 import type { FullDesk, Message, Settings, WidgetKind } from '@shared/types'
+import type { MenuGroup } from '@shared/extensionMenu'
 import { sameChord, shortcutForKeys } from '@shared/shortcuts'
 import type { ModuleDef, ModuleNav } from '../shell/types'
 import { useStore, type State, type View } from '../store'
 import type { WidgetDef } from '../canvas/registry'
 import { viewHidden } from '../moduleToggles'
 import { registerToolCard, type ToolCardDisplay, type ToolCardProps } from '../components/toolcards/registry'
+import { UNSUPPORTED_CSS } from '../lib/extensionsDev'
 import { req } from '../lib/api'
 import { notify } from '../lib/notify'
 import { extStore, onExtEvent, onMessageDisplay, onSelection, onViewOpened, type AppEvent, type ExtStore, type HostEvents } from './events'
@@ -71,6 +73,8 @@ export type SlotEntry<K extends SlotName> = SlotItem<K> & { extension: string }
 
 export interface PaletteCommandDef { id: string; label: string; hint?: string; run: () => void }
 export interface KeybindingDef { id: string; keys: string; when?: (s: State) => boolean; run: () => void }
+/** An item of the app menu, at the end of the top-level menu `group`. Its keys, if any, are a `keybinding` of their own. */
+export interface MenuItemDef { id: string; label: string; group: MenuGroup; run: () => void }
 export interface SelectionActionDef { id: string; label: string; run: (text: string) => void }
 export interface FenceRendererProps { code: string; streaming: boolean }
 
@@ -85,6 +89,8 @@ export interface UiApi {
   command(def: PaletteCommandDef): Disposable
   /** Throws when `keys` collide with a core shortcut or another binding. */
   keybinding(def: KeybindingDef): Disposable
+  /** An item in the app menu, listed while the extension is on. */
+  menuItem(def: MenuItemDef): Disposable
   toolCard(toolName: string, Component: FC<ToolCardProps>, display?: ToolCardDisplay): Disposable
   fenceRenderer(lang: string, Component: FC<FenceRendererProps>): Disposable
   selectionAction(def: SelectionActionDef): Disposable
@@ -105,6 +111,8 @@ export interface UiApi {
   on(event: `ext:${string}` | AppEvent, fn: (data: unknown) => void): Disposable
   /** Set existing CSS custom properties for one colour scheme, or both when `scheme` is omitted. */
   theme(tokens: Tokens, opts?: { scheme?: Scheme }): Disposable
+  /** Raw access to the page's styles and DOM. It breaks across releases, so it is only for an extension that declares `ui:unsupported-css`. */
+  unsupported: { css(text: string): Disposable; root(): HTMLElement }
 }
 
 export interface ExtensionModule {
@@ -135,9 +143,11 @@ const slots: Record<SlotName, unknown[]> = {
 }
 export interface OwnedPaletteCommand extends PaletteCommandDef { extension: string }
 export interface OwnedKeybinding extends KeybindingDef { extension: string }
+export interface OwnedMenuItem extends MenuItemDef { extension: string }
 export interface OwnedSelectionAction extends SelectionActionDef { extension: string }
 export const paletteCommands: OwnedPaletteCommand[] = []
 export const keybindings: OwnedKeybinding[] = []
+export const menuItems: OwnedMenuItem[] = []
 export const selectionActions: OwnedSelectionAction[] = []
 const fences = new Map<string, FC<FenceRendererProps>>()
 /** The canvas catalog: every widget kind a window can host, whoever registered it. */
@@ -185,6 +195,9 @@ export function registerKeybinding(owner: string, def: KeybindingDef): Disposabl
   return addUnique(keybindings, 'keybinding', { ...def, extension: owner })
 }
 
+export const registerMenuItem = (owner: string, def: MenuItemDef): Disposable =>
+  addUnique(menuItems, 'menu item', { ...def, id: `${owner}:${def.id}`, extension: owner })
+
 export const registerSelectionAction = (owner: string, def: SelectionActionDef): Disposable =>
   addUnique(selectionActions, 'selection action', { ...def, extension: owner })
 
@@ -209,11 +222,14 @@ export const fenceRenderer = (lang: string): FC<FenceRendererProps> | undefined 
 
 /**
  * Run an extension's `activate`. Each registration is also kept in the extension's scope, so the returned Disposable
- * undoes all of them, newest first, whether or not the extension disposed them itself.
+ * undoes all of them, newest first, whether or not the extension disposed them itself. `permissions` are the ones its manifest declares.
  */
-export function activateExtension(id: string, ext: ExtensionModule): Disposable {
+export function activateExtension(id: string, ext: ExtensionModule, permissions: readonly string[] = []): Disposable {
   const scope: Disposable[] = []
   const keep = (d: Disposable): Disposable => { scope.push(d); return d }
+  const requireUnsupported = (): void => {
+    if (!permissions.includes(UNSUPPORTED_CSS)) throw new Error(`extension "${id}" did not declare permission "${UNSUPPORTED_CSS}"`)
+  }
   ext.activate({
     id,
     view: (def) => {
@@ -228,6 +244,7 @@ export function activateExtension(id: string, ext: ExtensionModule): Disposable 
     slot: (slot, item) => keep(registerSlot(id, slot, item)),
     command: (def) => keep(registerCommand(id, def)),
     keybinding: (def) => keep(registerKeybinding(id, def)),
+    menuItem: (def) => keep(registerMenuItem(id, def)),
     toolCard: (name, Component, display) => keep(registerToolCard(name, Component, display)),
     fenceRenderer: (lang, Component) => keep(registerFenceRenderer(lang, Component)),
     selectionAction: (def) => keep(registerSelectionAction(id, def)),
@@ -249,7 +266,21 @@ export function activateExtension(id: string, ext: ExtensionModule): Disposable 
       const fn = ((...a: never[]) => ownerOn(useStore.getState().settings, id) ? handler(...a) : undefined) as never
       return keep(event === 'ui.view.opened' ? onViewOpened(fn) : event === 'ui.message.display' ? onMessageDisplay(fn) : event === 'ui.selection' ? onSelection(fn) : onExtEvent(event, fn))
     }) as UiApi['on'],
-    theme: (tokens, opts) => keep(addTheme(tokens, opts?.scheme))
+    theme: (tokens, opts) => keep(addTheme(tokens, opts?.scheme)),
+    unsupported: {
+      css: (text) => {
+        requireUnsupported()
+        const style = document.createElement('style')
+        style.dataset.extension = id
+        style.textContent = text
+        document.head.append(style)
+        return keep({ dispose: () => style.remove() })
+      },
+      root: () => {
+        requireUnsupported()
+        return document.documentElement
+      }
+    }
   })
   return { dispose: () => { for (const d of scope.reverse()) d.dispose() } }
 }

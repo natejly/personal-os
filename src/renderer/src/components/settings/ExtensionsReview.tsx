@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../lib/api'
 import { useStore } from '../../store'
+import { unsupportedWarning } from '../../lib/extensionsDev'
 import type { ExtensionCard, ExtensionsReview as Listing } from '@shared/types'
 
 /** The part of a unified diff line that says how to colour it. */
@@ -19,6 +20,7 @@ function Facts({ card }: { card: ExtensionCard }): JSX.Element {
           card.permissions.length ? `Permissions: ${card.permissions.join(', ')}` : 'No permissions.',
           card.settings.length ? `Settings: ${card.settings.join(', ')}` : ''].filter(Boolean).join(' · ')}
       </p>
+      {unsupportedWarning(card.permissions) && <p className="set-help" role="status">{unsupportedWarning(card.permissions)}</p>}
       {card.tainted && (
         <p className="set-help" role="status">
           The chat that drafted this had read untrusted content{card.taintSources.length ? ` (${card.taintSources.join(', ')})` : ''}.

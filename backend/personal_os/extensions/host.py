@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Iterable, Iterator, get_args
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Iterable, Iterator, Literal, get_args
 
 from fastapi import Depends, HTTPException
 
@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 Handler = Callable[[], Awaitable[None]]
+Tier = Literal["builtin", "user"]  # where an extension came from
 
 SETTING_PREFIX = "ext."  # a setting `ext.<id>.<field>` belongs to the extension that declares <field>
 STOP_BUDGET_S = 5.0  # what one extension's app.stop handlers get before they are cancelled
@@ -200,6 +201,7 @@ class ExtensionScope:
     root: Path | None = None  # the extension's folder, where data.migrations is looked up
     _ctx: ExtensionContext | None = None  # set for an extension loaded from its folder
     dev: bool = False  # loaded from a folder outside the package (`load_folder`), so it can be reloaded
+    dormant: Callable[[], None] | None = None  # imports and runs `activate` on the first of the manifest's activation events; None once the code half is running
     disposables: Scope = field(default_factory=Scope)
     tools: dict[str, ToolSpec] = field(default_factory=dict)
     routers: list[APIRouter] = field(default_factory=list)
@@ -210,6 +212,11 @@ class ExtensionScope:
     @property
     def log(self) -> logging.Logger:
         return logging.getLogger(f"{__package__}.{self.manifest.id}")
+
+    @property
+    def tier(self) -> Tier:
+        """Derived from where the extension lives, never declared: the app's own package, or a folder the user installed."""
+        return "user" if self.dev else "builtin"
 
     @property
     def bus(self) -> HookBus:
@@ -485,6 +492,8 @@ class ExtensionScope:
         return self.disposables.add(self.retrieval.register(name, search, owner=self.manifest.id))
 
     async def start(self) -> None:
+        if self.dormant:
+            return  # `ExtensionHost.activate` starts it when its event comes
         if self.module:
             await self.module.start()
         await self._bus.emit("app.start", {}, owner=self.manifest.id)
@@ -582,7 +591,7 @@ class ExtensionHost:
         scope = self._add(builtin_manifest(ext_id), root=BUILTIN_ROOT / ext_id, ctx=ctx)
         if scope.manifest.kind == "profile":
             return scope  # a profile is data: nothing to import or activate
-        self._activate(scope, importlib.import_module(f"{__package__}.{ext_id}.extension"))
+        self._load_code(scope, lambda: importlib.import_module(f"{__package__}.{ext_id}.extension"))
         return scope
 
     def load_folder(self, root: Path, ctx: ExtensionContext) -> ExtensionScope:
@@ -597,7 +606,7 @@ class ExtensionHost:
         if manifest.kind == "profile":
             return scope  # a profile is data: nothing to import or activate
         try:
-            self._activate(scope, _import_extension(root, scope))
+            self._load_code(scope, lambda: _import_extension(root, scope))
         except BaseException:
             scope.disposables.dispose()
             del self.extensions[scope.manifest.id], self._enabled[scope.manifest.id]
@@ -646,6 +655,32 @@ class ExtensionHost:
         except Exception:
             self._failed_reloads.add(old.root)
             raise
+
+    def _load_code(self, scope: ExtensionScope, load: Callable[[], ModuleType]) -> None:
+        """Run the extension's `activate` now, or leave the code half dormant until one of its activation events."""
+        if "startup" in scope.manifest.activation:
+            self._activate(scope, load())
+        else:
+            scope.dormant = lambda: self._activate(scope, load())
+
+    async def activate(self, event: str) -> None:
+        """Start the code half of every dormant, enabled extension that lists `event` under activation. One that fails to activate
+        is unloaded and listed under `failed`: the event's source goes on."""
+        for scope in [s for s in self.extensions.values() if s.dormant and event in s.manifest.activation and s.enabled()]:
+            wake, scope.dormant = scope.dormant, None
+            try:
+                wake()
+                await scope.start()
+            except Exception as e:  # noqa: BLE001
+                log.warning("extension %s: activation on %s failed", scope.manifest.id, event, exc_info=True)
+                self.failed[scope.root] = f"{type(e).__name__}: {e}"
+                await self.unload(scope.manifest.id)
+
+    def slash_listing(self) -> list[dict[str, str]]:
+        """The enabled slash commands for the composer's menu: registered ones, and those a dormant extension declares."""
+        declared = [{"name": c["name"], "hint": c.get("hint", ""), "owner": s.manifest.id} for s in self.extensions.values()
+                    if s.dormant and s.enabled() for c in s.manifest.contributes.get("commands", ())]
+        return sorted([*self.slash.listing(), *declared], key=lambda c: c["name"])
 
     @staticmethod
     def _activate(scope: ExtensionScope, module: ModuleType) -> None:

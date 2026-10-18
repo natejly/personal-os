@@ -1,6 +1,7 @@
 import { app, BrowserWindow, crashReporter, dialog, Menu, powerMonitor, shell, systemPreferences } from 'electron'
 import { existsSync, statSync, writeFileSync } from 'fs'
 import { basename, join, resolve, sep } from 'path'
+import { acceptMenuItems, extensionMenuAction, type ExtensionMenuItem, type MenuGroup } from '../shared/extensionMenu'
 import { isOpenable } from '../shared/openable'
 import { SHORTCUTS, shortcut } from '../shared/shortcuts'
 import { backendInfo, backendStatus, backendToken, backendUrl, onBackendState, restartBackend, startBackend, stopBackend } from './backend'
@@ -179,7 +180,17 @@ const item = (id: string): Electron.MenuItemConstructorOptions => {
 
 const SPACES = SHORTCUTS.filter((s) => s.id.startsWith('space-')).map((s) => item(s.id))
 
+/** What the extensions added to the menu; the renderer sends the whole list again whenever it changes. */
+let extensionMenu: ExtensionMenuItem[] = []
+
+/** The items extensions placed in a top-level menu, after a separator of their own. */
+const extensionItems = (group: MenuGroup): Electron.MenuItemConstructorOptions[] => {
+  const items = extensionMenu.filter((i) => i.group === group)
+  return items.length ? [{ type: 'separator' }, ...items.map((i) => ({ label: i.label, click: () => sendMenu(extensionMenuAction(i.id)) }))] : []
+}
+
 function buildMenu(): void {
+  const front = Menu.getApplicationMenu()?.getMenuItemById('popouts-front')?.checked ?? false  // a rebuild keeps the checkbox where the user left it
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(platform.macMenus
       ? [
@@ -211,7 +222,8 @@ function buildMenu(): void {
               { type: 'separator' as const },
               item('settings'),
               { role: 'quit' as const }
-            ])
+            ]),
+        ...extensionItems('File')
       ]
     },
     {
@@ -227,7 +239,8 @@ function buildMenu(): void {
         item('find-prev'),
         ...(platform.macMenus
           ? [{ type: 'separator' }, { label: 'Speech', submenu: [{ role: 'startSpeaking' }, { role: 'stopSpeaking' }] }] as Electron.MenuItemConstructorOptions[]
-          : [])
+          : []),
+        ...extensionItems('Edit')
       ]
     },
     {
@@ -268,7 +281,8 @@ function buildMenu(): void {
         item('zoom-in'),
         item('zoom-out'),
         { type: 'separator' },
-        { role: 'togglefullscreen' }
+        { role: 'togglefullscreen' },
+        ...extensionItems('View')
       ]
     },
     {
@@ -287,7 +301,8 @@ function buildMenu(): void {
         item('canvas-tidy'),
         // One item, not a checkbox: the menu is built once and the lock belongs to whichever space
         // is active, so the renderer's padlock is the state, and this is only the shortcut.
-        item('canvas-lock')
+        item('canvas-lock'),
+        ...extensionItems('Canvases')
       ]
     },
     {
@@ -321,8 +336,10 @@ function buildMenu(): void {
           ...item('popouts-front'),
           id: 'popouts-front',
           type: 'checkbox',
+          checked: front,
           click: (mi) => { mi.checked = toggleFront() }
-        }
+        },
+        ...extensionItems('Window')
       ]
     },
     {
@@ -334,7 +351,8 @@ function buildMenu(): void {
         { label: 'Using Grain', click: () => sendMenu('help:guide') },
         { type: 'separator' },
         { label: 'Check for Updates…', click: () => void checkForUpdatesNow() },
-        { label: 'Open Logs', click: () => void (logDir() ? shell.openPath(logDir()) : undefined) }
+        { label: 'Open Logs', click: () => void (logDir() ? shell.openPath(logDir()) : undefined) },
+        ...extensionItems('Help')
       ]
     }
   ]
@@ -364,6 +382,10 @@ if (gotLock) app.whenReady().then(async () => {
   registerDeskNotify(() => win, showMain, sendMenu)
   handle('ui:zoom', (e, percent: number) => {
     if (typeof percent === 'number' && percent >= 80 && percent <= 160) e.sender.setZoomFactor(percent / 100)
+  })
+  handle('menu:extension-items', (_e, items: unknown) => {
+    extensionMenu = acceptMenuItems(items)
+    buildMenu()
   })
   handle('backend:status', () => backendStatus())
   handle('backend:token', () => backendToken())

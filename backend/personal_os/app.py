@@ -95,6 +95,7 @@ from .subagents import UNATTENDED_KINDS, USER_NOTE, AgentDefs, Subagents
 from .commands import Commands
 from .commands import expand as expand_command
 from .commands import expand_history as expand_commands
+from .commands import slash_name
 from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
 from .attention import for_job, for_run
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, CoreRefused, Run, RunBus, RunStore, Topic
@@ -2128,6 +2129,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
     permissions.SCOPE.set((project["permissions"] if project else None, conv["settings"].get("permissions")))  # settings() overlays them
     cfg = settings()
+    if command := slash_name(body.content):
+        await host.activate(f"onCommand:{command}")  # a dormant extension's slash command (and the context it adds) exists from this turn
     is_wake = bool(body.wake)  # a hidden turn that hands finished workers' reports to the assistant: not the user's words
     internal = is_wake or bool(body.kind)  # any turn whose "user" text is the backend's: never titled from, learned from or trusted as the user's
     in_side = duel.SIDE.get() is not None  # one side of a full model duel (duel.py): a hidden copy of the chat that learns nothing and touches no desk state
@@ -4672,7 +4675,7 @@ def list_commands() -> list[dict[str, Any]]:
 @app.get("/commands/registered")
 def list_registered_commands() -> list[dict[str, str]]:
     """The slash commands the enabled extensions register (api.command), for the composer's menu."""
-    return host.slash.listing()
+    return host.slash_listing()
 
 
 @app.post("/commands")

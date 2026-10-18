@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Callable
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .devapi import adopt, set_hidden_view
 from .drafts import Drafts, DraftError
@@ -20,6 +20,10 @@ log = logging.getLogger(__name__)
 
 class EnableIn(BaseModel):
     grants: list[str] = []
+
+
+class ActivateIn(BaseModel):
+    event: str = Field(pattern=r"^onView:.+")  # the only activation event the renderer raises
 
 
 class AcceptIn(BaseModel):
@@ -82,6 +86,11 @@ def router(review: Review) -> APIRouter:
     @r.get("")
     def listing() -> dict[str, Any]:
         return review.listing()
+
+    @r.post("/activate")
+    async def activate(body: ActivateIn) -> dict[str, bool]:
+        await review.host.activate(body.event)
+        return {"ok": True}
 
     @r.post("/{ext_id}/accept")
     async def accept(ext_id: str, body: AcceptIn) -> dict[str, Any]:

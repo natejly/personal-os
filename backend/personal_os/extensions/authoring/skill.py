@@ -41,7 +41,7 @@ extension.json, extension.py, tools/<name>.json (one object schema per tool), mi
 ## extension.json
 Unknown keys are refused.
 - id, name, description, version ("1.0.0"), apiVersion: 1, kind: "extension"
-- activation: ["startup"]
+- activation: ["startup"], or onView:<view id> / onCommand:<command name> (a view or slash command the manifest declares) to load the code only then; such an extension has no tools and provides no services
 - requires: {"services": [...]} for a service such as "mcp" or "google"; also needs the permission "service:<name>"
 - contributes.tools: [{"name", "danger", "group", "description", "schema": "tools/<name>.json"}]. danger is one of safe, writes, executes, external. The tool name must not be one the app already has.
 - hooks: {"<hook.name>": {"priority"?, "timeoutMs"?}} for every hook the code subscribes to

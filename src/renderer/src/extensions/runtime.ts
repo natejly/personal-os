@@ -1,8 +1,14 @@
-/** What the extensions need from the running app: their keybindings, and the view-opened event. Started once, by App. */
+/** What the extensions need from the running app: their keybindings and menu items, and the view-opened event. Started once, by App. */
+import { extensionMenuAction, type ExtensionMenuItem } from '@shared/extensionMenu'
 import { acceleratorOf, canonicalAccelerator } from '@shared/shortcuts'
+import { api } from '../lib/api'
 import { useStore } from '../store'
 import { emitViewOpened } from './events'
-import { keybindings, ownerOn } from './host'
+import { keybindings, menuItems, ownerOn } from './host'
+
+/** The menu items of the extensions that are on, as the main process lists them. */
+const visibleMenuItems = (): ExtensionMenuItem[] =>
+  menuItems.filter((m) => ownerOn(useStore.getState().settings, m.extension)).map(({ id, label, group }) => ({ id, label, group }))
 
 export function startExtensionRuntime(): () => void {
   const mac = window.os.platform === 'darwin'
@@ -16,9 +22,28 @@ export function startExtensionRuntime(): () => void {
     hit.run()
   }
   window.addEventListener('keydown', onKey)
-  const unsubscribe = useStore.subscribe((s, prev) => { if (s.view !== prev.view) emitViewOpened(s.view) })
+  const unsubscribe = useStore.subscribe((s, prev) => {
+    if (s.view === prev.view) return
+    emitViewOpened(s.view)
+    void api.extensions.activate(`onView:${s.view}`).catch(() => undefined)  // an extension whose code waits for this view starts now
+  })
+  const stopMenu = window.os.onMenu((action) => {
+    menuItems.find((m) => extensionMenuAction(m.id) === action && ownerOn(useStore.getState().settings, m.extension))?.run()
+  })
+  let listed = ''
+  const publishMenu = (): void => {
+    const items = visibleMenuItems()
+    const key = JSON.stringify(items)
+    if (key === listed) return
+    listed = key
+    void window.os.setMenuItems(items)
+  }
+  publishMenu()
+  const unsubscribeMenu = useStore.subscribe(publishMenu)
   return () => {
     window.removeEventListener('keydown', onKey)
     unsubscribe()
+    stopMenu()
+    unsubscribeMenu()
   }
 }

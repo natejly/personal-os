@@ -85,6 +85,34 @@ def test_the_listing_shows_built_ins_with_their_registrations() -> None:
     assert health["contributes"]["routes"] == {"prefix": "/health"}
 
 
+def test_the_listing_names_each_extensions_tier(ext: Path) -> None:
+    assert next(e for e in listing()["extensions"] if e["id"] == "health")["tier"] == "builtin"
+    assert load(ext).json()["tier"] == "user"
+
+
+def test_a_view_event_wakes_an_extension_whose_code_waits_for_it(tmp_path: Path) -> None:
+    root = tmp_path / "lazy"
+    root.mkdir()
+    (root / "extension.json").write_text(json.dumps({
+        "id": "lazy", "name": "Lazy", "version": "1.0.0", "apiVersion": 1, "activation": ["onView:lazy"],
+        "contributes": {"views": [{"id": "lazy"}], "commands": [{"name": "lazy-go", "hint": "go"}]}}), "utf-8")
+    (root / "extension.py").write_text("def activate(api):\n    api.command('lazy-go', lambda args: 'went')\n", "utf-8")
+    try:
+        load_on(root)
+        scope = appmod.host.extensions["lazy"]
+        assert scope.dormant and {"name": "lazy-go", "hint": "go", "owner": "lazy"} in client.get("/commands/registered").json()
+        assert client.post("/extensions/activate", json={"event": "onCommand:lazy-go"}).status_code == 422  # the renderer raises views only
+        assert client.post("/extensions/activate", json={"event": "onView:chat"}).json() == {"ok": True} and scope.dormant
+        assert client.post("/extensions/activate", json={"event": "onView:lazy"}).json() == {"ok": True}
+        assert scope.dormant is None and appmod.host.slash.expand("lazy-go", "") == "went"
+        assert client.get("/commands/registered").json().count({"name": "lazy-go", "hint": "go", "owner": "lazy"}) == 1
+    finally:
+        if "lazy" in appmod.host.extensions:
+            import asyncio
+            asyncio.run(appmod.host.unload("lazy"))
+        appmod.db.set_settings({"hiddenViews": [v for v in appmod.settings()["hiddenViews"] if v != "lazy"]})
+
+
 def test_the_api_needs_the_token() -> None:
     assert TestClient(appmod.app).get("/dev/extensions").status_code == 401
 

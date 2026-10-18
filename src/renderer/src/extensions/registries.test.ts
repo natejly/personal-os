@@ -219,7 +219,10 @@ test('an extension side-panel tab shows in the workspace panel while its `shown`
 test('the runtime runs a matching keybinding whose `when` holds, and tells subscribers when the view changes', async () => {
   const { startExtensionRuntime } = await import('./runtime')
   const listeners: ((e: KeyboardEvent) => void)[] = []
-  Object.assign(globalThis, { window: { os: { platform: 'linux' }, addEventListener: (_: string, fn: (e: KeyboardEvent) => void) => listeners.push(fn), removeEventListener: () => undefined } })
+  const posted: string[] = []
+  const real = globalThis.fetch
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => { posted.push(`${url} ${init?.body}`); return new Response('{"ok":true}') }) as typeof fetch
+  Object.assign(globalThis, { window: { os: { platform: 'linux', onMenu: () => () => undefined, setMenuItems: async () => undefined }, addEventListener: (_: string, fn: (e: KeyboardEvent) => void) => listeners.push(fn), removeEventListener: () => undefined } })
   const ran: string[] = []
   const opened: string[] = []
   let allowed = false
@@ -229,16 +232,85 @@ test('the runtime runs a matching keybinding whose `when` holds, and tells subsc
   })
   const press = (over: Partial<KeyboardEvent>): void => listeners[0]({ key: 'j', ctrlKey: true, altKey: true, metaKey: false, shiftKey: false, defaultPrevented: false, preventDefault: () => ran.push('prevented'), ...over } as KeyboardEvent)
   const stop = startExtensionRuntime()
-  press({})
-  allowed = true
-  press({ shiftKey: true })
-  press({ defaultPrevented: true })
-  press({})
-  useStore.setState({ view: 'jobs' })
-  stop()
-  gone()
+  try {
+    press({})
+    allowed = true
+    press({ shiftKey: true })
+    press({ defaultPrevented: true })
+    press({})
+    useStore.setState({ view: 'jobs' })
+  } finally {
+    globalThis.fetch = real
+    stop()
+    gone()
+  }
   assert.deepEqual(ran, ['prevented', 'go'])
   assert.deepEqual(opened, ['jobs'])
+  assert.deepEqual(posted, ['/extensions/activate {"event":"onView:jobs"}'])
+})
+
+test('menu items: listed to the main process while the extension is on, run by their action, unique per extension', async () => {
+  const { startExtensionRuntime } = await import('./runtime')
+  const { extensionMenuAction } = await import('@shared/extensionMenu')
+  let click: (action: string) => void = () => undefined
+  const lists: unknown[] = []
+  Object.assign(globalThis, { window: { os: { platform: 'linux', onMenu: (cb: typeof click) => { click = cb; return () => undefined }, setMenuItems: async (items: unknown) => { lists.push(items) } }, addEventListener: () => undefined, removeEventListener: () => undefined } })
+  const ran: string[] = []
+  const gone = withExtension('menudemo', (ui) => {
+    ui.menuItem({ id: 'open', label: 'Open demo', group: 'View', run: () => ran.push('open') })
+    assert.throws(() => ui.menuItem({ id: 'open', label: 'Again', group: 'File', run: () => undefined }), /already registered/)
+  })
+  const other = withExtension('menudemo2', (ui) => ui.menuItem({ id: 'open', label: 'Other', group: 'Help', run: () => ran.push('other') }))
+  const stop = startExtensionRuntime()
+  try {
+    assert.deepEqual(lists, [[{ id: 'menudemo:open', label: 'Open demo', group: 'View' }, { id: 'menudemo2:open', label: 'Other', group: 'Help' }]])
+    click(extensionMenuAction('menudemo:open'))
+    click('view:chat')
+    useStore.setState({ settings: { ...useStore.getState().settings, hiddenViews: ['menudemo'] } })
+    assert.deepEqual(lists.at(-1), [{ id: 'menudemo2:open', label: 'Other', group: 'Help' }])
+    click(extensionMenuAction('menudemo:open'))
+    click(extensionMenuAction('menudemo2:open'))
+  } finally {
+    useStore.setState({ settings: { ...useStore.getState().settings, hiddenViews: [] } })
+    stop()
+    gone()
+    other()
+  }
+  assert.deepEqual(ran, ['open', 'other'])
+})
+
+test('main accepts only well-formed menu items from the renderer', async () => {
+  const { acceptMenuItems } = await import('@shared/extensionMenu')
+  const good = { id: 'a:b', label: 'Do it', group: 'File' }
+  assert.deepEqual(acceptMenuItems([good, { ...good, group: 'Nowhere' }, { ...good, label: '' }, { ...good, id: 3 }, null, 'x']), [good])
+  assert.deepEqual(acceptMenuItems('nope'), [])
+})
+
+test('raw CSS and DOM access needs the ui:unsupported-css permission', () => {
+  const sheets: { dataset: Record<string, string>; textContent: string; removed: boolean; remove(): void }[] = []
+  const root = {}
+  Object.assign(globalThis, {
+    document: {
+      createElement: () => { const el = { dataset: {}, textContent: '', removed: false, remove() { el.removed = true } }; sheets.push(el); return el },
+      head: { append: () => undefined },
+      documentElement: root
+    }
+  })
+  try {
+    let plain!: UiApi
+    withExtension('plaincss', (ui) => { plain = ui })()
+    assert.throws(() => plain.unsupported.css('a{}'), /did not declare permission "ui:unsupported-css"/)
+    assert.throws(() => plain.unsupported.root(), /did not declare permission/)
+    let ui!: UiApi
+    const scope = activateExtension('rawcss', { activate: (u) => { ui = u } }, ['ui:unsupported-css'])
+    ui.unsupported.css('body{color:red}')
+    assert.equal(ui.unsupported.root(), root)
+    assert.deepEqual([sheets[0].dataset.extension, sheets[0].textContent, sheets[0].removed], ['rawcss', 'body{color:red}', false])
+    scope.dispose()
+    assert.equal(sheets[0].removed, true)
+  } finally {
+    Reflect.deleteProperty(globalThis, 'document')
+  }
 })
 
 test('title bar and status bar items render in their slots, and a profile can close either', async () => {

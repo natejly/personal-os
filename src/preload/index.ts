@@ -19,6 +19,7 @@ const api: GrainApi = {
   platform: process.platform,
   onMenu: (cb) => listen<string>('menu', cb),
   setZoom: (percent: number) => ipcRenderer.invoke('ui:zoom', percent),
+  setMenuItems: (items) => ipcRenderer.invoke('menu:extension-items', items),
   setChromeTheme: (background, symbol) => ipcRenderer.send('ui:chrome-theme', background, symbol),
   popout: {
     open: (windowId: string, req?: PopoutOpenRequest) => ipcRenderer.invoke('popout:open', windowId, req ?? {}),

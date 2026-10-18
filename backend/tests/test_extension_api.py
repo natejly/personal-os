@@ -414,3 +414,57 @@ def test_a_sync_pipe_over_the_cap_is_dropped_and_counts_toward_the_mute() -> Non
         assert bus.pipe_sync("memory.before_write", value) == value
     (wordy,) = bus.subscriptions("wordy")
     assert wordy.muted and "HookOutputTooLong" in wordy.errors[-1]
+
+
+# ---- activation events and tier ----
+def lazy(work: Path, code: str = CODE_COMMAND, **over: Any) -> Rig:
+    return Rig(work, {"activation": ["onCommand:ping"], "contributes": {"commands": [{"name": "ping", "hint": "say pong"}]},
+                      "hooks": {"app.start": {}}, **over}, code)
+
+
+def test_a_folder_extension_is_user_tier_and_a_packaged_one_builtin(work: Path) -> None:
+    assert Rig(work).scope.tier == "user"
+    assert ExtensionHost().add_module(SimpleNamespace(key="m", label="M", enabled=lambda: True)).tier == "builtin"
+
+
+def test_code_waits_for_its_activation_event_and_its_command_is_listed_meanwhile(work: Path) -> None:
+    rig = lazy(work)
+    assert rig.scope.dormant and rig.scope.module is None
+    assert rig.host.slash.listing() == [] and rig.host.slash.expand("ping", "a") is None
+    assert rig.host.slash_listing() == [{"name": "ping", "hint": "say pong", "owner": "demo"}]
+    run(rig.host.activate("onCommand:other"))
+    run(rig.host.activate("onView:ping"))
+    assert rig.scope.dormant
+    run(rig.host.activate("onCommand:ping"))
+    assert rig.scope.dormant is None and rig.host.slash.expand("ping", "a b") == "pong a b"
+    assert rig.host.slash_listing() == [{"name": "ping", "hint": "say pong", "owner": "demo"}]
+
+
+def test_activation_starts_the_extension_once(work: Path) -> None:
+    code = "def activate(api):\n    api.on('app.start', lambda p: (api.data_dir / 'starts').open('a').write('x'))\n"
+    rig = lazy(work, code)
+    run(rig.host.start())
+    assert not (rig.scope.data_dir / "starts").exists()  # app start passes it by
+    run(rig.host.activate("onCommand:ping"))
+    run(rig.host.activate("onCommand:ping"))
+    assert (rig.scope.data_dir / "starts").read_text() == "x"
+
+
+def test_a_disabled_extension_is_not_activated(work: Path) -> None:
+    rig = lazy(work)
+    rig.hidden.append("demo")
+    run(rig.host.activate("onCommand:ping"))
+    assert rig.scope.dormant and rig.host.slash_listing() == []
+    rig.hidden.clear()
+    run(rig.host.activate("onCommand:ping"))
+    assert rig.scope.dormant is None
+
+
+def test_a_failing_activation_unloads_the_extension_and_lists_it_as_failed(work: Path) -> None:
+    rig = lazy(work, "def activate(api):\n    raise RuntimeError('nope')\n")
+    run(rig.host.activate("onCommand:ping"))
+    assert "demo" not in rig.host.extensions and "RuntimeError: nope" in rig.host.failed[rig.root]
+
+
+def test_slash_name_is_the_command_a_turn_calls() -> None:
+    assert [commands.slash_name(t) for t in ("/ping a b", "/ping", "hello", "/Bad", "", None)] == ["ping", "ping", None, None, None, None]

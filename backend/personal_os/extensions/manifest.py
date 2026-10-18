@@ -20,7 +20,7 @@ API_VERSION = 1
 
 ID = re.compile(r"[a-z][a-z0-9-]*")
 _SEMVER = re.compile(r"\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?")
-_ACTIVATION = re.compile(r"startup|onSchedule|(onView|onCommand|onChannel):.+")
+_ACTIVATION = re.compile(r"startup|(onView|onCommand):.+")  # the events the host raises: a view opens, a slash command is typed
 _TOP_KEYS = {"id", "name", "description", "version", "apiVersion", "kind", "enabled", "activation", "requires", "provides",
              "contributes", "hooks", "permissions", "settings", "data"}
 _CONTRIBUTES = {"tools", "routes", "views", "slots", "settings", "commands", "keybindings", "theme", "defaults", "layout", "runtime", "presets"}
@@ -87,7 +87,7 @@ class Manifest:
         _check(raw.get("kind", "extension") in ("extension", "profile"), "kind must be 'extension' or 'profile'")
         _check(isinstance(raw.get("enabled", True), bool) or raw["enabled"] == "always", "enabled must be true, false or 'always'")
         activation = _strings(raw, "activation", ("startup",))
-        _check(all(_ACTIVATION.fullmatch(a) for a in activation), "activation has an unknown event")
+        _check(activation and all(_ACTIVATION.fullmatch(a) for a in activation), "activation takes startup, onView:<view id> or onCommand:<command name>")
         requires, provides = _object(raw, "requires", {"services", "extensions"}), _object(raw, "provides", {"services"})
         permissions = _strings(raw, "permissions", ())
         _check(all("." not in svc for svc in _strings(provides, "services", ())), "a service name has no dot: dotted names are runtime slots")
@@ -156,6 +156,7 @@ def _contributes(raw: dict[str, Any]) -> dict[str, Any]:
     _check(all(_is_str(i.get("id")) and i["id"].startswith(f"ext:{raw.get('id')}:") for i in slots.get("canvas.widget", ())),
            "contributes.slots['canvas.widget'] entries need an id of the form ext:<extension id>:<name>")
     _commands(c)
+    _activation(raw, c)
     _theme(c)
     _layout(raw, c)
     _defaults(c)
@@ -175,6 +176,20 @@ def _commands(c: dict[str, Any]) -> None:
         _check(e["name"] not in RESERVED, f"contributes.commands: /{e['name']} is one of the app's own commands")
         _check(isinstance(e.get("hint", ""), str), "contributes.commands: hint must be text")
     _check(len({e["name"] for e in entries}) == len(entries), "contributes.commands lists a name twice")
+
+
+def _activation(raw: dict[str, Any], c: dict[str, Any]) -> None:
+    """An extension whose code waits for an event names only contributions the manifest declares, and offers nothing that must exist
+    before the event: a tool's schema comes from code and a service is looked up late."""
+    events = raw.get("activation", ["startup"])
+    if "startup" in events:
+        return
+    views = {v.get("id") for v in c.get("views") or () if isinstance(v, dict)}
+    commands = {e.get("name") for e in c.get("commands", ())}
+    for event in events:
+        kind, _, target = event.partition(":")
+        _check(target in (views if kind == "onView" else commands), f"activation {event!r} names a {'view' if kind == 'onView' else 'command'} the manifest does not declare")
+    _check(not c.get("tools") and not _object(raw, "provides").get("services"), "an extension that activates on an event cannot contribute tools or provide services: they must exist at startup")
 
 
 def _runtime(c: dict[str, Any], permissions: list[str]) -> None:

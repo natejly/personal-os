@@ -121,6 +121,12 @@ def expand_skill(text: str, args: str, skills: Any) -> str:
     return f"{text}\n\n[No approved skill is called “{key}”. Approved skills: {names}. Tell the user, then answer as best you can.]"
 
 
+def slash_name(text: str | None) -> str | None:
+    """The command a turn typed as `/name args` calls, or None."""
+    m = _SLASH.match(text.strip()) if text and text.startswith("/") else None
+    return m.group(1) if m else None
+
+
 _MENTION = re.compile(r"(?<![\w@])@([a-z0-9][a-z0-9_-]{0,39})")
 
 

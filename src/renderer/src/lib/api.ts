@@ -710,7 +710,9 @@ export const api = {
     accept: (id: string, digest: string) => req<ExtensionsReview>(`/extensions/${encodeURIComponent(id)}/accept`, { method: 'POST', body: json({ digest }) }),
     reject: (id: string) => req<ExtensionsReview>(`/extensions/${encodeURIComponent(id)}/reject`, { method: 'POST' }),
     enable: (id: string, grants: string[]) => req<ExtensionsReview>(`/extensions/${encodeURIComponent(id)}/enable`, { method: 'POST', body: json({ grants }) }),
-    disable: (id: string) => req<ExtensionsReview>(`/extensions/${encodeURIComponent(id)}/disable`, { method: 'POST' })
+    disable: (id: string) => req<ExtensionsReview>(`/extensions/${encodeURIComponent(id)}/disable`, { method: 'POST' }),
+    /** Raise an activation event (`onView:<id>`) for extensions whose code is waiting for it. */
+    activate: (event: string) => req<{ ok: boolean }>('/extensions/activate', { method: 'POST', body: json({ event }) })
   },
   conversationUsage: (conversationId: string) => req<ConversationUsage>(`/conversations/${conversationId}/usage`),
   messageRequests: (messageId: string) =>

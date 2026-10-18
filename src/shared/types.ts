@@ -1,4 +1,5 @@
 import type { HookId } from './extensionHooks'
+import type { ExtensionMenuItem } from './extensionMenu'
 
 export type Role = 'system' | 'user' | 'assistant'
 
@@ -772,6 +773,8 @@ export interface ExtensionInfo {
   id: string
   name: string
   version: string
+  /** Where it came from: the app's own package or a folder the user installed. */
+  tier: 'builtin' | 'user'
   enabled: boolean
   /** The dev panel can turn it on or off (a profile, a module and an always-on built-in cannot be). */
   toggleable: boolean
@@ -2259,6 +2262,8 @@ export interface GrainApi {
   onMenu: (cb: (action: string) => void) => () => void
   /** Page zoom of this window, in percent. */
   setZoom: (percent: number) => Promise<void>
+  /** The items the extensions add to the app menu; replaces the last list. */
+  setMenuItems: (items: ExtensionMenuItem[]) => Promise<void>
   /** Resolved theme colours (hex), so native window controls and backgrounds match. */
   setChromeTheme: (background: string, symbol: string) => void
   popout: {

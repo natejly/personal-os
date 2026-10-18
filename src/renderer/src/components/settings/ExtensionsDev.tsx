@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import { viewHidden } from '../../moduleToggles'
-import { contributionSummary, formatEvery, formatMs, mutedHooks } from '../../lib/extensionsDev'
+import { contributionSummary, formatEvery, formatMs, mutedHooks, unsupportedWarning } from '../../lib/extensionsDev'
 import type { ExtensionInfo, ExtensionsDev as Listing } from '@shared/types'
 
 /** Settings > Advanced > Developer: every loaded extension with what it registered, how its handlers behave, and enable, disable and reload. */
@@ -32,12 +32,13 @@ export default function ExtensionsDev(): JSX.Element {
       {listing && !listing.live && <p className="set-help">Reloading needs the backend to be started with GRAIN_EXT_DEV=1.</p>}
       {listing?.extensions.map((x) => (
         <details key={x.id} className="adv-group">
-          <summary>{x.name} <small>{x.id} {x.version}{x.enabled ? '' : ' (off)'}{mutedHooks(x).length ? ' (muted handlers)' : ''}</small></summary>
+          <summary>{x.name} <small>{x.id} {x.version} {x.tier}{x.enabled ? '' : ' (off)'}{mutedHooks(x).length ? ' (muted handlers)' : ''}</small></summary>
           <div className="test-row">
             {x.toggleable && <button type="button" className="ghost-btn" onClick={() => act(() => (x.enabled ? api.devExtensions.disable(x.id) : api.devExtensions.enable(x.id)))}>{x.enabled ? 'Disable' : 'Enable'}</button>}
             {x.reloadable && <button type="button" className="ghost-btn" disabled={!listing.live} onClick={() => act(() => api.devExtensions.reload(x.id))}>Reload</button>}
           </div>
           <p className="set-help">{[...contributionSummary(x), ...x.permissions].join(' · ') || 'Registers nothing.'}</p>
+          {unsupportedWarning(x.permissions) && <p className="set-help" role="status">{unsupportedWarning(x.permissions)}</p>}
           {x.jobs.length > 0 && (
             <table>
               <thead><tr><th>Job</th><th>Every</th><th>Runs</th><th>State</th></tr></thead>

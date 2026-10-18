@@ -566,7 +566,8 @@ class ExtensionHost:
 
     # ---- data ----
     def migrate(self, db: Database) -> None:
-        """Apply every extension's pending migrations, after a premigrate backup when there are any."""
+        """Apply every extension's pending migrations, after a premigrate backup when there are any (not on a database this start created)."""
+        fresh, db.fresh = db.fresh, False
         steps = {s.manifest.id: s.migration_steps() for s in self.extensions.values()}
         if not any(steps.values()):
             return  # nothing declares migrations: no connection to open
@@ -574,7 +575,8 @@ class ExtensionHost:
             todo = {ext_id: p for ext_id, st in steps.items() if (p := migrations.pending_extension(c, ext_id, st))}
             if not todo:
                 return
-            backups.create(db.data_dir, "premigrate")
+            if not fresh:
+                backups.create(db.data_dir, "premigrate")
             for ext_id, pending in todo.items():
                 migrations.run_extension(c, ext_id, pending)
 

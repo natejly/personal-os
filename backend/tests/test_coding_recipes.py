@@ -436,6 +436,7 @@ def test_the_routes_save_approve_preview_run_and_list(rig):
     assert c.delete("/coding/recipes/fix").json() == {"archived": True} and c.get("/coding/recipes").json()["recipes"] == []
     assert c.post("/coding/recipes/fix/run", json={"inputs": {"test": "t"}}).status_code == 400  # archived: no such recipe
     assert c.get("/coding/recipes/nope").status_code == 404
+    assert c.post("/coding/recipes/nope/preview", json={}).status_code == 404 and c.post("/coding/recipes/nope/run", json={}).status_code == 404
 
 
 def rcp_routes(rig: Rig) -> Any:

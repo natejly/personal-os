@@ -428,7 +428,8 @@ def test_a_malformed_sql_migration_is_refused(tmp_path: Path) -> None:
 
 
 def test_host_migrate_backs_up_once_then_applies_each_extensions_steps(tmp_path: Path) -> None:
-    db = Database(tmp_path / "data")
+    Database(tmp_path / "data")
+    db = Database(tmp_path / "data")  # reopened: the file now exists
     root = tmp_path / "demo"
     (root / "migrations").mkdir(parents=True)
     (root / "migrations" / "0001_init.sql").write_text("CREATE TABLE demo_t(x);\n")
@@ -444,9 +445,24 @@ def test_host_migrate_backs_up_once_then_applies_each_extensions_steps(tmp_path:
     assert len(backups.list_backups(db.data_dir)) == 1
 
 
+def test_host_migrate_takes_no_backup_of_a_database_this_start_created(tmp_path: Path) -> None:
+    db = Database(tmp_path / "data")
+    root = tmp_path / "demo"
+    (root / "migrations").mkdir(parents=True)
+    (root / "migrations" / "0001_init.sql").write_text("CREATE TABLE demo_t(x);\n")
+    host = ExtensionHost()
+    host._add(manifest(data={"tables": ["demo_t"], "migrations": "migrations/"}), root=root)
+    host.migrate(db)
+    assert backups.list_backups(db.data_dir) == []
+    (root / "migrations" / "0002_more.sql").write_text("CREATE TABLE demo_u(x);\n")
+    host.migrate(db)  # a later load (dev extension) is not the first start
+    assert [b["kind"] for b in backups.list_backups(db.data_dir)] == ["premigrate"]
+
+
 def test_host_migrate_opens_no_connection_when_nothing_declares_migrations(tmp_path: Path) -> None:
     class NoConnect:
         data_dir = tmp_path
+        fresh = False
 
         def connect(self) -> None:
             raise AssertionError("opened a connection")

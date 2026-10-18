@@ -63,13 +63,13 @@ def recipes_router(coding: Coding) -> APIRouter:
     @r.post("/recipes/{ref}/preview")
     async def preview_run(ref: str, body: RunIn) -> dict[str, Any]:
         """What a run would use, for the form that confirms it."""
-        resolved = await guarded(asyncio.to_thread, coding.recipes.preview, ref, body.inputs, body.version)
+        resolved = await guarded(asyncio.to_thread, coding.recipes.preview, known(ref)["id"], body.inputs, body.version)
         return {"resolved": resolved, "lines": run_card(resolved)}
 
     @r.post("/recipes/{ref}/run")
     async def run_recipe(ref: str, body: RunIn) -> dict[str, Any]:
         ctx = {"conversation_id": None, "run_id": None, "settings": coding.tb.settings(), "tainted": False, "taint_sources": []}
-        return await guarded(coding.recipes.run, ref, body.inputs, "palette", ctx, version=body.version)
+        return await guarded(coding.recipes.run, known(ref)["id"], body.inputs, "palette", ctx, version=body.version)
 
     @r.get("/recipe-runs")
     async def list_runs(recipe_id: str | None = None, limit: int = 30) -> dict[str, Any]:

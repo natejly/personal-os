@@ -522,6 +522,7 @@ class Database:
         self.path = self.data_dir / "personal-os.db"
         self.secrets = SecretStore(self.data_dir)
         existing = self.path.exists() and self.path.stat().st_size > 0
+        self.fresh = not existing  # until the extensions' first migrate: a new file holds nothing worth a snapshot
         with closing(self.connect()) as c, c:  # a Connection's own `with` commits but never closes
             # A database with content gets a snapshot before anything pending touches it (adopting the
             # versioned system on a pre-existing file counts: the baseline re-runs _migrate).

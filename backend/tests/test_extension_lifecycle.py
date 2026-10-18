@@ -413,6 +413,16 @@ def test_sql_files_become_numbered_steps_run_statement_by_statement(tmp_path: Pa
     conn.close()
 
 
+def test_sql_comments_and_several_statements_on_a_line_are_fine(tmp_path: Path) -> None:
+    folder = tmp_path / "migrations"
+    folder.mkdir()
+    (folder / "0001_init.sql").write_text("-- first; note\nCREATE TABLE demo_t(x); INSERT INTO demo_t VALUES ('a');\n/* done */\n-- tail; comment\n")
+    conn = Database(tmp_path / "data").connect()
+    migrations.run_extension(conn, "demo", migrations.sql_steps(folder))
+    assert [r[0] for r in conn.execute("SELECT x FROM demo_t")] == ["a"]
+    conn.close()
+
+
 def test_a_malformed_sql_migration_is_refused(tmp_path: Path) -> None:
     folder = tmp_path / "migrations"
     folder.mkdir()

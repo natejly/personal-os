@@ -103,6 +103,18 @@ def test_enable_and_disable_write_the_hidden_views_and_fire_ext_changed(monkeypa
     assert client.post("/dev/extensions/ghost/enable").status_code == 404
 
 
+def test_parallel_toggles_do_not_lose_hidden_views_updates() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    ids = [f"qa-{i}" for i in range(20)]
+    before = appmod.settings()["hiddenViews"]
+    try:
+        with ThreadPoolExecutor(10) as pool:
+            list(pool.map(lambda i: devapi.set_hidden_view(appmod.host, appmod._ext_ctx, i, True), ids))
+        assert set(ids) <= set(appmod.settings()["hiddenViews"])
+    finally:
+        appmod.db.set_settings({"hiddenViews": before})
+
+
 def test_loading_a_folder_registers_its_tools_and_hooks_and_reload_picks_up_edits(ext: Path) -> None:
     declare(ext, "tool.pre", permissions=("hooks:gate",))
     edit(ext, "extension.py", lambda t: t + '\n    api.on("tool.pre", lambda p: None)\n')

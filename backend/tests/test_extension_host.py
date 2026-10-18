@@ -87,6 +87,10 @@ class ManifestTests(unittest.TestCase):
             "recap section without an id": manifest(contributes={"slots": {"recap.section": [{"order": 1}]}}),
             "canvas widget without an id": manifest(contributes={"slots": {"canvas.widget": [{"label": "Clock"}]}}),
             "canvas widget in another extension's namespace": manifest(contributes={"slots": {"canvas.widget": [{"id": "ext:other:clock"}]}}),
+            "runtime slot not text": manifest(contributes={"runtime": [{"slot": [], "id": "a", "label": "l"}]}),
+            "runtime slot an object": manifest(contributes={"runtime": [{"slot": {}, "id": "a", "label": "l"}]}),
+            "preset not text": manifest(contributes={"defaults": {"permissionPreset": []}}),
+            "preset an object": manifest(contributes={"defaults": {"permissionPreset": {}}}),
             "unknown hook": manifest(hooks={"tool.preee": {}}),
             "unknown hook option": manifest(hooks={"app.start": {"retries": 3}}),
             "onFailure allow": manifest(hooks={"tool.pre": {"onFailure": "allow"}}, permissions=["hooks:gate"]),
@@ -200,6 +204,13 @@ class EmitTests(Loose):
         with self.assertLogs("personal_os.extensions.hooks", "WARNING"):
             run(bus.emit("chat.created", None))
         self.assertEqual(ok, [1])
+
+    def test_a_declared_gate_budget_is_capped(self) -> None:
+        bus = HookBus()
+        sub(bus, "tool.pre", lambda p: None, timeout_ms=60000)
+        sub(bus, "chat.created", lambda p: None, timeout_ms=60000)
+        self.assertEqual(bus._timeout(bus._subs["tool.pre"][0], "gate"), 3.0)
+        self.assertEqual(bus._timeout(bus._subs["chat.created"][0], "emit"), 60.0)
 
     def test_timeout_cancels_the_handler_task(self) -> None:
         bus = HookBus()

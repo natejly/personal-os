@@ -172,7 +172,7 @@ def test_empty_text_and_a_line_changed_by_a_key_are_refused_until_ctrl_c(tmp_pat
     ("echo \x7f", "one line"),
     ("x" * 5000, "one line"),
     ("echo sk-abcdefghijklmnopqrstuvwxyz0123456789", "credential"),
-    ("rm -rf /", "never runs"),
+    ("rm -rf /", "never allowed"),
 ])
 def test_shape_secrets_and_the_hardline_are_refused_with_no_card(tmp_path, monkeypatch, line, why):
     tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
@@ -255,7 +255,7 @@ def test_an_unattended_run_cannot_open_or_type(tmp_path, monkeypatch):
 
 def test_the_open_command_is_judged_before_anything_is_spawned(tmp_path, monkeypatch):
     tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
-    assert "never runs" in call(tb, "terminal_open", ctx_of(cfg), cwd=str(home / "work"), command="rm -rf /")["error"]
+    assert "never allowed" in call(tb, "terminal_open", ctx_of(cfg), cwd=str(home / "work"), command="rm -rf /")["error"]
     assert "coding_session_start" in call(tb, "terminal_open", ctx_of(cfg), cwd=str(home / "repo"), command="git commit -am x")["error"]
     assert hub.opened == []
     out = call(tb, "terminal_open", ctx_of(cfg), cwd=str(home / "work"), command="npm run dev")

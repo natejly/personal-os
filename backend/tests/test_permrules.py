@@ -356,3 +356,12 @@ def test_malformed_rules_are_skipped():
     rs = pr.load_rules({"allow": ["Bash(ls *)", "((", 5], "deny": "nope"})
     assert [r.text for r in rs.allow] == ["Bash(ls *)"] and not rs.deny
     assert pr.load_rules(None).empty()
+
+
+def test_a_terminal_line_is_split_like_a_shell_command():
+    rs = rules(allow=["Bash(ls *)"], deny=["Bash(git push *)"])
+    for tool, key, line in (("terminal_send", "text", "ls && git push origin"), ("terminal_send", "text", "ls; git push origin"),
+                            ("terminal_send", "text", "echo `git push origin`"), ("terminal_open", "command", 'bash -c "git push o"')):
+        assert pr.evaluate(tool, {key: line}, rs).action == "deny", line
+    assert pr.evaluate("terminal_send", {"text": "ls -l"}, rs).action == "allow"
+    assert pr.evaluate("terminal_send", {"text": "ls && pwd"}, rules(ask=["Bash(pwd)"])).action == "ask"

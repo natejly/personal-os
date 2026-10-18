@@ -898,6 +898,12 @@ def _first(args: dict[str, Any], keys: Iterable[str]) -> str | None:
     return None
 
 
+def terminal_line(tool: str, args: dict[str, Any]) -> str | None:
+    """The line a terminal tool types into a shell, None when there is none to judge."""
+    line = args.get("text") if tool == "terminal_send" else args.get("command")
+    return line if isinstance(line, str) and line.strip() else None
+
+
 def subject_for(tool: str, args: dict[str, Any]) -> list[Subject]:
     """What a rule is matched against for this call, per the shared contract. A tool that is not built yet is
     still mapped by name, so the rules written for it work the day it lands."""
@@ -905,8 +911,8 @@ def subject_for(tool: str, args: dict[str, Any]) -> list[Subject]:
     if tool == "shell_run":
         return [Subject("Bash", str(a.get("command") or ""))]
     if tool in TERMINAL_TOOLS:  # a line typed into an agent's terminal is a shell command: the same rules judge it
-        line = a.get("text") if tool == "terminal_send" else a.get("command")
-        return [Subject("Bash", str(line))] if isinstance(line, str) and line.strip() else [Subject(tool, None)]
+        line = terminal_line(tool, a)
+        return [Subject("Bash", line)] if line else [Subject(tool, None)]
     if tool in READ_TOOLS:
         p = _first(a, PATH_KEYS)
         return [Subject("Read", p)] if p else [Subject("Read", None)]
@@ -1180,6 +1186,8 @@ def evaluate(tool: str, args: dict[str, Any], rules: RuleSet | dict[str, Any] | 
         c = args.get("cwd")
         start = _real(c, rl[0] if rl else cwd) if isinstance(c, str) and c else cwd  # an explicit cwd starts from the desk
         return _evaluate_bash(tool, str(args.get("command") or ""), rs, start, desk_folders(rl))
+    if tool in TERMINAL_TOOLS and (line := terminal_line(tool, args)):  # judged like shell_run: split, nested commands, deny > ask > allow
+        return _evaluate_bash(tool, line, rs, cwd, desk_folders(rl))
     # A relative path means what the file tools make of it: the *_local_file tools start at home, the fs_* tools at the
     # desk workspace, else home. A search with no root searches there too.
     cwd = os.path.expanduser("~") if tool in HOME_TOOLS else cwd or os.path.expanduser("~")

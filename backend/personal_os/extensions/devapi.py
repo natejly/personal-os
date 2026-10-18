@@ -3,6 +3,7 @@ and enable, disable and reload. Loading code from a folder is off unless the bac
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -46,10 +47,14 @@ async def adopt(host: ExtensionHost, toolbox: Toolbox, scope: ExtensionScope) ->
         raise
 
 
+_hidden_lock = threading.Lock()  # the routes run in the threadpool: read-modify-write of hiddenViews must not interleave
+
+
 def set_hidden_view(host: ExtensionHost, ctx: ExtensionContext, ext_id: str, hidden: bool) -> None:
     """Turn an extension off (listed in `hiddenViews`) or on, and apply it."""
-    views = [v for v in ctx.hidden_views() if v != ext_id]
-    ctx.set_settings({"hiddenViews": [*views, ext_id] if hidden else views})
+    with _hidden_lock:
+        views = [v for v in ctx.hidden_views() if v != ext_id]
+        ctx.set_settings({"hiddenViews": [*views, ext_id] if hidden else views})
     host.refresh_enabled()
 
 

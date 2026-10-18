@@ -47,6 +47,7 @@ MUTE_AFTER = 5  # consecutive emit failures before a handler is muted for the se
 STATS_WINDOW = 200  # latencies kept per handler for the dev panel's p50 and p95
 ERROR_WINDOW = 10  # failures kept per handler
 TIMEOUT_S = {"emit": 2.0, "collect": 1.0, "pipe": 1.0, "gate": 2.0}
+GATE_CEILING_S = 3.0  # a declared budget cannot hold a tool call longer than this
 STRICT = os.environ.get("GRAIN_HOOKS_STRICT") == "1"
 CALL_KIND = {"emit": "emit", "emit_sync": "emit", "fire": "emit", "collect": "collect", "pipe": "pipe", "pipe_sync": "pipe", "gate": "gate"}
 
@@ -158,7 +159,7 @@ class HookBus:
         """Core handlers were never time-limited; only an explicit budget bounds one. app.stop handlers share the one
         budget ExtensionScope.stop puts on the whole emit."""
         if sub.timeout_s is not None:
-            return sub.timeout_s
+            return min(sub.timeout_s, GATE_CEILING_S) if kind == "gate" else sub.timeout_s
         return None if sub.owner == "core" or sub.hook == "app.stop" else TIMEOUT_S[kind]
 
     async def _invoke(self, sub: Subscription, arg: Any, kind: str) -> Any:

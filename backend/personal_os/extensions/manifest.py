@@ -168,7 +168,7 @@ def _runtime(c: dict[str, Any], permissions: list[str]) -> None:
     seen: set[tuple[str, str]] = set()
     for e in entries:
         _check(set(e) <= _RUNTIME_KEYS and {"slot", "id", "label"} <= set(e), "contributes.runtime entries take slot, id, label and meta")
-        _check(e["slot"] in SLOTS, f"contributes.runtime: {e['slot']!r} is not a runtime slot")
+        _check(isinstance(e["slot"], str) and e["slot"] in SLOTS, f"contributes.runtime: {e['slot']!r} is not a runtime slot")
         _check(isinstance(e["id"], str) and _ID.fullmatch(e["id"]), "contributes.runtime: id must match [a-z0-9-]+")
         _check(_is_str(e["label"]) and isinstance(e.get("meta", {}), dict), "contributes.runtime: label must be text and meta an object")
         _check((e["slot"], e["id"]) not in seen, f"contributes.runtime lists {e['slot']} {e['id']} twice")
@@ -209,7 +209,7 @@ def _presets(c: dict[str, Any], ext_id: str) -> None:
     wanted = c.get("defaults", {}).get("permissionPreset")
     if wanted is not None:
         own = {f"profile:{ext_id}:{p['id']}" for p in items}
-        _check(wanted in own or wanted in presets.BUILTINS, "defaults.permissionPreset must name a built-in preset or one of this manifest's presets")
+        _check(isinstance(wanted, str) and (wanted in own or wanted in presets.BUILTINS), "defaults.permissionPreset must name a built-in preset or one of this manifest's presets")
 
 
 def _defaults(c: dict[str, Any]) -> None:

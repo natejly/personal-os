@@ -869,15 +869,18 @@ def sql_steps(folder: Path) -> list[tuple[int, str, Step]]:
     return sorted(steps, key=lambda s: s[0])
 
 
+_SQL_TRAILER = re.compile(r"(\s|--[^\n]*|/\*.*?\*/)*", re.S)  # what may follow the last statement
+
+
 def _sql_step(script: str) -> Step:
     def step(c: sqlite3.Connection) -> None:
         statement = ""
-        for line in script.splitlines(keepends=True):  # executescript would commit, and the ledger row has to land with the step
-            statement += line
-            if sqlite3.complete_statement(statement):
+        for ch in script:  # executescript would commit, and the ledger row has to land with the step
+            statement += ch
+            if ch == ";" and sqlite3.complete_statement(statement):
                 c.execute(statement)
                 statement = ""
-        if statement.strip():
+        if not _SQL_TRAILER.fullmatch(statement):
             raise ValueError(f"the last statement has no terminating semicolon: {statement.strip()[:60]!r}")
     return step
 

@@ -379,6 +379,7 @@ class ExtensionHost:
         self.routes = ExtensionRoutes(self)  # mounted at /ext by the app: where folder-loaded extensions' routers are served
         self.extensions: dict[str, ExtensionScope] = {}  # in start order
         self.failed: dict[Path, str] = {}  # folders `load_dev` could not load, with the reason
+        self._failed_reloads: set[Path] = set()  # folders whose reload failed: the user already chose their on/off state
         self._startup: list[Handler] = []
         self._shutdown: list[Handler] = []
         self._enabled: dict[str, bool] = {}  # what ext.changed last reported, per extension
@@ -447,6 +448,7 @@ class ExtensionHost:
             raise ValueError(f"{root} is already loaded as {loaded.manifest.id!r}")
         scope: ExtensionScope | None = None
         hide = False
+        first_load = first_load and root not in self._failed_reloads
         try:
             scope = self.load_folder(root, ctx)
             if hide := first_load and scope.toggleable and scope.manifest.id not in ctx.hidden_views():
@@ -462,6 +464,7 @@ class ExtensionHost:
                     ctx.set_settings({"hiddenViews": [v for v in ctx.hidden_views() if v != scope.manifest.id]})
             raise
         self.failed.pop(root, None)
+        self._failed_reloads.discard(root)
         return scope
 
     async def unload(self, ext_id: str) -> None:
@@ -475,7 +478,11 @@ class ExtensionHost:
         if not old.dev or old.root is None or old._ctx is None:
             raise ValueError(f"extension {ext_id!r} is not loaded from a folder, so it cannot be reloaded")
         await self.unload(ext_id)
-        return await self.load_dev(old.root, old._ctx, first_load=False)
+        try:
+            return await self.load_dev(old.root, old._ctx, first_load=False)
+        except Exception:
+            self._failed_reloads.add(old.root)
+            raise
 
     @staticmethod
     def _activate(scope: ExtensionScope, module: ModuleType) -> None:

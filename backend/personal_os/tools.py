@@ -1031,7 +1031,7 @@ class Toolbox:
         call that is not in `specs` (a connector tool the server marks destructive)."""
         ctx = ctx or {}
         kind = kind or self.floor_kind(name, args, ctx)
-        if kind is None:
+        if kind is None or ctx.get("user_accepted"):
             return None
         cfg = self.settings()
         pmode = ctx.get("permission_mode") or permissions.get(cfg, "permissionMode")

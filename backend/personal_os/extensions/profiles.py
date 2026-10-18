@@ -39,7 +39,7 @@ def router(host: ExtensionHost, changed: Callable[[dict[str, Any]], None]) -> AP
             return {"held": []}
         if (held := [c for c in scope.defaults.plan(scope.manifest) if c.looser]) and not confirm:
             return {"held": [c.to_dict() for c in held]}
-        before = scope.db.get_settings()
+        before = scope.defaults.db.get_settings()
         scope.defaults.apply(scope.manifest, confirmed=confirm)
         changed(before)
         host.refresh_enabled()
@@ -48,7 +48,7 @@ def router(host: ExtensionHost, changed: Callable[[dict[str, Any]], None]) -> AP
     @r.post("/profiles/{profile_id}/disable")
     def disable(profile_id: str) -> None:
         scope = profile(profile_id)
-        before = scope.db.get_settings()
+        before = scope.defaults.db.get_settings()
         scope.defaults.revert(profile_id)
         changed(before)
         host.refresh_enabled()

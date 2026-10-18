@@ -129,6 +129,8 @@ test('pasting 200 KB becomes a file attachment; the composer stays responsive', 
   await expect(page.locator('.file-chip').first()).toBeVisible({ timeout: 30_000 })
   expect((await box.inputValue()).length).toBeLessThan(5000)
   await box.type(' summarise this')
+  // Enter does nothing while the file is still uploading; the Send button is the signal that it is done.
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled({ timeout: 30_000 })
   await box.press('Enter')
   await expect(assistants(page).last()).toContainText('MOCK', { timeout: 60_000 })
 })

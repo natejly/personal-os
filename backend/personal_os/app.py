@@ -2148,6 +2148,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         msgs_ = conv["messages"]
         last_user = next((m for m in reversed(msgs_) if _said(m)), None)
         last_asst = next((m for m in reversed(msgs_) if m["role"] == "assistant"), None)
+        llm.usage_context.set({"conversation_id": conv_id, "project_id": conv["project_id"]})  # the router is selected per chat and project
         choice, route_notice = await router.choose(host.runtime, {
             "text": body.content if body.content is not None else str((last_user or {}).get("content") or ""),
             "attachments": bool(body.attachments) if body.content is not None else bool((last_user or {}).get("attachments")),
@@ -5950,7 +5951,8 @@ async def accept_proposal(pid: str, body: ProposalIn | None = None) -> dict[str,
                                                       ((conv or {}).get("settings") or {}).get("tools")),
                            # The chat's permission scope is not set in a route: judge the call as that chat would, then offer it to the extension gate.
                            "settings": chat_settings(claimed["conversation_id"]),
-                           "proposal_only": False, "message_id": claimed["message_id"]}
+                           "proposal_only": False, "message_id": claimed["message_id"],
+                           "user_accepted": True}  # the accept is the approval the destructive floor asks for
     spec = toolbox.specs.get(claimed["tool"])
     danger = spec.danger if spec else MCP_DANGER
     why, _ = await guards.settle(toolbox, ctx, claimed["tool"], claimed["args"], danger=danger, mode="on")

@@ -37,6 +37,7 @@ HOOKS: list[list[Any]] = []
 NAMES = ("g_read", "g_write", "g_off", "g_hang")
 VOLATILE = {"duration_ms", "created_at", "start", "end", "ttft_ms", "ms", "at", "auto_at", "finished_at", "elapsed", "date", "started_at"}
 IDS = re.compile(r"[0-9a-f]{12,}")
+TODAY = re.compile(r"## Today\n[^\n]*")  # the date block changes every day
 
 
 async def _scripted(settings: dict[str, Any], model: str, messages: list[dict[str, Any]],
@@ -91,7 +92,7 @@ def norm(v: Any) -> Any:
     if isinstance(v, float):
         return "<float>"
     if isinstance(v, str):
-        return IDS.sub("<id>", v)
+        return IDS.sub("<id>", TODAY.sub("## Today", v))
     return v
 
 

@@ -110,6 +110,19 @@ def test_a_selected_router_decides_and_is_recorded(ext: Path) -> None:
         assert [r["provider"] for r in turn.context_used["runtime"]] == ["demo/router"]
 
 
+def test_a_router_selected_for_one_chat_or_project_decides_that_chat(ext: Path) -> None:
+    with Harness(ext, SETTINGS) as h:
+        project = appmod.projects.create("Routed")["id"]
+        for scope in ("chat", "project"):
+            h.conversation_id = appmod.convos.create(project if scope == "project" else None, "Harness", "test-model")["id"]
+            if scope == "chat":
+                appmod.convos.update(h.conversation_id, {"settings": {"runtime": {"model.router": "demo/router"}}})
+            else:
+                appmod.projects.update(project, {"runtime": {"model.router": "demo/router"}})
+            status = [d for ev, d in h.chat("hello").events if ev == "status" and d.get("kind") == "route"]
+            assert status and status[0]["why"] == "demo router", scope
+
+
 def test_a_selection_whose_extension_is_gone_ends_the_turn_when_the_default_is_less_private(ext: Path) -> None:
     with Harness(ext, {**SETTINGS, "baseUrl": "https://api.example.com/v1"}) as h:
         h.select("model.client", "gone/client")

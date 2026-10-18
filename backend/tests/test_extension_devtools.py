@@ -191,6 +191,25 @@ def test_a_failed_reload_keeps_the_reason_and_drops_the_old_tools(ext: Path) -> 
     assert load(ext).status_code == 200
 
 
+def test_a_broken_edit_does_not_turn_an_enabled_extension_off(ext: Path) -> None:
+    load_on(ext)
+    edit(ext, "extension.py", lambda t: t + "\n    raise RuntimeError('half done')\n")
+    assert client.post("/dev/extensions/sample/reload").status_code == 400
+    edit(ext, "extension.py", lambda t: t.replace("\n    raise RuntimeError('half done')\n", "\n"))
+    assert load(ext).json()["enabled"] is True  # `grain ext dev` falls back to a load once the reload is refused
+
+
+def test_a_profile_folder_can_be_turned_on_and_off(tmp_path: Path) -> None:
+    root = scaffold("myprof", tmp_path, profile=True)
+    try:
+        load(root)
+        assert client.post("/profiles/myprof/enable", json={"confirm": True}).status_code == 200
+        assert client.post("/profiles/myprof/disable").status_code == 200
+    finally:
+        import asyncio
+        asyncio.run(appmod.host.unload("myprof"))
+
+
 def test_a_failing_start_leaves_nothing_registered_and_a_fixed_folder_loads(ext: Path) -> None:
     edit(ext, "extension.py", lambda t: t + "\n    api.on('app.start', lambda p: 1 / 0)\n")
     declare(ext, "app.start")

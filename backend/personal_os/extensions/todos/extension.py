@@ -8,7 +8,7 @@ import asyncio
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from ... import redact, todo_rules
@@ -97,7 +97,7 @@ class TodosExtension:
 
     # ---- routes ----
     def router(self) -> APIRouter:
-        r = APIRouter()
+        r = APIRouter(dependencies=[Depends(self.api.require_enabled)])
         store, app = self.store, self.api.app
 
         @r.get("/todos")
@@ -196,7 +196,12 @@ class TodosExtension:
             store.trash(id)  # restorable from the trash; Google still gets the delete
             return {"ok": True}
 
-        # ---- Google Tasks <-> todos sync ----
+        return r
+
+    def sync_router(self) -> APIRouter:
+        """The Google Tasks sync routes. Not gated by the view: Settings reads and changes the sync with Lists hidden, and the loop runs regardless."""
+        r = APIRouter()
+
         @r.get("/integrations/google/tasks-sync")
         def google_tasks_sync_status() -> dict[str, Any]:
             return self.tasks_sync.status()
@@ -342,6 +347,7 @@ def activate(api: ExtensionScope) -> None:
     api.provide("todos", ext.store)
     api.provide("tasks_sync", ext.tasks_sync)
     api.router(ext.router())
+    api.router(ext.sync_router())
     ext.register_tools()
     api.on("app.start", ext.start)
     api.recap_section("todos", card=ext.card, facts=ext.facts)

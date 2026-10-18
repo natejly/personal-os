@@ -27,7 +27,7 @@ export default function CommandPalette(): JSX.Element {
   const close = (): void => useStore.setState({ paletteOpen: false })
   const m = useModal(close)
   const [q, setQ] = useState('')
-  const [at, setAt] = useState(0)
+  const [pick, setPick] = useState<string | null>(null) // by key, so entries arriving after a keypress do not move the highlight
   const list = useRef<HTMLUListElement>(null)
   const settings = useStore((s) => s.settings)
   const conversations = useStore((s) => s.conversations)
@@ -55,7 +55,7 @@ export default function CommandPalette(): JSX.Element {
   ]
   const needle = q.trim().toLowerCase()
   const shown = needle ? entries.filter((e) => `${e.label} ${e.hint}`.toLowerCase().includes(needle)) : entries
-  const cur = Math.min(at, Math.max(shown.length - 1, 0))
+  const cur = Math.max(0, shown.findIndex((e) => e.key === pick))
 
   useEffect(() => { list.current?.querySelector('.active')?.scrollIntoView({ block: 'nearest' }) }, [cur])
 
@@ -68,7 +68,7 @@ export default function CommandPalette(): JSX.Element {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
       const n = shown.length
-      if (n) setAt((cur + (e.key === 'ArrowDown' ? 1 : n - 1)) % n)
+      if (n) setPick(shown[(cur + (e.key === 'ArrowDown' ? 1 : n - 1)) % n].key)
     } else if (e.key === 'Enter') {
       e.preventDefault()
       go(shown[cur])
@@ -84,7 +84,7 @@ export default function CommandPalette(): JSX.Element {
           className="palette-input"
           placeholder="Go to, create, open…"
           value={q}
-          onChange={(e) => { setQ(e.target.value); setAt(0) }}
+          onChange={(e) => { setQ(e.target.value); setPick(null) }}
           onKeyDown={onKey}
           aria-controls="palette-list"
           aria-activedescendant={shown[cur] ? `palette-${cur}` : undefined}
@@ -97,7 +97,7 @@ export default function CommandPalette(): JSX.Element {
               role="option"
               aria-selected={i === cur}
               className={i === cur ? 'active' : ''}
-              onMouseMove={() => i !== cur && setAt(i)}
+              onMouseMove={() => i !== cur && setPick(e.key)}
               onClick={() => go(e)}
             >
               <span>{e.label}</span>

@@ -370,6 +370,30 @@ def test_a_tool_with_a_preview_shows_its_lines_on_the_approval_card(tmp_path):
         appmod.coding.recipes.archive(saved["recipe_id"])
 
 
+def test_run_now_on_a_recipe_job_starts_the_recipe_run_and_its_dry_run_is_refused(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from personal_os import app as appmod
+    c = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    saved = appmod.coding.recipes.save({"name": "run-now", "prompt": "do it", "repo_path": str(repo), "driver": "claude", "verify": {"command": "true"}}, "user")
+    started: list[tuple[str, str | None]] = []
+
+    async def run(ref, inputs, origin, ctx, *, version=None, job_id=None):
+        started.append((origin, job_id))
+        return {"run_id": "rr1", "session_id": None, "status": "working"}
+    monkeypatch.setattr(appmod.coding.recipes, "run", run)
+    job = c.post("/jobs", json={"name": "rj", "kind": "coding_recipe", "prompt": '{"recipe": "run-now", "version": 1, "cron": "0 3 * * *"}'}).json()
+    try:
+        out = c.post(f"/jobs/{job['id']}/run").json()
+        assert out["ok"] and out["run_id"] == "rr1" and started == [("palette", job["id"])]
+        assert appmod.jobs.get(job["id"])["last_run_id"] == "rr1"
+        assert c.post(f"/jobs/{job['id']}/dry_run").status_code == 400 and len(started) == 1
+    finally:
+        c.delete(f"/jobs/{job['id']}")
+        appmod.coding.recipes.archive(saved["recipe_id"])
+
+
 def test_a_dispatched_call_carries_its_id_to_the_result_error_and_post_hooks():
     seen: dict[str, Any] = {}
     host = ExtensionHost()

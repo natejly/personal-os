@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 from ... import guards, permrules, shell
 from ...db import new_id
 from ...dispatch import dispatch_tool
+from ...jobs import Jobs
 from ...workers import fence_report
 from . import sessions
 from .sessions import AGENTS, MODEL_RE, CodingError, check_branch, worktree_path
@@ -221,6 +222,14 @@ def wake_text(run: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return f"{WAKE_HEADER}\n\n{head}\n{body}", {"ids": [], "tainted": True, "title": "a coding recipe run", "attachments": []}
 
 
+def failure_text(run: dict[str, Any]) -> str | None:
+    """How a run that did not pass ended, in a line for the job's last error; None for a pass or a run still going."""
+    if run["status"] in ("passed", "working", "queued", "verifying"):
+        return None
+    tail = (run["verify_tail"] or "").strip().splitlines()
+    return f"Recipe run {run['status']}" + (f": {tail[-1][:200]}" if tail else "")
+
+
 class Recipes:
     """The recipe tables, and the runs of recipes over `coding.sessions`."""
 
@@ -376,7 +385,16 @@ class Recipes:
         if run["origin"] == "chat" and run["conversation_id"]:
             self.coding.api.app.owe_wake(run["conversation_id"], *wake_text(run))
         elif run["origin"] == "job":
+            self._settle_job(run)
             self.coding.api.bus.fire("job.done", {"job_id": run["job_id"], "run_id": run["id"], "outcome": run["status"]})
+
+    def _settle_job(self, run: dict[str, Any]) -> None:
+        """A job's run ended: a pass clears the job's failure streak, a failure extends it and shows on the job as its last error."""
+        if run["status"] == "stopped":
+            return
+        jobs = Jobs(self.db)
+        jobs.record_outcome(run["job_id"], run["status"] == "passed")
+        jobs.mark_launched(run["job_id"], run["id"], failure_text(run))
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:

@@ -26,6 +26,9 @@ class TriggerAdapter(Protocol):
     def prompt_block(self, fire: dict[str, Any]) -> str:
         """What the fire found, as data for the run's prompt (text others wrote); empty when there is none."""
 
+    # Optional: `async def start_run(self, job) -> str`. A kind whose fire is not a chat run starts its own run when the
+    # user runs the job by hand, and returns that run's id; a ValueError says why it could not start.
+
 
 class Triggers:
     """The trigger kinds extensions registered, by name."""

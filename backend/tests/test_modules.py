@@ -136,6 +136,15 @@ class RouteTests(unittest.TestCase):
     def test_sync_routes_report_status(self) -> None:
         self.assertEqual(client.get("/integrations/google/tasks-sync").status_code, 200)
 
+    def test_sync_routes_answer_while_lists_is_hidden_but_the_todo_routes_do_not(self) -> None:
+        from personal_os import app as appmod
+        appmod.db.set_settings({"hiddenViews": ["todos"]})
+        try:
+            self.assertEqual(client.get("/integrations/google/tasks-sync").status_code, 200)
+            self.assertEqual(client.get("/todos").status_code, 404)
+        finally:
+            appmod.db.set_settings({"hiddenViews": []})
+
     def test_sync_run_maps_errors(self) -> None:
         # Not-connected is a 409 the UI turns into "connect Google"; anything else is a 502.
         target = tasks_sync

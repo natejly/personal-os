@@ -444,7 +444,9 @@ host.load_builtin("google", _ext_ctx)
 google: Google = _ext_ctx.services["google"]()
 app.include_router(setup_router(settings, db.set_settings, lambda: google.status()["connected"]))
 app.include_router(providers_router(db.get_settings, db.set_settings, db.secrets, ensure_embedding_model))
-host.mount(app, host.load_builtin("todos", _ext_ctx))
+# Not host.mount: the todos router gates itself, but the Google Tasks sync routes answer with the Lists view off.
+for _r in host.load_builtin("todos", _ext_ctx).routers:
+    app.include_router(_r)
 todos, tasks_sync = _ext_ctx.services["todos"](), _ext_ctx.services["tasks_sync"]()
 # Not host.mount: the send-undo bar and the Planner settings read the Mail routes with the Mail view off.
 for _r in host.load_builtin("mail", _ext_ctx).routers:
@@ -5719,6 +5721,13 @@ async def run_job_now(id: str, test: bool = False) -> dict[str, Any]:
     ok, why = await job_policy.admit(job, fire)
     if not ok:
         raise HTTPException(409, f"Not started: {why}")
+    if (start_run := getattr(host.triggers[job["kind"]], "start_run", None) if job["kind"] in host.triggers else None) is not None:
+        try:
+            run_id = await start_run(job)
+        except ValueError as e:
+            raise HTTPException(409, f"Not started: {e}") from e
+        jobs.mark_launched(job["id"], run_id)
+        return {"ok": True, "run_id": run_id, "conversation_id": None, "desk_id": None}
     run_id = await _launch_job(job, fire)
     jobs.mark_launched(job["id"], run_id)
     row = run_store.get(run_id) if run_id else None
@@ -5788,6 +5797,8 @@ async def dry_run_job(id: str) -> dict[str, Any]:
     job = _known_job(id)
     if job.get("target") == "desk":
         raise HTTPException(400, "A desk job has no preview: its desk shows you a plan before it does anything")
+    if job["kind"] == "coding_recipe":
+        raise HTTPException(400, "A recipe job has no preview: its run shows the recipe's exact settings before the agent starts")
     t = time.time()
     fire = {"job_id": job["id"], "job": job["name"], "kind": job["kind"], "cron": job["cron"], "timezone": job["timezone"],
             "due_at": t, "fired_at": t, "late_seconds": 0.0, "missed_slots": 0, "late": False, "manual": True, "dry_run": True}

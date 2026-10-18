@@ -511,6 +511,33 @@ def test_a_job_whose_run_cannot_start_spends_the_slot_and_tries_the_next(rig):
     assert fire is None and jobs.fired == [] and jobs.skips[0][1] == "recipe_not_started" and nxt > 1_000_000.0 + 86_400
 
 
+def test_a_job_runs_failure_shows_on_the_job_and_a_pass_clears_it(rig):
+    from personal_os.jobs import Jobs
+    rig.recipes.save(rig.body(), "user")
+    jobs = Jobs(rig.coding.api.db)
+    job = jobs.create("nightly", "0 3 * * *", "p")
+    out = rig.run(origin="job", job_id=job["id"])
+    assert finish(rig, out, 1, 1)["status"] == "failed"
+    row = jobs.get(job["id"])
+    assert row["consecutive_failures"] == 1 and row["last_error"].startswith("Recipe run failed") and row["last_run_id"] == out["run_id"]
+    out = rig.run(origin="job", job_id=job["id"])
+    assert finish(rig, out, 0)["status"] == "passed"
+    row = jobs.get(job["id"])
+    assert row["consecutive_failures"] == 0 and row["last_error"] is None
+
+
+def test_run_now_starts_a_palette_run_that_does_not_count_toward_the_failure_streak(rig):
+    from personal_os.jobs import Jobs
+    rig.recipes.save(rig.body(), "user")
+    jobs = Jobs(rig.coding.api.db)
+    job = jobs.create("nightly", "0 3 * * *", "p")
+    run_id = asyncio.run(RecipeTrigger(rig.coding).start_run({**job_row(rig), "id": job["id"]}))
+    run = rig.recipes.get_run(run_id)
+    assert (run["origin"], run["job_id"]) == ("palette", job["id"])
+    assert finish(rig, {"run_id": run_id, "session_id": run["session_id"]}, 1, 1)["status"] == "failed"
+    assert jobs.get(job["id"])["consecutive_failures"] == 0
+
+
 def test_a_job_run_waits_for_a_free_session_and_gives_up_after_ten_minutes(rig, monkeypatch):
     rig.recipes.save(rig.body(), "user")
     monkeypatch.setattr(rig.coding.sessions, "_live", lambda: [object()] * 3)

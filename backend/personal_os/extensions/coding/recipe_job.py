@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from ... import autoreview, shell
 from ...jobs import next_fire, valid_cron
-from .recipes import RecipeError
+from .recipes import RecipeError, failure_text
 from .sessions import CodingError
 
 if TYPE_CHECKING:
@@ -57,6 +57,19 @@ class RecipeTrigger:
             return str(e)
         return None
 
+    async def start_run(self, job: dict[str, Any], origin: str = "palette") -> str:
+        """Start the job's recipe run now and return its id. A clock slot starts it as "job"; Run now is the user's own
+        start ("palette"), which fails at once when no session is free and never counts toward the job's failure streak."""
+        cfg = config(job)
+        mode = autoreview.mode_of(self.coding.tb.settings())
+        ctx = {"conversation_id": None, "run_id": None, "settings": self.coding.tb.settings(),  # Allow everything does not lift an unattended run to bypass
+               "permission_mode": "auto" if mode == "allow_all" else mode, "tainted": False, "taint_sources": []}
+        try:
+            out = await self.coding.recipes.run(cfg["recipe"], cfg.get("inputs"), origin, ctx, version=cfg["version"], job_id=job["id"])
+        except shell.ShellError as e:
+            raise RecipeError(str(e)) from e
+        return out["run_id"]
+
     async def poll(self, jobs: Jobs, job: dict[str, Any], at: float) -> tuple[None, float]:
         """One look: when the slot after the last run (or after the job was made) has come, start a run and book the next.
         Always returns no fire record, because the run is not a chat turn."""
@@ -64,17 +77,15 @@ class RecipeTrigger:
         due = next_fire(cfg["cron"], job["timezone"], job.get("last_fired_at") or job["created_at"])
         if due > at:
             return None, due
-        mode = autoreview.mode_of(self.coding.tb.settings())
-        ctx = {"conversation_id": None, "run_id": None, "settings": self.coding.tb.settings(),  # Allow everything does not lift an unattended run to bypass
-               "permission_mode": "auto" if mode == "allow_all" else mode, "tainted": False, "taint_sources": []}
         nxt = next_fire(cfg["cron"], job["timezone"], at)
         try:
-            out = await self.coding.recipes.run(cfg["recipe"], cfg.get("inputs"), "job", ctx, version=cfg["version"], job_id=job["id"])
-        except (RecipeError, CodingError, shell.ShellError) as e:  # this slot is spent; the next one tries again
+            run_id = await self.start_run(job, "job")
+        except (RecipeError, CodingError) as e:  # this slot is spent; the next one tries again
             log.info("coding_recipe job %s could not start its run: %s", job["name"], e)
             jobs.record_skip(job["id"], "recipe_not_started", at, due)
             return None, nxt
-        jobs.mark_fired(job["id"], fired_at=at, due_at=due, next_due_at=nxt, run_id=out["run_id"])
+        jobs.mark_fired(job["id"], fired_at=at, due_at=due, next_due_at=nxt, run_id=run_id,
+                        error=failure_text(self.coding.recipes.get_run(run_id)))  # a run that failed to start has already settled
         self.coding.api.bus.fire("job.fired", {"job_id": job["id"], "kind": "coding_recipe", "trigger": "clock"})
         return None, nxt
 

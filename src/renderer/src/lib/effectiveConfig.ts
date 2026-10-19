@@ -50,8 +50,8 @@ const LOOK_KEYS = /^(theme|accent|font|codeFont|zoom)/
 /** The Settings tab where a key is edited, or null for a key with no panel of its own. */
 export function tabFor(key: string): SettingsTab | null {
   if (PERMISSION_KEYS.test(key)) return 'permissions'
-  if (MODEL_KEYS.test(key)) return 'model'
-  if (LOOK_KEYS.test(key)) return 'appearance'
-  if (key === 'hiddenViews' || key.startsWith('sidebar')) return 'sidebar'
+  if (MODEL_KEYS.test(key)) return 'models'
+  if (LOOK_KEYS.test(key)) return 'general'
+  if (key === 'hiddenViews' || key.startsWith('sidebar')) return 'layout'
   return null
 }

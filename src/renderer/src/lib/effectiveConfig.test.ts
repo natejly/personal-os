@@ -42,8 +42,8 @@ test('rows filter by words, by source kind and to what differs from the default'
 test('a key links to the tab that edits it', () => {
   assert.equal(tabFor('permissionMode'), 'permissions')
   assert.equal(tabFor('tools.shell_run'), 'permissions')
-  assert.equal(tabFor('defaultEffort'), 'model')
-  assert.equal(tabFor('accent'), 'appearance')
-  assert.equal(tabFor('hiddenViews'), 'sidebar')
+  assert.equal(tabFor('defaultEffort'), 'models')
+  assert.equal(tabFor('accent'), 'general')
+  assert.equal(tabFor('hiddenViews'), 'layout')
   assert.equal(tabFor('toolDeferAbove'), null)
 })

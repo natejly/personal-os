@@ -8,7 +8,7 @@
 .settings-tab-divider { height: 1px; margin: 6px 10px; background: var(--border); flex: none; }
 
 .settings-pane { scroll-behavior: auto; }
-.settings-modal .settings-pane > section.set-head { padding-top: 20px; padding-bottom: 4px; gap: 4px; }
+.settings-modal .settings-pane > section.set-head { padding-top: 20px; padding-bottom: 4px; display: flex; flex-direction: column; gap: 6px; }
 .settings-pane > section.set-head h3 { margin: 0; font-size: 17px; }
 .settings-pane .set-help { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
 /* Sections stacked under the header share one gutter. */
@@ -24,3 +24,6 @@
   .settings-tabs button { align-items: center; }
   .settings-tabs button > span { flex-direction: row; }
 }
+/* Runtime slots sit inside one group, so they are spaced and divided here rather than by the section rule above. */
+.settings-pane .set-sec[data-testid^='runtime-'] { margin-top: 14px; }
+.settings-pane .set-sec[data-testid^='runtime-'] + .set-sec[data-testid^='runtime-'] { padding-top: 12px; border-top: 1px solid var(--border); border-radius: 0; }

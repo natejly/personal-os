@@ -301,7 +301,6 @@ export default function TodosView(): JSX.Element {
             <div className="empty-state">
               <ListChecks size={28} />
               <h2>{showDone || board ? `Nothing on ${listLabel}` : 'All clear'}</h2>
-              <p>Type something in the box above and press Enter, or ask the assistant to keep track of it for you.</p>
             </div>
           )}
           {board ? <TodoBoard todos={shown} groupBy={groupBy} list={list || null} projectId={scope === 'all' || scope === 'personal' ? null : scope} onChanged={() => refreshTodos(scope, true, sort)} />

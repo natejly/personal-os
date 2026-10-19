@@ -345,7 +345,8 @@ def test_a_refused_card_becomes_a_denial_in_a_worker_and_a_workflow_step() -> No
     assert asyncio.run(appmod.subagent_mgr._ask(child, "g:6", "shell_run", {"command": "rm -rf /"}, False, "external")) == ("deny", None)
     assert "g:6" not in appmod.subagent_mgr.approvals
     run = {"id": "guards-run4", "conversation_id": None}
-    assert asyncio.run(appmod.workflow_engine._ask(run, {}, "g:7", "shell_run", {"command": "rm -rf /"}, False, "external", asyncio.Event())) is False
+    with pytest.raises(Exception, match="core guards"):
+        asyncio.run(appmod.workflow_engine._ask(run, {}, "g:7", "shell_run", {"command": "rm -rf /"}, False, "external", asyncio.Event()))
     assert appmod.run_store.approval("g:6") is None and appmod.run_store.approval("g:7") is None
 
 

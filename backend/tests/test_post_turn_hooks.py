@@ -675,6 +675,37 @@ def test_deleted_fires_for_a_delete_and_a_forget(mem: tuple[Memories, HookBus]) 
     assert gone == ["alpha", "beta"]
 
 
+def test_restore_announces_the_row_that_came_back_and_the_one_that_stepped_aside(mem: tuple[Memories, HookBus]) -> None:
+    memories, hooks = mem
+    a = memories.create(None, "alpha", kind="fact", source="user")
+    b = memories.supersede(a["id"], "alpha two", source="auto")
+    c = memories.create(None, "gamma", kind="fact", source="user")
+    memories.invalidate(c["id"])
+    back: list[Any] = []
+    gone: list[Any] = []
+    sub(hooks, "memory.written", lambda p: back.append(p["memory"]["content"]))
+    sub(hooks, "memory.deleted", lambda p: gone.append(p["memory"]["content"]))
+    memories.restore(a["id"])
+    assert back == ["alpha"] and gone == [b["content"]]
+    back.clear()
+    gone.clear()
+    memories.restore(c["id"])
+    assert back == ["gamma"] and gone == []
+
+
+def test_a_merge_announces_the_stored_row_once_and_every_row_it_replaced(mem: tuple[Memories, HookBus]) -> None:
+    memories, hooks = mem
+    a = memories.create(None, "alpha one", kind="fact", source="user", expires_at=time.time() + 3600)
+    b = memories.create(None, "beta two", kind="fact", source="user")
+    written: list[Any] = []
+    gone: list[Any] = []
+    sub(hooks, "memory.written", lambda p: written.append(p["memory"]))
+    sub(hooks, "memory.deleted", lambda p: gone.append(p["memory"]["content"]))
+    merged = memories.supersede_many([a["id"], b["id"]], "merged ab")
+    assert len(written) == 1 and written[0]["expires_at"] == merged["expires_at"] is None
+    assert gone == ["alpha one", "beta two"]
+
+
 def test_a_handler_cannot_change_the_row_the_caller_holds(mem: tuple[Memories, HookBus]) -> None:
     memories, hooks = mem
     sub(hooks, "memory.written", lambda p: p["memory"].update(content="tampered"))

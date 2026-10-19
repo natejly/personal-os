@@ -20,7 +20,7 @@ from typing import Any
 from . import llm, providers, redact
 from .db import Database, new_id, now, row_to_dict
 from .learn import _parse_json
-from .repos import ALL, Graph, Memories
+from .repos import ALL, Graph, Memories, MemoryRefused
 
 log = logging.getLogger("personal_os")
 
@@ -303,6 +303,8 @@ class Consolidator:
                 ok = self._apply_entities(pl)
             else:
                 ok = self._apply_memories(p["kind"], pl)
+        except MemoryRefused:  # the route says an extension refused; the proposal stays pending
+            raise
         except Exception:  # noqa: BLE001
             log.exception("applying proposal %s failed", id)
             ok = False

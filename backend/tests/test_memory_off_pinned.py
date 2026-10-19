@@ -129,6 +129,18 @@ def test_editing_text_and_pin_together_fires_memory_written_once_with_the_final_
     assert new["pinned"] and seen == [1]
 
 
+def test_editing_text_and_moving_scope_together_fires_memory_written_once() -> None:
+    mem, seen = appmod.memories, []
+    pid = appmod.projects.create("mover")["id"]
+    old = mem.create(pid, "User plays chess on Sundays")
+    sub = appmod.host.bus.subscribe("memory.written", lambda p: seen.append(p["memory"]["project_id"]), owner="test", order=0)
+    try:
+        new = client.put(f"/memories/{old['id']}", json={"content": "User plays chess on Mondays", "move_to_global": True}).json()
+    finally:
+        sub.dispose()
+    assert new["project_id"] is None and seen == [None]
+
+
 def test_blank_content_is_a_400_not_a_500() -> None:
     old = appmod.memories.create(None, "User keeps bees")
     assert client.put(f"/memories/{old['id']}", json={"content": "   "}).status_code == 400

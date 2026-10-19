@@ -401,6 +401,25 @@ def test_full_run_with_fan_out_and_approval() -> None:
     run(go())
 
 
+def test_a_step_the_core_refuses_fails_with_the_reason_and_opens_no_card() -> None:
+    reset()
+    w = save({"name": "refused-flow", "steps": [{"id": "w", "tool": "wf_write", "approval": "required", "args": {"path": "/x"}}]})
+    real = runs.core_refusal
+    runs.core_refusal = lambda tool, args, ctx: "blocked by test"
+    try:
+        async def go() -> None:
+            r = store.create_run(w, {})
+            engine.approve(r["id"], r["plan_digest"])
+            cur = await until(lambda: (g := store.get_run(r["id"]))["status"] == "failed" and g)
+            err = cur["steps"][0]["error"]
+            check("blocked by test" in err and "declined" not in err, "the step names the refusal, not a decline")
+            check(pending(r["id"]) == [] and CALLS.get("wf_write") is None, "no card was opened and the tool did not run")
+
+        run(go())
+    finally:
+        runs.core_refusal = real
+
+
 def test_denied_step_fails_and_blocks_dependants() -> None:
     reset()
     d = {"name": "deny-flow", "steps": [

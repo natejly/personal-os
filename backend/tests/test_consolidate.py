@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from personal_os import consolidate  # noqa: E402
 from personal_os.consolidate import Consolidator  # noqa: E402
 from personal_os.db import Database  # noqa: E402
-from personal_os.repos import Graph, Memories  # noqa: E402
+from personal_os.repos import Graph, Memories, MemoryRefused  # noqa: E402
 
 DAY = 86400
 
@@ -133,6 +133,22 @@ def test_apply_merge_memories(env, monkeypatch) -> None:
     assert [r["id"] for r in m.list(None, q="Texas")] == [rows[0]["id"]]  # indexed in FTS
     assert m.get(a["id"])["invalid_at"] and m.get(b["id"])["invalid_at"]  # originals kept as history
     assert c.apply(p["id"])["status"] == "applied"  # idempotent: second apply is a no-op
+
+
+def test_a_refused_merge_stays_pending_and_raises(env, monkeypatch) -> None:
+    from personal_os.extensions.hooks import Deny
+    db, m, g, c = env
+    m.create(None, "User lives in Austin")
+    m.create(None, "User lives in Austin, Texas")
+    _stub(monkeypatch, {"proposals": [{"kind": "merge_memories", "ids": ["C1", "C2"], "text": "User lives in Austin, Texas"}]})
+    p = _propose(c)[0]
+    sub = m.hooks.subscribe("memory.before_write", lambda _p: Deny("nope"), owner="test", order=1)
+    try:
+        with pytest.raises(MemoryRefused):
+            c.apply(p["id"])
+    finally:
+        sub.dispose()
+    assert c.get(p["id"])["status"] == "pending" and len(m.list(None)) == 2
 
 
 def test_stale_when_a_memory_changed(env, monkeypatch) -> None:

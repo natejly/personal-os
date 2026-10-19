@@ -296,6 +296,27 @@ def test_several_finished_workers_fold_into_one_wake() -> None:
     assert len(seat("wake")) == 1
 
 
+def test_a_reply_started_while_a_report_handler_awaits_is_not_overlapped_by_the_wake() -> None:
+    cid = new_conv()
+    WORKER["Quick job"] = [{"text": "quick result"}]
+    FRONT[:] = [delegate("Quick job"), {"text": "Started."}, {"text": "Typed meanwhile.", "delay": 0.6}]
+    WAKE[:] = [{"text": "It is done."}]
+
+    async def slow(_p: dict[str, Any]) -> dict[str, str]:
+        await asyncio.sleep(0.3)
+        return {"text": "note"}
+    h = appmod.host.bus.subscribe("worker.report", slow, owner="test", order=1)
+    try:
+        say(cid)
+        wait(lambda: any(w["status"] == "done" for w in workers_of(cid)), "the worker to finish")
+        say(cid, "typed while the handler awaits")
+        msgs = settle(cid)
+    finally:
+        h.dispose()
+    assert [(m["role"], m.get("kind")) for m in msgs] == [("user", None), ("assistant", None), ("user", None), ("assistant", None), ("user", "wake"), ("assistant", None)]
+    assert "Typed meanwhile." in msgs[3]["content"] and msgs[5]["content"] == "It is done."
+
+
 def test_a_second_trigger_during_a_slow_report_handler_does_not_rebuild_the_wake() -> None:
     cid = new_conv()
     for g in ("Job alpha", "Job beta"):

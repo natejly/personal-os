@@ -4235,6 +4235,10 @@ async def _wake_conversation(conv_id: str) -> None:
     except BaseException:
         unclaim()
         raise
+    if bus.answering(conv_id):  # a reply started while the handlers awaited: this wake runs when it ends
+        unclaim()
+        _wake_waiting.add(conv_id)
+        return
     if desk_id := row["settings"].get("deskId"):
         # A desk-bound chat is woken through its desk, so the turn runs under the desk runtime, supervisor and settle.
         started = _launch_desk(desk_id, text, MESSAGE_FROM, wake=wake)
@@ -6689,7 +6693,7 @@ def update_memory(id: str, body: MemoryPatch) -> dict[str, Any]:
     content = patch.pop("content", None)
     if content is not None and content.strip() and content.strip() != cur["content"]:
         # A hand edit is a new version, like the model's: the old wording stays in history and can be restored.
-        new = memories.supersede(id, content, kind=patch.pop("kind", None), source="user", keep_pinned=True, pinned=patch.pop("pinned", None))
+        new = memories.supersede(id, content, kind=patch.pop("kind", None), source="user", keep_pinned=True, pinned=patch.pop("pinned", None), announce=False)
         if not new:
             raise HTTPException(409, "This memory is no longer current")
         id = new["id"]
@@ -6697,7 +6701,7 @@ def update_memory(id: str, body: MemoryPatch) -> dict[str, Any]:
         if not content.strip():
             raise HTTPException(400, "Memory content cannot be empty")
         patch["content"] = content  # unchanged text is a no-op
-    m = memories.get(id) if id != cur["id"] and not patch else memories.update(id, patch)  # the new version already fired memory.written
+    m = memories.update(id, patch)  # a new version is announced here, once, with the rest of the patch applied
     if not m:
         raise HTTPException(404)
     return m

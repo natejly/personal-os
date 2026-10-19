@@ -690,7 +690,7 @@ class Memories:
     # ---- non-destructive changes: the old row stays as history, only `invalid_at` says it no longer holds ----
     def supersede(self, old_id: str, new_content: str, kind: str | None = None, source: str = "auto",
                   provenance: dict[str, Any] | None = None, keep_pinned: bool = False,
-                  expires_at: float | None = None, pinned: bool | None = None) -> dict[str, Any] | None:
+                  expires_at: float | None = None, pinned: bool | None = None, announce: bool = True) -> dict[str, Any] | None:
         """Replace a memory with a new version, keeping the old one as history. Returns the new row.
         The new row expires at `expires_at` when given, else when the old one did; it is pinned as `pinned` says, else as the old one was.
 
@@ -718,7 +718,8 @@ class Memories:
             c.execute("UPDATE memories SET invalid_at=?, superseded_by=? WHERE id=?", (t, mid, old_id))
             c.execute("DELETE FROM memories_fts WHERE memory_id=?", (old_id,))
         created = self.get(mid)
-        self._written(created)
+        if announce:
+            self._written(created)
         return created
 
     def supersede_many(self, old_ids: list[str], new_content: str, kind: str | None = None, source: str = "auto",
@@ -732,7 +733,7 @@ class Memories:
         ends = [o.get("expires_at") for o in olds]
         if expires_at is None and all(e is not None for e in ends):
             expires_at = max(ends)
-        mem = self.supersede(olds[0]["id"], new_content, kind=kind, source=source, provenance=provenance, expires_at=expires_at)
+        mem = self.supersede(olds[0]["id"], new_content, kind=kind, source=source, provenance=provenance, expires_at=expires_at, announce=False)
         if not mem:
             return None
         t = now()
@@ -742,7 +743,11 @@ class Memories:
             for o in olds[1:]:
                 c.execute("UPDATE memories SET invalid_at=?, superseded_by=? WHERE id=?", (t, mem["id"], o["id"]))
                 c.execute("DELETE FROM memories_fts WHERE memory_id=?", (o["id"],))
-        return self.get(mem["id"])
+        merged = self.get(mem["id"])
+        self._written(merged)
+        for o in olds:
+            self._deleted(o)
+        return merged
 
     def invalidate(self, id: str) -> dict[str, Any] | None:
         """Soft forget: the row leaves context and search but stays in history. Pinned rows are refused (None)."""
@@ -766,15 +771,19 @@ class Memories:
             m = self.update(id, {"expires_at": None}) or m
         if m["invalid_at"] is None:
             return m
+        nxt = self.get(m["superseded_by"]) if m["superseded_by"] else None
         with self.db.tx() as c:
-            nxt = m["superseded_by"]
             if nxt:
-                c.execute("UPDATE memories SET invalid_at=? WHERE id=? AND invalid_at IS NULL", (t, nxt))
-                c.execute("DELETE FROM memories_fts WHERE memory_id=?", (nxt,))
+                c.execute("UPDATE memories SET invalid_at=? WHERE id=? AND invalid_at IS NULL", (t, nxt["id"]))
+                c.execute("DELETE FROM memories_fts WHERE memory_id=?", (nxt["id"],))
             c.execute("UPDATE memories SET invalid_at=NULL, superseded_by=NULL, updated_at=? WHERE id=?", (t, id))
             c.execute("DELETE FROM memories_fts WHERE memory_id=?", (id,))
             c.execute("INSERT INTO memories_fts(content, memory_id) VALUES(?,?)", (m["content"], id))
-        return self.get(id)
+        restored = self.get(id)
+        self._written(restored)
+        if nxt and nxt["invalid_at"] is None:
+            self._deleted(nxt)
+        return restored
 
     def history(self, id: str) -> list[dict[str, Any]]:
         """The supersession chain through `id`, oldest first."""

@@ -103,7 +103,7 @@ test('visual: sidebar, project memory, settings memory, jobs', async ({ grain })
   // ---- d. settings > memory
   await soft('settings memory', async () => {
     await page.locator('.settings-btn').click()
-    await page.getByRole('dialog', { name: 'Settings' }).getByRole('tab', { name: 'Memory' }).click()
+    await page.getByRole('dialog', { name: 'Settings' }).locator('#settings-tab-context').click()
     await page.waitForTimeout(1200)
     await shot('settings-memory')
     await page.keyboard.press('Escape')

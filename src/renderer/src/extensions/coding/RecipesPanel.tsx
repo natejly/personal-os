@@ -107,9 +107,8 @@ export default function RecipesPanel(): JSX.Element {
   }
   return (
     <>
-      <p className="set-help">A recipe is a coding task you can repeat: a prompt, a repository, how the agent is set up, and a verify command. A run is done only when that command exits 0, whatever the agent says. A version the assistant saved waits here for your approval.</p>
       {error && <p className="set-help" role="status">{error}</p>}
-      {recipes.length === 0 && <p className="set-help">No recipes yet. Ask the assistant to save one, or add one below.</p>}
+      {recipes.length === 0 && <p className="set-help">No recipes yet.</p>}
       {recipes.map((r) => (
         <div key={r.id} className="set-row" data-testid={`recipe-${r.name}`}>
           <b>{r.name}</b> <small>v{r.current_version}{r.created_by === 'agent' ? ' (saved by the assistant)' : ''}</small>

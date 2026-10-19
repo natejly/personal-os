@@ -23,7 +23,7 @@ export default function ExtensionsDev({ onChanged }: { onChanged: () => Promise<
         {!!listing?.failed.length && <button type="button" className="ghost-btn" onClick={() => api.devExtensions.clearFailed().then(load).catch((e: Error) => setError(e.message))}>Clear failed loads</button>}
         {error && <span className="test-msg" role="status">{error}</span>}
       </div>
-      {listing && !listing.live && <p className="set-help">Reloading needs the backend to be started with GRAIN_EXT_DEV=1.</p>}
+      {listing && !listing.live && <p className="set-help">Reload needs GRAIN_EXT_DEV=1.</p>}
       {listing?.extensions.map((x) => (
         <details key={x.id} className="adv-group">
           <summary>{x.name} <small>{x.id} {x.version} {x.tier}{x.enabled ? '' : ' (off)'}{mutedHooks(x).length ? ' (muted handlers)' : ''}</small></summary>

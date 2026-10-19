@@ -119,7 +119,6 @@ function DriftBanner({ tool, onAccept }: { tool: McpTool; onAccept: () => void }
     <details className={`mcp-drift ${d.quarantined ? 'quarantined' : ''}`} open={d.quarantined}>
       <summary>
         <b>{d.quarantined ? `Quarantined: ${d.previous.schema_hash ? 'definition changed' : 'new tool'}` : 'Definition changed'}</b>
-        {d.quarantined && <span className="muted"> — withheld from the assistant until you accept it</span>}
       </summary>
       {diff.description.length > 0 && (
         <pre className="mcp-diff">{diff.description.filter((l) => !l.startsWith('---') && !l.startsWith('+++')).map((l, i) => (
@@ -134,7 +133,6 @@ function DriftBanner({ tool, onAccept }: { tool: McpTool; onAccept: () => void }
       )}
       <div className="row-actions">
         <button className="primary-btn sm" onClick={onAccept}>{d.quarantined ? (d.previous.schema_hash ? 'Accept change' : 'Accept tool') : 'Mark as reviewed'}</button>
-        <span className="muted small">Accepting does not turn the tool on: it still asks first.</span>
       </div>
     </details>
   )
@@ -156,7 +154,6 @@ function ScopedGrants({ tool, grants }: { tool: McpTool; grants: McpGrant[] }): 
           {g.schema_hash && g.schema_hash !== tool.schema_hash && <span className="tag ask">stale</span>}
         </li>
       ))}
-      <li className="small muted">Revoke these in Settings → Permissions → Grants.</li>
     </ul>
   )
 }
@@ -360,14 +357,7 @@ export default function McpSettings(): JSX.Element {
 
   return (
     <div className="mcp">
-      {/* One line: what a connector is lives on the MCP link's hover and in docs/connectors.md, not above every sub-tab. */}
-      <p className="muted small">
-        <a href="https://modelcontextprotocol.io/" target="_blank" rel="noreferrer"
-          title="A connector is an MCP server: another program that hands the assistant extra tools. A local one runs on this Mac under your account; a remote one is a web address reached with the headers or sign-in you give it.">MCP</a> servers
-        that add tools. Nothing runs until you add it here{allowAll
-          ? <>, and their tools <b>run without asking</b> while &ldquo;Allow all domains and MCP servers&rdquo; is on</>
-          : <>; their tools <b>ask before they run</b> until you say otherwise</>}.
-      </p>
+      {allowAll && <p className="muted small">Tools <b>run without asking</b> while &ldquo;Allow all domains and MCP servers&rdquo; is on.</p>}
 
       <div className="seg" role="tablist" aria-label="Connectors">
         {VIEWS.map((v) => (
@@ -379,7 +369,7 @@ export default function McpSettings(): JSX.Element {
       {view === 'import' && <ImportDialog onImported={() => void refresh()} />}
 
       {view === 'installed' && <>
-      {servers.length === 0 && !adding && <p className="empty-row"><Plug size={15} /> No connectors yet. Add one to give the assistant more tools.</p>}
+      {servers.length === 0 && !adding && <p className="empty-row"><Plug size={15} /> No connectors yet.</p>}
 
       {servers.map((s) => {
         const signin = needsSignIn(s)
@@ -428,7 +418,7 @@ export default function McpSettings(): JSX.Element {
                   <code className="mono">{s.transport !== 'stdio' ? s.url : joinArgv(s.command, s.args)}</code>
                   {s.cwd && <small className="muted">in {s.cwd}</small>}
                   {s.secret_keys.length > 0 && (
-                    <small className="muted">{s.transport !== 'stdio' ? 'headers' : 'secrets'}: {s.secret_keys.join(', ')} (stored in the backend, never shown)</small>
+                    <small className="muted">{s.transport !== 'stdio' ? 'headers' : 'secrets'}: {s.secret_keys.join(', ')} </small>
                   )}
                   {s.signed_in && <small className="muted">signed in</small>}
                 </div>
@@ -490,7 +480,7 @@ export default function McpSettings(): JSX.Element {
                       onAccept={() => void acceptChange(t.slug)} />)}
                   </div>
                 ) : (
-                  <p className="muted empty">{s.live.ready ? 'This server offers no tools.' : 'Tools appear once the server connects.'}</p>
+                  <p className="muted empty">{s.live.ready ? 'No tools.' : 'No tools yet.'}</p>
                 )}
               </div>
             )}
@@ -517,7 +507,7 @@ export default function McpSettings(): JSX.Element {
             </div>
             {draft.transport !== 'stdio' ? (
               <>
-                <label><span>URL <small className="muted">({draft.transport === 'sse' ? 'the SSE endpoint' : 'the streamable HTTP endpoint'}, or paste the server&apos;s config JSON here)</small></span>
+                <label><span>URL</span>
                   <input value={draft.url} spellCheck={false} placeholder="https://example.com/mcp"
                     onChange={(e) => setDraft({ ...draft, url: e.target.value })}
                     onPaste={(e) => {
@@ -526,7 +516,7 @@ export default function McpSettings(): JSX.Element {
                     }} />
                 </label>
                 <div className="mcp-headers">
-                  <span>Headers <small className="muted">(optional; values are kept in the backend and never shown again)</small></span>
+                  <span>Headers</span>
                   {draft.headerRows.map((h, i) => {
                     const set = (patch: Partial<HeaderRow>): void =>
                       setDraft({ ...draft, headerRows: draft.headerRows.map((r, j) => (j === i ? { ...r, ...patch } : r)) })
@@ -542,12 +532,11 @@ export default function McpSettings(): JSX.Element {
                   <button className="ghost-btn small" onClick={() => setDraft({ ...draft, headerRows: [...draft.headerRows, { k: '', v: '' }] })}>
                     <Plus size={12} /> Add header
                   </button>
-                  <small className="muted">A server that uses a browser sign-in shows a Sign in button once it is added.</small>
                 </div>
               </>
             ) : (
               <>
-                <label><span>Command <small className="muted">(or paste the server&apos;s config JSON here)</small></span>
+                <label><span>Command</span>
                   <input value={draft.argv} spellCheck={false} placeholder="npx -y @modelcontextprotocol/server-filesystem ~/Documents"
                     onChange={(e) => setDraft({ ...draft, argv: e.target.value })}
                     onPaste={(e) => {
@@ -555,14 +544,14 @@ export default function McpSettings(): JSX.Element {
                       if (text.trim().startsWith('{') && applyPaste(text)) e.preventDefault()
                     }} />
                 </label>
-                <label><span>Working directory <small className="muted">(optional)</small></span>
+                <label><span>Working directory</span>
                   <input value={draft.cwd} onChange={(e) => setDraft({ ...draft, cwd: e.target.value })} placeholder="~/code/project" spellCheck={false} />
                 </label>
-                <label><span>Environment <small className="muted">(KEY=value, one per line)</small></span>
-                  <textarea rows={2} value={draft.envText} onChange={(e) => setDraft({ ...draft, envText: e.target.value })} spellCheck={false} />
+                <label><span>Environment</span>
+                  <textarea rows={2} placeholder="KEY=value" value={draft.envText} onChange={(e) => setDraft({ ...draft, envText: e.target.value })} spellCheck={false} />
                 </label>
-                <label><span>Secrets <small className="muted">(KEY=value; kept in the backend and never sent to a model or shown again)</small></span>
-                  <textarea rows={2} value={draft.secretsText} onChange={(e) => setDraft({ ...draft, secretsText: e.target.value })} spellCheck={false} />
+                <label><span>Secrets</span>
+                  <textarea rows={2} placeholder="KEY=value" value={draft.secretsText} onChange={(e) => setDraft({ ...draft, secretsText: e.target.value })} spellCheck={false} />
                 </label>
               </>
             )}
@@ -582,12 +571,6 @@ export default function McpSettings(): JSX.Element {
         </button>
       )}
 
-      {servers.length > 0 && (
-        <p className="muted mcp-foot">
-          <Plug size={12} /> A connector&apos;s tools are offered to the assistant only while its server is connected.
-          A server that changes a tool after you approved it goes back to asking.
-        </p>
-      )}
       </>}
     </div>
   )

@@ -19,7 +19,7 @@ test('every settings tab opens and renders cleanly', async ({ grain }) => {
   // Coding recipes live in the Advanced section. Arrow keys walk the rail; Advanced is the last section.
   const advanced = tabBtn(page, 'Advanced')
   await advanced.click()
-  await expect(dialog(page).getByRole('tabpanel')).toContainText('A recipe is a coding task')
+  await expect(dialog(page).getByRole('tabpanel')).toContainText('New recipe')
   await page.keyboard.press('ArrowDown')
   await expect(tabBtn(page, 'General')).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('End')

@@ -110,7 +110,6 @@ export default function ExtensionsSection(): JSX.Element {
 
   return (
     <div className="ext-section">
-      <p className="set-help">Extensions add tools, views and settings to Grain. Nothing is installed or switched on until you say so.</p>
       {notice && <p className="ext-note" role="status">{notice}</p>}
       {error && <p className="ext-note error" role="alert">{error} <button type="button" className="ghost-btn sm" onClick={() => void load()}>Retry</button></p>}
 
@@ -124,7 +123,7 @@ export default function ExtensionsSection(): JSX.Element {
       <section className="ext-group" aria-labelledby="ext-h-installed">
         <h3 id="ext-h-installed">Installed</h3>
         {!data && !error && <p className="set-help">Loading...</p>}
-        {data && list.length === 0 && <p className="set-help">Nothing is installed yet. Included extensions are listed under Available.</p>}
+        {data && list.length === 0 && <p className="set-help">Nothing installed.</p>}
         <div className="ext-cards">
           {list.map((c) => (
             <ExtensionCardView
@@ -141,11 +140,11 @@ export default function ExtensionsSection(): JSX.Element {
         <h3 id="ext-h-available">Available</h3>
         {data?.catalogError && (
           <p className="set-help" role="status">
-            <span title={data.catalogError}>The online catalog could not be reached. Included extensions still work.</span>{' '}
+            <span title={data.catalogError}>Catalog unavailable.</span>{' '}
             <button type="button" className="ghost-btn sm" onClick={() => void load()}>Retry</button>
           </p>
         )}
-        {data && available.length === 0 && !data.catalogError && <p className="set-help">Everything available is already installed.</p>}
+        {data && available.length === 0 && !data.catalogError && <p className="set-help">Nothing available.</p>}
         <div className="ext-cards">
           {available.map((c) => (
             <ExtensionCardView key={c.id} card={c} names={names} busy={busy === c.id} mode="available" onAdd={() => addAvailable(c)} />
@@ -166,7 +165,6 @@ export default function ExtensionsSection(): JSX.Element {
           onCancel={() => setInstalled(null)}
           onConfirm={() => { const c = installed; setInstalled(null); void run(c.id, async () => { await enable(c) }) }}
         >
-          <p className="ext-desc">It is switched off. Turn it on when you are ready; you can also do that later from Installed.</p>
         </ExtensionsSectionDialog>
       )}
 
@@ -189,7 +187,7 @@ export default function ExtensionsSection(): JSX.Element {
           <p className="ext-desc">This deletes the extension from this computer.</p>
           <label className="ext-check">
             <input type="checkbox" checked={keepData} onChange={(e) => setKeepData(e.target.checked)} />
-            <span>Keep its data (settings and anything it saved) so a later install picks up where it left off</span>
+            <span>Keep its data</span>
           </label>
         </ExtensionsSectionDialog>
       )}

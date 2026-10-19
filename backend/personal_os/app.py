@@ -378,7 +378,7 @@ _MODULES_DEFAULT = 6
 # Stamp 4 shows these once: agent work waits for review there (desks, skill and workflow approvals), and a hidden row
 # meant the user could not find work the assistant had already handed back.
 _SHOWN_AT_4 = ("library", "cowork")
-_PROFILES = ("lean", "focus")  # the bundled profiles; a fresh install gets those whose manifest says enabled
+_PROFILES = ("lean", "focus")  # the bundled profiles; a fresh install starts with nothing enabled; a manifest's enabled is only the default for installs that predate it
 
 
 def _seed_hidden_modules() -> None:
@@ -394,7 +394,7 @@ def _seed_hidden_modules() -> None:
         hidden = [v for v in hidden if v not in _SHOWN_AT_4]
     first_boot = False
     if current == 0 and "hiddenViews" not in stored:
-        with db.tx() as c:  # a first boot starts lean; an install that already has chats keeps every view it had
+        with db.tx() as c:  # a first boot starts with nothing enabled; an install that already has chats keeps every view it had
             first_boot = not c.execute("SELECT 1 FROM conversations LIMIT 1").fetchone()
     widgets = dict(stored["homeWidgets"]) if isinstance(stored.get("homeWidgets"), dict) else {}
     db.set_settings({"hiddenViews": hidden, "homeWidgets": widgets, "modulesDefault": _MODULES_DEFAULT})

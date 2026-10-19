@@ -154,7 +154,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "dictationChord": "Control+Alt+D",
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
     "homeWidgets": {},
-    "hiddenViews": [],  # a fresh install gets the lean profile (app._seed_hidden_modules); an install without the key keeps every view on
+    "hiddenViews": [],  # a fresh install starts with no extensions enabled (app._seed_hidden_modules); an install without the key keeps every view on
     "pickerModels": [],  # model ids the picker lists; [] = every keyed provider's preset models
     # Rows hidden from the sidebar only; they stay reachable everywhere else. Default: only Files, Lists, Calendar, Library, Jobs, Canvases and Projects show.
     "sidebarHidden": ["mail", "health"],

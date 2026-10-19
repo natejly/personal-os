@@ -14,6 +14,8 @@ test('Allow all domains and MCP servers: lives in Settings > Permissions with th
   const toggle = dialog(page).getByLabel('Allow all domains and MCP servers')
   await expect(toggle).not.toBeChecked()
   await toggle.evaluate((el) => el.click()) // the real input is visually hidden behind the switch
+  await expect(dialog(page).getByRole('alert')).toContainText('Allow all domains and MCP servers?') // turning it on asks first
+  await dialog(page).getByRole('button', { name: 'Allow all', exact: true }).click()
   expect((await api('/settings')).allowAllConnections).toBeFalsy() // a draft until Save
   await save(page)
   expect((await api('/settings')).allowAllConnections).toBe(true)

@@ -33,7 +33,7 @@ export default function VoiceInputSettings(): JSX.Element | null {
         </select>
       </label>
       {text('sttModel', 'Speech-to-text model', 'Served at your base URL, which must route /v1/audio/transcriptions')}
-      {text('whisperModelPath', 'whisper.cpp model file', 'A ggml .bin for the local backend; blank takes the first one in the models folder', '/opt/models/ggml-base.en.bin')}
+      {text('whisperModelPath', 'whisper.cpp model file', 'A ggml .bin; blank uses the first in the models folder', '/opt/models/ggml-base.en.bin')}
       <Switch title="Tidy dictation with the model" checked={cfg.dictationCleanup} onChange={(v) => patch({ dictationCleanup: v })} />
       <Switch title="Drop silence hallucinations" checked={cfg.hallucinationFilter} onChange={(v) => patch({ hallucinationFilter: v })} />
     </>

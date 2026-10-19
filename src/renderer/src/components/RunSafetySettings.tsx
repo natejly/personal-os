@@ -27,6 +27,6 @@ export function SnapshotToggle({ draft, patch }: Props): JSX.Element {
   const snapOk = draft.snapshotsAvailable !== false
   return (
     <Switch title="Snapshot folders before changes" disabled={!snapOk} checked={snapOk && draft.snapshotsEnabled !== false} onChange={(snapshotsEnabled) => patch({ snapshotsEnabled })}
-      help={snapOk ? undefined : 'Unavailable on this Mac: install git (xcode-select --install)'} />
+      help={snapOk ? undefined : 'Needs git installed'} />
   )
 }

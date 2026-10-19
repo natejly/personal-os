@@ -11,6 +11,7 @@ import ts from 'typescript'
 // Scanned: every .tsx under src/renderer/src (recursively, skipping *.test.*).
 // Flagged:
 //   - JSX text longer than MAX chars (trimmed, whitespace collapsed)
+//   - string literals rendered from expression children ({cond ? 'long' : null}), longer than MAX
 //   - string literals used as the value of the JSX attributes in ATTRS, longer than MAX
 //   - string literals in object properties named in PROPS, longer than MAX
 // Exempt by rule:
@@ -30,13 +31,10 @@ const EXEMPT_NAME = /err|confirm|danger/i
 
 // TEMPORARY: owned by other lanes right now. The orchestrator removes these exclusions after merge.
 const EXCLUDED_PATHS: string[] = [
-  'components/SettingsModal.tsx',
-  'components/settings/',
   'components/ContextDrawer.tsx',
   'components/DeskPanel.tsx',
   'components/PageAgentPanel.tsx',
   'components/TracesPane.tsx',
-  'extensions/claude-code/',
   'extensions/memory-tree/',
 ]
 
@@ -111,6 +109,9 @@ function scanFile(abs: string): Hit[] {
   const visit = (n: ts.Node): void => {
     if (ts.isJsxText(n)) {
       add(n, n.text.replace(/\s+/g, ' ').trim())
+    } else if (ts.isJsxExpression(n) && n.expression && (ts.isJsxElement(n.parent) || ts.isJsxFragment(n.parent))) {
+      // Strings rendered from an expression child: {cond ? 'long text' : null}, {`long text`}.
+      strings(n.expression, (s) => add(s, s.text.replace(/\s+/g, ' ').trim()))
     } else if (ts.isJsxAttribute(n) && ATTRS.has(nameOf(n.name)) && n.initializer) {
       strings(n.initializer, (s) => add(s, s.text.replace(/\s+/g, ' ').trim()))
     } else if (ts.isPropertyAssignment(n) && PROPS.has(nameOf(n.name).replace(/^['"]|['"]$/g, ''))) {

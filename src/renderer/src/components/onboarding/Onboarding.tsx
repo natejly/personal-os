@@ -118,6 +118,7 @@ export default function Onboarding(): JSX.Element {
                 )
               })}
             </div>
+            <p className="muted small">Keys stay on this device; chats go only to the provider you pick.</p>
           </>
         )}
 

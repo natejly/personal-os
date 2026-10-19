@@ -86,7 +86,7 @@ export default function ExtensionsReview({ onChanged, pendingOnly = false }: { o
           </div>
         </details>
       ))}
-      {!listing.proposals.length && !listing.installed.filter((x) => !pendingOnly || x.changed).length && <p className="set-help">Nothing waiting and nothing installed.</p>}
+      {!listing.proposals.length && !listing.installed.filter((x) => !pendingOnly || x.changed).length && <p className="set-help">No extensions</p>}
     </>
   )
 }

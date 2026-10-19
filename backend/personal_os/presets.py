@@ -30,6 +30,7 @@ NETWORK_KEYS = ("shellNetwork", "shellRegistryAccess", "shellAllowedDomains", "f
 _FIELDS = {"schema", "id", "name", "description", "tools", "connectors", "network", *permissions.SCOPED_KEYS}
 _TOOL_TABLES = {"groups": None, "danger": tuple(DEFAULT_MODE), "tools": None}  # the allowed keys of each table, None for any name
 SCOPES = ("global", "project", "chat")
+NAME_MAX = 80
 
 # What a fresh install has, so applying one of these to it changes nothing (permissions.DEFAULTS).
 _SAFE_DEFAULTS = {"destructiveDefaults": permissions.DEFAULTS["destructiveDefaults"], "unattendedApprovals": permissions.DEFAULTS["unattendedApprovals"]}
@@ -89,8 +90,8 @@ def validate(doc: Any, *, rule_check: Callable[[Any], None] | None = None) -> di
     if doc.get("schema", SCHEMA) != SCHEMA:
         raise PresetError(f"schema must be {SCHEMA!r}")
     name = doc.get("name")
-    if not isinstance(name, str) or not name.strip() or len(name) > 80:
-        raise PresetError("a preset needs a name of at most 80 characters")
+    if not isinstance(name, str) or not name.strip() or len(name) > NAME_MAX:
+        raise PresetError(f"a preset needs a name of at most {NAME_MAX} characters")
     if not isinstance(doc.get("description", ""), str) or len(doc.get("description", "")) > 500:
         raise PresetError("description must be text of at most 500 characters")
     if "id" in doc and not (isinstance(doc["id"], str) and ID.fullmatch(doc["id"])):
@@ -199,7 +200,7 @@ class Presets:
 
     def duplicate(self, preset_id: str) -> dict[str, Any]:
         src = self.get(preset_id)
-        return self.save({**src["body"], "name": f"{src['name']} copy"})
+        return self.save({**src["body"], "name": f"{src['name'][:NAME_MAX - 5]} copy"})
 
     def delete(self, preset_id: str) -> None:
         self._mutable(preset_id)

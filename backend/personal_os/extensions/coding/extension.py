@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from ..host import ExtensionScope
 
 CLAUDE_INSTALL_HINT = "Install the claude CLI: npm i -g @anthropic-ai/claude-code"
-DIRECTIVE_VERSION = 1  # bump when the directive's text changes: it is part of the prompt prefix hash
+DIRECTIVE_VERSION = 2  # bump when the directive's text changes: it is part of the prompt prefix hash
 # Why a subagent's coding sessions stop with it, by exit reason, and how their row says it. A child that completed or
 # errored leaves them running: a session started to work in the background keeps going.
 SESSION_STOPS = {
@@ -159,9 +159,9 @@ class Coding:
         await self.sessions.stop_owned(ev["child_id"], f"the {'worker' if ev['detached'] else 'subagent'} that started it {how}")
 
     def directive(self, cfg: dict[str, Any]) -> str:
-        """The prompt rule for routing coding, naming recipes once the user has some."""
+        """The prompt rule for routing coding, and for recipes. A function of the settings alone: it is in the cached prefix."""
         text = route.hint(cfg)
-        return text + RECIPE_HINT if text and self.recipes.any() else text
+        return text + RECIPE_HINT if text else text
 
     async def chat_deleted(self, ev: dict[str, Any]) -> None:
         """chat.deleted: its terminals close."""

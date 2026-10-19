@@ -623,9 +623,10 @@ class ExtensionHost:
             raise
         return scope
 
-    async def load_dev(self, root: Path, ctx: ExtensionContext, *, first_load: bool = True) -> ExtensionScope:
+    async def load_dev(self, root: Path, ctx: ExtensionContext, *, first_load: bool = True, reloads: str | None = None) -> ExtensionScope:
         """Load and start the extension in `root` (the dev panel and the dev server). A folder extension starts disabled on
-        a first load, not on a reload: the user turns it on. A failure is kept in `failed` and raised."""
+        a first load, not on a reload: the user turns it on. A reload (`reloads`: the id it had) whose manifest now has another
+        id is a first load of that id, and the old id leaves hiddenViews. A failure is kept in `failed` and raised."""
         if loaded := next((s for s in self.extensions.values() if s.root == root), None):
             raise ValueError(f"{root} is already loaded as {loaded.manifest.id!r}")
         scope: ExtensionScope | None = None
@@ -633,10 +634,13 @@ class ExtensionHost:
         first_load = first_load and root not in self._failed_reloads
         try:
             scope = self.load_folder(root, ctx)
-            if hide := first_load and scope.toggleable and scope.manifest.id not in ctx.hidden_views():
+            renamed = reloads is not None and scope.manifest.id != reloads
+            if hide := (first_load or renamed) and scope.toggleable and scope.manifest.id not in ctx.hidden_views():
                 ctx.set_settings({"hiddenViews": [*ctx.hidden_views(), scope.manifest.id]})
                 self.refresh_enabled()
             self.migrate(ctx.db)
+            if renamed:
+                ctx.set_settings({"hiddenViews": [v for v in ctx.hidden_views() if v != reloads]})
             await scope.start()
         except Exception as e:
             self.failed[root] = f"{type(e).__name__}: {e}"
@@ -661,7 +665,7 @@ class ExtensionHost:
             raise ValueError(f"extension {ext_id!r} is not loaded from a folder, so it cannot be reloaded")
         await self.unload(ext_id)
         try:
-            return await self.load_dev(old.root, old._ctx, first_load=False)
+            return await self.load_dev(old.root, old._ctx, first_load=False, reloads=ext_id)
         except Exception:
             self._failed_reloads.add(old.root)
             raise

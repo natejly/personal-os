@@ -127,6 +127,19 @@ def test_permissions_update_is_a_forced_card_in_every_mode_and_never_reviewed(pm
     assert appmod.settings()["destructiveDefaults"]["send"] == "block", "a denial changes nothing"
 
 
+def test_a_change_the_chat_overrides_is_shown_against_the_global_value_and_says_the_chat_keeps_its_own() -> None:
+    from personal_os import permission_tool
+    cfg = {"permissionMode": "auto"}
+    token = permissions.SCOPE.set((None, {"permissionMode": "manual"}))
+    try:
+        _, lines = permission_tool.build(cfg, appmod.toolbox, "mode", "allow_all", "", False)
+        card = permission_tool.preview(appmod.toolbox, {"kind": "destructive", "target": "send", "value": "allow"})
+    finally:
+        permissions.SCOPE.reset(token)
+    assert lines[0] == "Permission mode: Auto -> Allow everything" and "keeps its own value here" in lines[1]
+    assert card == ["Sending email and messages (Manual mode): Block -> Allow"], "no note for a key the chat does not set"
+
+
 def test_approving_applies_each_kind_of_change() -> None:
     cases = [({"kind": "mode", "value": "auto"}, lambda s: s["permissionMode"] == "auto"),
              ({"kind": "destructive", "target": "files", "value": "ask"}, lambda s: s["destructiveDefaults"]["files"] == "ask"),

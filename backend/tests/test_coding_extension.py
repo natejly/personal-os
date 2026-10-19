@@ -466,7 +466,7 @@ def test_the_directive_is_part_of_the_prefix_hash_by_its_version(repo_rig):
     from personal_os.context import prefix_hash
     from personal_os.extensions.directives import Directives
     r = repo_rig
-    assert r.host.directives.versions({}) == ["coding@1"] and r.host.directives.versions({"codingRoute": False}) == []
+    assert r.host.directives.versions({}) == ["coding@2"] and r.host.directives.versions({"codingRoute": False}) == []
     newer = Directives()
     newer.register("coding", lambda cfg: "same text", 2, lambda: True)
     older = Directives()

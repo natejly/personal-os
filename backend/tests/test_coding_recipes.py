@@ -445,10 +445,11 @@ def test_the_approval_card_shows_the_settings_the_run_would_use(rig):
     assert NAME  # imported only to prove the hook is generic
 
 
-def test_the_directive_names_recipes_once_there_are_some(rig):
-    assert "coding_recipe_run" not in rig.host.directives.text({})
+def test_the_directive_names_recipes_whether_or_not_there_are_any(rig):
+    before = rig.host.directives.text({})
+    assert "coding_recipe_run" in before and "Coding goes to a coding agent" in before
     rig.recipes.save(rig.body(), "user")
-    assert "coding_recipe_run" in rig.host.directives.text({}) and "Coding goes to a coding agent" in rig.host.directives.text({})
+    assert rig.host.directives.text({}) == before  # the stable prefix does not follow the recipes table
     assert rig.host.directives.text({"codingRoute": False}) == ""
 
 

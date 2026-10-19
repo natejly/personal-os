@@ -90,10 +90,15 @@ def effective(db: Any, tools: Any, declared: dict[str, str], *, project_id: str 
         values[key] = entry
 
     global_tools = permissions.get(cfg, "tools") or {}
+    token = permissions.SCOPE.set((project_perms, chat_perms))  # the toolbox reads alwaysAsk through the settings, which overlay the scope
+    try:
+        explained = tools.explain(global_tools, (project or {}).get("tools"), ((conv or {}).get("settings") or {}).get("tools"))
+    finally:
+        permissions.SCOPE.reset(token)
     return {
         "scope": {"project_id": project_id, "conversation_id": conversation_id},
         "values": values,
-        "tools": tools.explain(global_tools, (project or {}).get("tools"), ((conv or {}).get("settings") or {}).get("tools")),
+        "tools": explained,
         "runtime": runtime or {},
         "secrets": {**{k: "set" if db.secrets.get(k) or cfg.get(k) else "unset" for k in sorted(secret_keys)},
                     "providerKeys": {e["id"]: "set" if e["id"] in provider_keys.saved_for(db.secrets) else "unset"

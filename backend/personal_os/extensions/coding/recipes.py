@@ -286,10 +286,6 @@ class Recipes:
         with self.db.tx() as c:
             return c.execute("UPDATE coding_recipes SET archived = 1 WHERE id = ?", (recipe_id,)).rowcount > 0
 
-    def any(self) -> bool:
-        with self.db.tx() as c:
-            return c.execute("SELECT 1 FROM coding_recipes WHERE archived = 0 LIMIT 1").fetchone() is not None
-
     def find(self, ref: str) -> dict[str, Any] | None:
         """A recipe by id or name."""
         with self.db.tx() as c:

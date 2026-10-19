@@ -535,6 +535,18 @@ def test_a_folder_loads_disabled_whatever_its_manifest_says_and_a_reload_keeps_t
     assert run(host.reload("sample")).enabled()
 
 
+def test_a_reload_whose_manifest_id_changed_starts_the_new_id_disabled_and_drops_the_old_one(ext: Path) -> None:
+    hidden: list[str] = []
+    ctx = context()
+    ctx.hidden_views, ctx.set_settings = lambda: hidden, lambda v: hidden.__setitem__(slice(None), v["hiddenViews"])
+    host = ExtensionHost()
+    run(host.load_dev(ext, ctx))
+    hidden.clear()  # the user enabled it
+    set_manifest(ext, id="renamed", data={})
+    scope = run(host.reload("sample"))
+    assert scope.manifest.id == "renamed" and not scope.enabled() and hidden == ["renamed"]
+
+
 def test_a_folder_extension_reaches_neither_the_bus_nor_the_app_nor_an_undeclared_db(ext: Path) -> None:
     set_manifest(ext, permissions=["context:volatile"])
     host, ctx = ExtensionHost(), context()

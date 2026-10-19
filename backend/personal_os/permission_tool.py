@@ -17,10 +17,20 @@ KINDS = ("mode", "destructive", "tool", "rule")
 MODE_NAMES = {"auto": "Auto", "manual": "Manual", "allow_all": "Allow everything"}
 TOOL_MODE_WORDS = {"on": "runs without asking", "ask": "asks every time", "off": "turned off"}
 ACTION_WORDS = {"block": "Block", "ask": "Ask", "allow": "Allow"}
+REPLACED_KEYS = {"permissionMode": "Permission mode", "destructiveDefaults": "Destructive-action defaults"}  # a project's or chat's value replaces the global one
 
 
 def build(cfg: dict[str, Any], tb: Any, kind: str, value: str, target: str, remove: bool) -> tuple[dict[str, Any], list[str]]:
-    """(the permission keys to store, plain-language before -> after lines) for one requested change; ValueError says why not."""
+    """(the permission keys to store, plain-language before -> after lines) for one requested change; ValueError says why not.
+    The write is global: a line says so when this chat or its project sets the same key itself, which then still applies here."""
+    out, lines = _build(cfg, tb, kind, value, target, remove)
+    layers = [layer for layer in permissions.SCOPE.get() or () if layer]
+    lines += [f"{label} is also set for this chat or its project, which keeps its own value here"
+              for key, label in REPLACED_KEYS.items() if key in out and any(key in layer for layer in layers)]
+    return out, lines
+
+
+def _build(cfg: dict[str, Any], tb: Any, kind: str, value: str, target: str, remove: bool) -> tuple[dict[str, Any], list[str]]:
     value, target = str(value or "").strip(), str(target or "").strip()
     if kind == "mode":
         if value not in MODE_NAMES:
@@ -61,9 +71,14 @@ def _norm(v: Any) -> str | None:
 
 
 def preview(tb: Any, args: dict[str, Any]) -> list[str] | None:
-    """The card's before -> after lines, from the settings as they are now; None when the arguments would not apply."""
+    """The card's before -> after lines, from the global settings as they are now (the write is global); None when the arguments would not apply."""
+    token = permissions.SCOPE.set(None)
     try:
-        return build(tb.settings(), tb, str(args.get("kind") or ""), args.get("value"), args.get("target"), bool(args.get("remove")))[1]
+        cfg = tb.settings()
+    finally:
+        permissions.SCOPE.reset(token)
+    try:
+        return build(cfg, tb, str(args.get("kind") or ""), args.get("value"), args.get("target"), bool(args.get("remove")))[1]
     except (ValueError, TypeError):
         return None
 

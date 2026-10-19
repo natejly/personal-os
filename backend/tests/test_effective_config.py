@@ -249,3 +249,12 @@ def test_the_cli_resolves_a_missing_model_client_as_the_backend_does() -> None:
     finally:
         appmod.db.set_settings({"baseUrl": before.get("baseUrl", ""), "runtime": {}})
     assert got["provider"] == "core/openai-compatible" and got["fell_back_from"] == "acme/cl" and not got["refused"]
+
+
+def test_a_chats_own_always_ask_caps_the_tool_modes_it_reports() -> None:
+    client.put("/settings", json={"tools": {"write_local_file": "on"}})
+    chat = appmod.convos.create(None, "t", "m")["id"]
+    assert dump(conversation_id=chat)["tools"]["write_local_file"]["mode"] == "on"
+    appmod.convos.update(chat, {"settings": {"permissions": {"alwaysAsk": ["write_local_file"]}}})
+    assert dump(conversation_id=chat)["tools"]["write_local_file"]["mode"] == "ask"
+    assert dump()["tools"]["write_local_file"]["mode"] == "on"

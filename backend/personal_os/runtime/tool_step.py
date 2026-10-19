@@ -73,7 +73,7 @@ class TurnState:
     plan_seen: bool  # whether this chat has any plan at all: one query per reply keeps the plan lookups off the hot path
     tool_schemas: list[dict[str, Any]] = field(default_factory=list)
     denials: permrules.DenialStreak = field(default_factory=permrules.DenialStreak)  # refused calls in a row; at three the next result says to stop varying them
-    detector: StuckDetector = field(init=False)  # loop shapes loopRepeatLimit cannot see; thresholds from stuckDetection (__post_init__)
+    detector: StuckDetector = field(init=False)  # loop shapes loopRepeatLimit cannot see; thresholds from stuckSensitivity (__post_init__)
     fence_nonce: str = field(default_factory=lambda: secrets.token_hex(8))  # per run: untrusted results are fenced with an id the page cannot guess
     blocked: set[str] = field(default_factory=set)
     tool_errors: dict[str, int] = field(default_factory=dict)
@@ -90,7 +90,7 @@ class TurnState:
     ended: bool = False  # the step ended the reply itself (a parked card): the loop stops
 
     def __post_init__(self) -> None:
-        self.detector = detector_for(self.cfg.get("stuckDetection"))
+        self.detector = detector_for(self.cfg.get("stuckSensitivity"))
 
 
 @dataclass

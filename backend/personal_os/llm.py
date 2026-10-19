@@ -136,7 +136,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     **PERMISSION_DEFAULTS,
     # loop lane: agent-loop tunables (limits.LOOP_DEFAULTS has the defaults, limits.RANGES the bounds)
     **LOOP_DEFAULTS,
-    "stuckDetection": "standard",  # off | relaxed | standard | strict: how soon the stuck detector steps in (stuck.limits_for)
+    "stuckSensitivity": "standard",  # off | relaxed | standard | strict: how soon the stuck detector steps in (stuck.limits_for)
     "parallelReads": 0,  # read-only calls of one round that run together; 0 = automatic (limits.worker_slots), 1 = one at a time
     # codemode lane: run_python(tools=...) lets a script drive app tools (toolbridge.py).
     "codeMode": True,  # off: run_python refuses `tools`; scripts cannot call app tools

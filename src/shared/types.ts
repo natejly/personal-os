@@ -1910,7 +1910,7 @@ export interface Settings {
   loopRepeatLimit?: number
   loopToolErrorLimit?: number
   loopDoomLimit?: number
-  stuckDetection?: 'off' | 'relaxed' | 'standard' | 'strict'
+  stuckSensitivity?: 'off' | 'relaxed' | 'standard' | 'strict'
   finalRoundSeconds?: number
   toolResultInlineChars?: number
   planLoopMaxSteps?: number

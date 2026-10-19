@@ -410,7 +410,7 @@ def test_the_chat_loop_a_workflow_and_the_bridge_refuse_with_the_guards_reason(
     assert ref.reason in run_chat(name, args, monkeypatch)[0]["error"]
     if name != "shell_run":  # the workflow engine and the bridge offer no shell
         assert ref.reason in workflow(guard, name, args)
-    if name in toolbridge.ALLOWED:
+    if toolbridge.bridgeable(appmod.toolbox, ctx(), name, {name: "on"})[0]:
         assert ref.reason in bridge(name, args)
     worker(name, args, monkeypatch)
     assert RAN == []

@@ -38,7 +38,7 @@ from . import chatlink, config, duel, fsx, guards, labels, permissions_routes, r
 from .fsx import sensitive_reason
 from . import context_map
 from .dispatch import dispatch_tool
-from .context import Block, PrefixWatch, build_context, cite_slim, compose, context_taints, estimate_tokens, layout_messages, prefix_hash, retrieval_query
+from .context import Block, Ledger, PrefixWatch, build_context, cite_slim, compose, context_taints, estimate_tokens, layout_messages, ledger_history, ledger_tools, prefix_hash, retrieval_query
 from .drive_backup import DriveBackup
 from .config import PRIVATE_SETTINGS
 from .presets import Presets
@@ -2753,6 +2753,17 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 loaded.update(picks)
                 st.tool_schemas = _schemas()
 
+        led: Ledger = used["ledger"]
+        _slug_server = {t["slug"]: {x["id"]: x["name"] for x in mcp_store.servers()}.get(t["server_id"], "MCP") for t in mcp_store.tools()} if mcp_schemas else {}
+
+        def _tool_source(name: str) -> str:
+            if name in toolbox.tool_owner:
+                return f"ext:{toolbox.tool_owner[name]}"
+            return f"mcp:{SOURCE_SERVER if is_source_tool(name) else _slug_server.get(name, 'MCP')}" if name in tool_ctx["mcp_schemas"] else "core"
+
+        used["tools_offered"] = ledger_tools(led, st.tool_schemas, tool_ctx["deferred"],
+                                             lambda n: tool_ctx["mcp_schemas"].get(n) or toolbox.specs[n].schema(), _tool_source)
+
         def _desk_manual_text() -> str:
             # Only the tools actually sent this turn are described, so the manual never promises one the model lacks.
             net = ("open" if permissions.get(cfg, "shellNetwork") or permissions.get(cfg, "allowAllConnections") else
@@ -2796,49 +2807,62 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             tools_hint = "\n\n".join(p for p in (tools_hint, _mcp_server_notes(set(mcp_modes))) if p)
         if use_tools and (_down := _mcp_down_note()):
             tools_hint = "\n\n".join(p for p in (tools_hint, _down) if p)
-        hints = (NO_EMOJI_HINT, RENDER_HINT, tools_hint,
-                 stance_hint,
-                 _agents_hint(modes, front=front_hint), _job_hint(run),
-                 job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
-                 DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if st.planning and desk else "",
-                 PERSONA_FOLDER_HINT.format(path=folder) if folder and not desk and st.tool_schemas else "",
-                 channel.hint if st.tool_schemas and channel is not None else "",
-                 host.directives.text(cfg) if st.tool_schemas else "")
+        hints = (("hint:no-emoji", "Plain-text rule", NO_EMOJI_HINT), ("hint:render", "Rendering hint", RENDER_HINT),
+                 ("hint:tools", "Tools hint", tools_hint), ("hint:stance", "Working stance", stance_hint),
+                 ("hint:agents", "Agents hint", _agents_hint(modes, front=front_hint)), ("hint:job", "Scheduled job hint", _job_hint(run)),
+                 ("hint:dry-run", "Dry run hint", job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else ""),
+                 ("hint:desk", "Desk manual", DESK_HINT + _desk_manual_text() if desk else ""),
+                 ("hint:desk-plan", "Desk planning hint", DESK_PLAN_HINT if st.planning and desk else ""),
+                 ("hint:persona-folder", "Agent folder hint", PERSONA_FOLDER_HINT.format(path=folder) if folder and not desk and st.tool_schemas else ""),
+                 ("hint:channel", "Channel hint", channel.hint if st.tool_schemas and channel is not None else ""),
+                 ("hint:directives", "Directives", host.directives.text(cfg) if st.tool_schemas else ""))
         inputs_block = _desk_inputs_block() if desk else ""
         map_block = _map_status_block(used, conv["settings"], cfg, conv["project_id"], st.fence_nonce, st.tool_schemas, tool_ctx["deferred"])
         skipped: list[str] = []
         contributed = await host.bus.collect("context.contribute", {"conversation_id": conv_id, "project_id": conv["project_id"]}, skipped=skipped)
         if skipped:
-            used["skipped"] = skipped
-        # The date changes daily: keep it out of the cacheable prefix.
-        slots = compose([*(Block(h, "stable") for h in hints), *(Block(b, "volatile") for b in (*used["volatile_blocks"], inputs_block, map_block, _today_hint())),
-                         *retrieved, *contributed], win)
+            used["skipped"] = [{"owner": o, "hook": "context.contribute", "reason": "failed or timed out"} for o in skipped]
+        # The date changes daily: keep it out of the cacheable prefix. The blocks build_context made are already in the
+        # ledger (record=False); everything else is recorded here, on its final wrapped text.
+        slots = compose([*(Block(t, "stable", id=i, label=lb) for i, lb, t in hints),
+                         *(Block(b, "volatile", record=False) for b in used["volatile_blocks"]),
+                         Block(inputs_block, "volatile", id="volatile:desk-inputs", label="Desk inputs", kind="note"),
+                         Block(map_block, "volatile", id="map:status", label="Workspace status", kind="map"),
+                         Block(_today_hint(), "volatile", id="volatile:today", label="Today", kind="note"),
+                         *retrieved, *contributed], win, led)
         used["volatile_blocks"] = slots.volatile
         # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
         stable = "\n\n".join(p for p in (used["stable_system"], *slots.stable) if p)
         system = "\n\n".join(p for p in (stable, *used["volatile_blocks"], *slots.tail) if p)
         versions = [*slots.versions, *(host.directives.versions(cfg) if st.tool_schemas else ())]
         used["stable_hash"] = prefix_hash(stable, versions)
-        if bust := prefix_watch.observe(conv_id, used["stable_hash"], versions):
+        bust = prefix_watch.observe(conv_id, used["stable_hash"], versions)
+        if bust:
             log.info("prompt cache bust in chat %s: %s (%d of %d turns)", conv_id, bust, prefix_watch.busts, prefix_watch.turns)
+        used["cache"] = {"changed": True, "reason": bust} if bust else {"changed": False}
         cspan["meta"]["stable_hash"] = used["stable_hash"]
         used["system_prompt"] = system
-        used["tokens_estimate"] = estimate_tokens(system)
-        _request_extra[conv_id] = used["tokens_estimate"] - ctx_tokens + (estimate_tokens(json.dumps(st.tool_schemas)) if st.tool_schemas else 0)
+        used["tokens_estimate"] = led.system_tokens()
+        _request_extra[conv_id] = used["tokens_estimate"] - ctx_tokens + led.totals()["tools"]
         run_notes: list[dict[str, Any]] = []  # system notes that follow the history, whichever history it is
+
+        def _run_note(nid: str, label: str, text: str) -> None:
+            run_notes.append({"role": "system", "content": text})
+            led.add(nid, label, text, slot="tail", kind="note")
+
         if parked_note:
-            run_notes.append({"role": "system", "content": parked_note})
+            _run_note("note:parked", "Parked work note", parked_note)
         if regen_done:
-            run_notes.append({"role": "system", "content": resume.build_regen_note(regen_done)})
+            _run_note("note:regen", "Regenerate note", resume.build_regen_note(regen_done))
         if not internal and "@" in user_text and (mnote := chatlink.mention_note(user_text, chat_links.chats(), conv_id, saved_dashboards.list())):
-            run_notes.append({"role": "system", "content": mnote})
+            _run_note("note:mention", "Mentioned chats note", mnote)
         if body.resume_of:
             old = run_store.get(body.resume_of) or {}
             old_events = run_store.events(body.resume_of)
-            run_notes.append({"role": "system", "content": resume.build_resume_note(
+            _run_note("note:resume", "Resume note", resume.build_resume_note(
                 old, old_events, run_store.executed(body.resume_of), run_store.approvals(None, run_id=body.resume_of),
                 reason=resume.reason_tag(old, _run_message(old)),
-                plan_steps=[s for p in plans.for_run(body.resume_of) if p["status"] == "approved" for s in p["steps"] if s["status"] == "approved"])})
+                plan_steps=[s for p in plans.for_run(body.resume_of) if p["status"] == "approved" for s in p["steps"] if s["status"] == "approved"]))
             # Taint is only ever added to: a resume cannot launder what the dead run read.
             for src in resume.taint_from_tape(old_events):
                 tool_ctx["tainted"] = True
@@ -2857,6 +2881,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 head[i] = {**head[i], "content": [{"type": "text", "text": head[i]["content"]}, *turn_images]}
             return head + [dict(n) for n in run_notes]
         messages.extend(_assemble(history))
+        ledger_history(led, history, turn_images)
+        used["tokens_estimate"] = led.system_tokens()  # the run notes joined the tail
+        used["blocks"], used["totals"] = led.finish(), led.totals(win)
         base_len = len(messages)  # what follows is this run's own steers, tool turns and notes
         if in_side:  # the duel reads this side's tool turns once it is picked (Side.transcript)
             duel.SIDE.get().live = (messages, lambda: base_len, lambda: plan_msg)
@@ -6537,6 +6564,7 @@ async def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
         global_system_prompt=cfg["systemPrompt"], skills=skills, style=style,
         draft=bool(conv_settings.get("draftMode")),
     )
+    used.pop("ledger", None)  # a live object, not JSON
     return used
 
 

@@ -29,13 +29,7 @@ const ATTRS = new Set([
 const PROPS = new Set(['description', 'hint', 'help', 'subtitle', 'blurb', 'intro'])
 const EXEMPT_NAME = /err|confirm|danger/i
 
-// TEMPORARY: owned by other lanes right now. The orchestrator removes these exclusions after merge.
-const EXCLUDED_PATHS: string[] = [
-  'components/ContextDrawer.tsx',
-  'components/DeskPanel.tsx',
-  'components/PageAgentPanel.tsx',
-  'components/TracesPane.tsx',
-]
+const EXCLUDED_PATHS: string[] = []
 
 const ROOT = path.join(process.cwd(), 'src/renderer/src')
 const ALLOW_FILE = path.join(ROOT, 'uiCopy.allow.json')

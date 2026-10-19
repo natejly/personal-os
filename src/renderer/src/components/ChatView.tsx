@@ -10,8 +10,6 @@ import FindBar from './FindBar'
 import Composer from './Composer'
 import ChatControls from './ChatControls'
 import DuelPanel from './DuelPanel'
-import ContextDrawer from './ContextDrawer'
-import ResizeHandle from './ResizeHandle'
 import WorkersPanel from './WorkersPanel'
 import ProgressCard from './ProgressCard'
 import ShowPanel from './ShowPanel'
@@ -79,7 +77,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const deskPanel = useStore((s) => s.deskPanel)
   const setDeskPanel = useStore((s) => s.setDeskPanel)
   const sidePanelClosed = useStore((s) => s.hiddenChrome.includes('sidepanel')) // a profile's layout keeps the Workspace column shut
-  const panelOn = !sidePanelClosed && !conversationId && (deskPanel || contextOpen) // the full-window Workspace column; it also hosts the step card and workers
+  // The side panel: the full-window chat's Workspace column (it also hosts the step card and workers), or, in a canvas chat window, the same panel opened by the context request.
+  const panelOn = conversationId ? contextOpen : !sidePanelClosed && (deskPanel || contextOpen)
   // Asking for a column the layout keeps shut says so and drops the request, so it does not open once the layout changes.
   useEffect(() => {
     if (!sidePanelClosed || conversationId || !(deskPanel || contextOpen)) return
@@ -167,9 +166,9 @@ export default function ChatView({ conversationId }: { conversationId?: string }
         <div className="no-drag header-right">
           {conversationId && <ChatFilesButton conversationId={convo?.id} />}
         </div>
-        {/* The full-window chat gives the last title-bar slot to its own workspace panel; ⌘I opens the quick chat. */}
+        {/* The full-window chat gives the last title-bar slot to its own workspace panel. ⌘I toggles the same panel on Context here, and opens the quick chat in other views. */}
         <AppSwitcher last={conversationId || sidePanelClosed ? undefined : (
-          <button className={`icon-btn${deskPanel || contextOpen ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={deskPanel || contextOpen} disabled={!convo?.id}
+          <button className={`icon-btn${deskPanel || contextOpen ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={deskPanel || contextOpen}
             onClick={() => { if (contextOpen) toggleContext(); setDeskPanel(!(deskPanel || contextOpen)) }}><SlidersHorizontal size={15} /></button>
         )} />
       </header>
@@ -223,10 +222,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           <Composer conversationId={conversationId} footer={<ChatControls conversationId={conversationId} />} />
         </div>
         {showing && <ShowPanel conversationId={showKey} />}
-        {/* Full-window: Context is a tab of the side panel (a context request opens it). Quick chats keep the drawer, whose handle sits on the chat body, pinned to the drawer's left edge. */}
-        {panelOn && <DeskPanel key={convo?.id ?? ''} desk={desk} conversationId={convo?.id} onClose={() => { setDeskPanel(false); if (contextOpen) toggleContext() }} />}
-        {conversationId && contextOpen && <ResizeHandle id="context-drawer-w" defaultSize={340} min={260} max={640} grows="left" onCollapse={toggleContext} label="Context panel width" className="ctx-edge" />}
-        {conversationId && contextOpen && <ContextDrawer conversationId={conversationId} />}
+        {/* One side panel for both: Context is its first tab, and a context request opens it. */}
+        {panelOn && <DeskPanel key={convo?.id ?? ''} desk={desk} conversationId={convo?.id ?? conversationId} onClose={() => { setDeskPanel(false); if (contextOpen) toggleContext() }} />}
       </div>
     </main>
   )

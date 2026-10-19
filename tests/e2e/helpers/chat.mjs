@@ -13,10 +13,10 @@ export async function openContextPanel(page) {
   const btn = page.getByRole('button', { name: 'Workspace panel', exact: true })
   if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click()
   const head = page.getByTestId('desk-tab-context')
-  if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click()
+  if ((await head.getAttribute('aria-selected')) !== 'true') await head.click()
 }
 
-/** Unfold one group (Memories, Files, ...) of the Context card's usage breakdown. */
+/** Unfold one group (Memories, Files, ...) of the Context tab's usage breakdown. */
 export async function openContextGroup(page, label) {
   const head = page.locator('.ctx-group-head').filter({ hasText: label })
   if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click()

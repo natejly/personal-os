@@ -85,7 +85,7 @@ test('in a chat the page-agent chord (⌘I) toggles the Context panel instead of
   assert.equal(useStore.getState().contextOpen, false)
 })
 
-test('toggle-desk (⌘I) opens the side panel, then closes it whichever flag opened it', () => {
+test('toggle-desk opens the side panel, then closes it whichever flag opened it', () => {
   useStore.setState({ deskPanel: false, contextOpen: false })
   fire('toggle-desk')
   assert.equal(useStore.getState().deskPanel, true)

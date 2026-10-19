@@ -32,7 +32,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'help', label: 'Keyboard Shortcuts…', keys: 'CmdOrCtrl+/', group: 'General', action: 'help', scope: 'menu' },
   { id: 'help-key', label: 'Keyboard Shortcuts (outside a text field)', keys: '?', group: 'General', scope: 'component' },
   { id: 'toggle-sidebar', label: 'Toggle Sidebar', keys: 'CmdOrCtrl+B', group: 'General', action: 'toggle-sidebar', scope: 'menu' },
-  { id: 'page-agent', label: 'Quick chat (in a chat: Context panel)', keys: 'CmdOrCtrl+I', group: 'General', action: 'page-agent', scope: 'menu' },
+  { id: 'page-agent', label: 'Context panel / Quick chat', keys: 'CmdOrCtrl+I', group: 'General', action: 'page-agent', scope: 'menu' },
   { id: 'toggle-desk', label: 'Toggle Side Panel', keys: '', group: 'General', action: 'toggle-desk', scope: 'menu' },
   { id: 'panel-context', label: 'Side Panel: Context and Terminal', keys: '', group: 'General', action: 'panel-context', scope: 'menu' },
   { id: 'toggle-context', label: 'Toggle Context Panel', keys: 'Control+Command+I', group: 'General', action: 'toggle-context', scope: 'menu' },

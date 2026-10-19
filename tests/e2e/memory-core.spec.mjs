@@ -120,8 +120,10 @@ test('a pinned memory reaches the system prompt of an unrelated chat; a forgotte
   expect(pin.id).toBeTruthy()
   // the context panel shows the memory that was sent
   await openContextPanel(page)
-  await openContextGroup(page, 'Memories')
-  await expect(page.locator('.ctx, [class*=context]').getByText(/ZEBRAPIN/).first()).toBeVisible()
+  await openContextGroup(page, 'Memory')
+  const views = page.locator('.ctx-irow').filter({ hasText: 'Memory' }).getByRole('button', { name: 'View', exact: true })
+  for (let i = (await views.count()) - 1; i >= 0; i--) await views.nth(i).click()
+  await expect(page.locator('aside.desk-panel').getByText(/ZEBRAPIN/).first()).toBeVisible()
   clean(grain)
 })
 

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { MessageSquarePlus, Pin, PinOff, SquareArrowOutUpRight, X } from '../icons'
+import { ChevronDown, ChevronRight, MessageSquarePlus, Pin, PinOff, SquareArrowOutUpRight, X } from '../icons'
 import { PAGE_AGENT_DRAFT, useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../store'
 import { panelConversationFor } from '../lib/pagePanel'
 import ChatControls from './ChatControls'
 import Composer from './Composer'
-import ResizeHandle from './ResizeHandle'
+import SidePanel from './SidePanel'
 import MessageView from './Message'
 import { chatBrowserSession, latestBrowserMessage } from '../lib/browserApproval'
 import { tip } from '../lib/tip'
@@ -45,13 +45,17 @@ export default function PageAgentPanel(): JSX.Element {
   }
 
   const hints = ctx?.hints ?? []
+  // What goes out with the next message: the page block, sized in tokens (about four characters each) and readable on demand.
+  const [showSent, setShowSent] = useState(false)
+  const sentText = ctx ? [ctx.detail, ctx.selection].filter(Boolean).join('\n\n') : ''
+  const sentTokens = Math.ceil(sentText.length / 4)
+  const usedLabel = [...msgs].reverse().find((m) => m.context_used?.page)?.context_used?.page?.label
 
   return (
-    <aside className="page-agent" aria-label="Page agent">
-      <ResizeHandle id="page-agent-w" defaultSize={380} min={280} max={720} grows="left" onCollapse={closePageAgent} label="Page agent width" className="at-left" />
+    <SidePanel label="Page agent" className="page-agent" onClose={closePageAgent}>
       <div className="page-agent-ctx" title={ctx?.detail ? `${ctx.detail.slice(0, 600)}…` : undefined}>
         <span className="page-agent-label">
-          {pin ? <><Pin size={11} /> <b>{pin.label}</b></> : ctx ? <><b>{ctx.label}</b>{ctx.selection ? <em> · selection</em> : null}</> : <span className="muted">This screen has no context to send.</span>}
+          {pin ? <><Pin size={11} /> <b>{pin.label}</b></> : ctx ? <><b>{ctx.label}</b>{ctx.selection ? <em> · selection</em> : null}</> : null}
         </span>
         <div className="page-agent-actions">
           {pin ? (
@@ -67,6 +71,19 @@ export default function PageAgentPanel(): JSX.Element {
           )}
           <button className="icon-btn" title={tip('Close', 'page-agent')} aria-label="Close page agent" onClick={closePageAgent}><X size={15} /></button>
         </div>
+      </div>
+
+      <div className="page-agent-sent">
+        {ctx ? (
+          <>
+            <button className="page-agent-sent-btn" aria-expanded={showSent} aria-controls="page-agent-sent-text" onClick={() => setShowSent((v) => !v)} disabled={!sentText}>
+              {showSent ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              <span>Sent <b>{ctx.label}</b> <span className="muted">~{sentTokens.toLocaleString()} tokens</span></span>
+            </button>
+            {showSent && sentText && <pre id="page-agent-sent-text" className="page-agent-sent-text" tabIndex={0} aria-label="Text sent with your message">{sentText}</pre>}
+          </>
+        ) : null}
+        {usedLabel && usedLabel !== ctx?.label && <span className="muted"> Last used {usedLabel}</span>}
       </div>
 
       <div className="page-agent-body" ref={scrollRef} onScroll={onScroll}>
@@ -90,6 +107,6 @@ export default function PageAgentPanel(): JSX.Element {
         onSend={sendToPageAgent}
         placeholder={ctx ? `Ask about ${ctx.label}…` : 'Ask…'}
       />
-    </aside>
+    </SidePanel>
   )
 }

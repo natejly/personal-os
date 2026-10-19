@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { Canvas, CanvasWindow, SnapMode, WidgetKind, WindowLayout, WindowState } from '@shared/types'
 import { api, getBase, getToken } from '../lib/api'
-import { useStore } from '../store'
+import { useStore, canvasPanelHook } from '../store'
 import { viewHidden } from '../moduleToggles'
 import { clampOpacity, nextOpacity } from './opacity'
 import { GAP } from './layout'
@@ -18,6 +18,9 @@ export interface CanvasState {
   order: string[]
   activeCanvasId: string | null
   focusedWindowId: string | null
+  /** Chat windows whose side panel is open, by window id. */
+  chatPanels: Record<string, boolean>
+  toggleChatPanel: (windowId: string) => void
   overview: boolean
   /** true during any drag, resize, zoom or space switch: drops backdrop-filter */
   interacting: boolean
@@ -393,6 +396,15 @@ export const useCanvas = create<CanvasState>((set, get) => {
     }
   }
 
+  // ⌘I and the context chord act on the focused chat window's own side panel; the app store falls back to its usual action otherwise.
+  canvasPanelHook.toggleFocused = () => {
+    const s = get()
+    const w = s.focusedWindowId ? findWin(s, s.focusedWindowId) : undefined
+    if (!w || w.kind !== 'chat' || !w.ref_id || (w.state !== 'normal' && w.state !== 'maximized')) return false
+    s.toggleChatPanel(w.id)
+    return true
+  }
+
   /** Optimistic hints from other renderers. The backend stays authoritative; a hint never creates state. */
   const onBus = (m: { kind: string; windowId?: string; data?: Record<string, unknown> }): void => {
     const id = m.windowId
@@ -423,6 +435,8 @@ export const useCanvas = create<CanvasState>((set, get) => {
     order: [],
     activeCanvasId: null,
     focusedWindowId: null,
+    chatPanels: {},
+    toggleChatPanel: (windowId) => set((st) => ({ chatPanels: { ...st.chatPanels, [windowId]: !st.chatPanels[windowId] } })),
     overview: false,
     interacting: false,
     loaded: false,

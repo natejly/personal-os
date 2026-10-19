@@ -1,20 +1,18 @@
 import { modelLabel } from '../lib/modelLabel'
-import { useSlidingPill } from "../lib/useSlidingPill"
-import { useEffect, useMemo, useState } from 'react'
-import { X, ChevronRight, ChevronDown, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, ShieldAlert, MonitorDot, PenLine } from '../icons'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { ChevronRight, ChevronDown, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, ShieldAlert, MonitorDot, PenLine } from '../icons'
 import { ToolOverrides } from './ToolPermissions'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
 import { api } from '../lib/api'
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import { citeLabel, openCite } from '../lib/remarkCites'
-import { DEFAULT_EFFORT, type ContextMeter, type ContextUsed, type ConversationSettings, type ConversationUsage } from '@shared/types'
+import { DEFAULT_EFFORT, type ContextMeter, type ContextPreview, type ContextUsed, type ConversationSettings, type ConversationUsage } from '@shared/types'
 import { fmtCost, usageLine } from '../lib/chatMeta'
 import { compactNow } from '../lib/compact'
 import { humanizeTaintSources } from '../lib/taintSources'
-import { tip } from '../lib/tip'
-import { contextBreakdown, fmtTok } from '../lib/contextBreakdown'
+import { resolveBreakdown, fmtTok, textFor, fallbackText, type BreakdownItem, type UsageBreakdown, type UsageSlice } from '../lib/contextBreakdown'
 
-/** The hint is a tooltip on the row; `fix` is a link to the Settings tab that turns this source on, kept visible beside the label. */
+/** The hint is a tooltip on the row only; `fix` is a short action link beside the label. */
 function Toggle({ label, hint, value, onChange, icon, disabled, fix }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element; disabled?: boolean; fix?: { label: string; open: () => void } }): JSX.Element {
   return (
     <label className="toggle-row compact" title={hint}>
@@ -26,104 +24,105 @@ function Toggle({ label, hint, value, onChange, icon, disabled, fix }: { label: 
   )
 }
 
-/** Replayed history against the model window, with manual compaction and the summary it produced. */
-const USAGE_COLORS = ['#5b8def', '#d9693f', '#3fa37a', '#d9a13f', '#9a8fd0', '#c9708f', '#4fb0c6']
 
-/** The side panel's Context card: percent of the window used, a segmented bar, one row per category, then each group's detail unfolding. */
-function UsageBreakdown({ meter, ctx, messageId }: { meter: ContextMeter; ctx: ContextUsed | null; messageId?: string }): JSX.Element {
-  const [open, setOpen] = useState<string | null>(null)
-  const b = contextBreakdown(meter, ctx)
-  const pct = (n: number): string => `${+((n / b.window) * 100).toFixed(1)}%`
-  const details = b.slices.filter((x) => x.count > 0)
+/* ---------- The reply's texts, fetched once per message on first expand ---------- */
+
+type TextMap = Record<string, string>
+type TextsEntry = 'loading' | 'missing' | TextMap
+const textsCache = new Map<string, TextsEntry>()
+
+interface Texts { status: 'idle' | 'loading' | 'ready' | 'missing'; texts: TextMap | null; ensure: () => void }
+
+/** Lazy `GET /messages/{id}/context`, cached per message id. A 404 or `texts_available: false` reads as "missing". The system prompt rides along under `system`. */
+function useMessageTexts(messageId?: string): Texts {
+  const [, bump] = useState(0)
+  const ensure = useCallback(() => {
+    if (!messageId || textsCache.has(messageId)) return
+    textsCache.set(messageId, 'loading')
+    bump((n) => n + 1)
+    void api.getMessageContext(messageId)
+      .then((r) => { textsCache.set(messageId, r.texts_available && (r.texts || r.system_prompt) ? { ...(r.system_prompt ? { system: r.system_prompt } : {}), ...(r.texts ?? {}) } : 'missing') })
+      .catch(() => { textsCache.set(messageId, 'missing') })
+      .finally(() => bump((n) => n + 1))
+  }, [messageId])
+  const e = messageId ? textsCache.get(messageId) : undefined
+  if (e === undefined) return { status: 'idle', texts: null, ensure }
+  if (e === 'loading') return { status: 'loading', texts: null, ensure }
+  if (e === 'missing') return { status: 'missing', texts: null, ensure }
+  return { status: 'ready', texts: e, ensure }
+}
+
+const KEPT_NOTE = 'Texts not kept for this reply'
+
+function CopyButton({ text }: { text: string }): JSX.Element {
+  const [done, setDone] = useState(false)
   return (
-    <div className="ctx-usage-card">
-      <div className="ctx-usage-head"><b>{Math.round(b.pct)}% used</b><span className="muted">{fmtTok(b.used)} / {fmtTok(b.window)}</span></div>
-      <div className="ctx-seg" role="img" aria-label={`${Math.round(b.pct)}% of the context window used`}>
-        {b.slices.map((x, i) => <span key={x.key} style={{ width: `${(x.tokens / b.window) * 100}%`, background: USAGE_COLORS[i % USAGE_COLORS.length] }} />)}
-      </div>
-      <ul className="ctx-rows">
-        {b.slices.map((x, i) => (
-          <li key={x.key}><i style={{ background: USAGE_COLORS[i % USAGE_COLORS.length] }} /><span>{x.label}</span><span className="muted">{fmtTok(x.tokens)}</span><span>{pct(x.tokens)}</span></li>
-        ))}
-        <li><i className="free" /><span>Free space</span><span className="muted">{fmtTok(b.free)}</span><span>{pct(b.free)}</span></li>
-      </ul>
-      {ctx && (details.length > 0 || ctx.page || messageId) && (
-        <div className="ctx-groups">
-          {[...details.map((x) => ({ key: x.key, label: x.label, n: String(x.count) })), ...(ctx.page ? [{ key: 'page', label: 'Page', n: '' }] : []), ...(messageId ? [{ key: 'request', label: 'Exact request', n: '' }] : [])].map((x) => (
-            <div key={x.key}>
-              <button className="ctx-group-head" aria-expanded={open === x.key} onClick={() => setOpen(open === x.key ? null : x.key)}>
-                {open === x.key ? <ChevronDown size={12} /> : <ChevronRight size={12} />}<span>{x.label}</span><span className="muted">{x.n}</span>
-              </button>
-              {open === x.key && (x.key === 'request' && messageId ? <ExactRequest messageId={messageId} /> : <ContextUsedView ctx={ctx} only={x.key} />)}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+    <button className="link small" onClick={() => { void navigator.clipboard.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500) }).catch(() => undefined) }}>{done ? 'Copied' : 'Copy'}</button>
   )
 }
 
-function ContextMeterView({ conversationId, refreshKey, embedded, ctx, messageId }: { conversationId: string; refreshKey: string; embedded?: boolean; ctx?: ContextUsed | null; messageId?: string }): JSX.Element | null {
-  const [meter, setMeter] = useState<ContextMeter | null>(null)
-  const [spent, setSpent] = useState<ConversationUsage | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  /** Null while closed; otherwise the optional "Keep focus on…" text for the next compaction. */
-  const [focus, setFocus] = useState<string | null>(null)
-  const load = (): void => {
-    void api.contextMeter(conversationId).then(setMeter).catch(() => setMeter(null))
-    // Its own catch: a failed usage read must leave the meter standing.
-    void api.conversationUsage(conversationId).then(setSpent).catch(() => setSpent(null))
-  }
-  useEffect(load, [conversationId, refreshKey])
-  if (!meter) return null
-  const spentLine = spent ? usageLine(spent) : null
-  const spentTitle = spent ? [
-    `${spent.totals.prompt_tokens.toLocaleString()} prompt (${(spent.totals.cached_tokens ?? 0).toLocaleString()} cached), ${spent.totals.completion_tokens.toLocaleString()} completion tokens over ${spent.totals.calls} calls`,
-    ...spent.by_kind.map((k) => `${k.kind}: ${k.calls} calls, ${k.calls > k.unpriced ? fmtCost(k.cost) : 'no price set'}`),
-    spent.estimated ? `${spent.estimated} calls had estimated token counts` : '',
-    spent.since ? `Since ${new Date(spent.since * 1000).toLocaleString()} (older records may have been cleaned up)` : ''
-  ].filter(Boolean).join('\n') : undefined
-  const frac = Math.min(1, meter.estimated_tokens / Math.max(1, meter.window))
-  const act = async (fn: () => Promise<unknown>): Promise<void> => {
-    setBusy(true)
-    setError(null)
-    try { await fn() } catch (e) { setError((e as Error).message) } finally { setBusy(false); load() }
-  }
+const SLOT_HINT: Record<string, string> = {
+  stable: 'In the cached prefix: the same every turn unless it changes',
+  volatile: 'Rebuilt every turn, after the cached prefix',
+  tail: 'Added at the end of the request',
+  history: 'Replayed conversation',
+  tools: 'Tool definitions'
+}
+
+function ItemRow({ item, ctx, tx }: { item: BreakdownItem; ctx: ContextUsed; tx: Texts }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const viewable = item.kind !== 'tool_schema'
+  const text = open ? (textFor(tx.texts, item.id, item.kind) ?? fallbackText(ctx, item)) : null
   return (
-    <section className="ctx-section">
-      {embedded ? <UsageBreakdown meter={meter} ctx={ctx ?? null} messageId={messageId} /> : <>
-        <h4>Context window</h4>
-        <div className="ctx-meter" title={`${Math.round(meter.compact_at * 100)}% triggers automatic compaction`}>
-          <div className={`ctx-meter-fill ${frac >= meter.compact_at ? 'hot' : ''}`} style={{ width: `${frac * 100}%` }} />
-        </div>
-      </>}
-      <div className="ctx-meta">
-        <span>~{meter.estimated_tokens.toLocaleString()} of {meter.window.toLocaleString()} tokens</span>
-        {focus === null && <button className="ghost-btn xs" disabled={busy} onClick={() => setFocus('')}>{busy ? 'compacting…' : 'Compact now'}</button>}
+    <li className="ctx-item">
+      <div className="ctx-item-row">
+        <span className="ctx-item-label" title={item.source && item.source !== item.label ? item.source : undefined}>{item.label}</span>
+        {item.owner?.startsWith('ext:') && <span className="ctx-chip-tag" title="Added by an extension">{item.owner}</span>}
+        {item.deferred && <span className="ctx-chip-tag" title="Its definition is sent only when the assistant searches for it">on demand</span>}
+        {item.slot && item.slot !== 'tools' && item.slot !== 'history' && <span className="ctx-chip-tag" title={SLOT_HINT[item.slot]}>{item.slot}</span>}
+        {item.version && <span className="ctx-chip-tag" title="Content version">{item.version}</span>}
+        <span className="ctx-item-tok" title={item.deferred ? 'Not counted toward tokens sent' : undefined}>{item.deferred ? `(${fmtTok(item.tokens)})` : fmtTok(item.tokens)}</span>
+        {viewable && <button className="link small" aria-expanded={open} onClick={() => { if (!open) tx.ensure(); setOpen(!open) }}>{open ? 'Hide' : 'View'}</button>}
       </div>
-      {focus !== null && (
-        <form className="ctx-compact-focus" onSubmit={(e) => { e.preventDefault(); const f = focus; void act(async () => {
-          const res = await compactNow(conversationId, f)
-          setFocus(null) // closed only on success: a failure keeps the typed focus for a retry
-          if (!res.compacted) setError('Nothing old enough to compact yet.')
-        }) }}>
-          <input autoFocus aria-label="Keep focus on" placeholder="Keep focus on… (optional)" value={focus} disabled={busy}
-            onChange={(e) => setFocus(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setFocus(null) } }} />
-          <button type="submit" className="ghost-btn xs" disabled={busy}>{busy ? 'compacting…' : 'Compact'}</button>
-          <button type="button" className="link" disabled={busy} onClick={() => setFocus(null)}>Cancel</button>
-        </form>
+      {open && (
+        <div className="ctx-text">
+          {text ? <><pre className="ctx-prompt">{text}</pre><CopyButton text={text} /></>
+            : tx.status === 'loading' || tx.status === 'idle' ? <p className="muted small">Loading…</p>
+            : null}
+        </div>
       )}
-      {spentLine && <div className="ctx-usage" title={spentTitle}>{spentLine}</div>}
-      {error && <p className="muted small">{error}</p>}
-      {meter.summary && (
-        <details className="ctx-summary">
-          <summary>Summary of earlier messages ({meter.summary.summarized_messages})</summary>
-          <pre>{meter.summary.summary}</pre>
-          <button className="link" disabled={busy} onClick={() => void act(() => api.discardSummary(conversationId))}>Discard summary</button>
-        </details>
-      )}
-    </section>
+    </li>
+  )
+}
+
+function SliceDetail({ slice, ctx, tx }: { slice: UsageSlice; ctx: ContextUsed; tx: Texts }): JSX.Element {
+  if (slice.groups) {
+    return (
+      <div className="ctx-detail">
+        {slice.groups.map((g) => (
+          <div key={g.key}>
+            <p className="ctx-group-label">{g.label} <span className="muted">{fmtTok(g.tokens)}</span></p>
+            <ul className="ctx-items">{g.items.map((i) => <ItemRow key={i.id} item={i} ctx={ctx} tx={tx} />)}</ul>
+          </div>
+        ))}
+        {(slice.deferredCount ?? 0) > 0 && <p className="ctx-group-label">On demand <span className="muted">{slice.deferredCount} · {fmtTok(slice.deferredTokens ?? 0)} not counted</span></p>}
+      </div>
+    )
+  }
+  return <div className="ctx-detail"><ul className="ctx-items">{(slice.items ?? []).map((i) => <ItemRow key={i.id} item={i} ctx={ctx} tx={tx} />)}</ul></div>
+}
+
+/** One inspector row: a button that discloses its detail. */
+function InspectorRow({ label, meta, swatch, open, onToggle, children }: { label: string; meta?: ReactNode; swatch?: number; open: boolean; onToggle: () => void; children?: ReactNode }): JSX.Element {
+  return (
+    <div className="ctx-irow">
+      <button className="ctx-group-head" aria-expanded={open} onClick={onToggle}>
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {swatch != null && <i className="ctx-swatch" style={{ background: `var(--chart-${swatch})` }} aria-hidden="true" />}
+        <span>{label}</span><span className="muted ctx-irow-meta">{meta}</span>
+      </button>
+      {open && children}
+    </div>
   )
 }
 
@@ -132,49 +131,250 @@ function ExactRequest({ messageId }: { messageId: string }): JSX.Element {
   const [rounds, setRounds] = useState<Awaited<ReturnType<typeof api.messageRequests>> | null | undefined>(undefined)
   const [open, setOpen] = useState<number | null>(null)
   useEffect(() => { setRounds(undefined); setOpen(null) }, [messageId])
-  const load = (): void => { void api.messageRequests(messageId).then(setRounds).catch(() => setRounds(null)) }
-  if (rounds === undefined) return <div className="ctx-meta"><button className="link" onClick={load}>Exact request</button></div>
-  if (!rounds) return <div className="ctx-meta muted">No request was captured for this reply.</div>
+  if (rounds === undefined) return <p className="ctx-meta muted small">Loading…</p>
+  if (!rounds) return <p className="ctx-meta muted small">Not captured</p>
   return (
-    <section>
-      <h5>Exact request ({rounds.length} {rounds.length === 1 ? 'round' : 'rounds'})</h5>
+    <div className="ctx-detail">
       {rounds.map((r) => {
         const json = JSON.stringify({ model: r.model, tool_choice: r.tool_choice, messages: r.messages, tools: r.tools }, null, 2)
         return (
-          <div key={r.round + r.tokens} className="ctx-meta">
-            #{r.round} {modelLabel(r.model)} · {r.messages.length} messages · {r.tools.length} tools · ~{r.tokens.toLocaleString()} tokens{' '}
-            <button className="link" onClick={() => setOpen(open === r.round ? null : r.round)}>{open === r.round ? 'hide' : 'view'}</button>{' '}
-            <button className="link" onClick={() => void navigator.clipboard.writeText(json)}>copy</button>{' '}
-            <a className="link" href={`data:application/json;charset=utf-8,${encodeURIComponent(json)}`} download={`request-${messageId}-${r.round}.json`}>download</a>
+          <div key={r.round + r.tokens} className="ctx-req">
+            <span>#{r.round} {modelLabel(r.model)} · {r.messages.length} messages · {r.tools.length} tools · ~{r.tokens.toLocaleString()} tokens</span>{' '}
+            <button className="link small" aria-expanded={open === r.round} onClick={() => setOpen(open === r.round ? null : r.round)}>{open === r.round ? 'Hide' : 'View'}</button>{' '}
+            <CopyButton text={json} />{' '}
+            <a className="link small" href={`data:application/json;charset=utf-8,${encodeURIComponent(json)}`} download={`request-${messageId}-${r.round}.json`}>Download</a>
             {open === r.round && <pre className="ctx-prompt">{json}</pre>}
           </div>
         )
       })}
+    </div>
+  )
+}
+
+/** A turn's ledger as rows: prefix cache state, per category, per item with the text of each, skipped hooks. Shared by the last reply and the draft preview. */
+function Inspector({ ctx, b, tx, children }: { ctx: ContextUsed; b: UsageBreakdown | null; tx: Texts; children?: ReactNode }): JSX.Element {
+  const [openRows, setOpenRows] = useState<Record<string, boolean>>({})
+  const exact = Boolean(b?.exact)
+  const slices = (b?.slices ?? []).filter((s) => (exact ? (s.items?.length ?? 0) > 0 : s.count > 0))
+  const extra: { key: string; label: string }[] = exact ? [] : [
+    ...(ctx.system_prompt ? [{ key: 'system', label: 'System prompt' }] : []),
+    ...(ctx.page ? [{ key: 'page', label: 'Page' }] : [])
+  ]
+  const firstKey = exact ? slices[0]?.key : (extra[0]?.key ?? slices[0]?.key)
+  const isOpen = (k: string): boolean => openRows[k] ?? k === firstKey
+  const toggle = (k: string): void => { const o = !isOpen(k); if (o) tx.ensure(); setOpenRows({ ...openRows, [k]: o }) }
+  const cache = ctx.cache
+  const hash = ctx.stable_hash ? ctx.stable_hash.slice(0, 6) : null
+  return (
+    <>
+      {exact && (cache || hash) && (
+        <p className="ctx-cache" role="status">
+          <span>Prefix cache</span> <b>{cache ? (cache.changed ? `changed${cache.reason ? ` · ${cache.reason}` : ''}` : 'unchanged') : 'unknown'}</b>
+          {hash && <span className="muted"> · {hash}</span>}
+        </p>
+      )}
+      {exact && tx.status === 'missing' && <p className="muted small">{KEPT_NOTE}</p>}
+      {exact && slices.map((s) => (
+        <InspectorRow key={s.key} label={s.label} swatch={s.hue} meta={`${s.count} · ${fmtTok(s.tokens)}`} open={isOpen(s.key)} onToggle={() => toggle(s.key)}>
+          <SliceDetail slice={s} ctx={ctx} tx={tx} />
+        </InspectorRow>
+      ))}
+      {!exact && extra.map((x) => (
+        <InspectorRow key={x.key} label={x.label} open={isOpen(x.key)} onToggle={() => toggle(x.key)}>
+          {x.key === 'system' ? <div className="ctx-detail"><pre className="ctx-prompt">{ctx.system_prompt}</pre><CopyButton text={ctx.system_prompt ?? ''} /></div> : <div className="ctx-detail"><ContextUsedView ctx={ctx} only={x.key} /></div>}
+        </InspectorRow>
+      ))}
+      {!exact && slices.map((s) => (
+        <InspectorRow key={s.key} label={s.label} swatch={s.hue} meta={`${s.count} · ${fmtTok(s.tokens)}`} open={isOpen(s.key)} onToggle={() => toggle(s.key)}>
+          <div className="ctx-detail"><ContextUsedView ctx={ctx} only={s.key} /></div>
+        </InspectorRow>
+      ))}
+      {exact && (ctx.skipped?.length ?? 0) > 0 && (
+        <ul className="ctx-skipped muted small" aria-label="Skipped hooks">
+          {ctx.skipped!.map((k, i) => <li key={`${k.owner}${k.hook}${i}`}>{k.owner} · {k.hook}: {k.reason}</li>)}
+        </ul>
+      )}
+      {children}
+    </>
+  )
+}
+
+/** What the last reply was sent. */
+function LastReply({ ctx, messageId, b, conversationId }: { ctx: ContextUsed | null; messageId?: string; b: UsageBreakdown | null; conversationId: string }): JSX.Element {
+  const [loadReq, setLoadReq] = useState(false)
+  const devTools = useStore((s) => s.settings.devTools === true)
+  const tx = useMessageTexts(messageId)
+  useEffect(() => { setLoadReq(false) }, [messageId])
+  if (!ctx) return <section className="ctx-section"><h4>Last reply</h4><p className="muted ctx-empty">No replies yet</p></section>
+  return (
+    <section className="ctx-section ctx-inspector">
+      <h4>Last reply</h4>
+      <Inspector ctx={ctx} b={b} tx={tx}>
+        {messageId && (
+          <InspectorRow label="Exact request" open={loadReq} onToggle={() => setLoadReq(!loadReq)}>
+            <ExactRequest messageId={messageId} />
+          </InspectorRow>
+        )}
+        {devTools && <PreviewRow conversationId={conversationId} />}
+      </Inspector>
     </section>
   )
 }
 
-function ContextUsedView({ ctx, messageId, only }: { ctx: ContextUsed; messageId?: string; only?: string }): JSX.Element {
+/** The preview's ledger in the same rows as a saved reply; its texts arrive with it. */
+function PreviewLedger({ preview }: { preview: ContextPreview }): JSX.Element {
+  const b = resolveBreakdown(null, preview)
+  const tx = useMemo<Texts>(() => ({ status: 'ready', texts: { ...(preview.system_prompt ? { system: preview.system_prompt } : {}), ...(preview.texts ?? {}) }, ensure: () => undefined }), [preview])
+  return <Inspector ctx={preview} b={b} tx={tx} />
+}
+
+/** Draft preview: what a message you have not sent would pull in. Developer tool. */
+function PreviewRow({ conversationId }: { conversationId: string }): JSX.Element {
+  const convo = useConversation(conversationId)
+  const draftProjectId = useStore((s) => s.draftProjectId)
+  const draftChatSettings = useStore((s) => s.draftChatSettings)
+  const projectId = convo?.project_id ?? draftProjectId
+  const cs: ConversationSettings = convo?.settings ?? { effort: DEFAULT_EFFORT, useMemory: true, useGraph: true, useDocuments: true, useStyle: true, useMap: true, autoLearn: true, useTools: true, tools: {}, ...draftChatSettings }
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [preview, setPreview] = useState<ContextPreview | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const t = setTimeout(() => { void api.contextPreview(projectId, query, cs, convo?.id).then(setPreview).catch(() => setPreview(null)) }, 300)
+    return () => clearTimeout(t)
+  }, [open, query, projectId, convo?.id, cs.useMemory, cs.useGraph, cs.useDocuments, cs.useStyle, cs.draftMode])
+  return (
+    <InspectorRow label="Preview a draft" meta={<Eye size={12} />} open={open} onToggle={() => setOpen(!open)}>
+      <div className="ctx-detail ctx-preview">
+        <input aria-label="Draft message" placeholder="Draft a message…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        {preview && <PreviewLedger preview={preview} />}
+      </div>
+    </InspectorRow>
+  )
+}
+
+/** Percent of the window used as one stacked bar by category, with the auto-compact threshold as a tick. */
+function UsageBar({ b }: { b: UsageBreakdown }): JSX.Element {
+  const compactPct = b.compactAt != null ? Math.round(b.compactAt * 100) : null
+  const label = `${Math.round(b.pct)}% of the context window used, ${fmtTok(b.used)} of ${fmtTok(b.window)} tokens. ${b.slices.map((s) => `${s.label} ${fmtTok(s.tokens)}`).join(', ')}.${compactPct != null ? ` Auto-compact at ${compactPct}%.` : ''}`
+  const pct = (n: number): string => `${+((n / b.window) * 100).toFixed(1)}%`
+  return (
+    <>
+      <div className="ctx-bar" role="img" aria-label={label}>
+        {b.slices.map((x) => <span key={x.key} title={`${x.label}: ${fmtTok(x.tokens)} (${pct(x.tokens)})`} style={{ width: `${x.tokens * b.scale}%`, background: `var(--chart-${x.hue})` }} />)}
+        {b.compactPos != null && <span className="ctx-tick" aria-hidden="true" style={{ left: `${b.compactPos}%` }} title={`Auto-compact at ${compactPct}%`} />}
+      </div>
+      <ul className="ctx-rows" aria-label="Context by category">
+        {b.slices.map((x) => (
+          <li key={x.key}><i style={{ background: `var(--chart-${x.hue})` }} aria-hidden="true" /><span>{x.label}</span><span className="muted">{fmtTok(x.tokens)}</span><span>{pct(x.tokens)}</span></li>
+        ))}
+        <li><i className="free" aria-hidden="true" /><span>Free space</span><span className="muted">{fmtTok(b.free)}</span><span>{pct(b.free)}</span></li>
+        {compactPct != null && <li><i className="tick" aria-hidden="true" /><span>Auto-compact at {compactPct}%</span><span className="muted">{fmtTok((b.compactAt ?? 0) * b.window)}</span><span /></li>}
+      </ul>
+    </>
+  )
+}
+
+function ContextMeterView({ conversationId, refreshKey, ctx, messageId, scope }: { conversationId: string; refreshKey: string; ctx?: ContextUsed | null; messageId?: string; scope: ReactNode }): JSX.Element {
+  const [meter, setMeter] = useState<ContextMeter | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [spent, setSpent] = useState<ConversationUsage | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  /** Null while closed; otherwise the optional "Keep focus on…" text for the next compaction. */
+  const [focus, setFocus] = useState<string | null>(null)
+  const load = (): void => {
+    setLoading(true)
+    void api.contextMeter(conversationId).then((m) => { setMeter(m); setLoadError(null) }).catch((e) => { setMeter(null); setLoadError((e as Error).message || 'Could not read the context window.') }).finally(() => setLoading(false))
+    // Its own catch: a failed usage read must leave the meter standing.
+    void api.conversationUsage(conversationId).then(setSpent).catch(() => setSpent(null))
+  }
+  useEffect(load, [conversationId, refreshKey])
+  const spentLine = spent ? usageLine(spent) : null
+  const spentTitle = spent ? [
+    `${spent.totals.prompt_tokens.toLocaleString()} prompt (${(spent.totals.cached_tokens ?? 0).toLocaleString()} cached), ${spent.totals.completion_tokens.toLocaleString()} completion tokens over ${spent.totals.calls} calls`,
+    ...spent.by_kind.map((k) => `${k.kind}: ${k.calls} calls, ${k.calls > k.unpriced ? fmtCost(k.cost) : 'no price set'}`),
+    spent.estimated ? `${spent.estimated} calls had estimated token counts` : '',
+    spent.since ? `Since ${new Date(spent.since * 1000).toLocaleString()} (older records may have been cleaned up)` : ''
+  ].filter(Boolean).join('\n') : undefined
+  const act = async (fn: () => Promise<unknown>): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    try { await fn() } catch (e) { setError((e as Error).message) } finally { setBusy(false); load() }
+  }
+  const b = resolveBreakdown(meter, ctx ?? null, meter?.compact_at)
+  return (
+    <>
+      <section className="ctx-section ctx-head">
+        <div className="ctx-title">
+          <h3>Context</h3>
+          {meter && focus === null && <button className="ghost-btn xs" disabled={busy} onClick={() => setFocus('')}>{busy ? 'compacting…' : 'Compact now'}</button>}
+        </div>
+        {scope}
+        {!b && loading && <div className="ctx-skel" role="status" aria-busy="true">Reading context…</div>}
+        {loadError && !loading && (
+          <div className="ctx-error" role="alert">
+            <span>Could not read the context window{b ? '; showing the last reply’s figures' : ''}.</span>
+            <button className="link small" onClick={load}>Retry</button>
+          </div>
+        )}
+        {!b && !loading && !loadError && <p className="muted small">No replies yet</p>}
+        {b && (
+          <div className="ctx-usage-card">
+            <div className="ctx-usage-head"><b className="ctx-big">{Math.round(b.pct)}% used</b><span className="muted">{b.exact ? '' : '~'}{fmtTok(b.used)} / {fmtTok(b.window)} tokens</span></div>
+            <UsageBar b={b} />
+          </div>
+        )}
+        {focus !== null && (
+          <form className="ctx-compact-focus" onSubmit={(e) => { e.preventDefault(); const f = focus; void act(async () => {
+            const res = await compactNow(conversationId, f)
+            setFocus(null) // closed only on success: a failure keeps the typed focus for a retry
+            if (!res.compacted) setError('Nothing old enough to compact yet.')
+          }) }}>
+            <input autoFocus aria-label="Keep focus on" placeholder="Keep focus on… (optional)" value={focus} disabled={busy}
+              onChange={(e) => setFocus(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setFocus(null) } }} />
+            <button type="submit" className="ghost-btn xs" disabled={busy}>{busy ? 'compacting…' : 'Compact'}</button>
+            <button type="button" className="link" disabled={busy} onClick={() => setFocus(null)}>Cancel</button>
+          </form>
+        )}
+        {error && <p className="muted small" role="status">{error}</p>}
+      </section>
+
+      <LastReply ctx={ctx ?? null} messageId={messageId} b={b} conversationId={conversationId} />
+
+      {(spentLine || meter?.summary) && (
+        <section className="ctx-section">
+          {spentLine && <div className="ctx-usage" title={spentTitle}>{spentLine}</div>}
+          {meter?.summary && (
+            <details className="ctx-summary">
+              <summary>Summary of earlier messages ({meter.summary.summarized_messages})</summary>
+              <pre>{meter.summary.summary}</pre>
+              <button className="link" disabled={busy} onClick={() => void act(() => api.discardSummary(conversationId))}>Discard summary</button>
+            </details>
+          )}
+        </section>
+      )}
+    </>
+  )
+}
+
+function ContextUsedView({ ctx, only }: { ctx: ContextUsed; only?: string }): JSX.Element {
   const g = (k: string): boolean => !only || only === k
   const openMemory = useStore((s) => s.openMemory)
   const openFiles = useStore((s) => s.openFiles)
   const memories = useStore((s) => s.memories)
   const [showPrompt, setShowPrompt] = useState(false)
-  const devTools = useStore((s) => s.settings.devTools === true)
   const [viewing, setViewing] = useState<ChunkRef | null>(null)
-  const has = ctx.memories.length + (ctx.profile?.length ?? 0) + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
-    || Boolean(ctx.map) || Boolean(ctx.page) || Boolean(ctx.style) || (ctx.pinned?.length ?? 0) > 0
   return (
     <div className="ctx-used">
       {!only && <div className="ctx-meta">
         ~{ctx.tokens_estimate} tokens of context
         {ctx.trimmed && Object.keys(ctx.trimmed).length > 0 && <span className="muted"> · trimmed {Object.entries(ctx.trimmed).map(([k, n]) => `${k} ${n}`).join(', ')}</span>}
-        {(ctx.tools_deferred ?? 0) > 0 && <span className="muted" title="Held out of the request until the assistant searches for them"> · {ctx.tools_deferred} tools loaded on demand</span>}
-        {devTools && ctx.system_prompt && <button className="link" onClick={() => setShowPrompt((v) => !v)}>{showPrompt ? 'hide' : 'view full system prompt'}</button>}
+        {(ctx.tools_deferred ?? 0) > 0 && <span className="muted" title="Held out of the request until the assistant searches for them"> · {ctx.tools_deferred} on demand</span>}
+        {ctx.system_prompt && <button className="link" onClick={() => setShowPrompt((v) => !v)}>{showPrompt ? 'Hide' : 'System prompt'}</button>}
       </div>}
-      {!only && devTools && showPrompt && <pre className="ctx-prompt">{ctx.system_prompt}</pre>}
-      {!only && messageId && <ExactRequest messageId={messageId} />}
-      {!only && !has && <p className="muted">Nothing from memory, graph, or files was relevant.</p>}
+      {!only && showPrompt && <pre className="ctx-prompt">{ctx.system_prompt}</pre>}
       {g('page') && ctx.page && (
         <section>
           <h5><MonitorDot size={12} /> Page — {ctx.page.label}</h5>
@@ -224,9 +424,9 @@ function ContextUsedView({ ctx, messageId, only }: { ctx: ContextUsed; messageId
         <section>
           <h5><Share2 size={12} /> Workspace map (~{ctx.map.tokens} tokens{ctx.map.shrunk ? ', shortened' : ''})</h5>
           {Object.keys(ctx.map.sections).length > 0 && <p className="muted small">{Object.entries(ctx.map.sections).map(([k, n]) => `${k} ${n}`).join(' · ')}</p>}
-          {ctx.map.volatile && <p className="muted small">Changes each turn: ~{ctx.map.volatile.tokens} tokens{Object.keys(ctx.map.volatile.sections).length > 0 ? ` (${Object.entries(ctx.map.volatile.sections).map(([k, n]) => `${k} ${n}`).join(', ')})` : ''}</p>}
+          {ctx.map.volatile && <p className="muted small">Per turn ~{ctx.map.volatile.tokens} tokens{Object.keys(ctx.map.volatile.sections).length > 0 ? ` (${Object.entries(ctx.map.volatile.sections).map(([k, n]) => `${k} ${n}`).join(', ')})` : ''}</p>}
           <details>
-            <summary className="link small">view the map</summary>
+            <summary className="link small">Map</summary>
             <pre className="ctx-prompt">{ctx.map.text}</pre>
           </details>
         </section>
@@ -248,28 +448,19 @@ function ContextUsedView({ ctx, messageId, only }: { ctx: ContextUsed; messageId
   )
 }
 
-/** `embedded`: the body only, as a tab of the chat's side panel (no drawer chrome, closed by the panel). */
-export default function ContextDrawer({ conversationId, embedded }: { conversationId?: string; embedded?: boolean }): JSX.Element {
-  const tabsPill = useSlidingPill<HTMLDivElement>()
+/** The body of the side panel's Context tab: what the model is sent (with the text of each part), then what this chat may use. The shell scrolls it; `embedded` is accepted for callers and ignored. */
+export default function ContextDrawer({ conversationId }: { conversationId?: string; embedded?: boolean }): JSX.Element {
   const convo = useConversation(conversationId)
   const draftProjectId = useStore((s) => s.draftProjectId)
   const settings = useStore((s) => s.settings)
   const projectId = convo?.project_id ?? draftProjectId
   const project = useProject(projectId)
-  const toggleContext = useStore((s) => s.toggleContext)
   const setChatSettings = useStore((s) => s.setChatSettings)
   const openSettings = useStore((s) => s.openSettings)
   const draftChatSettings = useStore((s) => s.draftChatSettings)
   const openProject = useStore((s) => s.openProject)
   const induceSkill = useStore((s) => s.induceSkill)
-  const setTab = useStore((s) => s.setContextTab)
-  // Preview is a developer tool; with it off, the drawer only shows Last reply. Everything here is what the model is given; the run's steps live in the Traces tab.
-  const devTools = useStore((s) => s.settings.devTools === true)
-  const storeTab = useStore((s) => s.contextTab)
-  const tab = devTools && storeTab === 'preview' ? 'preview' : 'last'
   const streamingMessageId = useStreamingMessageId(conversationId)
-  const [query, setQuery] = useState('')
-  const [preview, setPreview] = useState<ContextUsed | null>(null)
 
   const hasStyle = useStore((s) => Boolean(s.style?.effective))
   const cs: ConversationSettings = convo?.settings ?? { effort: DEFAULT_EFFORT, useMemory: true, useGraph: true, useDocuments: true, useStyle: true, useMap: true, autoLearn: true, useTools: true, tools: {}, ...draftChatSettings }
@@ -287,47 +478,40 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
     return null
   }, [convo?.messages])
 
-  useEffect(() => {
-    if (tab !== 'preview') return
-    const t = setTimeout(() => {
-      void api.contextPreview(projectId, query, cs).then(setPreview).catch(() => setPreview(null))
-    }, 300)
-    return () => clearTimeout(t)
-  }, [tab, query, projectId, cs.useMemory, cs.useGraph, cs.useDocuments, cs.useStyle, cs.draftMode])
+  const scope = (
+    <p className="scope-line ctx-scope">
+      <span className="project-dot sm" style={{ background: project?.color ?? 'var(--text-faint)' }} />
+      <span>{project ? `${project.name} + personal` : 'Personal'}</span>
+      {project && <button className="link" onClick={() => openProject(project.id)}>open project</button>}
+    </p>
+  )
 
-  const Wrap = embedded ? 'div' : 'aside'
   return (
-    <Wrap className={embedded ? 'desk-pane scroll context-embedded' : 'context-drawer'}>
-      {!embedded && <header>
-        <h3>Context</h3>
-        <button className="icon-btn" title={tip('Close', 'toggle-context')} aria-label="Close context panel" onClick={toggleContext}><X size={16} /></button>
-      </header>}
-
-      <section className="ctx-section">
-        <h4>Scope</h4>
-        <div className="scope-line">
-          <span className="project-dot sm" style={{ background: project?.color ?? 'var(--text-faint)' }} />
-          <span>{project ? `${project.name} + personal` : 'Personal'}</span>
-          {project && <button className="link" onClick={() => openProject(project.id)}>open project</button>}
-        </div>
-      </section>
-
-      {convo && <ContextMeterView conversationId={convo.id} refreshKey={`${convo.messages?.length ?? 0}:${streamingMessageId ?? ''}`} embedded={embedded} ctx={lastCtx?.ctx} messageId={lastCtx?.id} />}
+    <div className="ctx-body">
+      {convo ? (
+        <ContextMeterView conversationId={convo.id} refreshKey={`${convo.messages?.length ?? 0}:${streamingMessageId ?? ''}`} ctx={lastCtx?.ctx} messageId={lastCtx?.id} scope={scope} />
+      ) : (
+        <section className="ctx-section ctx-head">
+          <div className="ctx-title"><h3>Context</h3></div>
+          {scope}
+          <p className="muted ctx-empty">No replies yet</p>
+        </section>
+      )}
 
       <section className="ctx-section">
         <h4>{convo ? 'This chat uses' : 'New chats use'}</h4>
         <Toggle icon={<Brain size={14} />} label="Memory" hint="Pinned, recent and matching memories" value={cs.useMemory} onChange={(v) => void setChatSettings({ useMemory: v }, conversationId)} />
         <Toggle icon={<Share2 size={14} />} label="Knowledge graph" hint="Entities mentioned + their neighbours" value={cs.useGraph} onChange={(v) => void setChatSettings({ useGraph: v }, conversationId)} />
         <Toggle icon={<FileText size={14} />} label="Files" hint="Best matching excerpts from your notes and uploads" value={cs.useDocuments} onChange={(v) => void setChatSettings({ useDocuments: v }, conversationId)} />
-        <Toggle icon={<PenLine size={14} />} label="Write in my voice" hint={hasStyle ? 'Put your voice in every turn of this chat. Off, the assistant still fetches it before drafting something you will send; ignored once the chat has read untrusted content' : 'No voice learned yet'} value={cs.draftMode === true && cs.useStyle !== false} onChange={(v) => void setChatSettings(v ? { draftMode: true, useStyle: true } : { draftMode: false }, conversationId)} />
+        <Toggle icon={<PenLine size={14} />} label="Write in my voice" hint={hasStyle ? 'Your voice in every turn' : 'No voice learned yet'} value={cs.draftMode === true && cs.useStyle !== false} onChange={(v) => void setChatSettings(v ? { draftMode: true, useStyle: true } : { draftMode: false }, conversationId)} />
         {convo && <>
-          <Toggle icon={<EyeOff size={14} />} label="Don’t learn from this chat" hint="Stays in history and search; nothing from it becomes a memory, graph relation or draft skill" value={cs.learn === false} onChange={(v) => void setChatSettings({ learn: !v }, conversationId)} />
+          <Toggle icon={<EyeOff size={14} />} label="Don’t learn from this chat" hint="Nothing here becomes a memory or skill" value={cs.learn === false} onChange={(v) => void setChatSettings({ learn: !v }, conversationId)} />
           {cs.learn === false && <button className="link small" onClick={() => void useStore.getState().forgetLearned(convo.id)}>Forget what was learned here</button>}
         </>}
-        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Off for every chat'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} disabled={!settings.autoLearn} fix={settings.autoLearn ? undefined : { label: 'Turn on in Settings → Memory', open: () => openSettings('memory') }} />
-        <Toggle icon={<Wrench size={14} />} label="Tools" hint={settings.permissionMode === 'allow_all' ? 'Allow everything is on: tools run without asking. Deny rules still apply.' : 'Web, files, memory, graph, todos, Python… Risky actions follow the permission mode in Settings.'} value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
-        <Toggle icon={<GraduationCap size={14} />} label="Skills" hint="Skills you approved, added to the context as steps to follow. Candidates are never added." value={cs.useSkills !== false} onChange={(v) => void setChatSettings({ useSkills: v }, conversationId)} />
-        <Toggle icon={<Share2 size={14} />} label="Workspace map" hint="A short overview of what exists (memory, files, projects) and today's state, so the assistant knows where to look. Sections are chosen in Settings → Memory." value={cs.useMap !== false} onChange={(v) => void setChatSettings({ useMap: v }, conversationId)} fix={{ label: 'Choose sections in Settings → Memory', open: () => openSettings('memory') }} />
+        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Off for every chat'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} disabled={!settings.autoLearn} fix={settings.autoLearn ? undefined : { label: 'Settings', open: () => openSettings('memory') }} />
+        <Toggle icon={<Wrench size={14} />} label="Tools" hint={settings.permissionMode === 'allow_all' ? 'Allow everything is on' : 'Risky actions follow the permission mode'} value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
+        <Toggle icon={<GraduationCap size={14} />} label="Skills" hint="Approved skills only" value={cs.useSkills !== false} onChange={(v) => void setChatSettings({ useSkills: v }, conversationId)} />
+        <Toggle icon={<Share2 size={14} />} label="Workspace map" hint="Overview of memory, files and projects" value={cs.useMap !== false} onChange={(v) => void setChatSettings({ useMap: v }, conversationId)} fix={{ label: 'Sections', open: () => openSettings('memory') }} />
         {(convo || cs.useTools) && (
           <div className="ctx-tools">
             {convo && <button className="link small" title="Waits in Library → Skills until you approve it." onClick={() => void induceSkill(convo.id)}>Save this chat as a skill…</button>}
@@ -345,26 +529,12 @@ export default function ContextDrawer({ conversationId, embedded }: { conversati
           return (
             <div className="ctx-taint" title={full}>
               <ShieldAlert size={14} />
-              <span className="ctx-taint-text">Read untrusted content{names.length ? ` from ${names.join(', ')}` : ''}. Risky actions ask first.</span>
+              <span className="ctx-taint-text">Untrusted{names.length ? `: ${names.join(', ')}` : ''}</span>
               <button className="ghost-btn sm" onClick={() => void setChatSettings({ tainted: false, taint_sources: [], useDocuments: false })}>Clear</button>
             </div>
           )
         })()}
       </section>
-
-      {(!embedded || devTools) && <div className="ctx-tabs pill-group" ref={tabsPill}>
-        <button className={tab === 'last' ? 'active' : ''} onClick={() => setTab('last')}>Last reply</button>
-        {devTools && <button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')}><Eye size={12} /> Preview</button>}
-      </div>}
-
-      {tab === 'last' ? (
-        embedded && convo ? null : lastCtx ? <ContextUsedView ctx={lastCtx.ctx} messageId={lastCtx.id} /> : <p className="muted ctx-empty">Send a message to see its context.</p>
-      ) : (
-        <div className="ctx-preview">
-          <input placeholder="Draft a message…" value={query} onChange={(e) => setQuery(e.target.value)} />
-          {preview && <ContextUsedView ctx={preview} />}
-        </div>
-      )}
-    </Wrap>
+    </div>
   )
 }

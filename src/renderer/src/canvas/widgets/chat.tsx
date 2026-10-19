@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { isSideNote, isBranchNote, isClear, sinceClear } from '../../lib/workers'
 import BranchNote from '../../components/BranchNote'
 import SideNote from '../../components/SideNote'
-import { Check, MessageSquare, MessagesSquare, Pencil, Smile } from '../../icons'
+import { Check, MessageSquare, MessagesSquare, Pencil, Smile, SlidersHorizontal } from '../../icons'
+import DeskPanel from '../../components/DeskPanel'
 import type { Attachment, CanvasWindow, DragKind, DragPayload, Rect } from '@shared/types'
 import MessageView from '../../components/Message'
 import RegenRow from '../../components/RegenRow'
@@ -175,6 +176,8 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
   const streaming = useIsStreaming(convId)
   const streamingId = useStreamingMessageId(convId)
   const { status } = useRingStatus(convId)
+  const panelOn = useCanvas((s) => !!s.chatPanels[win.id])
+  const toggleChatPanel = useCanvas((s) => s.toggleChatPanel)
   // Blob view: the window shows only this chat's creature, posed by this chat's own state. A window
   // that has never chosen follows Settings › Behavior › Compact chats; the head's button overrides it.
   const compactOn = useStore((s) => !!s.settings.compactChats)
@@ -326,6 +329,7 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
   const actions = (
     <>
       <ChatSwitcher win={win} convId={convId} />
+      <button className={`icon-btn ghost xs${panelOn ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={panelOn} onClick={() => toggleChatPanel(win.id)}><SlidersHorizontal size={11} /></button>
       <button className="icon-btn ghost xs" title="Shrink to a face" aria-label="Shrink to a face" onClick={() => setBlob(win, true)}><Smile size={11} /></button>
     </>
   )
@@ -337,6 +341,7 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
     if (el) setStick(el.scrollHeight - el.scrollTop - el.clientHeight < 80)
   }
   return (
+    <div className="chat-split">
     <div ref={root} className={drop.over ? 'widget drop-over' : 'widget'} {...drop.handlers}>
       <ChatTitle convId={convId} title={convo?.title ?? ''} actions={actions} />
       <div className="messages" ref={scroll} onScroll={onScroll}>
@@ -348,6 +353,8 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
         </div>
       </div>
       <Composer conversationId={convId} compact footer={<ChatControls conversationId={convId} />} />
+    </div>
+    {panelOn && <DeskPanel key={convId} conversationId={convId} onClose={() => toggleChatPanel(win.id)} />}
     </div>
   )
 }

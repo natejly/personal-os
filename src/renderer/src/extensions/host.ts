@@ -65,9 +65,9 @@ export interface SlotItems {
    * A card of the chat's side panel; it is listed while `shown` (default: always) and `count` is its badge. `Overlay` is drawn
    * over the chat whenever the card is listed, collapsed or not, so a window the card opens outlives the card closing.
    */
+  'sidepanel.tab': { label: string; Component: FC<SidePanelTabProps>; Overlay?: FC<SidePanelTabProps>; shown?: (p: SidePanelTabProps) => boolean; count?: (p: SidePanelTabProps) => number }
   /** A block at the top of a Grain project's Files, for what the extension keeps for that project. */
   'project.files': { Component: FC<{ projectId: string }> }
-  'sidepanel.tab': { label: string; Component: FC<SidePanelTabProps>; Overlay?: FC<SidePanelTabProps>; shown?: (p: SidePanelTabProps) => boolean; count?: (p: SidePanelTabProps) => number }
 }
 export type SlotName = keyof SlotItems
 

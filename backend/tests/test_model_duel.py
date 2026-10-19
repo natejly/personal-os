@@ -146,6 +146,18 @@ def test_no_duel_without_dev_tools_or_ab_model() -> None:
         client.put("/settings", json={"devTools": True})
 
 
+def test_a_selected_agent_loop_skips_the_duel_and_says_so() -> None:
+    client.put("/runtime", json={"slot": "agent.loop", "scope": "global", "value": "core/plan-execute-verify", "confirm": True})
+    try:
+        cid, rid = start("hello")
+        wait_done(cid)
+        assert "duel-b" not in CALLS and not appmod._ab_waits
+        events = client.get(f"/runs/{rid}/events").text
+        assert "ab_start" not in events and "Model duel skipped" in events
+    finally:
+        client.put("/runtime", json={"slot": "agent.loop", "scope": "global", "value": None})
+
+
 def test_pick_with_no_duel_is_404_and_bad_winner_400() -> None:
     assert client.post("/conversations/x/ab/pick", json={"message_id": "nope", "winner": "a"}).status_code == 404
     assert client.post("/conversations/x/ab/pick", json={"message_id": "nope", "winner": "z"}).status_code == 400

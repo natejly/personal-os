@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from personal_os.extensions.catalog import HOOKS
+from personal_os.runtime.protocols import ModelReply
 
 from .hooks import Fire
 
@@ -173,7 +174,6 @@ class FakeModelClient:
             yield ev
 
     async def complete(self, req: Any) -> Any:
-        from personal_os.runtime.protocols import ModelReply  # lazy: the app is not importable until the data dir is set
         self.requests.append(req)
         if self.fail_at == 0:
             raise self.error("scripted failure")

@@ -239,3 +239,13 @@ def test_the_cli_refuses_an_unknown_project_or_chat_and_resolves_the_runtime_slo
         appmod.db.set_settings({"runtime": {}})
     assert set(got) == set(appmod.host.runtime.resolve_all())
     assert got["agent.loop"]["provider"] == "core/plan-execute-verify" and got["agent.loop"]["source"] == "global"
+
+
+def test_the_cli_resolves_a_missing_model_client_as_the_backend_does() -> None:
+    before = appmod.db.get_settings()
+    appmod.db.set_settings({"baseUrl": "http://localhost:11434/v1", "runtime": {"model.client": "acme/cl"}})
+    try:
+        got = json.loads(cli("--json", data_dir=appmod.db.data_dir).stdout)["runtime"]["model.client"]
+    finally:
+        appmod.db.set_settings({"baseUrl": before.get("baseUrl", ""), "runtime": {}})
+    assert got["provider"] == "core/openai-compatible" and got["fell_back_from"] == "acme/cl" and not got["refused"]

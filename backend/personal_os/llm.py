@@ -1674,10 +1674,11 @@ class OpenAICompatible:
 
     @property
     def locality(self) -> str:
-        """Where prompts go: local when every configured provider sits on this computer or the local network."""
+        """Where prompts go: local when every configured provider sits on this computer or the local network. A LiteLLM proxy
+        forwards to models anywhere, so it is remote whatever its host."""
         cfg = self.settings()
-        urls = [e["baseUrl"] for e in provider_route.usable(cfg)] or [str(cfg.get("baseUrl") or "")]
-        return "local" if all(u and _loopback_or_private(u) for u in urls) else "remote"
+        entries = provider_route.usable(cfg) or [{"kind": cfg.get("provider"), "baseUrl": str(cfg.get("baseUrl") or "")}]
+        return "local" if all(e.get("kind") != "litellm" and e["baseUrl"] and _loopback_or_private(e["baseUrl"]) for e in entries) else "remote"
 
     def stream(self, req: ModelRequest) -> AsyncIterator[dict[str, Any]]:
         return _stream_openai(self.settings(), req.model, req.messages, req.tools, kind=req.kind, effort=req.effort,

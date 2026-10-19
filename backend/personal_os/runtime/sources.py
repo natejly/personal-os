@@ -79,8 +79,9 @@ class ToolSources:
         extra = self.rt.resolve("tools.source", scopes).extra
         return [t for i in extra if (p := self.rt.provider("tools.source", i)) is not None for t in self._list(p) if not t.quarantined]
 
-    def pending(self) -> list[SourceTool]:
-        """The tools withheld until the user accepts their changed declaration."""
+    def pending(self, scopes: Scopes) -> list[SourceTool]:
+        """The tools withheld until the user accepts their changed declaration, as the enabled sources list them now."""
+        self.tools(scopes)
         return [t for tools in self._last.values() for t in tools if t.quarantined]
 
     def accept(self, slug: str) -> bool:

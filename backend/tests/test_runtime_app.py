@@ -131,6 +131,18 @@ def test_a_selection_whose_extension_is_gone_ends_the_turn_when_the_default_is_l
         assert any(n["ext_id"] == "core" and "not available" in n["body"] and n["target"] == "inbox" for n in appmod.ExtNotes(appmod.db).open())
 
 
+def test_a_restart_does_not_repeat_the_card_for_an_unchanged_missing_selection(ext: Path) -> None:
+    with Harness(ext, SETTINGS) as h:
+        h.select("agent.loop", "gone/loop")
+
+        def cards() -> list[dict[str, Any]]:
+            return [n for n in appmod.ExtNotes(appmod.db).open() if n["ext_id"] == "core" and "'gone/loop'" in n["body"]]
+        appmod.host.runtime.resolve("agent.loop")
+        appmod.host.runtime._announced.clear()  # what a restart forgets
+        appmod.host.runtime.resolve("agent.loop")
+        assert len(cards()) == 1
+
+
 def test_a_selected_source_offers_its_tool_and_a_call_runs_through_the_loop(ext: Path) -> None:
     with Harness(ext, SETTINGS) as h:
         assert not any("x__demo__look" in t for t in h.chat("hello").tools)

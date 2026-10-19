@@ -97,6 +97,11 @@ def test_the_built_in_client_derives_its_locality_from_the_configured_hosts() ->
                                                {"id": "b", "kind": "custom", "baseUrl": "https://api.example.com/v1"}]}, "remote")):
         client.settings = lambda s=settings: s
         assert client.locality == expected, settings
+    proxy = {"providers": [{"id": "p", "kind": "litellm", "baseUrl": "http://localhost:4000"}]}
+    client.settings = lambda: proxy
+    assert client.locality == "remote"  # the proxy forwards to whatever model its config names
+    client.settings = lambda: {"provider": "litellm", "baseUrl": "http://127.0.0.1:4000"}
+    assert client.locality == "remote"
 
 
 # ---- model.client: shape, accounting, secrets ----
@@ -130,6 +135,11 @@ def test_the_core_fires_the_model_hooks_and_the_usage_row_for_a_swapped_client(r
     request, response = (p for _, p in rig.events)
     assert request["model"] == "m" and request["message_count"] == 1
     assert response["model"] == "m" and response["kind"] == "title" and response["estimated"] is True and response["completion_tokens"] >= 1
+
+
+def test_the_sdk_exports_the_reply_a_client_returns_from_complete() -> None:
+    import grain_sdk
+    assert grain_sdk.ModelReply is ModelReply and grain_sdk.ModelRequest is ModelRequest
 
 
 def test_the_client_is_handed_the_request_and_nothing_else(rig: Rig) -> None:

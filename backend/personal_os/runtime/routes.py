@@ -114,7 +114,7 @@ def router(rt: Runtime, selections: Selections, sources: ToolSources) -> APIRout
                            "selected": {"global": scopes.global_.get(d.id), "project": scopes.project.get(d.id) if scopes.project_id else None,
                                         "chat": scopes.chat.get(d.id) if conversation_id else None}} for d in SLOTS.values()],
                 "accept_partial": scopes.global_.get(ACCEPT_PARTIAL, {}),
-                "withheld_tools": [{"slug": t.slug, "name": t.name, "source": t.provider.label} for t in sources.pending()]}
+                "withheld_tools": [{"slug": t.slug, "name": t.name, "source": t.provider.label} for t in sources.pending(scopes)]}
 
     @r.get("/runtime/resolve")
     def resolve(conversation_id: str | None = None, project_id: str | None = None) -> dict[str, Any]:

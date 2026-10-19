@@ -113,7 +113,7 @@ from .extensions.authoring import skill as author_extension
 from .extensions.drafts import Drafts
 from .extensions.defaults import Defaults
 from .extensions.hooks import Deny, hook_ctx
-from .extensions.notes import ExtNotes, InboxItem
+from .extensions.notes import BODY_CHARS, ExtNotes, InboxItem
 from .extensions.host import ExtensionContext, ExtensionHost, builtin_manifest
 from .modules import Module, ModuleContext, build_modules
 from .tools import Toolbox, UrlBlocked, guarded_request, page_title, summarize_result, times_body
@@ -569,7 +569,7 @@ runtime.active = host.runtime
 llm.default_client.settings = settings
 runtime_selections = runtime_routes.Selections(db, convos, projects)
 host.runtime.scopes = runtime_selections.current
-host.runtime.note = lambda title, body: _alert(title, body, "inbox")
+host.runtime.note = lambda title, body: _selection_gone(title, body)
 guards.alert = lambda title, body: _alert(title, body, "inbox")
 host.bus.subscribe("model.response", _record_usage, owner="core", order=0)
 
@@ -1561,6 +1561,12 @@ def _alert(title: str, body: str, target: str) -> None:
     """A card under Needs you for something the core itself caught."""
     ExtNotes(db).add("core", InboxItem(title, body, target), inbox=True)
     events.publish("inbox_note", {})
+
+
+def _selection_gone(title: str, body: str) -> None:
+    """Runtime announces a missing selection once per run of the backend; a card still open from an earlier run is not repeated."""
+    if not any(n["ext_id"] == "core" and n["title"] == title and n["body"] == body[:BODY_CHARS] for n in ExtNotes(db).open()):
+        _alert(title, body, "inbox")
 
 
 def _chat_created(conv: dict[str, Any]) -> None:
@@ -2953,6 +2959,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
         ab_model = (body.ab_model or "").strip() if (cfg.get("devTools") is True and run is not None and body.content is not None
                                                       and not internal and not in_side and not _job) else ""
+        if ab_model and alt_loop is not None:  # the duel is the chat loop's first round; a selected loop runs the turn instead
+            ab_model = ""
+            yield "status", {"id": am["id"], "kind": "phase", "text": "Model duel skipped: the selected agent loop runs this turn."}
         ab_chosen: dict[str, Any] | None = None  # the picked side's finished turn (text, tool events, held actions, transcript), seeded into this reply once
 
         async def _drop_side(sd: duel.Side) -> None:

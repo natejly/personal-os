@@ -144,7 +144,7 @@ def cmd_pack(args: argparse.Namespace) -> int:
 def cmd_config_dump(args: argparse.Namespace) -> int:
     """The settings in force, with the source of each value, read from a data folder with the server stopped or running.
     Opens the database read-only: no migrations, no recovery, nothing written."""
-    from ... import config, provider_keys, provider_route
+    from ... import config, llm, provider_keys, provider_route
     from ...db import ReadOnlyDatabase, data_dir_from_env
     from ...repos import Conversations, Projects
     from ...runtime.defaults import core_providers
@@ -167,6 +167,7 @@ def cmd_config_dump(args: argparse.Namespace) -> int:
         return 1
     provider_route.set_key_source(lambda: provider_keys.load(db.secrets))
     declared = config.declared_settings(load_manifest(p) for p in sorted(BUILTIN_ROOT.glob("*/extension.json")))
+    llm.default_client.settings = lambda: config.assemble(db)  # the default client's locality is read from the stored providers
     runtime = Runtime(HookBus(), core_providers())  # the core's providers only: extension code is not loaded here
     scopes = Selections(db, convos, projects).scopes(args.chat, args.project)
     dump = config.effective(db, Toolbox(None, None, None, lambda: config.assemble(db)), declared,  # type: ignore[arg-type]

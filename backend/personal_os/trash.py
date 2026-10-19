@@ -68,9 +68,14 @@ class Trash:
     # ---- trash ----
     def trash(self, kind: str, id: str) -> bool:
         hit = self._trash(kind, id)
-        if hit and kind == "memory":
-            self._announce_memory("memory.deleted", id)
+        if hit:
+            for mid in [id] if kind == "memory" else self._cascaded_memories(id) if kind == "project" else []:
+                self._announce_memory("memory.deleted", mid)
         return hit
+
+    def _cascaded_memories(self, project_id: str) -> list[str]:
+        with self.db.tx() as c:
+            return [r["id"] for r in c.execute("SELECT id FROM memories WHERE deleted_with=?", (project_id,)).fetchall()]
 
     def _trash(self, kind: str, id: str) -> bool:
         table, _ = self._check(kind)
@@ -117,6 +122,7 @@ class Trash:
         if handler := self.kinds.get(kind):
             return {"ok": True, "type": kind, "id": id, "moved_to_personal": False} if handler.restore(id) else None
         table, _ = self._check(kind)
+        mem_ids: list[str] = []
         with self.db.tx() as c:
             row = c.execute(f"SELECT * FROM {table} WHERE id=? AND deleted_at IS NOT NULL", (id,)).fetchone()
             if not row:
@@ -139,8 +145,8 @@ class Trash:
                     sync_memories_fts(c, [id])
         if kind == "todo":
             self.todos.restore(id)
-        if kind == "memory":
-            self._announce_memory("memory.written", id)
+        for mid in [id] if kind == "memory" else mem_ids:
+            self._announce_memory("memory.written", mid)
         return {"ok": True, "type": kind, "id": id, "moved_to_personal": moved}
 
     # ---- permanent delete ----

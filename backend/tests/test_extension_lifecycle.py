@@ -304,6 +304,8 @@ def test_put_settings_accepts_declared_extension_keys_and_keeps_secrets_out_of_t
         assert c.get("/settings").json()["ext.demo.limit"] is None
         r = c.put("/settings", json={"ext.demo.limit": 1.5})
         assert r.status_code == 422 and "must be an integer" in r.json()["detail"]
+        r = c.put("/settings", json={"ext.demo.token": 5})
+        assert r.status_code == 422 and "must be a string" in r.json()["detail"]
 
 
 def test_settings_changed_lists_the_changed_keys_and_never_a_secret_value(demo_extension: list) -> None:
@@ -498,6 +500,18 @@ def test_host_migrate_takes_no_backup_of_a_database_this_start_created(tmp_path:
     assert [b["kind"] for b in backups.list_backups(db.data_dir)] == ["premigrate"]
 
 
+def test_host_migrate_takes_no_backup_when_an_extension_loaded_after_the_first_call_migrates_a_new_database(tmp_path: Path) -> None:
+    db = Database(tmp_path / "data")
+    host = ExtensionHost()
+    host.migrate(db)  # nothing loaded yet: the start has not migrated anything
+    root = tmp_path / "demo"
+    (root / "migrations").mkdir(parents=True)
+    (root / "migrations" / "0001_init.sql").write_text("CREATE TABLE demo_t(x);\n")
+    host._add(manifest(data={"tables": ["demo_t"], "migrations": "migrations/"}), root=root)
+    host.migrate(db)
+    assert backups.list_backups(db.data_dir) == []
+
+
 def test_host_migrate_opens_no_connection_when_nothing_declares_migrations(tmp_path: Path) -> None:
     class NoConnect:
         data_dir = tmp_path
@@ -516,7 +530,7 @@ def test_export_includes_the_declared_extension_tables(tmp_path: Path) -> None:
     db = Database(tmp_path / "data")
     with db.tx() as c:
         c.execute("CREATE TABLE demo_t(x TEXT, y BLOB)")
-        c.execute("INSERT INTO demo_t VALUES('a', X'00')")
+        c.execute("INSERT INTO demo_t VALUES('a', X'00ff')")
     host = ExtensionHost()
     host._add(manifest(data={"tables": ["demo_t", "not_created_yet"]}))
     assert host.data_tables() == ["demo_t", "not_created_yet"]
@@ -525,7 +539,7 @@ def test_export_includes_the_declared_extension_tables(tmp_path: Path) -> None:
     with zipfile.ZipFile(dest) as z:
         names = set(z.namelist())
         assert "export/extensions/demo_t.json" in names and "export/extensions/not_created_yet.json" not in names
-        assert json.loads(z.read("export/extensions/demo_t.json"))[0]["x"] == "a"
+        assert json.loads(z.read("export/extensions/demo_t.json"))[0] == {"x": "a", "y": "AP8="}  # the BLOB 00 ff, base64
         assert "extensions/<table>.json" in z.read("README.txt").decode()
     backups.export_zip(db.data_dir, dest)
     with zipfile.ZipFile(dest) as z:

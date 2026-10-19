@@ -22,6 +22,7 @@ a prerestore backup and swaps the chosen one in.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -283,7 +284,7 @@ export/             The same content as plain text:
   conversations.md / conversations.json
   memories.md / memories.json
   documents.md / documents.json   (extracted text of every document)
-  extensions/<table>.json         (one file per table an extension keeps, e.g. todos)
+  extensions/<table>.json         (one file per table an extension keeps, e.g. todos; BLOBs as base64)
 """
 
 
@@ -421,6 +422,11 @@ def export_zip(data_dir: Path, dest: Path, ext_tables: Sequence[str] = ()) -> di
     return {"path": str(dest), "size": dest.stat().st_size}
 
 
+def _json_value(v: Any) -> str:
+    """Non-JSON column values in an extension table: BLOBs as base64, the rest as text."""
+    return base64.b64encode(v).decode("ascii") if isinstance(v, bytes) else str(v)
+
+
 def _write_zip(part: Path, snap: Path, data_dir: Path, ext_tables: Sequence[str]) -> None:
     with zipfile.ZipFile(part, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("README.txt", _README)
@@ -429,7 +435,7 @@ def _write_zip(part: Path, snap: Path, data_dir: Path, ext_tables: Sequence[str]
             z.writestr(f"export/{base}.md", md)
             z.writestr(f"export/{base}.json", json.dumps(js, indent=2, ensure_ascii=False))
         for table, rows in _ext_rows(snap, ext_tables).items():
-            z.writestr(f"export/extensions/{table}.json", json.dumps(rows, indent=2, ensure_ascii=False, default=str))
+            z.writestr(f"export/extensions/{table}.json", json.dumps(rows, indent=2, ensure_ascii=False, default=_json_value))
         for sub in ("uploads", "doc_assets", "cowork"):
             up = data_dir / sub
             for f in sorted(up.rglob("*")) if up.exists() else []:

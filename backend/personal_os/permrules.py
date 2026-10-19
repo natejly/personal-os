@@ -41,6 +41,7 @@ HOME_TOOLS = {"read_local_file", "write_local_file", "move_local_file", "trash_l
 MAIL_TOOLS = {"gmail_send", "gmail_draft"}
 CALENDAR_TOOLS = {"calendar_create", "calendar_update", "calendar_delete", "calendar_propose"}
 TERMINAL_TOOLS = {"terminal_open", "terminal_send"}  # the agent terminal tools whose line is judged like a shell command (extensions/coding/terminals.py)
+PATTERN_TOOLS = PSEUDO_TOOLS | MAIL_TOOLS | CALENDAR_TOOLS  # the rule names a call can narrow with a pattern; any other tool's subject has no value
 PATH_KEYS = ("path", "root", "directory", "dir", "file_path", "folder")
 SRC_KEYS = ("src", "source", "from")
 DEST_KEYS = ("dest", "dst", "destination", "to", "target")

@@ -93,6 +93,12 @@ def test_a_rule_naming_no_tool_is_refused_on_save() -> None:
     assert client.post("/permissions/presets", json={"name": "x", "permissionRules": {"deny": ["no_such_tool"]}}).status_code == 422
 
 
+def test_a_pattern_on_a_tool_that_never_matches_one_is_refused_on_save() -> None:
+    r = client.post("/permissions/presets", json={"name": "x", "permissionRules": {"deny": ["shell_run(rm *)"]}})
+    assert r.status_code == 422 and "never matches" in r.text
+    assert client.post("/permissions/presets", json={"name": "x", "permissionRules": {"deny": ["shell_run", "Bash(rm *)"]}}).status_code == 200
+
+
 # ---- the built-ins
 def test_auto_on_an_untouched_install_changes_nothing() -> None:
     before = appmod.db.get_settings()

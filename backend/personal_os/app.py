@@ -1055,6 +1055,9 @@ def _rule_tool_known(r: permrules.Rule) -> None:
     saved rule for a tool that later goes away keeps loading."""
     if r.tool not in permrules.PSEUDO_TOOLS and r.tool not in toolbox.specs and not mcp_is(r.tool):
         raise ValueError(f"unknown tool {r.tool!r} in {r.text!r}")
+    if r.pattern and r.tool not in permrules.PATTERN_TOOLS:
+        raise ValueError(f"{r.text!r} never matches: only {', '.join(sorted(permrules.PATTERN_TOOLS))} take a pattern; "
+                         f"write {r.tool!r} alone, or Bash(...) for a shell command")
 
 
 def _check_permissions(patch: dict[str, Any]) -> dict[str, Any]:

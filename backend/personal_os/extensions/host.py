@@ -781,7 +781,6 @@ class ExtensionHost:
     # ---- data ----
     def migrate(self, db: Database) -> None:
         """Apply every extension's pending migrations, after a premigrate backup when there are any (not on a database this start created)."""
-        fresh, db.fresh = db.fresh, False
         steps = {s.manifest.id: s.migration_steps() for s in self.extensions.values()}
         if not any(steps.values()):
             return  # nothing declares migrations: no connection to open
@@ -789,8 +788,9 @@ class ExtensionHost:
             todo = {ext_id: p for ext_id, st in steps.items() if (p := migrations.pending_extension(c, ext_id, st))}
             if not todo:
                 return
-            if not fresh:
+            if not db.fresh:  # a start can migrate twice (core, then the built-in coding extension): the first with work consumes the flag
                 backups.create(db.data_dir, "premigrate")
+            db.fresh = False
             for ext_id, pending in todo.items():
                 migrations.run_extension(c, ext_id, pending)
 
@@ -816,7 +816,8 @@ class ExtensionHost:
               "boolean": isinstance(value, bool), "integer": isinstance(value, int) and not isinstance(value, bool),
               "number": isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)}[kind]
         if value is not None and not ok:
-            raise ValueError(f"{key} must be {'an' if kind[0] in 'aeiou' else 'a'} {kind}")
+            noun = "string" if kind == "secret" else kind
+            raise ValueError(f"{key} must be {'an' if noun[0] in 'aeiou' else 'a'} {noun}")
         return value
 
     def secret_setting_keys(self) -> list[str]:

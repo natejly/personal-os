@@ -27,7 +27,7 @@ from personal_os import compaction, limits, llm, settled  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.extensions import hooks as hooks_mod  # noqa: E402
 from personal_os.extensions.hooks import Deny, HookBus  # noqa: E402
-from personal_os.repos import Conversations, Memories, MemoryRefused  # noqa: E402
+from personal_os.repos import Conversations, Memories, MemoryRefused, Projects  # noqa: E402
 from personal_os.runs import RunBus, RunStore  # noqa: E402
 from personal_os.docs import Docs  # noqa: E402
 from personal_os.todos import Todos  # noqa: E402
@@ -772,3 +772,18 @@ def test_forgetting_through_the_trash_fires_deleted_and_restoring_fires_written(
     assert trash.trash("memory", m["id"]) and trash.trash("memory", m["id"]) is False
     assert gone == ["alpha"]
     assert trash.restore("memory", m["id"]) and back == ["alpha"]
+
+
+def test_trashing_and_restoring_a_project_announces_its_memories(tmp_path: Path) -> None:
+    db, hooks = Database(tmp_path), HookBus()
+    memories = Memories(db, hooks)
+    trash = Trash(db, Todos(db), Docs(db), hooks)
+    gone: list[Any] = []
+    back: list[Any] = []
+    sub(hooks, "memory.deleted", lambda p: gone.append(p["memory"]["content"]))
+    sub(hooks, "memory.written", lambda p: back.append(p["memory"]["content"]))
+    pid = Projects(db).create("p")["id"]
+    memories.create(pid, "beta", kind="fact", source="user")
+    back.clear()
+    assert trash.trash("project", pid) and gone == ["beta"]
+    assert trash.restore("project", pid) and back == ["beta"]

@@ -1,4 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import { Blobatar } from 'blobatar/react'
+import { happy, idle, sad, scared, sleepy, surprised, thinking, unsure, type Expression } from 'blobatar/expression'
+import 'blobatar/motion.css'
+import { useStore } from '../store'
+import { mascotId, type MascotId } from '../lib/appearance'
 import Sprout, { type SproutMood } from './Sprout'
 
 /** Status words used across replies, desks, subagents and job runs, read as a pose. Unknown words stay idle. */
@@ -12,6 +17,9 @@ export const MOOD: Record<string, SproutMood> = {
   review: 'happy', done: 'happy', completed: 'happy', partial: 'unsure',
   waiting_approval: 'surprised'
 }
+
+/** The same poses for the Blobs mascot. */
+const BLOB_EXPRESSION: Record<SproutMood, Expression> = { idle, thinking, unsure, surprised, scared, sad, sleepy, happy }
 
 const LIVE = new Set(['streaming', 'running', 'working', 'planning'])
 /** How a live run ended decides the one-shot reaction: a droop for these, a hop for a clean finish, nothing for the rest (approval, paused, stopped). */
@@ -27,21 +35,30 @@ export const FACE_SCALE = 1.25
  * The same name always draws the same creature, so an agent is recognisable wherever it shows up.
  * Live ones move all the time; the rest only move on hover, which keeps a long transcript quiet.
  * `hue`/`tone` lock the color so a family of faces differs by shape alone.
+ * With the mascot off, `decor` faces (avatars beside a name) draw nothing, so the caller's box collapses;
+ * the rest become a small status dot in the same box, because there the face is what shows progress.
  */
-export default function Face({ name, status, size = 26, title, hue, tone, send, calm }: { name: string; status?: string; size?: number | 'fill'; title?: string; hue?: number; tone?: number; send?: boolean; calm?: boolean }): JSX.Element {
+export default function Face(props: FaceProps): JSX.Element | null {
+  return <FaceView {...props} mascot={useStore((s) => mascotId(s.settings.mascot))} />
+}
+
+export interface FaceProps { name: string; status?: string; size?: number | 'fill'; title?: string; hue?: number; tone?: number; send?: boolean; calm?: boolean; decor?: boolean }
+
+/** `Face` with the mascot choice passed in, which is what draws. */
+export function FaceView({ name, status, size = 26, title, hue, tone, send, calm, decor, mascot }: FaceProps & { mascot: MascotId }): JSX.Element | null {
   const fx = useReaction(status, send, calm)
-  return (
-    <Sprout
-      className={fx ? `face ${fx}` : 'face'}
-      name={name}
-      size={size === 'fill' ? undefined : Math.round(size * FACE_SCALE)}
-      title={title}
-      hue={hue}
-      tone={tone}
-      mood={(status && MOOD[status]) || 'idle'}
-      live={!!status && LIVE.has(status)}
-    />
-  )
+  const mood = (status && MOOD[status]) || 'idle'
+  const live = !!status && LIVE.has(status)
+  const px = size === 'fill' ? undefined : Math.round(size * FACE_SCALE)
+  const className = fx ? `face ${fx}` : 'face'
+  if (mascot === 'off') {
+    if (decor) return null
+    return <span className="face face-dot" style={{ width: px, height: px }} data-mood={mood} data-live={live || undefined} role={title ? 'img' : undefined} aria-label={title} title={title} />
+  }
+  if (mascot === 'blobs') {
+    return <Blobatar className={className} name={name} size={px} title={title} hue={hue} tone={tone} expression={BLOB_EXPRESSION[mood]} animate={live ? 'always' : 'hover'} />
+  }
+  return <Sprout className={className} name={name} size={px} title={title} hue={hue} tone={tone} mood={mood} live={live} />
 }
 
 /**

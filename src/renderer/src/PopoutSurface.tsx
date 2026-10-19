@@ -24,7 +24,7 @@ export default function PopoutSurface({ windowId }: { windowId: string }): JSX.E
   const [error, setError] = useState('')
   const [focused, setFocused] = useState(() => document.hasFocus())
   const [tuning, setTuning] = useState(false)
-  const appearance = useStore(useShallow((s) => [s.settings.theme, s.settings.accent, s.settings.textTone, s.settings.surfaceTone, s.settings.uiFont, s.settings.codeFont, s.settings.accentCustom] as const))
+  const appearance = useStore(useShallow((s) => [s.settings.theme, s.settings.accent, s.settings.textTone, s.settings.surfaceTone, s.settings.uiFont, s.settings.codeFont, s.settings.accentCustom, s.settings.mascot] as const))
   /** The slider fires per pixel; the window follows every tick, the backend only once the drag rests. */
   const saveOpacity = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -52,7 +52,7 @@ export default function PopoutSurface({ windowId }: { windowId: string }): JSX.E
   }, [reload])
 
   useEffect(() => {
-    applyAppearance({ theme: appearance[0], accent: appearance[1], textTone: appearance[2], surfaceTone: appearance[3], uiFont: appearance[4], codeFont: appearance[5], accentCustom: appearance[6] })
+    applyAppearance({ theme: appearance[0], accent: appearance[1], textTone: appearance[2], surfaceTone: appearance[3], uiFont: appearance[4], codeFont: appearance[5], accentCustom: appearance[6], mascot: appearance[7] })
   }, [appearance])
 
   useEffect(() => {

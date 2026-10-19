@@ -48,7 +48,7 @@ function Column({ conversationId, messageId, sideKey, side, label, hot, canRegen
   const usage = side.done && side.tokens ? `${compactCount(side.tokens)} tok${speed}` : ''
   return (
     <div className={`msg assistant duel-col${hot ? ' hot' : ''}`}>
-      <div className="avatar face-avatar"><Face name={`duel-${label}`} hue={label === 'A' ? 35 : 215} tone={0.6} status={side.done ? (side.error ? 'error' : undefined) : 'streaming'} /></div>
+      <div className="avatar face-avatar"><Face decor name={`duel-${label}`} hue={label === 'A' ? 35 : 215} tone={0.6} status={side.done ? (side.error ? 'error' : undefined) : 'streaming'} /></div>
       <div className="bubble">
         <div className="duel-body-wrap">
           <div className="duel-body" ref={body} onScroll={check}>

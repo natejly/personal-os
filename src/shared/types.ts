@@ -1560,6 +1560,8 @@ export interface Settings {
   surfaceTone?: 'neutral' | 'warm' | 'cool' | 'black'
   /** Interface typeface; missing means system. */
   uiFont?: 'system' | 'serif' | 'rounded' | 'mono' | 'avenir' | 'helvetica' | 'gill' | 'futura' | 'charter' | 'georgia' | 'iowan' | 'palatino' | 'menlo'
+  /** Which creature draws the faces; missing means the Grain mascot. */
+  mascot?: 'grain' | 'blobs' | 'off'
   /** Code and monospace typeface; missing means default. */
   codeFont?: 'default' | 'sfmono' | 'menlo' | 'monaco' | 'courier'
   /** Electron accelerator for the global Gather/Scatter shortcut. */

@@ -304,3 +304,30 @@ test('modal is usable and scrolls at 820x520', async ({ grain }) => {
   await closeDirty(page)
   noErrors(grain)
 })
+
+test('the Mascot setting swaps the faces for blobs or a status dot, and saves', async ({ grain }) => {
+  const { page, api } = grain
+  await api('/conversations', { method: 'POST', body: { title: 'Mascot chat' } })
+  await page.reload()
+  const row = page.locator('.sidebar .convo-item', { hasText: 'Mascot chat' })
+  await expect(row.locator('svg.face.sprout')).toHaveCount(1)
+  const pick = async (label) => {
+    await openSettings(page)
+    await dialog(page).getByRole('radiogroup', { name: 'Mascot' }).getByRole('radio', { name: label, exact: true }).click()
+    await save(page)
+  }
+  await pick('Blobs')
+  await expect(row.locator('.face .mo-root')).toHaveCount(1)
+  await expect(row.locator('.sprout')).toHaveCount(0)
+  expect((await api('/settings')).mascot).toBe('blobs')
+  await pick('Off')
+  await expect(row.locator('.face-dot')).toHaveCount(1)
+  await expect(row.locator('.sprout, .mo-root')).toHaveCount(0)
+  await expect(page.locator('html')).toHaveAttribute('data-mascot', 'off')
+  expect((await api('/settings')).mascot).toBe('off')
+  const p2 = await grain.relaunch()
+  await expect(p2.locator('.sidebar .convo-item', { hasText: 'Mascot chat' }).locator('.face-dot')).toHaveCount(1)
+  await openSettings(p2)
+  await expect(dialog(p2).getByRole('radio', { name: 'Off', exact: true })).toHaveAttribute('aria-checked', 'true')
+  noErrors(grain)
+})

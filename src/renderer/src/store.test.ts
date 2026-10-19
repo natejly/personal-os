@@ -1548,3 +1548,14 @@ test('no component reads the whole store with a bare useStore()', async () => {
   walk(join(process.cwd(), 'src/renderer/src'))
   assert.deepEqual(bad, [])
 })
+
+test('the mascot setting defaults to the Grain mascot and saves through the settings route', async (t) => {
+  assert.equal(useStore.getState().settings.mascot, 'grain')
+  const { calls } = stubFetch(t, (_m, _p, body) => json({ ...useStore.getState().settings, ...body }))
+  for (const mascot of ['blobs', 'off', 'grain'] as const) {
+    await useStore.getState().saveSettings({ mascot })
+    assert.equal(calls.at(-1)?.method, 'PUT')
+    assert.deepEqual(calls.at(-1)?.body, { mascot })
+    assert.equal(useStore.getState().settings.mascot, mascot)
+  }
+})

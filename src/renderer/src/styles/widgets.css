@@ -311,6 +311,8 @@
 /* Rows that line up with the reply text, re-aligned to the 28px face + 8px gap (the page uses 46px). */
 .widget .regen-row { padding-left: 36px; margin-top: -8px; }
 .widget .run-error-row { margin-left: 36px; font-size: 12px; }
+[data-mascot='off'] .widget .regen-row { padding-left: 0; }
+[data-mascot='off'] .widget .run-error-row { margin-left: 0; }
 .widget .messages-inner .msg-actions { min-height: 22px; }
 /* Page-sized headings read as shouting in a panel, and an image wider than the window scrolls it sideways. */
 .widget .markdown h1 { font-size: 15px; }

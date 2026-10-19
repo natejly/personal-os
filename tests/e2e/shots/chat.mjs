@@ -31,7 +31,7 @@ if (want('basic')) await session(async (g) => {
     const f = page.getByRole('textbox', { name: 'Find in conversation' }); await f.fill('helper'); await sleep(300)
     await snap(g, 'chat-search'); await f.press('Escape')
   })
-  await attempt('chat-context-drawer', async () => { await page.getByRole('button', { name: 'Toggle context panel' }).click(); await sleep(800); await snap(g, 'chat-context-drawer'); await page.getByRole('button', { name: 'Toggle context panel' }).click() })
+  await attempt('chat-context-drawer', async () => { await page.getByRole('button', { name: 'Workspace panel', exact: true }).click(); await page.getByTestId('desk-tab-context').waitFor(); await sleep(800); await snap(g, 'chat-context-drawer'); await page.getByRole('button', { name: 'Workspace panel', exact: true }).click() })
   await attempt('chat-files-popover-empty', async () => { await page.getByRole('button', { name: 'Documents in this chat' }).click(); await sleep(600); await snap(g, 'chat-files-popover-empty'); await page.keyboard.press('Escape') })
   await attempt('chat-narrow', async () => { await resize(g, 820, 520); await sleep(800); await snap(g, 'chat-narrow'); await resize(g, 1280, 800) })
 })
@@ -114,11 +114,11 @@ if (want('desk')) await session(async (g) => {
   await attempt('chat-desk-panel', async () => {
     if (!(await page.locator('.desk-panel').count())) await page.locator('.desk-strip').getByRole('button', { name: 'Files, changes and review' }).click()
     await sleep(600)
-    const tabs = page.locator('.desk-panel .desk-card-head')
+    const tabs = page.locator('.desk-panel .side-tab')
     const n = await tabs.count()
     for (let i = 0; i < n; i++) {
       const label = (await tabs.nth(i).innerText()).trim().split(/\s+/)[0]
-      if ((await tabs.nth(i).getAttribute('aria-expanded')) !== 'true') await tabs.nth(i).click(); await sleep(700)
+      if ((await tabs.nth(i).getAttribute('aria-selected')) !== 'true') await tabs.nth(i).click(); await sleep(700)
       await snap(g, `chat-desk-panel-${label.toLowerCase()}`)
     }
   })

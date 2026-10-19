@@ -16,7 +16,7 @@ async function reviewDesk(grain, title, extra = []) {
   await waitStatus(grain, desk.id, 'review')
   await openChat(grain.page, title)
   await openPanel(grain.page, 'Review')
-  for (const t of ['Files', 'Changes']) await expect(panel(grain.page).locator('.desk-card-head', { hasText: t })).toBeVisible()
+  for (const t of ['Files', 'Changes']) await expect(panel(grain.page).locator('.side-tab', { hasText: t })).toBeVisible()
   return { llm, desk }
 }
 

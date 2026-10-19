@@ -88,7 +88,7 @@ test('every chat has a side panel: Files, and neither Changes nor Review without
   await expect(tabs.getByTestId('desk-tab-files')).toBeVisible()
   await expect(tabs.getByTestId('desk-tab-changes')).toHaveCount(0) // shows once the chat has changed files
   await expect(tabs.getByTestId('desk-tab-review')).toHaveCount(0)
-  await expect(tabs.getByTestId('desk-tab-context')).toHaveAttribute('aria-expanded', 'true') // opens with Context expanded
+  await expect(tabs.getByTestId('desk-tab-context')).toHaveAttribute('aria-selected', 'true') // opens on the Context tab
   await tabs.getByTestId('desk-tab-files').click()
   await expect(panel.getByText('No files in this chat yet.')).toBeVisible()
   await page.getByRole('button', { name: 'Workspace panel', exact: true }).click()

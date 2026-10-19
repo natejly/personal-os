@@ -77,7 +77,7 @@ test('chat tool creates a todo and the open view updates without reload; API wri
   await grain.api('/todos', { method: 'POST', body: { title: 'from api while open' } })
   await expect(row(page, 'from api while open')).toBeVisible({ timeout: 15_000 })
   // open a chat in the page agent panel (applies to the current view)
-  await menu(grain, 'Quick chat (in a chat: Context panel)')
+  await menu(grain, 'Context panel / Quick chat')
   const box = page.getByPlaceholder(/ask|message|follow/i).last()
   await box.fill('!!tool todo_add {"title":"Made by tool","due":"' + dayStr(1) + '"}')
   await box.press('Enter')

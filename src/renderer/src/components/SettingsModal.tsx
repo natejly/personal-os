@@ -306,7 +306,6 @@ export default function SettingsModal(): JSX.Element {
           <div className="settings-pane" id="settings-pane" role="tabpanel" aria-labelledby={`settings-tab-${tab}`} ref={paneRef}>
             <section className="set-head">
               <h3>{meta.label}</h3>
-              <p className="set-help">{meta.description}</p>
             </section>
             {content()}
             {sectionPanels.length > 0 && (

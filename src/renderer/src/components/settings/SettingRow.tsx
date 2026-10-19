@@ -3,7 +3,7 @@ import { RotateCcw } from '../../icons'
 import { scopeLabel, sourceText, valueText } from '../../lib/settingSource'
 import { useEffective } from './useEffective'
 
-/** One setting: title and one-line help on the left, its control on the right, and small marks for "modified", where the value came from, and reset. Renders fully without effective data. */
+/** One setting: title on the left (help shows only as its tooltip), its control on the right, and small marks for "modified", where the value came from, and reset. Renders fully without effective data. */
 export default function SettingRow({ settingKey, title, help, value, defaultValue, onReset, danger, children }: {
   settingKey?: string; title: ReactNode; help?: ReactNode; value?: unknown; defaultValue?: unknown; onReset?: () => void; danger?: boolean; children: ReactNode
 }): JSX.Element {
@@ -24,7 +24,7 @@ export default function SettingRow({ settingKey, title, help, value, defaultValu
   const showMeta = modified || !!entry
   return (
     <div className={`setting-row set-row-x${danger ? ' danger' : ''}`} data-setting={settingKey}>
-      <span className="toggle-text"><b>{title}</b>{help && <small>{help}</small>}</span>
+      <span className="toggle-text"><b title={typeof help === 'string' ? help : undefined}>{title}</b></span>
       <span className="set-control">{children}</span>
       {showMeta && (
         <span className="set-meta" ref={box}>

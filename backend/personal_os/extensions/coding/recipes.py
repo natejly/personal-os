@@ -511,7 +511,9 @@ class Recipes:
             self._set(run["id"], status="verifying")
         elif row["status"] == "stopped":
             self._set(run["id"], status="stopped", ended_at=time.time(), verify_tail=row.get("detail"))
-        elif row["status"] in ("failed", "blocked", "needs_you"):
+        elif row["status"] in ("blocked", "needs_you"):  # nobody is there to answer, and the session would hold its slot
+            await self._end_with_session(run, "agent_failed", row.get("detail") or "")
+        elif row["status"] == "failed":
             self._set(run["id"], status="agent_failed", ended_at=time.time(), verify_tail=row.get("detail"))
 
     async def _verify(self, run: dict[str, Any]) -> None:
@@ -523,7 +525,10 @@ class Recipes:
             return
         result = await dispatch_tool(self.coding.tb, ctx, "shell_run", args, call_id=f"recipe-{run['id']}-{run['attempt']}")
         code = result.get("exit_code") if isinstance(result, dict) else None
-        tail = shell._scrub(str((result or {}).get("output") or (result or {}).get("error") or ""))[-RETRY_TAIL:]
+        tail = shell._scrub(str((result or {}).get("output") or (result or {}).get("error") or ""))
+        if isinstance(result, dict) and result.get("timed_out"):
+            tail = f"{tail}\n{result.get('note')}"
+        tail = tail[-RETRY_TAIL:]
         if not isinstance(code, int):  # it did not run: refused by a rule, a hook or the sandbox
             self._set(run["id"], status="verify_blocked", ended_at=time.time(), verify_tail=tail)
         elif code == 0:

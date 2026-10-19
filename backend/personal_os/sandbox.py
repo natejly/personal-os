@@ -133,13 +133,17 @@ def _current_backend() -> tuple[str, Any]:
     return (chosen.id, chosen.impl) if chosen is not None else (OS_DEFAULT.id, OS_DEFAULT)
 
 
-def python_confined() -> bool:
-    """Does run_python go through sandbox_wrap: the platform sandbox is there, or the user selected a backend (which then
-    confines the script or refuses it)."""
+def backend_selected() -> bool:
+    """Did the user select a sandbox backend (which then confines the command or refuses it)."""
     try:
-        return osplat.current().sandbox.python_available() or runtime.active.alternative("sandbox.backend") is not None
+        return runtime.active.alternative("sandbox.backend") is not None
     except Refused:
         return True
+
+
+def python_confined() -> bool:
+    """Does run_python go through sandbox_wrap: the platform sandbox is there, or the user selected a backend."""
+    return osplat.current().sandbox.python_available() or backend_selected()
 
 
 def _refuse(req: SandboxRequest, backend: str, why: str, dimension: str, enforcement: dict[str, Any]) -> SandboxRefused:

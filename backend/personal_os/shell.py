@@ -267,7 +267,7 @@ def truncate(text: str) -> tuple[str, bool]:
 
 
 def sandbox_available() -> bool:
-    return osplat.current().sandbox.shell_available()
+    return osplat.current().sandbox.shell_available() or sandbox.backend_selected()
 
 
 def no_sandbox_reason() -> str:

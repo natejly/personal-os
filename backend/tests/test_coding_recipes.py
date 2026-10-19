@@ -42,6 +42,7 @@ class Rig:
         self.verify_runs: list[dict[str, Any]] = []
         self.exits: list[int] = []
         self.output = "tests ran"
+        self.timed_out = False
         self.fail_start: Exception | None = None
         self.events: list[tuple[str, Any]] = []
         monkeypatch.setattr(self.coding.sessions, "start", self._start)
@@ -76,7 +77,8 @@ class Rig:
 
     async def _shell(self, ctx: dict[str, Any], **args: Any) -> Any:
         self.verify_runs.append(args)
-        return {"exit_code": self.exits.pop(0), "output": self.output}
+        code = self.exits.pop(0)
+        return {"exit_code": code, "output": self.output, **({"timed_out": True, "note": "Killed after 2s"} if self.timed_out else {})}
 
     def settle(self, sid: str, status: str, detail: str | None = None) -> None:
         with self.coding.sessions.db.tx() as c:
@@ -332,12 +334,28 @@ def test_the_chats_own_deny_rule_and_an_extension_deny_or_ask_stop_the_verify(ri
 
 def test_a_stopped_or_failed_or_waiting_session_ends_the_run_without_verifying(rig):
     rig.recipes.save(rig.body(), "user")
+    stopped: list[str] = []
+
+    async def stop(sid: str, reason: str) -> dict[str, Any]:
+        stopped.append(sid)
+        return {}
+    rig.coding.sessions.stop = stop  # type: ignore[method-assign]
     for status, ends in (("stopped", "stopped"), ("failed", "agent_failed"), ("blocked", "agent_failed"), ("needs_you", "agent_failed")):
         out = rig.run()
         rig.settle(out["session_id"], status, "why")
         run = rig.advance(out["run_id"])
         assert (run["status"], run["verify_tail"]) == (ends, "why"), status
     assert rig.verify_runs == []
+    assert len(stopped) == 2  # a session waiting for an answer nobody gives is stopped, so it frees its slot
+
+
+def test_a_verify_that_times_out_says_so(rig):
+    rig.recipes.save(rig.body(max_retries=0), "user")
+    out = rig.run()
+    rig.output = "partial"
+    rig.timed_out = True
+    run = finish(rig, out, -15)
+    assert run["status"] == "failed" and run["verify_tail"].endswith("Killed after 2s")
 
 
 def test_a_run_past_its_time_limit_stops_its_session_and_never_reports_passed(rig):

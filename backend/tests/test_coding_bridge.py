@@ -398,6 +398,15 @@ def test_a_finished_call_is_emitted_once_and_added_to_the_feed_unless_the_timeli
     assert [e["text"] for e in events] == ["npm test"] and events[0]["tool"] == "Bash"
 
 
+def test_a_call_without_an_id_is_added_even_when_earlier_events_have_none(routes):
+    make_session(routes, "sess-noid")
+    with routes.app.db.tx() as c:
+        c.execute("INSERT INTO coding_session_events(session_id, seq, ts, kind, text) VALUES('sess-noid', 1, 't', 'user', 'run the build')")
+    hook_post(routes.local, "sess-noid", "post", input={"command": "make build"}, call_id=None)
+    from personal_os.extensions.coding import events as feed
+    assert [e["text"] for e in feed.list_after(routes.app.db, "sess-noid") if (e["data"] or {}).get("hook")] == ["make build"]
+
+
 def test_subscribing_needs_the_permissions(routes):
     from personal_os.extensions.hooks import HookBus
     from personal_os.extensions.host import ExtensionHost

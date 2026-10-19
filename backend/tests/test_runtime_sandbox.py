@@ -264,6 +264,13 @@ def test_shell_run_refuses_when_the_backend_cannot_confine_and_spawns_nothing(ri
     assert not (tmp_path / "x").exists()
 
 
+def test_a_selected_backend_makes_the_shell_available_where_the_os_has_no_sandbox(rig: Rig, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(type(osplat.current().sandbox), "shell_available", lambda self: False)
+    assert shell.sandbox_available() is False
+    rig.backend(FakeSandbox({"workspace-write": FULL}))
+    assert shell.sandbox_available() is True
+
+
 def test_confine_refuses_with_a_shell_error_and_gives_back_the_proxy_token(rig: Rig) -> None:
     rig.backend(FakeSandbox({}))
     revoked: list[Any] = []

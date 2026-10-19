@@ -206,6 +206,7 @@ class Terminals:
         self.coding = coding
         self.db = coding.api.db
         self.bridge = TerminalBridge()
+        self.opening: list[str] = []  # owners of opens in flight: their rows are not inserted yet, but they count toward the caps
         self.scratch: dict[str, tuple[str, str | None]] = {}  # terminal id -> (its temp folder, its proxy run token)
         self.cursors: dict[str, int] = {}  # terminal id -> where the agent last read to
         self.partial: dict[str, str] = {}  # terminal id -> text typed without Enter, so the whole line is judged
@@ -266,14 +267,22 @@ class Terminals:
     # ---- open ----
     async def open(self, ctx: dict[str, Any], cwd: str | None, command: str | None, cols: int | None, rows: int | None,
                    name: str | None) -> dict[str, Any]:
-        tb = self.coding.tb
-        cfg = ctx.get("settings") or tb.settings()
         if not shell.sandbox_available():
             raise TerminalError(f"Terminals run in the OS sandbox, which is not available here ({shell.no_sandbox_reason()}).")
         owner = self.owner_key(ctx)
-        if self._live(owner) >= MAX_PER_OWNER or self._live() >= MAX_AGENT:
+        if self._live(owner) + self.opening.count(owner) >= MAX_PER_OWNER or self._live() + len(self.opening) >= MAX_AGENT:
             raise TerminalError(f"At most {MAX_PER_OWNER} terminals per agent and {MAX_AGENT} in all can be open.",
                                 "terminal_close one you are done with")
+        self.opening.append(owner)
+        try:
+            return await self._open(ctx, owner, cwd, command, cols, rows, name)
+        finally:
+            self.opening.remove(owner)
+
+    async def _open(self, ctx: dict[str, Any], owner: str, cwd: str | None, command: str | None, cols: int | None,
+                    rows: int | None, name: str | None) -> dict[str, Any]:
+        tb = self.coding.tb
+        cfg = ctx.get("settings") or tb.settings()
         dr = opencode._desk_root(tb, ctx)
         try:
             where = shell.resolve_cwd(cwd, dr or mac.home(), dr)
@@ -564,9 +573,3 @@ def login_shell() -> str:
     configured = os.environ.get("SHELL") or ""
     return configured if configured.startswith("/") and os.access(configured, os.X_OK) else "/bin/zsh" if os.path.exists("/bin/zsh") else "/bin/sh"
 
-
-def _clamp(value: Any, bounds: tuple[int, int], default: int) -> int:
-    try:
-        return max(bounds[0], min(int(value if value is not None else default), bounds[1]))
-    except (TypeError, ValueError):
-        return default

@@ -76,7 +76,8 @@ def payload(row: dict[str, Any], body: HookIn) -> dict[str, Any]:
 
 def _recorded(coding: Coding, sid: str, p: dict[str, Any], line: str) -> bool:
     """Whether the session's feed already has this call: reported twice, or seen by the timeline parser as a step."""
-    return any((e["data"] or {}).get("call_id") == p["call_id"] or (e["tool"] == "step" and line and line in e["text"])
+    return any((p["call_id"] is not None and (e["data"] or {}).get("call_id") == p["call_id"])
+               or (e["tool"] == "step" and line and line in e["text"])
                for e in events.recent(coding.sessions.db, sid, RECENT))
 
 

@@ -131,6 +131,23 @@ def test_limits_per_owner_and_overall(tmp_path, monkeypatch):
     assert "terminal_id" in call(tb, "terminal_open", ctx_of(cfg), cwd=str(home / "work"))  # a closed one frees its slot
 
 
+def test_opens_in_flight_count_toward_the_caps(tmp_path, monkeypatch):
+    tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
+    real = hub.call
+
+    async def slow(command: dict[str, Any], timeout: float = 10) -> dict[str, Any]:
+        await asyncio.sleep(0.05)
+        return await real(command, timeout)
+    monkeypatch.setattr(hub, "call", slow)
+
+    async def many() -> list[Any]:
+        return await asyncio.gather(*(coding.terminals.open(ctx_of(cfg), str(home / "work"), None, None, None, None) for _ in range(8)),
+                                    return_exceptions=True)
+    results = asyncio.run(many())
+    assert sum(isinstance(r, dict) for r in results) == terms.MAX_PER_OWNER
+    assert coding.terminals.opening == [] and coding.terminals._live() == terms.MAX_PER_OWNER
+
+
 def test_a_terminal_the_hub_lost_is_closed_and_frees_its_slot(tmp_path, monkeypatch):
     tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
     ids = [opened(tb, ctx_of(cfg), str(home / "work")) for _ in range(terms.MAX_PER_OWNER)]

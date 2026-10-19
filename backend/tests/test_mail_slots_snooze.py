@@ -103,3 +103,13 @@ def test_snoozed_thread_is_hidden_until_its_time() -> None:
     clock["now"] = dt.datetime(2026, 10, 3, 12, 0, tzinfo=dt.timezone.utc)  # 08:00 New York
     assert ids() == ["a", "b"] and c.get("/mail/snoozed").json()["thread_ids"] == []
     assert all(m[k].call_count == 0 for k in ("gmail_send", "gmail_modify", "calendar_create"))
+
+
+def test_snoozing_a_thread_gmail_does_not_know_leaves_no_row() -> None:
+    mod = MailExtension(mail_scope(None))
+    mod.google = mock.Mock(gmail_thread_last_id=mock.Mock(side_effect=ValueError("no such thread")))
+    app = FastAPI()
+    app.include_router(mod.router())
+    c = TestClient(app)
+    assert c.post("/mail/threads/%20/snooze", json={"until": "2031-01-01T00:00:00Z"}).status_code == 400
+    assert mod.store.snoozed_ids(dt.datetime(2030, 1, 1, tzinfo=dt.timezone.utc)) == []

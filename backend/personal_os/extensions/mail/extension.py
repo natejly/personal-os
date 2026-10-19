@@ -155,6 +155,8 @@ class MailExtension:
         @r.post("/mail/threads/{thread_id}/snooze")
         def snooze_thread(thread_id: str, body: SnoozeIn) -> dict[str, Any]:
             """Local only: hides the thread in the mail list until `until` (null clears). No Gmail write."""
+            if body.until and not self.store.get(thread_id):
+                call(google.gmail_thread_last_id, thread_id)  # an id Gmail does not know must not leave a row behind
             self.store.snooze(thread_id, body.until)
             return {"thread_id": thread_id, "until": body.until}
 
@@ -379,8 +381,9 @@ class MailExtension:
                                       alternative="tell the user to use the Undo button on the pending send")
                 row = await run(outbox.cancel, id)
                 if not row:
+                    done = "was already cancelled" if existing["status"] == "cancelled" else "has already gone out"
                     return tool_error(redact.scrub_command_output(
-                        f"Send '{id}' can no longer be cancelled — it has already gone out."), field="id",
+                        f"Send '{id}' can no longer be cancelled — it {done}."), field="id",
                                       alternative="tell the user it was sent, and offer to send a follow-up")
                 return scrub_strings({"cancelled": id, "to": row["to"], "subject": row["subject"], "note": "It was never sent."})
             rows = [r for r in await run(outbox.list) if own(r)]

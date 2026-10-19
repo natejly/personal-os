@@ -31,8 +31,8 @@ export function shownTab(tab: SettingsTab, available: readonly string[]): Settin
   return available.includes(tab) ? tab : DEFAULT_TAB
 }
 
-/** One findable block of settings: the tab it lives on, its anchor id (`sec-<sec>` in the pane) and the words people type for it. */
-export interface SettingsEntry { tab: SettingsTab; sec: string; title: string; keys: string }
+/** One findable block of settings: the tab it lives on, its anchor id (`sec-<sec>` in the pane) and the words people type for it. `ext` is the extension that renders the block: with it off there is nothing to scroll to. */
+export interface SettingsEntry { tab: SettingsTab; sec: string; title: string; keys: string; ext?: string }
 export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'model', sec: 'provider', title: 'Providers', keys: 'provider add key api key verify replace remove address base url openai anthropic fireworks openrouter ollama litellm custom setup' },
   { tab: 'model', sec: 'models', title: 'Models', keys: 'chat model default tier high medium low worker embedding search rerank vision image fast model' },
@@ -49,7 +49,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'integrations', sec: 'accounts', title: 'Mail and Calendar account', keys: 'google gmail calendar sign in oauth client outbox undo send' },
   { tab: 'integrations', sec: 'connectors', title: 'Connectors', keys: 'mcp library tools planner mail' },
   { tab: 'integrations', sec: 'web-search', title: 'Web search', keys: 'firecrawl brave tavily exa searxng github token reader api key' },
-  { tab: 'integrations', sec: 'texting', title: 'Telegram bot', keys: 'texting text telegram bot pairing messages phone sms chat token botfather' },
+  { tab: 'integrations', sec: 'texting', title: 'Telegram bot', keys: 'texting text telegram bot pairing messages phone sms chat token botfather', ext: 'telegram' },
   { tab: 'agents', sec: 'desks', title: 'Desks', keys: 'cowork desk folder agents workers autonomous' },
   { tab: 'agents', sec: 'workers', title: 'Background workers', keys: 'delegate delegation concurrent queue tool rounds' },
   { tab: 'agents', sec: 'coding', title: 'Coding sessions', keys: 'opencode claude code repo git coding agent' },
@@ -69,9 +69,9 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'advanced', sec: 'developer', title: 'Developer tools', keys: 'traces otel telemetry export context preview system prompt debug extensions hooks reload latency' }
 ]
 
-/** Entries whose title or keywords hold every typed word; `extra` are entries that exist only at run time (an extension's section). Empty query: none. */
-export function searchSettings(q: string, extra: readonly SettingsEntry[] = []): SettingsEntry[] {
+/** Entries whose title or keywords hold every typed word; `extra` are entries that exist only at run time (an extension's section), `off` the extensions turned off. Empty query: none. */
+export function searchSettings(q: string, extra: readonly SettingsEntry[] = [], off: ReadonlySet<string> = new Set()): SettingsEntry[] {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean)
   if (!words.length) return []
-  return [...SETTINGS_INDEX, ...extra].filter((e) => { const hay = `${e.title} ${e.keys}`.toLowerCase(); return words.every((w) => hay.includes(w)) })
+  return [...SETTINGS_INDEX, ...extra].filter((e) => !(e.ext && off.has(e.ext))).filter((e) => { const hay = `${e.title} ${e.keys}`.toLowerCase(); return words.every((w) => hay.includes(w)) })
 }

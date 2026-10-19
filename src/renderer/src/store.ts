@@ -1990,12 +1990,14 @@ export const useStore = create<State>((set, get) => {
       }
     },
     saveSettings: async (patch) => {
+      const listsWereOff = viewHidden(get().settings, 'todos')
       set({ settings: await api.settings.set(patch) })
       // Which tools are capped at ask follows this list, and the tool rows read it from the tools listing.
       if ('alwaysAsk' in patch) void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
       if ('baseUrl' in patch || 'apiKey' in patch || 'provider' in patch) void get().loadModels()
       if ('googleClientId' in patch || 'googleClientSecret' in patch) void get().refreshGoogle()
-      if ('hiddenViews' in patch) void useTodos.getState().refreshTodos()
+      // Only Lists going on or off changes what the todos hold; any other save must not reset the open Lists view's scope, sort and Done rows.
+      if (listsWereOff !== viewHidden(get().settings, 'todos')) void useTodos.getState().refreshTodos()
     },
     setView: (view) => {
       // A view turned off in Settings → Sidebar stays off, whoever links to it: the toast says how to turn it back on.

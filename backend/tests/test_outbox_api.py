@@ -61,6 +61,15 @@ class OutboxApiTests(unittest.TestCase):
         self.client.post(f"/outbox/gmail/{row['id']}/cancel", headers=self.headers)
         again = self.client.post(f"/outbox/gmail/{row['id']}/cancel", headers=self.headers)
         self.assertEqual(again.status_code, 409)
+        self.assertIn("already cancelled", again.json()["detail"])
+
+    def test_cancelling_an_unknown_send_is_not_found(self) -> None:
+        self.assertEqual(self.client.post("/outbox/gmail/nope/cancel", headers=self.headers).status_code, 404)
+
+    def test_the_hold_settings_must_be_the_right_type(self) -> None:
+        for bad in ({"enabled": "false"}, {"seconds": "abc"}):
+            r = self.client.put("/settings", headers=self.headers, json={"gmailSendHold": bad})
+            self.assertEqual(r.status_code, 422, bad)
 
     def test_send_now_goes_out_and_is_verified(self) -> None:
         row = self.client.post("/integrations/google/gmail/send", headers=self.headers,

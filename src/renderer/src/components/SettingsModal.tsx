@@ -72,7 +72,11 @@ export default function SettingsModal(): JSX.Element {
   const gp = { openGroups, toggle: toggleGroup }
   const [q, setQ] = useState('')
   const [jump, setJump] = useState<string | null>(null)
-  const hits = searchSettings(q, panels.map((p) => ({ tab: p.tab, sec: '', title: p.label, keys: p.keys ?? '' })))
+  const [offExtensions, setOffExtensions] = useState<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    api.devExtensions.list().then((r) => setOffExtensions(new Set(r.extensions.filter((e) => !e.enabled).map((e) => e.id)))).catch(() => undefined)
+  }, [])
+  const hits = searchSettings(q, panels.map((p) => ({ tab: p.tab, sec: '', title: p.label, keys: p.keys ?? '' })), offExtensions)
   const google = useStore((s) => s.google)
   /** Go to a search hit: its tab, any collapsed group around it opened, then scrolled to once it has rendered. */
   const goTo = (h: { tab: Tab; sec: string }): void => {
@@ -144,6 +148,7 @@ export default function SettingsModal(): JSX.Element {
   /** A profile was turned on or off (applied at once by its own routes): the same refresh, and off the view it may have hidden. */
   const profileApplied = async (): Promise<void> => {
     await providersChanged()
+    void api.profiles.list().then(useStore.getState().applyProfiles).catch(() => undefined)  // the layout and theme tokens of whichever profiles are now on
     void useStore.getState().refreshDashboard()  // a view the profile turned on has no data loaded yet
     void useTodos.getState().refreshTodos()
     if (viewHidden(useStore.getState().settings, view)) setView('chat')

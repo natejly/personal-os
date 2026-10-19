@@ -294,6 +294,9 @@ class OutboxTests(unittest.TestCase):
                                    {"project_id": None, "conversation_id": "c1"}))
         self.assertEqual(out["cancelled"], queued["queued"])
         self.assertEqual(self.server.messages, {})
+        again = asyncio.run(box.call("gmail_outbox", {"action": "cancel", "id": queued["queued"]},
+                                     {"project_id": None, "conversation_id": "c1"}))
+        self.assertIn("already cancelled", again["error"])
 
     def test_another_chat_cannot_see_or_cancel_a_queued_send(self) -> None:
         box, _ = mail_tools(self.google, db=self.db, settings=self.cfg)

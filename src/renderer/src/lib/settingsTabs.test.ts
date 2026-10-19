@@ -45,6 +45,11 @@ test('the Telegram bot section is found by "bot" and "texting"', () => {
   }
 })
 
+test('a section owned by an extension that is off is not offered', () => {
+  assert.deepEqual(searchSettings('telegram', [], new Set(['telegram'])), [])
+  assert.deepEqual(searchSettings('telegram', [], new Set(['mail'])).map((e) => e.sec), ['texting'])
+})
+
 test('providers and models are found by what people type', () => {
   assert.ok(searchSettings('api key').some((e) => e.sec === 'provider'))
   assert.ok(searchSettings('rerank').some((e) => e.sec === 'models'))

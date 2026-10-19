@@ -21,7 +21,6 @@ export default function ProfilesSection({ onApplied }: { onApplied: () => Promis
   const refresh = async (): Promise<void> => {
     const list = await api.profiles.list()
     setProfiles(list)
-    useStore.getState().applyProfiles(list)
     await onApplied()
   }
   useEffect(() => { api.profiles.list().then(setProfiles).catch(() => undefined) }, [])

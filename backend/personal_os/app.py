@@ -1051,6 +1051,15 @@ def _check_numeric_setting(key: str, value: Any) -> int | float:
     return int(value) if isinstance(default, int) else float(value)
 
 
+def _check_send_hold(value: dict[str, Any]) -> None:
+    """The hold's switch is a real boolean (the string "false" must not read back as on) and its length a number."""
+    if "enabled" in value and not isinstance(value["enabled"], bool):
+        raise HTTPException(422, "gmailSendHold.enabled must be true or false")
+    seconds = value.get("seconds")
+    if "seconds" in value and (isinstance(seconds, bool) or not isinstance(seconds, (int, float))):
+        raise HTTPException(422, "gmailSendHold.seconds must be a number")
+
+
 def _rule_tool_known(r: permrules.Rule) -> None:
     """A rule must name something a call can match, or it silently never applies. Checked on save, not on load, so a
     saved rule for a tool that later goes away keeps loading."""
@@ -1138,6 +1147,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, f"defaultEffort must be one of {', '.join(EFFORTS)}")
         elif k == "docTypography":
             clean[k] = clean_typography(v) or {}
+        elif k == "gmailSendHold":
+            _check_send_hold(v)
     _lock_embedding(clean)
     for k in SECRET_SETTINGS:
         if k in clean and clean[k] == "":  # blank means "unchanged" (the form never holds the saved key); null clears

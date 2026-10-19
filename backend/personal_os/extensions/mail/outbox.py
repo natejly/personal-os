@@ -122,7 +122,7 @@ class Outbox:
             seconds = int(seconds)
         except (TypeError, ValueError):
             seconds = DEFAULT_HOLD["seconds"]
-        return {"enabled": bool(stored.get("enabled", DEFAULT_HOLD["enabled"])),
+        return {"enabled": stored.get("enabled", DEFAULT_HOLD["enabled"]) is True,
                 "seconds": max(lo, min(seconds, hi)), "min": lo, "max": hi}
 
     # ---- queue / cancel / send now ----
@@ -372,7 +372,11 @@ def router(outbox: Outbox) -> Any:
     def cancel(pid: str) -> dict[str, Any]:
         row = outbox.cancel(pid) or outbox.discard(pid)
         if not row:
-            raise HTTPException(409, "Too late — that email has already gone out.")
+            existing = outbox.get(pid)
+            if not existing:
+                raise HTTPException(404, "No such queued email.")
+            raise HTTPException(409, "That email was already cancelled." if existing["status"] == CANCELLED
+                                else "Too late — that email has already gone out.")
         return row
 
     @r.post("/{pid}/send-now")

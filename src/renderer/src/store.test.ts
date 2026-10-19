@@ -1609,6 +1609,17 @@ test('a todos fetch still in flight when Lists goes off does not put its rows ba
   assert.deepEqual(useTodos.getState().todos, [])
 })
 
+test('saving a Sidebar change that leaves Lists as it was does not refetch the open Lists view', async (t) => {
+  const orig = useStore.getState().settings
+  t.after(() => useStore.setState({ settings: orig }))
+  const { calls } = stubFetch(t, () => json({ ...orig, hiddenViews: ['calendar'] }))
+  useStore.setState({ settings: { ...orig, hiddenViews: [] } })
+  useTodos.setState({ todos: [{ id: 'done-one' } as never] })
+  await useStore.getState().saveSettings({ hiddenViews: ['calendar'] })
+  assert.equal(calls.length, 1)
+  assert.deepEqual(useTodos.getState().todos, [{ id: 'done-one' }])
+})
+
 test('a view turned off in Settings is not entered by setView, which says how to turn it on', (t) => {
   const orig = useStore.getState()
   t.after(() => useStore.setState({ settings: orig.settings, view: orig.view, toasts: orig.toasts }))

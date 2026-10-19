@@ -41,6 +41,8 @@ class Review:
         set_hidden_view(self.host, self.ctx, ext_id, hidden)
 
     async def _load(self, ext_id: str) -> ExtensionScope:
+        if "runtime:loop" in self.drafts.slot_grants(ext_id):
+            self.host.slot_grants.add(ext_id)
         scope = await self.host.load_dev(self.drafts.installed / ext_id, self.ctx, first_load=False)
         await adopt(self.host, self.toolbox(), scope)
         return scope
@@ -51,6 +53,8 @@ class Review:
         if scope and scope.manifest.kind == "profile":
             scope.defaults.revert(ext_id)  # a profile's defaults are not tied to hiddenViews: undo them here, as its own disable does
         self._hide(ext_id, True)
+        self.host.slot_grants.discard(ext_id)
+        self.drafts.revoke_grants(ext_id)
         if scope:
             self.toolbox().drop_extension_tools(list(scope.tools))
             await self.host.unload(ext_id)

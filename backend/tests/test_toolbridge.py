@@ -310,7 +310,8 @@ def test_run_python_without_tools_is_unchanged(rig: Rig) -> None:
 
 def test_schema_advertises_tools_and_the_socket_dir_is_cleaned_up(rig: Rig) -> None:
     props = rig.tb.specs["run_python"].parameters["properties"]
-    assert props["tools"]["type"] == "array"
+    kinds = {o.get("type") for o in props["tools"]["anyOf"]}
+    assert kinds == {"array", "string"}
 
     async def go() -> str:
         b = await toolbridge.Bridge(rig.tb, rig.ctx, ["fs_glob"]).start()

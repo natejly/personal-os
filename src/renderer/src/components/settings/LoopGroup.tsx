@@ -9,7 +9,7 @@ import { useRuntimeSelect } from './useRuntimeSelect'
 
 export const LOOP_SLOT = 'agent.loop'
 
-export type StuckMode = NonNullable<Settings['stuckDetection']>
+export type StuckMode = NonNullable<Settings['stuckSensitivity']>
 export const STUCK_MODES: { id: StuckMode; text: string }[] = [
   { id: 'off', text: 'Never stops a reply for repeating itself.' },
   { id: 'relaxed', text: 'Stops only clear loops.' },
@@ -21,8 +21,8 @@ type NumKey = 'loopMaxRounds' | 'loopModelCalls' | 'loopRepeatLimit' | 'loopTool
   | 'toolResultInlineChars' | 'planLoopMaxSteps' | 'planLoopVerifyPasses' | 'parallelReads' | 'llmRetries' | 'llmIdleSeconds'
 
 /** Built-in defaults, as the backend ships them. A field the Settings object leaves out reads as these. */
-export const LOOP_DEFAULTS: Record<NumKey, number> & { stuckDetection: StuckMode } = {
-  loopMaxRounds: 0, loopModelCalls: 60, loopRepeatLimit: 5, loopToolErrorLimit: 3, loopDoomLimit: 3, stuckDetection: 'standard',
+export const LOOP_DEFAULTS: Record<NumKey, number> & { stuckSensitivity: StuckMode } = {
+  loopMaxRounds: 0, loopModelCalls: 60, loopRepeatLimit: 5, loopToolErrorLimit: 3, loopDoomLimit: 3, stuckSensitivity: 'standard',
   finalRoundSeconds: 90, toolResultInlineChars: 12000, planLoopMaxSteps: 8, planLoopVerifyPasses: 1,
   parallelReads: 0, llmRetries: 3, llmIdleSeconds: 300
 }
@@ -52,7 +52,7 @@ const NUMBERS: { key: NumKey; title: string; help: string; zero?: string; group:
 export default function LoopGroup({ draft, patch }: TabProps): JSX.Element {
   const rt = useRuntimeSelect()
   const slot = rt.view?.slots.find((s) => s.id === LOOP_SLOT)
-  const stuck = draft.stuckDetection ?? LOOP_DEFAULTS.stuckDetection
+  const stuck = draft.stuckSensitivity ?? LOOP_DEFAULTS.stuckSensitivity
   const row = (n: (typeof NUMBERS)[number]): ReactNode => {
     const value = draft[n.key] ?? LOOP_DEFAULTS[n.key]
     return (
@@ -80,9 +80,9 @@ export default function LoopGroup({ draft, patch }: TabProps): JSX.Element {
         <div key={g}>
           <h5 className="set-subhead">{g}</h5>
           {g === 'Stuck detection' && (
-            <SettingRow settingKey="stuckDetection" title="Stuck detection" help={STUCK_MODES.find((m) => m.id === stuck)?.text} value={stuck} defaultValue={LOOP_DEFAULTS.stuckDetection}
-              onReset={() => patch({ stuckDetection: LOOP_DEFAULTS.stuckDetection })}>
-              <select aria-label="Stuck detection" value={stuck} onChange={(e) => patch({ stuckDetection: e.target.value as StuckMode })}>
+            <SettingRow settingKey="stuckSensitivity" title="Stuck detection" help={STUCK_MODES.find((m) => m.id === stuck)?.text} value={stuck} defaultValue={LOOP_DEFAULTS.stuckSensitivity}
+              onReset={() => patch({ stuckSensitivity: LOOP_DEFAULTS.stuckSensitivity })}>
+              <select aria-label="Stuck detection" value={stuck} onChange={(e) => patch({ stuckSensitivity: e.target.value as StuckMode })}>
                 {STUCK_MODES.map((m) => <option key={m.id} value={m.id}>{m.id[0].toUpperCase() + m.id.slice(1)}: {m.text}</option>)}
               </select>
             </SettingRow>

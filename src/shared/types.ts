@@ -1847,7 +1847,7 @@ export interface Settings {
   loopRepeatLimit?: number
   loopToolErrorLimit?: number
   loopDoomLimit?: number
-  stuckDetection?: 'off' | 'relaxed' | 'standard' | 'strict'
+  stuckSensitivity?: 'off' | 'relaxed' | 'standard' | 'strict'
   /** Seconds kept for the final round (10-600). */
   finalRoundSeconds?: number
   /** Characters of a tool result kept inline before the rest is stored aside (2000-60000). */

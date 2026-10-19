@@ -12,7 +12,7 @@ test('every numeric loop default sits inside its range', () => {
 })
 
 test('the stuck modes include the default, and a range reads with its special zero', () => {
-  assert.ok(STUCK_MODES.some((m) => m.id === LOOP_DEFAULTS.stuckDetection))
+  assert.ok(STUCK_MODES.some((m) => m.id === LOOP_DEFAULTS.stuckSensitivity))
   assert.equal(rangeText('loopMaxRounds', 'no cap'), 'Range 0 to 200; 0 means no cap.')
   assert.equal(rangeText('loopModelCalls'), 'Range 5 to 500.')
 })

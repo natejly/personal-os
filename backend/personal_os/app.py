@@ -1145,6 +1145,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, f"{k} must be a {type(d).__name__}")
         elif k == "retrievalMode" and v not in ("hybrid", "bm25"):
             raise HTTPException(422, "retrievalMode must be 'hybrid' or 'bm25'")
+        elif k == "stuckDetection" and v not in limits.STUCK_MODES:
+            raise HTTPException(422, f"stuckDetection must be one of {', '.join(limits.STUCK_MODES)}")
         elif k == "defaultEffort" and v not in EFFORTS:
             raise HTTPException(422, f"defaultEffort must be one of {', '.join(EFFORTS)}")
         elif k == "docTypography":
@@ -1884,6 +1886,15 @@ EMPTY_NUDGE = ("Your last turn ended without any text and without a tool call. A
                "or say in one line what you did and what is still missing.")
 LOOP_STOP = ("{name} has been called with identical arguments {n} times in a row, so this reply is stopping tool use. "
              "Answer with what you already have, and say in one line what you could not finish.")
+def _loop_bounds(loop: Any, cfg: dict[str, Any]) -> Any:
+    """The round bounds an alternative loop declares for this turn: its own `turn_bounds(cfg)` when it has one (so settings can
+    move them), else the fixed `bounds`. Read once, when the turn starts."""
+    derive = getattr(loop, "turn_bounds", None)
+    return derive(cfg) if callable(derive) else loop.bounds
+
+
+ROUNDS_STOP = ("This reply has used its {n} rounds of tool calls, so it is stopping tool use. "
+               "Answer with what you already have, and say in one line what you could not finish.")
 CUT_STOP = ("The model's output limit cut this call short, so it was not executed. "
             "Write the best final answer you can from what you already have, and say in one line what is still missing.")
 CUT_CALL = ("the arguments were cut off at the model's output limit and the call was not run; "
@@ -3154,7 +3165,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             span = tracer.start("llm", model, {"round": _round, "effort": turn_effort, "final": True, "messages": len(messages), "tools": len(st.tool_schemas)})
             yield "span", {"message_id": am["id"], "span": span}
             start, fin = len(buf), {}
-            llm.stream_deadline.set(time.monotonic() + FINAL_ROUND_SECONDS)
+            llm.stream_deadline.set(time.monotonic() + limits.loop_setting(cfg, "finalRoundSeconds"))
             # tools are still declared, with tool_choice "none": the history holds tool_calls, and some OpenAI-compatible
             # backends reject that when no tool list is sent. "none" is the portable way to say "answer, do not call".
             _capture("none")
@@ -3289,7 +3300,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             loop is handed only the harness. Its model calls, tool calls and steers go through the same objects and checks as the default's."""
             open_spans: dict[str, dict[str, Any]] = {}
             last: dict[str, Any] = {}  # the last model call's text, reasoning, finish and span, which the tool step needs
-            calls_made = ModelCalls(limits.LOOP_MODEL_CALLS)
+            calls_made = ModelCalls(limits.loop_setting(cfg, "loopModelCalls"))
             sealed = ""  # digest of the assembled context after the core last wrote it
 
             def _loop_event(event: LoopEvent) -> tuple[str, Any]:
@@ -3412,11 +3423,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         turn_loop.publish(item)
                 return folded
 
+            public_cfg = public_settings()
             harness = LoopHarness(ContextBuilder(_build), ModelStream(_model), Tools(_tools), EventSink(turn_loop.emit),
-                                  LoopHooks(host.bus, run.run_id if run else None, conv_id), TurnLimits(loop.bounds, calls_made, stop.is_set, _steers))
+                                  LoopHooks(host.bus, run.run_id if run else None, conv_id), TurnLimits(_loop_bounds(loop, public_cfg), calls_made, stop.is_set, _steers))
             refs = tuple(AttachmentRef(a["id"], a["name"]) for a in attachments) if body.content is not None else ()
             turn = TurnInput(conv_id, run.run_id if run else None, user_text, refs, body.origin, bool(body.resume_of), model, turn_effort,
-                             public_settings())
+                             public_cfg)
             async for item in turn_loop.events(turn, harness):
                 yield item
             for span in open_spans.values():
@@ -3623,6 +3635,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     st.delegation_forced = True
                     st.tool_schemas = _schemas()
                     messages.append({"role": "system", "content": workers_mod.FORCE_DELEGATE_NUDGE.format(n=work_rounds)})
+            max_rounds = limits.loop_setting(cfg, "loopMaxRounds")
+            if max_rounds and _round >= max_rounds and st.partial is None:  # loopMaxRounds: the closing answer, as after a breaker
+                st.partial = "loop"
+                messages.append({"role": "system", "content": ROUNDS_STOP.format(n=max_rounds)})
             if st.partial == "loop":
                 async for chunk in _final_round():
                     yield chunk

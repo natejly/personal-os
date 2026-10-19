@@ -120,7 +120,9 @@ test('Advanced retrieval settings persist across relaunch and clamp out-of-range
   await page.getByLabel('Search by').selectOption('bm25')
   await setToggle(page.getByRole('checkbox', { name: /Re-rank document search/ }), true)
   await page.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect.poll(async () => (await api('/settings')).retrievalMode).toBe('bm25')
+  // Save sends only the fields that changed, so wait on the switch's own key, and on the dialog closing (the PUT has returned).
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect.poll(async () => (await api('/settings')).retrievalRerank).toBe(true)
   expect(await api('/settings')).toMatchObject({ retrievalMode: 'bm25', retrievalRerank: true })
   // The per-document cap, similarity floor and candidate count have no controls any more; the API still holds their ranges.
   for (const body of [{ retrievalPerDocCap: 99 }, { retrievalCandidates: 1 }, { retrievalMinSimilarity: 7 }]) {

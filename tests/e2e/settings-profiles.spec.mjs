@@ -9,9 +9,12 @@ test('a profile switch applies its defaults at once and turning it off puts them
   const { page, api } = grain
   await expect(row(page, 'Lists')).toHaveCount(1)
   await openSettings(page, 'Sidebar and layout')
-  // The harness starts with every view on, though a first boot recorded Lean: switch it off first.
-  await flip(page, 'Lean')
-  await expect(profile(page, 'Lean')).not.toBeChecked()
+  // The harness starts with every view on. If a first boot recorded Lean as on, switch it off first and wait for that to land.
+  if (await profile(page, 'Lean').isChecked()) {
+    await flip(page, 'Lean')
+    await expect(profile(page, 'Lean')).not.toBeChecked()
+    await expect(row(page, 'Lists')).toHaveCount(1)
+  }
   await flip(page, 'Lean')
   await expect(profile(page, 'Lean')).toBeChecked()
   await expect(row(page, 'Lists')).toHaveCount(0)
@@ -24,6 +27,7 @@ test('a profile switch applies its defaults at once and turning it off puts them
 
   await flip(page, 'Focus')
   await expect.poll(async () => (await api('/settings')).defaultEffort).toBe('low')
+  await expect.poll(async () => (await api('/profiles')).find((x) => x.id === 'focus').enabled).toBe(true)
   await flip(page, 'Focus')
   await expect.poll(async () => (await api('/settings')).defaultEffort).toBe('high')
 })

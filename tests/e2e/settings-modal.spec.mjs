@@ -16,9 +16,9 @@ test('every settings tab opens and renders cleanly', async ({ grain }) => {
     await expect(dialog(page).getByRole('tabpanel')).not.toBeEmpty()
     await page.waitForTimeout(250)
   }
-  // Arrow keys walk the rail; the core Runtime section is the last one, after the coding extension's.
+  // Arrow keys walk the rail; the Extensions section registers last, after Runtime.
   const recipes = dialog(page).getByRole('tab', { name: 'Coding recipes' })
-  const runtime = dialog(page).getByRole('tab', { name: 'Runtime' })
+  const runtime = dialog(page).getByRole('tab', { name: 'Extensions' })
   await recipes.click()
   await expect(dialog(page).getByRole('tabpanel')).toContainText('A recipe is a coding task')
   await runtime.click()

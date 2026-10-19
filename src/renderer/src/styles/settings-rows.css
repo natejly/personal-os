@@ -1,0 +1,20 @@
+/* Settings rows: SettingRow's meta marks, its popover, and the inline danger confirmation. */
+.settings-pane .set-row-x { flex-wrap: wrap; position: relative; }
+.settings-pane .set-row-x > .set-control { display: flex; align-items: center; gap: 8px; flex: none; }
+.settings-pane .set-row-x > .set-control > input[type='number'] { width: 96px; min-width: 0; }
+.settings-pane .set-row-x > .set-control > select { width: auto; min-width: 160px; }
+.set-meta { position: relative; display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.set-modified { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; }
+.set-scope { font: inherit; font-size: 11px; line-height: 1; padding: 3px 7px; border-radius: 999px; color: var(--text-muted); background: transparent; border: 1px solid var(--border-strong); cursor: pointer; }
+.set-scope:hover, .set-scope[aria-expanded='true'] { color: var(--text); border-color: var(--control-border); }
+.set-scope:focus-visible, .set-reset:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.set-reset { width: 22px; height: 22px; color: var(--text-muted); }
+.set-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 20; min-width: 220px; max-width: 320px; padding: 10px 12px; font-size: 12px; line-height: 1.5; color: var(--text); background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25); }
+.set-pop p { margin: 0; }
+.set-pop p.muted { color: var(--text-muted); margin-top: 6px; }
+.set-pop ul { margin: 4px 0 0; padding-left: 16px; }
+.set-pop code { font-family: var(--mono); font-size: 11px; }
+.confirm-danger { display: block; padding: 10px 16px; border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); border-radius: var(--radius); background: color-mix(in srgb, var(--danger) 6%, transparent); }
+.confirm-danger ul { margin: 6px 0; padding-left: 18px; font-size: 12px; color: var(--text-muted); }
+.confirm-danger-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.set-subhead { margin: 14px 0 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }

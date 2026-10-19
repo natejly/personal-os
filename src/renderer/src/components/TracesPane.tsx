@@ -48,7 +48,7 @@ export default function TracesPane({ conversationId }: { conversationId?: string
           <ul>{workers.map((w) => <li key={w.id}><b>{w.title}</b> <span className="muted small">{w.status}</span></li>)}</ul>
         </section>
       )}
-      {turns.length === 0 && <p className="muted ctx-empty">Send a message to see its trace.</p>}
+      {turns.length === 0 && <p className="muted ctx-empty">No replies yet</p>}
       {turns.map((t) => (
         <section key={t.messageId} className="ctx-section traces-turn">
           <h4>{t.model ? modelLabel(t.model) : 'Reply'}{t.live ? ' (running)' : ''}</h4>

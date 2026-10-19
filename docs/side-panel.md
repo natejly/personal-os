@@ -25,10 +25,10 @@ The workspace panel is the chat's side surface: a tab strip over one scrolling b
   chat whose desk is in review opens on Review. While the panel stays open it remembers the tab you
   chose. Escape closes it. A layout profile can keep it shut (the `sidepanel` region); asking for it then
   shows a notice instead.
-- **Canvas chat windows** do not have the panel yet: only the full-window chat does.
+- **Canvas chat windows** have the same panel: a Workspace panel button in the window's header opens it over that window's right edge, and Cmd+I (or Control+Command+I) toggles it for the focused chat window. Its tabs show that window's chat only.
 - **Page agent** (Cmd+I outside a chat) uses the same shell and the same width. Under its header a
-  "Sent with your message" line shows the size of the page block (about one token per four characters)
-  with a disclosure that reveals the exact text, or says nothing from the screen is sent.
+  "Sent" line shows the size of the page block (about one token per four characters)
+  with a disclosure that reveals the exact text; it is absent when the screen sends nothing.
 - **Extensions** add tabs by registering a `sidepanel.tab` slot item with a label and a component
   (and optionally an overlay drawn over the chat, as Terminal does for its window).
 

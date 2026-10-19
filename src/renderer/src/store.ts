@@ -38,6 +38,9 @@ import { pauseQueue, sendNext, updateQueue, type DoneInfo } from './lib/followQu
 import { DEFAULT_ZOOM, stepZoom } from './lib/zoom'
 import { inputChip } from './lib/deskFiles'
 import { cmdIAction } from './lib/cmdI'
+
+/** Set by the canvas store: toggles the focused chat window's side panel and returns true, or false when no chat window has focus. */
+export const canvasPanelHook: { toggleFocused: () => boolean } = { toggleFocused: () => false }
 import { isInternal, upsertWorker, withoutInternal } from './lib/workers'
 import { appendDelta, settleHeld } from './lib/noReply'
 
@@ -1026,10 +1029,10 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'chat:next') s.stepChat(1)
       else if (action === 'chat:prev') s.stepChat(-1)
       else if (action === 'chat:search') s.searchChats()
-      else if (action === 'toggle-context') s.toggleContext()
+      else if (action === 'toggle-context') { if (!(s.view === 'canvas' && canvasPanelHook.toggleFocused())) s.toggleContext() }
       else if (action === 'toggle-desk') s.toggleDeskPanel()
       else if (action === 'panel-context') s.togglePanelContext()
-      else if (action === 'page-agent') { if (cmdIAction(s.view) === 'panel-context') s.togglePanelContext(); else s.togglePageAgent() }
+      else if (action === 'page-agent') { if (s.view === 'canvas' && canvasPanelHook.toggleFocused()) { /* the focused chat window's own panel */ } else if (cmdIAction(s.view) === 'panel-context') s.togglePanelContext(); else s.togglePageAgent() }
       else if (action === 'view:graph') s.openMemory('graph')
       else if (action === 'view:memory') s.openMemory()
       else if (action === 'view:documents') s.openFiles('uploads')

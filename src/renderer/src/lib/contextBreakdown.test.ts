@@ -70,13 +70,25 @@ test('resolveBreakdown works from the ledger alone and is null without either', 
   assert.equal(r!.window, 200)
 })
 
-test('textFor reads blocks, top-level ids and the system prompt under either name', () => {
-  assert.equal(textFor({ blocks: { 'memory:1': 'hi' } }, 'memory:1'), 'hi')
-  assert.equal(textFor({ 'hint:x': 'top' }, 'hint:x'), 'top')
-  assert.equal(textFor({ system_prompt: 'sys' }, 'system', 'system'), 'sys')
+test('textFor reads the block id, and the system block falls back to texts.system', () => {
+  assert.equal(textFor({ 'memory:1': 'hi' }, 'memory:1'), 'hi')
   assert.equal(textFor({ system: 'sys2' }, 'whatever', 'system'), 'sys2')
-  assert.equal(textFor({ blocks: {} }, 'nope'), null)
+  assert.equal(textFor({ system: 'sys2' }, 'hint:x'), null)
+  assert.equal(textFor({}, 'nope'), null)
   assert.equal(textFor(undefined, 'nope'), null)
+})
+
+test('the fallback bar uses turn_tokens when there is no reply ledger', () => {
+  assert.equal(contextBreakdown({ window: 1000, estimated_tokens: 100, turn_tokens: 400 }, null).used, 400)
+  assert.equal(contextBreakdown({ window: 1000, estimated_tokens: 100, turn_tokens: 0 }, null).used, 100)
+})
+
+test('a tool from an MCP server is grouped by tools_offered source, not block owner', () => {
+  const ctx = ledger({ blocks: [blk('tool:srch', 'tool_schema', 25, { slot: 'tools' })], totals: { stable: 0, volatile: 0, tail: 0, tools: 25, history: 0, window: 1000 },
+    tools_offered: [{ name: 'srch', tokens: 25, source: 'mcp:web', deferred: false }, { name: 'late', tokens: 40, source: 'core', deferred: true }] })
+  const tools = contextBreakdown({ window: 1000, estimated_tokens: 0 }, ctx).slices.find((s) => s.key === 'tools')!
+  assert.equal(tools.tokens, 25)
+  assert.deepEqual(tools.groups!.map((g) => g.key), ['core', 'mcp:web'])
 })
 
 test('fallbackText finds memory and system text on the ctx', () => {
@@ -87,8 +99,8 @@ test('fallbackText finds memory and system text on the ctx', () => {
 })
 
 test('traceContextNote tolerates both reason shapes', () => {
-  assert.equal(traceContextNote({ stable_hash: 'a1b2c3d4', cache_reason: 'tools changed' }), 'Context: stable prefix a1b2c3 · cache reset: tools changed')
-  assert.equal(traceContextNote({ stable_hash: 'a1b2c3d4', cache: { reason: 'x' } }), 'Context: stable prefix a1b2c3 · cache reset: x')
-  assert.equal(traceContextNote({ stable_hash: 'abcdef12' }), 'Context: stable prefix abcdef')
+  assert.equal(traceContextNote({ stable_hash: 'a1b2c3d4', cache_reason: 'tools changed' }), 'Prefix a1b2c3 · Cache changed: tools changed')
+  assert.equal(traceContextNote({ stable_hash: 'a1b2c3d4', cache: { reason: 'x' } }), 'Prefix a1b2c3 · Cache changed: x')
+  assert.equal(traceContextNote({ stable_hash: 'abcdef12' }), 'Prefix abcdef')
   assert.equal(traceContextNote({}), null)
 })

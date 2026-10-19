@@ -55,7 +55,7 @@ export default function PageAgentPanel(): JSX.Element {
     <SidePanel label="Page agent" className="page-agent" onClose={closePageAgent}>
       <div className="page-agent-ctx" title={ctx?.detail ? `${ctx.detail.slice(0, 600)}…` : undefined}>
         <span className="page-agent-label">
-          {pin ? <><Pin size={11} /> <b>{pin.label}</b></> : ctx ? <><b>{ctx.label}</b>{ctx.selection ? <em> · selection</em> : null}</> : <span className="muted">This screen has no context to send.</span>}
+          {pin ? <><Pin size={11} /> <b>{pin.label}</b></> : ctx ? <><b>{ctx.label}</b>{ctx.selection ? <em> · selection</em> : null}</> : null}
         </span>
         <div className="page-agent-actions">
           {pin ? (
@@ -78,12 +78,12 @@ export default function PageAgentPanel(): JSX.Element {
           <>
             <button className="page-agent-sent-btn" aria-expanded={showSent} aria-controls="page-agent-sent-text" onClick={() => setShowSent((v) => !v)} disabled={!sentText}>
               {showSent ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-              <span>Sent with your message: <b>{ctx.label}</b> (~{sentTokens.toLocaleString()} tokens)</span>
+              <span>Sent <b>{ctx.label}</b> <span className="muted">~{sentTokens.toLocaleString()} tokens</span></span>
             </button>
             {showSent && sentText && <pre id="page-agent-sent-text" className="page-agent-sent-text" tabIndex={0} aria-label="Text sent with your message">{sentText}</pre>}
           </>
-        ) : <span className="muted">Nothing from this screen is sent.</span>}
-        {usedLabel && usedLabel !== ctx?.label && <span className="muted"> Last message used: {usedLabel}.</span>}
+        ) : null}
+        {usedLabel && usedLabel !== ctx?.label && <span className="muted"> Last used {usedLabel}</span>}
       </div>
 
       <div className="page-agent-body" ref={scrollRef} onScroll={onScroll}>

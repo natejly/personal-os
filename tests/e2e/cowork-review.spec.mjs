@@ -104,7 +104,7 @@ test('review: rejecting all outputs marks them rejected and finishes the desk', 
   const { desk } = await reviewDesk(grain, 'Rejector 2')
   const { page } = grain
   await page.getByRole('button', { name: /Reject (all|selected)/ }).click()
-  await page.getByPlaceholder(/Why reject/).fill('not wanted')
+  await page.getByPlaceholder(/Reason/).fill('not wanted')
   await page.getByRole('button', { name: 'Reject', exact: true }).last().click()
   await expect.poll(async () => (await grain.api(`/cowork/desks/${desk.id}`)).outputs[0].status, { timeout: 60_000 }).toBe('rejected')
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).toBe('done')

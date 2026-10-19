@@ -1,4 +1,4 @@
-import type { ContextBlock, ContextUsed, MessageContext } from '@shared/types'
+import type { ContextBlock, ContextUsed } from '@shared/types'
 
 export type CategoryKey = 'system' | 'tools' | 'memory' | 'sources' | 'extensions' | 'conversation'
 
@@ -13,7 +13,7 @@ export interface BreakdownItem {
   version?: string
   /** Tool definitions only: core, ext:<id> or mcp:<name>. */
   group?: string
-  /** Tool definitions only: listed to the model on demand, so not counted toward tokens sent. */
+  /** Tool definitions only: held out of the request until searched for; not counted toward tokens sent. */
   deferred?: boolean
 }
 export interface ToolGroup { key: string; label: string; tokens: number; items: BreakdownItem[] }
@@ -126,10 +126,10 @@ function finish(slices: UsageSlice[], window: number, exact: boolean, compactAt:
  * grouped into categories; older replies fall back to an estimate (len/4): the replayed history from the context
  * meter plus each injected block of the last reply. The estimate does not itemise the system prompt or tool schemas.
  */
-export function contextBreakdown(meter: { window: number; estimated_tokens: number }, ctx: ContextUsed | null, compactAt?: number | null): UsageBreakdown {
+export function contextBreakdown(meter: { window: number; estimated_tokens: number; turn_tokens?: number }, ctx: ContextUsed | null, compactAt?: number | null): UsageBreakdown {
   if (ctx?.blocks?.length) return exactBreakdown(meter, ctx, compactAt ?? null)
   const items: UsageSlice[] = [
-    { key: 'messages', label: 'Messages', tokens: meter.estimated_tokens, count: 0, hue: 5 },
+    { key: 'messages', label: 'Messages', tokens: ctx ? meter.estimated_tokens : (meter.turn_tokens || meter.estimated_tokens), count: 0, hue: 5 },
     ...(ctx ? [
       { key: 'memory', label: 'Memories', tokens: sum([...(ctx.profile ?? []), ...ctx.memories].map((m) => m.content)), count: (ctx.profile?.length ?? 0) + ctx.memories.length, hue: 3 },
       { key: 'graph', label: 'Graph', tokens: sum([...ctx.nodes.map((n) => n.label), ...ctx.edges.map((e) => e.relation)]), count: ctx.nodes.length, hue: 7 },
@@ -144,7 +144,7 @@ export function contextBreakdown(meter: { window: number; estimated_tokens: numb
 }
 
 /** Breakdown with or without the context meter: a failed meter still yields a bar when the reply's ledger carries the window. */
-export function resolveBreakdown(meter: { window: number; estimated_tokens: number } | null, ctx: ContextUsed | null, compactAt?: number | null): UsageBreakdown | null {
+export function resolveBreakdown(meter: { window: number; estimated_tokens: number; turn_tokens?: number } | null, ctx: ContextUsed | null, compactAt?: number | null): UsageBreakdown | null {
   if (meter) return contextBreakdown(meter, ctx, compactAt)
   if (ctx?.blocks?.length) return contextBreakdown({ window: ctx.totals?.window || 1, estimated_tokens: 0 }, ctx, compactAt)
   return null
@@ -157,15 +157,11 @@ export const fmtTok = (n: number): string => {
   return String(Math.round(n))
 }
 
-/** The text sent for one block, from whatever shape the texts payload has: `blocks[id]`, a top-level `[id]`, or the system prompt under `system` / `system_prompt`. */
-export function textFor(texts: MessageContext['texts'] | null | undefined, blockId: string, kind?: string): string | null {
+/** The text sent for one block: `texts[id]`, or for the system block the system prompt (`texts.system`). */
+export function textFor(texts: Record<string, string> | null | undefined, blockId: string, kind?: string): string | null {
   if (!texts) return null
   const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null)
-  const fromBlocks = texts.blocks && typeof texts.blocks === 'object' ? str((texts.blocks as Record<string, unknown>)[blockId]) : null
-  if (fromBlocks) return fromBlocks
-  if (blockId !== 'blocks') { const top = str(texts[blockId]); if (top) return top }
-  if (kind === 'system' || blockId === 'system') return str(texts.system) ?? str(texts.system_prompt)
-  return null
+  return str(texts[blockId]) ?? (kind === 'system' ? str(texts.system) : null)
 }
 
 /** What the ledger-less ctx already holds for a block, for replies whose texts were not kept. */
@@ -188,7 +184,7 @@ export function fallbackText(ctx: ContextUsed, b: Pick<BreakdownItem, 'id' | 'ki
   }
 }
 
-/** "Context: stable prefix a1b2c3 · cache reset: <reason>" from a context span's meta, tolerant of `cache_reason` or `cache.reason`. */
+/** "Prefix a1b2c3 · Cache changed: <reason>" from a context span's meta, tolerant of `cache_reason` or `cache.reason`. */
 export function traceContextNote(meta: Record<string, unknown> | undefined): string | null {
   if (!meta) return null
   const hash = typeof meta.stable_hash === 'string' ? meta.stable_hash : null
@@ -196,5 +192,5 @@ export function traceContextNote(meta: Record<string, unknown> | undefined): str
   const reasonRaw = meta.cache_reason ?? cache?.reason
   const reason = typeof reasonRaw === 'string' && reasonRaw ? reasonRaw : null
   if (!hash && !reason) return null
-  return ['Context:', hash ? `stable prefix ${hash.slice(0, 6)}` : '', hash && reason ? '·' : '', reason ? `cache reset: ${reason}` : ''].filter(Boolean).join(' ')
+  return [hash ? `Prefix ${hash.slice(0, 6)}` : '', reason ? `Cache changed: ${reason}` : ''].filter(Boolean).join(' · ')
 }

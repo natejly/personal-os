@@ -34,11 +34,11 @@ export default function ApprovalRules({ event, conversationId, decide }: {
   return (
     <div className="approval-rules">
       {event.review?.verdict === 'ask' && <p className="muted small">Review: {event.review.reason}</p>}
-      {perm?.kind === 'doom_loop' && <p className="muted small">The same call has now been made three times in a row. No rule can wave this one through.</p>}
-      {perm?.kind === 'opaque' && <p className="muted small">This command uses substitutions or a heredoc, so it cannot be matched against rules and always asks.</p>}
-      {perm?.kind === 'destructive' && <p className="muted small">Permanent or irreversible{perm.subject ? `: ${perm.subject}` : ''}. No rule can wave this one through.</p>}
-      {perm?.kind === 'external_directory' && <p className="muted small">This command touches a protected location.</p>}
-      {perm?.rule && perm.kind === 'rule' && <p className="muted small">Asked because of your rule <code>{perm.rule}</code>.</p>}
+      {perm?.kind === 'doom_loop' && <p className="muted small">Same call three times in a row</p>}
+      {perm?.kind === 'opaque' && <p className="muted small">Cannot be matched against rules</p>}
+      {perm?.kind === 'destructive' && <p className="muted small">Irreversible{perm.subject ? `: ${perm.subject}` : ''}</p>}
+      {perm?.kind === 'external_directory' && <p className="muted small">Protected location</p>}
+      {perm?.rule && perm.kind === 'rule' && <p className="muted small">Rule <code>{perm.rule}</code></p>}
       {canSave && (
         <div className="approval-rule-list">
           {rules.map((r, i) => (

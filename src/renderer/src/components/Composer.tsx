@@ -459,7 +459,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   return (
     <div className={compact ? 'composer-wrap compact' : 'composer-wrap'}>
       {!hasKey && (
-        <div className="notice">Finish setup to start chatting. <button className="link" onClick={openWizard}>Finish setup</button></div>
+        <div className="notice">Setup incomplete <button className="link" onClick={openWizard}>Finish setup</button></div>
       )}
       {queueId && (
         <QueueTray conversationId={queueId} busy={streaming} onSendNow={sendNow} onResume={resume}
@@ -468,13 +468,13 @@ export default function Composer({ conversationId, footer, compact = false, onSe
       {(suggested.length > 0 || presetHint.length > 0) && (
         <div className="skill-hints" aria-label="Skills that fit this message">
           {suggested.map((s) => (
-            <button key={s.id} className="ghost-btn xs" title={`${s.description}\nPuts /skill ${skillSlug(s.name)} in front of your message.`} onClick={() => useSkill(s)}>
+            <button key={s.id} className="ghost-btn xs" title={`/skill ${skillSlug(s.name)}`} onClick={() => useSkill(s)}>
               <Sparkles size={11} /> Use {s.name}
             </button>
           ))}
           {presetHint.map((p) => (
             <button key={p.name} className="ghost-btn xs" disabled={importingPreset === p.name}
-              title={`${p.blurb}\nA popular skill from ${p.source} (${p.license}). Imports as a candidate you approve under Library → Skills.`}
+              title={`${p.source} (${p.license})`}
               onClick={() => void importPreset(p)}>
               <Download size={11} /> {importingPreset === p.name ? 'Importing…' : `Import the ${p.name} skill`}
             </button>
@@ -488,7 +488,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
       )}
       {confirm && (
         <div className="notice queue-confirm" role="alertdialog" aria-label="Decline the open card?">
-          Sending now declines the open card and tells the assistant why. To change the card instead (add a cc, move a time), edit it in place.{' '}
+          Sending now declines the open card.{' '}
           <button className="link danger" onClick={confirmSteer}>Decline and send</button>{' '}
           {!confirm.item && <><button className="link" onClick={queueInstead}>Queue instead</button>{' '}</>}
           <button className="link" onClick={() => setConfirm(null)}>Cancel</button>

@@ -37,7 +37,7 @@ export default function DeskPlan({ desk }: { desk: FullDesk }): JSX.Element {
   if (!plan) {
     return (
       <div className="desk-plan">
-        <p className="empty-hint">No plan yet.</p>
+        <p className="empty-hint">No plan</p>
       </div>
     )
   }
@@ -64,7 +64,7 @@ export default function DeskPlan({ desk }: { desk: FullDesk }): JSX.Element {
       </header>
       <ProgressBar done={done} total={live.length} label="Plan progress" />
       {amending && (
-        <InlineNote placeholder="What should change about the plan? The agent re-plans." submitLabel="Ask to re-plan"
+        <InlineNote placeholder="What should change?" submitLabel="Ask to re-plan"
           onSubmit={amend} onCancel={() => setAmending(false)} />
       )}
       {plan.intent && <p className="aplan-intent">{plan.intent}</p>}

@@ -102,12 +102,12 @@ test('a view action routes, and view:graph opens Settings → Memory on the grap
   // Memory is a Settings tab, not a page.
   fire('view:graph')
   assert.equal(useStore.getState().settingsOpen, true)
-  assert.equal(useStore.getState().settingsTab, 'memory')
+  assert.equal(useStore.getState().settingsTab, 'context')
   assert.equal(useStore.getState().memoryMode, 'graph')
-  useStore.setState({ settingsOpen: false, settingsTab: 'model' })
+  useStore.setState({ settingsOpen: false, settingsTab: 'models' })
   fire('view:memory')
   assert.equal(useStore.getState().settingsOpen, true)
-  assert.equal(useStore.getState().settingsTab, 'memory')
+  assert.equal(useStore.getState().settingsTab, 'context')
   assert.equal(useStore.getState().memoryMode, 'split')
   useStore.setState({ settingsOpen: false })
 })
@@ -133,7 +133,7 @@ test('view:documents and upload open Files on uploads, where the upload input re
   assert.deepEqual(clicked, ['doc-upload-input'])
   // ⌘, after that still opens on Model.
   fire('settings')
-  assert.equal(useStore.getState().settingsTab, 'appearance')
+  assert.equal(useStore.getState().settingsTab, 'general')
   useStore.getState().setSettingsOpen(false)
 })
 
@@ -170,7 +170,7 @@ test('a hidden view stays shut: its shortcut toasts a way to turn it on', () => 
   fire('view:todos')
   assert.equal(useStore.getState().toasts[0].text, 'Lists is turned off')
   assert.equal(useStore.getState().settingsOpen, true)
-  assert.equal(useStore.getState().settingsTab, 'sidebar')
+  assert.equal(useStore.getState().settingsTab, 'layout')
   useStore.getState().setSettingsOpen(false)
   // A view that is on still opens.
   fire('view:calendar')
@@ -245,7 +245,7 @@ test("the doc editor's chords are not menu accelerators, which would swallow the
   const menu = new Set(SHORTCUTS.filter((s) => s.scope === 'menu' || s.scope === 'window').map((s) => s.keys))
   const editor = readFileSync('src/renderer/src/components/MarkdownEditor.tsx', 'utf8')
   // The hint bar is the list the editor advertises; each chord must be free in the menu.
-  const hints = /className="md-hints">([^<]+)</.exec(editor)?.[1] ?? ''
+  const hints = /className="md-status" title="([^"]+)"/.exec(editor)?.[1] ?? ''
   const accel: Record<string, string> = {
     '⌘B': 'CmdOrCtrl+B', '⇧⌘B': 'CmdOrCtrl+Shift+B', '⌘I': 'CmdOrCtrl+I', '⇧⌘I': 'CmdOrCtrl+Shift+I',
     '⌘K': 'CmdOrCtrl+K', '⇧⌘M': 'CmdOrCtrl+Shift+M', '⌃⌘M': 'Control+Command+M', '⇧⌘E': 'CmdOrCtrl+Shift+E'

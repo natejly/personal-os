@@ -12,7 +12,7 @@ export default function ModelDuels(): JSX.Element {
   return (
     <div className="model-duels">
       <div className="setting-row">
-        <span className="toggle-text"><b>Model duels</b><small>{data ? `${data.votes} judged. Turn on A/B under the composer to add more.` : 'Loading…'}</small></span>
+        <span className="toggle-text"><b>Model duels</b><small>{data ? `${data.votes} judged` : 'Loading…'}</small></span>
         <button className="ghost-btn" type="button" disabled={!data?.votes} onClick={reset}>Reset</button>
       </div>
       {!!data?.models.length && (

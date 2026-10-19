@@ -72,7 +72,7 @@ test('hidden views are not in the sidebar; More rows opens Settings → Sidebar'
   await expect(sidebarItem(page, 'Library')).toHaveCount(0)
   await page.getByRole('button', { name: /More rows/ }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
-  await expect(page.locator('#settings-tab-sidebar')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('#settings-tab-layout')).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('dialog').getByRole('heading', { name: 'Sidebar', level: 3 })).toBeVisible()
   await expect(page.getByRole('dialog').getByRole('checkbox', { name: 'Library', exact: true })).not.toBeChecked()
 })
@@ -260,7 +260,7 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   await menu(grain, 'Chats'); await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
   // Memory… opens Settings on the Memory tab, split: graph and list side by side
   await menu(grain, 'Memory…')
-  await expect(page.locator('#settings-tab-memory')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('#settings-tab-context')).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('dialog').locator('.knowledge-body .graph-body')).toBeVisible()
   await expect(page.getByRole('dialog').locator('.knowledge-body .mem-pane')).toBeVisible()
   await menu(grain, 'Settings…')

@@ -393,8 +393,8 @@ function ComposeCard({ event, pending, decide, rules, conversationId }: ToolCard
         <button type="button" className="mc-link-btn" disabled={off} onClick={() => fileRef.current?.click()}><Paperclip size={11} /> Attach</button>
       </div>
       {looksMarkdown(body) && (
-        <div className="mc-hint">This looks like Markdown, and email shows it as plain text.
-          <button type="button" className="mc-link-btn" disabled={off} onClick={() => setBody(markdownToPlain(body))}>Clean it up</button></div>
+        <div className="mc-hint">
+          <button type="button" className="mc-link-btn" disabled={off} title="Email shows Markdown as plain text" onClick={() => setBody(markdownToPlain(body))}>Clean up Markdown</button></div>
       )}
       {problem && (to.length > 0 || bad.length > 0 || changed.length > 0) && <div className="mc-problem" role="alert">{problem}</div>}
       {event.forced && <div className="mc-hint">{tainted ? 'Approval is required because this chat read content from outside.' : 'Approval is required each time.'}</div>}

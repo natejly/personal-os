@@ -22,12 +22,12 @@ export default function TraceExportSettings({ value, onChange }: { value?: OtelE
   return (
     <>
       <h4>Trace export</h4>
-      <Switch title="Export traces as OpenTelemetry" help="Sends each reply's trace to a collector. Save settings before testing." checked={cfg.enabled} onChange={(v) => set({ enabled: v })} />
+      <Switch title="Export traces as OpenTelemetry" checked={cfg.enabled} onChange={(v) => set({ enabled: v })} />
       {cfg.enabled && (
         <>
           <label><span className="toggle-text"><b>Endpoint</b></span><input value={cfg.endpoint} onChange={(e) => set({ endpoint: e.target.value })} placeholder="http://localhost:6006" spellCheck={false} /></label>
-          <Switch title="Include message content" help="Tool arguments and the reply text. Never the system prompt or memories." checked={cfg.includeContent} onChange={(v) => set({ includeContent: v })} />
-          <Switch title="Send traces off this machine" help="Required for any endpoint that is not localhost." checked={cfg.allowRemote} onChange={(v) => set({ allowRemote: v })} />
+          <Switch title="Include message content" checked={cfg.includeContent} onChange={(v) => set({ includeContent: v })} />
+          <Switch title="Send traces off this machine" checked={cfg.allowRemote} onChange={(v) => set({ allowRemote: v })} />
           <div className="test-row">
             <button type="button" className="ghost-btn" onClick={() => void test()}>Send test span</button>
             {result && <span className="test-msg" role="status">{result}</span>}

@@ -140,7 +140,41 @@ RANGES: dict[str, tuple[float, float]] = {
     "delegationAfterRounds": (1, 20),
     "workerMaxConcurrent": (1, 16),
     "planAutoApproveSeconds": (0, 600),  # 0 = off
+    # loop lane: the agent-loop tunables (read at the use site through loop_setting)
+    "loopMaxRounds": (0, 200),  # 0 = no cap
+    "loopModelCalls": (5, 500),
+    "loopRepeatLimit": (2, 20),
+    "loopToolErrorLimit": (1, 10),
+    "loopDoomLimit": (1, 10),
+    "finalRoundSeconds": (10, 600),
+    "toolResultInlineChars": (2_000, 60_000),
+    "planLoopMaxSteps": (2, 20),
+    "planLoopVerifyPasses": (0, 3),
+    "codeModeMaxCalls": (1, 500),
 }
+# stuckSensitivity is an enum, not a number; stuck.limits_for maps it to thresholds.
+STUCK_MODES = ("off", "relaxed", "standard", "strict")
+PLAN_LOOP_MAX_STEPS = 8            # steps the plan loop's plan may have
+PLAN_LOOP_VERIFY_PASSES = 1        # repair passes the plan loop makes after a failed check
+LOOP_MAX_ROUNDS = 0                # tool rounds of the default chat loop (0 = no cap)
+TOOL_RESULT_INLINE_CHARS = 12000   # a tool result this long or shorter goes into the context whole; longer is stored behind a handle
+# Defaults of the loop-lane keys, the one table llm.DEFAULT_SETTINGS and loop_setting read.
+LOOP_DEFAULTS: dict[str, int] = {
+    "loopMaxRounds": LOOP_MAX_ROUNDS, "loopModelCalls": LOOP_MODEL_CALLS, "loopRepeatLimit": REPEAT_LIMIT,
+    "loopToolErrorLimit": TOOL_ERROR_LIMIT, "loopDoomLimit": 3, "finalRoundSeconds": int(FINAL_ROUND_SECONDS),
+    "toolResultInlineChars": TOOL_RESULT_INLINE_CHARS, "planLoopMaxSteps": PLAN_LOOP_MAX_STEPS,
+    "planLoopVerifyPasses": PLAN_LOOP_VERIFY_PASSES,
+}
+
+
+def loop_setting(settings: Any, key: str) -> int:
+    """A loop-lane number from the turn's settings: the stored value clamped into RANGES, the default when it is
+    missing or not a finite number."""
+    v = settings.get(key) if settings is not None else None
+    lo, hi = RANGES[key]
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v in (float("inf"), float("-inf")):
+        return LOOP_DEFAULTS[key]
+    return int(min(max(v, lo), hi))
 
 
 def _pos(v: Any) -> float:

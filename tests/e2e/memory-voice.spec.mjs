@@ -23,7 +23,7 @@ async function chatIn(grain, title, settings = {}) {
 test('voice panel: empty state, add a sample, garbage relearn is survived, delete the sample', async ({ grain }) => {
   const { page, api, backend } = grain
   await openVoice(page)
-  await expect(page.getByText(/Nothing learned yet/)).toBeVisible()
+  await expect(page.getByText(/No samples/)).toBeVisible()
   await expect(page.getByText('no voice yet · 0 samples')).toBeVisible()
   await expect(page.getByRole('button', { name: /Learn my style/ })).toBeDisabled()
   await page.getByPlaceholder('Paste a piece of your own writing…').fill('Hi Sam, thanks for the notes. I will send the draft over on Thursday and we can pick it apart then. Cheers, N')
@@ -40,7 +40,7 @@ test('voice panel: empty state, add a sample, garbage relearn is survived, delet
   expect((await api('/style')).profile).toBeNull()
   await page.getByRole('button', { name: /Delete writing sample/ }).click()
   await expect(page.locator('.style-sample')).toHaveCount(0)
-  await expect(page.getByText('No samples in this scope yet.')).toBeVisible()
+  await expect(page.getByText('No samples')).toBeVisible()
   clean(grain)
 })
 
@@ -152,7 +152,7 @@ test('a project voice replaces the personal one inside that project; without it 
   await page.locator('.sidebar').getByText('Casual', { exact: true }).first().click()
   await openProjectSection(page, 'Memory')
   await page.getByRole('button', { name: 'Voice', exact: true }).click()
-  await expect(page.getByText(/currently use your personal voice/)).toBeVisible()
+  await expect(page.getByText(/Using your personal voice/)).toBeVisible()
   clean(grain)
 })
 

@@ -39,7 +39,7 @@ def _route_set() -> set[tuple[str, str]]:
 class HostTests(unittest.TestCase):
     def test_modules_and_built_in_extensions_load_and_the_app_starts_through_the_lifespan(self) -> None:
         from personal_os import app as appmod
-        self.assertEqual(list(appmod.host.extensions), ["google", "todos", "calendar", "mail", *(m.key for m in modules), "health", "spaces", "lean", "focus", "coding", "telegram"])
+        self.assertEqual(list(appmod.host.extensions), ["google", "todos", "calendar", "mail", *(m.key for m in modules), "health", "spaces", "lean", "focus", "coding", "claude-code", "memory-tree", "telegram"])
         self.assertIs(appmod.google, appmod._ext_ctx.services["google"]())
         self.assertEqual(app.router.on_startup + app.router.on_shutdown, [])  # no @app.on_event handlers remain
         with TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN}) as c:  # runs the lifespan
@@ -236,15 +236,14 @@ class ModulesStampTests(unittest.TestCase):
             c.execute("DELETE FROM settings WHERE key IN ('modulesDefault', 'hiddenViews', 'homeWidgets', 'extDefaults')")
             c.execute("DELETE FROM conversations")
 
-    def test_first_boot_starts_lean(self) -> None:
+    def test_first_boot_applies_no_profile(self) -> None:
+        """No profile is on by default any more: a fresh install is lean because its extensions start off (test_fresh_install_extensions)."""
         from personal_os import app as appmod
         self._reset(appmod)
         appmod._seed_hidden_modules()
-        self.assertEqual(appmod.db.get_settings()["hiddenViews"], ["todos", "calendar", "mail", "health", "spaces"])
-        self.assertTrue(host.extensions["lean"].enabled())
-        self.assertFalse(host.extensions["focus"].enabled())
-        host.extensions["lean"].defaults.revert("lean")  # turning the lean profile off shows every view again
         self.assertEqual(appmod.db.get_settings()["hiddenViews"], [])
+        self.assertFalse(host.extensions["lean"].enabled())
+        self.assertFalse(host.extensions["focus"].enabled())
 
     def test_install_with_chats_keeps_every_view(self) -> None:
         from personal_os import app as appmod

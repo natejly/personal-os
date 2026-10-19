@@ -39,6 +39,19 @@ export interface SettingsPanelDef {
   /** Words Settings search matches besides the label. */
   keys?: string
   Component: FC
+  /** The Settings section the panel is shown in (a section id such as 'agent'); default 'advanced'. */
+  group?: string
+  /** Sort position inside the section, lower first; default 100. Equal orders keep registration order. */
+  order?: number
+}
+
+/** The section a panel is shown in. */
+export const panelGroup = (p: { group?: string }): string => p.group ?? 'advanced'
+
+/** The panels of `section`, by `order` (default 100) then registration order. */
+export function panelsIn<T extends { group?: string; order?: number }>(section: string, list: readonly T[]): T[] {
+  return list.map((p, i) => ({ p, i })).filter(({ p }) => panelGroup(p) === section)
+    .sort((a, b) => (a.p.order ?? 100) - (b.p.order ?? 100) || a.i - b.i).map(({ p }) => p)
 }
 
 /** What a message slot item receives: the message, and whether the transcript can show context chips. */

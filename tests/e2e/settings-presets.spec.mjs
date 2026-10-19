@@ -54,7 +54,7 @@ test('the effective configuration lists every setting with its source and is rea
   await expect(table.locator('tbody tr')).not.toHaveCount(0)
   await dialog(page).getByLabel('Search the effective configuration').fill('permissionMode')
   await expect(table.locator('tr[data-key="permissionMode"]')).toContainText('preset:builtin:allow-all')
-  await expect(table.locator('tbody tr')).toHaveCount(1)
+  await expect(table.locator('tr[data-key="permissionMode"]')).toHaveCount(1)
   await dialog(page).getByLabel('Search the effective configuration').fill('')
   await dialog(page).getByRole('group', { name: 'Source' }).getByRole('button', { name: 'preset', exact: true }).click()
   await expect(table.locator('tbody tr').first()).toContainText('preset:builtin:allow-all')

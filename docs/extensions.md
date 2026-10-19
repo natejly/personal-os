@@ -13,14 +13,34 @@ Backend, under `backend/personal_os/extensions/`:
 - Permission presets with scoped overrides and a loosening gate; the effective configuration (`grain config dump`).
 - Runtime slots: swappable model client, router, tool source and sandbox backend, selected per chat, project, profile or globally, with a refusal-credentials breaker and a Needs-you card when a selection falls back.
 - Swappable agent loop (`agent.loop`) with a shipped plan, execute and verify loop.
-- Built-in extensions: `health`, `todos`, `telegram`, `google` (service), `calendar`, `mail`, `spaces`, `coding`, and the `lean` and `focus` profiles.
-- Review: an agent can draft an extension with the author skill and `ext_propose`; it lands disabled in Settings > Advanced > Extensions with its permission diff, findings and digest. Accepting names the digest the user reviewed; enabling is a separate step.
+- Built-in extensions: `health`, `todos`, `telegram`, `google` (service), `calendar`, `mail`, `spaces`, `coding`, `memory-tree` (the History digest, see `docs/memory-tree.md`), and the `lean` and `focus` profiles.
+- Review: an agent can draft an extension with the author skill and `ext_propose`; it lands disabled in the Needs review group of Settings > Extensions with its permission diff, findings and digest. Accepting names the digest the user reviewed; enabling is a separate step.
 
 Renderer, under `src/renderer/src/extensions/`: an open view union and registries for sidebar, composer, message, side-panel, titlebar and status-bar slots, palette entries, keybindings, selection menus, fences, tool cards and recap sections; a per-extension store slice; design tokens and profile layouts.
 
 ## Enable an extension
 
-Built-in extensions are listed in Settings > Advanced > Extensions and in the view toggles. A manifest's `enabled` field is its default; the user's choice wins. Disabling unloads the extension's handlers and tools for the next turn (a turn in flight keeps the tools it was offered). Installed folder extensions live in the installed folder of the data directory, load disabled, and run only after the user enables them.
+A fresh install starts with nothing enabled except the internal `google` service. A manifest's `enabled` field is only the fresh-install default: an existing install keeps its state, recorded in `extensions-seeded.json` in the data directory, so a pull never turns a view on or off.
+
+Settings > Extensions lists extensions in two groups, Installed and Available (bundled extensions that are off, plus entries from the catalog index). Proposals drafted by an agent sit in a Needs review group. Enabling a bundled extension opens the consent sheet (see below). If the extension requires other extensions that are off, the sheet offers to enable them too; declining enables nothing. Required services, such as `google`, activate automatically when something that needs them is enabled. Disabling unloads the extension's handlers and tools for the next turn (a turn in flight keeps the tools it was offered).
+
+## Install an extension
+
+Settings > Extensions > Install from URL or folder accepts:
+
+- a git URL, with an optional ref and subdirectory;
+- a zip file or zip URL;
+- a local folder.
+
+The source is fetched into `<data>/extensions-quarantine/`. Nothing executes while it is there: the host only reads the manifest and text files. A consent sheet shows the name, version, source, the permissions in plain language, the tools (with their danger level), hooks, views and slots it would add, shell commands found in its README or setup text (verbatim), findings from the checker, a warning when the id is close to another extension's, and the content hash. Confirming moves the folder to `<data>/extensions/<id>/`, records its hash in `<data>/extensions/.pins`, and leaves it disabled; enabling is a separate step. Discarding deletes the quarantine copy.
+
+Updating re-fetches the source into quarantine and shows the same sheet with what changed. If the permission or hook set grew, the extension stays disabled until the user enables it again; if only code changed, its enabled state is kept. An identical tree reports "Already up to date". Removing an installed extension asks whether to keep its data folder and tables.
+
+Bundled extensions go through the same consent sheet on first enable, with the source shown as bundled.
+
+The Settings > Extensions catalog index is a JSON file at the URL in the `extensionCatalogUrl` setting, shaped `{"extensions":[...]}`; each entry gives the id, name, description, version and the git or zip source to install from. Entries not yet installed appear under Available and install through the same quarantine and consent steps. A working example extension is in `examples/extensions/reading-list`.
+
+Installed folder extensions load their backend half only (tools, hooks, jobs, settings). Renderer parts (views and slots) are not loaded from a folder yet; the card says so when the manifest declares them.
 
 ## Author an extension
 
@@ -38,7 +58,7 @@ The manifest declares tools, views, slots, hooks, permissions (`db:own`, `contex
 
 ## Deferred
 
-- Loading third-party extensions from a registry, pinning and signing (out of scope).
+- Signing and publisher verification for catalog entries (installs are hash-pinned but unsigned).
 - Frontend hot reload with registry disposal and a packed renderer half for folder extensions (needs the renderer to load code from a folder); built-ins use Vite hot reload.
 - Embeddings, images and audio through `model.client`; a read-only mode and denied-read probe on the default sandbox adapter.
 - Hooks not built: `input.attachment`, `schedule.tick`, `context.history`, `text.delta`, `turn.continue`, `tool.args`.

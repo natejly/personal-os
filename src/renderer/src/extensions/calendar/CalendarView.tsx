@@ -261,7 +261,6 @@ export default function CalendarView(): JSX.Element {
           <div className="empty-state cal-empty">
             <CalIcon size={28} />
             <h2>No events this {mode}</h2>
-            <p>Click any slot to add one, or plan your todos into the free time.</p>
             <button className="primary-btn" onClick={() => setEditing({ event: null, draft: {} })}><Plus size={14} /> New event</button>
           </div>
         )}

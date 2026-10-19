@@ -63,14 +63,13 @@ export default function PresetsSection({ onApplied }: { onApplied: () => Promise
   return (
     <Sec id="presets">
       <h4>Presets</h4>
-      <p className="muted small">A preset is a named bundle of permission settings. Applying one never changes the floor: destructive shell commands, Grain&apos;s own data and the hardline list are protected under every preset. One that allows more than is in force shows what would change first.</p>
       <div className="preset-scope" role="group" aria-label="Apply to">
         {scopes.map((s) => <button key={s} type="button" className={`ghost-btn ${where === s ? 'on' : ''}`} aria-pressed={where === s} onClick={() => { setScope(s); setHeld(null) }}>{SCOPE_LABEL[s]}</button>)}
       </div>
       <ul className="preset-list">
         {presets.map((p) => (
           <li key={p.id} data-preset={p.id}>
-            <span className="toggle-text"><b>{p.name}</b><small>{presetOrigin(p)}{p.description ? `. ${p.description}` : ''}</small></span>
+            <span className="toggle-text"><b>{p.name}</b><small>{presetOrigin(p)}</small></span>
             <span className="preset-buttons">
               <button className="ghost-btn" aria-label={`Apply ${p.name}`} onClick={() => apply(p).catch(fail)}>Apply</button>
               <button className="ghost-btn" aria-label={`Duplicate ${p.name}`} onClick={() => api.presets.duplicate(p.id).then(reload).catch(fail)}>Duplicate</button>

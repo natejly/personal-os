@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "url": { "type": "string", "description": "The http or https link to save." },
+    "note": { "type": "string", "description": "Why it is worth reading (up to 500 characters)." }
+  },
+  "required": ["url"]
+}

@@ -99,7 +99,7 @@ function RunCard({ run, onChange }: { run: WorkflowRun; onChange: () => void }):
             </div>
           ))}
           {run.status === 'done' && cur.result != null && <pre className="muted small">{typeof cur.result === 'string' ? cur.result : JSON.stringify(cur.result, null, 2)}</pre>}
-          <small className="muted">Plan {run.plan_digest.slice(0, 12)}. Editing the workflow withdraws this approval.</small>
+          <small className="muted" title="Editing the workflow withdraws this approval">Plan {run.plan_digest.slice(0, 12)}</small>
         </div>
       )}
     </div>
@@ -130,9 +130,7 @@ function Editor({ wf, onDone }: { wf: Workflow | null; onDone: () => void }): JS
       <label>Definition (JSON)
         <textarea rows={16} spellCheck={false} value={text} onChange={(e) => setText(e.target.value)} />
       </label>
-      {errors.length > 0
-        ? <ul className="muted small">{errors.map((e) => <li key={e}>{e}</li>)}</ul>
-        : <p className="muted small">Valid. Saving changes the plan hash, so runs proposed earlier will need to be proposed again.</p>}
+      {errors.length > 0 && <ul className="muted small">{errors.map((e) => <li key={e}>{e}</li>)}</ul>}
       <div className="row-actions">
         <button className="primary-btn sm" disabled={errors.length > 0} onClick={() => void save()}>Save</button>
         <button className="ghost-btn sm" onClick={onDone}>Cancel</button>
@@ -158,8 +156,7 @@ export function ParamForm({ wf, onProposed }: { wf: Workflow; onProposed: () => 
         </label>
       ))}
       <div className="row-actions">
-        <button className="primary-btn sm" onClick={() => void propose()}><Play size={13} /> Review the plan</button>
-        <span className="muted small">Nothing starts until you approve the plan.</span>
+        <button className="primary-btn sm" title="Nothing starts until you approve the plan" onClick={() => void propose()}><Play size={13} /> Review the plan</button>
       </div>
     </div>
   )
@@ -205,18 +202,13 @@ export default function WorkflowsPanel(): JSX.Element {
           <div className="library-toolbar-row">
             <button className="primary-btn" onClick={() => setMode({ kind: 'edit', id: 'new' })}><Plus size={14} /> New workflow</button>
           </div>
-          <div className="muted small">
-            <p>A workflow is a saved plan of steps. You approve a run before anything happens, every step goes through the same permissions as chat, and a run that stops can be resumed without repeating finished steps.</p>
-            <details><summary>How approval works</summary>An approval covers the exact steps and inputs you were shown, checked by a fingerprint (hash), so a run whose steps change has to be approved again.</details>
-          </div>
         </div>
       )}
       {adding && <div className="skill-row"><Editor wf={null} onDone={() => { setMode(null); void load() }} /></div>}
       {empty && (
         <div className="empty-state">
           <WorkflowIcon size={28} />
-          <h2>No workflows yet</h2>
-          <p>A workflow is a saved plan of steps. Nothing runs until you approve its plan, and a run that stops can be resumed where it left off.</p>
+          <h2>No workflows</h2>
           <button className="primary-btn" onClick={() => setMode({ kind: 'edit', id: 'new' })}><Plus size={14} /> New workflow</button>
         </div>
       )}
@@ -245,7 +237,7 @@ export default function WorkflowsPanel(): JSX.Element {
       {(wfs.length > 0 || runs.length > 0) && (
         <section className="skill-section">
           <h4>Runs {runs.length > 0 && <span className="count">{runs.length}</span>}</h4>
-          {runs.length === 0 && <p className="muted small">No runs yet.</p>}
+          {runs.length === 0 && <p className="muted small">No runs</p>}
           {runs.map((r) => <RunCard key={r.id} run={r} onChange={() => void load()} />)}
         </section>
       )}

@@ -148,7 +148,7 @@ def _code(root: Path, manifest: Manifest) -> list[Finding]:
         except SyntaxError as e:
             out.append(Finding("error", "code", f"{rel}:{e.lineno}: {e.msg}"))
             continue
-        out += _imports(rel, tree)
+        out += _imports(rel, tree, provides_loop)
         if provides_loop:  # the agent loop import fence (design doc 10.10.3): what a loop may import is checked on every file of the extension
             out += [Finding("error", "loop-fence", f"{rel}: {problem}") for problem in loop_fence.violations(tree)]
         for call in (n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and _is_api(n.func.value)):
@@ -230,13 +230,15 @@ def _is_api(node: ast.expr) -> bool:
     return (isinstance(node, ast.Name) and node.id == "api") or (isinstance(node, ast.Attribute) and node.attr == "api")
 
 
-def _imports(rel: Path, tree: ast.AST) -> list[Finding]:
+def _imports(rel: Path, tree: ast.AST, allow_loop_api: bool = False) -> list[Finding]:
     out: list[Finding] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names = [a.name for a in node.names]
         elif isinstance(node, ast.ImportFrom):
             names = [node.module or ""]
+            if allow_loop_api and node.module == loop_fence.API:  # a loop provider's one import from the app
+                continue
             if node.level > 1:
                 out.append(Finding("error", "forbidden-import", f"{rel}:{node.lineno}: a relative import may not leave the extension folder"))
         else:

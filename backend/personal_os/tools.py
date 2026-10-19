@@ -41,6 +41,7 @@ from . import plans, router
 from . import firecrawl, reach, setup_cards
 from . import mcp_search
 from .learn import KINDS as MEMORY_KINDS, normalize_memory, skill_block, until_ts
+from .runtime.memory_api import MemoryScope
 from .memory_limits import SEARCH_HITS, SEARCH_PAGE, TAINT_SAVE_MIN_OVERLAP
 from . import graph_recall, redact
 from .graph_learn import LITERAL_PREDICATES, PREDICATES, SINGLE_VALUED, TYPES as ENTITY_TYPES, canonical_type, normalize_predicate
@@ -169,6 +170,8 @@ class ToolSpec:
         self.available_fn: Callable[[], bool] | None = None
         # (args) -> the lines its approval card shows beyond the arguments (what the call would do), or None
         self.preview: Callable[[dict[str, Any]], list[str] | None] | None = None
+        # False keeps this tool out of reach of a run_python script (toolbridge.bridgeable)
+        self.bridge = True
 
     def schema(self) -> dict[str, Any]:
         d = self.description
@@ -808,6 +811,7 @@ class Toolbox:
         self.ext_drafts: Any = None  # extensions.drafts.Drafts; set by app.py (ext_tools.py)
         self.chat_files: Any = None  # chat_files.ChatFiles: which chat each file belongs to; set by app.py
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
+        self.memory_system: Callable[[dict[str, Any]], Any] = lambda ctx: None  # the chat's selected memory system, None for the built-in one; set by app.py
         self.trash: Any = None  # soft delete (trash.py); set by app.py
         self.todos: Any = None  # todos.Todos, the todos extension's store (labels.py reads it); set by app.py
         self.retriever: Any = None  # hybrid document search (retrieval.py); set by app.py
@@ -1316,7 +1320,9 @@ class Toolbox:
 
         async def _memories(ctx: dict[str, Any], query: str, offset: int, kind: str, since_ts: float | None) -> Any:
             q = query.strip()
-            if q and self.memory_index is not None:
+            if q and (alt := self.memory_system(ctx)) is not None:
+                found = await alt.search(q, MemoryScope(ctx["project_id"], ctx.get("conversation_id"), ctx.get("conv_settings") or {}), SEARCH_HITS)
+            elif q and self.memory_index is not None:
                 cfg = self.settings()  # a None vector still ranks lexically and through the graph
                 found = await self.memory_index.search_reranked(ctx["project_id"], query, await self.memory_index.query_vec(cfg, query),
                                                                 limit=SEARCH_HITS, settings=cfg)
@@ -1369,6 +1375,11 @@ class Toolbox:
                 if not replaces:
                     return tool_error("forget needs `replaces`: the id of the memory to forget.", field="replaces",
                                       alternative="search_memory to find the memory's id")
+                if forget and (alt := self.memory_system(ctx)) is not None:  # the selected memory system owns its rows
+                    if not await alt.forget(replaces):
+                        return tool_error(f"No current memory {replaces} in this chat's scope.", field="replaces",
+                                          alternative="search_memory for the memory's current id")
+                    return {"forgotten": replaces}
                 old = self.memories.get(replaces)
                 if (not old or old["invalid_at"] is not None or (old.get("expires_at") or 1e18) <= time.time()
                         or old["project_id"] not in ((ctx.get("project_id"),) if isolated else (None, ctx.get("project_id")))):
@@ -1408,6 +1419,12 @@ class Toolbox:
                 done(m)
                 return {"updated": replaces, "saved": m["id"], "content": m["content"]}
             scope = None if personal else ctx["project_id"]
+            if not old and (alt := self.memory_system(ctx)) is not None:  # the selected memory system stores it (and owns any dedupe)
+                m = await alt.remember(text, kind or "fact", MemoryScope(scope, ctx.get("conversation_id"), ctx.get("conv_settings") or {}), "auto")
+                if not m:
+                    return tool_error("The memory system did not store that memory.")
+                done(m)
+                return {"saved": m["id"], "content": m["content"]}
             # The same statement reworded supersedes its live twin instead of adding a row (pinned rows never match).
             dup = await self.memory_index.near_duplicate(self.settings(), scope, text) if self.memory_index is not None else None
             if dup and dup["project_id"] != scope:  # a personal memory already says it; a project save never rewrites it
@@ -1682,7 +1699,7 @@ class Toolbox:
             examples=[{"url": "https://example.com/blog/post"}, {"url": "https://en.wikipedia.org/wiki/SQLite", "max_chars": 20000},
                       {"url": "https://example.com/pricing", "focus": "enterprise pricing"}, {"url": "https://example.com/report.pdf", "offset": 12000}], taints=True))
 
-        async def run_python_tool(ctx: dict[str, Any], code: str, timeout: int = 30, tools: list[str] | None = None) -> Any:
+        async def run_python_tool(ctx: dict[str, Any], code: str, timeout: int = 30, tools: list[str] | str | None = None) -> Any:
             # In a desk the script runs in the desk workspace (read/write there; sandbox.py allows exactly that folder). The
             # shared work environment's interpreter is used once it is ready, else the app's own.
             desk_id = str(ctx.get("desk_id") or "")
@@ -1714,7 +1731,7 @@ class Toolbox:
                 if tools:  # programmatic tool calling: the script drives app tools over a socket (toolbridge.py)
                     from . import toolbridge
                     runner = lambda c, t, _py, bridge: run_python(c, t, py, bridge, workspace=wroot, keep=keep)  # noqa: E731
-                    bridged = await toolbridge.run(self, ctx, code, timeout, list(tools), runner)
+                    bridged = await toolbridge.run(self, ctx, code, timeout, tools if isinstance(tools, str) else list(tools), runner)
                     await _carry(bridged)
                     return bridged
                 out = await asyncio.to_thread(run_python, code, secs, py, None, wroot, keep)
@@ -1737,12 +1754,12 @@ class Toolbox:
                                       f"{self.workspace.max_files} files / {self.workspace.max_total_bytes} bytes. Nothing was deleted, "
                                       "but further writes will be refused until you desk_trash_file what you no longer need.")
             return out
-        R("run_python", ToolSpec("run_python", run_python_intro() + " In a cowork desk the script runs inside the desk workspace instead: it can read and write files there, and the result lists workspace_files it created or changed. Outside a desk, files the script saves under outputs/ (os.makedirs('outputs', exist_ok=True) first; up to 10 files of 25 MB) are kept in this chat's files, listed as outputs, for the user to download. The document and data libraries (pandas, openpyxl, python-docx, ...) are there once the work environment is set up; python_install adds more. Use for calculations, data wrangling, quick prototypes. Print what you want to see. numpy and matplotlib are installed: any figure saved with plt.savefig('name.png') is shown to the user inline (prefer a ```chart block for simple bar/line/pie charts of small data; use matplotlib for anything it can't express)." + ("" if python_unsandboxed() else limits_text(declared_limits()["run_python"])),
+        R("run_python", ToolSpec("run_python", run_python_intro() + " In a cowork desk the script runs inside the desk workspace instead: it can read and write files there, and the result lists workspace_files it created or changed. Outside a desk, files the script saves under outputs/ (os.makedirs('outputs', exist_ok=True) first; up to 10 files of 25 MB) are kept in this chat's files, listed as outputs, for the user to download. The document and data libraries (pandas, openpyxl, python-docx, ...) are there once the work environment is set up; python_install adds more. Use for calculations, data wrangling, quick prototypes. Print what you want to see. Code mode (tools='offered' or a list of tool names): the script calls your app tools from Python, and inner results stay in the script, so only its printed output costs context. Use it for more than ~3 dependent calls, for filtering or joining large results, and for loops over lists; do not use it for a single call or when you must read each result yourself. grain_tools.gather(('fs_grep', {...}), ('fs_glob', {...})) runs reads together and returns results in order (a failed call is a ToolError in its place); a refused or declined call raises grain_tools.ToolError, which the script may catch. Example: import grain_tools as g; rs = g.gather(*[g.call_later('fs_grep', pattern=p, root='.') for p in ('TODO', 'FIXME')]); print([len(r['matches']) for r in rs]). The result adds calls (name, ok, ms per inner call) and a summary. numpy and matplotlib are installed: any figure saved with plt.savefig('name.png') is shown to the user inline (prefer a ```chart block for simple bar/line/pie charts of small data; use matplotlib for anything it can't express)." + ("" if python_unsandboxed() else limits_text(declared_limits()["run_python"])),
             _obj({"code": {"type": "string"}, "timeout": {"type": "integer", "default": 30},
-                  "tools": {"type": "array", "items": {"type": "string"}, "description": "App tools the script may call as grain_tools.call(name, **args) (import grain_tools). Allowed: fs_glob, fs_grep, read_local_file, fs_edit, search_documents, web_search, fetch_url. Each call is gated like your own: off tools are refused, ask tools wait for the user. At most 300s per script; only what the script prints comes back."}},
+                  "tools": {"anyOf": [{"type": "array", "items": {"type": "string"}}, {"type": "string", "enum": ["offered"]}], "description": "Code mode: \"offered\" (every tool you can use that a script may call) or a list of tool names (a held-back tool you name loads). The script imports grain_tools and calls grain_tools.<tool>(**args), grain_tools.gather(...), grain_tools.search(q), grain_tools.describe(name). Each call is gated like your own: off tools are refused, ask tools wait for the user. At most 300s per script and codeModeMaxCalls calls; only what the script prints comes back."}},
                  ["code"]), run_python_tool, "code", "executes",
             examples=[{"code": "print(sum(1 / n**2 for n in range(1, 10000)))"},
-                      {"code": "import grain_tools\nr = grain_tools.call('search_documents', query='TODO')\nprint(r)", "tools": ["search_documents"], "timeout": 120},
+                      {"code": "import grain_tools as g\nrs = g.gather(g.call_later('search_documents', query='TODO'), g.call_later('search_documents', query='FIXME'))\nprint([len(str(r)) for r in rs])", "tools": ["search_documents"], "timeout": 120},
                       {"code": "import matplotlib\nmatplotlib.use('Agg')\nimport matplotlib.pyplot as plt\nplt.plot([1, 4, 9])\nplt.savefig('squares.png')", "timeout": 60}]))
 
         async def setup_request(ctx: dict[str, Any], feature: str, reason: str = "") -> Any:

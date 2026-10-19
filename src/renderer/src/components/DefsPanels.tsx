@@ -34,15 +34,13 @@ export function CommandsPanel(): JSX.Element {
   return (
     <div className="library-panel">
       <div className="add-row">
-        <div className="muted small">
-          <details><summary>Placeholders</summary>Write $ARGUMENTS where what you type after the command goes, or $1, $2 for its separate words.</details>
-        </div>
-        <button className="primary-btn small" onClick={() => setEdit('new')}><Plus size={13} /> New command</button>
+        <span className="spacer" />
+        <button className="primary-btn small" title="$ARGUMENTS = text after the command; $1, $2 = its words" onClick={() => setEdit('new')}><Plus size={13} /> New command</button>
       </div>
       {edit === 'new' && <div className="skill-row"><Editor initial={COMMAND_SKELETON} save={api.commands.create} onDone={done} /></div>}
       <section className="skill-section">
         <h4>Saved commands</h4>
-        {cmds.length === 0 && <div className="empty-hint"><p className="muted small">None yet.</p></div>}
+        {cmds.length === 0 && <div className="empty-hint"><p className="muted small">No commands</p></div>}
         {cmds.map((c) => (
           <div key={c.id} className="skill-row">
             <div className="skill-head">

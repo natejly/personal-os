@@ -427,7 +427,7 @@ def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: 
     if bridge is not None:
         from . import toolbridge
         with open(os.path.join(work, GRAIN_TOOLS_MODULE), "w", encoding="utf-8") as f:
-            f.write(toolbridge.CLIENT_SOURCE)
+            f.write(bridge.client_source() if hasattr(bridge, "client_source") else toolbridge.CLIENT_SOURCE)
         sock = bridge.socket_path
         env["GRAIN_TOOLS_SOCK"] = sock
         # -I keeps the script's own folder off sys.path, so put it back for the client module and run main.py by path.

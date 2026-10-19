@@ -92,7 +92,7 @@ export default function HelpOverlay(): JSX.Element {
               </section>
             )) : <p className="help-empty">No shortcut matches.</p>
           ) : guideError ? (
-            <p className="help-empty">The guide could not be loaded. Ask Grain instead: it answers from the same guide.</p>
+            <p className="help-empty">The guide could not be loaded.</p>
           ) : guide === null ? (
             <p className="help-empty">Loading…</p>
           ) : guideShown.length ? (

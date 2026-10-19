@@ -39,6 +39,8 @@
      "attachments": null,
      "content": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -53,6 +55,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "conversation_id": null,
@@ -787,6 +791,8 @@
     "keys": {
      "attachments": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -801,6 +807,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "error": null,
@@ -1121,7 +1129,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      }
     ],
     "tool_choice": "auto",
@@ -1239,7 +1247,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -1402,7 +1410,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      }
     ],
     "tool_choice": "auto",
@@ -1520,7 +1528,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -1670,7 +1678,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      }
     ],
     "tool_choice": "auto",
@@ -1789,7 +1797,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      }
     ],
     "tool_choice": "auto",
@@ -1907,7 +1915,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -2044,7 +2052,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -2200,7 +2208,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -2375,7 +2383,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -2479,7 +2487,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -2595,7 +2603,7 @@
     ]
    }
   ],
-  "prefix_sha1": "a9ae503476ed39a231a9048d141de2c8c5821a76"
+  "prefix_sha1": "8b1b7978392eb22a06399088d8a4bdcebebb2b76"
  },
  "round_card_allowed": {
   "events": [
@@ -2637,6 +2645,8 @@
      "attachments": null,
      "content": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -2651,6 +2661,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "conversation_id": null,
@@ -3128,6 +3140,8 @@
     "keys": {
      "attachments": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -3142,6 +3156,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "error": null,
@@ -3258,7 +3274,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      }
     ],
     "tool_choice": "auto",
@@ -3376,7 +3392,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -3532,7 +3548,7 @@
     ]
    }
   ],
-  "prefix_sha1": "a9ae503476ed39a231a9048d141de2c8c5821a76"
+  "prefix_sha1": "8b1b7978392eb22a06399088d8a4bdcebebb2b76"
  },
  "round_card_denied": {
   "events": [
@@ -3574,6 +3590,8 @@
      "attachments": null,
      "content": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -3588,6 +3606,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "conversation_id": null,
@@ -3947,6 +3967,8 @@
     "keys": {
      "attachments": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -3961,6 +3983,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "error": null,
@@ -4126,7 +4150,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      }
     ],
     "tool_choice": "auto",
@@ -4244,7 +4268,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -4407,7 +4431,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      }
     ],
     "tool_choice": "auto",
@@ -4525,7 +4549,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -4668,7 +4692,7 @@
     ]
    }
   ],
-  "prefix_sha1": "a9ae503476ed39a231a9048d141de2c8c5821a76"
+  "prefix_sha1": "8b1b7978392eb22a06399088d8a4bdcebebb2b76"
  },
  "stopped_in_a_tool": {
   "events": [
@@ -4710,6 +4734,8 @@
      "attachments": null,
      "content": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -4724,6 +4750,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "conversation_id": null,
@@ -4910,6 +4938,8 @@
     "keys": {
      "attachments": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -4924,6 +4954,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "error": null,
@@ -5129,7 +5161,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      }
     ],
     "tool_choice": "auto",
@@ -5247,7 +5279,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -5410,7 +5442,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      }
     ],
     "tool_choice": "auto",
@@ -5528,7 +5560,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -5678,7 +5710,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      }
     ],
     "tool_choice": "auto",
@@ -5790,7 +5822,7 @@
     ]
    }
   ],
-  "prefix_sha1": "a9ae503476ed39a231a9048d141de2c8c5821a76"
+  "prefix_sha1": "8b1b7978392eb22a06399088d8a4bdcebebb2b76"
  },
  "unknown_tool": {
   "events": [
@@ -5832,6 +5864,8 @@
      "attachments": null,
      "content": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -5846,6 +5880,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "conversation_id": null,
@@ -6058,6 +6094,8 @@
     "keys": {
      "attachments": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -6072,6 +6110,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "error": null,
@@ -6427,7 +6467,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      }
     ],
     "tool_choice": "auto",
@@ -6545,7 +6585,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -6708,7 +6748,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      }
     ],
     "tool_choice": "auto",
@@ -6826,7 +6866,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -6976,7 +7016,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      }
     ],
     "tool_choice": "auto",
@@ -7095,7 +7135,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      }
     ],
     "tool_choice": "auto",
@@ -7213,7 +7253,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -7350,7 +7390,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -7506,7 +7546,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -7681,7 +7721,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -7785,7 +7825,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -7908,7 +7948,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      }
     ],
     "tool_choice": "auto",
@@ -8026,7 +8066,7 @@
        "system",
        "user"
       ],
-      "digest": "f68f9ced0be5"
+      "digest": "1178a88fff1e"
      },
      {
       "content": null,
@@ -8156,6 +8196,6 @@
     ]
    }
   ],
-  "prefix_sha1": "a9ae503476ed39a231a9048d141de2c8c5821a76"
+  "prefix_sha1": "8b1b7978392eb22a06399088d8a4bdcebebb2b76"
  }
 }

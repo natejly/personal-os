@@ -113,3 +113,18 @@ async def agent_loop(impl: Any) -> None:
     assert isinstance(impl.id, str) and impl.id, "a loop has an id"
     assert impl.bounds and all(isinstance(n, int) and n > 0 for n in impl.bounds.values()), "bounds name the rounds the loop may count, each a positive number"
     assert inspect.isasyncgenfunction(impl.run), "run(turn, harness) must be an async generator of events"
+
+
+async def memory_system(impl: Any) -> None:
+    from .memory_api import MemoryScope
+    scope = MemoryScope(None, None, {"useMemory": True, "useGraph": True})
+    assert isinstance(impl.id, str) and impl.id, "a memory system has an id"
+    for name in ("learn", "recall", "remember", "forget", "search"):
+        assert inspect.iscoroutinefunction(getattr(impl, name)), f"{name}() must be async"
+    assert not inspect.iscoroutinefunction(impl.profile), "profile() is sync: it is read while the cached prefix is built"
+    blocks = await impl.recall("contract check", scope, 8000)
+    assert isinstance(blocks, list) and all(b.slot == "volatile" and isinstance(b.text, str) for b in blocks), "recall() returns volatile Blocks"
+    block = impl.profile(scope, 8000)
+    assert block is None or (block.slot == "stable" and isinstance(block.text, str)), "profile() returns a stable Block or None"
+    assert isinstance(await impl.search("contract check", scope, 5), list), "search() returns a list of rows"
+    assert isinstance(impl.status(scope), dict), "status() returns a dict"

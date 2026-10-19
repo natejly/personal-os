@@ -123,7 +123,7 @@ function AboutYou({ proposalCount, onChange }: { proposalCount: number; onChange
   const { current, pending } = state
   if (!current && !pending && !note) return (
     <div className="mem-tools">
-      <span className="muted small">A short summary of you, built from your memories. You review it before it is used.</span>
+      
       <span className="spacer" />
       <button className="ghost-btn sm" onClick={() => void draft()} disabled={busy}><Sparkles size={13} /> {busy ? 'Drafting…' : 'Draft About you'}</button>
     </div>
@@ -174,7 +174,6 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
   const memories = useMemo(() => (focus ? allMemories.filter((m) => focus.includes(m.id)) : allMemories), [focus, allMemories])
   const libraryScope = useStore((s) => s.libraryScope)
   const { refreshMemories, addMemory } = useStore(useShallow((s) => ({ refreshMemories: s.refreshMemories, addMemory: s.addMemory })))
-  const autoLearn = useStore((s) => s.settings.autoLearn)
   const scope: Scope = projectId ?? libraryScope
   const [draft, setDraft] = useState('')
   const [kind, setKind] = useState('fact')
@@ -257,11 +256,6 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
         <select aria-label="Kind for the new memory" value={kind} onChange={(e) => setKind(e.target.value)}>{KINDS.map((k) => <option key={k}>{k}</option>)}</select>
         <button className="primary-btn" onClick={() => void add()} disabled={!draft.trim()}><Plus size={14} /> Add</button>
       </div>
-      <p className="muted small">
-        {projectId
-          ? 'Project memories are injected into chats in this project, on top of your personal memories.'
-          : 'Personal memories go into every chat; project memories only into that project’s chats. Pinned ones are always included; the rest are chosen by recency and relevance.'}
-      </p>
       {/* One row of secondary tools, so Add above stays the only primary action. */}
       <div className="mem-tools">
         <label className={`chip-check ${showHistory ? 'on' : ''}`} title="Also list memories that were replaced or forgotten">
@@ -280,15 +274,12 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
       <AboutYou proposalCount={proposalCount} onChange={() => { loadProposals(); void refreshMemories(query) }} />
       {proposals.filter((p) => p.kind !== 'about_you').map((p) => <ProposalRow key={p.id} p={p} byId={byId} labels={labels} onApply={() => void decide(p, true)} onDismiss={() => void decide(p, false)} />)}
       {memories.length === 0 && (query ? <p className="empty-hint big">No memories match.</p> : (
-        <div className="empty-hint big">
-          <p>No memories yet.</p>
-          <p className="muted small">{autoLearn ? 'Grain saves facts and preferences from your chats as you go' : 'Learning from chats is off in Settings'}, or type one in the box above.</p>
-        </div>
+        <p className="empty-hint big">No memories</p>
       ))}
       {query && memories.map((m) => <MemoryRow key={m.id} m={m} showProject={scope === 'all'} />)}
-      {!query && ([['Profile', '', sections.profile], ['Log', '', sections.log], ['Notes', 'Kept until a date.', sections.notes]] as const).map(([title, hint, rows]) => rows.length > 0 && (
+      {!query && ([['Profile', sections.profile], ['Log', sections.log], ['Notes', sections.notes]] as const).map(([title, rows]) => rows.length > 0 && (
         <section key={title} className="mem-section">
-          <h5>{title}{hint && <span className="muted small">{hint}</span>}</h5>
+          <h5>{title}</h5>
           {rows.map((m) => <MemoryRow key={m.id} m={m} showProject={scope === 'all'} />)}
         </section>
       ))}

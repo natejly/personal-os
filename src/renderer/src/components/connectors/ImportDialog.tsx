@@ -57,9 +57,6 @@ export default function ImportDialog({ onImported }: { onImported: () => void })
 
   return (
     <div className="import-panel">
-      <p className="muted small">
-        Secret-looking values go to the secret store. Nothing is turned on until you enable it.
-      </p>
       {error && <p className="test-msg fail">{error}</p>}
       {sources?.map((src) => (
         <section key={src.id} className="mcp-server open import-source">
@@ -102,10 +99,6 @@ export default function ImportDialog({ onImported }: { onImported: () => void })
       <section className="mcp-server open import-source import-paste">
         <div className="mcp-head"><b>Paste JSON config</b></div>
         <div className="mcp-body">
-          <small className="muted">
-            Accepts <code>{'{"mcpServers": {...}}'}</code>, a bare name-to-server map, or one server object. Values go to
-            the secret store; nothing is turned on.
-          </small>
           <textarea rows={5} value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} aria-label="Config JSON"
             placeholder={'{"mcpServers": {"name": {"command": "npx", "args": ["-y", "some-server"]}}}'} />
           {pasteError && <p className="test-msg fail">{pasteError}</p>}

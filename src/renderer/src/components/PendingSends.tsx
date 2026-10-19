@@ -65,7 +65,7 @@ export default function PendingSends(): JSX.Element | null {
     setBusy(id)
     try {
       const r = what === 'cancel' ? await api.outbox.cancel(id) : await api.outbox.sendNow(id)
-      toast(what === 'cancel' ? 'Send cancelled — nothing went out.' : r.verified === false ? 'Sent, but unconfirmed.' : 'Sent.')
+      toast(what === 'cancel' ? 'Cancelled' : r.verified === false ? 'Sent, but unconfirmed.' : 'Sent.')
       await refresh()
     } catch (e) {
       toast((e as Error).message, 'error')

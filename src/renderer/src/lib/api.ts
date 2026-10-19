@@ -1,6 +1,6 @@
 import type {
   ArchivedInboxRun,
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, DriveBackupRun, DriveBackupStatus, Recap, Conversation, ConversationSettings, WorkerInfo, ContextUsed, ContextMeter, MessageContext, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, DriveBackupRun, DriveBackupStatus, Recap, Conversation, ConversationSettings, WorkerInfo, ContextUsed, ContextMeter, ContextPreview, MessageContext, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
   Memory, MemoryProposal, Profile, ProfileHeld, RuntimeResolution, RuntimeSelection, RuntimeView, PermissionPreset, PresetBody, PresetDiff, PresetScope, EffectiveConfig, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, ExtensionCommand, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
@@ -21,6 +21,7 @@ import type {
 import type { SavedDashboard, DashboardRender, DashboardViewSpec } from '@shared/types'
 import type { AgentTerminal, CodingRecipe, CodingRecipeDetail, CodingRecipePreview, CodingRecipeRun, CodingSession, CodingSessionDiff, CodingSessionEvent, DuelWinner, ModelStanding, ShipChecklist } from '@shared/types'
 import type { ExtensionInfo, ExtensionsDev, ExtensionsReview } from '@shared/types'
+import type { CatalogCard, ExtensionConsent, ExtensionEnableResult, ExtensionInstallRequest, ExtensionsCatalog } from '@shared/types'
 import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
 import { ApiError, detailText } from './apiError'
 import type { ChatRunChanges } from './deskFiles'
@@ -682,6 +683,8 @@ export const api = {
   /** Folder changes a reply made (whole-folder snapshots), and the user's Undo / Redo of them. */
   runChanges: (runId: string) => req<RunChanges>(`/runs/${runId}/changes`),
   conversationChanges: (id: string) => req<{ available: boolean; runs: ChatRunChanges[] }>(`/conversations/${id}/changes`),
+  /** The context ledger of a reply; `texts_available` is false once its request log is pruned. */
+  getMessageContext: (messageId: string) => req<MessageContext>(`/messages/${messageId}/context`),
   messageChanges: (messageId: string) => req<RunChanges>(`/messages/${messageId}/changes`),
   undoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/undo`, { method: 'POST' }),
   redoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/redo`, { method: 'POST' }),
@@ -705,6 +708,20 @@ export const api = {
     reload: (id: string) => req<ExtensionInfo>(`/dev/extensions/${encodeURIComponent(id)}/reload`, { method: 'POST' }),
     clearFailed: () => req<{ ok: boolean }>('/dev/extensions/failed', { method: 'DELETE' })
   },
+  /** Settings > Extensions: the catalog, consent facts and the install, enable, update and remove calls. */
+  extensionsCatalog: {
+    catalog: () => req<ExtensionsCatalog>('/extensions/catalog'),
+    consent: (id: string) => req<ExtensionConsent>(`/extensions/${encodeURIComponent(id)}/consent`),
+    install: (body: ExtensionInstallRequest) => req<ExtensionConsent>('/extensions/install', { method: 'POST', body: json(body) }, 120_000),
+    confirm: (id: string) => req<{ card: CatalogCard }>(`/extensions/install/${encodeURIComponent(id)}/confirm`, { method: 'POST' }),
+    discard: (id: string) => req<{ ok: boolean }>(`/extensions/install/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    enable: (id: string, withRequires = false) =>
+      req<ExtensionEnableResult>(`/extensions/${encodeURIComponent(id)}/enable`, { method: 'POST', body: json({ with_requires: withRequires }) }),
+    disable: (id: string) => req<{ ok: boolean; disabled: string[] }>(`/extensions/${encodeURIComponent(id)}/disable`, { method: 'POST' }),
+    remove: (id: string, keepData: boolean) =>
+      req<{ ok: boolean }>(`/extensions/${encodeURIComponent(id)}?keep_data=${keepData ? 'true' : 'false'}`, { method: 'DELETE' }),
+    update: (id: string) => req<ExtensionConsent>(`/extensions/${encodeURIComponent(id)}/update`, { method: 'POST' }, 120_000)
+  },
   extensions: {
     list: () => req<ExtensionsReview>('/extensions'),
     accept: (id: string, digest: string) => req<ExtensionsReview>(`/extensions/${encodeURIComponent(id)}/accept`, { method: 'POST', body: json({ digest }) }),
@@ -717,11 +734,6 @@ export const api = {
   conversationUsage: (conversationId: string) => req<ConversationUsage>(`/conversations/${conversationId}/usage`),
   messageRequests: (messageId: string) =>
     req<{ round: number; model: string; tool_choice: string; tokens: number; messages: unknown[]; tools: unknown[] }[]>(`/messages/${messageId}/requests`),
-  /** The context ledger of one reply and, while kept, the texts that were sent. A 404 (`ApiError.status`) means the reply has none. */
-  getMessageContext: async (id: string): Promise<{ ledger: ContextUsed; texts?: MessageContext['texts']; texts_available: boolean }> => {
-    const r = await req<MessageContext>(`/messages/${id}/context`)
-    return { ledger: r.ledger, texts: r.texts, texts_available: r.texts_available !== false && r.texts != null }
-  },
   contextMeter: (conversationId: string) => req<ContextMeter>(`/conversations/${conversationId}/context-meter`),
   compactConversation: (conversationId: string, focus?: string) =>
     req<{ compacted: boolean }>(`/conversations/${conversationId}/compact`, { method: 'POST', body: json({ focus: focus ?? null }) }, NO_TIMEOUT),
@@ -733,8 +745,8 @@ export const api = {
   activateMessage: (conversationId: string, messageId: string) =>
     req<Conversation>(`/conversations/${conversationId}/messages/${messageId}/activate`, { method: 'POST' }),
   discardSummary: (conversationId: string) => req<{ removed: boolean }>(`/conversations/${conversationId}/summary`, { method: 'DELETE' }),
-  contextPreview: (projectId: string | null, query: string, convSettings?: Partial<ConversationSettings>) =>
-    req<ContextUsed>('/context/preview', { method: 'POST', body: json({ project_id: projectId, query, conv_settings: convSettings ?? {} }) }),
+  contextPreview: (projectId: string | null, query: string, convSettings?: Partial<ConversationSettings>, conversationId?: string) =>
+    req<ContextPreview>('/context/preview', { method: 'POST', body: json({ project_id: projectId, query, conv_settings: convSettings ?? {}, conversation_id: conversationId ?? null }) }),
   memories: {
     list: (s: Scope, q = '') => req<Memory[]>(`/memories?${scope(s)}&q=${encodeURIComponent(q)}`),
     create: (m: { project_id: string | null; content: string; kind?: string; pinned?: boolean }) => req<Memory>('/memories', { method: 'POST', body: json(m) }),

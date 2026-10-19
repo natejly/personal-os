@@ -18,7 +18,7 @@ function ViewImageCard(props: ToolCardProps): JSX.Element {
       <Meta items={[['Question', str(event.arguments.question) || null]]} />
       {text && (
         <div className="tc-section">
-          {ocr && <div className="tc-statusrow"><Badge tone="warn">OCR only</Badge><span className="tc-muted">{str(d?.note) || 'No vision model is set, so this is the text found in the picture.'}</span></div>}
+          {ocr && <div className="tc-statusrow"><Badge tone="warn">OCR only</Badge><span className="tc-muted">{str(d?.note)}</span></div>}
           <MonoBlock text={text} collapseAt={8} />
         </div>
       )}

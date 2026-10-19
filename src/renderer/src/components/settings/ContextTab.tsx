@@ -7,6 +7,8 @@ import AdvancedRetrieval, { rebuildIndex } from '../AdvancedRetrieval'
 import EmbeddingHint from '../EmbeddingHint'
 import MemoryPanel from '../MemoryPanel'
 import ScopeSelect from '../ScopeSelect'
+import NumberField from './NumberField'
+import SettingRow from './SettingRow'
 import Switch from './Switch'
 import { AdvGroup, Sec, type GroupProps, type TabProps } from './shared'
 
@@ -42,14 +44,74 @@ function IndexStatusLine(): JSX.Element | null {
   )
 }
 
-export default function MemoryTab({ draft, patch, openGroups, toggle }: TabProps & GroupProps): JSX.Element {
+/** Backend defaults (llm.py DEFAULT_SETTINGS, limits.py). An unset field behaves as these. */
+const COMPACTION_DEFAULTS = {
+  autoCompact: true, compactAt: 0.7, compactAtTokens: 30000, compactKeepRecent: 8, compactKeepTokens: 10000,
+  microAt: 0.25, microKeep: 3, contextWindow: 0, toolDeferAbove: 40
+} as const
+
+function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }): JSX.Element {
+  return <label className="switch-wrap"><input type="checkbox" aria-label={label} checked={checked} onChange={(e) => onChange(e.target.checked)} /><span className="switch" /></label>
+}
+
+type NumKey = Exclude<keyof typeof COMPACTION_DEFAULTS, 'autoCompact'>
+
+/** How a long chat is kept inside the model's window: when older messages are summarized and old tool results cleared. */
+function CompactionGroup({ draft, patch }: TabProps): JSX.Element {
+  const d = COMPACTION_DEFAULTS
+  const num = (key: NumKey, title: string, help: string, step = 1): JSX.Element => {
+    const value = draft[key] ?? d[key]
+    return (
+      <SettingRow settingKey={key} title={title} help={help} value={value} defaultValue={d[key]} onReset={() => patch({ [key]: d[key] })}>
+        <NumberField name={key} label={title} value={value} fallback={d[key]} step={step} onChange={(n) => patch({ [key]: n })} />
+      </SettingRow>
+    )
+  }
+  const auto = draft.autoCompact ?? d.autoCompact
+  return (
+    <Sec id="compaction">
+      <h4>Compaction and context window</h4>
+      <SettingRow settingKey="autoCompact" title="Summarize long chats" help="When a chat outgrows the limits below, older messages are replaced by a summary in what is sent to the model. Your saved transcript is never changed." value={auto} defaultValue={d.autoCompact} onReset={() => patch({ autoCompact: d.autoCompact })}>
+        <Toggle label="Summarize long chats" checked={auto} onChange={(autoCompact) => patch({ autoCompact })} />
+      </SettingRow>
+      {num('compactAt', 'Summarize at', 'Fraction of the context window (0.1 to 0.95) that the history plus the system prompt may fill before older messages are summarized. 0.7 is 70%.', 0.05)}
+      {num('compactAtTokens', 'Also summarize past (tokens)', 'An absolute limit on the replayed history alone, in estimated tokens (4,000 and up). It still triggers when the window is so large that the fraction above never would.')}
+      {num('compactKeepRecent', 'Recent messages kept', 'The newest messages that are never summarized (2 to 200). The kept tail also stops at the token limit below, whichever is reached first.')}
+      {num('compactKeepTokens', 'Recent history kept (tokens)', 'The newest history, in estimated tokens (1,000 and up), kept word for word after a summary.')}
+      {num('microAt', 'Clear old tool results at', 'Within one reply, old tool results shrink to one-line stubs once the request fills this fraction of the window (0.05 to 0.95), or about 64,000 tokens if that is sooner. A stub can be read in full again.', 0.05)}
+      {num('microKeep', 'Tool results left intact', 'How many of the newest tool results are never cleared (0 to 50).')}
+      {num('contextWindow', 'Context window (tokens)', '0 uses the size the model reports, or 128,000 if it reports none. A number from 1,000 up lowers it; it never raises it above what the model reports.')}
+      {num('toolDeferAbove', 'Defer tools above', 'When more than this many built-in tools are available, the model gets a core set plus a search tool that loads the rest when needed. 0 sends every tool every time.')}
+    </Sec>
+  )
+}
+
+/** Opens the Workspace panel's context card for the chat in front, which sits behind the Settings window. */
+function InspectorGroup(): JSX.Element {
+  const focused = useStore((s) => s.focusedConversationId)
+  const open = (): void => {
+    const s = useStore.getState()
+    s.setSettingsOpen(false)
+    if (s.view !== 'chat') s.setView('chat')
+    if (!s.contextOpen) s.togglePanelContext()
+  }
+  return (
+    <Sec id="inspector">
+      <h4>Context inspector</h4>
+      <p className="set-help">Shows what the current chat sends to the model: the system prompt, memory, tools and history, with how much of the window each takes.</p>
+      <button type="button" className="ghost-btn" disabled={!focused} onClick={open}>Open context inspector for the current chat</button>
+      {!focused && <p className="set-help">Open a chat first; the inspector shows one chat at a time.</p>}
+    </Sec>
+  )
+}
+
+export default function ContextTab({ draft, patch, openGroups, toggle }: TabProps & GroupProps): JSX.Element {
   const libraryScope = useStore((s) => s.libraryScope)
   const setLibraryScope = useStore((s) => s.setLibraryScope)
   const gp = { openGroups, toggle }
   return (
     <section className="knowledge-section">
       <div className="knowledge-head">
-        <h3>Memory</h3>
         <div className="knowledge-controls modal-free"><ScopeSelect value={libraryScope} onChange={(sc) => void setLibraryScope(sc)} /></div>
       </div>
       <div className="knowledge-top">
@@ -73,8 +135,10 @@ export default function MemoryTab({ draft, patch, openGroups, toggle }: TabProps
           <Switch title="Today (todos, next events, inbox)" help="Open todos, upcoming events and unread mail. Changes each turn." checked={draft.mapToday !== false} onChange={(mapToday) => patch({ mapToday })} />
           <Switch title="Also give background workers the map" help="Scheduled jobs and other background runs get it too. Off by default." checked={draft.mapWorkers === true} onChange={(mapWorkers) => patch({ mapWorkers })} />
       </AdvGroup></Sec>
+        <CompactionGroup draft={draft} patch={patch} />
+        <InspectorGroup />
       </div>
-      <div className="knowledge-body modal-free"><MemoryPanel /></div>
+      <Sec id="memories"><div className="knowledge-body modal-free"><MemoryPanel /></div></Sec>
     </section>
   )
 }

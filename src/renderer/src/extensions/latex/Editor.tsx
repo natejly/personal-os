@@ -72,7 +72,8 @@ export default function Editor({ value, onChange, onSave, onCompile, jump }: Edi
 
   useEffect(() => {
     const v = view.current
-    if (!v || v.state.doc.toString() === value) return
+    // The editor's text has \n line breaks; a CRLF file is the same text. Replacing it would "edit" the file just by opening it.
+    if (!v || v.state.doc.toString() === value.replace(/\r\n?/g, '\n')) return
     const at = Math.min(v.state.selection.main.head, value.length)
     v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value }, selection: { anchor: at } })
   }, [value])

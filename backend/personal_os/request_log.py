@@ -19,7 +19,8 @@ def _part(p: Any) -> Any:
 
 
 def record(data_dir: Path, message_id: str, rnd: int, model: str, messages: list[Any], tools: list[Any] | None,
-           tool_choice: str) -> None:
+           tool_choice: str, ledger_texts: dict[str, str] | None = None) -> None:
+    """`ledger_texts` (block id -> system-prompt text) is written once, on the reply's first round, so the context inspector can key texts by block."""
     msgs = [{**m, "content": [_part(p) for p in m["content"]]} if isinstance(m, dict) and isinstance(m.get("content"), list) else m
             for m in messages]
     body = json.dumps({"messages": msgs, "tools": tools or []}, default=str)
@@ -29,7 +30,10 @@ def record(data_dir: Path, message_id: str, rnd: int, model: str, messages: list
     new = not path.exists()
     with path.open("a") as f:
         # The body is serialised once; the small header is spliced onto it rather than the whole thing re-parsed.
-        head = json.dumps({"round": rnd, "model": model, "tool_choice": tool_choice, "tokens": estimate_tokens(body)})
+        meta: dict[str, Any] = {"round": rnd, "model": model, "tool_choice": tool_choice, "tokens": estimate_tokens(body)}
+        if new and ledger_texts:
+            meta["ledger_texts"] = ledger_texts
+        head = json.dumps(meta)
         f.write(head[:-1] + ", " + body[1:] + "\n")
     if new:  # prune once per reply, not once per round
         for old in sorted(d.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)[:-KEEP]:

@@ -187,7 +187,7 @@ def test_core_results_come_back_by_name_and_extension_results_become_blocks() ->
     reg.register("wiki", ext, owner="demo")
     core, blocks = asyncio.run(reg.gather({"query": "q"}))
     assert core == {"docs": ["q"]}
-    assert blocks == [Block("## wiki\n- first line [page 2]\n- third", "volatile", "demo")]
+    assert blocks == [Block("## wiki\n- first line [page 2]\n- third", "volatile", "demo", id="ext:demo:retrieve:wiki", label="wiki (retrieved)")]
 
 
 def test_a_failing_timing_out_or_empty_source_contributes_nothing() -> None:
@@ -292,7 +292,7 @@ def test_a_stable_version_bump_changes_stable_hash_and_a_failure_is_recorded(mon
         s.disposables.dispose()
         del appmod.host.extensions["hash-demo"]
     assert used1["stable_hash"] != used2["stable_hash"]
-    assert "skipped" not in used2 and used3["skipped"] == ["hash-demo"]
+    assert "skipped" not in used2 and [x["owner"] for x in used3["skipped"]] == ["hash-demo"]
     assert json.dumps(used3["stable_hash"]) == json.dumps(used2["stable_hash"])
 
 

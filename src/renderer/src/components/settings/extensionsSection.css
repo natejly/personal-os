@@ -1,0 +1,52 @@
+/* Settings > Extensions. Colours come from the theme variables, so dark and light follow the app. */
+.ext-section { display: flex; flex-direction: column; gap: 20px; padding: 0 16px 16px; }
+.ext-group h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--text); }
+.ext-cards { display: flex; flex-direction: column; gap: 10px; }
+.ext-card { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.ext-card-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ext-card-top .toggle-row { padding: 0; }
+.ext-name { font-size: 14px; }
+.ext-ver { font-size: 12px; color: var(--text-muted); font-weight: 400; }
+.ext-grow { flex: 1; }
+.ext-meta { margin: 0; font-size: 12px; color: var(--text-muted); }
+.ext-desc { margin: 0; font-size: 13px; color: var(--text); }
+.ext-badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--text-muted); }
+.ext-badge.bundled { color: var(--accent); border-color: var(--zone-border); }
+.ext-badge.verified { color: var(--info); border-color: var(--info); }
+.ext-badge.unverified { color: var(--warn); border-color: var(--warn); }
+.ext-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.ext-chips li { font-size: 11px; padding: 1px 8px; border-radius: 6px; background: var(--hover); color: var(--text-muted); }
+.ext-chips li.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.ext-card-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.ext-add { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.ext-add small { font-size: 11px; color: var(--text-muted); }
+.ext-note { margin: 0; font-size: 12px; color: var(--text-muted); }
+.ext-note.warn { color: var(--warn); }
+.ext-note.error { color: var(--danger); }
+.ext-card code, .ext-sheet code { font-family: var(--mono); font-size: 12px; }
+.ext-install { display: flex; flex-direction: column; gap: 8px; }
+.ext-install-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.ext-install-row input[type='text'] { flex: 1; min-width: 160px; padding: 7px 10px; border: 1px solid var(--control-border); border-radius: 8px; background: var(--bg-input); color: var(--text); font: inherit; font-size: 13px; }
+.ext-install-row input[type='text']:focus-visible, .ext-card button:focus-visible, .ext-sheet button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ext-install-more summary { cursor: pointer; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+/* Sheet */
+.ext-sheet-backdrop { z-index: 70; }
+.ext-sheet { width: 640px; }
+.ext-dialog { width: 460px; }
+.ext-sheet:focus, .ext-dialog:focus { outline: none; }
+.ext-sheet header { gap: 12px; }
+.ext-sheet-body { padding: 14px 20px; display: flex; flex-direction: column; gap: 12px; }
+.ext-consent-group h3 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+.ext-consent-group.warn h3 { color: var(--warn); }
+.ext-consent-group.warn { border-left: 3px solid var(--warn); padding-left: 10px; }
+.ext-list { margin: 0; padding-left: 18px; font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
+.ext-danger { font-size: 11px; padding: 0 6px; border-radius: 6px; background: var(--hover); color: var(--text-muted); }
+.ext-danger.write { color: var(--warn); }
+.ext-danger.danger { color: var(--danger); }
+.ext-code { margin: 4px 0 0; padding: 8px 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow: auto; }
+.ext-facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; font-size: 12px; }
+.ext-facts dt { color: var(--text-muted); }
+.ext-facts dd { margin: 0; word-break: break-all; }
+.ext-check { display: flex; flex-direction: row; gap: 8px; align-items: flex-start; font-size: 13px; }
+.ext-danger-btn { background: var(--danger); color: var(--on-accent); }
+@media (max-width: 640px) { .ext-sheet, .ext-dialog { width: calc(100vw - 32px); max-width: none; } }

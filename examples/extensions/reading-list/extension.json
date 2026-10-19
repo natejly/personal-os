@@ -1,0 +1,18 @@
+{
+  "id": "reading-list",
+  "name": "Reading list",
+  "description": "Save links with a short note and list them back, newest first.",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "kind": "extension",
+  "enabled": false,
+  "activation": ["startup"],
+  "contributes": {
+    "tools": [
+      { "name": "reading_list_add", "danger": "writes", "group": "reading-list", "description": "Save a link with a short note to the reading list.", "schema": "tools/reading_list_add.json" },
+      { "name": "reading_list_list", "danger": "safe", "group": "reading-list", "description": "List saved links, newest first.", "schema": "tools/reading_list_list.json" }
+    ]
+  },
+  "permissions": ["db:own"],
+  "data": { "tables": ["reading_list_links"], "migrations": "migrations/" }
+}

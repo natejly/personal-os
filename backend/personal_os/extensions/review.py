@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from .defaults import Defaults
 from .devapi import adopt, set_hidden_view
 from .drafts import Drafts, DraftError
+from .manifest import ManifestError, load_manifest
 
 if TYPE_CHECKING:
     from ..tools import Toolbox
@@ -21,6 +22,8 @@ log = logging.getLogger(__name__)
 
 class EnableIn(BaseModel):
     grants: list[str] = []
+    with_requires: bool = False  # also turn on the extensions this one requires, first
+    confirm: bool = False  # a profile that holds a looser permission preset is applied only with this
 
 
 class ActivateIn(BaseModel):
@@ -41,6 +44,8 @@ class Review:
         set_hidden_view(self.host, self.ctx, ext_id, hidden)
 
     async def _load(self, ext_id: str) -> ExtensionScope:
+        if "runtime:loop" in self.drafts.slot_grants(ext_id):
+            self.host.slot_grants.add(ext_id)
         scope = await self.host.load_dev(self.drafts.installed / ext_id, self.ctx, first_load=False)
         await adopt(self.host, self.toolbox(), scope)
         return scope
@@ -51,6 +56,8 @@ class Review:
         if scope and scope.manifest.kind == "profile":
             scope.defaults.revert(ext_id)  # a profile's defaults are not tied to hiddenViews: undo them here, as its own disable does
         self._hide(ext_id, True)
+        self.host.slot_grants.discard(ext_id)
+        self.drafts.revoke_grants(ext_id)
         if scope:
             self.toolbox().drop_extension_tools(list(scope.tools))
             await self.host.unload(ext_id)
@@ -73,6 +80,87 @@ class Review:
         scope.defaults.apply(scope.manifest)
         self.host._settings_changed(before, self.ctx.db.get_settings())
         self.host.refresh_enabled()
+
+    def _declared(self, ext_id: str) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+        if (declared := self.host._declared(ext_id)) is not None:
+            return declared
+        if ext_id in self.drafts.installed_ids():
+            try:
+                m = load_manifest(self.drafts.installed / ext_id / "extension.json")
+            except ManifestError:
+                return None
+            return m.requires_extensions, m.requires_services
+        return None
+
+    def name_of(self, ext_id: str) -> str:
+        if scope := self.host.extensions.get(ext_id):
+            return scope.manifest.name
+        return (self.drafts.card(ext_id) or {}).get("name") or ext_id
+
+    def known(self, ext_id: str) -> bool:
+        """An installed extension or a bundled one. A folder loaded from the dev panel is neither: it cannot pass the review gates here."""
+        scope = self.host.extensions.get(ext_id)
+        return (scope is not None and not scope.dev) or ext_id in self.drafts.installed_ids()
+
+    async def _turn_on(self, ext_id: str, grants: list[str], confirm: bool) -> bool:
+        """Turn one extension or profile on; False when it was held back (a looser preset without `confirm`) or cannot be switched."""
+        if ext_id in self.drafts.installed_ids():
+            await self.enable(ext_id, grants)
+            return self.host.is_on(ext_id)
+        scope = self.host.extensions[ext_id]
+        if scope.manifest.kind == "profile":
+            if scope.enabled():
+                return True
+            if any(c.looser for c in scope.defaults.plan(scope.manifest)) and not confirm:
+                return False
+            before = self.ctx.db.get_settings()
+            scope.defaults.apply(scope.manifest, confirmed=confirm)
+            self.host._settings_changed(before, self.ctx.db.get_settings())
+            self.host.refresh_enabled()
+            return True
+        if not scope.toggleable:
+            return scope.enabled()
+        if not scope.enabled():
+            self._hide(ext_id, False)
+        return scope.enabled()
+
+    async def enable_with_requires(self, ext_id: str, grants: list[str], with_requires: bool, confirm: bool = False) -> dict[str, Any]:
+        """Enable ext_id. When a required extension is off: with `with_requires` they are turned on first, in dependency order, then
+        ext_id; without it nothing changes and `needs` names them. The providers of required services are turned on either way.
+        Raises KeyError for an unknown id."""
+        if not self.known(ext_id):
+            raise KeyError(ext_id)
+        chain, named = self.host.enable_plan(ext_id, self._declared)
+        if named and not with_requires:
+            return {"ok": False, "enabled": [], "needs": [{"id": i, "name": self.name_of(i), "enabled": False} for i in named]}
+        done: list[str] = []
+        for i in [*chain, ext_id]:
+            if self.host.is_on(i):
+                continue
+            if not await self._turn_on(i, grants if i == ext_id else [], confirm):
+                return {"ok": False, "enabled": done, "needs": [], "held": True}
+            done.append(i)
+        return {"ok": True, "enabled": done, "needs": []}
+
+    async def disable_one(self, ext_id: str) -> dict[str, Any]:
+        """Turn ext_id off and nothing else: what needs it keeps its state. Raises KeyError for an unknown id."""
+        if not self.known(ext_id):
+            raise KeyError(ext_id)
+        was = self.host.is_on(ext_id) or ext_id in self.drafts.installed_ids()
+        if ext_id in self.drafts.installed_ids():
+            await self.stand_down(ext_id)
+        else:
+            scope = self.host.extensions[ext_id]
+            if scope.manifest.kind == "profile":
+                before = self.ctx.db.get_settings()
+                scope.defaults.revert(ext_id)
+                self.host._settings_changed(before, self.ctx.db.get_settings())
+                self.host.refresh_enabled()
+            elif not scope.toggleable:
+                raise ValueError(f"extension {ext_id!r} cannot be turned off")
+            else:
+                self._hide(ext_id, True)
+        return {"ok": True, "disabled": [ext_id] if was else []}
 
     async def load_installed(self) -> None:
         """At startup: load what the user enabled. One whose files changed, or that fails to load, is disabled instead."""
@@ -131,21 +219,25 @@ def router(review: Review) -> APIRouter:
 
     @r.post("/{ext_id}/enable")
     async def enable(ext_id: str, body: EnableIn | None = None) -> dict[str, Any]:
+        body = body or EnableIn()
         try:
-            await review.enable(ext_id, body.grants if body else [])
+            out = await review.enable_with_requires(ext_id, body.grants, body.with_requires, body.confirm)
         except KeyError:
-            raise HTTPException(404, "no installed extension with that id") from None
+            raise HTTPException(404, "no extension with that id") from None
         except DraftError as e:
             raise HTTPException(409, str(e)) from e
         except Exception as e:  # noqa: BLE001 - the reason goes to the card
             raise HTTPException(400, f"{type(e).__name__}: {e}") from e
-        return review.listing()
+        return {**review.listing(), **out}
 
     @r.post("/{ext_id}/disable")
     async def disable(ext_id: str) -> dict[str, Any]:
-        if ext_id not in review.drafts.installed_ids():
-            raise HTTPException(404, "no installed extension with that id")
-        await review.stand_down(ext_id)
-        return review.listing()
+        try:
+            out = await review.disable_one(ext_id)
+        except KeyError:
+            raise HTTPException(404, "no extension with that id") from None
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {**review.listing(), **out}
 
     return r

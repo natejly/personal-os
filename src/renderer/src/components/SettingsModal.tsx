@@ -26,11 +26,11 @@ import GeneralTab, { THEMES } from './settings/GeneralTab'
 import SidebarTab from './settings/SidebarTab'
 import SystemTab from './settings/SystemTab'
 import AdvancedTab from './settings/AdvancedTab'
-import ExtensionsReview from './settings/ExtensionsReview'
 import { EffectiveProvider } from './settings/useEffective'
 import { Sec } from './settings/shared'
 import './settings/RuntimeTab'
 import '../styles/settings-shell.css'
+import './settings/ExtensionsSection'
 import { useShortcuts } from './settings/useShortcuts'
 
 type Tab = SettingsSectionId
@@ -253,9 +253,7 @@ export default function SettingsModal(): JSX.Element {
       case 'agent': return <AgentsTab {...tabProps} />
       case 'context': return <ContextTab {...tabProps} {...gp} />
       case 'permissions': return <><PermissionsTab {...tabProps} onPresetApplied={providersChanged} /><SystemTab /></>
-      case 'extensions':
-        // hook point: the extensions lane registers a panel with group 'extensions'; this fallback goes away then
-        return sectionPanels.length ? null : <section><Sec id="extensions"><ExtensionsReview onChanged={profileApplied} /></Sec></section>
+      case 'extensions': return null  // the Extensions panel registers into this section's group
       case 'hooks': return <HooksTab />
       case 'integrations': return <IntegrationsTab {...tabProps} onSaveCreds={saveGoogleCreds} />
       case 'layout': return <SidebarTab {...tabProps} onProfileApplied={profileApplied} />
@@ -313,7 +311,7 @@ export default function SettingsModal(): JSX.Element {
             {content()}
             {sectionPanels.length > 0 && (
               <section className="set-panels">
-                {sectionPanels.map((p) => <Sec key={p.tab} id={p.id}><h4>{p.label}</h4><p.Component /></Sec>)}
+                {sectionPanels.map((p) => <Sec key={p.tab} id={p.id}>{p.group !== 'extensions' && <h4>{p.label}</h4>}<p.Component /></Sec>)}
               </section>
             )}
           </div>

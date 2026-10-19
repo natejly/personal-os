@@ -69,6 +69,67 @@ export interface ContextUsed {
   /** Context previews only: a saved reply drops it (its Exact request shows the prompt it was sent). */
   system_prompt?: string
   tokens_estimate: number
+  /** The per-turn context ledger: one entry per piece of the request. Absent on messages saved before it existed. */
+  blocks?: ContextBlock[]
+  totals?: ContextTotals
+  stable_hash?: string
+  /** Did the cached prefix change against the chat's previous turn, and why. */
+  cache?: { changed: boolean; reason?: string }
+  /** Extension context handlers that failed or timed out this turn. */
+  skipped?: { owner: string; hook: string; reason: string }[]
+  tools_offered?: ToolOffered[]
+}
+
+/** `GET /messages/{id}/context`: the saved ledger, plus texts while the request log still holds the reply's first round. */
+export interface MessageContext {
+  blocks: ContextBlock[] | null
+  totals: ContextTotals | null
+  stable_hash: string | null
+  cache: { changed: boolean; reason?: string } | null
+  skipped: { owner: string; hook: string; reason: string }[] | null
+  tools_offered: ToolOffered[] | null
+  tokens_estimate: number | null
+  texts_available: boolean
+  /** The system messages of the first round, joined. */
+  system_prompt?: string
+  /** Block id -> text, for every system-prompt block of that turn (stable ones too). */
+  texts?: Record<string, string>
+}
+
+/** `POST /context/preview`: a turn's ledger as it would be assembled now, with the text of each system-prompt block. */
+export type ContextPreview = ContextUsed & { texts: Record<string, string> }
+
+export interface ContextBlock {
+  /** Stable per block kind and source, e.g. "memory:profile", "hint:no-emoji", "ext:health:v3". */
+  id: string
+  label: string
+  owner: 'core' | `ext:${string}`
+  slot: 'stable' | 'volatile' | 'tail' | 'history' | 'tools'
+  kind: 'system' | 'memory' | 'graph' | 'skills' | 'files' | 'style' | 'page' | 'map' | 'hint' | 'extension' | 'tool_schema' | 'message' | 'attachment' | 'summary' | 'plan' | 'note'
+  /** Estimate, by the same estimator as the budget fitter. */
+  tokens: number
+  chars: number
+  /** Stable-block content version. */
+  version?: string
+  /** Memory ids, file name, skill names or tool name. */
+  source?: string
+}
+
+export interface ContextTotals {
+  stable: number
+  volatile: number
+  tail: number
+  tools: number
+  history: number
+  window: number
+}
+
+export interface ToolOffered {
+  name: string
+  tokens: number
+  source: 'core' | `ext:${string}` | `mcp:${string}`
+  /** Held out of the request until tool_search loads it. */
+  deferred: boolean
 }
 
 export interface WorkspaceMapUsed {
@@ -840,7 +901,11 @@ export interface ExtensionsReview {
 /** GET /conversations/{id}/context-meter: the replayed history against the model window (estimates, len/4). */
 export interface ContextMeter {
   window: number
+  /** History only (kept for older callers); same number as `history_tokens`. */
   estimated_tokens: number
+  history_tokens?: number
+  /** History plus the last turn's system prompt and tool schemas; 0 extra until the chat has run a turn. */
+  turn_tokens?: number
   compact_at: number
   compact_at_tokens?: number
   summary: { summary: string; summarized_messages: number; tokens_before: number; tokens_after: number; updated_at: number } | null
@@ -1761,6 +1826,8 @@ export interface Settings {
   surfaceTone?: 'neutral' | 'warm' | 'cool' | 'black'
   /** Interface typeface; missing means system. */
   uiFont?: 'system' | 'serif' | 'rounded' | 'mono' | 'avenir' | 'helvetica' | 'gill' | 'futura' | 'charter' | 'georgia' | 'iowan' | 'palatino' | 'menlo'
+  /** URL (or local path) of the extensions catalog index; missing means the default catalog. */
+  extensionCatalogUrl?: string
   /** Which creature draws the faces; missing means the Grain mascot. */
   mascot?: 'grain' | 'blobs' | 'off'
   /** Code and monospace typeface; missing means default. */
@@ -1860,6 +1927,10 @@ export interface Settings {
   autoArchiveDays?: number
   /** Seconds before a plan the assistant rates high-confidence goes ahead unanswered (default 30, 0 = off, 0-600). Never in manual mode. */
   planAutoApproveSeconds?: number
+  /** run_python may drive app tools from a script (grain_tools). Missing means on. */
+  codeMode?: boolean
+  /** Most inner tool calls one script may make (default 100, 1-500). */
+  codeModeMaxCalls?: number
   /** Hosts fetch_url may still read once the reply has seen untrusted content. */
   fetchAllowlist?: string[]
   /** Snapshot granted folders before a reply changes them, so Undo covers shell effects. Missing means on. */
@@ -3386,3 +3457,81 @@ export interface DashboardRender {
   failed: { binding: string; error: string; lastGoodAt: string | null }[]
   bindings: { name: string; source: string; label: string }[]
 }
+
+// ---- Extensions catalog (GET /extensions/catalog and the install flow) ----
+
+export type CatalogDanger = 'read' | 'write' | 'danger' | (string & {})
+
+/** One extension or profile as Settings > Extensions lists it. */
+export interface CatalogCard {
+  id: string
+  name: string
+  description: string
+  version: string
+  tier: 'builtin' | 'installed'
+  kind: 'extension' | 'profile'
+  source: 'bundled' | 'git' | 'zip' | 'folder' | 'catalog'
+  author?: string
+  enabled: boolean
+  requires: { extensions: string[]; services: string[] }
+  /** Ids of the extensions that need this one; for a service it names who makes it active. */
+  requiredBy: string[]
+  contributes: {
+    tools: { name: string; danger: CatalogDanger }[]
+    views: string[]
+    slots: string[]
+    hooks: string[]
+    commands: string[]
+    settingsFields: string[]
+    processes: string[]
+  }
+  permissions: string[]
+  /** Plain-language line per permission. */
+  permissionText: string[]
+  /** Estimated stable context the extension adds to every turn. */
+  contextCostTokens: number
+  state: 'ready' | 'needs-review' | 'invalid' | 'disabled-dependency'
+  reason?: string
+  pinned?: { sha256: string; sha?: string }
+  updateAvailable?: boolean
+  verified?: boolean
+  url?: string
+  ref?: string
+  subdir?: string
+  /** An installed folder extension declares views or slots, but its renderer half is not loaded. */
+  uiNotLoaded?: boolean
+}
+
+export interface ExtensionsCatalog {
+  installed: CatalogCard[]
+  available: CatalogCard[]
+  services: CatalogCard[]
+  catalogError?: string
+  catalogUrl: string
+}
+
+export interface ExtensionConsentFinding { level: 'error' | 'warn' | 'info'; message: string }
+
+/** What the user reads before an extension is enabled, installed or updated. */
+export interface ExtensionConsent {
+  id: string
+  card: CatalogCard
+  /** Shell-looking lines found in its README or setup text, verbatim. */
+  commands: string[]
+  typosquat: { similarTo: string } | null
+  findings: ExtensionConsentFinding[]
+  sha256: string
+  source: { kind: 'git' | 'zip' | 'folder' | 'bundled' | 'catalog'; url?: string; ref?: string; subdir?: string; commit?: string }
+  /** Updates only: what the new version adds. */
+  changes?: { permissionsAdded: string[]; hooksAdded: string[]; toolsAdded: string[] }
+  /** Fetched into quarantine and waiting for confirm (or discard). */
+  quarantined: boolean
+}
+
+export interface ExtensionEnableResult {
+  ok: boolean
+  enabled: string[]
+  needs: { id: string; name: string; enabled: boolean }[]
+}
+
+export interface ExtensionInstallRequest { url?: string; path?: string; ref?: string; subdir?: string }

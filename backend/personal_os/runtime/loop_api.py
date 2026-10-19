@@ -18,6 +18,13 @@ ToolChoice = Literal["auto", "required"]  # "required": the model must call a to
 LOOP_EVENTS = frozenset({"delta", "plan", "span", "status"})  # what a loop itself may emit; the tool and model objects emit the rest
 
 
+def setting_int(cfg: Mapping[str, Any], key: str) -> int:
+    """A loop tunable from the turn's settings (`TurnInput.cfg`), clamped into its range; the default when absent or invalid.
+    `key` is one of the loop-lane settings (loopMaxRounds ... planLoopVerifyPasses)."""
+    from .. import limits  # local: a loop module reaches the settings only through here
+    return limits.loop_setting(cfg, key)
+
+
 class LimitReached(Exception):
     """A bound the core enforces was spent (a round bound the loop declared, or the turn's ceiling on model calls)."""
 

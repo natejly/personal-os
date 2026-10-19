@@ -1,4 +1,4 @@
-/** OKLCH hue (0-360) of a #rgb / #rrggbb colour, the hue space the blobatar palette uses; null when it is not a hex colour or is grey. */
+/** OKLCH hue (0-360) of a #rgb / #rrggbb colour, the hue space a locked mascot colour is given in; null when it is not a hex colour or is grey. */
 export function hexToHue(hex: string): number | null {
   let h = hex.trim().replace(/^#/, '')
   if (/^[0-9a-f]{3}$/i.test(h)) h = h.replace(/./g, '$&$&')
@@ -17,5 +17,5 @@ export function hexToHue(hex: string): number | null {
   return Math.round(((Math.atan2(bb, a) * 180) / Math.PI + 360) % 360)
 }
 
-/** The blobatar tone (pale 0 to ink 1) project-coloured faces wear: mid, like the project dot. */
+/** The mascot tone (pale 0 to ink 1) project-coloured faces wear: mid, like the project dot. */
 export const PROJECT_TONE = 0.5

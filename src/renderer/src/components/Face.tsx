@@ -1,18 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import { Blobatar } from 'blobatar/react'
-import { happy, idle, sad, scared, sleepy, surprised, thinking, unsure, type Expression } from 'blobatar/expression'
-import 'blobatar/motion.css'
+import Sprout, { type SproutMood } from './Sprout'
 
 /** Status words used across replies, desks, subagents and job runs, read as a pose. Unknown words stay idle. */
-const MOOD: Record<string, Expression> = {
-  streaming: thinking, running: thinking, working: thinking, planning: thinking,
-  awaiting_plan: unsure, blocked: unsure,
-  needs_approval: surprised, 'needs-approval': surprised, awaiting_approval: surprised,
-  paused: sleepy, queued: sleepy, stopped: sleepy,
-  interrupted: scared, timed_out: scared, cancelled: sleepy,
-  error: sad, failed: sad,
-  review: happy, done: happy, completed: happy, partial: unsure,
-  waiting_approval: surprised
+export const MOOD: Record<string, SproutMood> = {
+  streaming: 'thinking', running: 'thinking', working: 'thinking', planning: 'thinking',
+  awaiting_plan: 'unsure', blocked: 'unsure',
+  needs_approval: 'surprised', 'needs-approval': 'surprised', awaiting_approval: 'surprised',
+  paused: 'sleepy', queued: 'sleepy', stopped: 'sleepy',
+  interrupted: 'scared', timed_out: 'scared', cancelled: 'sleepy',
+  error: 'sad', failed: 'sad',
+  review: 'happy', done: 'happy', completed: 'happy', partial: 'unsure',
+  waiting_approval: 'surprised'
 }
 
 const LIVE = new Set(['streaming', 'running', 'working', 'planning'])
@@ -33,15 +31,15 @@ export const FACE_SCALE = 1.25
 export default function Face({ name, status, size = 26, title, hue, tone, send, calm }: { name: string; status?: string; size?: number | 'fill'; title?: string; hue?: number; tone?: number; send?: boolean; calm?: boolean }): JSX.Element {
   const fx = useReaction(status, send, calm)
   return (
-    <Blobatar
+    <Sprout
       className={fx ? `face ${fx}` : 'face'}
       name={name}
       size={size === 'fill' ? undefined : Math.round(size * FACE_SCALE)}
       title={title}
       hue={hue}
       tone={tone}
-      expression={(status && MOOD[status]) || idle}
-      animate={status && LIVE.has(status) ? 'always' : 'hover'}
+      mood={(status && MOOD[status]) || 'idle'}
+      live={!!status && LIVE.has(status)}
     />
   )
 }

@@ -21,6 +21,7 @@ import type {
 import type { SavedDashboard, DashboardRender, DashboardViewSpec } from '@shared/types'
 import type { AgentTerminal, CodingRecipe, CodingRecipeDetail, CodingRecipePreview, CodingRecipeRun, CodingSession, CodingSessionDiff, CodingSessionEvent, DuelWinner, ModelStanding, ShipChecklist } from '@shared/types'
 import type { ExtensionInfo, ExtensionsDev, ExtensionsReview } from '@shared/types'
+import type { CatalogCard, ExtensionConsent, ExtensionEnableResult, ExtensionInstallRequest, ExtensionsCatalog } from '@shared/types'
 import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
 import { ApiError, detailText } from './apiError'
 import type { ChatRunChanges } from './deskFiles'
@@ -704,6 +705,20 @@ export const api = {
     disable: (id: string) => req<ExtensionInfo>(`/dev/extensions/${encodeURIComponent(id)}/disable`, { method: 'POST' }),
     reload: (id: string) => req<ExtensionInfo>(`/dev/extensions/${encodeURIComponent(id)}/reload`, { method: 'POST' }),
     clearFailed: () => req<{ ok: boolean }>('/dev/extensions/failed', { method: 'DELETE' })
+  },
+  /** Settings > Extensions: the catalog, consent facts and the install, enable, update and remove calls. */
+  extensionsCatalog: {
+    catalog: () => req<ExtensionsCatalog>('/extensions/catalog'),
+    consent: (id: string) => req<ExtensionConsent>(`/extensions/${encodeURIComponent(id)}/consent`),
+    install: (body: ExtensionInstallRequest) => req<ExtensionConsent>('/extensions/install', { method: 'POST', body: json(body) }, 120_000),
+    confirm: (id: string) => req<{ card: CatalogCard }>(`/extensions/install/${encodeURIComponent(id)}/confirm`, { method: 'POST' }),
+    discard: (id: string) => req<{ ok: boolean }>(`/extensions/install/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    enable: (id: string, withRequires = false) =>
+      req<ExtensionEnableResult>(`/extensions/${encodeURIComponent(id)}/enable`, { method: 'POST', body: json({ with_requires: withRequires }) }),
+    disable: (id: string) => req<{ ok: boolean; disabled: string[] }>(`/extensions/${encodeURIComponent(id)}/disable`, { method: 'POST' }),
+    remove: (id: string, keepData: boolean) =>
+      req<{ ok: boolean }>(`/extensions/${encodeURIComponent(id)}?keep_data=${keepData ? 'true' : 'false'}`, { method: 'DELETE' }),
+    update: (id: string) => req<ExtensionConsent>(`/extensions/${encodeURIComponent(id)}/update`, { method: 'POST' }, 120_000)
   },
   extensions: {
     list: () => req<ExtensionsReview>('/extensions'),

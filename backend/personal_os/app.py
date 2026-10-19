@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import contextlib
 import functools
 import hashlib
@@ -38,7 +39,7 @@ from . import chatlink, config, duel, fsx, guards, labels, permissions_routes, r
 from .fsx import sensitive_reason
 from . import context_map
 from .dispatch import dispatch_tool
-from .context import Block, Ledger, PrefixWatch, build_context, cite_slim, compose, context_taints, estimate_tokens, layout_messages, ledger_history, ledger_tools, prefix_hash, retrieval_query
+from .context import Block, Ledger, MemoryBlocks, PrefixWatch, build_context, cite_slim, compose, context_taints, estimate_tokens, layout_messages, ledger_history, ledger_tools, prefix_hash, retrieval_query
 from .drive_backup import DriveBackup
 from .config import PRIVATE_SETTINGS
 from .presets import Presets
@@ -48,6 +49,8 @@ from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_inde
 from .consolidate import Consolidator
 from . import about_you
 from . import learn, memory_limits, provider_keys, provider_route, providers, query_expand
+from .runtime.memory_api import MemoryScope
+from .runtime.memory_core import CoreMemory, MemoryRouting
 from .learn import MAX_INJECTED_SKILLS, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
 from .graph_backfill import BackfillRunning, GraphBackfill
@@ -1606,7 +1609,7 @@ def _said(m: dict[str, Any]) -> bool:
     return m["role"] == "user" and not is_internal(m)
 
 
-settled.register(host.bus, style=style, relearn=queue_style_relearn, learner=learner, skills=skills, followup_jobs=followup_jobs,
+settled.register(host.bus, style=style, relearn=queue_style_relearn, memory=lambda cid, pid: memory_routing.system(cid, pid), followup_jobs=followup_jobs,
                  title_jobs=title_jobs, set_trace=convos.set_trace, get_conversation=convos.get, said=_said)
 
 
@@ -2342,10 +2345,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))  # every context block is a share of it
     # One query embedding for all three, then the three lookups side by side: they all sit before the first token.
     qvec = await _query_vec(rq, cfg, conv["settings"])
-    hits, retrieved = await host.retrieval.gather({"query": rq, "vec": qvec, "project_id": conv["project_id"], "conv_settings": dict(conv["settings"])})
+    hits, retrieved, memory_blocks = await _gather_context(rq, qvec, conv["project_id"], conv_id, dict(conv["settings"]), win)
     system, used = build_context(
         memories=memories, graph=graph, documents=documents, doc_hits=hits["docs"],
-        memory_hits=hits["memory"], graph_hits=hits["graph"],
+        memory_hits=hits["memory"], graph_hits=hits["graph"], memory=memory_blocks,
         project=project, project_id=conv["project_id"], query=user_text, retrieval_text=rq,
         settings=cfg, conv_settings=conv["settings"],
         global_system_prompt="\n\n".join(p for p in (_persona_text(persona), cfg["systemPrompt"]) if p),
@@ -6111,6 +6114,7 @@ async def retry_ship(id: str) -> dict[str, Any]:
 # Loaded here, after the ship tools, so its tools keep the place they always had at the end of the list.
 _coding_scope = host.load_builtin("coding", _ext_ctx)
 _cc_scope = host.load_builtin("claude-code", _ext_ctx)  # default off; needs the coding service, which is bound below before any session starts
+host.mount(app, host.load_builtin("memory-tree", _ext_ctx))
 host.migrate(db)
 coding: Coding = _ext_ctx.services["coding"]()
 coding.bind(toolbox)
@@ -6610,6 +6614,41 @@ host.retrieval.register("docs", lambda p: _doc_hits(p["project_id"], p["query"],
 host.retrieval.register("memory", lambda p: _memory_hits(p["project_id"], p["query"], settings(), p["conv_settings"], p["vec"]))
 host.retrieval.register("graph", lambda p: _graph_hits(p["project_id"], p["query"], settings(), p["conv_settings"], p["vec"]))
 
+# The memory.system slot: the built-in provider is an adapter over the repositories and workers above; a chat's selection is
+# resolved per call (chat over project over profile over global) and fenced, so a failing provider falls back to it.
+core_memory = CoreMemory(memories=memories, graph=graph, index=memory_index, learner=learner, skills=skills, settings=settings,
+                         memory_hits=_memory_hits, graph_hits=_graph_hits, query_vec=_query_vec)
+host.runtime.attach("memory.system", "core/memory", core_memory)
+memory_routing = MemoryRouting(host.runtime, runtime_selections.scopes, core_memory)
+toolbox.memory_system = lambda ctx: memory_routing.selected(ctx.get("conversation_id"), ctx.get("project_id"))
+
+
+async def _gather_context(query: str, qvec: Any, project_id: str | None, conv_id: str | None, conv_settings: dict[str, Any],
+                          window: int) -> tuple[dict[str, Any], list[Block], MemoryBlocks | None]:
+    """The turn's retrieval: (the built-in sources' results, extension blocks, the memory system's blocks). While the built-in memory
+    system serves the chat the memory and graph sources run as they always did and the blocks are made from their hits (None here);
+    a selected memory system is asked for its profile and recalled blocks instead, side by side with the other sources, and the
+    built-in memory and graph sources are switched off for the turn."""
+    mem = memory_routing.selected(conv_id, project_id)
+    payload = {"query": query, "vec": qvec, "project_id": project_id, "conv_settings": conv_settings}
+    if mem is None:
+        hits, retrieved = await host.retrieval.gather(payload)
+        return hits, retrieved, None
+    use_mem, use_graph = bool(conv_settings.get("useMemory", True)), bool(conv_settings.get("useGraph", True))
+    scope = MemoryScope(project_id, conv_id, conv_settings)
+    owner = mem.id.split("/")[0]
+
+    async def blocks() -> MemoryBlocks:
+        recalled = await mem.recall(query, scope, window, vec=qvec) if use_mem or use_graph else []
+        # The chat's switches stay in front of the provider: a graph block needs useGraph, any other memory block useMemory.
+        recalled = [dataclasses.replace(b, owner=owner) for b in recalled if (use_graph if b.kind == "graph" else use_mem)]
+        profile = mem.profile(scope, window) if use_mem else None
+        return MemoryBlocks(dataclasses.replace(profile, owner=owner) if profile is not None else None, recalled)
+
+    (hits, retrieved), memory_blocks = await asyncio.gather(
+        host.retrieval.gather({**payload, "conv_settings": {**conv_settings, "useMemory": False, "useGraph": False}}), blocks())
+    return hits, retrieved, memory_blocks
+
 
 def _preview_tools(cfg: dict[str, Any], project: dict[str, Any] | None, conv_settings: dict[str, Any], conv_id: str | None,
                    project_id: str | None) -> tuple[list[dict[str, Any]], set[str], dict[str, str], dict[str, Any]]:
@@ -6662,11 +6701,11 @@ async def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
     model = router.concrete(str((conv or {}).get("model") or cfg["defaultModel"]), cfg)
     win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))
     qvec = await _query_vec(body.query, cfg, conv_settings)
-    hits, retrieved = await host.retrieval.gather({"query": body.query, "vec": qvec, "project_id": project_id, "conv_settings": conv_settings})
+    hits, retrieved, memory_blocks = await _gather_context(body.query, qvec, project_id, body.conversation_id, conv_settings, win)
     _, used = build_context(
         memories=memories, graph=graph, documents=documents, project=project,
         doc_hits=hits["docs"], project_id=project_id,
-        memory_hits=hits["memory"], graph_hits=hits["graph"],
+        memory_hits=hits["memory"], graph_hits=hits["graph"], memory=memory_blocks,
         query=body.query, settings=cfg, conv_settings=conv_settings,
         global_system_prompt=cfg["systemPrompt"], skills=skills, style=style,
         draft=bool(conv_settings.get("draftMode")), window=win,

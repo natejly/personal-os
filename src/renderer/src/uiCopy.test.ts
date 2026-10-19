@@ -35,7 +35,6 @@ const EXCLUDED_PATHS: string[] = [
   'components/DeskPanel.tsx',
   'components/PageAgentPanel.tsx',
   'components/TracesPane.tsx',
-  'extensions/memory-tree/',
 ]
 
 const ROOT = path.join(process.cwd(), 'src/renderer/src')

@@ -41,6 +41,7 @@ from . import plans, router
 from . import firecrawl, reach, setup_cards
 from . import mcp_search
 from .learn import KINDS as MEMORY_KINDS, normalize_memory, skill_block, until_ts
+from .runtime.memory_api import MemoryScope
 from .memory_limits import SEARCH_HITS, SEARCH_PAGE, TAINT_SAVE_MIN_OVERLAP
 from . import graph_recall, redact
 from .graph_learn import LITERAL_PREDICATES, PREDICATES, SINGLE_VALUED, TYPES as ENTITY_TYPES, canonical_type, normalize_predicate
@@ -810,6 +811,7 @@ class Toolbox:
         self.ext_drafts: Any = None  # extensions.drafts.Drafts; set by app.py (ext_tools.py)
         self.chat_files: Any = None  # chat_files.ChatFiles: which chat each file belongs to; set by app.py
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
+        self.memory_system: Callable[[dict[str, Any]], Any] = lambda ctx: None  # the chat's selected memory system, None for the built-in one; set by app.py
         self.trash: Any = None  # soft delete (trash.py); set by app.py
         self.todos: Any = None  # todos.Todos, the todos extension's store (labels.py reads it); set by app.py
         self.retriever: Any = None  # hybrid document search (retrieval.py); set by app.py
@@ -1318,7 +1320,9 @@ class Toolbox:
 
         async def _memories(ctx: dict[str, Any], query: str, offset: int, kind: str, since_ts: float | None) -> Any:
             q = query.strip()
-            if q and self.memory_index is not None:
+            if q and (alt := self.memory_system(ctx)) is not None:
+                found = await alt.search(q, MemoryScope(ctx["project_id"], ctx.get("conversation_id"), ctx.get("conv_settings") or {}), SEARCH_HITS)
+            elif q and self.memory_index is not None:
                 cfg = self.settings()  # a None vector still ranks lexically and through the graph
                 found = await self.memory_index.search_reranked(ctx["project_id"], query, await self.memory_index.query_vec(cfg, query),
                                                                 limit=SEARCH_HITS, settings=cfg)
@@ -1371,6 +1375,11 @@ class Toolbox:
                 if not replaces:
                     return tool_error("forget needs `replaces`: the id of the memory to forget.", field="replaces",
                                       alternative="search_memory to find the memory's id")
+                if forget and (alt := self.memory_system(ctx)) is not None:  # the selected memory system owns its rows
+                    if not await alt.forget(replaces):
+                        return tool_error(f"No current memory {replaces} in this chat's scope.", field="replaces",
+                                          alternative="search_memory for the memory's current id")
+                    return {"forgotten": replaces}
                 old = self.memories.get(replaces)
                 if (not old or old["invalid_at"] is not None or (old.get("expires_at") or 1e18) <= time.time()
                         or old["project_id"] not in ((ctx.get("project_id"),) if isolated else (None, ctx.get("project_id")))):
@@ -1410,6 +1419,12 @@ class Toolbox:
                 done(m)
                 return {"updated": replaces, "saved": m["id"], "content": m["content"]}
             scope = None if personal else ctx["project_id"]
+            if not old and (alt := self.memory_system(ctx)) is not None:  # the selected memory system stores it (and owns any dedupe)
+                m = await alt.remember(text, kind or "fact", MemoryScope(scope, ctx.get("conversation_id"), ctx.get("conv_settings") or {}), "auto")
+                if not m:
+                    return tool_error("The memory system did not store that memory.")
+                done(m)
+                return {"saved": m["id"], "content": m["content"]}
             # The same statement reworded supersedes its live twin instead of adding a row (pinned rows never match).
             dup = await self.memory_index.near_duplicate(self.settings(), scope, text) if self.memory_index is not None else None
             if dup and dup["project_id"] != scope:  # a personal memory already says it; a project save never rewrites it

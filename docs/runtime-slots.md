@@ -1,6 +1,6 @@
 # Runtime slots
 
-Five seams of the app have a built-in provider and room for others: `model.client` (how a model call is sent), `model.router` (which model a turn uses), `tools.source` (extra tools beside the built-in ones and the connectors), `sandbox.backend` (how a confined process is confined) and `agent.loop` (how a reply's rounds are run: the chat loop, or "Plan, execute, verify"). An extension offers a provider; only you select one.
+Six seams of the app have a built-in provider and room for others: `model.client` (how a model call is sent), `model.router` (which model a turn uses), `tools.source` (extra tools beside the built-in ones and the connectors), `sandbox.backend` (how a confined process is confined) `agent.loop` (how a reply's rounds are run: the chat loop, or "Plan, execute, verify") and `memory.system` (how memory is learned, recalled and searched). An extension offers a provider; only you select one.
 
 ## Choosing
 
@@ -13,6 +13,14 @@ If a chosen provider is turned off or removed, the built-in takes over with a no
 ## Plan, execute, verify
 
 Choose it for a chat, a project or everywhere and a reply goes in four parts: one model call writes a plan of at most eight steps (shown in the progress panel; listing a step approves nothing), each step is worked with tools for at most six rounds, one call checks the work against the plan, and the final answer is written. If the check finds gaps the loop makes one repair pass and checks once more; if the second check also fails, the answer says what is not verified and does not claim the task is done. A turn is held to `loopModelCalls` model calls (60 unless you change it; see [the agent loop](agent-loop.md)) and ends with an explanation if it uses them. Every tool call still goes through the same permission checks and approval cards as in the chat loop, Stop and steering work the same way, and the cached prompt prefix and the tool list are unchanged, so switching loops between turns costs no cache. Only the final answer is streamed as the reply.
+
+## Memory system
+
+`memory.system` decides what a chat remembers. The built-in provider is the app's own memory: auto-learn after a reply, the standing-preferences block, the recalled-memories and knowledge-graph blocks, and the memory tools. A provider implements `personal_os.runtime.memory_api.MemorySystem`: `learn` (after a settled reply), `recall` (volatile blocks for a turn), `profile` (the stable standing-preferences block), `remember`, `forget`, `search` and `status`. It is chosen for a chat, a project or everywhere like any other slot, and only built-in extensions can provide it for now.
+
+The chat's own switches stay in front of any provider: with memory off nothing is recalled, profiled or learned, with the graph off no graph block is used, and a chat with auto-learn off never reaches `learn`. A provider that raises, takes too long or returns the wrong kind of block is replaced by the built-in memory for that call, and a card in the inbox says so once. The Memory settings page and its routes still read the built-in memory tables.
+
+The built-in History digest extension (`memory-tree/digest`, see [the history digest](memory-tree.md)) is a layering provider: it hands every call to the built-in memory and adds one volatile block, the digest, to what `recall` returns.
 
 ## What never changes
 

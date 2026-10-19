@@ -53,6 +53,7 @@ IDLE_CLOSE_S = 30 * 60
 KEYS = {"ctrl-c": "\x03", "ctrl-d": "\x04", "escape": "\x1b", "up": "\x1b[A", "down": "\x1b[B", "right": "\x1b[C", "left": "\x1b[D",
         "tab": "\t"}
 OPAQUE = re.compile(r"python[\d.]*|node|deno|bun|perl|ruby|sh|bash|zsh|fish|vim|vi|nano|emacs|less|man")
+DIR_CHANGERS = frozenset({"cd", "pushd", "popd", "chdir"})
 PROMPT_END = re.compile(r"(\?|:|>|\$|#|%|\]|\(y/n\)|\(Y/n\)|\(y/N\))\s*$")
 CSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 OSC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
@@ -359,12 +360,21 @@ class Terminals:
         if (why := permrules.touches_protected(text, cwd)) and "Grain's own" in why:
             return f"Grain's own data folder and app are off limits ({why.split(':')[0]})."
         if route.enabled(cfg):
+            if self._changes_dir(text):
+                return ("A terminal's folder is the one it was opened in, and a line that changes it would be judged from the wrong place. "
+                        "Open a terminal with terminal_open cwd=<folder> instead.")
             if hit := route._shell_refusal(text, cwd):
                 return route.refusal_text(cfg, f"a terminal line ({hit[0]})", hit[1])
             if route.repo_root(cwd) and self._opaque(text) and not route._only_verifies(text):
                 return (route.refusal_text(cfg, "a terminal line that starts an interpreter, shell, editor or pager", route.repo_root(cwd) or cwd)
                         + " What it would do cannot be judged from here, so it is refused.")
         return None
+
+    @staticmethod
+    def _changes_dir(text: str) -> bool:
+        parsed = permrules.split_command(text)
+        return any((tokens := permrules.strip_wrappers(seg.words, True)) and tokens[0] in DIR_CHANGERS
+                   for seg in parsed.segments + parsed.nested)
 
     @staticmethod
     def _opaque(text: str) -> bool:

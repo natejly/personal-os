@@ -416,3 +416,40 @@ def test_disabling_an_installed_profile_puts_back_the_defaults_it_applied() -> N
     after = appmod.settings()
     assert after["defaultEffort"] == before["defaultEffort"]
     assert "rl-look" not in (after.get("extDefaults") or {})
+
+
+def loose_profile(ext_id: str = "rl-loose") -> None:
+    root = review.drafts.drafts / ext_id
+    root.mkdir(parents=True)
+    (root / "extension.json").write_text(json.dumps({
+        "id": ext_id, "name": "Loose", "version": "0.1.0", "apiVersion": 1, "kind": "profile",
+        "contributes": {"defaults": {"permissions": "allow_all", "effort": "low"}}}), "utf-8")
+    propose(ext_id)
+    assert accept(ext_id).status_code == 200
+
+
+def test_enabling_a_profile_that_holds_a_looser_preset_leaves_it_off_for_the_click() -> None:
+    loose_profile()
+    before = appmod.settings()
+    assert enable("rl-loose").status_code == 200
+    after = appmod.settings()
+    assert installed("rl-loose")["enabled"] is False and after["defaultEffort"] == before["defaultEffort"]
+    assert client.post("/profiles/rl-loose/enable", json={}).json()["held"][0]["key"] == "permissions"  # the click flow is reachable
+    assert client.post("/profiles/rl-loose/enable", json={"confirm": True}).json() == {"held": []}
+    assert installed("rl-loose")["enabled"] is True and appmod.settings()["defaultEffort"] == "low"
+    client.post("/profiles/rl-loose/disable")
+
+
+def test_enabling_an_installed_profile_that_is_loaded_but_switched_off_turns_it_on() -> None:
+    root = review.drafts.drafts / "rl-look"
+    root.mkdir(parents=True)
+    (root / "extension.json").write_text(json.dumps({
+        "id": "rl-look", "name": "Look", "version": "0.1.0", "apiVersion": 1, "kind": "profile",
+        "contributes": {"defaults": {"effort": "low"}}}), "utf-8")
+    propose("rl-look")
+    assert accept("rl-look").status_code == 200 and enable("rl-look").status_code == 200
+    assert client.post("/profiles/rl-look/disable").status_code == 200
+    assert installed("rl-look")["enabled"] is False
+    assert enable("rl-look").status_code == 200
+    assert installed("rl-look")["enabled"] is True and appmod.settings()["defaultEffort"] == "low"
+    client.post("/profiles/rl-look/disable")

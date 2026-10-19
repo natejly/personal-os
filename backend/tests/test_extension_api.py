@@ -497,3 +497,19 @@ def test_a_failing_activation_unloads_the_extension_and_lists_it_as_failed(work:
 
 def test_slash_name_is_the_command_a_turn_calls() -> None:
     assert [commands.slash_name(t) for t in ("/ping a b", "/ping", "hello", "/Bad", "", None)] == ["ping", "ping", None, None, None, None]
+
+
+def test_a_failed_load_cancels_the_tasks_the_extension_spawned(work: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    spawned: list[Any] = []
+    code = ("import asyncio, builtins\n"
+            "async def forever():\n    await asyncio.sleep(3600)\n"
+            "def activate(api):\n    builtins._spawned.append(api.spawn(forever()))\n    raise RuntimeError('late fail')\n")
+    monkeypatch.setattr("builtins._spawned", spawned, raising=False)
+
+    async def load() -> None:
+        with pytest.raises(RuntimeError, match="late fail"):
+            Rig(work, code=code)
+        await asyncio.sleep(0)
+
+    run(load())
+    assert len(spawned) == 1 and spawned[0].cancelled()

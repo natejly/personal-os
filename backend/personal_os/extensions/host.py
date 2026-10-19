@@ -609,6 +609,8 @@ class ExtensionHost:
         try:
             self._load_code(scope, lambda: _import_extension(root, scope))
         except BaseException:
+            for task in scope.tasks:  # what a failed activate spawned must not outlive the load
+                task.cancel()
             scope.disposables.dispose()
             del self.extensions[scope.manifest.id], self._enabled[scope.manifest.id]
             raise

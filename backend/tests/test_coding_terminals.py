@@ -249,7 +249,7 @@ def test_coding_is_routed_to_a_session_inside_a_work_tree(tmp_path, monkeypatch)
     outside = opened(tb, ctx_of(cfg), str(home / "work"))
     assert "coding_session_start" in send(tb, cfg, inside, "echo y > src/a.py")["error"]
     assert "coding_session_start" in send(tb, cfg, inside, "git commit -am x")["error"]
-    for line in ("python3 script.py", "node build.js", "bash run.sh", "vim src/a.py", "less README.md", "cd src && python x.py"):
+    for line in ("python3 script.py", "node build.js", "bash run.sh", "vim src/a.py", "less README.md"):
         assert "cannot be judged" in send(tb, cfg, inside, line)["error"], line
     for line in ("git status", "ls -la", "python3 -m pytest -q", "npm test", "git push origin x"):
         assert send(tb, cfg, inside, line)["ok"] is True, line
@@ -259,6 +259,17 @@ def test_coding_is_routed_to_a_session_inside_a_work_tree(tmp_path, monkeypatch)
     tb2, hub2, home2, cfg2 = off[0], off[2], off[3], off[4]
     t2 = opened(tb2, ctx_of(cfg2), str(home2 / "repo"))
     assert send(tb2, cfg2, t2, "python3 script.py")["ok"] is True  # the setting is off: nothing is routed
+
+
+def test_a_line_that_changes_folder_is_refused_so_every_line_is_judged_where_it_runs(tmp_path, monkeypatch):
+    tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
+    outside = opened(tb, ctx_of(cfg), str(home / "work"))
+    for line in ("cd ../repo", "pushd ../repo", "ls && cd ../repo && touch x", "cd src && python x.py"):
+        assert "terminal_open cwd" in send(tb, cfg, outside, line)["error"], line
+    assert send(tb, cfg, outside, "echo hi > a.txt")["ok"] is True
+    off = rig(tmp_path / "off", monkeypatch, codingRoute=False)
+    tb2, cfg2, home2 = off[0], off[4], off[3]
+    assert send(tb2, cfg2, opened(tb2, ctx_of(cfg2), str(home2 / "work")), "cd ../repo")["ok"] is True  # nothing is routed
 
 
 def test_a_tainted_reply_that_can_reach_out_must_ask_and_trust_lifts_it(tmp_path, monkeypatch):

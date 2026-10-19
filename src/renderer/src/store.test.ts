@@ -1602,3 +1602,14 @@ test('a view turned off in Settings is not entered by setView, which says how to
   assert.equal(useStore.getState().view, 'calendar')
   assert.ok(useStore.getState().toasts.some((x) => x.text === 'Lists is turned off'))
 })
+
+test('completing or deleting a todo works when the dashboard loaded without todos (Lists was off)', async (t) => {
+  const prior = useStore.getState().dashboard
+  t.after(() => useStore.setState({ dashboard: prior }))
+  stubFetch(t, () => json({ id: 't1', title: 'A', done: 1 }))
+  useStore.setState({ dashboard: {} as never })
+  useTodos.setState({ todos: [{ id: 't1', title: 'A', done: 0 } as never] })
+  await useTodos.getState().updateTodo('t1', { done: true })
+  await useTodos.getState().deleteTodo('t1')
+  assert.deepEqual(useTodos.getState().todos, [])
+})

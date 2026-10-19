@@ -45,14 +45,14 @@ export const useTodos = create<TodosState>()((set, get) => ({
     }
     if (recurs) void get().refreshTodos()  // the next instance was just created server-side
     set((s) => ({ todos: s.todos.map((x) => (x.id === id ? t : x)) }))
-    useStore.setState((s) => ({ dashboard: s.dashboard && { ...s.dashboard, todos: s.dashboard.todos.map((x) => (x.id === id ? t : x)).filter((x) => !x.done) } }))
+    useStore.setState((s) => ({ dashboard: s.dashboard?.todos ? { ...s.dashboard, todos: s.dashboard.todos.map((x) => (x.id === id ? t : x)).filter((x) => !x.done) } : s.dashboard }))  // no todos key while Lists was off at load
     if ('done' in patch || 'due' in patch || 'clear_due' in patch) void useStore.getState().refreshDashboard()  // todo_stats: the nav badge and Today card
   },
   deleteTodo: async (id) => {
     const title = get().todos.find((x) => x.id === id)?.title
     await api.todos.delete(id)
     set((s) => ({ todos: s.todos.filter((x) => x.id !== id) }))
-    useStore.setState((s) => ({ dashboard: s.dashboard && { ...s.dashboard, todos: s.dashboard.todos.filter((x) => x.id !== id) } }))
+    useStore.setState((s) => ({ dashboard: s.dashboard?.todos ? { ...s.dashboard, todos: s.dashboard.todos.filter((x) => x.id !== id) } : s.dashboard }))
     void useStore.getState().refreshDashboard()
     useStore.getState().offerUndo(title ? `todo “${title}”` : 'todo', [{ type: 'todo', id }])
   }

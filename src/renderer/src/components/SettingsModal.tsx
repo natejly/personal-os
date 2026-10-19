@@ -3,6 +3,7 @@ import { useSlidingPill } from "../lib/useSlidingPill"
 import { X, Search, Plug, Cpu, Bot, Palette, ShieldCheck, SlidersHorizontal, KeyRound, Gauge, Brain, PanelLeft, Package, type Icon } from '../icons'
 import { useShallow } from 'zustand/react/shallow'
 import { useStore, setSettingsGuard } from '../store'
+import { useTodos } from '../extensions/todos/store'
 import { modeOf, MODES } from '../lib/permissionMode'
 import { resolveTab, searchSettings, shownTab, DEFAULT_TAB, type SettingsTab } from '../lib/settingsTabs'
 import { api } from '../lib/api'
@@ -143,6 +144,8 @@ export default function SettingsModal(): JSX.Element {
   /** A profile was turned on or off (applied at once by its own routes): the same refresh, and off the view it may have hidden. */
   const profileApplied = async (): Promise<void> => {
     await providersChanged()
+    void useStore.getState().refreshDashboard()  // a view the profile turned on has no data loaded yet
+    void useTodos.getState().refreshTodos()
     if (viewHidden(useStore.getState().settings, view)) setView('chat')
   }
   // Every way out (X, Escape, the backdrop, Cancel) comes through here, so a changed draft is never

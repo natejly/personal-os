@@ -1638,7 +1638,9 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
                 raise HTTPException(409, "A desk or job transcript cannot be moved")
             patch["project_id"] = wsid(body.project_id)
     settings_patch = patch.get("settings") if isinstance(patch.get("settings"), dict) else {}
-    if isinstance(settings_patch.get("tools"), dict):
+    if "tools" in settings_patch and not isinstance(settings_patch["tools"], dict):
+        raise HTTPException(422, "settings.tools is a map of tool name to mode")
+    if "tools" in settings_patch:
         settings_patch["tools"] = _check_permissions({"tools": settings_patch["tools"]})["tools"]  # external and schedules tools top out at ask
     settings_patch.pop("permissions", None)  # set by the preset routes only: a PATCH must not loosen a chat unasked
     settings_patch.pop("deskId", None)  # bound and unbound by the cowork routes only, never by a settings PATCH

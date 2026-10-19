@@ -103,6 +103,12 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(ids, [c["id"]])
         self.assertNotIn(c["id"], [x["id"] for x in self.j("GET", "/conversations?project_id=all")])
 
+    def test_settings_tools_must_be_a_map(self) -> None:
+        c = self.j("POST", "/conversations", {"project_id": None})
+        for bad in (["x"], "str", 5):
+            self.j("PATCH", f"/conversations/{c['id']}", {"settings": {"tools": bad}}, 422)
+        self.assertEqual(self.j("GET", f"/conversations/{c['id']}")["settings"]["tools"], {})
+
 
 if __name__ == "__main__":
     unittest.main()

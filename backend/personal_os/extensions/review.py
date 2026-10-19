@@ -57,16 +57,21 @@ class Review:
     async def enable(self, ext_id: str, grants: list[str]) -> None:
         if ext_id not in self.drafts.installed_ids():
             raise KeyError(ext_id)
-        if ext_id in self.host.extensions:
+        if ext_id not in self.host.extensions:
+            self.drafts.approve(ext_id, grants)
+            await self._load(ext_id)  # still in hiddenViews: loaded disabled
+            self._hide(ext_id, False)
+        scope = self.host.extensions[ext_id]
+        if scope.manifest.kind != "profile" or scope.enabled():
             return
-        self.drafts.approve(ext_id, grants)
-        scope = await self._load(ext_id)  # still in hiddenViews: loaded disabled
-        self._hide(ext_id, False)
-        if scope.manifest.kind == "profile":  # a profile is on when its defaults are applied, not when it leaves hiddenViews
-            before = self.ctx.db.get_settings()
-            scope.defaults.apply(scope.manifest)
-            self.host._settings_changed(before, self.ctx.db.get_settings())
-            self.host.refresh_enabled()
+        # A profile is on when its defaults are applied, not when it leaves hiddenViews, and also when it is loaded but switched off.
+        # A looser permission preset needs the user's click on /profiles, so a profile that holds one stays off here.
+        if any(c.looser for c in scope.defaults.plan(scope.manifest)):
+            return
+        before = self.ctx.db.get_settings()
+        scope.defaults.apply(scope.manifest)
+        self.host._settings_changed(before, self.ctx.db.get_settings())
+        self.host.refresh_enabled()
 
     async def load_installed(self) -> None:
         """At startup: load what the user enabled. One whose files changed, or that fails to load, is disabled instead."""

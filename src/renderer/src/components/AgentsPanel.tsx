@@ -47,7 +47,6 @@ export default function AgentsPanel(): JSX.Element {
 
   return (
     <div className="library-panel">
-      <p className="muted small">Editing an agent withdraws its approval.</p>
       <div className="add-row">
         <input placeholder="Describe an agent to draft, e.g. a travel planner that checks my calendar and keeps a packing list" value={intent}
           onChange={(e) => setIntent(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && intent.trim().length >= 4) void draft() }} />
@@ -57,7 +56,7 @@ export default function AgentsPanel(): JSX.Element {
       {edit && !edit.id && <div className="skill-row"><AgentEditor initial={edit.fields} save={(t, sc) => api.agentDefs.create(t, sc)} onDone={() => { setEdit(null); void refreshAgentDefs() }} /></div>}
       <section className="skill-section">
         <h4>Yours</h4>
-        {custom.length === 0 && <div className="empty-hint"><p className="muted small">None yet.</p></div>}
+        {custom.length === 0 && <div className="empty-hint"><p className="muted small">No agents</p></div>}
         {custom.map((d) => (
           <div key={d.id} className={`skill-row ${d.approved ? 'approved' : ''}`}>
             <div className="skill-head static">
@@ -65,7 +64,7 @@ export default function AgentsPanel(): JSX.Element {
               <button className="skill-name link" title="Open this agent's page" onClick={() => setHomeId(d.id)}>{d.name}</button>
               {(() => { const a = agentState(agentStatus[d.name]); return a.state === 'idle' ? null : <span className={`agent-status ${a.state}`}>{a.label}</span> })()}
               <span className="skill-desc muted">{d.label || d.description}</span>
-              {!d.approved && <small className="muted">unapproved: replies cannot delegate to it</small>}
+              {!d.approved && <small className="muted">unapproved</small>}
               <div className="skill-actions no-drag">
                 <button className="ghost-btn sm" disabled={!d.approved} title={d.approved ? 'A new chat that speaks as this agent' : 'Approve it first'} onClick={() => chatWithAgent(d.name, d.model)}><MessageSquare size={13} /> Chat</button>
                 <button className={d.approved ? 'ghost-btn sm' : 'primary-btn sm'} onClick={() => void act(() => api.agentDefs.approve(d.id, !d.approved))}>
@@ -141,7 +140,6 @@ function AgentEditor({ initial, save, onDone }: { initial: AgentFields; save: (t
       </details>
       <details className="agent-pick">
         <summary>Tool settings for this agent <span className="tag">{Object.keys(f.tool_modes ?? {}).length}</span></summary>
-        <p className="muted small">Overrides the project's setting for this agent; a chat's own setting still wins. Anything that leaves the app keeps asking.</p>
         {Object.entries(f.tool_modes ?? {}).map(([name, mode]) => (
           <div key={name} className="agent-face-row">
             <code>{name}</code>
@@ -158,7 +156,7 @@ function AgentEditor({ initial, save, onDone }: { initial: AgentFields; save: (t
       </details>
       <details className="agent-pick">
         <summary>Skills <span className="tag">{f.skills.length}</span></summary>
-        {skills.length === 0 && <p className="muted small">No approved skills yet (Library › Skills).</p>}
+        {skills.length === 0 && <p className="muted small">No approved skills</p>}
         <div className="agent-chips">
           {skills.map((s) => (
             <button key={s.id} className={`tag ${f.skills.includes(s.name) ? 'on' : ''}`} title={s.description} onClick={() => toggle('skills', s.name)}>{s.name}</button>

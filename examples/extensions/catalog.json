@@ -1,0 +1,14 @@
+{
+  "extensions": [
+    {
+      "id": "reading-list",
+      "name": "Reading list",
+      "description": "Save links with a short note and list them back, newest first.",
+      "url": "https://github.com/natejly/personal-os.git",
+      "ref": "main",
+      "subdir": "examples/extensions/reading-list",
+      "author": "natejly",
+      "verified": false
+    }
+  ]
+}

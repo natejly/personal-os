@@ -20,8 +20,9 @@ export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { sho
   const zoom = draft.uiZoom ?? DEFAULT_ZOOM
   return (
     <section>
-      <h3>General</h3>
       <Sec id="look">
+      <h4>Appearance</h4>
+      <p className="set-help">Theme, accent colour, fonts and interface size. Changes preview at once and apply when you save.</p>
       <div className="preset-row" role="radiogroup" aria-label="Appearance presets">
         {PRESETS.map((p) => {
           const on = activePreset(draft) === p.id

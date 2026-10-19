@@ -11,13 +11,15 @@ export default function IntegrationsTab({ draft, patch, onSaveCreds }: TabProps 
   const hold = draft.gmailSendHold ?? { enabled: true, seconds: 90 }
   return (
     <section>
-      <h3>Integrations</h3>
       <Sec id="accounts">
+      <h4>Mail and Calendar</h4>
+      <p className="set-help">Sign in with Google so the assistant can read and draft mail and see your calendar.</p>
       <Switch title="Hold outgoing email so I can undo" checked={hold.enabled} onChange={(enabled) => patch({ gmailSendHold: { ...hold, enabled } })} />
       <GoogleSettings clientId={draft.googleClientId ?? ''} clientSecret={draft.googleClientSecret ?? ''} secretSaved={!!settings.googleClientSecretSet} backupLabel={draft.driveBackupLabel ?? ''} onChange={(p) => patch(p)}
         onSaveCreds={onSaveCreds} />
       </Sec>
       <Sec id="connectors"><h4>Connectors</h4>
+      <p className="set-help">Tools from other services the assistant can call.</p>
       <div className="setting-row">
         <span className="toggle-text"><b>Connectors</b><small>Tools from other services, added and managed in the Library.</small></span>
         <button className="ghost-btn" type="button" onClick={() => { useStore.getState().setLibraryTab('connectors'); useStore.getState().setView('library'); useStore.getState().setSettingsOpen(false) }}>Open Library</button>

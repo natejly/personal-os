@@ -2,7 +2,6 @@ import SupportSettings from '../SupportSettings'
 import TraceExportSettings from '../TraceExportSettings'
 import ExtensionsDev from './ExtensionsDev'
 import EffectiveConfig from './EffectiveConfig'
-import ExtensionsReview from './ExtensionsReview'
 import DataSettings from '../DataSettings'
 import TrashPanel from '../TrashPanel'
 import NumberField from './NumberField'
@@ -13,8 +12,6 @@ export default function AdvancedTab({ draft, patch, openGroups, toggle, onExtens
   const gp = { openGroups, toggle }
   return (
     <section>
-      <h3>Advanced</h3>
-
       <Sec id="data"><AdvGroup id="data" title="Data" {...gp}>
           <DataSettings />
           <label><span className="toggle-text"><b>Auto-archive after (days)</b><small>Chats and inbox messages with no activity for this long move to Archived. They stay searchable and can be restored. 0 turns it off.</small></span>
@@ -23,10 +20,6 @@ export default function AdvancedTab({ draft, patch, openGroups, toggle, onExtens
           <TrashPanel />
           <h4>Diagnostics</h4>
           <SupportSettings />
-      </AdvGroup></Sec>
-
-      <Sec id="extensions"><AdvGroup id="extensions" title="Extensions" {...gp}>
-          <ExtensionsReview onChanged={onExtensionsChanged} />
       </AdvGroup></Sec>
 
       <Sec id="effective"><AdvGroup id="effective" title="Effective configuration" {...gp}>

@@ -40,7 +40,7 @@ export default function MemoryPanel({ projectId }: { projectId?: string; embedde
   useEffect(() => { if (!yielded) void loadScope(scope) }, [scope, loadScope, yielded])
 
   const entityCount = graph.nodes.filter((n) => !n.properties?.self && !n.properties?.literal).length
-  const graphCount = [count(memories.length, 'memory', 'memories'), count(entityCount, 'entity', 'entities'), count(graph.edges.length, 'relation', 'relations')].join(' · ')
+  const graphCount = `${count(memories.length, 'memory', 'memories')} · ${count(entityCount, 'entity', 'entities')}, ${count(graph.edges.length, 'relation', 'relations')}`
   const showStyle = mode === 'style'
   // 'style' is a page of its own: a voice profile has nothing to sit side by side with.
   const showList = !showStyle && mode !== 'graph'

@@ -25,14 +25,18 @@ export default function ProfilesSection({ onApplied }: { onApplied: () => Promis
   }
   useEffect(() => { api.profiles.list().then(setProfiles).catch(() => undefined) }, [])
 
+  /** Show the switch in its new position at once: a second click before the reply must act on that, not on the old state. */
+  const mark = (id: string, enabled: boolean): void => setProfiles((l) => l.map((x) => (x.id === id ? { ...x, enabled } : x)))
   const enable = async (p: Profile, confirm: boolean): Promise<void> => {
     const { held: changes } = await api.profiles.enable(p.id, confirm)
     setHeld(changes.length ? { profile: p, changes } : null)
+    if (changes.length) mark(p.id, false)
     if (!changes.length) await refresh()
   }
   const toggle = (p: Profile, on: boolean): void => {
+    mark(p.id, on)
     const done = on ? enable(p, false) : api.profiles.disable(p.id).then(() => { setHeld(null); return refresh() })
-    done.catch((e: Error) => toast(e.message, 'error'))
+    done.catch((e: Error) => { mark(p.id, !on); toast(e.message, 'error') })
   }
   if (!profiles.length) return null
   return (

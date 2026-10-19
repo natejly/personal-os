@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import contextlib
+import threading
 import functools
 import hashlib
 import html
@@ -7627,10 +7628,16 @@ def get_voice_config() -> dict[str, Any]:
     return stt.config_for(db.get_settings())
 
 
+_voice_config_lock = threading.Lock()
+
+
 @app.put("/voice/config")
 def put_voice_config(body: VoiceConfigIn) -> dict[str, Any]:
-    cfg = stt.clean_config({**stt.config_for(db.get_settings()), **body.model_dump(exclude_none=True)})
-    db.set_settings({"voice": cfg})
+    # Read-merge-write under a lock: two quick patches (a select then a switch) run on separate threads, and
+    # without it the second reads the config before the first has stored, so one of them is lost.
+    with _voice_config_lock:
+        cfg = stt.clean_config({**stt.config_for(db.get_settings()), **body.model_dump(exclude_none=True)})
+        db.set_settings({"voice": cfg})
     return cfg
 
 

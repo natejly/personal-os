@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import type { VoiceConfig } from '@shared/types'
@@ -8,10 +8,13 @@ import Switch from './settings/Switch'
 export default function VoiceInputSettings(): JSX.Element | null {
   const [cfg, setCfg] = useState<VoiceConfig | null>(null)
   useEffect(() => { void api.voice.getConfig().then(setCfg).catch(() => undefined) }, [])
+  const latest = useRef(0)
   if (!cfg) return null
   const patch = (p: Partial<VoiceConfig>): void => {
     setCfg({ ...cfg, ...p })
-    void api.voice.setConfig(p).then(setCfg).catch((e: Error) => useStore.getState().toast(e.message, 'error'))
+    // Only the newest reply may replace the shown config: an earlier one would put back a switch just flipped.
+    const n = ++latest.current
+    void api.voice.setConfig(p).then((c) => { if (n === latest.current) setCfg(c) }).catch((e: Error) => useStore.getState().toast(e.message, 'error'))
   }
   // Text fields commit on blur so each keystroke is not a request.
   const text = (k: 'sttModel' | 'whisperModelPath', label: string, hint: string, placeholder = ''): JSX.Element => (

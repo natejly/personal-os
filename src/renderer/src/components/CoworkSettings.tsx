@@ -33,7 +33,7 @@ function SignIns(): JSX.Element | null {
   return (
     <div className="workspace-roots">
       <span><b>Browser sign-ins</b></span>
-      {rows && rows.length === 0 && <p className="muted small">Nothing saved.</p>}
+      {rows && rows.length === 0 && <p className="muted small">No sign-ins</p>}
       {rows && rows.length > 0 && (
         <ul className="plain-list">
           {rows.map((r) => (
@@ -76,7 +76,7 @@ export function HostList({ title, value, onChange }: { title: string; value: str
         </ul>
       )}
       <div className="workspace-roots-add">
-        <input value={text} placeholder="example.com" spellCheck={false} aria-label={`${title}: add a hostname`} aria-invalid={error ? true : undefined}
+        <input value={text} placeholder="example.com" title="Hostnames only; a name also allows its subdomains" spellCheck={false} aria-label={`${title}: add a hostname`} aria-invalid={error ? true : undefined}
           onChange={(e) => { setText(e.target.value); setError(null) }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }} />
         <button type="button" onClick={add} disabled={!text.trim()}>Add</button>
       </div>
@@ -117,11 +117,10 @@ function WorkEnv({ draft, saved, patch }: { draft: Settings; saved: Settings; pa
     <div className="cowork-env">
       <div className="cowork-env-row">
         <b>{st === null ? 'Checking…' : st.ready ? 'Ready' : st.error ? 'Setup failed' : 'Not set up'}</b>
-        <button type="button" className="ghost-btn" disabled={busy || unsaved} onClick={() => void setup()}>
+        <button type="button" className="ghost-btn" disabled={busy || unsaved} title={unsaved ? 'Save settings first' : undefined} onClick={() => void setup()}>
           {busy ? 'Working, this can take a few minutes…' : st?.ready ? 'Update' : 'Set up'}
         </button>
       </div>
-      {unsaved && <p className="muted small">Save first.</p>}
       {st && st.packages.length > 0 && (
         <p className="muted small">
           <code>{shown.join(', ')}</code>

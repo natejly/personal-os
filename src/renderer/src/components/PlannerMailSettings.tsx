@@ -64,7 +64,7 @@ export default function PlannerMailSettings(): JSX.Element | null {
               )
             })}
           </div>
-        </> : <p className="muted small">{cals === null ? 'Loading…' : 'Calendars could not be loaded.'}</p>}
+        </> : <p className="muted small">{cals === null ? 'Loading calendars...' : 'Calendars could not be loaded'}</p>}
       </>}
       {mail && <>
         <h4>Reply tracker</h4>

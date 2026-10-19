@@ -58,10 +58,9 @@ export default function ProviderForm(p: Props): JSX.Element {
       {provider?.keyUrl && (
         <p className="muted small"><button type="button" className="link" onClick={() => void window.open(provider.keyUrl as string, '_blank')}>Get a key from {provider.name} <ExternalLink size={11} /></button></p>
       )}
-      {provider?.note && !p.onProvider && <p className="muted small">{provider.note}</p>}
       {p.onModel && p.providerId === 'custom' && (
         <label><span className="toggle-text"><b>Model id (optional)</b></span>
-          <input value={p.model ?? ''} onChange={(e) => p.onModel?.(e.target.value)} spellCheck={false} />
+          <input title="Only if the server cannot list its models" value={p.model ?? ''} onChange={(e) => p.onModel?.(e.target.value)} spellCheck={false} />
         </label>
       )}
     </>

@@ -101,7 +101,11 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
         <span className="g-logo">G</span>
         <div>
           <b>Google Workspace</b>
-          {google?.connected && <small><Check size={11} /> Signed in as {google.email}</small>}
+          <small>
+            {google?.connected
+              ? <><Check size={11} /> Signed in as {google.email}</>
+              : null}
+          </small>
         </div>
         {google?.connected ? (
           <>
@@ -116,7 +120,7 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
       </div>
 
       {needsReauth && (
-        <p className="integration-warn"><AlertTriangle size={13} /> {google?.reauth_reason ?? 'This connection needs to be renewed.'}</p>
+        <p className="integration-warn"><AlertTriangle size={13} /> {google?.reauth_reason ?? 'Sign-in expired.'}</p>
       )}
 
       {google?.connected && (
@@ -146,7 +150,7 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
       {google?.connected && (
         <div className="tasks-sync">
           <div className="tasks-sync-row">
-            <span className="toggle-text"><b title={folder ? `Drive folder: ${folder.name}` : undefined}>Back up files to Google Drive</b></span>
+            <span className="toggle-text"><b>Back up files to Google Drive</b>{folder && <small>{folder.name}</small>}</span>
             <button className="ghost-btn" onClick={() => void backUpNow()} disabled={backingUp}>
               <Upload size={13} className={backingUp ? 'spin' : ''} /> {backingUp ? 'Backing up…' : 'Back up now'}
             </button>
@@ -181,24 +185,24 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
               ))}
             </li>
             <li>
-              Consent screen: <b>External</b>, add yourself under <b>Test users</b>
+              OAuth consent screen (<b>External</b>); add your Google account under <b>Test users</b>.
               <button className="link-btn" onClick={() => openExternal(CONSOLE.consent)}><ExternalLink size={11} /> Consent screen</button>
             </li>
             <li>
-              OAuth client ID, type <b>Desktop app</b>; download the JSON
+              Create credentials → OAuth client ID → <b>Desktop app</b> (not Web application); download its JSON.
               <button className="link-btn" onClick={() => openExternal(CONSOLE.client)}><ExternalLink size={11} /> Create client</button>
             </li>
-            <li>Load the JSON below</li>
+            <li>Load the JSON below, then sign in.</li>
           </ol>
 
           <div className="setup-drop" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); loadFile(e.dataTransfer.files[0]) }}>
-            <button className="ghost-btn" onClick={() => fileRef.current?.click()}><Upload size={13} /> Load client_secret….json</button>
-            <span className="muted small">or drop the file here</span>
+            <button className="ghost-btn" title="Or drop the file here, or paste the JSON into Client ID" onClick={() => fileRef.current?.click()}><Upload size={13} /> Load client_secret….json</button>
+            
             <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(e) => loadFile(e.target.files?.[0] ?? undefined)} />
           </div>
 
           <label><span className="toggle-text"><b>Client ID</b></span>
-            <input ref={idRef} value={clientId} onChange={(e) => onChange({ googleClientId: e.target.value })} onPaste={onPasteMaybeJson} placeholder="…apps.googleusercontent.com — or paste the whole JSON" spellCheck={false} />
+            <input ref={idRef} value={clientId} onChange={(e) => onChange({ googleClientId: e.target.value })} onPaste={onPasteMaybeJson} placeholder="…apps.googleusercontent.com" spellCheck={false} />
           </label>
           <label><span className="toggle-text"><b>Client secret</b></span>
             <input type="password" value={clientSecret} onChange={(e) => onChange({ googleClientSecret: e.target.value })} onPaste={onPasteMaybeJson} placeholder={secretSaved ? 'Saved. Type to replace' : 'GOCSPX-…'} spellCheck={false} />
@@ -207,7 +211,6 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
           {draftHasClient && !google?.configured && (
             <button className="primary-btn" onClick={() => void signIn()}><span className="g-logo g-logo-sm">G</span> Save and sign in</button>
           )}
-
         </details>
       )}
     </div>

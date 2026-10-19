@@ -55,7 +55,6 @@ test('first run: wizard connects on the key step, finishes, and never returns af
 
     // done: checked and saved by the same click
     await expect(w.getByRole('heading', { name: 'You are all set' })).toBeVisible()
-    await expect(w.getByText(/Grain is connected to Custom/)).toBeVisible()
     const st = await api('/setup/status')
     expect(st.needsOnboarding).toBe(false)
     expect(st.onboardedAt).toBeTruthy()

@@ -73,7 +73,7 @@ export default function GrantsPanel({ draft, patch }: { draft: Settings; patch: 
     <>
     <div className="perm-rules grants-panel">
       <h4>Standing grants</h4>
-      {none && <p className="muted small">None yet.</p>}
+      {none && <p className="muted small">None</p>}
       {modes.length + allow.length + globalMcp.length > 0 && (
         <div className="perm-rule-group">
           <b>Everywhere</b>

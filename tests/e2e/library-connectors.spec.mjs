@@ -16,7 +16,7 @@ const quoted = (p) => `"${p}"`
 test('add the stub through the UI (path with spaces), it connects and lists tools', async ({ grain }) => {
   const { page, api } = grain
   await openLibrary(page, 'Connectors')
-  await expect(page.getByText('No connectors yet')).toBeVisible()
+  await expect(page.getByText('No connectors')).toBeVisible()
   await page.getByRole('button', { name: 'Add custom' }).click()
   await page.getByPlaceholder('Filesystem', { exact: true }).fill('Stub')
   await page.getByPlaceholder(/npx -y/).fill(`${quoted(PY)} ${quoted(STUB)} --mode friendly`)
@@ -98,7 +98,7 @@ test('remove connector (two-step) and persistence across relaunch', async ({ gra
   expect((await api('/mcp/servers')).length).toBe(1)
   await srv.getByRole('button', { name: 'Remove' }).click()
   await srv.getByRole('button', { name: 'Really remove' }).click()
-  await expect(page.getByText('No connectors yet')).toBeVisible()
+  await expect(page.getByText('No connectors')).toBeVisible()
   expect(await api('/mcp/servers')).toEqual([])
   expect(grain.consoleErrors).toEqual([])
 })

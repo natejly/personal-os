@@ -58,13 +58,13 @@ function Column({ conversationId, messageId, sideKey, side, label, hot, canRegen
             {side.error && <div className="notice error" role="alert">{side.error}</div>}
             {side.files.length > 0 && (
               <div className="duel-files">
-                <small>Made in a temporary copy (kept only if picked):</small>
+                <small title="Made in a temporary copy; kept only if picked">Files</small>
                 {side.files.map((f) => <ProducedFile key={f.path} conversationId={conversationId} messageId={messageId} side={sideKey} file={f} />)}
               </div>
             )}
             {side.held.length > 0 && (
               <div className="duel-calls">
-                <small>Will do if picked:</small>
+                <small title="Runs only if this side is picked">Pending</small>
                 {side.held.map((c, i) => <HeldCall key={i} name={c.name} args={c.args} />)}
               </div>
             )}

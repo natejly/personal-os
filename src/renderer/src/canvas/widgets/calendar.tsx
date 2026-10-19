@@ -174,7 +174,7 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
       <div className="proxy-card">
         <CalIcon size={18} />
         <strong>{win.title || 'Calendar'}</strong>
-        <span>Paused while off-screen</span>
+        <span>Paused</span>
       </div>
     )
   }
@@ -204,7 +204,7 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
 
       {mode === 'agenda' ? (
         <div className="widget-scroll">
-          {agenda.length === 0 && <div className="widget-empty"><span>Nothing in the next {span} days.</span></div>}
+          {agenda.length === 0 && <div className="widget-empty"><span>No events</span></div>}
           <div className="widget-list">
             {agenda.map(([k, g]) => (
               <div key={k} className="agenda-day"

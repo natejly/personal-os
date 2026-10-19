@@ -132,7 +132,7 @@ function DriftBanner({ tool, onAccept }: { tool: McpTool; onAccept: () => void }
         </ul>
       )}
       <div className="row-actions">
-        <button className="primary-btn sm" onClick={onAccept}>{d.quarantined ? (d.previous.schema_hash ? 'Accept change' : 'Accept tool') : 'Mark as reviewed'}</button>
+        <button className="primary-btn sm" title="Does not turn the tool on" onClick={onAccept}>{d.quarantined ? (d.previous.schema_hash ? 'Accept change' : 'Accept tool') : 'Mark as reviewed'}</button>
       </div>
     </details>
   )
@@ -147,7 +147,7 @@ function ScopedGrants({ tool, grants }: { tool: McpTool; grants: McpGrant[] }): 
   const title = (g: McpGrant): string =>
     (g.scope === 'project' ? projects.find((p) => p.id === g.scope_id)?.name : conversations.find((c) => c.id === g.scope_id)?.title) || g.scope_id
   return (
-    <ul className="mcp-scoped-grants">
+    <ul className="mcp-scoped-grants" title="Revoke in Settings → Permissions → Grants">
       {grants.map((g) => (
         <li key={g.id} className="small">
           <span className="muted">{g.scope === 'project' ? 'Project' : 'Chat'}</span> {title(g)}: <b>{g.mode}</b>
@@ -209,7 +209,6 @@ function Extras({ live }: { live: McpServer['live'] }): JSX.Element | null {
 }
 
 export default function McpSettings(): JSX.Element {
-  const allowAll = useStore((s) => Boolean(s.settings?.allowAllConnections))
   const toast = useStore((s) => s.toast)
   const [servers, setServers] = useState<McpServer[]>([])
   const [open, setOpen] = useState<string | null>(null)
@@ -357,8 +356,6 @@ export default function McpSettings(): JSX.Element {
 
   return (
     <div className="mcp">
-      {allowAll && <p className="muted small">Tools <b>run without asking</b> while &ldquo;Allow all domains and MCP servers&rdquo; is on.</p>}
-
       <div className="seg" role="tablist" aria-label="Connectors">
         {VIEWS.map((v) => (
           <button key={v.key} type="button" role="tab" aria-selected={view === v.key} className={view === v.key ? 'on' : ''} onClick={() => setView(v.key)}>{v.label}</button>
@@ -369,7 +366,7 @@ export default function McpSettings(): JSX.Element {
       {view === 'import' && <ImportDialog onImported={() => void refresh()} />}
 
       {view === 'installed' && <>
-      {servers.length === 0 && !adding && <p className="empty-row"><Plug size={15} /> No connectors yet.</p>}
+      {servers.length === 0 && !adding && <p className="empty-row"><Plug size={15} /> No connectors</p>}
 
       {servers.map((s) => {
         const signin = needsSignIn(s)
@@ -418,7 +415,7 @@ export default function McpSettings(): JSX.Element {
                   <code className="mono">{s.transport !== 'stdio' ? s.url : joinArgv(s.command, s.args)}</code>
                   {s.cwd && <small className="muted">in {s.cwd}</small>}
                   {s.secret_keys.length > 0 && (
-                    <small className="muted">{s.transport !== 'stdio' ? 'headers' : 'secrets'}: {s.secret_keys.join(', ')} </small>
+                    <small className="muted">{s.transport !== 'stdio' ? 'headers' : 'secrets'}: {s.secret_keys.join(', ')}</small>
                   )}
                   {s.signed_in && <small className="muted">signed in</small>}
                 </div>
@@ -480,7 +477,7 @@ export default function McpSettings(): JSX.Element {
                       onAccept={() => void acceptChange(t.slug)} />)}
                   </div>
                 ) : (
-                  <p className="muted empty">{s.live.ready ? 'No tools.' : 'No tools yet.'}</p>
+                  <p className="muted empty">{s.live.ready ? 'No tools' : 'Not connected'}</p>
                 )}
               </div>
             )}
@@ -507,7 +504,7 @@ export default function McpSettings(): JSX.Element {
             </div>
             {draft.transport !== 'stdio' ? (
               <>
-                <label><span>URL</span>
+                <label><span title="Or paste the server's config JSON here">URL</span>
                   <input value={draft.url} spellCheck={false} placeholder="https://example.com/mcp"
                     onChange={(e) => setDraft({ ...draft, url: e.target.value })}
                     onPaste={(e) => {
@@ -516,7 +513,7 @@ export default function McpSettings(): JSX.Element {
                     }} />
                 </label>
                 <div className="mcp-headers">
-                  <span>Headers</span>
+                  <span title="Values are kept in the backend and never shown again">Headers <small className="muted">(optional)</small></span>
                   {draft.headerRows.map((h, i) => {
                     const set = (patch: Partial<HeaderRow>): void =>
                       setDraft({ ...draft, headerRows: draft.headerRows.map((r, j) => (j === i ? { ...r, ...patch } : r)) })
@@ -536,7 +533,7 @@ export default function McpSettings(): JSX.Element {
               </>
             ) : (
               <>
-                <label><span>Command</span>
+                <label><span title="Or paste the server's config JSON here">Command</span>
                   <input value={draft.argv} spellCheck={false} placeholder="npx -y @modelcontextprotocol/server-filesystem ~/Documents"
                     onChange={(e) => setDraft({ ...draft, argv: e.target.value })}
                     onPaste={(e) => {
@@ -550,8 +547,8 @@ export default function McpSettings(): JSX.Element {
                 <label><span>Environment</span>
                   <textarea rows={2} placeholder="KEY=value" value={draft.envText} onChange={(e) => setDraft({ ...draft, envText: e.target.value })} spellCheck={false} />
                 </label>
-                <label><span>Secrets</span>
-                  <textarea rows={2} placeholder="KEY=value" value={draft.secretsText} onChange={(e) => setDraft({ ...draft, secretsText: e.target.value })} spellCheck={false} />
+                <label><span title="Kept in the backend; never sent to a model or shown again">Secrets <small className="muted">(KEY=value)</small></span>
+                  <textarea rows={2} value={draft.secretsText} onChange={(e) => setDraft({ ...draft, secretsText: e.target.value })} spellCheck={false} />
                 </label>
               </>
             )}

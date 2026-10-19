@@ -376,7 +376,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
         {message.error && <div className="msg-error"><AlertCircle size={14} /><span>{message.error}</span></div>}
         {summarized && showContextChips && (
           <button className="compact-note" title="Open the context panel, where the summary lives" onClick={() => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() }}>
-            Earlier messages were summarized to fit the context window
+            Earlier messages summarized
           </button>
         )}
         {bare ? <div className="msg-partial">Stopped before any output</div> : note && <div className="msg-partial">{note}</div>}
@@ -488,7 +488,7 @@ export function PendingUserMessage({ text, attachments, queued }: { text: string
     <div className="msg user pending" aria-busy="true">
       <div className="avatar"><User size={14} /></div>
       <div className="bubble"><div className="user-bubble"><AttachmentChips files={attachments} />{text && <UserText content={text} />}</div>
-        {queued && <div className="pending-queued">Queued #{queued}: it starts when another desk finishes</div>}</div>
+        {queued && <div className="pending-queued">Queued #{queued}</div>}</div>
     </div>
   )
 }

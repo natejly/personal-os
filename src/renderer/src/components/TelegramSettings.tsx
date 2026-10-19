@@ -44,7 +44,6 @@ export default function TelegramSettings({ draft, patch }: { draft: Settings; pa
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const [guide, setGuide] = useState(false)
 
   const load = (): void => {
     api.telegramStatus().then((s) => { setSt(s); setStErr(null); setOff(false) })
@@ -88,19 +87,11 @@ export default function TelegramSettings({ draft, patch }: { draft: Settings; pa
       <div className="workspace-roots">
         {st?.status === 'claimed_elsewhere' && (
           <div className="workspace-roots-add">
-            <button type="button" className="ghost-btn" onClick={() => setGuide((g) => !g)}>Set up a bot for this Mac</button>
             <button type="button" className="ghost-btn" disabled={busy} onClick={takeOver}>Take over this bot</button>
           </div>
         )}
-        {(guide || st?.status !== 'claimed_elsewhere') && (
-          <ol className="muted small">
-            <li>In Telegram, open <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a> and send /newbot</li>
-            <li>Name it <code>Grain · {st?.machine_name ?? 'this Mac'}</code>; username ends in "bot", e.g. <code>grain_{(st?.machine_name ?? 'mac').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'mac'}_bot</code></li>
-            <li>Paste the token below</li>
-          </ol>
-        )}
         <div className="workspace-roots-add">
-          <input type="password" value={token} autoComplete="off" spellCheck={false} aria-label="Bot token" placeholder={hasToken ? 'Saved. Paste a new token to replace' : '123456789:ABC…'}
+          <input type="password" value={token} autoComplete="off" spellCheck={false} aria-label="Bot token" title="Send /newbot to @BotFather in Telegram and paste the token it gives you. Each Mac needs its own bot" placeholder={hasToken ? 'Saved. Paste a new token to replace' : '123456789:ABC…'}
             onChange={(e) => setToken(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && token.trim()) { e.preventDefault(); void saveToken() } }} />
           <button type="button" className="ghost-btn" disabled={busy || !token.trim()} onClick={() => void saveToken()}>{busy ? 'Saving…' : 'Save token'}</button>
         </div>
@@ -120,13 +111,13 @@ export default function TelegramSettings({ draft, patch }: { draft: Settings; pa
             {pairing ? (
               <>
                 <div className="workspace-roots-add">
-                  <code>{pairing.code}</code>
+                  <code title={`Or send /start ${pairing.code} to the bot`}>{pairing.code}</code>
                   <button type="button" className="ghost-btn" onClick={() => copy(pairing.code)}><Copy size={12} /> {copied ? 'Copied' : 'Copy'}</button>
                   <a className="ghost-btn" href={pairing.link} target="_blank" rel="noreferrer"><ExternalLink size={12} /> Open in Telegram</a>
                 </div>
                 <p className="muted small">{expiryLabel(pairing.expires_at)}</p>
               </>
-            ) : <p className="muted small">The code has expired.</p>}
+            ) : <p className="muted small">Code expired</p>}
             <div className="workspace-roots-add">
               <button type="button" className="ghost-btn" disabled={busy} onClick={() => void run(api.telegramNewCode)}>New code</button>
             </div>

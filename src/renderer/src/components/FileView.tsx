@@ -110,7 +110,7 @@ export default function FileView({ item, tick = 0, toolbar = false, onPages }: {
     return (
       <div className="show-nopreview empty-state">
         <FileWarning size={22} />
-        <p>No preview for this kind of file.</p>
+        <p>No preview</p>
         <button className="ghost-btn" onClick={() => void saveDownload(itemRawPath(item), name)}><Download size={13} /> Save a copy</button>
       </div>
     )
@@ -131,8 +131,8 @@ export default function FileView({ item, tick = 0, toolbar = false, onPages }: {
   if (from === 'doc' || from === 'preview') {
     return (
       <>
-        {!kept && <p className="show-note">The original file wasn&apos;t kept, so this is the text read from it.</p>}
-        {text.trim() ? md(text) : <div className="show-nopreview">No text could be read from this file.</div>}
+        
+        {text.trim() ? md(text) : <div className="show-nopreview">No text</div>}
       </>
     )
   }

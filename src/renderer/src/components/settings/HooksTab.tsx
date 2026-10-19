@@ -34,7 +34,7 @@ export default function HooksTab(): JSX.Element {
         <h4>Hooks</h4>
         {ext.state === 'loading' && <p className="hooks-note">Loading…</p>}
         {ext.state === 'error' && <p className="hooks-note" role="status">Hooks could not be read right now ({ext.message}).</p>}
-        {ext.state === 'ok' && groups.length === 0 && <p className="hooks-note">No extension has registered a hook.</p>}
+        {ext.state === 'ok' && groups.length === 0 && <p className="hooks-note">No hooks</p>}
         {groups.map((g) => (
           <div key={g.event} className="hooks-event">
             <h5>{g.event}</h5>

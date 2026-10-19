@@ -48,7 +48,7 @@ export default function SidebarChatFiles({ jump }: { jump: (conversationId: stri
     <div className="cf-side">
       {problem && <p className="empty-hint" role="alert">{problem}</p>}
       {!problem && files === null && <p className="empty-hint">Loading…</p>}
-      {files?.length === 0 && <p className="empty-hint">No documents in personal chats yet.</p>}
+      {files?.length === 0 && <p className="empty-hint">No documents</p>}
       {!!files?.length && (
         <label className="cf-bychat">
           <input type="checkbox" checked={byChat} onChange={(e) => {

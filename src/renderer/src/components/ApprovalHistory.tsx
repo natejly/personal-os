@@ -40,7 +40,7 @@ export default function ApprovalHistory(): JSX.Element {
         <input placeholder="Search" aria-label="Search history" value={q} onChange={(e) => filter(setQ)(e.target.value)} />
       </div>
       <div className="perm-rule-group">
-        {rows === null ? <p className="muted small">Loading…</p> : rows.length === 0 ? <p className="muted small">Nothing recorded yet.</p> : (
+        {rows === null ? <p className="muted small">Loading…</p> : rows.length === 0 ? <p className="muted small">No history</p> : (
           <ul>
             {rows.map((r) => {
               const review = reviewLine({ verdict: r.reviewer_verdict, reason: r.reviewer_reason })

@@ -30,7 +30,7 @@ export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; on
       <div className="mode-cards" role="radiogroup" aria-label="Permission mode" onKeyDown={onKey}>
         {MODES.map((m) => (
           <button key={m.id} type="button" role="radio" data-mode={m.id} aria-checked={mode === m.id} tabIndex={mode === m.id ? 0 : -1}
-            className={`mode-card ${m.id === 'allow_all' ? 'danger' : ''} ${mode === m.id ? 'on' : ''}`} onClick={() => pick(m.id)}>
+            className={`mode-card ${m.id === 'allow_all' ? 'danger' : ''} ${mode === m.id ? 'on' : ''}`} title={m.description} onClick={() => pick(m.id)}>
             <b>{m.id === 'allow_all' ? <ShieldAlert size={14} /> : <ShieldCheck size={14} />} {m.label}</b>
           </button>
         ))}
@@ -88,7 +88,7 @@ function ChatPresets({ conversationId, close, onApplied }: { conversationId: str
     <>
       <p className="pop-menu-title">Preset for this chat</p>
       {presets.map((p) => (
-        <button key={p.id} type="button" className="pop-menu-item" onClick={() => apply(p)}>{p.name}{p.description && <small>{p.description}</small>}</button>
+        <button key={p.id} type="button" className="pop-menu-item" title={p.description || undefined} onClick={() => apply(p)}>{p.name}</button>
       ))}
     </>
   )

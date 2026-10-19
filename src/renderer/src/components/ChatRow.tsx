@@ -92,7 +92,7 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
         data-chat-id={conv.id}
         className={`convo-item${sub ? ' sub' : ''} ${active ? 'active' : ''}${picked ? ' picked' : ''}`}
         aria-current={active ? 'page' : undefined}
-        title={telegram ? 'Telegram — messages from your phone show here too' : undefined}
+        title={telegram ? 'Telegram' : undefined}
         role="button"
         tabIndex={0}
         onClick={(e) => {

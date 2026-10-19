@@ -315,7 +315,7 @@ export function CommentsPanel({ state }: { state: DocCommentsState }): JSX.Eleme
       )}
       {shown.map((t) => <ThreadCard key={t.root.id} t={t} state={state} />)}
       {shown.length === 0 && !state.draft && (
-        <p className="empty-hint">Select text, then press Comment.</p>
+        <p className="empty-hint" title="Select text, then press Comment">No comments</p>
       )}
       {resolvedCount > 0 && (
         <label className="doc-comments-foot">

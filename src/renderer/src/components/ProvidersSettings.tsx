@@ -178,8 +178,8 @@ export default function ProvidersSettings({ onChanged }: { onChanged: () => Prom
           {entries.map((p) => <Row key={p.id} p={p} onChanged={changed} onRemoved={async (s) => { setStale(s); await changed() }} />)}
         </div>
       )}
-      {entries.length === 0 && presets && !adding && <p className="muted small">No providers yet.</p>}
-      {stale.length > 0 && <p className="prov-err" role="status">Still set to the removed provider: {stale.join(', ')}</p>}
+      {entries.length === 0 && presets && !adding && <p className="muted small">No providers</p>}
+      {stale.length > 0 && <p className="prov-err" role="status">Still set to the removed provider: {stale.join(', ')}.</p>}
       {adding && presets ? (
         <AddForm presets={presets} entries={entries} onCancel={() => setAdding(false)} onAdded={async () => { setAdding(false); setStale([]); await changed() }} />
       ) : (

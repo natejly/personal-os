@@ -28,7 +28,7 @@ function RecapWidget({ live }: WidgetProps): JSX.Element {
       <div className="proxy-card">
         <Sparkles size={18} />
         <strong>Daily recap</strong>
-        <span>{content ? day : 'Paused while off-screen'}</span>
+        <span>{content ? day : 'Paused'}</span>
       </div>
     )
   }
@@ -47,7 +47,7 @@ function RecapWidget({ live }: WidgetProps): JSX.Element {
       <div className="widget-scroll">
         {content
           ? <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{content}</ReactMarkdown></div>
-          : <p className="widget-sub">{loading ? 'Writing your recap…' : 'Nothing recapped yet.'}</p>}
+          : <p className="widget-sub">{loading ? 'Writing…' : 'No recap'}</p>}
       </div>
     </div>
   )

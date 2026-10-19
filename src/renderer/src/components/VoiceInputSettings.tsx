@@ -14,26 +14,26 @@ export default function VoiceInputSettings(): JSX.Element | null {
     void api.voice.setConfig(p).then(setCfg).catch((e: Error) => useStore.getState().toast(e.message, 'error'))
   }
   // Text fields commit on blur so each keystroke is not a request.
-  const text = (k: 'sttModel' | 'whisperModelPath', label: string, placeholder = ''): JSX.Element => (
+  const text = (k: 'sttModel' | 'whisperModelPath', label: string, hint: string, placeholder = ''): JSX.Element => (
     <label><span className="toggle-text"><b>{label}</b></span>
-      <input key={cfg[k]} defaultValue={cfg[k]} placeholder={placeholder} spellCheck={false}
+      <input key={cfg[k]} defaultValue={cfg[k]} title={hint} placeholder={placeholder} spellCheck={false}
         onBlur={(e) => { if (e.target.value !== cfg[k]) patch({ [k]: e.target.value }) }} />
     </label>
   )
   return (
     <>
       <label className="setting-row"><span className="toggle-text"><b>Transcription</b></span>
-        <select value={cfg.sttBackend} onChange={(e) => patch({ sttBackend: e.target.value as VoiceConfig['sttBackend'] })}>
+        <select title="Auto tries Speech, then Whistle, then whisper.cpp, then the model provider" value={cfg.sttBackend} onChange={(e) => patch({ sttBackend: e.target.value as VoiceConfig['sttBackend'] })}>
           <option value="auto">Auto</option>
           <option value="speech">On-device Speech</option>
-          <option value="whistle">On-device Whistle (seven languages, 17 MB)</option>
+          <option value="whistle">On-device Whistle</option>
           <option value="proxy">Model provider only</option>
           <option value="local">Local whisper.cpp only</option>
           <option value="off">Off</option>
         </select>
       </label>
-      {text('sttModel', 'Speech-to-text model')}
-      {text('whisperModelPath', 'whisper.cpp model file', '/opt/models/ggml-base.en.bin')}
+      {text('sttModel', 'Speech-to-text model', 'Served at your base URL, which must route /v1/audio/transcriptions')}
+      {text('whisperModelPath', 'whisper.cpp model file', 'A ggml .bin; blank uses the first in the models folder', '/opt/models/ggml-base.en.bin')}
       <Switch title="Tidy dictation with the model" checked={cfg.dictationCleanup} onChange={(v) => patch({ dictationCleanup: v })} />
       <Switch title="Drop silence hallucinations" checked={cfg.hallucinationFilter} onChange={(v) => patch({ hallucinationFilter: v })} />
     </>

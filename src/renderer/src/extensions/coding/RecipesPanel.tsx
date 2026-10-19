@@ -108,7 +108,7 @@ export default function RecipesPanel(): JSX.Element {
   return (
     <>
       {error && <p className="set-help" role="status">{error}</p>}
-      {recipes.length === 0 && <p className="set-help">No recipes yet.</p>}
+      {recipes.length === 0 && <p className="set-help">No recipes</p>}
       {recipes.map((r) => (
         <div key={r.id} className="set-row" data-testid={`recipe-${r.name}`}>
           <b>{r.name}</b> <small>v{r.current_version}{r.created_by === 'agent' ? ' (saved by the assistant)' : ''}</small>
@@ -121,7 +121,7 @@ export default function RecipesPanel(): JSX.Element {
       ))}
       {running && <RunForm recipe={running} onDone={() => { setRunning(null); load() }} />}
       <h4>Recent runs</h4>
-      {runs.length === 0 && <p className="set-help">None yet.</p>}
+      {runs.length === 0 && <p className="set-help">No runs</p>}
       {runs.slice(0, 10).map((x) => (
         <p key={x.id} className="set-help" data-testid={`recipe-run-${x.id}`}>
           {x.resolved.recipe} v{x.recipe_version} · {OUTCOME[x.status]}{x.verify_exit !== null ? ` (verify exit ${x.verify_exit})` : ''}

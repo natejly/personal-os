@@ -55,8 +55,7 @@ export default function ArtifactsView(): JSX.Element {
       {files?.length === 0 && (
         <div className="empty-state">
           <FileDown size={28} />
-          <h2>No artifacts yet</h2>
-          <p>Files the assistant makes in any chat (documents, data, images, code, downloads) show up here.</p>
+          <h2>No artifacts</h2>
         </div>
       )}
       {!!files?.length && groupByChat(files).map((g) => (

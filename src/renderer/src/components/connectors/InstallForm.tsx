@@ -27,20 +27,17 @@ export function InstallForm({ entry, busy, error, onSubmit, onCancel }: {
         <button type="button" className="icon-btn" aria-label="Cancel" onClick={onCancel}><X size={14} /></button>
       </div>
       <div className="mcp-body">
-        {entry.fields.length === 0 && <p className="muted small">Nothing to fill in. It starts as soon as it is installed.</p>}
         {entry.fields.map((f) => {
           const common = {
             value: values[f.id] ?? '', placeholder: f.placeholder, spellCheck: false, required: !!f.required,
             'aria-invalid': tried && missing.includes(f.id), onChange: (e: { target: { value: string } }) => setValues({ ...values, [f.id]: e.target.value })
           }
           return (
-            <label key={f.id}>
+            <label key={f.id} title={f.help || undefined}>
               <span>{f.label}{f.required && <b className="req" title="Required"> *</b>}{f.multiple && <small className="muted"> (one per line)</small>}</span>
               {f.multiple
                 ? <textarea rows={3} {...common} />
                 : <input {...common} type={f.secret ? 'password' : 'text'} autoComplete="off" />}
-              {f.help && <small className="muted">{f.help}</small>}
-              {f.secret && <small className="muted">Kept in the backend and never shown again.</small>}
             </label>
           )
         })}

@@ -37,7 +37,7 @@ export default function JobsView(): JSX.Element {
         {job ? <JobDetail job={job} onBack={() => openJobs(null)} /> : (
           <>
             {creating && <div className="jobs-new"><NewTask onDone={() => setCreating(false)} /></div>}
-            {jobs.length === 0 && !creating && <p className="muted">No scheduled jobs yet.</p>}
+            {jobs.length === 0 && !creating && <p className="muted">No jobs</p>}
             <div className="jobs-grid">
               {jobs.map((j) => (
                 <button key={j.id} className={`job-card${j.enabled ? '' : ' off'}`} onClick={() => openJobs(j.id)}>
@@ -94,7 +94,7 @@ function JobDetail({ job, onBack }: { job: Job; onBack: () => void }): JSX.Eleme
       {editing && <NewTask job={job} onDone={() => setEditing(false)} />}
 
       <h4>Latest outputs</h4>
-      {runs && reports.length === 0 && <p className="muted small">No reports yet.</p>}
+      {runs && reports.length === 0 && <p className="muted small">No reports</p>}
       {reports.map((r) => (
         <section key={r.run_id} className="job-report">
           <div className="job-report-head small muted">

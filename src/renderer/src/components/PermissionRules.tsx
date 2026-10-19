@@ -36,7 +36,7 @@ export default function PermissionRules({ value, onChange }: { value: Rules | un
 
   return (
     <div className="perm-rules">
-      <h4>Permission rules</h4>
+      <h4 title="Tool or Tool(pattern), e.g. Bash(git push *), Read(~/Documents/**), Agent(researcher). * matches any run of characters, ? one. Deny wins over ask, ask over allow.">Permission rules</h4>
       {KINDS.map((k) => (
         <div key={k.key} className="perm-rule-group">
           <span className="toggle-text"><b>{k.label}</b></span>
@@ -55,7 +55,7 @@ export default function PermissionRules({ value, onChange }: { value: Rules | un
       ))}
       {bad && <p className="small err" role="alert">{bad}</p>}
       <div className="perm-rule-test">
-        <span className="toggle-text"><b>Test a call</b></span>
+        <span className="toggle-text"><b title="Checks against the saved rules">Test a call</b></span>
         <form className="perm-rule-add" onSubmit={(e) => { e.preventDefault(); void test() }}>
           <select value={tool} onChange={(e) => { setTool(e.target.value as TesterTool); setResult(null) }} aria-label="Tool to test">
             {TESTERS.map((t) => <option key={t.tool} value={t.tool}>{t.label}</option>)}
@@ -68,7 +68,7 @@ export default function PermissionRules({ value, onChange }: { value: Rules | un
             <b>{result.action === 'none' ? 'No rule applies' : result.action}</b>
             {result.hardline ? ' (never allowed)' : result.rule ? <> by <code>{result.rule}</code></> : null}
             {result.reason && !result.hardline ? ` - ${result.reason}` : ''}
-            {result.action === 'none' && ' - the tool’s own setting decides.'}
+           
             {result.subjects.length > 0 && <><br /><small className="muted">Matched on {result.subjects.map((s) => <code key={s}>{s} </code>)}</small></>}
           </p>
         )}

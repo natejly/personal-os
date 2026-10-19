@@ -13,7 +13,7 @@ const LOOP_SLOT = 'agent.loop'
 
 function Enforcement({ enforcement }: { enforcement: NonNullable<RuntimeResolution['enforcement']> }): JSX.Element {
   const modes = Object.entries(enforcement)
-  if (!modes.length) return <p className="set-help">Enforces nothing here.</p>
+  if (!modes.length) return <p className="set-help">None</p>
   return (
     <table className="set-help">
       <tbody>{modes.map(([mode, dims]) => <tr key={mode}><th scope="row">{mode}</th>{Object.entries(dims).map(([d, level]) => <td key={d}>{d.replace(/_/g, ' ')}: {level}</td>)}</tr>)}</tbody>

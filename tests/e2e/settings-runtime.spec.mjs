@@ -83,7 +83,7 @@ test('the chat\'s runtime menu picks the agent loop for this chat alone', async 
   await page.getByRole('button', { name: 'Runtime for this chat' }).click()
   await page.getByLabel('Agent loop, this chat').selectOption('core/plan-execute-verify')
   await expect.poll(async () => (await api(`/conversations/${chat.id}`)).settings.runtime?.['agent.loop']).toBe('core/plan-execute-verify')
-  await expect(page.getByText('because this chat selects it')).toBeVisible()
+  await expect(page.getByLabel('Agent loop, this chat')).toHaveValue('core/plan-execute-verify')
   expect((await api('/settings')).runtime?.['agent.loop']).toBeUndefined()
   await page.getByLabel('Agent loop, this chat').selectOption('')
   await expect.poll(async () => (await api(`/conversations/${chat.id}`)).settings.runtime?.['agent.loop']).toBeUndefined()

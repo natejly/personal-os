@@ -61,7 +61,6 @@ export default function AgentHome({ def, onBack }: { def: AgentDef; onBack: () =
           <MessageSquare size={13} /> New chat as {def.name}
         </button>
       </div>
-      {!def.approved && <p className="muted small">Unapproved: it cannot chat, run routines or take delegated work until you approve it in the list.</p>}
       {def.boundaries && <p className="muted small agent-boundaries"><strong>Boundaries:</strong> {def.boundaries}</p>}
       <div className="library-tabs tabs" role="tablist">
         {TABS.map((t) => (
@@ -73,7 +72,7 @@ export default function AgentHome({ def, onBack }: { def: AgentDef; onBack: () =
 
       {tab === 'chats' && (
         <section>
-          {home && home.chats.length === 0 && <p className="muted small">No chats yet.</p>}
+          {home && home.chats.length === 0 && <p className="muted small">No chats</p>}
           <ul className="agent-home-list">
             {home?.chats.map((c) => (
               <li key={c.id}><button className="link" onClick={() => void selectChat(c.id)}>{c.title || 'Untitled'}</button><span className="muted small">{stamp(c.updated_at)}</span></li>
@@ -84,8 +83,7 @@ export default function AgentHome({ def, onBack }: { def: AgentDef; onBack: () =
 
       {tab === 'routines' && (
         <section>
-          <p className="muted small">Anything that leaves the app comes back as a proposal.</p>
-          {routines.length === 0 && !adding && <p className="muted small">No routines yet.</p>}
+          {routines.length === 0 && !adding && <p className="muted small">No routines</p>}
           {routines.length > 0 && <ul>{routines.map((j) => <JobRow key={j.id} job={j} />)}</ul>}
           {home && home.job_history?.length > 0 && (
             <>
@@ -112,7 +110,7 @@ export default function AgentHome({ def, onBack }: { def: AgentDef; onBack: () =
 
       {tab === 'skills' && (
         <section className="agent-editor">
-          {skills.length === 0 && <p className="muted small">No approved skills yet (Library › Skills).</p>}
+          {skills.length === 0 && <p className="muted small">No approved skills</p>}
           <div className="agent-chips">
             {skills.map((s) => (
               <button key={s.id} className={`tag ${def.skills.includes(s.name) ? 'on' : ''}`} title={s.description} aria-pressed={def.skills.includes(s.name)}
@@ -125,7 +123,7 @@ export default function AgentHome({ def, onBack }: { def: AgentDef; onBack: () =
       {tab === 'memory' && (
         <section className="agent-editor">
           <label>What this agent should remember
-            <textarea rows={6} maxLength={4000} value={notes} placeholder="Names, preferences, standing context. It sees this at the start of every chat and routine."
+            <textarea rows={6} maxLength={4000} value={notes} placeholder="Names, preferences, standing context"
               onChange={(e) => setNotes(e.target.value)} />
           </label>
           <div className="row-actions">
@@ -136,7 +134,7 @@ export default function AgentHome({ def, onBack }: { def: AgentDef; onBack: () =
 
       {tab === 'activity' && (
         <section>
-          {home && home.runs.length === 0 && <p className="muted small">Nothing yet.</p>}
+          {home && home.runs.length === 0 && <p className="muted small">No activity</p>}
           <ul className="agent-home-list">
             {home?.runs.map((r) => (
               <li key={r.run_id}>

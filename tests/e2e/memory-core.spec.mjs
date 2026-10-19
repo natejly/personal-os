@@ -15,7 +15,7 @@ const addBox = (page) => page.getByPlaceholder(/Remember something/)
 test('add, edit, pin, forget a memory from Settings; counts follow', async ({ grain }) => {
   const { page, api } = grain
   await openMemory(page)
-  await expect(page.getByText('No memories yet.')).toBeVisible()
+  await expect(page.getByText('No memories')).toBeVisible()
   await expect(page.getByText(/^0 memories · 0 entities, 0 relations/)).toBeVisible()
   await addBox(page).fill('I live in Lisbon')
   await page.getByLabel('Kind for the new memory').selectOption('preference')
@@ -66,7 +66,7 @@ test('add, edit, pin, forget a memory from Settings; counts follow', async ({ gr
 
   // forget moves it to the trash; restoring it from there brings it back
   await page.getByRole('button', { name: /^Forget memory/ }).click()
-  await expect(page.getByText('No memories yet.')).toBeVisible()
+  await expect(page.getByText('No memories')).toBeVisible()
   await expect(page.getByText(/^0 memories · /)).toBeVisible()
   expect(await api('/memories')).toHaveLength(0)
   const trash = await api('/trash')

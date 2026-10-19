@@ -63,7 +63,7 @@ function DocumentsWidget({ window: win, live, onConfig }: WidgetProps): JSX.Elem
         <span>{rows.length}</span>
       </div>
       {rows.length === 0 ? (
-        <div className="widget-empty">No uploads in this scope.</div>
+        <div className="widget-empty">No uploads</div>
       ) : (
         <div className="widget-scroll"><div className="widget-list">{rows.map((d) => <Row key={d.id} d={d} />)}</div></div>
       )}

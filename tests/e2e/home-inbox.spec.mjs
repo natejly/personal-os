@@ -225,7 +225,7 @@ test('Trash: deleted chat and file appear, restore one, purge one, empty the res
   await expect(trash.locator('.trash-row', { hasText: 'Purged chat' })).toHaveCount(0)
   expect((await api(`/trash/conversation/${c2.id}`, { method: 'DELETE', raw: true })).status).toBe(404)
   await trash.getByRole('button', { name: 'Empty trash' }).click({ delay: 700 })
-  await expect(trash).toContainText('Nothing in the trash')
+  await expect(trash).toContainText('Empty')
   expect((await api('/trash')).total).toBe(0)
   noErrors(grain)
 })
@@ -241,7 +241,7 @@ test('Trash: 150 deleted chats list and empty cleanly', async ({ grain }) => {
   const trash = dialog(page).locator('section', { has: page.getByRole('heading', { name: 'Trash' }) }).last()
   await expect(trash.locator('.trash-row')).toHaveCount(150)
   await trash.getByRole('button', { name: 'Empty trash' }).click({ delay: 700 })
-  await expect(trash).toContainText('Nothing in the trash')
+  await expect(trash).toContainText('Empty')
   noErrors(grain)
 })
 

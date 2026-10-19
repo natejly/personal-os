@@ -111,7 +111,7 @@ export default function DataSettings(): JSX.Element {
       <h4>Export and location</h4>
       <div className="data-row">
         <span className="toggle-text"><b>Export all data</b></span>
-        <button className="ghost-btn" onClick={() => void exportAll()} disabled={busy !== null}><Download size={14} /> {busy === 'export' ? 'Exporting…' : 'Export all data…'}</button>
+        <button className="ghost-btn" title="Excludes API keys and tokens" onClick={() => void exportAll()} disabled={busy !== null}><Download size={14} /> {busy === 'export' ? 'Exporting…' : 'Export all data…'}</button>
       </div>
 
       {info && (

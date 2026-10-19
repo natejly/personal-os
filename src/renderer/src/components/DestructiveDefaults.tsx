@@ -17,7 +17,7 @@ export function DestructiveDefaults({ value, onChange }: { value?: Partial<Defau
   const cur = { ...DEFAULT_DESTRUCTIVE, ...value }
   return (
     <div className="destructive-defaults" role="group" aria-label="Destructive actions in Manual mode">
-      <b>Destructive actions (Manual mode)</b>
+      <b title="Manual mode only. Block refuses the action outright.">Destructive actions</b>
       {ROWS.map((r) => (
         <div key={r.kind} className="row">
           <span>{r.label}</span>

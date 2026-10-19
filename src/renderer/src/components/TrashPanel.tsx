@@ -60,8 +60,8 @@ export default function TrashPanel(): JSX.Element {
 
   return (
     <section>
-      <h3>Trash</h3>
-      {list && list.total === 0 && <p className="empty-row"><Trash2 size={15} /> Nothing in the trash.</p>}
+      <h3 title={`Erased after ${list?.retention_days ?? 30} days`}>Trash</h3>
+      {list && list.total === 0 && <p className="empty-row"><Trash2 size={15} /> Empty</p>}
       {list && GROUPS.map(({ key, label }) => list.groups[key].length > 0 && (
         <div className="trash-group" key={key}>
           <h4>{label}</h4>

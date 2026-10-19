@@ -74,7 +74,7 @@ export function ChatFilesList({ conversationId, layout = 'pane', onDone }: { con
     <div className={`${layout === 'pop' ? '' : 'desk-pane scroll '}cf-list${layout === 'above' ? ' cf-above' : ''}`}>
       {problem && <p className="empty-hint" role="alert">{problem}</p>}
       {!problem && files === null && <p className="empty-hint">Loading…</p>}
-      {files?.length === 0 && <p className="empty-hint">No files in this chat yet.</p>}
+      {files?.length === 0 && <p className="empty-hint">No files</p>}
       {files && groupByKind(files).sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind)).map((g) => (
         <section key={g.kind}>
           <h4>{LABEL[g.kind] ?? g.label}</h4>

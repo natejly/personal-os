@@ -74,7 +74,6 @@ export function NeedsYou({ c, compact }: { c: CodingSession; compact?: boolean }
   return (
     <div className="tc-hint warn">
       <strong>This coding session is waiting for you</strong>
-      <div>It needs an answer in its own session.</div>
       {buttons}
       {c.attach_hint && <div className="tc-muted small">Or run <span className="mono">{c.attach_hint}</span> yourself.</div>}
     </div>
@@ -187,11 +186,6 @@ export default function CodingSessionCard(props: ToolCardProps): JSX.Element {
           <div>Runs <strong>{AGENT_LABEL[agent]}</strong> in <span className="mono">{where || '(no folder)'}</span> in the background.</div>
           {str(a.prompt) && <MonoBlock text={str(a.prompt)} label="Task" collapseAt={6} />}
           {PERMISSION_WARNING[mode] && <div className="tc-hint warn">{PERMISSION_WARNING[mode]}</div>}
-          {agent === 'claude' && (
-            <div className="tc-muted small">Runs outside Grain&apos;s sandbox with your own account; Claude Code asks for permission in its own session.</div>
-          )}
-          {agent === 'opencode' && <div className="tc-muted small">Runs inside the OS sandbox.</div>}
-          {agent === 'pi' && <div className="tc-muted small">Runs inside the OS sandbox. pi never asks before it edits files or runs commands.</div>}
         </>
       )}
       {pending && tool === 'coding_session_send' && (

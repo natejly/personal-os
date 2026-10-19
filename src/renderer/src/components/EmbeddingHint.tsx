@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { X } from '../icons'
 import { useStore } from '../store'
 
-const TEXT = 'Memory search is using keywords only. Add an OpenAI or Fireworks key, or pick an embedding model, for meaning-based search.'
+const TEXT = 'Memory search is keyword-only.'
 const KEY = 'grain.embeddingHintDismissed'
 
 /** A few-word status for Settings → Memory while search has no embedding model. */

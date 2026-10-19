@@ -48,10 +48,10 @@ const SOURCE_LABEL: Record<Skill['source'], string> = {
 }
 
 const ORDER: Skill['status'][] = ['candidate', 'approved', 'rejected']
-const SECTION: Record<Skill['status'], { title: string; blurb: string }> = {
-  candidate: { title: 'Waiting for you', blurb: 'Nothing here is in use. Read it, edit it if you like, then approve or discard.' },
-  approved: { title: 'In use', blurb: 'Injected into chats that have skills turned on, as reference material the assistant may follow.' },
-  rejected: { title: 'Discarded', blurb: 'Kept so the same suggestion is recognisable if it comes back.' }
+const SECTION: Record<Skill['status'], { title: string }> = {
+  candidate: { title: 'Waiting for you' },
+  approved: { title: 'In use' },
+  rejected: { title: 'Discarded' }
 }
 
 /**
@@ -146,7 +146,6 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
           <div className="row-actions">
             <button className="primary-btn sm" disabled={!dirty} onClick={() => void save()}>Save</button>
             {dirty && <button className="ghost-btn sm" onClick={() => setDraft(null)}>Cancel</button>}
-            {skill.status === 'approved' && <span className="muted small">Edits take effect in the next reply.</span>}
           </div>
         </div>
       )}
@@ -236,8 +235,7 @@ export default function SkillsPanel(): JSX.Element {
 
   return (
     <div className="library-panel">
-      {/* One toolbar row, the buttons the same height, with the explanation as a line under it.
-          With nothing listed the empty state below offers the same actions instead. */}
+      {/* With nothing listed the empty state below offers the same actions instead. */}
       {!empty && (
         <div className="library-toolbar">
           <div className="library-toolbar-row">
@@ -246,14 +244,10 @@ export default function SkillsPanel(): JSX.Element {
             <button className={`ghost-btn${browsing ? ' on' : ''}`} aria-expanded={browsing} onClick={() => setBrowsing(!browsing)}><Globe size={14} /> Popular skills</button>
             <button className={`ghost-btn${preview ? ' on' : ''}`} aria-pressed={!!preview} onClick={() => void togglePreview()}><Eye size={14} /> What the assistant sees</button>
           </div>
-          <p className="muted small">Stays off until you approve it.</p>
         </div>
       )}
       {browsing && (
         <div className="skill-body standalone">
-          <p className="muted small">
-            Import adds a candidate for you to read and approve. Bundled scripts and assets are not imported.
-          </p>
           {(Object.keys(PRESET_KIND_LABEL) as SkillPreset['kind'][]).map((kind) => (
             <section key={kind} className="preset-group">
               <h5>{PRESET_KIND_LABEL[kind]}</h5>
@@ -280,11 +274,10 @@ export default function SkillsPanel(): JSX.Element {
         <div className="skill-body standalone">
           {preview.block ? (
             <p className="muted small">
-              {preview.included.length} approved skill{preview.included.length === 1 ? '' : 's'}, about {preview.tokens_estimate} tokens.{' '}
-              Chats get the full text below while it fits the model's window; past that they get names and one-line descriptions and open a procedure when it applies.
-              {preview.omitted.length > 0 && ` Past the procedure limit and left out: ${preview.omitted.map((o) => o.name).join(', ')}.`}
+              {preview.included.length} approved skill{preview.included.length === 1 ? '' : 's'}, about {preview.tokens_estimate} tokens.
+              {preview.omitted.length > 0 && ` Left out: ${preview.omitted.map((o) => o.name).join(', ')}.`}
             </p>
-          ) : <p className="muted small">No approved procedures, so chats see nothing from here.</p>}
+          ) : <p className="muted small">No approved skills</p>}
           {preview.block && <pre className="skill-preview">{preview.block}</pre>}
         </div>
       )}
@@ -301,7 +294,6 @@ export default function SkillsPanel(): JSX.Element {
           <div className="row-actions">
             <button className="primary-btn sm" disabled={!(mdUrl.trim() || mdText.trim()) || !!fetching} onClick={() => void importMd()}>{fetching ? 'Importing…' : 'Import as candidate'}</button>
             <button className="ghost-btn sm" onClick={() => setImporting(false)}>Cancel</button>
-            <span className="muted small">Imported skills wait for your approval; allowed-tools and bundled files are ignored.</span>
           </div>
         </div>
       )}
@@ -321,15 +313,13 @@ export default function SkillsPanel(): JSX.Element {
           <div className="row-actions">
             <button className="primary-btn sm" disabled={!form.name.trim() || saving} onClick={() => void add()}>Add as candidate</button>
             <button className="ghost-btn sm" onClick={() => setAdding(false)}>Cancel</button>
-            <span className="muted small">It stays off until you approve it.</span>
           </div>
         </div>
       )}
       {empty && (
         <div className="empty-state">
           <Sparkles size={28} />
-          <h2>No skills yet</h2>
-          <p>A skill is a way of doing a task that the assistant can follow again. Write one, or save a reply that used tools. It stays off until you approve it.</p>
+          <h2>No skills</h2>
           <div className="library-toolbar-row">
             <button className="primary-btn" onClick={() => setAdding(true)}><Plus size={14} /> New skill</button>
             <button className="ghost-btn" onClick={() => setImporting(true)}><Upload size={14} /> Import skill file</button>
@@ -343,7 +333,6 @@ export default function SkillsPanel(): JSX.Element {
         return (
           <section key={status} className="skill-section">
             <h4>{SECTION[status].title} <span className="count">{rows.length}</span></h4>
-            <p className="muted small">{SECTION[status].blurb}</p>
             {rows.map((s) => <SkillRow key={s.id} skill={s} />)}
           </section>
         )

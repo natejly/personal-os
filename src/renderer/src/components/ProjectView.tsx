@@ -55,7 +55,6 @@ export default function ProjectView(): JSX.Element {
         <div className="empty-state">
           <FolderX size={28} />
           <h2>Project not found</h2>
-          <p>It may have been deleted, or moved to the trash.</p>
           <button className="primary-btn" onClick={() => setView('chat')}>Back to chats</button>
         </div>
       </main>
@@ -91,8 +90,7 @@ export default function ProjectView(): JSX.Element {
             {rows.length === 0 && (
               <div className="empty-state">
                 <MessageSquare size={28} />
-                <h2>No chats yet</h2>
-                <p>A chat started here follows this project&apos;s instructions and can use its knowledge and memory.</p>
+                <h2>No chats</h2>
               </div>
             )}
             <div className="chat-rows">
@@ -119,9 +117,8 @@ export default function ProjectView(): JSX.Element {
         </details>
         <details className="project-sec project-fold project-tools" aria-label={L.instructions}>
           {fold(<BookOpen size={14} />, L.instructions, prompt.trim() ? oneLine(prompt, 90) : 'None')}
-          <textarea className="instructions" rows={4} value={prompt}
+          <textarea className="instructions" rows={4} value={prompt} title="Added to every chat's system prompt here; saved when you click away"
             onChange={(e) => setPrompt(e.target.value)} onBlur={() => prompt !== project.system_prompt && void updateProject(id, { system_prompt: prompt })} />
-          <p className="muted small">Added to every chat&apos;s system prompt here, after your global one. Saved when you click away.</p>
         </details>
         <details className="project-sec project-fold project-tools" aria-label={L.memory}>
           {fold(<Brain size={14} />, L.memory, String((st?.memories ?? 0) + (st?.nodes ?? 0)))}

@@ -16,7 +16,7 @@ test('workflows panel: empty state, create through the editor with live validati
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const { page } = grain
   await openWorkflows(page)
-  await expect(page.getByText('No workflows yet')).toBeVisible()
+  await expect(page.getByText('No workflows')).toBeVisible()
   await page.getByRole('button', { name: 'New workflow' }).first().click()
   const ta = page.getByLabel(/Definition \(JSON\)/)
   await ta.fill('{ not json')

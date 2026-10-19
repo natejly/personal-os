@@ -175,14 +175,13 @@ export default function ProvidersSettings({ onChanged }: { onChanged: () => Prom
   return (
     <>
       <h4>Providers</h4>
-      <p className="muted small">Add a provider and its key. Grain checks the key before saving it, and every model from a provider with a key can be picked below. These changes apply at once, not with Save.</p>
       {loadError && <p className="prov-err" role="alert">Could not load providers: {loadError}</p>}
       {entries.length > 0 && (
         <div className="setting-list">
           {entries.map((p) => <Row key={p.id} p={p} onChanged={changed} onRemoved={async (s) => { setStale(s); await changed() }} />)}
         </div>
       )}
-      {entries.length === 0 && presets && !adding && <p className="muted small">No provider yet. Add one to start chatting.</p>}
+      {entries.length === 0 && presets && !adding && <p className="muted small">No providers</p>}
       {stale.length > 0 && <p className="prov-err" role="status">Still set to the removed provider: {stale.join(', ')}. Pick another model below.</p>}
       {adding && presets ? (
         <AddForm presets={presets} entries={entries} onCancel={() => setAdding(false)} onAdded={async () => { setAdding(false); setStale([]); await changed() }} />

@@ -40,11 +40,10 @@ function ChatRuntime({ conversationId, projectId }: { conversationId: string; pr
       {error && <p className="pop-menu-note" role="status">{error}</p>}
       {slots?.map((s) => (
         <label key={s.id} className="pop-menu-field">{slotNoun(s.id)}
-          <select aria-label={`${slotNoun(s.id)}, this chat`} value={pickedId(s.selected.chat)} onChange={(e) => select(s.id, e.target.value || null)}>
+          <select aria-label={`${slotNoun(s.id)}, this chat`} title={s.resolution.reason} value={pickedId(s.selected.chat)} onChange={(e) => select(s.id, e.target.value || null)}>
             <option value="">As set wider</option>
             {s.providers.filter((p) => p.available).map((p) => <option key={p.id} value={p.id}>{p.label}{p.core ? '' : ` (${p.tier})`}</option>)}
           </select>
-          <small>{s.resolution.reason}</small>
         </label>
       ))}
     </>

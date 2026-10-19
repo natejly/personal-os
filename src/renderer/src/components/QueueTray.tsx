@@ -25,7 +25,7 @@ export default function QueueTray({ conversationId, busy, onEdit, onSendNow, onR
   return (
     <div className="queue-tray" aria-label="Queued follow-ups">
       <div className="queue-tray-head">
-        <span>{waiting ? 'Paused' : 'Queued: runs after this reply'}</span>
+        <span>{waiting ? 'Paused' : 'Queued'}</span>
         {waiting && <button className="link" onClick={onResume}>Resume</button>}
       </div>
       {q.items.map((item) => (

@@ -67,11 +67,11 @@ export function AlwaysAsk({ value, onChange }: { value: string[]; onChange: (nex
     <div className="tool-perms">
       {lockable.map((t) => (
         <label key={t.name} className={`toggle-row plain ${!t.available ? 'unavailable' : ''}`}>
-          <span className="toggle-text"><b>{toolLabel(t.name)} <small className="muted">{humanizeName(t.group)}</small></b><small className="clamp-2" title={t.description}>{t.description}</small></span>
+          <span className="toggle-text" title={t.description}><b>{toolLabel(t.name)} <small className="muted">{humanizeName(t.group)}</small></b></span>
           <input type="checkbox" checked={value.includes(t.name)} onChange={(e) => toggle(t.name, e.target.checked)} /><span className="switch" />
         </label>
       ))}
-      {lockable.length === 0 && <p className="muted small">No tool here acts outside the app yet.</p>}
+      {lockable.length === 0 && <p className="muted small">No tools</p>}
     </div>
   )
 }
@@ -100,8 +100,8 @@ export function ToolGlobalToggles({ value, onChange }: { value: Record<string, T
               const label = toolLabel(t.name)
               return (
                 <div key={t.name} className={`tool-perm row ${mode === 'off' ? 'off' : ''} ${!t.available ? 'unavailable' : ''}`}>
-                  {/* The description is written for the model and runs long: two lines here, all of it on hover. */}
-                  <span className="toggle-text"><b>{label} <small className="muted">{DANGER_LABEL[t.danger]}</small></b><small className="clamp-2" title={t.description}>{t.description}</small></span>
+                  {/* The description is written for the model and runs long: it is the row's tooltip. */}
+                  <span className="toggle-text" title={t.description}><b>{label} <small className="muted">{DANGER_LABEL[t.danger]}</small></b></span>
                   <div className="seg" role="group" aria-label={`Permission for ${label}`} title={locked ? LOCKED_TIP : undefined}>
                     {((locked ? ['ask', 'off'] : ['on', 'ask', 'off']) as ToolMode[]).map((m) => <button key={m} type="button" className={mode === m ? 'on' : ''} aria-pressed={mode === m} onClick={() => set(t.name, m)}>{m}</button>)}
                   </div>
@@ -111,7 +111,7 @@ export function ToolGlobalToggles({ value, onChange }: { value: Record<string, T
           </details>
         )
       })}
-      {needle && groups.length === 0 && <p className="muted small">No tool matches “{q.trim()}”.</p>}
+      {needle && groups.length === 0 && <p className="muted small">No matches</p>}
     </div>
   )
 }

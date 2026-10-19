@@ -14,7 +14,6 @@ export default function RunSafetySettings({ draft, patch }: Props): JSX.Element 
   return (
     <>
       <HostList title="Allowed hosts after reading untrusted content"
-        help="After reading outside content, a reply may only fetch links you or a search gave it, plus these hosts. A name also allows its subdomains."
         value={draft.fetchAllowlist ?? []} onChange={(fetchAllowlist) => patch({ fetchAllowlist })} />
       <TrustExternalToggle draft={draft} patch={patch} />
     </>
@@ -26,7 +25,6 @@ export default function RunSafetySettings({ draft, patch }: Props): JSX.Element 
 export function TrustExternalToggle({ draft, patch }: Props): JSX.Element {
   return (
     <Switch danger={!!draft.trustExternalContent} title="Trust content from outside Grain" label="Trust content from outside Grain"
-      help="Off by default. Lets a reply that has read content from outside Grain run commands and touch files without asking each time. Credential stores, Grain's own files and destructive commands still ask."
       checked={!!draft.trustExternalContent} onChange={(trustExternalContent) => patch({ trustExternalContent })} />
   )
 }
@@ -35,8 +33,6 @@ export function SnapshotToggle({ draft, patch }: Props): JSX.Element {
   const snapOk = draft.snapshotsAvailable !== false
   return (
     <Switch title="Snapshot folders before changes" disabled={!snapOk} checked={snapOk && draft.snapshotsEnabled !== false} onChange={(snapshotsEnabled) => patch({ snapshotsEnabled })}
-      help={snapOk
-        ? 'Lets Undo reverse shell effects too. Keeps a copy before a reply first changes a folder.'
-        : 'Unavailable on this Mac: folder snapshots need git installed (xcode-select --install).'} />
+      help={snapOk ? undefined : 'Unavailable on this Mac: install git (xcode-select --install)'} />
   )
 }

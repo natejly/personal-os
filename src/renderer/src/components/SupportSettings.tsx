@@ -57,12 +57,9 @@ export default function SupportSettings(): JSX.Element {
   return (
     <>
       <h4>Support</h4>
-      <p className="muted small">
-        Includes versions, settings with keys masked, recent logs and restart history. No messages or files.
-      </p>
       <div className="button-row">
         <button type="button" className="ghost-btn" onClick={() => useStore.getState().openHelp('guide')}><CircleHelp size={14} /> Help</button>
-        <button type="button" className="ghost-btn" disabled={busy} onClick={() => void copy()}><Copy size={14} /> Copy diagnostics</button>
+        <button type="button" className="ghost-btn" title="Versions, settings with keys masked, recent logs and restart history; no messages or files" disabled={busy} onClick={() => void copy()}><Copy size={14} /> Copy diagnostics</button>
         <button type="button" className="ghost-btn" disabled={busy} onClick={() => void save()}><Download size={14} /> Save diagnostics…</button>
         <button type="button" className="ghost-btn" onClick={() => void window.os.openLogs()}><FolderOpen size={14} /> Open logs</button>
         <button type="button" className="ghost-btn" disabled={busy} onClick={() => void run(() => restart())}><RefreshCw size={14} /> Restart backend</button>

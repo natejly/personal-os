@@ -21,12 +21,14 @@ const render = (desk?: FullDesk): string => {
 
 const btn = (html: string, key: string): string | undefined => html.match(new RegExp(`<button[^>]*data-testid="desk-tab-${key}"[^>]*>`))?.[0]
 
-test('a live worker and a checklist add no Checklist or Workers tab, and Context is the expanded card', () => {
+test('a live worker and a checklist add no Checklist or Workers tab, and Context is the selected tab', () => {
   const html = render()
   assert.equal(btn(html, 'checklist'), undefined)
   assert.equal(btn(html, 'workers'), undefined)
-  assert.match(btn(html, 'context') ?? '', /aria-expanded="true"/)
+  assert.match(btn(html, 'context') ?? '', /aria-selected="true"/)
   assert.ok(btn(html, 'context'))
+  assert.match(html, /role="tablist"/)
+  assert.match(html, /role="tabpanel"[^>]*aria-labelledby="side-tab-context"/)
   assert.equal(btn(html, 'changes'), undefined) // no files, no desk runs: nothing to show
   assert.equal(btn(html, 'review'), undefined)
 })

@@ -5,7 +5,7 @@
   --sidebar-w: 260px;
   /* Title bars: the sidebar top, chat and page headers all share one height. */
   --bar-h: 40px;
-  --page-agent-w: 380px;
+  --side-panel-w: 380px;
   /* Room the native window controls take at the top right (none on macOS, where they sit on the left). */
   --overlay-w: 0px;
   /* Room the macOS traffic lights take at the top left. */
@@ -579,13 +579,13 @@ kbd {
 .titlebar-slot { display: flex; align-items: center; gap: 6px; }
 /* The page agent is a third column of the shell, not a drawer inside one view: ⌘I opens it over
    Files, Calendar, Todos and the canvas alike. */
-.app.page-agent-open { grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--page-agent-w); }
-.app.page-agent-open.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr) var(--page-agent-w); }
+.app.page-agent-open { grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--side-panel-w); }
+.app.page-agent-open.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr) var(--side-panel-w); }
 /* Same breakpoint as the workspace panel: too narrow for sidebar, view and panel side by side, so the panel floats over the view. */
-@media (max-width: 1100px) {
+@media (max-width: 900px) {
   .app.page-agent-open { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
   .app.page-agent-open.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
-  .app.page-agent-open > .page-agent { position: absolute; inset: 0 0 0 auto; width: min(var(--page-agent-w), calc(100% - 160px)); z-index: 30; box-shadow: var(--shadow, 0 8px 24px rgb(0 0 0 / 0.18)); }
+  .app.page-agent-open > .page-agent { position: absolute; inset: 0 0 0 auto; width: min(var(--side-panel-w), calc(100% - 16px)); z-index: 30; box-shadow: var(--shadow, 0 8px 24px rgb(0 0 0 / 0.18)); }
 }
 .app.loading { background: var(--bg); }
 
@@ -1557,14 +1557,10 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .ghost-btn.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .ghost-btn.full { width: 100%; justify-content: center; margin-top: 12px; }
 
-/* ---------- Chat body + context drawer ---------- */
+/* ---------- Chat body ---------- */
 .chat-body { flex: 1; display: flex; min-height: 0; position: relative; }
-.resize-handle.ctx-edge { right: calc(var(--context-drawer-w, 340px) - 4px); }
 .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 360px; position: relative; container: chatmain / inline-size; }
-.context-drawer { width: var(--context-drawer-w, 340px); border-left: 1px solid var(--border); background: var(--bg-elev); display: flex; flex-direction: column; overflow-y: auto; font-size: 13px; flex-shrink: 0; }
-.context-drawer > header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg-elev); z-index: 1; }
 .context-embedded { font-size: 13px; padding: 0; }
-.context-drawer h3 { margin: 0; font-size: 14px; }
 /* The side panel beside a chat: what the `show` tool (or "Open in panel" on a block) put there. The reply's own
    block renderers fill it edge to edge; its resize handle sits inside its own left edge. */
 .show-panel { position: relative; width: var(--show-panel-w, 520px); border-left: 1px solid var(--border); background: var(--bg-elev); display: flex; min-width: 0; flex-shrink: 0; }
@@ -1637,9 +1633,9 @@ label:active > input:not(:disabled):checked + .switch::after { left: calc(16px -
 .ctx-meter-fill { height: 100%; background: var(--accent); opacity: .7; }
 .ctx-meter-fill.hot { opacity: 1; }
 .ctx-summary { margin-top: 6px; font-size: 12px; }
-.ctx-summary pre { white-space: pre-wrap; max-height: 220px; overflow: auto; margin: 6px 0; font-size: 11px; color: var(--text-faint); }
+.ctx-summary pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; font-size: 11px; color: var(--text-faint); }
 .ctx-meta { display: flex; justify-content: space-between; align-items: center; color: var(--text-faint); font-size: 11px; margin-bottom: 8px; }
-.ctx-prompt { font-size: 11px; white-space: pre-wrap; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 10px; max-height: 240px; overflow: auto; color: var(--text-muted); }
+.ctx-prompt { font-size: 11px; white-space: pre-wrap; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 10px; overflow-wrap: anywhere; color: var(--text-muted); }
 .ctx-used section { margin-top: 12px; }
 .ctx-used h5 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 12px; color: var(--text-muted); }
 .ctx-used h5 .link { margin-left: auto; font-size: 11px; }
@@ -2321,7 +2317,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .trace-bar { position: absolute; top: 0; height: 100%; border-radius: 2px; background: var(--span); min-width: 2px; }
 .trace-row.running .trace-bar { animation: trace-pulse 1s ease-in-out infinite; }
 @keyframes trace-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
-.trace-meta { margin: 8px 0 2px 23px; font-size: 10.5px; white-space: pre-wrap; word-break: break-word; background: var(--bg-input); border-radius: 6px; padding: 8px; max-height: 260px; overflow: auto; color: var(--text-muted); }
+.trace-meta { margin: 8px 0 2px 23px; font-size: 10.5px; white-space: pre-wrap; word-break: break-word; background: var(--bg-input); border-radius: 6px; padding: 8px; color: var(--text-muted); }
 
 /* ---------- Approvals ---------- */
 .approval { margin: 0 10px 10px; padding: 10px 12px; border-radius: 10px; background: var(--await-fill); border: 1px solid var(--await-border); }
@@ -3256,7 +3252,14 @@ select:focus-visible {
 .skill-desc { margin: 4px 0 0; }
 
 /* ---------- Page agent (⌘I) ---------- */
-.page-agent { position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--bg-elev); border-left: 1px solid var(--border); font-size: 13px; }
+.side-panel.page-agent { width: auto; }
+.page-agent-sent { flex: none; padding: 4px 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
+.page-agent-sent-btn { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-height: 28px; padding: 0; border: 0; background: none; color: var(--text-muted); font: inherit; text-align: left; cursor: pointer; }
+.page-agent-sent-btn:hover:not(:disabled) { color: var(--text); }
+.page-agent-sent-btn:disabled { cursor: default; }
+.page-agent-sent-btn:focus-visible, .page-agent-sent-text:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.page-agent-sent-btn b { color: var(--text); font-weight: 600; }
+.page-agent-sent-text { margin: 4px 0 6px; padding: 8px 10px; max-height: 40vh; overflow: auto; white-space: pre-wrap; word-break: break-word; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 11.5px; }
 .page-agent-actions { display: flex; align-items: center; gap: 2px; }
 .page-agent-ctx { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 12px; }
 .page-agent-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -3533,4 +3536,4 @@ select:focus-visible {
 .traces-round { list-style: none; padding: 4px 6px; border-radius: 6px; background: var(--hover); }
 .traces-tool { margin: 2px 0 2px 14px; font-size: 12px; }
 .traces-tool.error summary { color: var(--danger); }
-.traces-tool pre { max-height: 220px; overflow: auto; white-space: pre-wrap; }
+.traces-tool pre { white-space: pre-wrap; overflow-wrap: anywhere; }

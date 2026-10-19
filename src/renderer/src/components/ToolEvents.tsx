@@ -336,7 +336,7 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
   const approveTool = useStore((s) => s.approveTool)
   const tools = useStore((s) => s.tools)
   const lastBrowser = browserSession ? latestBrowserCall(events) : null
-  // The context panel only ever shows the main view's chat, so "See why" is offered there alone.
+  // "See why" opens the Traces tab of the full-window chat's side panel, so it is offered in the main view's chat alone.
   const inMainChat = useStore((s) => s.view === 'chat' && s.focusedConversationId === conversationId)
   // A chat working autonomously shows its desk's plan card at the foot of the transcript (DeskInline), so not twice.
   // That includes the moment before the desk row has loaded: the card is not drawn here first and moved a frame later.

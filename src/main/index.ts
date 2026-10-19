@@ -266,7 +266,7 @@ function buildMenu(): void {
         item('chat-search'),
         { type: 'separator' },
         item('toggle-sidebar'),
-        // ⌘I is Quick chat (the page agent), or the Context panel while a chat is showing; the renderer routes it by view.
+        // ⌘I toggles the side panel on Context while a chat is showing and opens Quick chat (the page agent) elsewhere; the renderer routes it by view, so the label names both.
         item('toggle-desk'),
         item('page-agent'),
         item('panel-context'),

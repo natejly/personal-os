@@ -91,6 +91,7 @@
  "mapToday": true,
  "mapUploads": true,
  "mapWorkers": false,
+ "mascot": "grain",
  "mcpServerNotes": true,
  "memoryRerank": true,
  "microAt": 0.25,

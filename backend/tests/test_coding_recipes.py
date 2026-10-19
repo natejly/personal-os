@@ -242,6 +242,7 @@ def test_a_failed_start_is_recorded_and_raised(rig):
         rig.run()
     run = rig.recipes.list_runs()[0]
     assert run["status"] == "agent_failed" and "already running" in run["verify_tail"]
+    assert not [e for e in rig.events if e[0] == "wake"]  # the tool's error is the chat's answer: no extra turn about it
 
 
 # ---- the state machine ----

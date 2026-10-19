@@ -265,9 +265,10 @@ class Terminals:
         with self.db.tx() as c:
             c.execute(f"UPDATE coding_terminals SET {', '.join(f'{k} = ?' for k in cols)} WHERE id = ?", (*cols.values(), terminal_id))
 
-    def _touch(self, row: dict[str, Any], reply: dict[str, Any] | None = None) -> None:
-        """Record use, and what the hub says about the user: whether they have it open or have typed into it."""
-        cols: dict[str, Any] = {"last_used_at": time.time()}
+    def _touch(self, row: dict[str, Any], reply: dict[str, Any] | None = None, *, used: bool = True) -> None:
+        """Record use (unless `used` is false: the card only looking), and what the hub says about the user: whether they have it
+        open or have typed into it."""
+        cols: dict[str, Any] = {"last_used_at": time.time()} if used else {}
         if reply:
             for key, col in (("attached", "user_attached"), ("dirty", "user_dirty")):
                 if key in reply:
@@ -365,6 +366,8 @@ class Terminals:
         text = partial + line
         if len(text) > SEND_MAX or LINE_BAD.search(text):
             return f"A line typed into a terminal is one line of at most {SEND_MAX} characters with no control characters."
+        if text.endswith("\\"):
+            return "A line typed into a terminal cannot end in a backslash: the shell would join it to the next line, which is judged alone."
         if logs.redact_literals(text, reliability.secret_values(cfg)) != text or redact.scrub_command_output(text) != text:
             return "That line contains a credential; a secret is never typed into a terminal."
         if why := permrules.hardline(text):
@@ -581,7 +584,7 @@ class Terminals:
         out = []
         for row in rows:
             try:
-                self._touch(row, await self._call(row, {"type": "status", "terminal_id": row["id"]}))
+                self._touch(row, await self._call(row, {"type": "status", "terminal_id": row["id"]}), used=False)
             except TerminalError:
                 pass  # the app is not connected: show what was last known (a terminal it lost is closed, and drops out below)
             if row["state"] == "open":

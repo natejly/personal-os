@@ -205,6 +205,8 @@ def test_a_bad_schema_is_refused_before_anything_runs(rig):
                         ({"allOf": [{"$ref": "file:///etc/passwd"}]}, "only references inside"),
                         ({"type": "object", "description": "x" * 17_000}, "over 16000 bytes"),
                         ({"$ref": "#"}, "refers to itself"),
+                        ({"$ref": "#/$defs/missing"}, "does not resolve"),
+                        ({"$dynamicRef": "http://z"}, "does not resolve"),
                         ({"$defs": {"a": {"$ref": "#/$defs/a"}}, "$ref": "#/$defs/a"}, "refers to itself")):
         assert why in rig.run(schema=schema)["error"], schema
     assert not Path(f"{rig.exe}.argv").exists()  # nothing was spawned

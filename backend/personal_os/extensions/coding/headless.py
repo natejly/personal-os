@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
+from referencing.exceptions import Unresolvable
 
 from ... import mac, shell
 from ...bounds import clamp_int
@@ -72,6 +73,8 @@ def check_schema(schema: Any) -> dict[str, Any]:
         Draft202012Validator(schema).is_valid(None)  # a reference loop only shows when validating, after the paid run
     except RecursionError as e:
         raise ValueError("schema refers to itself without ever narrowing the value, so it can never be checked.") from e
+    except Unresolvable as e:
+        raise ValueError(f"schema has a reference that does not resolve inside it: {str(e)[:200]}") from e
     return schema
 
 

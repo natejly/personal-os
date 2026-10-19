@@ -381,19 +381,21 @@ class Recipes:
         try:
             row = await self.coding.sessions.start(**resolved["start"], ctx=ctx, recipe_run_id=run_id)
         except (CodingError, shell.ShellError) as e:
-            self._set(run_id, status="agent_failed", ended_at=time.time(), verify_tail=shell._scrub(str(e))[:RETRY_TAIL])
+            # a chat's run that cannot start is reported by the tool's error, so the chat is not also woken
+            self._set(run_id, status="agent_failed", ended_at=time.time(), verify_tail=shell._scrub(str(e))[:RETRY_TAIL],
+                      announce=self.get_run(run_id)["origin"] != "chat")
             raise
         status = "agent_failed" if row["status"] == "failed" else "working"
         self._set(run_id, status=status, session_id=row["id"], started_at=time.time(),
                   **({"ended_at": time.time(), "verify_tail": row.get("detail")} if status != "working" else {}))
         return {"run_id": run_id, "session_id": row["id"], "status": status}
 
-    def _set(self, run_id: str, **cols: Any) -> None:
+    def _set(self, run_id: str, *, announce: bool = True, **cols: Any) -> None:
         with self.db.tx() as c:
             c.execute(f"UPDATE coding_recipe_runs SET {', '.join(f'{k} = ?' for k in cols)} WHERE id = ?", (*cols.values(), run_id))
         run = self.get_run(run_id)
         self.coding.api.app.publish("coding_recipe_run", {k: run[k] for k in ("id", "recipe_id", "recipe_version", "status", "attempt", "session_id")})
-        if run["status"] in TERMINAL:
+        if announce and run["status"] in TERMINAL:
             self._announce(run)
 
     def _announce(self, run: dict[str, Any]) -> None:

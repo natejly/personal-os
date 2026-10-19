@@ -308,6 +308,22 @@ def test_text_typed_without_enter_is_judged_with_what_follows_it(tmp_path, monke
     assert "never runs" in send(tb, cfg, tid, "/")["error"]  # the whole line is what is judged
 
 
+def test_a_line_ending_in_a_backslash_is_refused_so_the_shell_cannot_join_two_judged_lines(tmp_path, monkeypatch):
+    tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
+    tid = opened(tb, ctx_of(cfg), str(home / "work"))
+    assert "backslash" in send(tb, cfg, tid, "to\\")["error"]
+    assert "backslash" in call(tb, "terminal_send", ctx_of(cfg), terminal_id=tid, text="to\\", submit=False)["error"]
+
+
+def test_the_cards_status_poll_does_not_count_as_use(tmp_path, monkeypatch):
+    tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
+    tid = opened(tb, ctx_of(cfg), str(home / "work"))
+    old = time.time() - terms.IDLE_CLOSE_S - 5
+    coding.terminals._save(tid, last_used_at=old)
+    asyncio.run(coding.terminals.live_status())
+    assert coding.terminals.row(tid)["last_used_at"] == old
+
+
 def test_the_send_rate_is_limited(tmp_path, monkeypatch):
     tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
     tid = opened(tb, ctx_of(cfg), str(home / "work"))

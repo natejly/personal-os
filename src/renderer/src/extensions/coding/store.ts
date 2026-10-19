@@ -59,7 +59,7 @@ export const useCoding = create<CodingState>((set, get) => ({
     useStore.setState((st) => ({ contextOpen: false, deskPanel: true, deskTabRequest: { tab: 'terminal', n: (st.deskTabRequest?.n ?? 0) + 1, at } }))
   },
   attached: null,
-  attach: (id, mode) => { void startEntry(ensureEntry(id, mode)); set({ attached: { id, mode } }) },
+  attach: (id, mode) => { get().detach(); void startEntry(ensureEntry(id, mode)); set({ attached: { id, mode } }) },
   detach: () => {
     const { attached } = get()
     const entry = attached?.mode === 'agent' ? getEntry(attached.id, 'agent') : undefined

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -326,6 +327,18 @@ def test_pack_drops_a_bundle_whose_source_is_gone(ext: Path) -> None:
     (ext / "dist" / "extension.js").write_text("old", "utf-8")
     (ext / "extension.tsx").unlink()
     assert "dist/extension.js" not in json.loads(pack.pack(ext).read_text("utf-8"))["files"] and not (ext / "dist" / "extension.js").exists()
+
+
+def test_a_failed_build_leaves_no_stale_bundle_or_lock(ext: Path) -> None:
+    try:
+        pack.esbuild()
+    except FileNotFoundError:
+        pytest.skip("esbuild is not installed")
+    pack.pack(ext)
+    (ext / "extension.tsx").write_text("export const x: = ;\n", "utf-8")
+    with pytest.raises(subprocess.CalledProcessError):
+        pack.pack(ext)
+    assert not (ext / "dist" / "extension.js").exists() and not (ext / "extension.lock.json").exists()
 
 
 def test_pack_command_refuses_an_extension_with_errors(ext: Path, capsys: Any) -> None:

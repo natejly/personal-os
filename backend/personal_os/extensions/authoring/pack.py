@@ -46,13 +46,13 @@ def pack(root: Path) -> Path:
     manifest = load_manifest(root / "extension.json")
     if manifest.kind == "profile":
         raise ValueError("a profile has no code to pin: it ships as its extension.json alone")
+    lock = root / LOCK
+    lock.unlink(missing_ok=True)  # a build that fails must not leave the last build's bundle and pin looking current
+    (root / BUNDLE).unlink(missing_ok=True)
     if (root / "extension.tsx").is_file():
         subprocess.run([esbuild(), "extension.tsx", "--bundle", "--format=esm", "--platform=browser", "--jsx=automatic",
                         *(f"--external:{m}" for m in SHARED), f"--outfile={BUNDLE}", "--log-level=warning"],
                        cwd=root, check=True, capture_output=True, text=True)
-    else:
-        (root / BUNDLE).unlink(missing_ok=True)  # a bundle left from a removed extension.tsx would be pinned and shipped
     files = content_hash(root)
-    lock = root / LOCK
     lock.write_text(json.dumps({"id": manifest.id, "version": manifest.version, "hash": digest(files), "declared": declared(manifest), "files": files}, indent=2) + "\n", "utf-8")
     return lock

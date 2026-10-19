@@ -1,6 +1,6 @@
 import type {
   ArchivedInboxRun,
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, DriveBackupRun, DriveBackupStatus, Recap, Conversation, ConversationSettings, WorkerInfo, ContextUsed, ContextMeter, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, DriveBackupRun, DriveBackupStatus, Recap, Conversation, ConversationSettings, WorkerInfo, ContextUsed, ContextMeter, ContextPreview, MessageContext, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
   Memory, MemoryProposal, Profile, ProfileHeld, RuntimeResolution, RuntimeSelection, RuntimeView, PermissionPreset, PresetBody, PresetDiff, PresetScope, EffectiveConfig, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, ExtensionCommand, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
@@ -682,6 +682,8 @@ export const api = {
   /** Folder changes a reply made (whole-folder snapshots), and the user's Undo / Redo of them. */
   runChanges: (runId: string) => req<RunChanges>(`/runs/${runId}/changes`),
   conversationChanges: (id: string) => req<{ available: boolean; runs: ChatRunChanges[] }>(`/conversations/${id}/changes`),
+  /** The context ledger of a reply; `texts_available` is false once its request log is pruned. */
+  getMessageContext: (messageId: string) => req<MessageContext>(`/messages/${messageId}/context`),
   messageChanges: (messageId: string) => req<RunChanges>(`/messages/${messageId}/changes`),
   undoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/undo`, { method: 'POST' }),
   redoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/redo`, { method: 'POST' }),
@@ -728,8 +730,8 @@ export const api = {
   activateMessage: (conversationId: string, messageId: string) =>
     req<Conversation>(`/conversations/${conversationId}/messages/${messageId}/activate`, { method: 'POST' }),
   discardSummary: (conversationId: string) => req<{ removed: boolean }>(`/conversations/${conversationId}/summary`, { method: 'DELETE' }),
-  contextPreview: (projectId: string | null, query: string, convSettings?: Partial<ConversationSettings>) =>
-    req<ContextUsed>('/context/preview', { method: 'POST', body: json({ project_id: projectId, query, conv_settings: convSettings ?? {} }) }),
+  contextPreview: (projectId: string | null, query: string, convSettings?: Partial<ConversationSettings>, conversationId?: string) =>
+    req<ContextPreview>('/context/preview', { method: 'POST', body: json({ project_id: projectId, query, conv_settings: convSettings ?? {}, conversation_id: conversationId ?? null }) }),
   memories: {
     list: (s: Scope, q = '') => req<Memory[]>(`/memories?${scope(s)}&q=${encodeURIComponent(q)}`),
     create: (m: { project_id: string | null; content: string; kind?: string; pinned?: boolean }) => req<Memory>('/memories', { method: 'POST', body: json(m) }),

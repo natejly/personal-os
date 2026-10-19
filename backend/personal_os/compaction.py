@@ -521,7 +521,8 @@ class CompactIn(BaseModel):
 
 
 def router(compactor: Compactor, convos: Any, settings_fn: Callable[[], dict[str, Any]],
-           window_fn: Callable[[dict[str, Any], str], int] | None = None) -> APIRouter:
+           window_fn: Callable[[dict[str, Any], str], int] | None = None,
+           extra_fn: Callable[[str], int] | None = None) -> APIRouter:
     r = APIRouter()
 
     def _conv(conv_id: str) -> dict[str, Any]:
@@ -559,7 +560,10 @@ def router(compactor: Compactor, convos: Any, settings_fn: Callable[[], dict[str
         with compactor.db.tx() as c:  # spend covers every call, including the rows the summary folded away
             spend = c.execute("SELECT COALESCE(SUM(cost),0) AS cost, COALESCE(SUM(prompt_tokens+completion_tokens),0) AS tokens"
                               " FROM usage_log WHERE conversation_id=?", (conv_id,)).fetchone()
-        return {"window": window, "estimated_tokens": estimate_messages(hist),
+        history_tokens = estimate_messages(hist)
+        # The last turn's system prompt and tool schemas ride on every request; 0 until the chat has run a turn in this process.
+        return {"window": window, "estimated_tokens": history_tokens, "history_tokens": history_tokens,
+                "turn_tokens": history_tokens + (extra_fn(conv_id) if extra_fn else 0),
                 "compact_at": _float(cfg, "compactAt", 0.7), "compact_at_tokens": _int(cfg, "compactAtTokens", limits.COMPACT_AT_TOKENS), "summary": s,
                 "spend": {"cost": spend["cost"], "tokens": spend["tokens"]}}
 

@@ -39,6 +39,8 @@
      "attachments": null,
      "content": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -53,6 +55,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "conversation_id": null,
@@ -787,6 +791,8 @@
     "keys": {
      "attachments": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -801,6 +807,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "error": null,
@@ -2637,6 +2645,8 @@
      "attachments": null,
      "content": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -2651,6 +2661,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "conversation_id": null,
@@ -3128,6 +3140,8 @@
     "keys": {
      "attachments": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -3142,6 +3156,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "error": null,
@@ -3574,6 +3590,8 @@
      "attachments": null,
      "content": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -3588,6 +3606,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "conversation_id": null,
@@ -3947,6 +3967,8 @@
     "keys": {
      "attachments": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -3961,6 +3983,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "error": null,
@@ -4710,6 +4734,8 @@
      "attachments": null,
      "content": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -4724,6 +4750,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "conversation_id": null,
@@ -4910,6 +4938,8 @@
     "keys": {
      "attachments": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -4924,6 +4954,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "error": null,
@@ -5832,6 +5864,8 @@
      "attachments": null,
      "content": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -5846,6 +5880,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "conversation_id": null,
@@ -6058,6 +6094,8 @@
     "keys": {
      "attachments": null,
      "context_used": {
+      "blocks": null,
+      "cache": null,
       "chunks": null,
       "edges": null,
       "map": null,
@@ -6072,6 +6110,8 @@
       "style": null,
       "tokens_estimate": null,
       "tools_deferred": null,
+      "tools_offered": null,
+      "totals": null,
       "trimmed": null
      },
      "error": null,

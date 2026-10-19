@@ -69,6 +69,67 @@ export interface ContextUsed {
   /** Context previews only: a saved reply drops it (its Exact request shows the prompt it was sent). */
   system_prompt?: string
   tokens_estimate: number
+  /** The per-turn context ledger: one entry per piece of the request. Absent on messages saved before it existed. */
+  blocks?: ContextBlock[]
+  totals?: ContextTotals
+  stable_hash?: string
+  /** Did the cached prefix change against the chat's previous turn, and why. */
+  cache?: { changed: boolean; reason?: string }
+  /** Extension context handlers that failed or timed out this turn. */
+  skipped?: { owner: string; hook: string; reason: string }[]
+  tools_offered?: ToolOffered[]
+}
+
+/** `GET /messages/{id}/context`: the saved ledger, plus texts while the request log still holds the reply's first round. */
+export interface MessageContext {
+  blocks: ContextBlock[] | null
+  totals: ContextTotals | null
+  stable_hash: string | null
+  cache: { changed: boolean; reason?: string } | null
+  skipped: { owner: string; hook: string; reason: string }[] | null
+  tools_offered: ToolOffered[] | null
+  tokens_estimate: number | null
+  texts_available: boolean
+  /** The system messages of the first round, joined. */
+  system_prompt?: string
+  /** Block id -> text, for every system-prompt block of that turn (stable ones too). */
+  texts?: Record<string, string>
+}
+
+/** `POST /context/preview`: a turn's ledger as it would be assembled now, with the text of each system-prompt block. */
+export type ContextPreview = ContextUsed & { texts: Record<string, string> }
+
+export interface ContextBlock {
+  /** Stable per block kind and source, e.g. "memory:profile", "hint:no-emoji", "ext:health:v3". */
+  id: string
+  label: string
+  owner: 'core' | `ext:${string}`
+  slot: 'stable' | 'volatile' | 'tail' | 'history' | 'tools'
+  kind: 'system' | 'memory' | 'graph' | 'skills' | 'files' | 'style' | 'page' | 'map' | 'hint' | 'extension' | 'tool_schema' | 'message' | 'attachment' | 'summary' | 'plan' | 'note'
+  /** Estimate, by the same estimator as the budget fitter. */
+  tokens: number
+  chars: number
+  /** Stable-block content version. */
+  version?: string
+  /** Memory ids, file name, skill names or tool name. */
+  source?: string
+}
+
+export interface ContextTotals {
+  stable: number
+  volatile: number
+  tail: number
+  tools: number
+  history: number
+  window: number
+}
+
+export interface ToolOffered {
+  name: string
+  tokens: number
+  source: 'core' | `ext:${string}` | `mcp:${string}`
+  /** Held out of the request until tool_search loads it. */
+  deferred: boolean
 }
 
 export interface WorkspaceMapUsed {
@@ -840,7 +901,11 @@ export interface ExtensionsReview {
 /** GET /conversations/{id}/context-meter: the replayed history against the model window (estimates, len/4). */
 export interface ContextMeter {
   window: number
+  /** History only (kept for older callers); same number as `history_tokens`. */
   estimated_tokens: number
+  history_tokens?: number
+  /** History plus the last turn's system prompt and tool schemas; 0 extra until the chat has run a turn. */
+  turn_tokens?: number
   compact_at: number
   compact_at_tokens?: number
   summary: { summary: string; summarized_messages: number; tokens_before: number; tokens_after: number; updated_at: number } | null

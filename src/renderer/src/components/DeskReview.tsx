@@ -20,7 +20,7 @@ const DESTINATIONS: { value: PromotionKind; label: string; hint: string; only?: 
   { value: 'doc_append', label: 'Append to a file', hint: 'Proposes an edit to an existing file; you accept it in Files' },
   { value: 'document', label: 'Upload', hint: 'Adds the file to your uploads' },
   { value: 'todo', label: 'Lists', hint: 'One todo per checklist or list line' },
-  { value: 'mail_draft', label: 'Gmail draft', hint: 'Saves a Gmail draft, never sends. The file starts with To: and Subject: lines, then a blank line' },
+  { value: 'mail_draft', label: 'Gmail draft', hint: 'Saves a draft, never sends. Start with To: and Subject: lines' },
   { value: 'download', label: 'Download', hint: 'Hands you the file; nothing enters the app' }
 ]
 

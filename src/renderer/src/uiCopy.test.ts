@@ -57,11 +57,23 @@ function nameOf(n: ts.Node | undefined): string {
   return n ? n.getText() : ''
 }
 
+// role="alert" / "alertdialog" elements, or a className naming error, confirm, warn or danger.
+function isAlertElement(el: ts.JsxOpeningElement): boolean {
+  for (const a of el.attributes.properties) {
+    if (!ts.isJsxAttribute(a) || !a.initializer || !ts.isStringLiteral(a.initializer)) continue
+    const n = nameOf(a.name)
+    if (n === 'role' && /^alert(dialog)?$/.test(a.initializer.text)) return true
+    if (n === 'className' && /err|confirm|danger|warn/i.test(a.initializer.text)) return true
+  }
+  return false
+}
+
 // True when an ancestor is an error/confirm/danger-named element, attribute,
 // variable or property, or sits inside a confirm( ) call.
 function exempt(node: ts.Node): boolean {
   for (let p: ts.Node | undefined = node.parent; p; p = p.parent) {
     let name = ''
+    if (ts.isJsxElement(p) && isAlertElement(p.openingElement)) return true
     if (ts.isJsxElement(p)) name = nameOf(p.openingElement.tagName)
     else if (ts.isJsxSelfClosingElement(p)) name = nameOf(p.tagName)
     else if (ts.isJsxAttribute(p)) {

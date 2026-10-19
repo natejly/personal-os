@@ -488,7 +488,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
       )}
       {confirm && (
         <div className="notice queue-confirm" role="alertdialog" aria-label="Decline the open card?">
-          Sending now declines the open card and tells the assistant why. To change the card instead (add a cc, move a time), edit it in place.{' '}
+          Sending now declines the open card.{' '}
           <button className="link danger" onClick={confirmSteer}>Decline and send</button>{' '}
           {!confirm.item && <><button className="link" onClick={queueInstead}>Queue instead</button>{' '}</>}
           <button className="link" onClick={() => setConfirm(null)}>Cancel</button>

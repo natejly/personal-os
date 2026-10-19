@@ -68,7 +68,7 @@ export function AskCard(props: ToolCardProps): JSX.Element {
       <Chips items={options} chosen={str(d?.choice) || undefined} />
       {answered ? (
         <div className="tc-statusrow"><Badge tone="ok">Your answer</Badge><span>{answer || 'Approved without a typed answer'}</span></div>
-      ) : d?.status === 'no_answer' ? <div className="tc-muted">Approved without a typed answer.</div>
+      ) : d?.status === 'no_answer' ? <div className="tc-muted">No typed answer</div>
         : d ? <div className="tc-muted">Waiting for your answer</div> : null}
       <ErrorLine event={event} />
     </CardShell>

@@ -3,7 +3,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { TOOL_CARDS } from '../../components/toolcards/registry'
 import { dispatchExtEvent } from '../events'
-import { settingsPanels, slotItems } from '../host'
+import { ownerOn, settingsPanels, slotItems } from '../host'
+import { navEntries } from '../../shell/nav'
+import { rowHidden } from '../../moduleToggles'
 import '../../components/DeskPanel'
 import '../index'
 import { CARD_TOOLS } from './ClaudeCodeCard'
@@ -23,6 +25,20 @@ test('it registers its view row, tool cards and settings panel', () => {
   assert.ok(slotItems('sidebar.row').some((r) => r.extension === 'claude-code' && r.label === 'Claude Code'))
   const panel = settingsPanels.find((p) => p.tab === 'ext:claude-code:claude-code')
   assert.ok(panel && panel.group === 'agent' && panel.order === 60)
+})
+
+test('its view id is its extension id, so hiddenViews hides the row, the panel and the palette entries', () => {
+  const row = navEntries().find((e) => e.view === 'claude-code')
+  assert.ok(row)
+  const panel = settingsPanels.find((p) => p.tab === 'ext:claude-code:claude-code')
+  assert.ok(panel)
+  const on = { hiddenViews: [] } as never
+  const off = { hiddenViews: ['claude-code'] } as never
+  assert.equal(rowHidden(on, row.view as string), false)
+  assert.equal(ownerOn(on, panel.extension), true)
+  assert.equal(rowHidden(off, row.view as string), true)
+  assert.equal(ownerOn(off, panel.extension), false)
+  assert.equal(slotItems('sidebar.row').filter((r) => r.extension === 'claude-code' && ownerOn(off, r.extension)).length, 0)
 })
 
 test('upsert replaces by id, keeps the map for an identical row', () => {

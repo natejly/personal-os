@@ -47,7 +47,7 @@ function Timeline({ id }: { id: string }): JSX.Element {
   }, [events])
   return (
     <div className="cs-timeline" ref={ref} onScroll={onScroll} role="log" aria-label="Session activity">
-      {events.length ? events.map((e) => <EventRow key={e.seq} e={e} />) : <div className="cs-ev cs-ev-result">No activity yet.</div>}
+      {events.length ? events.map((e) => <EventRow key={e.seq} e={e} />) : null}
     </div>
   )
 }
@@ -97,7 +97,7 @@ function Row({ c }: { c: CcSession }): JSX.Element {
       <small className="muted cs-sub" title={sub}>{sub}</small>
       {c.pending_approval && (
         <div className="cs-needs">
-          <span className="cs-needs-text">Waiting for approval: {c.pending_approval.tool}{c.pending_approval.summary ? ` (${c.pending_approval.summary})` : ''}. Answer it on the approval card in the chat.</span>
+          <span className="cs-needs-text">Waiting for approval: {c.pending_approval.tool}{c.pending_approval.summary ? ` (${c.pending_approval.summary})` : ''}</span>
         </div>
       )}
       {c.last_text && !open && <div className="cs-latest" title={c.last_text}>{c.last_text.replace(/\s+/g, ' ').trim()}</div>}
@@ -133,7 +133,6 @@ export default function ClaudeCodeView(): JSX.Element {
           <strong>{formatCost(total.cost)}</strong>
           <span><Counts sum={total} /></span>
         </div>
-        {!list.length && !error && <p className="set-help">No sessions yet. Ask in a chat to run Claude Code on a repo and they appear here.</p>}
         {groups.map((g) => {
           const fleet = g.fleet ? fleetById.get(g.fleet) : undefined
           const sum = fleet ? summarizeFleet(fleet, sessions) : summarize(g.sessions)

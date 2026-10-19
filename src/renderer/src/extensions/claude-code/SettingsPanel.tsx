@@ -34,7 +34,6 @@ export default function ClaudeCodeSettings(): JSX.Element {
   return (
     <div className="set-sec" data-testid="claude-code-settings">
       <h3>Claude Code</h3>
-      <p className="set-help">Limits for sessions the agent starts. A session stops when it reaches its budget or turn limit.</p>
       {number(SETTING_KEYS.maxConcurrent, 'Sessions at once', 'default')}
       {text(SETTING_KEYS.defaultModel, 'Default model', 'Claude Code default')}
       <label className="set-row">Permission mode{' '}

@@ -10,9 +10,9 @@ import type { CcEvent, CcSession } from './lib'
 export function activate(ui: UiApi): void {
   bindApi(ui)
   ui.view({
-    id: 'ext:claude-code',
+    id: 'claude-code',
     label: 'Claude Code',
-    description: 'Sessions Claude Code is running for you',
+    description: 'Claude Code sessions',
     icon: <Bot size={15} />,
     Component: ClaudeCodeView,
     nav: { order: 40 }

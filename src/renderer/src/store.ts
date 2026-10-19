@@ -42,8 +42,8 @@ import { isInternal, upsertWorker, withoutInternal } from './lib/workers'
 import { appendDelta, settleHeld } from './lib/noReply'
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-type BuiltinView = 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'library' | 'jobs' | 'project' | 'canvas'
-/** `health` is the id of a built-in extension's view: it predates `ext:` ids, and `hiddenViews` already stores it. */
+type BuiltinView = 'chat' | 'todos' | 'health' | 'claude-code' | 'calendar' | 'mail' | 'docs' | 'library' | 'jobs' | 'project' | 'canvas'
+/** `health` and `claude-code` are ids of built-in extensions' views: it predates `ext:` ids, and `hiddenViews` already stores it. */
 export type View = BuiltinView | `ext:${string}`
 /** Which tab a project page shows. */
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */

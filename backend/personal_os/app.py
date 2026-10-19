@@ -103,7 +103,7 @@ from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .style import WritingStyle
 from .extensions.channels import ChatService
 from .extensions.coding.extension import Coding
-from .extensions import devapi, profiles as profile_routes, review as review_routes
+from .extensions import catalog_routes, devapi, profiles as profile_routes, review as review_routes
 from .runtime import routes as runtime_routes
 from .runtime.sources import SERVER as SOURCE_SERVER, ToolSources, is_source_tool
 from .runtime.harness import ContextBuilder, EventSink, LoopHooks, LoopRun, LoopViolation, ModelCalls, ModelStream, Tools, TurnLimits
@@ -644,6 +644,7 @@ app.include_router(backups.router(db.data_dir, host.data_tables))
 app.include_router(devapi.router(host, _ext_ctx, lambda: toolbox, prefix_watch.stats))
 ext_review = review_routes.Review(ext_drafts, host, _ext_ctx, lambda: toolbox)
 app.include_router(review_routes.router(ext_review))
+app.include_router(catalog_routes.router(host, _ext_ctx, ext_review, db, default_catalog_url=llm.DEFAULT_SETTINGS["extensionCatalogUrl"]))
 host.on_start(ext_review.load_installed)
 app.mount("/ext", host.routes)
 # Supportability: GET /diagnostics, POST /maintenance/sweep, and the daily retention sweep (retention.py).

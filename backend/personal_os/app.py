@@ -6043,12 +6043,16 @@ async def retry_ship(id: str) -> dict[str, Any]:
 # ---------------- coding (extensions/coding): Claude Code / OpenCode / pi on a repo or a fresh worktree ----------------
 # Loaded here, after the ship tools, so its tools keep the place they always had at the end of the list.
 _coding_scope = host.load_builtin("coding", _ext_ctx)
+_cc_scope = host.load_builtin("claude-code", _ext_ctx)  # default off; needs the coding service, which is bound below before any session starts
 host.migrate(db)
 coding: Coding = _ext_ctx.services["coding"]()
 coding.bind(toolbox)
 toolbox.extensions.append(_coding_scope)
 toolbox.set_extension_tools(_coding_scope)
 host.mount(app, _coding_scope)
+toolbox.extensions.append(_cc_scope)
+toolbox.set_extension_tools(_cc_scope)
+host.mount(app, _cc_scope)
 
 
 def _checked_edit(tool: str, args: dict[str, Any], desk_id: str | None = None, conversation_id: str | None = None) -> dict[str, Any]:

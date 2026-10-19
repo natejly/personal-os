@@ -19,7 +19,8 @@
       {"name": "claude_code_wait", "danger": "safe", "group": "shell", "description": "Wait until Claude Code sessions have settled."},
       {"name": "claude_code_permission", "danger": "external", "group": "shell", "description": "The name of the approval card for a session's permission request; never offered to the model."}
     ],
-    "routes": { "prefix": "/claude-code" }
+    "routes": { "prefix": "/claude-code" },
+    "views": [{ "id": "claude-code", "label": "Claude Code", "icon": "bot" }]
   },
   "hooks": {
     "app.start": {},

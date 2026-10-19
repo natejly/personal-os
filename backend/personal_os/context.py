@@ -405,7 +405,7 @@ def build_context(
     # `parts` holds what does not depend on the query, `volatile` what does. `system` is both, as shown to the user.
     parts: list[str] = [redact.scrub_command_output(global_system_prompt.strip())] if global_system_prompt.strip() else []
     parts.append(DIRECTNESS_RULES)
-    hidden = [{"docs": "Files", "spaces": "Canvases", "todos": "Lists"}.get(v, v.title()) for v in settings.get("hiddenViews") or () if isinstance(v, str)]  # the sidebar labels 'docs' Files
+    hidden = [{"docs": "Files", "spaces": "Canvases", "todos": "Lists", "claude-code": "Claude Code"}.get(v, v.title()) for v in settings.get("hiddenViews") or () if isinstance(v, str)]  # the sidebar labels 'docs' Files
     if hidden:
         # Without this the model sends users to views they cannot see (approvals end in Library, for one).
         parts.append(f"Hidden in this app right now: {', '.join(hidden)}. Before pointing the user at one of them, "

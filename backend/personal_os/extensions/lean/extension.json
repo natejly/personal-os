@@ -8,7 +8,7 @@
   "enabled": true,
   "contributes": {
     "defaults": {
-      "views": { "todos": false, "calendar": false, "mail": false, "health": false, "spaces": false }
+      "views": { "todos": false, "calendar": false, "mail": false, "health": false, "spaces": false, "claude-code": false }
     }
   }
 }

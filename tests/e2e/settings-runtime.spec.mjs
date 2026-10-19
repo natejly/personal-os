@@ -2,7 +2,7 @@ import { test, expect } from './fixtures.mjs'
 import { dialog, openSettings, closeSettings } from './helpers/home.mjs'
 import { newChat, sayAndWait } from './helpers/chat.mjs'
 
-const SLOTS = ['model.client', 'model.router', 'tools.source', 'sandbox.backend', 'agent.loop']
+const SLOTS = ['model.client', 'model.router', 'tools.source', 'sandbox.backend', 'agent.loop', 'memory.system']
 
 test('Settings > Runtime shows every slot on its built-in provider, with where it comes from', async ({ grain }) => {
   const { page, api } = grain

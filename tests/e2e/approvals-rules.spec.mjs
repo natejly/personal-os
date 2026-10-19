@@ -90,7 +90,7 @@ test('the opaque and the hardline cases: substitutions always ask, rm -rf / is r
     await newChat(page)
     await say(page, touch(ws, 'touch $(echo sub).txt'))
     await expect(card(page)).toBeVisible({ timeout: 90_000 })
-    await expect(card(page)).toContainText(/substitutions|always asks/)
+    await expect(card(page)).toContainText('Cannot be matched against rules')
     await card(page).getByRole('button', { name: 'Deny', exact: true }).click()
     await expect.poll(async () => (await pending(grain)).length).toBe(0)
     await say(page, touch(ws, 'rm -rf /'))

@@ -71,7 +71,7 @@ export default function SettingsModal(): JSX.Element {
   const gp = { openGroups, toggle: toggleGroup }
   const [q, setQ] = useState('')
   const [jump, setJump] = useState<string | null>(null)
-  const hits = searchSettings(q, panels.map((p) => ({ tab: p.tab, sec: '', title: p.label, keys: '' })))
+  const hits = searchSettings(q, panels.map((p) => ({ tab: p.tab, sec: '', title: p.label, keys: p.keys ?? '' })))
   const google = useStore((s) => s.google)
   /** Go to a search hit: its tab, any collapsed group around it opened, then scrolled to once it has rendered. */
   const goTo = (h: { tab: Tab; sec: string }): void => {

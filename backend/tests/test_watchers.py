@@ -326,3 +326,18 @@ def test_enabling_a_calendar_job_is_refused_while_its_view_is_off() -> None:
         client.delete(f"/jobs/{paused.json()['id']}")
     finally:
         client.put("/settings", json={"hiddenViews": keep})
+
+
+def test_resending_enabled_on_an_enabled_calendar_job_is_not_refused_while_its_view_is_off() -> None:
+    client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
+    keep = client.get("/settings").json()["hiddenViews"]
+    try:
+        client.put("/settings", json={"hiddenViews": []})
+        made = client.post("/jobs", json={"name": "n", "prompt": "p", "kind": "calendar", "calendar_query": "standup", "enabled": True})
+        assert made.status_code == 200, made.text
+        client.put("/settings", json={"hiddenViews": ["calendar"]})
+        resent = client.patch(f"/jobs/{made.json()['id']}", json={"name": "x", "enabled": True})
+        assert resent.status_code == 200, resent.text
+        client.delete(f"/jobs/{made.json()['id']}")
+    finally:
+        client.put("/settings", json={"hiddenViews": keep})

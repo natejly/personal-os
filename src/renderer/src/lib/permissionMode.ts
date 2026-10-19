@@ -21,5 +21,5 @@ export const pillLabel = (m: PermissionMode): string => MODES.find((x) => x.id =
 /** Hover text and accessible name for the composer pill. Under Allow everything its red text is the only cue, so it says so. */
 export const pillTitle = (m: PermissionMode): string =>
   m === 'allow_all'
-    ? 'Dangerously allow all is on: Grain acts without asking. It still asks before destructive shell commands: permanent deletes, disk wipes and force-pushes. Click to change it in Settings.'
-    : `Permission mode: ${pillLabel(m)}. Click to change it in Settings.`
+    ? 'Dangerously allow all is on: Grain acts without asking. It still asks before destructive shell commands: permanent deletes, disk wipes and force-pushes. Click for presets and settings.'
+    : `Permission mode: ${pillLabel(m)}. Click for presets and settings.`

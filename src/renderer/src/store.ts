@@ -1035,14 +1035,8 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'view:documents') s.openFiles('uploads')
       else if (action.startsWith('open-chat:')) void s.selectChat(action.slice(10))
       else if (action.startsWith('desk:')) void s.goToDesk(action.slice(5))
-      else if (action.startsWith('view:')) {
-        const v = action.slice(5) as View
-        // A view turned off in Settings → Sidebar stays off: its shortcut says how to turn it back on.
-        // Named as the sidebar shows it; nav.tsx holds the labels but importing it here would close a cycle.
-        const name = v === 'todos' ? 'Lists' : `${v[0].toUpperCase()}${v.slice(1)}`
-        if (viewHidden(s.settings, v)) s.toast(`${name} is turned off`, 'info', { label: 'Turn on', run: () => get().openSettings('sidebar') })
-        else s.setView(v)
-      } else if (action === 'upload') {
+      else if (action.startsWith('view:')) s.setView(action.slice(5) as View)
+      else if (action === 'upload') {
         s.openFiles('uploads')
         setTimeout(() => document.getElementById('doc-upload-input')?.click(), 100)
       }
@@ -2001,8 +1995,16 @@ export const useStore = create<State>((set, get) => {
       if ('alwaysAsk' in patch) void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
       if ('baseUrl' in patch || 'apiKey' in patch || 'provider' in patch) void get().loadModels()
       if ('googleClientId' in patch || 'googleClientSecret' in patch) void get().refreshGoogle()
+      if ('hiddenViews' in patch) void useTodos.getState().refreshTodos()
     },
     setView: (view) => {
+      // A view turned off in Settings → Sidebar stays off, whoever links to it: the toast says how to turn it back on.
+      // Named as the sidebar shows it; nav.tsx holds the labels but importing it here would close a cycle.
+      if (viewHidden(get().settings, view)) {
+        const name = view === 'todos' ? 'Lists' : `${view[0].toUpperCase()}${view.slice(1)}`
+        get().toast(`${name} is turned off`, 'info', { label: 'Turn on', run: () => get().openSettings('sidebar') })
+        return
+      }
       const cur = get().view
       // Leaving the editor must not drop what is still in the buffer.
       if (cur === 'docs' && view !== 'docs') void get().flushDoc()

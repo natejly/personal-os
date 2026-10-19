@@ -66,7 +66,7 @@ export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; on
 
 /** What the pill's menu offers a chat: each permission preset, applied to this chat alone. One that allows more than the chat has
     now lists what would change and applies on the second click. */
-function ChatPresets({ conversationId, close }: { conversationId: string; close: () => void }): JSX.Element {
+function ChatPresets({ conversationId, close, onApplied }: { conversationId: string; close: () => void; onApplied: () => void }): JSX.Element {
   const [presets, setPresets] = useState<PermissionPreset[]>([])
   const [held, setHeld] = useState<{ preset: PermissionPreset; diff: PresetDiff } | null>(null)
   const toast = useStore((s) => s.toast)
@@ -75,6 +75,7 @@ function ChatPresets({ conversationId, close }: { conversationId: string; close:
     api.presets.apply(preset.id, 'chat', conversationId, confirm).then((r) => {
       if ('held' in r) { setHeld({ preset, diff: r.held }); return }
       toast(`${preset.name} applied to this chat`, 'info')
+      onApplied()
       close()
     }).catch((e: Error) => toast(e.message, 'error'))
   }
@@ -101,7 +102,18 @@ function ChatPresets({ conversationId, close }: { conversationId: string; close:
 /** The composer pill: the current mode, in red text under Allow everything and otherwise plain. Its menu applies a preset to this
     chat and opens Settings on Permissions, which also holds the domains and MCP controls. */
 export function PermissionModePill({ conversationId = null }: { conversationId?: string | null }): JSX.Element {
-  const mode = useStore((s) => modeOf(s.settings))
+  const globalMode = useStore((s) => modeOf(s.settings))
+  const [chatMode, setChatMode] = useState<PermissionMode | null>(null)
+  const [applied, setApplied] = useState(0)
+  // A preset applied to this chat can set its own mode, so the pill shows the chat's effective one.
+  useEffect(() => {
+    setChatMode(null)
+    if (!conversationId) return
+    let live = true
+    api.config.effective(null, conversationId).then((c) => { if (live) setChatMode(modeOf({ permissionMode: c.values.permissionMode?.value })) }).catch(() => undefined)
+    return () => { live = false }
+  }, [conversationId, globalMode, applied])
+  const mode = chatMode ?? globalMode
   const openSettings = useStore((s) => s.openSettings)
   const title = pillTitle(mode)
   return (
@@ -109,7 +121,7 @@ export function PermissionModePill({ conversationId = null }: { conversationId?:
       label={<><ShieldCheck size={13} aria-hidden /> {pillLabel(mode)}</>}>
       {(close) => (
         <>
-          {conversationId && <ChatPresets conversationId={conversationId} close={close} />}
+          {conversationId && <ChatPresets conversationId={conversationId} close={close} onApplied={() => setApplied((n) => n + 1)} />}
           <button type="button" className="pop-menu-item" onClick={() => { close(); openSettings('permissions') }}>Permission settings</button>
         </>
       )}

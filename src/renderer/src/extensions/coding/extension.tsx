@@ -43,7 +43,7 @@ export function activate(ui: UiApi): void {
     const ev = data as CodingSessionEvent
     useCoding.getState().addEvents(ev.session_id, [ev])
   })
-  ui.settingsPanel({ id: 'recipes', label: 'Coding recipes', Component: RecipesPanel })
+  ui.settingsPanel({ id: 'recipes', label: 'Coding recipes', keys: 'recipe coding', Component: RecipesPanel })
   ui.command({
     id: 'run-recipe', label: 'Run coding recipe...', hint: 'Coding',
     run: () => useStore.getState().openSettings('ext:coding:recipes')

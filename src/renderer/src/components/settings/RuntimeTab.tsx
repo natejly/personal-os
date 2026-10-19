@@ -127,4 +127,4 @@ export default function RuntimeTab(): JSX.Element {
   )
 }
 
-registerSettingsPanel(CORE, { id: 'runtime', label: 'Runtime', Component: RuntimeTab })
+registerSettingsPanel(CORE, { id: 'runtime', label: 'Runtime', keys: 'agent loop sandbox terminal', Component: RuntimeTab })

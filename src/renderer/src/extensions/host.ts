@@ -36,6 +36,8 @@ export interface ViewDef {
 export interface SettingsPanelDef {
   id: string
   label: string
+  /** Words Settings search matches besides the label. */
+  keys?: string
   Component: FC
 }
 

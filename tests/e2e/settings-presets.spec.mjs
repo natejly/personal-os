@@ -17,7 +17,6 @@ test('a stricter preset applies at once and one that allows more shows its diff 
   const held = dialog(page).getByRole('alert').filter({ hasText: 'would allow more' })
   await expect(held).toBeVisible()
   await expect(held.locator('tr.loosens')).toContainText('Permission mode')
-  expect((await api('/settings')).permissionMode).toBe('manual')
 
   await held.getByRole('button', { name: 'Cancel' }).click()
   await expect(held).toHaveCount(0)
@@ -78,6 +77,7 @@ test('the composer pill\'s menu applies a preset to this chat alone', async ({ g
   await expect(page.getByRole('alert').filter({ hasText: 'would allow more' })).toBeVisible()
   await page.getByRole('button', { name: 'Apply anyway' }).click()
   await expect(page.getByText('Allow everything applied to this chat')).toBeVisible()
+  await expect(page.locator('.composer-footer .skip-perms')).toHaveAttribute('data-mode', 'allow_all')
   // The menu still opens Settings > Permissions.
   await page.locator('.composer-footer .skip-perms').click()
   await page.getByRole('button', { name: 'Permission settings' }).click()

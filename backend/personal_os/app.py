@@ -5802,7 +5802,7 @@ async def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     if not (orphaned and "kind" not in patch and not patch.get("enabled")) and not inert:
         _check_schedule(merged["kind"], merged["cron"], patch.get("timezone"), merged["run_at"],
                         fresh_time="run_at" in patch, watch_dir=merged.get("watch_dir"), job=merged)
-    if "enabled" in patch or "kind" in patch:
+    if any(merged.get(k) != cur.get(k) for k in ("enabled", "kind")):  # a no-op re-send of the current state is not a new enable
         _check_trigger_on(merged["kind"], bool(merged.get("enabled")))
     # Switching a spent one-off back on is the one re-arm that cannot work: it has no instant left to wait for,
     # so say that instead of leaving the toggle on with nothing scheduled behind it.

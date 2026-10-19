@@ -1,0 +1,31 @@
+/* LaTeX view (extensions/latex): files | editor | PDF. Colours are the app's tokens only. */
+.page-body.lx-body { display: flex; padding: 0; max-width: none; overflow: hidden; min-height: 0; }
+.lx-side { width: 210px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px; border-right: 1px solid var(--border); overflow-y: auto; }
+.lx-row { display: flex; gap: 6px; align-items: center; }
+.lx-row select, .lx-row input { flex: 1; min-width: 0; }
+.lx-files { list-style: none; margin: 0; padding: 0; flex: 1; }
+.lx-files button { display: flex; align-items: center; gap: 6px; width: 100%; padding: 4px 6px; border-radius: 6px; font-size: 12.5px; text-align: left; color: var(--text); }
+.lx-files button:hover:not(:disabled) { background: var(--hover); }
+.lx-files button.active { background: var(--active); }
+.lx-files button:disabled { color: var(--text-faint); cursor: default; }
+.lx-files span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lx-upload { justify-content: center; }
+
+.lx-mid { flex: 1.2; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+.lx-tab { padding: 6px 12px; font-size: 12px; color: var(--text-muted); border-bottom: 1px solid var(--border); min-height: 18px; }
+.lx-dirty { color: var(--accent); }
+.lx-editor { flex: 1; min-height: 0; overflow: hidden; }
+.lx-problems { max-height: 34%; display: flex; flex-direction: column; border-top: 1px solid var(--border); background: var(--bg-elev); }
+.lx-problems-head { display: flex; align-items: center; gap: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; color: var(--text-muted); text-align: left; }
+.lx-problems ul { list-style: none; margin: 0; padding: 0 0 4px; overflow-y: auto; }
+.lx-problems li button { display: flex; align-items: baseline; gap: 6px; width: 100%; padding: 3px 12px; font-size: 12px; text-align: left; color: var(--text); }
+.lx-problems li button:hover { background: var(--hover); }
+.lx-where { font-family: var(--mono); color: var(--text-muted); white-space: nowrap; }
+.lx-err { color: var(--danger); flex-shrink: 0; align-self: center; }
+.lx-warn { color: var(--warn); flex-shrink: 0; align-self: center; }
+
+.lx-preview { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.lx-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.lx-status { font-size: 12px; color: var(--text-muted); }
+.lx-status.bad { color: var(--danger); }
+.lx-pdf { flex: 1; width: 100%; border: 0; background: var(--bg); }

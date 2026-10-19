@@ -1,0 +1,20 @@
+{
+  "id": "latex",
+  "name": "LaTeX",
+  "description": "Write and compile multi-file LaTeX projects: an editor, a PDF preview and agent tools. Projects are plain folders under ~/Grain/LaTeX.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "kind": "extension",
+  "enabled": false,
+  "activation": ["startup"],
+  "contributes": {
+    "tools": [
+      { "name": "latex_projects", "danger": "safe", "group": "latex" },
+      { "name": "latex_new", "danger": "writes", "group": "latex" },
+      { "name": "latex_compile", "danger": "executes", "group": "latex" }
+    ],
+    "routes": { "prefix": "/latex" },
+    "views": [{ "id": "latex", "label": "LaTeX", "icon": "sigma" }]
+  },
+  "permissions": []
+}

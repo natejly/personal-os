@@ -467,6 +467,7 @@ for _m in modules:
         app.include_router(_r)
 host.mount(app, host.load_builtin("health", _ext_ctx))
 host.mount(app, host.load_builtin("spaces", _ext_ctx))
+host.mount(app, host.load_builtin("latex", _ext_ctx))
 canvases = _ext_ctx.services["canvases"]()
 for _p in _PROFILES:
     host.load_builtin(_p, _ext_ctx)

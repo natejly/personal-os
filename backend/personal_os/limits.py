@@ -152,7 +152,7 @@ RANGES: dict[str, tuple[float, float]] = {
     "planLoopVerifyPasses": (0, 3),
     "codeModeMaxCalls": (1, 500),
 }
-# stuckDetection is an enum, not a number; stuck.limits_for maps it to thresholds.
+# stuckSensitivity is an enum, not a number; stuck.limits_for maps it to thresholds.
 STUCK_MODES = ("off", "relaxed", "standard", "strict")
 PLAN_LOOP_MAX_STEPS = 8            # steps the plan loop's plan may have
 PLAN_LOOP_VERIFY_PASSES = 1        # repair passes the plan loop makes after a failed check

@@ -79,7 +79,7 @@ class Limits:
 
 
 def limits_for(mode: Any) -> Limits | None:
-    """The thresholds for the stuckDetection setting: standard is the constants above, relaxed doubles each, strict takes one
+    """The thresholds for the stuckSensitivity setting: standard is the constants above, relaxed doubles each, strict takes one
     off (never below 2), off is no detector (None). A value that is not a mode reads as standard."""
     if mode == "off":
         return None
@@ -92,7 +92,7 @@ def limits_for(mode: Any) -> Limits | None:
 
 
 def detector_for(mode: Any) -> "StuckDetector":
-    """A detector for the stuckDetection setting."""
+    """A detector for the stuckSensitivity setting."""
     return StuckDetector(limits_for(mode), enabled=mode != "off")
 
 

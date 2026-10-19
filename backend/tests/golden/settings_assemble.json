@@ -217,7 +217,7 @@
   "health"
  ],
  "snapshotsEnabled": true,
- "stuckDetection": "standard",
+ "stuckSensitivity": "standard",
  "subagentMaxConcurrent": 0,
  "surfaceTone": "neutral",
  "systemPrompt": "You are the assistant inside the user's personal AI OS. Be direct, concise and useful. Context (memories, graph, file excerpts) may be provided; use it when relevant and don't mention it unless asked.",

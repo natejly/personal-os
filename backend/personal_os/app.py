@@ -1147,8 +1147,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, f"{k} must be a {type(d).__name__}")
         elif k == "retrievalMode" and v not in ("hybrid", "bm25"):
             raise HTTPException(422, "retrievalMode must be 'hybrid' or 'bm25'")
-        elif k == "stuckDetection" and v not in limits.STUCK_MODES:
-            raise HTTPException(422, f"stuckDetection must be one of {', '.join(limits.STUCK_MODES)}")
+        elif k == "stuckSensitivity" and v not in limits.STUCK_MODES:
+            raise HTTPException(422, f"stuckSensitivity must be one of {', '.join(limits.STUCK_MODES)}")
         elif k == "defaultEffort" and v not in EFFORTS:
             raise HTTPException(422, f"defaultEffort must be one of {', '.join(EFFORTS)}")
         elif k == "docTypography":

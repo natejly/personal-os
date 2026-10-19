@@ -819,7 +819,7 @@ def test_loop_max_rounds_zero_is_no_cap() -> None:
 
 def test_stuck_detection_modes_move_when_the_nudge_comes() -> None:
     def nudges(mode: str, n: int) -> list[str | None]:
-        appmod.db.set_settings({"stuckDetection": mode})
+        appmod.db.set_settings({"stuckSensitivity": mode})
         events = breaker_run(None, [{"tool_calls": [fx.call("g_read", f"s{i}", same="x")]} for i in range(n)] + ["end"])
         return [r.get("breaker") for r in results(events)]
     assert nudges("strict", 3)[-1] == "stuck_nudge"       # same result 4 -> 3

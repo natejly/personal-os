@@ -519,6 +519,7 @@ class ExtensionScope:
 
 
 BUILTIN_ROOT = Path(__file__).parent
+CORE_VIEWS = frozenset({"chat", "docs", "library", "jobs", "project", "canvas"})  # view ids in hiddenViews that no extension owns
 
 
 def builtin_manifest(ext_id: str) -> Manifest:
@@ -607,6 +608,13 @@ class ExtensionHost:
             raise ValueError("only a built-in extension may use the chat service: it can answer an approval")
         if builtin_only := sorted(h for h in manifest.hooks if HOOKS[h].subscribers == "builtin"):
             raise ValueError(f"only a built-in extension may subscribe to {', '.join(builtin_only)}")
+        if manifest.id in CORE_VIEWS:
+            raise ValueError(f"{manifest.id!r} is the id of a core view")
+        if missing := [e for e in manifest.requires_extensions if e not in self.extensions]:
+            raise ValueError(f"requires extension {', '.join(missing)}, which is not loaded")
+        provided = ctx.services.keys() | {s for x in self.extensions.values() for s in x.manifest.provides_services}
+        if missing := [s for s in manifest.requires_services if s not in provided]:
+            raise ValueError(f"requires service {', '.join(missing)}, which nothing provides")
         scope = self._add(manifest, root=root, ctx=ctx, dev=True)
         if manifest.kind == "profile":
             return scope  # a profile is data: nothing to import or activate
@@ -799,25 +807,33 @@ class ExtensionHost:
         return [t for s in self.extensions.values() for t in s.manifest.data.get("tables", ())]
 
     # ---- settings: `ext.<id>.<field>`, typed by the manifest ----
-    def setting_type(self, key: str) -> str | None:
-        """The declared type of an extension setting key, or None when no loaded extension declares it."""
+    def _setting_spec(self, key: str) -> dict[str, Any] | None:
         if not key.startswith(SETTING_PREFIX):
             return None
         ext_id, _, name = key.removeprefix(SETTING_PREFIX).partition(".")
-        spec = self.extensions[ext_id].manifest.settings.get(name) if ext_id in self.extensions else None
+        return self.extensions[ext_id].manifest.settings.get(name) if ext_id in self.extensions else None
+
+    def setting_type(self, key: str) -> str | None:
+        """The declared type of an extension setting key, or None when no loaded extension declares it."""
+        spec = self._setting_spec(key)
         return spec["type"] if spec else None
 
     def check_setting(self, key: str, value: Any) -> Any:
         """The value as it may be stored for a declared extension setting, or ValueError with the reason. None unsets it."""
-        kind = self.setting_type(key)
-        if kind is None:
+        spec = self._setting_spec(key)
+        if spec is None:
             raise ValueError(f"{key} is not a declared setting")
+        kind = spec["type"]
         ok = {"string": isinstance(value, str), "secret": isinstance(value, str),
               "boolean": isinstance(value, bool), "integer": isinstance(value, int) and not isinstance(value, bool),
               "number": isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)}[kind]
         if value is not None and not ok:
             noun = "string" if kind == "secret" else kind
             raise ValueError(f"{key} must be {'an' if noun[0] in 'aeiou' else 'a'} {noun}")
+        if value is not None and "enum" in spec and value not in spec["enum"]:
+            raise ValueError(f"{key} must be one of {', '.join(map(str, spec['enum']))}")
+        if value is not None and not spec.get("minimum", value) <= value <= spec.get("maximum", value):
+            raise ValueError(f"{key} must be between {spec.get('minimum', 'any')} and {spec.get('maximum', 'any')}")
         return value
 
     def secret_setting_keys(self) -> list[str]:

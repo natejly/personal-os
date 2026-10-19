@@ -263,6 +263,20 @@ def test_check_setting_types() -> None:
     assert host.secret_setting_keys() == ["ext.demo.k"]
 
 
+def test_check_setting_enforces_the_manifests_bounds_and_enum() -> None:
+    host = ExtensionHost()
+    host._add(manifest(settings={"i": {"type": "integer", "minimum": 1, "maximum": 10}, "s": {"type": "string", "enum": ["a", "b"]},
+                                 "n": {"type": "number", "minimum": 0, "maximum": 1}}))
+    for name, value in {"i": 10, "s": "b", "n": 0.5}.items():
+        assert host.check_setting(f"ext.demo.{name}", value) == value
+    assert host.check_setting("ext.demo.i", None) is None
+    for name, value in {"i": 0, "n": 2.5, "s": "zzz"}.items():
+        with pytest.raises(ValueError):
+            host.check_setting(f"ext.demo.{name}", value)
+    with pytest.raises(ValueError):
+        appmod.host.check_setting("ext.coding.structuredBudgetUsd", -5)
+
+
 @pytest.fixture()
 def demo_extension():
     """An extension with settings and lifecycle subscriptions added to the app's own host for one test."""

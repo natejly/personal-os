@@ -493,6 +493,25 @@ def test_a_folder_extension_may_not_use_the_chat_service(ext: Path) -> None:
     assert host.extensions == {}
 
 
+def test_a_folder_may_not_take_a_core_view_id(ext: Path) -> None:
+    set_manifest(ext, id="library")
+    host = ExtensionHost()
+    with pytest.raises(ValueError, match="core view"):
+        host.load_folder(ext, context())
+    assert host.extensions == {}
+
+
+def test_a_folder_needs_its_required_extensions_and_services_loaded(ext: Path) -> None:
+    host = ExtensionHost()
+    set_manifest(ext, requires={"extensions": ["nope-ext"]})
+    with pytest.raises(ValueError, match="nope-ext"):
+        host.load_folder(ext, context())
+    set_manifest(ext, requires={"services": ["bogus"]})
+    with pytest.raises(ValueError, match="bogus"):
+        host.load_folder(ext, context())
+    assert host.extensions == {}
+
+
 def test_a_folder_loads_disabled_whatever_its_manifest_says_and_a_reload_keeps_the_users_choice(ext: Path) -> None:
     hidden: list[str] = []
     ctx = context()

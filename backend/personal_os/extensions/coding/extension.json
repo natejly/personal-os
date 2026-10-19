@@ -44,7 +44,7 @@
     "subagent.stop": { "timeoutMs": 60000 }
   },
   "permissions": ["db:own", "hooks:gate", "terminal:control"],
-  "settings": { "structuredBudgetUsd": { "type": "number" } },
+  "settings": { "structuredBudgetUsd": { "type": "number", "minimum": 0.01, "maximum": 100 } },
   "data": {
     "tables": ["coding_sessions", "coding_session_events", "coding_recipes", "coding_recipe_versions", "coding_recipe_runs", "coding_terminals"],
     "migrations": "migrations/"

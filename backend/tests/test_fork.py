@@ -109,6 +109,15 @@ def test_taint_carries_and_grants_do_not() -> None:
     check(n == 0, "no approvals are copied")
 
 
+def test_permission_and_runtime_overrides_carry_over() -> None:
+    cid = three_turns()
+    chat = {"permissionMode": "manual"}
+    runtime = {"agent.loop": "builtin/loop"}
+    app_mod.convos.update(cid, {"settings": {"permissions": chat, "runtime": runtime}})
+    s = fork(cid, msgs(cid)[1]["id"]).json()["settings"]
+    check(s["permissions"] == chat and s["runtime"] == runtime, f"a branch is never looser than its source, got {s}")
+
+
 def test_new_turn_in_the_fork_sees_the_copied_history() -> None:
     cid = three_turns()
     f = fork(cid, msgs(cid)[1]["id"]).json()

@@ -533,9 +533,9 @@ class Conversations:
             hidden = [row_to_dict(r, ("tool_events",)) or {} for r in cut]
         return [{"id": r["id"], "created_at": r["created_at"], "role": r["role"], "tool_events": r.get("tool_events") or []} for r in hidden]
 
-    # Settings a branch carries over. The rest stays behind on purpose: standing tool grants (the `tools` map's
-    # "on" entries), titles, and the desk/job markers.
-    FORK_KEYS = (*[k for k in DEFAULT_CONV_SETTINGS if k != "tools"], "useSkills", "tainted", "taint_sources")
+    # Settings a branch carries over, including the chat's permission and runtime overrides: a branch is never looser than
+    # its source. The rest stays behind on purpose: standing tool grants (the `tools` map's "on" entries), titles, and the desk/job markers.
+    FORK_KEYS = (*[k for k in DEFAULT_CONV_SETTINGS if k != "tools"], "useSkills", "permissions", "runtime", "tainted", "taint_sources")
 
     def fork(self, conv_id: str, upto_mid: str) -> dict[str, Any]:
         """A new chat holding the live transcript up to and including `upto_mid`; the source is untouched. Only rows a

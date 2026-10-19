@@ -20,6 +20,8 @@ Choose it for a chat, a project or everywhere and a reply goes in four parts: on
 
 The chat's own switches stay in front of any provider: with memory off nothing is recalled, profiled or learned, with the graph off no graph block is used, and a chat with auto-learn off never reaches `learn`. A provider that raises, takes too long or returns the wrong kind of block is replaced by the built-in memory for that call, and a card in the inbox says so once. The Memory settings page and its routes still read the built-in memory tables.
 
+The built-in History digest extension (`memory-tree/digest`, see [the history digest](memory-tree.md)) is a layering provider: it hands every call to the built-in memory and adds one volatile block, the digest, to what `recall` returns.
+
 ## What never changes
 
 Whatever is selected, the permission checks, approvals, the call journal and secret redaction run exactly as before. A model client sees the request, never your settings or keys. A tool source's tools are named `x__<extension>__<tool>`, are always `ask`, and taint the run like a connector's. A sandbox backend that cannot enforce a request is never bypassed: the command is refused, not run unconfined. An agent loop reaches tools only through the same step the chat loop uses (so every card and refusal applies), gets its context from the same contributors, cannot write the cached prefix or change which tools are offered, and cannot decide an approval; a run in which a tool ran around that step ends as failed with `loop_violation`.

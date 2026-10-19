@@ -43,6 +43,8 @@ class MemoryTree:
         self.api = api
         self.store = TreeStore(api.db)
         self.merger = Merger(self.store, lambda: api.app.settings(), self.setting)
+        self._source: Any = None  # the retrieval source, registered while some summary exists: a turn pays nothing for it before
+        self._snapshots: dict[str, tuple[int, list[Leaf], dict[tuple[int, int], Node]]] = {}
 
     def setting(self, name: str) -> Any:
         return self.api.settings.get(name)
@@ -97,10 +99,30 @@ class MemoryTree:
     async def on_settled(self, _turn: Any) -> None:
         n = int(self.setting("memoryTreeMergesPerTurn") or 0)
         if n > 0 and not self.merger.busy:
-            self.api.spawn(self.merger.run_merges(n))  # off the chat's path
+            self.api.spawn(self.merge(n))  # off the chat's path
 
     async def tick(self) -> None:
-        await self.merger.run_merges(JOB_MERGES)
+        await self.merge(JOB_MERGES)
+
+    async def merge(self, n: int) -> int:
+        done = await self.merger.run_merges(n)
+        if done:
+            self.sync_source()
+        return done
+
+    async def start(self, _: Any) -> None:
+        try:
+            self.sync_source()
+        except Exception:  # noqa: BLE001
+            self.api.log.warning("memory-tree: could not look for summaries at start", exc_info=True)
+
+    def sync_source(self) -> None:
+        wanted = self.store.has_nodes()
+        if wanted and self._source is None:
+            self._source = self.api.retrieval_source("History digest", self.retrieve)
+        elif not wanted and self._source is not None:
+            self._source.dispose()
+            self._source = None
 
     def rebuild(self, scope: str) -> dict[str, Any]:
         """Wipe the scope's rows and file every live memory again in the order it became true."""
@@ -111,11 +133,18 @@ class MemoryTree:
         for m in rows:
             _, text, ts = self._leaf_of(m)
             self.store.append(scope, m["id"], text, ts, self._tainted(m))
+        self.sync_source()
         return {"scope": scope, "leaves": len(rows), "nodes": 0}
 
     # ---- reading ----
     def snapshot(self, scope: str) -> tuple[list[Leaf], dict[tuple[int, int], Node]]:
-        return self.store.leaves(scope), self.store.nodes(scope)
+        """The scope's leaves and nodes; kept until something writes to the tables, because a digest is read on every turn."""
+        hit = self._snapshots.get(scope)
+        if hit is None or hit[0] != self.store.version:
+            version = self.store.version
+            hit = (version, self.store.leaves(scope), self.store.nodes(scope))
+            self._snapshots[scope] = hit
+        return hit[1], hit[2]
 
     @staticmethod
     def _unit_dict(u: Unit) -> dict[str, Any]:
@@ -328,6 +357,6 @@ def activate(api: ExtensionScope) -> None:
     api.on("memory.deleted", ext.on_deleted)
     api.on("turn.settled", ext.on_settled)
     api.job("merge", timedelta(minutes=10), ext.tick)
-    api.retrieval_source("History digest", ext.retrieve)
+    api.on("app.start", ext.start)
     api.provide(SLOT, TreeMemory(ext), id="digest", label="History digest")
     ext.register_tools()

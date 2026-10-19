@@ -42,6 +42,7 @@ files: fs_copy — Copy a file or folder, fs_edit — Change a file by replacing
 graph: graph_add — Add a relation, graph_search — Find people, projects and other entities, graph_traverse — Walk the knowledge graph outward
 knowledge: list_documents — List the uploaded files available, read_document — Read an uploaded file by id
 media: generate_image — Make a picture from a text
+memory-tree: memory_tree_status — Size of the History digest per, memory_zoom — Open one block of the History
 permissions: permissions_update — Propose a change to what needs
 research: deep_research — Answer a question that needs many
 schedule: cancel_scheduled_task — Switch off a scheduled task so, schedule_task — Schedule work for YOU to do, scheduled_tasks — List the scheduled tasks

@@ -13,7 +13,7 @@ Backend, under `backend/personal_os/extensions/`:
 - Permission presets with scoped overrides and a loosening gate; the effective configuration (`grain config dump`).
 - Runtime slots: swappable model client, router, tool source and sandbox backend, selected per chat, project, profile or globally, with a refusal-credentials breaker and a Needs-you card when a selection falls back.
 - Swappable agent loop (`agent.loop`) with a shipped plan, execute and verify loop.
-- Built-in extensions: `health`, `todos`, `telegram`, `google` (service), `calendar`, `mail`, `spaces`, `coding`, and the `lean` and `focus` profiles.
+- Built-in extensions: `health`, `todos`, `telegram`, `google` (service), `calendar`, `mail`, `spaces`, `coding`, `memory-tree` (the History digest, see `docs/memory-tree.md`), and the `lean` and `focus` profiles.
 - Review: an agent can draft an extension with the author skill and `ext_propose`; it lands disabled in Settings > Advanced > Extensions with its permission diff, findings and digest. Accepting names the digest the user reviewed; enabling is a separate step.
 
 Renderer, under `src/renderer/src/extensions/`: an open view union and registries for sidebar, composer, message, side-panel, titlebar and status-bar slots, palette entries, keybindings, selection menus, fences, tool cards and recap sections; a per-extension store slice; design tokens and profile layouts.

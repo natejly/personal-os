@@ -27,6 +27,8 @@ schedule_suggest 841d47a22933371e
 health_summary a73d9a964eaf79c5
 health_log b7fbd2b763b8d229
 health_delete_entry 09ccbdc9845214bb
+memory_zoom eb3cf46c814d44da
+memory_tree_status b7c764fd12d0c704
 doc_list 9521ca89eee91e16
 doc_search b9de94309e5c09ee
 doc_read 40d066271bab1c33

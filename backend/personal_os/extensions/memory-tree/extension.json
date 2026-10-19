@@ -16,7 +16,7 @@
     "routes": { "prefix": "/memory-tree" },
     "runtime": [{ "slot": "memory.system", "id": "digest", "label": "History digest" }]
   },
-  "hooks": { "memory.written": {}, "memory.deleted": {}, "turn.settled": {} },
+  "hooks": { "app.start": {}, "memory.written": {}, "memory.deleted": {}, "turn.settled": {} },
   "permissions": ["db:own", "service:memories", "runtime:memory"],
   "settings": {
     "memoryTreeDigestTokens": { "type": "integer", "default": 1500, "minimum": 300, "maximum": 6000 },

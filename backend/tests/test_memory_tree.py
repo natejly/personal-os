@@ -557,6 +557,17 @@ def test_retrieval_ranks_summaries_and_opens_the_best_one_a_level(env: Env, monk
     assert env.ext.retrieve({"query": "zzzz", "vec": None, "project_id": None, "conv_settings": {}}) == []
 
 
+def test_the_retrieval_source_exists_only_while_there_are_summaries(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    sources = env.scope.retrieval._sources
+    assert "History digest" not in sources
+    env.add(2)
+    env.merge_all(monkeypatch)
+    asyncio.run(env.ext.start(None))
+    assert "History digest" in sources
+    env.ext.rebuild("personal")
+    assert "History digest" not in sources
+
+
 def test_bm25_prefers_the_document_with_the_rare_query_word() -> None:
     scores = tree.bm25("greyhound", ["the dog ran", "the greyhound ran", "the dog slept"])
     assert scores.index(max(scores)) == 1 and scores[0] == 0
@@ -632,7 +643,7 @@ def test_memory_tree_status_counts_per_scope(env: Env, monkeypatch: pytest.Monke
 def test_the_manifest_declares_the_contract(env: Env) -> None:
     m = env.scope.manifest
     assert (m.id, m.name, m.enabled, m.version) == ("memory-tree", "History digest", False, "1.0.0")
-    assert set(m.hooks) == {"memory.written", "memory.deleted", "turn.settled"} and set(env.scope.tools) == {"memory_zoom", "memory_tree_status"}
+    assert set(m.hooks) == {"app.start", "memory.written", "memory.deleted", "turn.settled"} and set(env.scope.tools) == {"memory_zoom", "memory_tree_status"}
     assert set(m.data["tables"]) == {"memory_tree_leaf", "memory_tree_node"} and "runtime:memory" in m.permissions
     assert env.host.check_setting("ext.memory-tree.memoryTreeDigestTokens", 1000) == 1000
     for key, bad in (("memoryTreeDigestTokens", 100), ("memoryTreeDigestTokens", 9000), ("memoryTreeMergesPerTurn", 11), ("memoryTreeMergeModel", "huge")):

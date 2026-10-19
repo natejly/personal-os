@@ -46,7 +46,7 @@ test('the shell registers its own items in the slots', () => {
   assert.deepEqual(ids('sidebar.section'), ['spaces'])
   assert.deepEqual(ids('composer.toolbar'), ['mic'])
   assert.deepEqual(ids('message.footer'), ['model-tag', 'runtime', 'trace'])
-  assert.deepEqual(ids('sidepanel.tab'), ['context', 'files', 'changes', 'review', 'traces', 'terminal'])  // the last is the coding extension's
+  assert.deepEqual(ids('sidepanel.tab'), ['context', 'files', 'changes', 'history-digest', 'review', 'traces', 'terminal'])  // the digest and the last are extensions'
   assert.deepEqual(ids('sidebar.row'), ['todos', 'calendar', 'mail', 'health', 'library', 'jobs'])
 })
 

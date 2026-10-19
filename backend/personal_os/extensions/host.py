@@ -531,6 +531,7 @@ class ExtensionHost:
         self.routes = ExtensionRoutes(self)  # mounted at /ext by the app: where folder-loaded extensions' routers are served
         self.extensions: dict[str, ExtensionScope] = {}  # in start order
         self.failed: dict[Path, str] = {}  # folders `load_dev` could not load, with the reason
+        self.slot_grants: set[str] = set()  # ids of folder extensions the user granted their runtime:<slot> permission (set by Review)
         self._failed_reloads: set[Path] = set()  # folders whose reload failed: the user already chose their on/off state
         self._startup: list[Handler] = []
         self._shutdown: list[Handler] = []
@@ -736,7 +737,7 @@ class ExtensionHost:
             for entry in manifest.contributes.get("runtime", ()):  # listed while the extension is idle; selectable once it provides code
                 scope.disposables.add(self.runtime.declare(Provider(
                     f"{manifest.id}/{entry['id']}", entry["slot"], entry["label"], "user" if dev else "built-in", manifest.id,
-                    entry.get("meta", {}), enabled=scope.enabled)))
+                    entry.get("meta", {}), enabled=scope.enabled), granted=manifest.id in self.slot_grants and SLOTS[entry["slot"]].permission in manifest.permissions))
         except (ValueError, PermissionError):
             scope.disposables.dispose()
             raise

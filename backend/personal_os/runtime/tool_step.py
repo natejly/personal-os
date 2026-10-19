@@ -28,7 +28,7 @@ from ..extensions.hooks import hook_ctx
 from ..mcp_client import MCP_DANGER
 from ..plans import PLAN_BLOCKED, PLAN_TOOL, normalize_plan, plan_voided_by_taint, taint_expected
 from ..runs import CoreRefused, Run, args_digest
-from ..stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector
+from ..stuck import STUCK_NUDGE, STUCK_STOP, WAITING_TOOLS, StuckDetector, detector_for
 from ..subagents import UNATTENDED_KINDS, parallel_safe
 from ..thinking_summary import ThinkingSummary
 from ..tools import ASK_LOCKED_DANGER, summarize_result
@@ -73,7 +73,7 @@ class TurnState:
     plan_seen: bool  # whether this chat has any plan at all: one query per reply keeps the plan lookups off the hot path
     tool_schemas: list[dict[str, Any]] = field(default_factory=list)
     denials: permrules.DenialStreak = field(default_factory=permrules.DenialStreak)  # refused calls in a row; at three the next result says to stop varying them
-    detector: StuckDetector = field(default_factory=StuckDetector)  # loop shapes REPEAT_LIMIT cannot see
+    detector: StuckDetector = field(init=False)  # loop shapes loopRepeatLimit cannot see; thresholds from stuckDetection (__post_init__)
     fence_nonce: str = field(default_factory=lambda: secrets.token_hex(8))  # per run: untrusted results are fenced with an id the page cannot guess
     blocked: set[str] = field(default_factory=set)
     tool_errors: dict[str, int] = field(default_factory=dict)
@@ -88,6 +88,9 @@ class TurnState:
     inflight: dict[str, Any] | None = None  # the call whose tool is executing, for a cancelled run to record
     awaiting: dict[str, Any] | None = None  # the tool event of a call blocked on approval, for a cancelled run to keep
     ended: bool = False  # the step ended the reply itself (a parked card): the loop stops
+
+    def __post_init__(self) -> None:
+        self.detector = detector_for(self.cfg.get("stuckDetection"))
 
 
 @dataclass
@@ -150,7 +153,7 @@ class ToolStep:
             proots, pcwd = shell_tool.perm_where(core.toolbox, sim)
             pcwd = pcwd if name == "shell_run" else None
             perm = permrules.resolve(name, args, "on", False, rules=st.perm_rules, conv=st.conv_id, roots=proots, cwd=pcwd,
-                                     doom=st.detector is not None and st.detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
+                                     doom=st.detector is not None and st.detector.repeat_count(name, args) >= limits.loop_setting(st.cfg, "loopDoomLimit") - 1)
             if perm.mode != "on" or perm.refusal or perm.kind == "doom_loop":
                 break
             # A call Auto mode would hand the reviewer must not have gone out before the review.
@@ -209,10 +212,10 @@ class ToolStep:
             sig = tools.call_key(c["name"], args)
             st.repeats = st.repeats + 1 if sig == st.last_sig and c["name"] not in WAITING_TOOLS else 1
             st.last_sig = sig
-            if st.repeats >= core.REPEAT_LIMIT:  # before the approval gate: denying the same call forever is still a loop
+            if st.repeats >= limits.loop_setting(st.cfg, "loopRepeatLimit"):  # before the approval gate: denying the same call forever is still a loop
                 st.partial = "loop"
             if st.partial == "loop":  # every pending call still needs a tool message, executed or not
-                st.messages.append({"role": "tool", "tool_call_id": c["id"], "content": st.stop_text or core.LOOP_STOP.format(name=c["name"], n=core.REPEAT_LIMIT)})
+                st.messages.append({"role": "tool", "tool_call_id": c["id"], "content": st.stop_text or core.LOOP_STOP.format(name=c["name"], n=limits.loop_setting(st.cfg, "loopRepeatLimit"))})
                 continue
             # A call that cannot run as sent (broken JSON, an unknown name, a cut-off call) is answered here with
             # what was wrong. It never reaches the gate, a rule, a plan claim, an approval card or the tool:
@@ -224,14 +227,14 @@ class ToolStep:
                 shown = (c["_asked"] or c["name"])[:80] if invalid == "name" else c["name"]
                 uid = f"{rnd.am['id']}:{c['id']}"
                 if c["name"] in st.blocked:
-                    bad = tools.denied(c["name"], f"failing {core.TOOL_ERROR_LIMIT} times in a row and disabled for the rest of this reply")
+                    bad = tools.denied(c["name"], f"failing {limits.loop_setting(st.cfg, 'loopToolErrorLimit')} times in a row and disabled for the rest of this reply")
                 yield "tool_call", {"message_id": rnd.am["id"], "id": uid, "name": shown, "arguments": {},
                                     "needs_approval": False, "forced": False, "proposal": None, "permission": None, "plan": None}
                 tspan = rnd.tracer.start("tool", shown, {"round": rnd.n, "arguments": {}, "invalid": invalid}, parent=rnd.span)
                 yield "span", {"message_id": rnd.am["id"], "span": tspan}
                 preview, err = summarize_result(bad), bad.get("error")
                 st.tool_errors[c["name"]] = st.tool_errors.get(c["name"], 0) + 1
-                if st.tool_errors[c["name"]] >= core.TOOL_ERROR_LIMIT:
+                if st.tool_errors[c["name"]] >= limits.loop_setting(st.cfg, "loopToolErrorLimit"):
                     st.blocked.add(c["name"])
                 rnd.tracer.end(tspan, {"result_chars": len(preview), "invalid": invalid}, error=err)
                 event = {"id": uid, "name": shown, "arguments": {}, "result_preview": preview, "duration_ms": 0,
@@ -242,7 +245,7 @@ class ToolStep:
                 yield "tool_result", {"message_id": rnd.am["id"], **event}
                 yield "span", {"message_id": rnd.am["id"], "span": tspan}
                 st.messages.append({"role": "tool", "tool_call_id": c["id"],
-                                 "content": core.tool_results.for_model(st.conv_id, rnd.am["id"], c["name"], bad, untrusted=False)})
+                                 "content": core.tool_results.for_model(st.conv_id, rnd.am["id"], c["name"], bad, untrusted=False, inline_chars=limits.loop_setting(st.cfg, "toolResultInlineChars"))})
                 continue
             raw_mode = st.modes.get(c["name"], "off")
             first_use = False  # a deferred tool called by name before any search: loaded now, run now, schema returned on an error
@@ -324,7 +327,7 @@ class ToolStep:
                 perm = permrules.resolve(
                     c["name"], args, mode, forced,
                     rules=st.perm_rules, conv=st.conv_id, roots=proots, cwd=pcwd,
-                    doom=st.detector is not None and st.detector.repeat_count(c["name"], args) >= permrules.DOOM_LIMIT - 1)
+                    doom=st.detector is not None and st.detector.repeat_count(c["name"], args) >= limits.loop_setting(st.cfg, "loopDoomLimit") - 1)
                 mode = perm.mode
                 if perm.kind == "doom_loop":
                     forced, taint_only, hard_forced = True, False, True
@@ -758,7 +761,7 @@ class ToolStep:
             ran = False  # only a call that really executed says anything about being stuck
             mcp_ran = False  # the connector was actually contacted: whatever it said, error or not, is third-party text
             if was_blocked:
-                result: Any = tools.denied(c["name"], f"failing {core.TOOL_ERROR_LIMIT} times in a row and disabled for the rest of this reply")
+                result: Any = tools.denied(c["name"], f"failing {limits.loop_setting(st.cfg, 'loopToolErrorLimit')} times in a row and disabled for the rest of this reply")
             elif pre is not None:
                 # An unusable plan, a step of a plan the user rejected, or a plan-mode refusal.
                 # Ahead of the `off` branch: plan mode turns the mode off to stop the call, and
@@ -838,7 +841,7 @@ class ToolStep:
             st.tool_errors[c["name"]] = st.tool_errors.get(c["name"], 0) + 1 if err else 0  # reset on success = consecutive
             if ran and not err and st.run is not None:
                 st.run.tool_ok += 1  # a desk turn's progress, beside steps_consumed (_chain_kind)
-            if st.tool_errors[c["name"]] >= core.TOOL_ERROR_LIMIT:
+            if st.tool_errors[c["name"]] >= limits.loop_setting(st.cfg, "loopToolErrorLimit"):
                 st.blocked.add(c["name"])
             # An MCP result is third-party text by definition, so it taints like a web fetch does.
             # A connector's error text is as untrusted as its output, so it taints either way.
@@ -896,7 +899,8 @@ class ToolStep:
             brought_untrusted = bool(st.tool_ctx.get("tainted"))
             # Fenced per call, not per run: a safe read after a web read is not wrapped, or the fence means nothing.
             fence = st.fence_nonce if len(st.tool_ctx["taint_sources"]) > sources_before else None
-            content, rid = core.tool_results.render(st.conv_id, rnd.am["id"], c["name"], for_model, untrusted=brought_untrusted, fence=fence)
+            content, rid = core.tool_results.render(st.conv_id, rnd.am["id"], c["name"], for_model, untrusted=brought_untrusted, fence=fence,
+                                                  inline_chars=limits.loop_setting(st.cfg, "toolResultInlineChars"))
             if rid:
                 event["result_id"] = rid  # persisted with the tool event, so later turns can name the handle
             if stuck and event["breaker"] == "stuck_nudge":

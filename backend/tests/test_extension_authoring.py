@@ -672,3 +672,36 @@ def test_a_disabled_extension_answers_404(ext: Path) -> None:
     assert client.get("/ext/sample/hi").status_code == 200
     hidden.append("sample")
     assert client.get("/ext/sample/hi").status_code == 404
+
+
+# ---- grain ext new --loop ----
+def test_new_loop_writes_a_provider_that_passes_check_and_the_fence(work: Path) -> None:
+    root = scaffold("looper", work, loop=True)
+    assert sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()) == ["extension.json", "extension.py", "tests/test_extension.py"]
+    manifest = manifest_mod.load_manifest(root / "extension.json")
+    assert manifest.permissions == ("runtime:loop",)
+    assert manifest.contributes["runtime"] == [{"slot": "agent.loop", "id": "draft-critique-revise", "label": "Looper: draft, critique, revise"}]
+    assert check(root) == []
+    (root / "extension.py").write_text("import gc\n" + (root / "extension.py").read_text("utf-8"), "utf-8")
+    assert errors(root) == ["loop-fence"]
+
+
+def test_new_loop_command_and_a_profile_cannot_be_a_loop(work: Path, capsys: Any) -> None:
+    assert cli.main(["ext", "new", "viacli", "--loop", "--dir", str(work)]) == 0
+    assert (work / "viacli" / "extension.py").is_file() and "created" in capsys.readouterr().out
+    with pytest.raises(ValueError, match="profile"):
+        scaffold("both", work, profile=True, loop=True)
+
+
+def test_the_generated_loop_test_passes_under_the_harness(work: Path) -> None:
+    root = scaffold("looper", work, loop=True)
+    scratch = tempfile.mkdtemp(prefix="authoring-data-")
+    try:
+        env = {**__import__("os").environ, "PERSONAL_OS_DATA_DIR": scratch, "GRAIN_SECRETS_BACKEND": "file",
+               "PERSONAL_OS_OPENCODE_DB": str(Path(scratch) / "no.db"), "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
+        done = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", str(root / "tests")], cwd=root, env=env,
+                              capture_output=True, text=True, timeout=300)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "2 passed" in done.stdout
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)

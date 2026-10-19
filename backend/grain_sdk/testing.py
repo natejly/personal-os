@@ -68,6 +68,9 @@ class Harness:
         self.fire = self._fire
         self.conversation_id: str | None = None
         appmod.db.set_settings({**SETTINGS, **(settings or {})})
+        manifest = json.loads((Path(folder) / "extension.json").read_text("utf-8"))
+        if "runtime:loop" in manifest.get("permissions", ()):  # the test grants a loop provider its permission, as the user does on its card
+            appmod.host.slot_grants.add(manifest["id"])
         self.scope = self._run(appmod.host.load_dev(Path(folder).resolve(), appmod._ext_ctx))
         appmod.toolbox.set_extension_tools(self.scope)
         appmod.db.set_settings({"hiddenViews": [v for v in appmod.settings().get("hiddenViews") or () if v != self.scope.manifest.id]})
@@ -85,6 +88,7 @@ class Harness:
         self._llm._stream_openai = self._stream
         self._app.db.set_settings({"runtime": self._runtime})
         self._app.toolbox.drop_extension_tools(self.scope.tools)
+        self._app.host.slot_grants.discard(self.scope.manifest.id)
         self._run(self._app.host.unload(self.scope.manifest.id))
         self._loop.close()
 

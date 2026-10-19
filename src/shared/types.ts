@@ -1904,6 +1904,17 @@ export interface Settings {
   telegramPushWorkerResults?: boolean
   /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
   llmRetries?: number
+  // loop lane: agent-loop tunables (backend limits.LOOP_DEFAULTS / RANGES)
+  loopMaxRounds?: number // 0 = no cap
+  loopModelCalls?: number
+  loopRepeatLimit?: number
+  loopToolErrorLimit?: number
+  loopDoomLimit?: number
+  stuckDetection?: 'off' | 'relaxed' | 'standard' | 'strict'
+  finalRoundSeconds?: number
+  toolResultInlineChars?: number
+  planLoopMaxSteps?: number
+  planLoopVerifyPasses?: number
   llmIdleSeconds?: number
   /** Archive chats and inbox messages whose last activity is older than this many days (restorable). 0 or missing = off. */
   autoArchiveDays?: number

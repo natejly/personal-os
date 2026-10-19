@@ -27,6 +27,24 @@ MANIFEST = Template('''{
 }
 ''')
 
+LOOP_MANIFEST = Template('''{
+  "id": "$id",
+  "name": "$title",
+  "description": "An agent loop that drafts an answer, critiques it and revises it. Replace the steps.",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "kind": "extension",
+  "enabled": true,
+  "activation": ["startup"],
+  "contributes": {
+    "runtime": [
+      { "slot": "agent.loop", "id": "draft-critique-revise", "label": "$title: draft, critique, revise" }
+    ]
+  },
+  "permissions": ["runtime:loop"]
+}
+''')
+
 PROFILE = Template('''{
   "id": "$id",
   "name": "$title",
@@ -78,6 +96,87 @@ def activate(api: Extension) -> None:
     api.context(lambda payload: Contribution(f"The user has {count()} saved notes."), slot="volatile")
 ''')
 
+LOOP_BACKEND = Template('''"""$title: an agent loop that drafts an answer, critiques it and revises it.
+
+A loop reaches the model, the tools and the context only through the harness `run` is handed, so every tool call is judged by
+the same permission checks and approval cards as in the chat. The only import from the app is `loop_api` (the import fence checks
+the whole file); the introspection modules of the standard library are off limits too.
+"""
+from __future__ import annotations
+
+from types import MappingProxyType
+from typing import Any, AsyncIterator
+
+from grain_sdk import Extension
+from personal_os.runtime.loop_api import LimitReached, LoopEvent, LoopHarness, TurnInput
+
+CRITIQUE = "Critique the draft answer above for the user's request. List what is wrong, missing or unproven, briefly. Call no tool."
+REVISE = "Write the final answer for the user: the draft with the critique applied. Do not mention the draft or the critique."
+
+
+class DraftCritiqueRevise:
+    id = "$id/draft-critique-revise"
+    bounds = MappingProxyType({"draft": 6})  # rounds of tools while drafting; the core counts them and caps the turn's model calls
+
+    async def run(self, turn: TurnInput, h: LoopHarness) -> AsyncIterator[LoopEvent]:
+        try:
+            draft = ""
+            yield "status", {"text": "Drafting"}
+            messages = h.context.build()  # the context pipeline's messages plus this run's own, kept as the draft grows
+            while not h.limits.stopped:
+                h.limits.next_round("draft")  # raises LimitReached once the declared bound is spent
+                end: dict[str, Any] = {}
+                async for event in h.model.stream(messages, tools=True):
+                    if event["type"] == "end":
+                        end = event
+                if h.limits.stopped:
+                    return
+                if not end.get("tool_calls"):
+                    draft = end.get("text", "")
+                    break
+                await h.tools.run(end["tool_calls"])  # appends the tool messages to `messages`
+            yield "status", {"text": "Critiquing"}
+            critique = ""
+            async for event in h.model.stream(h.context.build([f"Draft answer:\\n{draft}\\n\\n{CRITIQUE}"]), tools=False):
+                if event["type"] == "end":
+                    critique = event["text"]
+            yield "status", {"text": "Revising"}
+            async for event in h.model.stream(h.context.build([f"Draft answer:\\n{draft}\\n\\nCritique:\\n{critique}\\n\\n{REVISE}"]), tools=False):
+                if event["type"] == "delta":
+                    yield "delta", {"text": event["text"]}  # only the revision reaches the reply
+        except LimitReached as e:
+            yield "delta", {"text": f"I stopped here: {e}."}
+
+
+def activate(api: Extension) -> None:
+    api.provide("agent.loop", DraftCritiqueRevise(), id="draft-critique-revise", label="$title: draft, critique, revise")
+''')
+
+LOOP_TEST = Template('''from pathlib import Path
+
+from grain_sdk.testing import Harness
+
+ROOT = Path(__file__).parents[1]
+
+
+def test_the_loop_drafts_critiques_and_revises() -> None:
+    with Harness(ROOT) as h:
+        h.select("agent.loop", "$id/draft-critique-revise")
+        turn = h.chat("say hi", model_script=["a draft", "the draft is fine", "the final answer"])
+        assert turn.error is None
+        assert turn.text == "the final answer"  # only the revision is streamed
+        assert len(turn.requests) == 3
+        assert "a draft" in str(turn.requests[1]) and "the draft is fine" in str(turn.requests[2])
+
+
+def test_a_tool_round_runs_before_the_critique() -> None:
+    call = {"id": "c1", "name": "todo_write", "arguments": {"steps": [{"text": "one", "status": "pending"}]}}
+    with Harness(ROOT, settings={"permissionMode": "allow_all"}) as h:
+        h.select("agent.loop", "$id/draft-critique-revise")
+        turn = h.chat("plan it", model_script=[{"tool_calls": [call]}, "a draft", "fine", "done"])
+        assert turn.error is None and turn.text == "done"
+''')
+
 FRONTEND = '''// The renderer half. Register views, settings panels and slot items from `activate`.
 export function activate(): void {}
 '''
@@ -106,7 +205,7 @@ def test_the_tool_saves_a_note() -> None:
 ''')
 
 
-def scaffold(ext_id: str, parent: Path, profile: bool = False) -> Path:
+def scaffold(ext_id: str, parent: Path, profile: bool = False, loop: bool = False) -> Path:
     """Write `<parent>/<ext_id>/` and return it. Refuses an id that is not a valid new id or is a built-in's, or a folder that exists."""
     if not ID.fullmatch(ext_id):
         raise ValueError("an extension id starts with a letter and holds lowercase letters, digits and hyphens")
@@ -116,7 +215,13 @@ def scaffold(ext_id: str, parent: Path, profile: bool = False) -> Path:
     if root.exists():
         raise FileExistsError(f"{root} already exists")
     values = {"id": ext_id, "ident": ext_id.replace("-", "_"), "title": ext_id.replace("-", " ").title()}
+    if profile and loop:
+        raise ValueError("a profile runs no code, so it cannot provide a loop")
     files = {"extension.json": PROFILE.substitute(values)} if profile else {
+        "extension.json": LOOP_MANIFEST.substitute(values),
+        "extension.py": LOOP_BACKEND.substitute(values),
+        "tests/test_extension.py": LOOP_TEST.substitute(values),
+    } if loop else {
         "extension.json": MANIFEST.substitute(values),
         "extension.py": BACKEND.substitute(values),
         "extension.tsx": FRONTEND,

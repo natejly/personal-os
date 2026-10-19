@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 
 run_id: ContextVar[str | None] = ContextVar("runtime_run_id", default=None)  # the run a call belongs to, for hook payloads
 USER_SLOTS = frozenset({"model.router", "model.client", "tools.source"})  # a user extension may not provide the others
+GRANTED_SLOTS = frozenset({"agent.loop"})  # a user extension may provide these only when the user granted its runtime:<slot> permission
 CLIENT_KINDS = frozenset({"chat", "complete", "embed", "image", "audio"})
 _LOCALITY = {"remote": 0, "local": 1}
 _STRICTEST: dict[str, Any] = {"model.client": "local", "sandbox.backend": {"workspace-write": dict.fromkeys(DIMENSIONS, "full")}}
@@ -142,13 +143,13 @@ class Runtime:
             self._providers[provider.slot][provider.id] = provider
 
     # ---- registration ----
-    def declare(self, provider: Provider) -> Disposable:
+    def declare(self, provider: Provider, granted: bool = False) -> Disposable:
         """List a provider an extension's manifest names; it can be selected only once `attach` gives it code."""
         if provider.slot not in SLOTS:
             raise ValueError(f"{provider.slot!r} is not a runtime slot")
         if provider.id in self._providers[provider.slot]:
             raise ValueError(f"{provider.slot} already has a provider {provider.id!r}")
-        if provider.tier == "user" and provider.slot not in USER_SLOTS:
+        if provider.tier == "user" and provider.slot not in USER_SLOTS and not (granted and provider.slot in GRANTED_SLOTS):
             raise PermissionError(f"a user extension cannot provide {provider.slot}")
         self._providers[provider.slot][provider.id] = provider
         return Disposable(lambda: self._providers[provider.slot].pop(provider.id, None))

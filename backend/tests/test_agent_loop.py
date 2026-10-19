@@ -116,7 +116,7 @@ def _script(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
         hooks.clear()
     yield
     ROUNDS.clear()
-    appmod.db.set_settings({"permissionRules": {}})
+    appmod.db.set_settings({"permissionRules": {}, **limits.LOOP_DEFAULTS})
 
 
 @pytest.fixture
@@ -320,6 +320,8 @@ def test_every_loop_in_the_tree_and_the_fixtures_keep_the_fence() -> None:
     package = Path(appmod.__file__).parent
     found = 0
     for path in sorted(package.rglob("*.py")):
+        if path == package / "extensions" / "authoring" / "scaffold.py":
+            continue  # holds the text of a loop to write out, not a loop; the scaffold's tests check what it writes
         tree = ast.parse(path.read_text("utf-8"))
         loops = [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and any(
             isinstance(f, ast.AsyncFunctionDef) and f.name == "run" and [a.arg for a in f.args.args] == ["self", "turn", "h"] for f in n.body)]
@@ -461,7 +463,7 @@ def test_the_core_caps_the_model_calls_of_a_turn(test_loops: None, monkeypatch: 
     drive(cid)
     assert limits.LOOP_MODEL_CALLS == len(MODEL) == 60 and "60 model calls" in fx.SEEN["greedy"]
     MODEL.clear()
-    monkeypatch.setattr(limits, "LOOP_MODEL_CALLS", 5)  # a budget added in core applies to every alternative loop
+    appmod.db.set_settings({"loopModelCalls": 5})  # a budget added in core applies to every alternative loop
     drive(chat("test/greedy"))
     assert len(MODEL) == 5
 
@@ -588,10 +590,10 @@ def test_a_step_ends_after_its_rounds_and_the_next_thing_is_the_check() -> None:
 
 
 def test_the_model_call_ceiling_ends_the_turn_with_an_explanation(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(limits, "LOOP_MODEL_CALLS", 3)
-    ROUNDS.extend([GOOD_PLAN, {"tool_calls": [fx.call("g_read", "a", n=1)]}, {"tool_calls": [fx.call("g_read", "b", n=2)]}])
+    appmod.db.set_settings({"loopModelCalls": 5})
+    ROUNDS.extend([GOOD_PLAN, *({"tool_calls": [fx.call("g_read", k, n=i)]} for i, k in enumerate("abcd", 1))])
     events = drive(chat(PEV))
-    assert len(MODEL) == 3 and "I stopped here: this turn reached its 3 model calls" in text_of(events)
+    assert len(MODEL) == 5 and "I stopped here: this turn reached its 5 model calls" in text_of(events)
     assert "Read the note" in text_of(events) and done(events)["error"] is None
 
 
@@ -738,7 +740,7 @@ def test_the_repeat_breaker_ends_either_loop_the_same_way() -> None:
 
 
 def test_a_lower_repeat_limit_applies_to_both_loops(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(appmod, "REPEAT_LIMIT", 2)
+    appmod.db.set_settings({"loopRepeatLimit": 2})
     script = [{"tool_calls": [fx.call("g_read", f"r{i}")]} for i in range(2)] + ["closing"]
     runs = {loop: breaker_run(loop, script) for loop in (None, PEV)}
     assert all(done(e)["partial"] == "loop" and len(results(e)) == 1 for e in runs.values())
@@ -797,3 +799,66 @@ def test_a_run_whose_calls_all_went_through_the_step_is_not_flagged(test_loops: 
     ROUNDS.append({"tool_calls": [fx.call("g_write")]})
     events = drive(cid, run=_run_for(cid))
     assert done(events)["error"] is None and results(events)[0]["error"] is None
+
+
+# ---------------------------------------------------------------- loop settings (loop lane)
+def test_loop_max_rounds_forces_a_closing_answer_in_the_chat_loop() -> None:
+    appmod.db.set_settings({"loopMaxRounds": 2})
+    ROUNDS.extend([{"tool_calls": [fx.call("g_read", f"r{i}", n=i)]} for i in range(1, 3)] + ["closing answer"])
+    events = drive(chat(), cards="allow")
+    assert len(results(events)) == 2 and done(events)["partial"] == "loop" and done(events)["error"] is None
+    assert text_of(events) == "closing answer" and MODEL[-1]["tool_choice"] == "none"
+    assert "used its 2 rounds" in tails(MODEL[-1])
+
+
+def test_loop_max_rounds_zero_is_no_cap() -> None:
+    ROUNDS.extend([{"tool_calls": [fx.call("g_read", f"r{i}", n=i)]} for i in range(1, 5)] + ["fine"])
+    events = drive(chat(), cards="allow")
+    assert len(results(events)) == 4 and done(events)["partial"] is None
+
+
+def test_stuck_detection_modes_move_when_the_nudge_comes() -> None:
+    def nudges(mode: str, n: int) -> list[str | None]:
+        appmod.db.set_settings({"stuckDetection": mode})
+        events = breaker_run(None, [{"tool_calls": [fx.call("g_read", f"s{i}", same="x")]} for i in range(n)] + ["end"])
+        return [r.get("breaker") for r in results(events)]
+    assert nudges("strict", 3)[-1] == "stuck_nudge"       # same result 4 -> 3
+    assert nudges("standard", 3)[-1] is None
+    assert nudges("standard", 4)[-1] == "stuck_nudge"
+    assert nudges("off", 4)[-1] is None
+    assert nudges("relaxed", 4)[-1] is None
+
+
+def test_tool_result_inline_chars_decides_when_a_result_becomes_a_handle() -> None:
+    async def big(ctx: dict[str, Any]) -> dict[str, Any]:
+        return {"text": "z" * 3000}
+    appmod.toolbox.specs["g_big"] = ToolSpec("g_big", "g_big", OBJ, big, "test", "safe")
+    try:
+        def previews(inline: int) -> str:
+            appmod.db.set_settings({"toolResultInlineChars": inline})
+            ROUNDS.clear()
+            ROUNDS.extend([{"tool_calls": [fx.call("g_big")]}, "done"])
+            drive(chat(tools={**tools_on(), "g_big": "on"}), cards="allow")
+            return next(m["content"] for m in reversed(MODEL[-1]["messages"]) if m["role"] == "tool")
+        assert "result_id" not in previews(12000) and "result_id" in previews(2000)
+    finally:
+        appmod.toolbox.specs.pop("g_big", None)
+
+
+def test_plan_loop_max_steps_limits_the_plan_and_says_so() -> None:
+    appmod.db.set_settings({"planLoopMaxSteps": 2})
+    ROUNDS.extend([plan_of("a", "b", "c"), plan_of("a", "b"), "did a", "did b", VERIFIED, "final"])
+    drive(chat(PEV))
+    assert "at most 2 steps" in tails(MODEL[0]) and "3 steps and the most is 2" in tails(MODEL[1])
+    assert [s["title"] for s in HOOKS["loop.plan"][0]["steps"]] == ["a", "b"]
+
+
+def test_plan_loop_verify_passes_set_the_repairs_after_a_failed_check() -> None:
+    def verifies(passes: int) -> int:
+        appmod.db.set_settings({"planLoopVerifyPasses": passes})
+        HOOKS["loop.verify"].clear()
+        ROUNDS.clear()
+        ROUNDS.extend([GOOD_PLAN, "read", *([failed("x"), "repair"] * 4), "final"])
+        drive(chat(PEV))
+        return len(HOOKS["loop.verify"])
+    assert [verifies(p) for p in (0, 1, 3)] == [1, 2, 4]

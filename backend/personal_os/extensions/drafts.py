@@ -31,6 +31,9 @@ TAINT_REFUSED = frozenset({"prompt:inject", "hooks:gate"})  # a session that rea
 GATE_PERMISSIONS = frozenset(p for spec in HOOKS.values() for p in spec.permission)  # the permissions that can narrow or change what the user did: granted by name at enable
 
 
+SLOT_GRANTS = frozenset({"runtime:loop"})  # a user extension may provide agent.loop only with this granted by name
+
+
 class DraftError(ValueError):
     def __init__(self, message: str, findings: list[str] | None = None) -> None:
         super().__init__(message)
@@ -43,7 +46,7 @@ def _card(manifest: Manifest, tainted: bool, sources: list[str]) -> dict[str, An
     return {"id": manifest.id, "name": manifest.name, "description": manifest.description, "version": manifest.version,
             "tier": "user", "contributes": manifest.contributes, "hooks": sorted(manifest.hooks), "permissions": sorted(perms),
             "settings": sorted(manifest.settings), "tainted": tainted, "taintSources": sources,
-            "refused": sorted(TAINT_REFUSED & perms) if tainted else [], "needsGrant": sorted(GATE_PERMISSIONS & perms)}
+            "refused": sorted(TAINT_REFUSED & perms) if tainted else [], "needsGrant": sorted((GATE_PERMISSIONS | SLOT_GRANTS) & perms)}
 
 
 def _copy(src: Path, dst: Path) -> None:
@@ -224,3 +227,17 @@ class Drafts:
                              f"so it may not hold {', '.join(card['refused'])}")
         if missing := sorted(set(card["needsGrant"]) - set(grants)):
             raise DraftError(f"it can change what you approved or refused; enable it again granting {', '.join(missing)}")
+        self._set_grants(ext_id, sorted(SLOT_GRANTS & set(grants) & set(card["permissions"])))
+
+    def _set_grants(self, ext_id: str, slot_grants: list[str]) -> None:
+        pin = self._pins / f"{ext_id}.json"
+        if pin.is_file():
+            pin.write_text(json.dumps({**json.loads(pin.read_text("utf-8")), "slotGrants": slot_grants}), "utf-8")
+
+    def slot_grants(self, ext_id: str) -> list[str]:
+        """The runtime:<slot> permissions the user granted this installed extension when enabling it."""
+        pin = self._pins / f"{ext_id}.json"
+        return json.loads(pin.read_text("utf-8")).get("slotGrants", []) if pin.is_file() else []
+
+    def revoke_grants(self, ext_id: str) -> None:
+        self._set_grants(ext_id, [])

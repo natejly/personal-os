@@ -78,9 +78,28 @@ class Limits:
     not_run: int = NOT_RUN
 
 
+def limits_for(mode: Any) -> Limits | None:
+    """The thresholds for the stuckDetection setting: standard is the constants above, relaxed doubles each, strict takes one
+    off (never below 2), off is no detector (None). A value that is not a mode reads as standard."""
+    if mode == "off":
+        return None
+    base = Limits()
+    if mode == "relaxed":
+        return Limits(*(v * 2 for v in vars(base).values()))
+    if mode == "strict":
+        return Limits(*(max(2, v - 1) for v in vars(base).values()))
+    return base
+
+
+def detector_for(mode: Any) -> "StuckDetector":
+    """A detector for the stuckDetection setting."""
+    return StuckDetector(limits_for(mode), enabled=mode != "off")
+
+
 class StuckDetector:
-    def __init__(self, limits: Limits | None = None) -> None:
+    def __init__(self, limits: Limits | None = None, enabled: bool = True) -> None:
         self.limits = limits or Limits()
+        self.enabled = enabled  # off: calls are still observed (repeat_count feeds the permission card) but check() never names a pattern
         self.obs: deque[Obs] = deque(maxlen=WINDOW)
         self.not_run = 0
         self.last_not_run = ""
@@ -125,6 +144,8 @@ class StuckDetector:
         return list(self.obs)[-n:] if len(self.obs) >= n else []
 
     def check(self) -> Stuck | None:
+        if not self.enabled:
+            return None
         lim = self.limits
         if self.not_run >= lim.not_run:
             return Stuck("not_run", self.last_not_run, f"{self.last_not_run} and other calls were refused or unavailable {self.not_run} times in a row")

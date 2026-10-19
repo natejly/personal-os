@@ -23,7 +23,7 @@ from .extensions.hooks import HookBus
 from .runtime import checked
 from .runtime.protocols import ModelReply, ModelRequest
 from .runtime.slots import Refused, at_least_as_private
-from .limits import (VOLATILE_HEADER, CODING_SESSION_MAX_CONCURRENT, COMPACT_AT, COMPACT_AT_TOKENS, COMPACT_KEEP_RECENT, COMPACT_KEEP_TOKENS, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, LLM_IDLE_SECONDS, LLM_RETRIES, MICRO_AT, MICRO_KEEP, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, TOOL_DEFER_ABOVE, WORKER_MAX_CONCURRENT)
+from .limits import (LOOP_DEFAULTS, VOLATILE_HEADER, CODING_SESSION_MAX_CONCURRENT, COMPACT_AT, COMPACT_AT_TOKENS, COMPACT_KEEP_RECENT, COMPACT_KEEP_TOKENS, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, LLM_IDLE_SECONDS, LLM_RETRIES, MICRO_AT, MICRO_KEEP, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, TOOL_DEFER_ABOVE, WORKER_MAX_CONCURRENT)
 from .permissions import DEFAULTS as PERMISSION_DEFAULTS
 log = logging.getLogger("personal_os.llm")
 
@@ -134,6 +134,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "fileSnapshots": True,
     # Every permission key (tools, alwaysAsk, permissionRules, ...) and its default: permissions.py.
     **PERMISSION_DEFAULTS,
+    # loop lane: agent-loop tunables (limits.LOOP_DEFAULTS has the defaults, limits.RANGES the bounds)
+    **LOOP_DEFAULTS,
+    "stuckDetection": "standard",  # off | relaxed | standard | strict: how soon the stuck detector steps in (stuck.limits_for)
     "parallelReads": 0,  # read-only calls of one round that run together; 0 = automatic (limits.worker_slots), 1 = one at a time
     # codemode lane: run_python(tools=...) lets a script drive app tools (toolbridge.py).
     "codeMode": True,  # off: run_python refuses `tools`; scripts cannot call app tools

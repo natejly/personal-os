@@ -12,14 +12,14 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, AsyncIterator
 
-from .loop_api import LimitReached, LoopEvent, LoopHarness, Messages, TurnInput
+from .loop_api import LimitReached, LoopEvent, LoopHarness, Messages, TurnInput, setting_int
 
-MAX_STEPS = 8
+MAX_STEPS = 8  # the default; planLoopMaxSteps moves it per turn
 PREVIEW_CHARS = 200
 SINGLE_STEP = {"title": "Do the task", "done_when": "the request is answered"}
 
 PLAN_TAIL = ("Before doing anything, plan the work. Reply with JSON only, no tool calls and no other text: "
-             '{"steps": [{"title": "...", "done_when": "..."}]} with at most 8 steps. Each has a short title and one sentence '
+             '{"steps": [{"title": "...", "done_when": "..."}]} with at most {max_steps} steps. Each has a short title and one sentence '
              "saying how to tell it is done. Nothing in the plan is carried out or approved by being listed.")
 STEP_TAIL = ("You are carrying out step {n} of {total} of the plan: {title}\nIt is done when: {done_when}\n"
              "Work on this step only. Call tools as needed; when the step is done, say so in one sentence and call no tool.")
@@ -67,12 +67,12 @@ def _json_object(text: str) -> Any:
         return None
 
 
-def _plan_problem(data: Any) -> str | None:
+def _plan_problem(data: Any, max_steps: int = MAX_STEPS) -> str | None:
     steps = data.get("steps") if isinstance(data, dict) else None
     if not isinstance(steps, list) or not steps:
         return 'it must be {"steps": [...]} with at least one step'
-    if len(steps) > MAX_STEPS:
-        return f"it has {len(steps)} steps and the most is {MAX_STEPS}"
+    if len(steps) > max_steps:
+        return f"it has {len(steps)} steps and the most is {max_steps}"
     for step in steps:
         if not (isinstance(step, dict) and all(isinstance(step.get(k), str) and step[k].strip() for k in ("title", "done_when"))):
             return "each step needs a title and done_when, both text"
@@ -95,6 +95,11 @@ class PlanExecuteVerify:
     id = "core/plan-execute-verify"
     bounds = MappingProxyType({"plan": 2, "execute": 6, "verify": 2})  # a plan call and one repair; rounds per step; verifications
 
+    @staticmethod
+    def turn_bounds(cfg: Any) -> MappingProxyType:
+        """The bounds for one turn: the verifications are the first check plus planLoopVerifyPasses repairs (the core reads this once)."""
+        return MappingProxyType({"plan": 2, "execute": 6, "verify": setting_int(cfg, "planLoopVerifyPasses") + 1})
+
     async def run(self, turn: TurnInput, h: LoopHarness) -> AsyncIterator[LoopEvent]:
         work = _Work()
         try:
@@ -106,7 +111,7 @@ class PlanExecuteVerify:
     async def _turn(self, turn: TurnInput, h: LoopHarness, work: _Work) -> AsyncIterator[LoopEvent]:
         yield "status", {"text": "Planning the work"}
         yield "span", {"name": "plan", "open": True, "meta": {}}
-        work.steps = await self._plan(h)
+        work.steps = await self._plan(h, setting_int(turn.cfg, "planLoopMaxSteps"))
         if h.limits.stopped:  # a Stop during the plan call leaves the chat's own plan alone
             yield "span", {"name": "plan", "open": False, "meta": {}}
             return
@@ -128,7 +133,7 @@ class PlanExecuteVerify:
             ok, gaps = await self._verify(h, work)
             await h.hooks.emit("loop.verify", {"run_id": turn.run_id, "conversation_id": turn.conversation_id, "attempt": attempt, "ok": ok, "gaps": gaps})
             yield "span", {"name": "verify", "open": False, "meta": {"ok": ok, "gaps": len(gaps)}}
-            if ok or attempt >= self.bounds["verify"]:
+            if ok or attempt >= self.turn_bounds(turn.cfg)["verify"]:
                 break
             async for event in self._step(h, work, len(work.steps) - 1, REPAIR_TAIL.format(gaps="\n".join(f"- {g}" for g in gaps)), repair=True):
                 yield event
@@ -138,8 +143,9 @@ class PlanExecuteVerify:
         async for event in self._call(h, h.context.build([tail, work.record()]), _Call(), tools=False, forward=True):
             yield event
 
-    async def _plan(self, h: LoopHarness) -> list[dict[str, str]]:
-        tail, problem = [PLAN_TAIL], ""
+    async def _plan(self, h: LoopHarness, max_steps: int = MAX_STEPS) -> list[dict[str, str]]:
+        plan_tail = PLAN_TAIL.replace("{max_steps}", str(max_steps))
+        tail, problem = [plan_tail], ""
         for _ in range(self.bounds["plan"]):
             h.limits.next_round("plan")
             out = _Call()
@@ -148,9 +154,9 @@ class PlanExecuteVerify:
             if h.limits.stopped:
                 return []
             data = _json_object(out.text)
-            if not (problem := _plan_problem(data) or ""):
+            if not (problem := _plan_problem(data, max_steps) or ""):
                 return [{"title": s["title"].strip(), "done_when": s["done_when"].strip()} for s in data["steps"]]
-            tail = [PLAN_TAIL, f"Your last reply was not a usable plan: {problem}. Reply with the JSON only."]
+            tail = [plan_tail, f"Your last reply was not a usable plan: {problem}. Reply with the JSON only."]
         return [dict(SINGLE_STEP)]
 
     async def _step(self, h: LoopHarness, work: _Work, index: int, tail: str, repair: bool = False) -> AsyncIterator[LoopEvent]:

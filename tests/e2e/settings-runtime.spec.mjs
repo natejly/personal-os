@@ -4,11 +4,11 @@ import { newChat, sayAndWait } from './helpers/chat.mjs'
 
 const SLOTS = ['model.client', 'model.router', 'tools.source', 'sandbox.backend', 'agent.loop']
 
-test('Settings > Runtime shows every slot on its built-in provider, with the reason', async ({ grain }) => {
+test('Settings > Runtime shows every slot on its built-in provider, with where it comes from', async ({ grain }) => {
   const { page, api } = grain
   await openSettings(page, 'Agent')
   for (const slot of SLOTS) {
-    await expect(dialog(page).getByTestId(`runtime-${slot}-reason`)).toContainText('by default')
+    await expect(dialog(page).getByTestId(`runtime-${slot}-reason`)).toContainText('built-in default')
   }
   // The model router has only its built-in provider, so there is nothing to pick; the agent loop has one built-in alternative.
   await expect(dialog(page).getByLabel('Model router, Everywhere')).toBeDisabled()

@@ -1,3 +1,4 @@
+import { sourceText } from '../../lib/settingSource'
 import { useState } from 'react'
 import type { RuntimeProvider, RuntimeResolution, RuntimeSlot } from '@shared/types'
 import { api } from '../../lib/api'
@@ -55,6 +56,7 @@ export default function RuntimeTab(): JSX.Element {
       {view?.slots.filter((s) => s.id !== LOOP_SLOT).map((s) => (
         <div key={s.id} className="set-sec" data-testid={`runtime-${s.id}`}>
           <h4>{slotNoun(s.id)}</h4>
+          <small data-testid={`runtime-${s.id}-reason`}>{sourceText(s.resolution.source)}{s.resolution.locality ? ` · ${s.resolution.locality}` : ''}</small>
           {s.resolution.enforcement && s.id === 'sandbox.backend' && <Enforcement enforcement={s.resolution.enforcement} />}
           {picker(s)}
           {s.providers.filter((p) => !p.core).map((p) => (

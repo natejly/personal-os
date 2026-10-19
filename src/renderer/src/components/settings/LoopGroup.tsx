@@ -1,3 +1,4 @@
+import { sourceText } from '../../lib/settingSource'
 import type { ReactNode } from 'react'
 import type { Settings } from '@shared/types'
 import { slotNoun } from '../../lib/runtime'
@@ -64,6 +65,7 @@ export default function LoopGroup({ draft, patch }: TabProps): JSX.Element {
         <h5 className="set-subhead">{slotNoun(LOOP_SLOT)}</h5>
         <ScopeButtons rt={rt} />
         <SelectNotices rt={rt} />
+        {slot && <small data-testid={`runtime-${LOOP_SLOT}-reason`}>{sourceText(slot.resolution.source)}</small>}
         {slot && <SlotPicker slot={slot} rt={rt} />}
       </div>
       {sections.map((g) => (

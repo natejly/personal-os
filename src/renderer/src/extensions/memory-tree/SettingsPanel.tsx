@@ -21,8 +21,7 @@ export default function DigestSettings(): JSX.Element {
   }
   return (
     <>
-      <p className="set-help">A bounded digest of everything you have told the assistant: recent memories word for word, older ones summarised by age.</p>
-      <label className="set-row">Digest size (tokens)
+      <label className="set-row">Digest size
         <input type="number" min={DIGEST_TOKENS.min} max={DIGEST_TOKENS.max} value={get('memoryTreeDigestTokens', DIGEST_TOKENS.fallback)}
           onChange={(e) => put('memoryTreeDigestTokens', clampInt(e.target.value, DIGEST_TOKENS.min, DIGEST_TOKENS.max, DIGEST_TOKENS.fallback))} />
       </label>

@@ -11,13 +11,13 @@ const NONE: Open = {}
 export default function DigestTab({ conversationId }: SidePanelTabProps): JSX.Element {
   const projectId = useStore((s) => s.conversations.find((c) => c.id === conversationId)?.project_id ?? s.draftProjectId)
   const scope = scopeFor(projectId)
-  const { cover, open, zoomed, loading, error, loadCover, toggle } = useDigest(useShallow((s) => ({
-    cover: s.covers[scope], open: s.open[scope] ?? NONE, zoomed: s.zoomed, loading: !!s.loading[scope], error: s.error, loadCover: s.loadCover, toggle: s.toggle
+  const { cover, open, zoomed, error, loadCover, toggle } = useDigest(useShallow((s) => ({
+    cover: s.covers[scope], open: s.open[scope] ?? NONE, zoomed: s.zoomed, error: s.error, loadCover: s.loadCover, toggle: s.toggle
   })))
   useEffect(() => { void loadCover(scope) }, [scope, loadCover])
 
-  if (!cover) return <p className="set-help" role="status">{error ?? (loading ? 'Loading…' : 'Nothing in the digest yet')}</p>
-  if (isEmpty(cover)) return <p className="set-help">Nothing in the digest yet</p>
+  if (!cover) return error ? <p className="set-help" role="status">{error}</p> : <></>
+  if (isEmpty(cover)) return <></>
   const rows = visibleRows(cover.nodes, open, zoomed, scope)
   return (
     <div className="memtree" data-testid="memtree-cover">
@@ -41,7 +41,7 @@ export default function DigestTab({ conversationId }: SidePanelTabProps): JSX.El
               >
                 <small className="set-help">{zoomable ? (open[node.range] ? '▾ ' : '▸ ') : ''}{spanLabel(node)}</small>
                 {node.tainted && <small style={{ marginLeft: 6, opacity: 0.8 }}>unverified</small>}
-                <div style={node.pending ? { opacity: 0.6, fontStyle: 'italic' } : undefined}>{node.pending ? 'not summarised yet' : node.text}</div>
+                <div style={node.pending ? { opacity: 0.6, fontStyle: 'italic' } : undefined}>{node.pending ? '…' : node.text}</div>
               </div>
             </li>
           )

@@ -79,6 +79,10 @@ class ToolSources:
         extra = self.rt.resolve("tools.source", scopes).extra
         return [t for i in extra if (p := self.rt.provider("tools.source", i)) is not None for t in self._list(p) if not t.quarantined]
 
+    def known_slugs(self) -> set[str]:
+        """The slugs of every tool any source has listed, enabled for a chat or not."""
+        return {t.slug for tools in self._last.values() for t in tools}
+
     def pending(self, scopes: Scopes) -> list[SourceTool]:
         """The tools withheld until the user accepts their changed declaration, as the enabled sources list them now."""
         self.tools(scopes)

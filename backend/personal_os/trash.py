@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import APIRouter, HTTPException
 
@@ -250,12 +250,18 @@ class Trash:
                 out.append({"kind": kind, "label": handler.label, "items": items})
         return out
 
+    def _purge_extension(self, kind: str, id: str) -> int:
+        """Purge one extension row; a handler that raises leaves that row in the trash and the sweep going."""
+        try:
+            return self.purge(kind, id)
+        except Exception:  # noqa: BLE001 - one extension's row must not stop the rest being erased
+            log.warning("trash: purging %s %s failed", kind, id, exc_info=True)
+            return 0
+
     def empty(self) -> int:
-        n = 0
         listing = self.list()
-        for it in [*(i for items in listing["groups"].values() for i in items), *(i for g in listing["extensions"] for i in g["items"])]:
-            n += self.purge(it["type"], it["id"])
-        return n
+        n = sum(self.purge(i["type"], i["id"]) for items in listing["groups"].values() for i in items)
+        return n + sum(self._purge_extension(i["type"], i["id"]) for g in listing["extensions"] for i in g["items"])
 
     def purge_old(self, days: float = RETENTION_DAYS) -> int:
         """Erase what has sat in the trash longer than `days`. Projects first: purging one takes its
@@ -271,7 +277,7 @@ class Trash:
             for i in ids:
                 n += self.purge(kind, i)
         for group in self._extension_groups():
-            n += sum(self.purge(it["type"], it["id"]) for it in group["items"] if it["deleted_at"] < cutoff)
+            n += sum(self._purge_extension(it["type"], it["id"]) for it in group["items"] if it["deleted_at"] < cutoff)
         return n
 
     async def loop(self) -> None:
@@ -303,16 +309,26 @@ def router(trash: Trash) -> APIRouter:
     def list_trash() -> dict[str, Any]:
         return trash.list()
 
-    @r.post("/trash/{kind}/{id}/restore")
+    def _guarded(kind: str, act: Callable[[], Any]) -> Any:
+        """The result of `act`; a failing extension handler is a 502 naming the kind, not a bare 500."""
+        try:
+            return act()
+        except Exception as e:  # noqa: BLE001
+            if kind not in trash.kinds.kinds():
+                raise
+            log.warning("trash: %s handler failed", kind, exc_info=True)
+            raise HTTPException(502, f"The {kind} handler failed: {e}") from e
+
+    @r.post("/trash/{kind}/{id:path}/restore")  # :path, since an extension's ids are free strings
     def restore_item(kind: str, id: str) -> dict[str, Any]:
-        out = trash.restore(_kind(kind), id)
+        out = _guarded(kind, lambda: trash.restore(_kind(kind), id))
         if not out:
             raise HTTPException(404, "Not in the trash")
         return out
 
-    @r.delete("/trash/{kind}/{id}")
+    @r.delete("/trash/{kind}/{id:path}")
     def purge_item(kind: str, id: str) -> dict[str, bool]:
-        if not trash.purge(_kind(kind), id):
+        if not _guarded(kind, lambda: trash.purge(_kind(kind), id)):
             raise HTTPException(404, "Not in the trash")
         return {"ok": True}
 

@@ -421,8 +421,8 @@ export const api = {
   /** Soft delete: every DELETE above lands here first; these restore it or erase it for good. */
   trash: {
     list: () => req<TrashListing>('/trash'),
-    restore: (type: TrashKind | string, id: string) => req<{ ok: boolean; moved_to_personal: boolean }>(`/trash/${type}/${id}/restore`, { method: 'POST' }),
-    purge: (type: TrashKind | string, id: string) => req<{ ok: boolean }>(`/trash/${type}/${id}`, { method: 'DELETE' }),
+    restore: (type: TrashKind | string, id: string) => req<{ ok: boolean; moved_to_personal: boolean }>(`/trash/${type}/${encodeURIComponent(id)}/restore`, { method: 'POST' }),
+    purge: (type: TrashKind | string, id: string) => req<{ ok: boolean }>(`/trash/${type}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     empty: () => req<{ ok: boolean; purged: number }>('/trash', { method: 'DELETE' })
   },
   mcp: {

@@ -418,3 +418,18 @@ def test_an_apply_stamps_the_source_and_the_previous_value() -> None:
         rows = setting_sources.read(c)
     assert rows[("permissionMode", "global", "")]["source"] == "preset:builtin:manual"
     assert rows[("permissionMode", "global", "")]["prev"] == "auto"
+
+
+def test_a_name_or_group_nothing_has_is_pending_not_silently_dropped() -> None:
+    pid = user_preset(tools={"tools": {"shell_runn": "off"}, "groups": {"nogroup": "off"}})
+    assert apply(pid).json()["pending"] == ["tools.shell_runn", "groups.nogroup"]
+
+
+def test_a_tools_table_reaches_extension_source_tools_and_connector_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(P, "source_slugs", lambda: {"x__demo__peek"})
+    r = apply("builtin:read-only")
+    assert r.status_code == 200 and r.json()["changes"]["connectors.x__demo__peek"]["new"] == "off"
+    assert appmod.mcp_store.effective_mode("x__demo__peek")["mode"] == "off"
+    named = user_preset(tools={"tools": {"x__demo__peek": "on"}})
+    assert apply(named).json()["changes"]["connectors.x__demo__peek"]["new"] == "ask"  # a connector is never switched on
+    assert apply(named).json()["pending"] == []

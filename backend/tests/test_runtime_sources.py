@@ -169,3 +169,9 @@ def test_a_tool_pre_deny_keeps_a_source_from_being_contacted(rig: Rig) -> None:
     box.bus.subscribe("tool.pre", lambda p: Deny("off limits"), owner="t", order=0)
     contact = Contact(lambda: rig.sources.call("x__demo__look", {}, {}))
     assert "off limits" in go(box, {}, contact)["error"] and not contact.reached and rig.source.calls == []
+
+
+def test_known_slugs_are_what_any_source_has_listed(rig: Rig) -> None:
+    assert rig.sources.known_slugs() == set()
+    rig.sources.tools(rig.on)
+    assert rig.sources.known_slugs() == {"x__demo__look"}

@@ -25,6 +25,8 @@ os.environ.setdefault("GRAIN_SECRETS_BACKEND", "file")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest  # noqa: E402
+from fastapi import FastAPI  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import commands, trash as trash_mod  # noqa: E402
 from personal_os.context import Block  # noqa: E402
@@ -285,6 +287,37 @@ def test_a_trash_handler_lists_restores_and_erases_its_own_kind(work: Path) -> N
     rows["d"] = {"id": "d", "title": "x", "deleted_at": time.time()}
     rig.hidden.append("demo")
     assert trash.list()["total"] == 0  # a disabled extension's trash is left alone
+
+
+def test_a_trash_handler_that_raises_does_not_stop_empty_or_the_daily_sweep(work: Path) -> None:
+    rig = Rig(work)
+    old = time.time() - 40 * trash_mod.DAY
+    rows = {"a": {"id": "a", "title": "A", "deleted_at": old}, "b": {"id": "b", "title": "B", "deleted_at": old}}
+
+    def purge(i: str) -> bool:
+        if i == "a":
+            raise RuntimeError("boom")
+        return rows.pop(i, None) is not None
+
+    rig.scope.trash_handler("demo:note", TrashHandler("Demo notes", lambda: list(rows.values()), lambda i: True, purge))
+    db = rig.ctx.db
+    trash = trash_mod.Trash(db, Todos(db), Docs(db), HookBus(), rig.host.trash_kinds)
+    assert trash.purge_old() == 1 and list(rows) == ["a"]
+    rows["b"] = {"id": "b", "title": "B", "deleted_at": old}
+    assert trash.empty() == 1 and list(rows) == ["a"]
+
+
+def test_an_extension_trash_id_with_a_slash_restores_and_purges_over_http(work: Path) -> None:
+    rig = Rig(work)
+    rows = {"a/b": {"id": "a/b", "title": "Slashed", "deleted_at": time.time()}}
+    rig.scope.trash_handler("demo:note", TrashHandler("Demo notes", lambda: list(rows.values()),
+                                                      lambda i: i in rows, lambda i: rows.pop(i, None) is not None))
+    db = rig.ctx.db
+    app = FastAPI()
+    app.include_router(trash_mod.router(trash_mod.Trash(db, Todos(db), Docs(db), HookBus(), rig.host.trash_kinds)))
+    http = TestClient(app)
+    assert http.post("/trash/demo:note/a%2Fb/restore").status_code == 200
+    assert http.delete("/trash/demo:note/a/b").status_code == 200 and rows == {}
 
 
 def test_a_trash_kind_is_named_after_its_extension_and_a_failing_handler_hides_only_itself(work: Path) -> None:

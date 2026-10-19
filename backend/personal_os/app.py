@@ -789,7 +789,9 @@ def _mcp_tooling(project_id: str | None, conversation_id: str | None) -> tuple[d
     modes: dict[str, str] = {}
     schemas: list[dict[str, Any]] = []
     sources = tool_sources.tools(runtime_selections.scopes(conversation_id, project_id)) if host.runtime.has_alternatives("tools.source") else []
-    for tool in sources:  # an extension's source: always ask
+    for tool in sources:  # an extension's source: ask, or off when a preset or the user switched it off
+        if mcp_store.effective_mode(tool.slug, project_id, conversation_id)["mode"] == "off":
+            continue
         modes[tool.slug] = "ask"
         schemas.append({"type": "function", "function": {
             "name": tool.slug,
@@ -1092,7 +1094,7 @@ def _shipped_presets() -> list[tuple[str, str, dict[str, Any]]]:
     return [(m.id, m.name, doc) for scope in host.extensions.values() if (m := scope.manifest) for doc in m.contributes.get("presets", ())]
 
 
-presets = Presets(db, toolbox, mcp_store, projects, convos, _shipped_presets, _rule_tool_known, host.bus)
+presets = Presets(db, toolbox, mcp_store, projects, convos, _shipped_presets, _rule_tool_known, host.bus, tool_sources.known_slugs)
 _ext_ctx.preset_keys = presets.keys
 app.include_router(permissions_routes.router(presets, lambda project_id, conversation_id: config.effective(
     db, toolbox, config.declared_settings(s.manifest for s in host.extensions.values()), project_id=project_id, conversation_id=conversation_id,

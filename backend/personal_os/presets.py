@@ -18,6 +18,7 @@ from typing import Any, Callable
 from . import permissions, setting_sources
 from .db import Database
 from .extensions.hooks import HookBus
+from .mcp_client import MCP_DANGER
 from .mcp_servers import MODES as MCP_MODES, McpServers
 from .repos import Conversations, Projects
 from .tools import DEFAULT_MODE, Toolbox
@@ -55,7 +56,7 @@ class PresetError(ValueError):
 class Plan:
     changes: dict[str, dict[str, Any]]  # key -> {"old", "new", "loosens"}
     not_applied: list[str]              # keys this scope cannot hold
-    pending: list[str]                  # always-ask names no loaded tool has (kept, not dropped)
+    pending: list[str]                  # always-ask, tool and group names nothing loaded has (kept, not dropped)
 
     @property
     def loosened(self) -> list[str]:
@@ -139,7 +140,8 @@ def _tool_tables(tools: Any) -> dict[str, dict[str, str]]:
 
 def tool_modes(tools: dict[str, dict[str, str]], toolbox: Toolbox) -> dict[str, str]:
     """The per-tool map a tools section means today: danger tier, then group, then name, the most specific last. A tool
-    added later is covered by its tier or group the next time the preset is applied."""
+    added later is covered by its tier or group the next time the preset is applied. Built-in tools only: connector and
+    extension-source tools are read by `Presets._connector_modes`."""
     out: dict[str, str] = {}
     for name, spec in toolbox.specs.items():
         for table, key in (("danger", spec.danger), ("groups", spec.group), ("tools", name)):
@@ -155,8 +157,9 @@ def slug_of(name: str) -> str:
 class Presets:
     def __init__(self, db: Database, toolbox: Toolbox, mcp: McpServers, projects: Projects, convos: Conversations,
                  shipped: Callable[[], list[tuple[str, str, dict[str, Any]]]], rule_check: Callable[[Any], None],
-                 bus: HookBus) -> None:
+                 bus: HookBus, source_slugs: Callable[[], set[str]]) -> None:
         self.db, self.toolbox, self.mcp, self.projects, self.convos = db, toolbox, mcp, projects, convos
+        self.source_slugs = source_slugs  # the tools extension sources have listed; like MCP tools they are not in toolbox.specs
         self.shipped, self.rule_check, self.bus = shipped, rule_check, bus  # shipped: [(profile id, profile name, preset)]
 
     # ---- the list
@@ -249,10 +252,17 @@ class Presets:
             old, new = permissions.get(before, key), permissions.get(after, key)
             note(key, old, new, bool(permissions.loosening({key: old}, {key: new})))
         self._tool_changes(body, scope, project, conv, wide, note)
-        self._connector_changes(body, scope, scope_id, project, conv, note)
-        names = body.get("alwaysAsk", [])
-        return Plan(changes, [k for k in body.get("network", {}) if scope != "global"],
-                    [n for n in names if n not in self.toolbox.specs])
+        self._connector_changes(body, project, conv, note)
+        return Plan(changes, [k for k in body.get("network", {}) if scope != "global"], self._unknown_names(body))
+
+    def _unknown_names(self, body: dict[str, Any]) -> list[str]:
+        """Names the preset uses that nothing loaded has: they may belong to something not loaded yet, or be a typo."""
+        tools = body.get("tools", {})
+        known = set(self.toolbox.specs) | {t["slug"] for t in self.mcp.tools()} | self.source_slugs()
+        groups = {s.group for s in self.toolbox.specs.values()}
+        return [*(n for n in body.get("alwaysAsk", []) if n not in self.toolbox.specs),
+                *(f"tools.{n}" for n in tools.get("tools", {}) if n not in known),
+                *(f"groups.{g}" for g in tools.get("groups", {}) if g not in groups)]
 
     def _rows(self, scope: str, scope_id: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         if scope == "global":
@@ -277,12 +287,23 @@ class Presets:
         for name in wanted:
             note(f"tools.{name}", old[name], new[name], permissions.MODE_RANK[new[name]] > permissions.MODE_RANK[old[name]])
 
-    def _connector_changes(self, body: dict[str, Any], scope: str, scope_id: str, project: dict[str, Any] | None,
-                           conv: dict[str, Any] | None, note: Callable[[str, Any, Any, bool], None]) -> None:
+    def _connector_modes(self, body: dict[str, Any]) -> dict[str, str]:
+        """The mode each connector tool gets: the tools table read against MCP and extension-source tools (all external, in no
+        group; a connector is never switched on), then the connectors section."""
+        out: dict[str, str] = {}
+        table = body.get("tools", {})
+        for slug in [*(t["slug"] for t in self.mcp.tools()), *self.source_slugs()]:
+            if mode := table.get("tools", {}).get(slug) or table.get("danger", {}).get(MCP_DANGER):
+                out[slug] = "ask" if mode == "on" else mode
         for server, mode in body.get("connectors", {}).items():
-            for tool in self.mcp.tools(server):
-                now = self.mcp.effective_mode(tool["slug"], (project or {}).get("id"), (conv or {}).get("id"))["mode"]
-                note(f"connectors.{tool['slug']}", now, mode, permissions.MODE_RANK[mode] > permissions.MODE_RANK[now])
+            out.update({t["slug"]: mode for t in self.mcp.tools(server)})
+        return out
+
+    def _connector_changes(self, body: dict[str, Any], project: dict[str, Any] | None, conv: dict[str, Any] | None,
+                           note: Callable[[str, Any, Any, bool], None]) -> None:
+        for slug, mode in self._connector_modes(body).items():
+            now = self.mcp.effective_mode(slug, (project or {}).get("id"), (conv or {}).get("id"))["mode"]
+            note(f"connectors.{slug}", now, mode, permissions.MODE_RANK[mode] > permissions.MODE_RANK[now])
 
     def apply(self, preset_id: str, scope: str, scope_id: str = "", confirm: str | None = None, by: str = "user") -> dict[str, Any]:
         """Apply the preset. Raises Held (with the diff) when it loosens anything and `confirm` is not the diff's hash."""

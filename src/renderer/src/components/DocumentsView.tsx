@@ -37,7 +37,6 @@ export default function DocumentsView({ projectId }: { projectId?: string; embed
         <div className="empty-state">
           <FileText size={28} />
           <h2>No uploads yet</h2>
-          <p>Drop files here, or upload them.</p>
           <button className="primary-btn" title={tip('Upload file', 'upload')} onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
         </div>
       )}

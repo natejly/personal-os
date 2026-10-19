@@ -223,7 +223,7 @@
 .desk-browser-stage.ended img { opacity: 0.5; filter: grayscale(0.6); }
 .desk-browser-mark { position: absolute; box-sizing: border-box; border: 2px solid var(--accent); border-radius: 4px; background: color-mix(in srgb, var(--accent) 18%, transparent); box-shadow: 0 0 0 1px var(--bg); pointer-events: none; transition: left 0.15s, top 0.15s, width 0.15s, height 0.15s; }
 .desk-browser-caption { margin: 0; color: var(--text); }
-.desk-browser-help, .desk-browser-error { margin: 0; }
+.desk-browser-error { margin: 0; }
 .desk-browser-error { color: var(--danger); }
 .desk-browser-frame { display: flex; justify-content: center; min-height: 0; }
 .desk-browser-frame img { max-width: 100%; max-height: calc(100vh - 260px); object-fit: contain; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-input); }

@@ -210,7 +210,7 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
   if (desk.outputs.length === 0) {
     return (
       <div className="desk-review">
-        <p className="empty-hint">Nothing to review yet.</p>
+        <p className="empty-hint">Nothing to review</p>
       </div>
     )
   }
@@ -247,10 +247,10 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
       ))}
 
       {noting === 'back' && (
-        <InlineNote placeholder="What needs changing? The desk picks the work up again." submitLabel="Send back" onSubmit={sendBack} onCancel={() => setNoting(null)} />
+        <InlineNote placeholder="What needs changing?" submitLabel="Send back" onSubmit={sendBack} onCancel={() => setNoting(null)} />
       )}
       {noting === 'reject' && (
-        <InlineNote optional danger placeholder="Why reject? A note is optional and goes on the desk." submitLabel="Reject" onSubmit={reject} onCancel={() => setNoting(null)} />
+        <InlineNote optional danger placeholder="Reason (optional)" submitLabel="Reject" onSubmit={reject} onCancel={() => setNoting(null)} />
       )}
       {undecided.length > 0 && <footer className="desk-review-foot">
         <button className="primary-btn" disabled={busy || selection.length === 0 || blocked} title={blocked ? 'Pick a file to append to' : undefined} onClick={() => void accept()}>

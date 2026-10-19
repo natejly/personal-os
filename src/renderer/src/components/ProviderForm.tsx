@@ -9,7 +9,7 @@ interface Props {
   providerId: string
   /** Given: a provider select is shown. Absent: the caller has its own provider picker. */
   onProvider?: (id: string) => void
-  /** Provider ids that are already added and cannot be chosen again. */
+  /** Already added: not selectable. */
   taken?: ReadonlySet<string>
   baseUrl: string
   onBaseUrl: (v: string) => void
@@ -23,8 +23,8 @@ interface Props {
   onModel?: (v: string) => void
 }
 
-/** Provider, address, key (and for a custom endpoint a name and a model id): the fields the first-run key step and Settings → Models share. */
 export default function ProviderForm(p: Props): JSX.Element {
+  // Provider, address, key and custom-endpoint fields, shared by the first-run key step and Settings.
   const [showKey, setShowKey] = useState(false)
   const { provider } = p
   const editable = !provider || showsBaseUrl(p.providerId)
@@ -48,7 +48,7 @@ export default function ProviderForm(p: Props): JSX.Element {
           <input data-autofocus value={p.baseUrl} onChange={(e) => p.onBaseUrl(e.target.value)} placeholder={provider?.baseUrl || 'https://api.example.com/v1'} spellCheck={false} />
         </label>
       )}
-      <label><span className="toggle-text"><b>{keyLabel}</b><small>Checked before it is saved. Stored on this Mac.</small></span>
+      <label><span className="toggle-text"><b>{keyLabel}</b></span>
         <div className="input-row">
           <input data-autofocus={editable ? undefined : ''} type={showKey ? 'text' : 'password'} value={p.apiKey} onChange={(e) => p.onApiKey(e.target.value)}
             placeholder={provider && !provider.needsKey ? 'Only if your server needs one' : 'Paste your key'} spellCheck={false} autoComplete="off" />
@@ -58,9 +58,9 @@ export default function ProviderForm(p: Props): JSX.Element {
       {provider?.keyUrl && (
         <p className="muted small"><button type="button" className="link" onClick={() => void window.open(provider.keyUrl as string, '_blank')}>Get a key from {provider.name} <ExternalLink size={11} /></button></p>
       )}
-      {provider?.note && <p className="muted small">{provider.note}</p>}
+      {provider?.note && !p.onProvider && <p className="muted small">{provider.note}</p>}
       {p.onModel && p.providerId === 'custom' && (
-        <label><span className="toggle-text"><b>Model id (optional)</b><small>Only if the server cannot list its models.</small></span>
+        <label><span className="toggle-text"><b>Model id (optional)</b></span>
           <input value={p.model ?? ''} onChange={(e) => p.onModel?.(e.target.value)} spellCheck={false} />
         </label>
       )}

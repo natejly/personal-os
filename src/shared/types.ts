@@ -69,6 +69,34 @@ export interface ContextUsed {
   /** Context previews only: a saved reply drops it (its Exact request shows the prompt it was sent). */
   system_prompt?: string
   tokens_estimate: number
+  // context contract (also added by the context lane)
+  blocks?: ContextBlock[]
+  totals?: { stable: number; volatile: number; tail: number; tools: number; history: number; window: number }
+  stable_hash?: string
+  cache?: { changed: boolean; reason?: string }
+  skipped?: Array<{ owner: string; hook: string; reason: string }>
+  tools_offered?: Array<{ name: string; tokens: number; source: string; deferred: boolean }>
+}
+
+/** One entry of a reply's context ledger: what was put in the request, where, and how big. */
+export interface ContextBlock {
+  /** Stable per block kind + source, e.g. "memory:123", "hint:no-emoji", "ext:health:v3". */
+  id: string
+  label: string
+  owner: string
+  slot: 'stable' | 'volatile' | 'tail' | 'history' | 'tools'
+  kind: 'system' | 'memory' | 'graph' | 'skills' | 'files' | 'style' | 'page' | 'map' | 'hint' | 'extension' | 'tool_schema' | 'message' | 'attachment' | 'summary' | 'plan' | 'note'
+  tokens: number
+  chars: number
+  version?: string
+  source?: string
+}
+
+/** `GET /messages/{id}/context`: the ledger plus the texts kept for recent replies (shape is loose; read it with `textFor`). */
+export interface MessageContext {
+  ledger: ContextUsed
+  texts?: { system?: string; blocks?: Record<string, string>; [k: string]: unknown }
+  texts_available?: boolean
 }
 
 export interface WorkspaceMapUsed {

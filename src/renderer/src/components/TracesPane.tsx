@@ -3,6 +3,7 @@ import { useStore, useConversation, useStreamingMessageId } from '../store'
 import { modelLabel } from '../lib/modelLabel'
 import { fmtMs } from '../lib/toolDisplay'
 import { traceTurns, type TraceRound } from '../lib/traces'
+import { traceContextNote } from '../lib/contextBreakdown'
 import type { Span } from '@shared/types'
 
 type Usage = { prompt_tokens?: number; completion_tokens?: number; cached_tokens?: number; reasoning_tokens?: number }
@@ -41,7 +42,7 @@ export default function TracesPane({ conversationId }: { conversationId?: string
   const workers = useStore((s) => (conversationId ? s.workers[conversationId] : undefined)) ?? []
   const turns = useMemo(() => traceTurns(convo?.messages ?? [], liveId).reverse(), [convo?.messages, liveId])
   return (
-    <div className="desk-pane scroll traces-pane" data-testid="traces-pane">
+    <div className="traces-pane" data-testid="traces-pane">
       {workers.length > 0 && (
         <section className="ctx-section"><h4>Workers</h4>
           <ul>{workers.map((w) => <li key={w.id}><b>{w.title}</b> <span className="muted small">{w.status}</span></li>)}</ul>
@@ -51,6 +52,7 @@ export default function TracesPane({ conversationId }: { conversationId?: string
       {turns.map((t) => (
         <section key={t.messageId} className="ctx-section traces-turn">
           <h4>{t.model ? modelLabel(t.model) : 'Reply'}{t.live ? ' (running)' : ''}</h4>
+          {(() => { const note = traceContextNote(t.other.find((x) => x.kind === 'context')?.meta); return note ? <p className="trace-ctx-note muted small">{note}</p> : null })()}
           {t.thinking && <details className="trace-thinking"><summary className="muted small">Thinking</summary><p>{t.thinking}</p></details>}
           <ol className="trace-rows">{t.rounds.map((r) => <Round key={r.round} r={r} />)}</ol>
           {t.other.length > 0 && <p className="muted small">{t.other.map((s) => `${s.kind} ${dur(s)}`).join(' · ')}</p>}

@@ -236,15 +236,14 @@ class ModulesStampTests(unittest.TestCase):
             c.execute("DELETE FROM settings WHERE key IN ('modulesDefault', 'hiddenViews', 'homeWidgets', 'extDefaults')")
             c.execute("DELETE FROM conversations")
 
-    def test_first_boot_starts_lean(self) -> None:
+    def test_first_boot_applies_no_profile(self) -> None:
+        """No profile is on by default any more: a fresh install is lean because its extensions start off (test_fresh_install_extensions)."""
         from personal_os import app as appmod
         self._reset(appmod)
         appmod._seed_hidden_modules()
-        self.assertEqual(appmod.db.get_settings()["hiddenViews"], ["todos", "calendar", "mail", "health", "spaces"])
-        self.assertTrue(host.extensions["lean"].enabled())
-        self.assertFalse(host.extensions["focus"].enabled())
-        host.extensions["lean"].defaults.revert("lean")  # turning the lean profile off shows every view again
         self.assertEqual(appmod.db.get_settings()["hiddenViews"], [])
+        self.assertFalse(host.extensions["lean"].enabled())
+        self.assertFalse(host.extensions["focus"].enabled())
 
     def test_install_with_chats_keeps_every_view(self) -> None:
         from personal_os import app as appmod

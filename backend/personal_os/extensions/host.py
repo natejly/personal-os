@@ -8,6 +8,7 @@ import importlib.machinery
 import importlib.util
 import inspect
 import itertools
+import json
 import logging
 import math
 import sys
@@ -512,6 +513,17 @@ BUILTIN_ROOT = Path(__file__).parent
 CORE_VIEWS = frozenset({"chat", "docs", "library", "jobs", "project", "canvas"})  # view ids in hiddenViews that no extension owns
 
 
+SEEDED_FILE = "extensions-seeded.json"
+
+
+def _has_chats(db: Database) -> bool:
+    try:
+        with db.tx() as c:
+            return c.execute("SELECT 1 FROM conversations LIMIT 1").fetchone() is not None
+    except Exception:  # noqa: BLE001 - no table yet: nothing to keep
+        return False
+
+
 def builtin_manifest(ext_id: str) -> Manifest:
     return load_manifest(BUILTIN_ROOT / ext_id / "extension.json")
 
@@ -534,6 +546,7 @@ class ExtensionHost:
         self._failed_reloads: set[Path] = set()  # folders whose reload failed: the user already chose their on/off state
         self._startup: list[Handler] = []
         self._shutdown: list[Handler] = []
+        self._seed_legacy: bool | None = None  # decided at the first built-in load: does this install predate SEEDED_FILE?
         self._enabled: dict[str, bool] = {}  # what ext.changed last reported, per extension
         self._refresh_lock = threading.RLock()  # sync routes run in the threadpool: a pass must see the last one's _enabled
         self._load_order = itertools.count()  # never reused, so a reloaded extension sorts after the ones loaded before it
@@ -582,11 +595,34 @@ class ExtensionHost:
 
     def load_builtin(self, ext_id: str, ctx: ExtensionContext) -> ExtensionScope:
         """Load the built-in extension in this package's `<ext_id>/` folder: read its manifest, then run its `activate(scope)`."""
-        scope = self._add(builtin_manifest(ext_id), root=BUILTIN_ROOT / ext_id, ctx=ctx)
+        manifest = builtin_manifest(ext_id)
+        self._seed_enabled(manifest, ctx)
+        scope = self._add(manifest, root=BUILTIN_ROOT / ext_id, ctx=ctx)
         if scope.manifest.kind == "profile":
             return scope  # a profile is data: nothing to import or activate
         self._load_code(scope, lambda: importlib.import_module(f"{__package__}.{ext_id}.extension"))
         return scope
+
+    def _seed_enabled(self, manifest: Manifest, ctx: ExtensionContext) -> None:
+        """A built-in's manifest `enabled` is only a default for an extension this install has not seen yet. The ids seen are kept in
+        SEEDED_FILE in the data directory. An install that predates the file (it has chats) keeps every built-in as it was: seeing them
+        changes nothing. On a fresh install, and for a built-in added later, `enabled: false` puts the id in hiddenViews, which is
+        what turns it off."""
+        if manifest.kind != "extension" or manifest.enabled == "always":
+            return
+        path = Path(ctx.db.data_dir) / SEEDED_FILE
+        try:
+            seen = json.loads(path.read_text())
+        except (OSError, ValueError):
+            seen = None
+        if self._seed_legacy is None:
+            self._seed_legacy = not isinstance(seen, list) and _has_chats(ctx.db)
+        seen = seen if isinstance(seen, list) else []
+        if manifest.id in seen:
+            return
+        if manifest.enabled is False and not self._seed_legacy and manifest.id not in ctx.hidden_views():
+            ctx.set_settings({"hiddenViews": [*ctx.hidden_views(), manifest.id]})
+        path.write_text(json.dumps([*seen, manifest.id]))
 
     def load_folder(self, root: Path, ctx: ExtensionContext) -> ExtensionScope:
         """Load an extension from any folder holding extension.json and extension.py, in a fresh module namespace. If its
@@ -755,6 +791,54 @@ class ExtensionHost:
 
     def fire(self, hook: str, payload: Any = None) -> None:
         self.bus.fire(hook, payload)
+
+    # ---- dependencies ----
+    def provider_of(self, service: str) -> str | None:
+        """The id of the extension that provides the service, if one does (a core service has no provider here)."""
+        return next((i for i, x in self.extensions.items() if service in x.manifest.provides_services), None)
+
+    def is_on(self, ext_id: str) -> bool:
+        return ext_id in self.extensions and self.extensions[ext_id].enabled()
+
+    def dependents(self, ext_id: str, *, enabled_only: bool = False) -> list[str]:
+        """The extensions that need this one, by `requires.extensions` or by a service it provides, in start order."""
+        provided = self.extensions[ext_id].manifest.provides_services if ext_id in self.extensions else ()
+        return [i for i, x in self.extensions.items() if i != ext_id and (not enabled_only or x.enabled())
+                and (ext_id in x.manifest.requires_extensions or any(s in provided for s in x.manifest.requires_services))]
+
+    def _declared(self, ext_id: str) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+        x = self.extensions.get(ext_id)
+        return (x.manifest.requires_extensions, x.manifest.requires_services) if x else None
+
+    def _requirements(self, ext_id: str, declared: Callable[[str], tuple[tuple[str, ...], tuple[str, ...]] | None] | None = None) -> list[tuple[str, bool]]:
+        """What turning ext_id on needs first, in dependency order, as (id, named): `named` is a required extension, otherwise it is only
+        the provider of a required service. Cycle-safe: an id is visited once. The target itself is not included."""
+        out: list[tuple[str, bool]] = []
+        seen = {ext_id}
+
+        def visit(i: str) -> None:
+            if (req := (declared or self._declared)(i)) is None:
+                return  # not loaded (a folder extension that is off) and nothing else to read it from
+            for dep, named in [*((d, True) for d in req[0]), *((p, False) for s in req[1] if (p := self.provider_of(s)))]:
+                if dep in seen:
+                    continue
+                seen.add(dep)
+                visit(dep)
+                out.append((dep, named))
+
+        visit(ext_id)
+        return out
+
+    def missing_requirements(self, ext_id: str, declared: Callable[[str], tuple[tuple[str, ...], tuple[str, ...]] | None] | None = None) -> list[str]:
+        """The required extensions of ext_id (transitively) that are off, in the order they must be turned on. A service's provider is
+        included when it can be switched; one that is always on never is."""
+        return [i for i, _ in self._requirements(ext_id, declared) if not self.is_on(i)]
+
+    def enable_plan(self, ext_id: str, declared: Callable[[str], tuple[tuple[str, ...], tuple[str, ...]] | None] | None = None) -> tuple[list[str], list[str]]:
+        """(everything to turn on before ext_id, the required extensions among them that the user has to be told about). The providers
+        of required services turn on without asking, so they are in the first list only."""
+        off = [(i, named) for i, named in self._requirements(ext_id, declared) if not self.is_on(i)]
+        return [i for i, _ in off], [i for i, named in off if named]
 
     def refresh_enabled(self) -> None:
         """Fire ext.changed for each extension whose enabled state differs from the last one reported. An extension's

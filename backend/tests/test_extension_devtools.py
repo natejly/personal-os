@@ -120,6 +120,8 @@ def test_the_api_needs_the_token() -> None:
 
 def test_enable_and_disable_write_the_hidden_views_and_fire_ext_changed(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[Any] = []
+    appmod.db.set_settings({"hiddenViews": sorted({*appmod.settings()["hiddenViews"], "health"})})  # Health starts off, as on a fresh install
+    appmod.host.refresh_enabled()
     monkeypatch.setattr(appmod.host.bus, "fire", lambda hook, payload=None: seen.append((hook, payload)))
     try:
         on = client.post("/dev/extensions/health/enable").json()  # a fresh install has Health off
@@ -203,9 +205,9 @@ def test_a_profile_folder_loads_and_is_not_toggled_here(tmp_path: Path) -> None:
 
 
 def test_an_always_on_built_in_is_not_toggled_here() -> None:
-    assert next(e for e in listing()["extensions"] if e["id"] == "spaces")["toggleable"] is False
+    assert next(e for e in listing()["extensions"] if e["id"] == "google")["toggleable"] is False
     before = appmod.settings()["hiddenViews"]
-    assert client.post("/dev/extensions/spaces/disable").status_code == 400 and appmod.settings()["hiddenViews"] == before
+    assert client.post("/dev/extensions/google/disable").status_code == 400 and appmod.settings()["hiddenViews"] == before
 
 
 def test_a_loaded_folder_starts_disabled_whatever_its_manifest_says(ext: Path) -> None:

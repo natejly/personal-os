@@ -57,6 +57,7 @@
  "fastModel": "",
  "fetchAllowlist": [],
  "fileSnapshots": true,
+ "finalRoundSeconds": 90,
  "firecrawlApiKey": "",
  "followUps": true,
  "gatherShortcut": "Control+Alt+Command+Space",
@@ -77,6 +78,11 @@
  "learnStyle": true,
  "llmIdleSeconds": 300,
  "llmRetries": 3,
+ "loopDoomLimit": 3,
+ "loopMaxRounds": 0,
+ "loopModelCalls": 60,
+ "loopRepeatLimit": 5,
+ "loopToolErrorLimit": 3,
  "mailWatch": {
   "awaitingAfterDays": 3,
   "needsReplyAfterHours": 24,
@@ -158,6 +164,8 @@
  },
  "pickerModels": [],
  "planAutoApproveSeconds": 30,
+ "planLoopMaxSteps": 8,
+ "planLoopVerifyPasses": 1,
  "planner": {
   "bufferMin": 10,
   "busyCalendarIds": [],
@@ -206,6 +214,7 @@
   "health"
  ],
  "snapshotsEnabled": true,
+ "stuckDetection": "standard",
  "subagentMaxConcurrent": 0,
  "surfaceTone": "neutral",
  "systemPrompt": "You are the assistant inside the user's personal AI OS. Be direct, concise and useful. Context (memories, graph, file excerpts) may be provided; use it when relevant and don't mention it unless asked.",
@@ -217,6 +226,7 @@
  "textTone": "neutral",
  "theme": "light",
  "toolDeferAbove": 7,
+ "toolResultInlineChars": 12000,
  "tools": {
   "shell_run": "off"
  },

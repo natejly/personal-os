@@ -251,17 +251,18 @@ class ToolResults:
         return {"id": rid, "total_chars": total}
 
     def render(self, conversation_id: str, message_id: str | None, tool: str, result: Any, untrusted: bool = False,
-               fence: str | None = None) -> tuple[str, str | None]:
+               fence: str | None = None, inline_chars: int | None = None) -> tuple[str, str | None]:
         """The tool message's content: the result itself when small, a handle when not. Also the handle's id, if any.
         With `fence` (the run's nonce) the content is wrapped as untrusted data; the stored blob never is."""
-        content, rid = self._render(conversation_id, message_id, tool, result, untrusted)
+        content, rid = self._render(conversation_id, message_id, tool, result, untrusted, inline_chars)
         return (fence_untrusted(content, fence, tool) if fence else content), rid
 
-    def _render(self, conversation_id: str, message_id: str | None, tool: str, result: Any, untrusted: bool) -> tuple[str, str | None]:
+    def _render(self, conversation_id: str, message_id: str | None, tool: str, result: Any, untrusted: bool,
+                inline_chars: int | None = None) -> tuple[str, str | None]:
         from .tools import summarize_result  # local: tools.py imports nothing from here
 
         blob = _dumps(result)
-        if len(blob) <= INLINE_CHARS:
+        if len(blob) <= (inline_chars or INLINE_CHARS):  # the turn's toolResultInlineChars, else the module default
             return redact.scrub_command_output(blob), None
         shape = shape_of(result)
         if untrusted:
@@ -273,8 +274,9 @@ class ToolResults:
             "preview": summarize_result(result, PREVIEW_CHARS), "note": HANDLE_NOTE,
         })), row["id"]
 
-    def for_model(self, conversation_id: str, message_id: str | None, tool: str, result: Any, untrusted: bool = False) -> str:
-        return self.render(conversation_id, message_id, tool, result, untrusted)[0]
+    def for_model(self, conversation_id: str, message_id: str | None, tool: str, result: Any, untrusted: bool = False,
+                  inline_chars: int | None = None) -> str:
+        return self.render(conversation_id, message_id, tool, result, untrusted, inline_chars=inline_chars)[0]
 
     def get(self, result_id: str, conversation_id: str | None = None) -> dict[str, Any] | None:
         sql = "SELECT * FROM tool_results WHERE id=?"

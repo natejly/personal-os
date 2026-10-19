@@ -29,10 +29,6 @@ export default function RegistrySearch({ onUse }: { onUse: (r: McpRegistryResult
   return (
     <section className="registry-search">
       <h3>Search the MCP Registry</h3>
-      <p className="muted small">
-        Anyone can publish to the registry and Grain has not checked these. A result only fills in the custom form
-        so you can run the safety check before adding it.
-      </p>
       <form className="add-row" onSubmit={(e) => { e.preventDefault(); void search() }}>
         <input className="search" aria-label="Search the MCP Registry" placeholder="e.g. postgres, notion, weather" value={q}
           onChange={(e) => setQ(e.target.value)} spellCheck={false} />

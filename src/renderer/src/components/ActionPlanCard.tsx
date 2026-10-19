@@ -134,10 +134,7 @@ function StepRow({ step, dropped, draft, open, decided, onDrop, onDraft, onToggl
             />
             {err
               ? <p className="aplan-invalid">{err}</p>
-              : <p className="muted small">
-                  {changed ? 'The agent will be held to these arguments, not its own.' : 'Unchanged — reformatting is not an edit.'}
-                  {changed && <> <button className="aplan-edit-toggle" onClick={() => onDraft(pretty(step.arguments))}>revert</button></>}
-                </p>}
+              : changed && <p className="muted small"><button className="aplan-edit-toggle" onClick={() => onDraft(pretty(step.arguments))}>revert</button></p>}
           </div>
         )}
         {step.result_error && <p className="aplan-invalid">{step.result_error}</p>}
@@ -245,12 +242,11 @@ export default function ActionPlanCard({ plan, onDecide, shortcuts = true }: {
       {plan.expected_taint.length > 0 && (
         <p className="aplan-taint">
           <ShieldAlert size={12} />
-          This plan reads untrusted content ({plan.expected_taint.join(', ')}) before it acts. Anything it finds there
-          could be trying to steer the later steps — read the arguments below as the ones you are agreeing to.
+          Reads untrusted content ({plan.expected_taint.join(', ')}) before it acts
         </p>
       )}
       {plan.tainted && plan.expected_taint.length === 0 && (
-        <p className="aplan-taint"><ShieldAlert size={12} /> This reply had already read untrusted content when it wrote the plan.</p>
+        <p className="aplan-taint"><ShieldAlert size={12} /> Written after reading untrusted content</p>
       )}
 
       <ol className="aplan-steps">
@@ -277,7 +273,7 @@ export default function ActionPlanCard({ plan, onDecide, shortcuts = true }: {
             value={note}
             onChange={(e) => { hold(); setNote(e.target.value) }}
           />
-          {counting && <p className="aplan-countdown" role="status">{secondsLeft > 0 ? `Going ahead in ${secondsLeft}s` : 'Going ahead…'} - edit or reject to stop it</p>}
+          {counting && <p className="aplan-countdown" role="status">{secondsLeft > 0 ? `Going ahead in ${secondsLeft}s` : 'Going ahead…'}</p>}
           <div className="aplan-actions">
             <button
               className="primary-btn sm"

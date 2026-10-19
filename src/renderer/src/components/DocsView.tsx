@@ -328,7 +328,6 @@ export default function DocsView(): JSX.Element {
           <section className="empty-state">
             <FileText size={28} />
             <h2>Nothing open</h2>
-            <p>{treeOpen ? 'Pick a file on the left, or start a new one.' : 'Show the file tree to pick a file, or start a new one.'}</p>
             <button className="ghost-btn" title={tip('New file', 'new-note')} onClick={() => void createDoc({})}><Plus size={13} /> New file</button>
           </section>
         ) : (
@@ -432,7 +431,7 @@ export default function DocsView(): JSX.Element {
                         }}
                       />
                     )
-                    : <p className="muted">{docMode === 'preview' ? 'Empty file. Double-click here to write.' : 'Nothing to preview yet.'}</p>}
+                    : <p className="muted">{docMode === 'preview' ? 'Empty' : 'Nothing to preview'}</p>}
                 </div>
               )}
             </div>}
@@ -464,7 +463,7 @@ export default function DocsView(): JSX.Element {
                   <DiffView key={r.id} revision={r} current={activeDoc.content}
                     onAccept={() => void acceptRevision(r.id)} onReject={() => void rejectRevision(r.id)} />
                 ))}
-                {applied.length === 0 && pending.length === 0 && <p className="empty-hint">No revisions yet.</p>}
+                {applied.length === 0 && pending.length === 0 && <p className="empty-hint">No revisions</p>}
                 {applied.map((r) => (
                   <DiffView key={r.id} revision={r} onRestore={() => {
                     if (confirm('Restore the file to this version? The current text is kept in the history.')) void restoreRevision(r.id)

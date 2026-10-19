@@ -45,7 +45,7 @@ Once some summaries exist, the extension also adds a retrieval source: it ranks 
 
 ## Limits
 
-- It only sees memories written while it is on. Turn it on, then rebuild each scope once to file the earlier ones.
+- Memories written while it was off are filed when it is turned on (and at startup if it is on and the personal log is empty): each scope whose log is empty is rebuilt from its live memories once, in the background. A scope that already has entries is left alone; rebuild it by hand if it has drifted.
 - Summaries lose detail on purpose; the memory list stays the source of truth, and a forgotten memory disappears from the digest at once but from its summaries only when they are made again.
 - The log is read in full for each scope when it changes, which is fine for thousands of memories and not designed for millions.
 - It answers "what has happened over time", not "what do I know about X". Relevance search is unchanged.

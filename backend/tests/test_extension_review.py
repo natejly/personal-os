@@ -242,8 +242,13 @@ def test_an_unknown_extension_cannot_be_enabled() -> None:
     assert enable("rl-ghost").status_code == 404 and client.post("/extensions/rl-ghost/disable").status_code == 404
 
 
-def test_a_dev_loaded_or_built_in_id_that_is_not_installed_cannot_be_enabled() -> None:
-    assert enable("todos").status_code == 404
+def test_a_built_in_id_enables_and_disables_through_the_same_routes() -> None:
+    """The old rule (a built-in id answered 404) is gone: the catalog turns bundled extensions on here. See test_extension_requires."""
+    on = enable("todos")
+    assert on.status_code == 200 and on.json()["ok"] is True and "todos" not in appmod.settings()["hiddenViews"]
+    off = client.post("/extensions/todos/disable")
+    assert off.status_code == 200 and off.json()["disabled"] == ["todos"] and "todos" in appmod.settings()["hiddenViews"]
+    enable("todos")
 
 
 def test_a_draft_id_follows_the_same_rule_as_ext_new() -> None:

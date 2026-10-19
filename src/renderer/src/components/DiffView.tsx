@@ -181,8 +181,7 @@ export default function DiffView({
       {revision.stale && (
         <p className="diff-stale">
           <AlertTriangle size={12} />
-          You edited this file after the assistant proposed the change, so the diff below is against your current text.
-          Accepting replaces it with the proposal.
+          Edited since proposed; accepting replaces your text.
         </p>
       )}
       {revision.title_after && revision.title_after !== revision.title_before && (

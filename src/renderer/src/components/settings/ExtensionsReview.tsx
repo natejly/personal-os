@@ -32,7 +32,8 @@ function Facts({ card }: { card: ExtensionCard }): JSX.Element {
 }
 
 /** Settings > Advanced > Extensions: extensions the assistant drafted wait here as a diff; accepting installs one switched off, and only Enable here turns it on. */
-export default function ExtensionsReview({ onChanged }: { onChanged: () => Promise<void> }): JSX.Element {
+/** `pendingOnly`: list only drafts and installed extensions whose files changed; the rest are on the Installed cards. */
+export default function ExtensionsReview({ onChanged, pendingOnly = false }: { onChanged: () => Promise<void>; pendingOnly?: boolean }): JSX.Element {
   const [listing, setListing] = useState<Listing | null>(null)
   const [granted, setGranted] = useState<Record<string, string[]>>({})
   const [error, setError] = useState<string | null>(null)
@@ -47,7 +48,6 @@ export default function ExtensionsReview({ onChanged }: { onChanged: () => Promi
   if (!listing) return <>{error && <p className="set-help" role="status">{error}</p>}</>
   return (
     <>
-      <p className="set-help">Extensions the assistant writes for you wait here. Accepting installs one switched off; you turn it on yourself.</p>
       {error && <p className="set-help" role="status">{error}</p>}
       {listing.proposals.map((p) => (
         <details key={p.id} className="adv-group" open>
@@ -68,15 +68,15 @@ export default function ExtensionsReview({ onChanged }: { onChanged: () => Promi
           </div>
         </details>
       ))}
-      {listing.installed.map((x) => (
+      {listing.installed.filter((x) => !pendingOnly || x.changed).map((x) => (
         <details key={x.id} className="adv-group">
           <summary>{x.name} <small>{x.id} {x.version} ({x.enabled ? 'on' : 'off'}{x.changed ? ', files changed' : ''})</small></summary>
           <Facts card={x} />
-          {x.changed && <p className="set-help" role="status">Its files are not the ones you accepted, so it stays off until the assistant proposes it again.</p>}
+          {x.changed && <p className="set-help" role="status">Files changed; stays off.</p>}
           {!x.enabled && x.needsGrant.map((perm) => (
             <label key={perm}>
               <input type="checkbox" checked={(granted[x.id] ?? []).includes(perm)} onChange={(e) => grant(x.id, perm, e.target.checked)} />
-              {' '}Allow {perm}: it can narrow or change what you have approved
+              {' '}Allow {perm}
             </label>
           ))}
           <div className="test-row">
@@ -86,7 +86,7 @@ export default function ExtensionsReview({ onChanged }: { onChanged: () => Promi
           </div>
         </details>
       ))}
-      {!listing.proposals.length && !listing.installed.length && <p className="set-help">Nothing waiting and nothing installed.</p>}
+      {!listing.proposals.length && !listing.installed.filter((x) => !pendingOnly || x.changed).length && <p className="set-help">No extensions</p>}
     </>
   )
 }

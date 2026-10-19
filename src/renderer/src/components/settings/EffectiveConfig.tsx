@@ -20,7 +20,6 @@ export default function EffectiveConfig(): JSX.Element {
   if (!cfg) return <p className="muted small">Loading…</p>
   return (
     <div className="eff-config">
-      <p className="muted small">What Grain runs on for {chatId ? 'this chat' : projectId ? 'this project' : 'everything'}, with the source of each value. Secrets show only whether they are set. Nothing is edited here.</p>
       <div className="eff-bar">
         <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search settings" aria-label="Search the effective configuration" spellCheck={false} />
         <div className="eff-chips" role="group" aria-label="Source">

@@ -1,0 +1,45 @@
+{
+  "id": "claude-code",
+  "name": "Claude Code",
+  "description": "Run and orchestrate Claude Code sessions: fleets of headless sessions in their own worktrees, with Grain's approvals",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "kind": "extension",
+  "enabled": false,
+  "activation": ["startup"],
+  "requires": { "extensions": ["coding"] },
+  "contributes": {
+    "tools": [
+      {"name": "claude_code_run", "danger": "external", "group": "shell", "description": "Run Claude Code headless on a repo in its own worktree."},
+      {"name": "claude_code_fleet", "danger": "external", "group": "shell", "description": "Start several Claude Code sessions as one fleet."},
+      {"name": "claude_code_status", "danger": "safe", "group": "shell", "description": "Status of a Claude Code session, or a list of recent ones."},
+      {"name": "claude_code_send", "danger": "external", "group": "shell", "description": "Steer a Claude Code session over its open input."},
+      {"name": "claude_code_stop", "danger": "executes", "group": "shell", "description": "Stop a Claude Code session."},
+      {"name": "claude_code_result", "danger": "safe", "group": "shell", "description": "Outcome, cost and diff of a Claude Code session."},
+      {"name": "claude_code_wait", "danger": "safe", "group": "shell", "description": "Wait until Claude Code sessions have settled."},
+      {"name": "claude_code_permission", "danger": "external", "group": "shell", "description": "The name of the approval card for a session's permission request; never offered to the model."}
+    ],
+    "routes": { "prefix": "/claude-code" },
+    "views": [{ "id": "claude-code", "label": "Claude Code", "icon": "bot" }]
+  },
+  "hooks": {
+    "app.start": {},
+    "app.stop": {},
+    "ext.changed": { "timeoutMs": 60000 },
+    "run.after": { "timeoutMs": 60000 },
+    "subagent.stop": { "timeoutMs": 60000 }
+  },
+  "permissions": ["db:own", "coding:read"],
+  "settings": {
+    "claudeCodeMaxConcurrent": {"type": "integer", "title": "Claude Code sessions at once", "description": "How many headless Claude Code sessions may work at the same time. They also count toward the coding session limit. A fleet queues the rest.", "default": 3, "minimum": 1, "maximum": 16},
+    "claudeCodeDefaultModel": {"type": "string", "title": "Default model", "description": "The model id for sessions that do not name one. Empty uses the Claude Code CLI's own default.", "default": ""},
+    "claudeCodeDefaultPermissionMode": {"type": "string", "title": "Default permission mode", "description": "How a session asks before editing files or running commands. Whatever it would ask becomes an approval card in the chat that started it.", "default": "default", "enum": ["default", "acceptEdits", "plan", "auto", "dontAsk"]},
+    "claudeCodeBudgetUsd": {"type": "number", "title": "Budget per session (USD)", "description": "A session stops after spending this much. 0 means no limit.", "default": 0, "minimum": 0, "maximum": 1000},
+    "claudeCodeMaxTurns": {"type": "integer", "title": "Turn limit per session", "description": "A session stops after this many turns. 0 means no limit.", "default": 0, "minimum": 0, "maximum": 1000},
+    "claudeCodeWorktreeRoot": {"type": "string", "title": "Worktree folder", "description": "Where each session's git worktree is made, as <folder>/<repo>/<task>. Never a .claude/worktrees folder: Claude Code cleans those up while sessions run.", "default": "~/Grain/worktrees"}
+  },
+  "data": {
+    "tables": ["claude_code_sessions", "claude_code_events"],
+    "migrations": "migrations/"
+  }
+}

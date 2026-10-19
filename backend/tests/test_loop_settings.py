@@ -32,7 +32,7 @@ RANGES = {"loopMaxRounds": (0, 200), "loopModelCalls": (5, 500), "loopRepeatLimi
 def test_defaults_equal_todays_constants() -> None:
     for k, v in DEFAULTS.items():
         assert llm.DEFAULT_SETTINGS[k] == v and limits.LOOP_DEFAULTS[k] == v, k
-    assert llm.DEFAULT_SETTINGS["stuckDetection"] == "standard"
+    assert llm.DEFAULT_SETTINGS["stuckSensitivity"] == "standard"
     assert (limits.REPEAT_LIMIT, limits.TOOL_ERROR_LIMIT, limits.LOOP_MODEL_CALLS, limits.FINAL_ROUND_SECONDS) == (5, 3, 60, 90.0)
     assert working.INLINE_CHARS == 12000
 
@@ -51,10 +51,10 @@ def test_put_settings_validates_the_range_and_the_enum() -> None:
     for k, (lo, hi) in RANGES.items():
         assert client.put("/settings", json={k: hi + 1}).status_code == 422, k
         assert client.put("/settings", json={k: lo}).status_code == 200, k
-    assert client.put("/settings", json={"stuckDetection": "strict"}).status_code == 200
-    assert client.put("/settings", json={"stuckDetection": "paranoid"}).status_code == 422
-    assert client.get("/settings").json()["stuckDetection"] == "strict"
-    client.put("/settings", json={**DEFAULTS, "stuckDetection": "standard"})
+    assert client.put("/settings", json={"stuckSensitivity": "strict"}).status_code == 200
+    assert client.put("/settings", json={"stuckSensitivity": "paranoid"}).status_code == 422
+    assert client.get("/settings").json()["stuckSensitivity"] == "strict"
+    client.put("/settings", json={**DEFAULTS, "stuckSensitivity": "standard"})
 
 
 def test_stuck_thresholds_per_mode() -> None:

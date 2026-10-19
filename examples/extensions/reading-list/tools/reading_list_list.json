@@ -1,0 +1,6 @@
+{
+  "type": "object",
+  "properties": {
+    "limit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "How many links to return (default 20)." }
+  }
+}

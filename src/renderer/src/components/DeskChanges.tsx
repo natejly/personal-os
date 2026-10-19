@@ -62,7 +62,7 @@ export default function DeskChanges({ desk, conversationId }: { desk?: FullDesk;
     }
   }, [desk, loadDeskFiles, toast])
 
-  if (turns.length === 0 && !unavailable) return desk ? null : <p className="empty-hint">No files changed in this chat yet.</p>
+  if (turns.length === 0 && !unavailable) return desk ? null : <p className="empty-hint">No changes</p>
   return (
     <section className="desk-changes">
       <button className="desk-folder" onClick={() => setOpen((o) => !o)} aria-expanded={open}>

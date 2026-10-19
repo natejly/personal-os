@@ -8,8 +8,8 @@ import type { Project, ToolOverride } from '@shared/types'
 
 const COLORS = ['#d97757', '#e5484d', '#e5a13b', '#46a758', '#3b9edb', '#8e6fdb', '#d95c9e', '#8b8b8b']
 const MEMORY_MODES: { value: Project['memory_mode']; label: string; hint: string }[] = [
-  { value: 'shared', label: 'Shared with personal', hint: 'Chats here also use your personal memory, docs, skills and voice.' },
-  { value: 'isolated', label: 'This project only', hint: 'Chats here see only this project, and save nothing to personal. You can change this later.' }
+  { value: 'shared', label: 'Shared with personal', hint: 'Also uses your personal memory, docs, skills and voice' },
+  { value: 'isolated', label: 'This project only', hint: 'Sees only this project, saves nothing to personal' }
 ]
 const COLOR_NAMES = ['Terracotta', 'Red', 'Amber', 'Green', 'Blue', 'Purple', 'Pink', 'Gray']
 
@@ -61,9 +61,9 @@ export default function ProjectModal(): JSX.Element {
           <h3>Memory</h3>
           <div role="radiogroup" aria-label="Memory" className="memory-mode">
             {MEMORY_MODES.map((m) => (
-              <label key={m.value} className="memory-mode-opt">
+              <label key={m.value} className="memory-mode-opt" title={m.hint}>
                 <input type="radio" name="memory-mode" checked={memoryMode === m.value} onChange={() => setMemoryMode(m.value)} />
-                <b>{m.label}</b> <small className="muted">{m.hint}</small>
+                <b>{m.label}</b>
               </label>
             ))}
           </div>
@@ -74,9 +74,8 @@ export default function ProjectModal(): JSX.Element {
             <summary>
               <ChevronRight size={12} />
               <h3>Tools</h3>
-              <span className="muted small">{customized ? `${customized} customized` : 'Following your global settings'}</span>
+              <span className="muted small">{customized ? `${customized} customized` : 'Default'}</span>
             </summary>
-            <p className="muted">"Inherit" follows your global settings.</p>
             <ToolOverrides value={tools} onChange={setTools} effectiveBase={globalTools} compact />
           </details>
         </section>

@@ -76,7 +76,7 @@ export function MailWatchList({ watch }: { watch: MailWatch }): JSX.Element | nu
   return (
     <section className="mail-watch">
       <h4 className="section-h">{LABEL[kind]} <span>{rows.length}</span></h4>
-      {rows.length === 0 && <p className="empty-hint">{data && data.threads.length === 0 ? 'Nothing scanned yet. Press the re-scan button above.' : 'Nothing here.'}</p>}
+      {rows.length === 0 && <p className="empty-hint">{data && data.threads.length === 0 ? 'Nothing scanned' : 'Nothing here.'}</p>}
       <div className="mail-list">
         {rows.map((t) => (
           <div key={t.thread_id} className="mail-row static">

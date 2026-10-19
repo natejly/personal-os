@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException
 
 from ... import redact
 from ...context import Block
+from ...repos import live_mem
 from ...runtime.memory_api import MemoryScope
 from ...tools import ToolSpec, _obj, tool_error
 from . import tree
@@ -115,6 +116,33 @@ class MemoryTree:
             self.sync_source()
         except Exception:  # noqa: BLE001
             self.api.log.warning("memory-tree: could not look for summaries at start", exc_info=True)
+        if self.api.enabled():
+            self.api.spawn(self.backfill())
+
+    async def ext_changed(self, ev: dict[str, Any]) -> None:
+        """ext.changed (runs while the extension is off too): the first time it is turned on, memories written before are filed."""
+        if ev.get("id") == self.api.manifest.id and ev.get("enabled"):
+            self.api.spawn(self.backfill())
+
+    def _backfill_scopes(self) -> list[str]:
+        """The scopes with live memories and no leaf at all: the personal one, then each project."""
+        with self.api.app.db.tx() as c:
+            pids = [r[0] for r in c.execute(f"SELECT DISTINCT project_id FROM memories WHERE project_id IS NOT NULL AND {live_mem()} ORDER BY project_id").fetchall()]
+            personal = c.execute(f"SELECT 1 FROM memories WHERE project_id IS NULL AND {live_mem()} LIMIT 1").fetchone()
+        wanted = ([tree.PERSONAL] if personal else []) + [tree.scope_name(p) for p in pids]
+        return [s for s in wanted if self.store.count(s) == 0]
+
+    async def backfill(self) -> None:
+        """File the live memories of every scope whose log is still empty, once, off the event loop. A scope that already has
+        leaves is left alone, so turning the extension on again never rebuilds."""
+        try:
+            for scope in await asyncio.to_thread(self._backfill_scopes):
+                if not self.api.enabled():
+                    return
+                await asyncio.to_thread(self.rebuild, scope, False)
+            self.sync_source()
+        except Exception:  # noqa: BLE001
+            self.api.log.warning("memory-tree: could not file the earlier memories", exc_info=True)
 
     def sync_source(self) -> None:
         wanted = self.store.has_nodes()
@@ -124,7 +152,7 @@ class MemoryTree:
             self._source.dispose()
             self._source = None
 
-    def rebuild(self, scope: str) -> dict[str, Any]:
+    def rebuild(self, scope: str, sync: bool = True) -> dict[str, Any]:
         """Wipe the scope's rows and file every live memory again in the order it became true."""
         memories = self.api.services.get("memories")
         rows = [m for m in memories.list(tree.scope_project(scope), include_global=False) if self._include(m.get("source"))]
@@ -133,7 +161,8 @@ class MemoryTree:
         for m in rows:
             _, text, ts = self._leaf_of(m)
             self.store.append(scope, m["id"], text, ts, self._tainted(m))
-        self.sync_source()
+        if sync:
+            self.sync_source()
         return {"scope": scope, "leaves": len(rows), "nodes": 0}
 
     # ---- reading ----
@@ -358,5 +387,6 @@ def activate(api: ExtensionScope) -> None:
     api.on("turn.settled", ext.on_settled)
     api.job("merge", timedelta(minutes=10), ext.tick)
     api.on("app.start", ext.start)
+    api.on("ext.changed", ext.ext_changed)
     api.provide(SLOT, TreeMemory(ext), id="digest", label="History digest")
     ext.register_tools()

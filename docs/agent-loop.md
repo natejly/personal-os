@@ -19,7 +19,7 @@ All of these are settings, read when a turn starts (a loop is never swapped or r
 | `loopRepeatLimit` | 5 | 2 to 20 | Identical tool calls in a row before the reply stops using tools. Applies to every loop. |
 | `loopToolErrorLimit` | 3 | 1 to 10 | Consecutive errors from one tool before it is switched off for the rest of the reply and the model is told to change approach. |
 | `loopDoomLimit` | 3 | 1 to 10 | How many times the same call may be made before the next identical call asks for approval again, whatever the permission mode. |
-| `stuckDetection` | `standard` | `off`, `relaxed`, `standard`, `strict` | The detector for loops the repeat limit cannot see (ping-pong between two calls, re-reading something that never changes, the same failure with varied arguments). `standard` is the shipped thresholds, `relaxed` doubles them, `strict` takes one off each (never below 2), `off` disables the detector. |
+| `stuckSensitivity` | `standard` | `off`, `relaxed`, `standard`, `strict` | The detector for loops the repeat limit cannot see (ping-pong between two calls, re-reading something that never changes, the same failure with varied arguments). `standard` is the shipped thresholds, `relaxed` doubles them, `strict` takes one off each (never below 2), `off` disables the detector. |
 | `finalRoundSeconds` | 90 | 10 to 600 | How long the closing-answer model call may stay open before it is abandoned. |
 | `toolResultInlineChars` | 12000 | 2000 to 60000 | A tool result this long or shorter goes into the context whole; a longer one is stored and the model gets a preview and a handle. |
 | `planLoopMaxSteps` | 8 | 2 to 20 | The most steps the plan may have in plan, execute, verify. |

@@ -3,7 +3,7 @@ import { useStore, type View } from '../store'
 import { viewHidden } from '../moduleToggles'
 import { useModal } from '../lib/useModal'
 import { plainTitle } from '../lib/chatRows'
-import { SETTINGS_TABS } from './SettingsModal'
+import { SETTINGS_SECTIONS } from '../lib/settingsSections'
 import { useCanvas } from '../canvas/store'
 import { CORE, ownerOn, paletteCommands, registerCommand, settingsPanels } from '../extensions/host'
 import { useSlot } from '../extensions/slot'
@@ -48,7 +48,7 @@ export default function CommandPalette(): JSX.Element {
       .map((c) => ({ key: `command:${c.id}`, label: c.label, hint: c.hint ?? 'Command', run: c.run })),
     ...recent(conversations).map((c) => ({ key: `chat:${c.id}`, label: plainTitle(c.title) || 'Untitled chat', hint: 'Chat', run: () => void s.selectChat(c.id) })),
     ...recent(docs).map((d) => ({ key: `doc:${d.id}`, label: d.title || 'Untitled', hint: 'File', run: () => void s.openDoc(d.id) })),
-    ...SETTINGS_TABS.map((t) => ({ key: `settings:${t.id}`, label: t.label, hint: 'Settings', run: () => s.openSettings(t.id) })),
+    ...SETTINGS_SECTIONS.map((t) => ({ key: `settings:${t.id}`, label: t.label, hint: 'Settings', run: () => s.openSettings(t.id) })),
     ...settingsPanels.filter((p) => ownerOn(settings, p.extension)).map((p) => ({ key: `settings:${p.tab}`, label: p.label, hint: 'Settings', run: () => s.openSettings(p.tab) })),
     // Advanced groups people look for by name.
     ...([['cowork', 'Desks and workers'], ['data', 'Data'], ['behavior', 'Assistant']] as const)

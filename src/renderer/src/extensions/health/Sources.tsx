@@ -49,16 +49,12 @@ export default function Sources({ onSynced, onClose }: { onSynced: () => Promise
     <section className="hl-manage hl-sources" aria-label="Connected services">
       <header className="hl-manage-head">
         <h3>Connected services</h3>
-        <span className="muted small">Sleep, steps, heart rate, workouts and weight sync in each day. If you also log a day yourself, the higher total counts, never both.</span>
         <button className="ghost-btn" onClick={onClose}>Done</button>
       </header>
       {sources?.map((s) => <SourceRow key={s.id} s={s} reload={reload} onSynced={onSynced} toast={toast} />)}
       <div className="hl-providers">
         {providers.filter((p) => !connected.has(p.key)).map((p) => <Connect key={p.key} p={p} onDone={reload} toast={toast} />)}
       </div>
-      <p className="muted small hl-src-note">
-        Strava isn&apos;t offered: its API terms don&apos;t allow its data to be used by AI apps, and the assistant here reads your health log.
-      </p>
     </section>
   )
 }

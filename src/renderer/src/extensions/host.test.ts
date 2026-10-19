@@ -1,7 +1,7 @@
 /** The frontend extension host: what `activate(ui)` registers, how it is disposed, and that Health arrives through it. */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { activateExtension, extensionModules, settingsPanels } from './host'
+import { activateExtension, extensionModules, panelGroup, panelsIn, settingsPanels } from './host'
 import { navEntries } from '../shell/nav'
 import { MODULES, moduleForView } from '../shell/registry'
 import { TOOL_CARDS } from '../components/toolcards/registry'
@@ -24,9 +24,9 @@ test('a registered view becomes a module the shell can turn off, and disposing i
 test('a settings panel gets a section id under its extension and is removed on dispose', () => {
   let panel: { dispose(): void } | undefined
   activateExtension('demo', { activate: (ui) => { panel = ui.settingsPanel({ id: 'main', label: 'Demo', Component }) } })
-  assert.deepEqual(settingsPanels.map((p) => [p.tab, p.extension]), [['ext:coding:recipes', 'coding'], ['ext:memory-tree:digest', 'memory-tree'], ['ext:demo:main', 'demo']])
+  assert.deepEqual(settingsPanels.map((p) => [p.tab, p.extension]), [['ext:coding:recipes', 'coding'], ['ext:memory-tree:digest', 'memory-tree'], ['ext:claude-code:claude-code', 'claude-code'], ['ext:demo:main', 'demo']])
   panel?.dispose()
-  assert.deepEqual(settingsPanels.map((p) => p.tab), ['ext:coding:recipes', 'ext:memory-tree:digest'])
+  assert.deepEqual(settingsPanels.map((p) => p.tab), ['ext:coding:recipes', 'ext:memory-tree:digest', 'ext:claude-code:claude-code'])
 })
 
 test('Lists is registered through its extension with its nav entry and canvas widget', () => {
@@ -52,4 +52,19 @@ test('Health is registered through its extension', () => {
   const m = moduleForView('health')
   assert.ok(m && extensionModules.includes(m) && MODULES.includes(m))
   assert.deepEqual([m.key, m.label, navEntries().find((e) => e.view === 'health')?.order, m.view?.optional], ['health', 'Health', 18, true])
+})
+
+test('settings panels default to Advanced and sort by order then registration', () => {
+  const ids: { dispose(): void }[] = []
+  activateExtension('grp', { activate: (ui) => {
+    ids.push(ui.settingsPanel({ id: 'a', label: 'A', Component }))
+    ids.push(ui.settingsPanel({ id: 'b', label: 'B', Component, group: 'agent', order: 20 }))
+    ids.push(ui.settingsPanel({ id: 'c', label: 'C', Component, group: 'agent' }))
+    ids.push(ui.settingsPanel({ id: 'd', label: 'D', Component, group: 'agent', order: 5 }))
+  } })
+  const mine = settingsPanels.filter((p) => p.extension === 'grp')
+  assert.deepEqual(mine.map(panelGroup), ['advanced', 'agent', 'agent', 'agent'])
+  assert.deepEqual(panelsIn('agent', mine).map((p) => p.id), ['d', 'b', 'c'])
+  assert.deepEqual(panelsIn('advanced', mine).map((p) => p.id), ['a'])
+  for (const d of ids) d.dispose()
 })

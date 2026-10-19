@@ -625,7 +625,7 @@ def build_context(
         led.add("system:prompt", "System prompt", parts[0], slot="stable", kind="system")
     parts.append(DIRECTNESS_RULES)
     led.add("system:directness", "Working style rules", DIRECTNESS_RULES, slot="stable", kind="system")
-    hidden = [{"docs": "Files", "spaces": "Canvases", "todos": "Lists"}.get(v, v.title()) for v in settings.get("hiddenViews") or () if isinstance(v, str)]  # the sidebar labels 'docs' Files
+    hidden = [{"docs": "Files", "spaces": "Canvases", "todos": "Lists", "claude-code": "Claude Code", "memory-tree": "History digest"}.get(v, v.title()) for v in settings.get("hiddenViews") or () if isinstance(v, str)]  # the sidebar labels 'docs' Files
     if hidden:
         # Without this the model sends users to views they cannot see (approvals end in Library, for one).
         parts.append(f"Hidden in this app right now: {', '.join(hidden)}. Before pointing the user at one of them, "

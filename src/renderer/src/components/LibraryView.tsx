@@ -11,16 +11,16 @@ import AppSwitcher from './AppSwitcher'
 import SidebarToggle from './SidebarToggle'
 
 const TABS: { key: LibraryTab; label: string; icon: JSX.Element; blurb: string }[] = [
-  { key: 'skills', label: 'Skills', icon: <Sparkles size={14} />, blurb: 'Skills the assistant can reuse, e.g. how you like a weekly review done' },
-  { key: 'agents', label: 'Agents', icon: <Users size={14} />, blurb: 'Roles with their own face, instructions, tools and skills; replies delegate to them, and you can chat with one' },
-  { key: 'automations', label: 'Automations', icon: <Zap size={14} />, blurb: 'Saved things the assistant may run: workflows and commands' },
-  { key: 'connectors', label: 'Connectors', icon: <Plug size={14} />, blurb: 'MCP servers whose tools the assistant can call' }
+  { key: 'skills', label: 'Skills', icon: <Sparkles size={14} />, blurb: 'Reusable instructions' },
+  { key: 'agents', label: 'Agents', icon: <Users size={14} />, blurb: 'Roles with their own instructions and tools' },
+  { key: 'automations', label: 'Automations', icon: <Zap size={14} />, blurb: 'Workflows and commands' },
+  { key: 'connectors', label: 'Connectors', icon: <Plug size={14} />, blurb: 'MCP servers' }
 ]
 
 // Automations holds two kinds of saved thing; the filter narrows to one, All stacks them.
 const KINDS = [
-  { key: 'workflows', label: 'Workflows', icon: <Workflow size={12} />, blurb: 'Repeatable multi-step plans you approve once, e.g. a Monday inbox triage', panel: <WorkflowsPanel /> },
-  { key: 'commands', label: 'Commands', icon: <Terminal size={12} />, blurb: 'Saved prompts you reuse, e.g. "summarise this thread for my manager"; $ARGUMENTS fills in what you type after the name', panel: <CommandsPanel /> }
+  { key: 'workflows', label: 'Workflows', icon: <Workflow size={12} />, blurb: 'Multi-step plans', panel: <WorkflowsPanel /> },
+  { key: 'commands', label: 'Commands', icon: <Terminal size={12} />, blurb: 'Saved prompts; $ARGUMENTS fills in what follows the name', panel: <CommandsPanel /> }
 ]
 
 export default function LibraryView(): JSX.Element {

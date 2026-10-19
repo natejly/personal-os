@@ -19,7 +19,7 @@ export function DeskInline({ desk, events }: { desk: FullDesk; events: ToolEvent
       {asking && (
         <div className="desk-banner ask">
           <CircleHelp size={14} />
-          <div><b>It needs an answer</b><p>{desk.question}</p><p className="muted small">Reply below.</p></div>
+          <div><b>It needs an answer</b><p>{desk.question}</p></div>
         </div>
       )}
       {approvals.length > 0 && (

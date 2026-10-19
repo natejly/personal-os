@@ -41,7 +41,6 @@ export default function BackendFailed({ message }: { message: string }): JSX.Ele
       <div className="backend-error drag" role="alert">
         <AlertTriangle size={28} />
         <h2>Grain could not start</h2>
-        <p>Something went wrong while starting Grain&apos;s background service. Your data is safe. Trying again often fixes it; if it does not, quit and reopen Grain.</p>
         <div className="backend-error-actions">
           <button className="primary-btn" onClick={() => void retry()} disabled={retrying}><RefreshCw size={13} className={retrying ? 'spin' : undefined} /> {retrying ? 'Trying…' : 'Try again'}</button>
           <button className="ghost-btn" onClick={copy}><Copy size={13} /> Copy details</button>
@@ -50,10 +49,6 @@ export default function BackendFailed({ message }: { message: string }): JSX.Ele
         <details>
           <summary>Details</summary>
           <pre>{message}</pre>
-          {fromSource && <p className="muted">
-            Running from source? Set the backend up once with <code>cd backend && uv venv && uv pip install -e .</code>, then relaunch.
-            Or run it yourself and set <code>PERSONAL_OS_BACKEND_URL</code>.
-          </p>}
         </details>
       </div>
     </div>

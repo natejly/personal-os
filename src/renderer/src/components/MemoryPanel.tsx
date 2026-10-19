@@ -1,10 +1,10 @@
+import MemoryView from './MemoryView'
+import GraphView from './GraphView'
+import StyleView from './StyleView'
 import { useEffect, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Search, Columns2, List, Share2, PenLine } from '../icons'
 import { useStore, type MemoryMode, type Scope } from '../store'
-import MemoryView from './MemoryView'
-import GraphView from './GraphView'
-import StyleView from './StyleView'
 
 const MODES: { key: MemoryMode; label: string; icon: JSX.Element; title: string }[] = [
   { key: 'split', label: 'Split', icon: <Columns2 size={13} />, title: 'Memories and graph side by side' },
@@ -12,6 +12,8 @@ const MODES: { key: MemoryMode; label: string; icon: JSX.Element; title: string 
   { key: 'graph', label: 'Graph', icon: <Share2 size={13} />, title: 'Knowledge graph only' },
   { key: 'style', label: 'Voice', icon: <PenLine size={13} />, title: 'How you write, and the samples it was learned from' }
 ]
+
+const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
 
 /**
  * Memory: one panel holding both halves of what the app remembers — the memory
@@ -38,6 +40,7 @@ export default function MemoryPanel({ projectId }: { projectId?: string; embedde
   useEffect(() => { if (!yielded) void loadScope(scope) }, [scope, loadScope, yielded])
 
   const entityCount = graph.nodes.filter((n) => !n.properties?.self && !n.properties?.literal).length
+  const graphCount = [count(memories.length, 'memory', 'memories'), count(entityCount, 'entity', 'entities'), count(graph.edges.length, 'relation', 'relations')].join(' · ')
   const showStyle = mode === 'style'
   // 'style' is a page of its own: a voice profile has nothing to sit side by side with.
   const showList = !showStyle && mode !== 'graph'
@@ -46,7 +49,7 @@ export default function MemoryPanel({ projectId }: { projectId?: string; embedde
   return (
     <div className="memory-panel embedded">
       <div className="memory-toolbar">
-        <span className="muted small">{showStyle ? styleCount : `${memories.length} memor${memories.length === 1 ? 'y' : 'ies'} · ${entityCount} entit${entityCount === 1 ? 'y' : 'ies'}, ${graph.edges.length} relation${graph.edges.length === 1 ? '' : 's'}`}</span>
+        <span className="muted small">{showStyle ? styleCount : graphCount}</span>
         <div className="toolbar-right">
           {!showStyle && (
             <label className="search"><Search size={14} /><input placeholder={showGraph && !showList ? 'Find entity' : 'Search memory'} value={q} onChange={(e) => setQ(e.target.value)} /></label>

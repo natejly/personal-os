@@ -45,7 +45,7 @@ const ProjectWidget = ({ window: win, live, onConfig, onTitle }: WidgetProps): J
     )
   }
 
-  if (!project) return <div className="widget-empty"><span>Project not found.</span></div>
+  if (!project) return <div className="widget-empty"><span>No project</span></div>
   const st = project.stats
 
   return (
@@ -64,7 +64,7 @@ const ProjectWidget = ({ window: win, live, onConfig, onTitle }: WidgetProps): J
       {tab === 'chats' && (
         <div className="widget-scroll">
           {chats.length === 0 ? (
-            <div className="widget-empty"><span>No chats yet.</span></div>
+            <div className="widget-empty"><span>No chats</span></div>
           ) : (
             <div className="widget-list">
               {chats.map((c) => (
@@ -86,14 +86,13 @@ const ProjectWidget = ({ window: win, live, onConfig, onTitle }: WidgetProps): J
           <textarea className="instructions" rows={10} value={prompt} placeholder="Added to the system prompt for every chat in this project."
             onChange={(e) => setPrompt(e.target.value)}
             onBlur={() => prompt !== project.system_prompt && void updateProject(id, { system_prompt: prompt })} />
-          <p className="widget-meta">Saved when you click away.</p>
         </div>
       )}
 
       {tab === 'files' && (
         <div className="widget-scroll">
           {files.length === 0 ? (
-            <div className="widget-empty"><span>No files.</span></div>
+            <div className="widget-empty"><span>No files</span></div>
           ) : (
             <div className="widget-list">
               {files.map((d) => (

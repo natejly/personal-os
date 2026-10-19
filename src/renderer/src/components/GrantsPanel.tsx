@@ -73,8 +73,7 @@ export default function GrantsPanel({ draft, patch }: { draft: Settings; patch: 
     <>
     <div className="perm-rules grants-panel">
       <h4>Standing grants</h4>
-      <p className="muted small">Revoking takes effect now.</p>
-      {none && <p className="muted small">None yet.</p>}
+      {none && <p className="muted small">None</p>}
       {modes.length + allow.length + globalMcp.length > 0 && (
         <div className="perm-rule-group">
           <b>Everywhere</b>
@@ -94,7 +93,7 @@ export default function GrantsPanel({ draft, patch }: { draft: Settings; patch: 
       )}
       {g.session.length > 0 && (
         <div className="perm-rule-group">
-          <b>This session</b> <small className="muted">Allowed for one chat until the app restarts.</small>
+          <b>This session</b>
           <ul>
             {g.session.flatMap((s) => s.keys.map((k) => (
               <li key={`${s.conversation_id}:${k}`}><span><code>{k}</code> <small className="muted">in {s.title || s.conversation_id}</small></span>

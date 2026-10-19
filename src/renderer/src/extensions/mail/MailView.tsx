@@ -533,7 +533,6 @@ export default function MailView(): JSX.Element {
         <div className="empty-state">
           <MailIcon size={28} />
           <h2>Connect your inbox</h2>
-          <p>Grain reads and triages your mail once {label} is connected. Nothing is sent without asking you first.</p>
           <button className="primary-btn" onClick={() => useStore.getState().openSettings(PIM_SETTINGS_TAB)}>Connect {label}</button>
         </div>
       )}
@@ -573,7 +572,6 @@ export default function MailView(): JSX.Element {
           <div className="empty-state">
             <MailIcon size={28} />
             <h2>No mail here</h2>
-            <p>Nothing in {folderLabel} matches these filters. Try a wider time range or another folder.</p>
             {narrowed
               ? <button className="primary-btn" onClick={clearFilters}>Clear filters</button>
               : <button className="primary-btn" onClick={startCompose}><SquarePen size={14} /> Compose</button>}

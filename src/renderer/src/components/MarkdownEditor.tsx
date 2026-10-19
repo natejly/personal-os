@@ -637,14 +637,13 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
           />
         )}
       </div>
-      <div className="md-status">
+      <div className="md-status" title="⇧⌘B bold · ⇧⌘I italic · ⌘K link · ⌃⌘M maths · ⇧⌘E code · Tab indent">
         {richStatus && sel.end > sel.start && (
           <span className="md-sel">
             {selWords} words, {sel.end - sel.start} chars selected
           </span>
         )}
         {notice && <span className="md-sel">{notice}</span>}
-        <span className="md-hints">⇧⌘B bold · ⇧⌘I italic · ⌘K link · ⌃⌘M maths · ⇧⌘E code · Tab indent</span>
       </div>
     </div>
   )

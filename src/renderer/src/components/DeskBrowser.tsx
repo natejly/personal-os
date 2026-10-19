@@ -18,7 +18,7 @@ export default function DeskBrowser(props: { session: string; live: boolean; emp
   return <DeskBrowserView key={props.session} {...props} /> // a different session starts from a clean view
 }
 
-function DeskBrowserView({ session, live, emptyText = "This desk hasn't opened its browser." }: {
+function DeskBrowserView({ session, live, emptyText = 'No browser' }: {
   session: string; live: boolean; emptyText?: string
 }): JSX.Element {
   const api = window.os?.agentBrowser
@@ -65,7 +65,7 @@ function DeskBrowserView({ session, live, emptyText = "This desk hasn't opened i
         <div className="empty-state">
           <Globe size={20} />
           <p>{emptyText}</p>
-          {!api && <p className="muted small">The browser view needs the desktop app.</p>}
+          {!api && <p className="muted small">Needs the desktop app.</p>}
         </div>
       </div>
     )
@@ -86,16 +86,13 @@ function DeskBrowserView({ session, live, emptyText = "This desk hasn't opened i
         <span className="spacer" />
         <span className={`desk-browser-live muted small ${view.status}`} role="status" aria-live="polite">
           {view.status === 'live' && <><i className="live-dot" /> Live</>}
-          {view.status === 'idle' && "Idle — the assistant isn't using the browser"}
+          {view.status === 'idle' && "Idle"}
           {view.status === 'ended' && `Browser session ended${view.reason ? ` (${view.reason})` : ''}`}
           {view.status === 'error' && `Page failed to load: ${view.reason}`}
         </span>
-        <button className="ghost-btn" disabled={!info || ended} onClick={() => act('show')}><MonitorUp size={13} /> Take over</button>
+        <button className="ghost-btn" disabled={!info || ended} title="Open the agent's browser in its own window" onClick={() => act('show')}><MonitorUp size={13} /> Take over</button>
         <button className="ghost-btn" disabled={!info?.visible || ended} onClick={() => act('hide')}><EyeOff size={13} /> Hand back</button>
       </div>
-      <p className="muted small desk-browser-help">
-        Taking over opens the agent's own browser window, separate from your browser, so you can sign in or get past a challenge.
-      </p>
       {error && <p className="small desk-browser-error">{error}</p>}
       <div className="desk-browser-frame">
         {frame ? (

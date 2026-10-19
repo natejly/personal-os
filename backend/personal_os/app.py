@@ -106,7 +106,7 @@ from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .style import WritingStyle
 from .extensions.channels import ChatService
 from .extensions.coding.extension import Coding
-from .extensions import devapi, profiles as profile_routes, review as review_routes
+from .extensions import catalog_routes, devapi, profiles as profile_routes, review as review_routes
 from .runtime import routes as runtime_routes
 from .runtime.sources import SERVER as SOURCE_SERVER, ToolSources, is_source_tool
 from .runtime.harness import ContextBuilder, EventSink, LoopHooks, LoopRun, LoopViolation, ModelCalls, ModelStream, Tools, TurnLimits
@@ -381,7 +381,7 @@ _MODULES_DEFAULT = 6
 # Stamp 4 shows these once: agent work waits for review there (desks, skill and workflow approvals), and a hidden row
 # meant the user could not find work the assistant had already handed back.
 _SHOWN_AT_4 = ("library", "cowork")
-_PROFILES = ("lean", "focus")  # the bundled profiles; a fresh install gets those whose manifest says enabled
+_PROFILES = ("lean", "focus")  # the bundled profiles; a fresh install starts with nothing enabled; a manifest's enabled is only the default for installs that predate it
 
 
 def _seed_hidden_modules() -> None:
@@ -397,7 +397,7 @@ def _seed_hidden_modules() -> None:
         hidden = [v for v in hidden if v not in _SHOWN_AT_4]
     first_boot = False
     if current == 0 and "hiddenViews" not in stored:
-        with db.tx() as c:  # a first boot starts lean; an install that already has chats keeps every view it had
+        with db.tx() as c:  # a first boot starts with nothing enabled; an install that already has chats keeps every view it had
             first_boot = not c.execute("SELECT 1 FROM conversations LIMIT 1").fetchone()
     widgets = dict(stored["homeWidgets"]) if isinstance(stored.get("homeWidgets"), dict) else {}
     db.set_settings({"hiddenViews": hidden, "homeWidgets": widgets, "modulesDefault": _MODULES_DEFAULT})
@@ -469,7 +469,6 @@ for _m in modules:
     if (_r := _m.router()) is not None:
         app.include_router(_r)
 host.mount(app, host.load_builtin("health", _ext_ctx))
-host.mount(app, host.load_builtin("memory-tree", _ext_ctx))
 host.mount(app, host.load_builtin("spaces", _ext_ctx))
 canvases = _ext_ctx.services["canvases"]()
 for _p in _PROFILES:
@@ -649,6 +648,7 @@ app.include_router(backups.router(db.data_dir, host.data_tables))
 app.include_router(devapi.router(host, _ext_ctx, lambda: toolbox, prefix_watch.stats))
 ext_review = review_routes.Review(ext_drafts, host, _ext_ctx, lambda: toolbox)
 app.include_router(review_routes.router(ext_review))
+app.include_router(catalog_routes.router(host, _ext_ctx, ext_review, db, default_catalog_url=llm.DEFAULT_SETTINGS["extensionCatalogUrl"]))
 host.on_start(ext_review.load_installed)
 app.mount("/ext", host.routes)
 # Supportability: GET /diagnostics, POST /maintenance/sweep, and the daily retention sweep (retention.py).
@@ -1150,8 +1150,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, f"{k} must be a {type(d).__name__}")
         elif k == "retrievalMode" and v not in ("hybrid", "bm25"):
             raise HTTPException(422, "retrievalMode must be 'hybrid' or 'bm25'")
-        elif k == "stuckDetection" and v not in limits.STUCK_MODES:
-            raise HTTPException(422, f"stuckDetection must be one of {', '.join(limits.STUCK_MODES)}")
+        elif k == "stuckSensitivity" and v not in limits.STUCK_MODES:
+            raise HTTPException(422, f"stuckSensitivity must be one of {', '.join(limits.STUCK_MODES)}")
         elif k == "defaultEffort" and v not in EFFORTS:
             raise HTTPException(422, f"defaultEffort must be one of {', '.join(EFFORTS)}")
         elif k == "docTypography":
@@ -6113,12 +6113,17 @@ async def retry_ship(id: str) -> dict[str, Any]:
 # ---------------- coding (extensions/coding): Claude Code / OpenCode / pi on a repo or a fresh worktree ----------------
 # Loaded here, after the ship tools, so its tools keep the place they always had at the end of the list.
 _coding_scope = host.load_builtin("coding", _ext_ctx)
+_cc_scope = host.load_builtin("claude-code", _ext_ctx)  # default off; needs the coding service, which is bound below before any session starts
+host.mount(app, host.load_builtin("memory-tree", _ext_ctx))
 host.migrate(db)
 coding: Coding = _ext_ctx.services["coding"]()
 coding.bind(toolbox)
 toolbox.extensions.append(_coding_scope)
 toolbox.set_extension_tools(_coding_scope)
 host.mount(app, _coding_scope)
+toolbox.extensions.append(_cc_scope)
+toolbox.set_extension_tools(_cc_scope)
+host.mount(app, _cc_scope)
 
 
 def _checked_edit(tool: str, args: dict[str, Any], desk_id: str | None = None, conversation_id: str | None = None) -> dict[str, Any]:

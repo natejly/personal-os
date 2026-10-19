@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 import os
 import re
 import subprocess
@@ -101,12 +102,23 @@ class FileFailed(Exception):
 _COUNT = re.compile(r"(\d+) (passed|failed|skipped|errors?|xfailed|xpassed|subtests passed|subtests failed)")
 
 
+def _preseed_builtins(test: Path, data_dir: str) -> None:
+    """A fresh data directory starts with every built-in extension off. Most files were written for the extensions being on, so
+    their directory starts with each built-in marked as seen (the state of an install that predates the rule); a file that tests
+    the fresh-install rule says so with `FRESH_INSTALL = True` and gets an empty directory."""
+    if "FRESH_INSTALL = True" in test.read_text(errors="ignore"):
+        return
+    ids = sorted(p.parent.name for p in (BACKEND / "personal_os" / "extensions").glob("*/extension.json"))
+    (Path(data_dir) / "extensions-seeded.json").write_text(json.dumps(ids))
+
+
 class FileItem(pytest.Item):
     def runtest(self) -> None:
         script = _as_script(self.path)
         env = dict(os.environ)
         # Fresh store per file: the files only setdefault this, so an inherited value would hand them all one database.
         env["PERSONAL_OS_DATA_DIR"] = tempfile.mkdtemp(prefix=f"pos-{self.path.stem}-")
+        _preseed_builtins(self.path, env["PERSONAL_OS_DATA_DIR"])
         env["PYTHONPATH"] = os.pathsep.join(p for p in (str(BACKEND), env.get("PYTHONPATH", "")) if p)
         env["PERSONAL_OS_TEST_CHILD"] = "1"
         if script:

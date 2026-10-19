@@ -1826,6 +1826,8 @@ export interface Settings {
   surfaceTone?: 'neutral' | 'warm' | 'cool' | 'black'
   /** Interface typeface; missing means system. */
   uiFont?: 'system' | 'serif' | 'rounded' | 'mono' | 'avenir' | 'helvetica' | 'gill' | 'futura' | 'charter' | 'georgia' | 'iowan' | 'palatino' | 'menlo'
+  /** URL (or local path) of the extensions catalog index; missing means the default catalog. */
+  extensionCatalogUrl?: string
   /** Which creature draws the faces; missing means the Grain mascot. */
   mascot?: 'grain' | 'blobs' | 'off'
   /** Code and monospace typeface; missing means default. */
@@ -1904,18 +1906,23 @@ export interface Settings {
   telegramPushWorkerResults?: boolean
   /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
   llmRetries?: number
-  // loop lane: agent-loop tunables (backend limits.LOOP_DEFAULTS / RANGES)
-  loopMaxRounds?: number // 0 = no cap
+  llmIdleSeconds?: number
+  // settings lane; loop lane defines the backend
+  /** Agent loop limits. loopMaxRounds 0 = no cap (0-200); loopModelCalls 5-500; loopRepeatLimit 2-20; loopToolErrorLimit 1-10; loopDoomLimit 1-10. */
+  loopMaxRounds?: number
   loopModelCalls?: number
   loopRepeatLimit?: number
   loopToolErrorLimit?: number
   loopDoomLimit?: number
-  stuckDetection?: 'off' | 'relaxed' | 'standard' | 'strict'
+  stuckSensitivity?: 'off' | 'relaxed' | 'standard' | 'strict'
+  /** Seconds kept for the final round (10-600). */
   finalRoundSeconds?: number
+  /** Characters of a tool result kept inline before the rest is stored aside (2000-60000). */
   toolResultInlineChars?: number
   planLoopMaxSteps?: number
   planLoopVerifyPasses?: number
-  llmIdleSeconds?: number
+  /** Read-only calls of one round that run together; 0 = automatic, 1 = one at a time. */
+  parallelReads?: number
   /** Archive chats and inbox messages whose last activity is older than this many days (restorable). 0 or missing = off. */
   autoArchiveDays?: number
   /** Seconds before a plan the assistant rates high-confidence goes ahead unanswered (default 30, 0 = off, 0-600). Never in manual mode. */
@@ -3450,3 +3457,81 @@ export interface DashboardRender {
   failed: { binding: string; error: string; lastGoodAt: string | null }[]
   bindings: { name: string; source: string; label: string }[]
 }
+
+// ---- Extensions catalog (GET /extensions/catalog and the install flow) ----
+
+export type CatalogDanger = 'read' | 'write' | 'danger' | (string & {})
+
+/** One extension or profile as Settings > Extensions lists it. */
+export interface CatalogCard {
+  id: string
+  name: string
+  description: string
+  version: string
+  tier: 'builtin' | 'installed'
+  kind: 'extension' | 'profile'
+  source: 'bundled' | 'git' | 'zip' | 'folder' | 'catalog'
+  author?: string
+  enabled: boolean
+  requires: { extensions: string[]; services: string[] }
+  /** Ids of the extensions that need this one; for a service it names who makes it active. */
+  requiredBy: string[]
+  contributes: {
+    tools: { name: string; danger: CatalogDanger }[]
+    views: string[]
+    slots: string[]
+    hooks: string[]
+    commands: string[]
+    settingsFields: string[]
+    processes: string[]
+  }
+  permissions: string[]
+  /** Plain-language line per permission. */
+  permissionText: string[]
+  /** Estimated stable context the extension adds to every turn. */
+  contextCostTokens: number
+  state: 'ready' | 'needs-review' | 'invalid' | 'disabled-dependency'
+  reason?: string
+  pinned?: { sha256: string; sha?: string }
+  updateAvailable?: boolean
+  verified?: boolean
+  url?: string
+  ref?: string
+  subdir?: string
+  /** An installed folder extension declares views or slots, but its renderer half is not loaded. */
+  uiNotLoaded?: boolean
+}
+
+export interface ExtensionsCatalog {
+  installed: CatalogCard[]
+  available: CatalogCard[]
+  services: CatalogCard[]
+  catalogError?: string
+  catalogUrl: string
+}
+
+export interface ExtensionConsentFinding { level: 'error' | 'warn' | 'info'; message: string }
+
+/** What the user reads before an extension is enabled, installed or updated. */
+export interface ExtensionConsent {
+  id: string
+  card: CatalogCard
+  /** Shell-looking lines found in its README or setup text, verbatim. */
+  commands: string[]
+  typosquat: { similarTo: string } | null
+  findings: ExtensionConsentFinding[]
+  sha256: string
+  source: { kind: 'git' | 'zip' | 'folder' | 'bundled' | 'catalog'; url?: string; ref?: string; subdir?: string; commit?: string }
+  /** Updates only: what the new version adds. */
+  changes?: { permissionsAdded: string[]; hooksAdded: string[]; toolsAdded: string[] }
+  /** Fetched into quarantine and waiting for confirm (or discard). */
+  quarantined: boolean
+}
+
+export interface ExtensionEnableResult {
+  ok: boolean
+  enabled: string[]
+  needs: { id: string; name: string; enabled: boolean }[]
+}
+
+export interface ExtensionInstallRequest { url?: string; path?: string; ref?: string; subdir?: string }

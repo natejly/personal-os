@@ -4,12 +4,11 @@ import { newChat, sayAndWait } from './helpers/chat.mjs'
 
 const SLOTS = ['model.client', 'model.router', 'tools.source', 'sandbox.backend', 'agent.loop']
 
-test('Settings > Runtime shows every slot on its built-in provider, with the reason', async ({ grain }) => {
+test('Settings > Runtime shows every slot on its built-in provider, with where it comes from', async ({ grain }) => {
   const { page, api } = grain
-  await openSettings(page)
-  await dialog(page).getByRole('tab', { name: 'Runtime' }).click()
+  await openSettings(page, 'Agent')
   for (const slot of SLOTS) {
-    await expect(dialog(page).getByTestId(`runtime-${slot}-reason`)).toContainText('by default')
+    await expect(dialog(page).getByTestId(`runtime-${slot}-reason`)).toContainText('built-in default')
   }
   // The model router has only its built-in provider, so there is nothing to pick; the agent loop has one built-in alternative.
   await expect(dialog(page).getByLabel('Model router, Everywhere')).toBeDisabled()
@@ -48,15 +47,15 @@ test('Settings > Runtime picks per scope, confirms a looser choice, tests a prov
   await page.route(/\/runtime\/test$/, (route) => route.fulfill({ json: { ok: false, detail: 'AssertionError: bad stream' } }))
   await page.route(/\/runtime\/accept-partial$/, (route) => { accepts.push(route.request().postDataJSON()); return route.fulfill({ json: {} }) })
 
-  await openSettings(page)
-  await dialog(page).getByRole('tab', { name: 'Runtime' }).click()
+  await openSettings(page, 'Agent')
   // The chat is focused, so the choice can be made for this chat.
-  await dialog(page).getByRole('button', { name: 'This chat' }).click()
+  const runtime = dialog(page).locator('#sec-runtime')
+  await runtime.getByRole('button', { name: 'This chat' }).click()
   await dialog(page).getByLabel('Model router, This chat').selectOption('acme/router')
   await expect.poll(() => puts.length).toBe(1)
   expect(puts[0]).toMatchObject({ slot: 'model.router', scope: 'chat', value: 'acme/router' })
   expect(puts[0].scope_id).toBeTruthy()
-  await dialog(page).getByRole('button', { name: 'Everywhere' }).click()
+  await runtime.getByRole('button', { name: 'Everywhere' }).click()
   await dialog(page).getByLabel('Model router, Everywhere').selectOption('acme/router')
   await expect.poll(() => puts.length).toBe(2)
   expect(puts[1]).toMatchObject({ scope: 'global', scope_id: null })
@@ -84,7 +83,7 @@ test('the chat\'s runtime menu picks the agent loop for this chat alone', async 
   await page.getByRole('button', { name: 'Runtime for this chat' }).click()
   await page.getByLabel('Agent loop, this chat').selectOption('core/plan-execute-verify')
   await expect.poll(async () => (await api(`/conversations/${chat.id}`)).settings.runtime?.['agent.loop']).toBe('core/plan-execute-verify')
-  await expect(page.getByText('because this chat selects it')).toBeVisible()
+  await expect(page.getByLabel('Agent loop, this chat')).toHaveValue('core/plan-execute-verify')
   expect((await api('/settings')).runtime?.['agent.loop']).toBeUndefined()
   await page.getByLabel('Agent loop, this chat').selectOption('')
   await expect.poll(async () => (await api(`/conversations/${chat.id}`)).settings.runtime?.['agent.loop']).toBeUndefined()

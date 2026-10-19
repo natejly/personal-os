@@ -19,11 +19,11 @@ export default function ExtensionsDev({ onChanged }: { onChanged: () => Promise<
     <>
       <h4>Extensions</h4>
       <div className="test-row">
-        <button type="button" className="ghost-btn" onClick={load}>Refresh</button>
+        <button type="button" className="ghost-btn" title={listing && !listing.live ? 'Reload needs GRAIN_EXT_DEV=1' : undefined} onClick={load}>Refresh</button>
         {!!listing?.failed.length && <button type="button" className="ghost-btn" onClick={() => api.devExtensions.clearFailed().then(load).catch((e: Error) => setError(e.message))}>Clear failed loads</button>}
         {error && <span className="test-msg" role="status">{error}</span>}
       </div>
-      {listing && !listing.live && <p className="set-help">Reloading needs the backend to be started with GRAIN_EXT_DEV=1.</p>}
+      
       {listing?.extensions.map((x) => (
         <details key={x.id} className="adv-group">
           <summary>{x.name} <small>{x.id} {x.version} {x.tier}{x.enabled ? '' : ' (off)'}{mutedHooks(x).length ? ' (muted handlers)' : ''}</small></summary>
@@ -31,7 +31,7 @@ export default function ExtensionsDev({ onChanged }: { onChanged: () => Promise<
             {x.toggleable && <button type="button" className="ghost-btn" onClick={() => act(() => (x.enabled ? api.devExtensions.disable(x.id) : api.devExtensions.enable(x.id)))}>{x.enabled ? 'Disable' : 'Enable'}</button>}
             {x.reloadable && <button type="button" className="ghost-btn" disabled={!listing.live} onClick={() => act(() => api.devExtensions.reload(x.id))}>Reload</button>}
           </div>
-          <p className="set-help">{[...contributionSummary(x), ...x.permissions].join(' · ') || 'Registers nothing.'}</p>
+          <p className="set-help">{[...contributionSummary(x), ...x.permissions].join(' · ') || 'None'}</p>
           {unsupportedWarning(x.permissions) && <p className="set-help" role="status">{unsupportedWarning(x.permissions)}</p>}
           {x.jobs.length > 0 && (
             <table>

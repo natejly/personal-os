@@ -54,7 +54,7 @@ function MemoryWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element
         <span>{rows.length}</span>
       </div>
       {rows.length === 0 ? (
-        <div className="widget-empty">No memories in this scope.</div>
+        <div className="widget-empty">No memories</div>
       ) : (
         <div className="widget-scroll"><div className="widget-list">{rows.map((m) => <Row key={m.id} m={m} />)}</div></div>
       )}

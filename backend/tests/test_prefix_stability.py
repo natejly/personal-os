@@ -42,7 +42,8 @@ async def _fake(settings: dict[str, Any], model: str, messages: list[dict[str, A
 
 def _setup() -> None:
     appmod.db.set_settings({"autoLearn": False, "baseUrl": "http://127.0.0.1:9/v1", "provider": "custom", "autoTitle": False,
-                            "followUps": False, "learnStyle": False, "permissionMode": "manual"})
+                            "followUps": False, "learnStyle": False, "permissionMode": "manual",
+                            "hiddenViews": ["todos", "calendar", "mail", "health", "spaces", "claude-code", "memory-tree"]})  # what the golden was taken with: Lists, Calendar, Mail, Health, Canvases, Claude Code and History digest off
 
 
 class _Clock(_dt.datetime):

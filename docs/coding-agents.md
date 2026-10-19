@@ -86,3 +86,59 @@ A recipe is a saved coding task: a prompt with inputs, a repository, the driver,
 ## Seeing what Claude Code does
 
 Extensions can gate and observe the tool calls of a Claude Code session Grain started: `coding.tool.pre` (an extension may answer deny or ask, never allow) and `coding.tool.post`. They need `coding:read`, and `hooks:gate` for the gate. A session reports through a per-session key that opens only its own two routes while it is live. When nothing subscribes and no step limit applies, the session's settings are exactly what they were before.
+
+## Claude Code orchestration
+
+The `claude-code` extension (off by default; turn it on under Settings, Extensions; it needs the Coding extension) runs Claude Code sessions that Grain drives itself, instead of handing them to the Claude daemon.
+
+How it differs from the `coding_session_*` tools:
+
+| | Coding sessions (`claude --bg`) | Claude Code orchestration |
+| --- | --- | --- |
+| Process | A background session of the Claude daemon, outlives the app. | One `claude -p --output-format stream-json --input-format stream-json` process per session, a child of the app. It ends with the app. |
+| Progress | Files the CLI keeps under `~/.claude/jobs`, polled. | The process's own event stream, stored as the session's event log (capped at 1000 events) and pushed to the open windows. |
+| Questions | `needs_you`; the user answers in the terminal (`claude attach`). | A permission request becomes an approval card in the chat that started the session. |
+| Many at once | One session per call. | `claude_code_fleet`: several sessions, queued behind a limit, with cost totalled for the fleet. |
+| Worktrees | `<repo>/.claude/worktrees/<name>` | Under a folder Grain owns (below). |
+
+### Tools
+
+| Tool | Use |
+| --- | --- |
+| `claude_code_run` | Start one session: `repo_path`, `prompt`, optional `name`, `model`, `max_turns`, `budget_usd`, `permission_mode`, `allowed_tools`, `json_schema`, `new_worktree` (default true), `branch`. Returns at once with an id. |
+| `claude_code_fleet` | Start up to 20 sessions as one fleet (`tasks`, `max_parallel`). What does not fit under the limits is queued and starts as running sessions settle; the fleet wakes the chat once, when the last one settles. |
+| `claude_code_status` | One session (optionally its last N events), or a list of recent sessions and fleets. |
+| `claude_code_send` | Steer or extend a session over its open input. It works while the session is running and after a result, until the process exits. |
+| `claude_code_stop` | Interrupt a session (SIGINT; after a few seconds SIGKILL). The worktree and branch stay. |
+| `claude_code_result` | Result subtype, `structured_output` (when `json_schema` was given), final text, cost per model, turns, permission denials and the worktree's diff. |
+| `claude_code_wait` | Block until sessions settle (`mode` all or any, `timeout`). |
+
+Starting, steering and fleets are external actions: a chat asks first, and an unattended run (a scheduled job) cannot use them. Reading a session taints the run, because what the agent wrote comes back through it.
+
+### Approvals
+
+A session's `--settings` carries Grain's floor from the coding extension (deny rules on Grain's own data and disk wipes, and the Bash hook that judges what a command runs) and a `PermissionRequest` hook. Claude Code runs that hook only when a call would otherwise prompt. The hook posts the request to a loopback route that opens with the session's own key, and waits for the user's answer for at most 10 minutes. The answer is an approval card in the chat that started the session; Allow everything and the auto reviewer apply to it as they do to any other card. A timeout, a late or malformed answer, an unreachable app or a missing card are all denials, and the denial tells the agent why.
+
+A card needs the reply that started the session to be running: it is raised through that reply. The extension takes the card channel again whenever a later reply drives the session (`claude_code_send`, `claude_code_wait`, `claude_code_status`, `claude_code_result`). With no running reply (it ended, or the run was an unattended job) a request is denied with "no card to ask on". So stay in the reply with `claude_code_wait` while a session may ask, or start it with `permission_mode: "acceptEdits"` for edit-only tasks.
+
+`permission_mode` is `default`, `acceptEdits`, `plan`, `auto`, `dontAsk` or `bypassPermissions`. `bypassPermissions` always asks the user first unless Grain itself is in Allow everything, and only in that case is the floor lifted, as for coding sessions.
+
+### Worktrees
+
+With `new_worktree` (the default) each session gets `git worktree add -b <branch> <root>/<repo>/<task>` with the branch `grain/<task>` (a short suffix is added when that name or path is taken). The root is the setting `claudeCodeWorktreeRoot`, `~/Grain/worktrees` by default. A root that is, or sits inside, a `.claude/worktrees` folder is refused, as is one inside Grain's own data folder: Claude Code cleans those up while sessions run. With `new_worktree=false` the session works in the repo itself, and only one live session may use a folder.
+
+### Limits and cost
+
+- `claudeCodeMaxConcurrent` (default 3) live sessions of this extension, and together with coding sessions never more than `codingSessionMaxConcurrent`. A finished session whose process is still open holds no slot.
+- `max_turns`, `budget_usd` and the settings `claudeCodeMaxTurns`, `claudeCodeBudgetUsd` (0 means none) are passed to the CLI as `--max-turns` and `--max-budget-usd`.
+- A result's `total_cost_usd` and `modelUsage` are cumulative for the session, so a session's cost is its latest result, and a fleet's is the sum of its sessions' latest, with a per-model breakdown.
+- A session that has produced a result keeps its input open for five minutes, then the process exits and `claude_code_send` reports that it is gone.
+- Sessions stop with the reply or subagent that started them when that run is stopped (a run that finishes normally leaves them working), when Coding or Claude Code is turned off, and when the app quits.
+
+### Settings
+
+`claudeCodeMaxConcurrent`, `claudeCodeDefaultModel` (empty uses the CLI's default), `claudeCodeDefaultPermissionMode` (never `bypassPermissions`), `claudeCodeBudgetUsd`, `claudeCodeMaxTurns`, `claudeCodeWorktreeRoot`. They are stored as `ext.claude-code.<name>`.
+
+### Routes and events
+
+Mounted at `/claude-code`: `GET /sessions`, `GET /sessions/{id}`, `GET /sessions/{id}/events?after=<seq>`, `POST /sessions/{id}/send`, `POST /sessions/{id}/stop`, `GET /fleets`. The open windows receive `session` (the whole session on every change) and `event` (one stored event) as `ext:claude-code:session` and `ext:claude-code:event`. Each finished tool call is also reported on the `coding.tool.post` hook, with the agent `claude`.

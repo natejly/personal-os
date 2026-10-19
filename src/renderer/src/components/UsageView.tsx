@@ -90,7 +90,7 @@ function PriceEditor({ report, onSaved }: { report: UsageReport; onSaved: (price
     }
   }
 
-  if (models.length === 0) return <p className="muted small">No models used yet.</p>
+  if (models.length === 0) return <p className="muted small">No models</p>
   return (
     <div className="usage-prices">
       <table>
@@ -152,7 +152,7 @@ export default function UsageView(): JSX.Element {
   }, [report])
 
   if (error) return <div className="chart-err"><AlertCircle size={14} /> Couldn't load usage: {error}</div>
-  if (!report || !charts) return <p className="muted small">{loading ? 'Loading usage…' : 'No usage recorded yet.'}</p>
+  if (!report || !charts) return <p className="muted small">{loading ? 'Loading usage…' : 'No usage'}</p>
 
   const t: UsageBucket = report.totals
   const empty = t.calls === 0
@@ -181,15 +181,15 @@ export default function UsageView(): JSX.Element {
       </div>
 
       {empty ? (
-        <p className="muted small">No model calls in this range.</p>
+        <p className="muted small">No calls</p>
       ) : (
         <>
           <div className="usage-tiles">
-            <Tile label="Cost" value={costText(t)} sub={costNote(t) || `over ${report.days} days`} />
+            <Tile label="Cost" value={costText(t)} sub={costNote(t) || undefined} />
             <Tile label="Tokens" value={compact(t.tokens)} sub={tokenSplit(t, compact)} />
             <Tile label="Model calls" value={t.calls.toLocaleString()} sub={`${t.chat_calls} chat · ${t.learn_calls} memory${t.other_calls ? ` · ${t.other_calls} other` : ''}`} />
-            <Tile label="Avg latency" value={ms(t.avg_ms)} sub="per model call" />
-            <Tile label="Cache hit rate" value={pct(t.cache_hit_rate ?? 0)} sub={`${compact(t.cached_tokens ?? 0)} input tokens from the provider cache`} />
+            <Tile label="Avg latency" value={ms(t.avg_ms)} />
+            <Tile label="Cache hit rate" value={pct(t.cache_hit_rate ?? 0)} sub={`${compact(t.cached_tokens ?? 0)} cached`} />
             <Tile label="Reasoning tokens" value={compact(t.reasoning_tokens ?? 0)} sub={`${pct(t.reasoning_share ?? 0)} of output tokens`} />
           </div>
 
@@ -210,9 +210,8 @@ export default function UsageView(): JSX.Element {
 
           {features.length > 0 && (
             <>
-              <h4 className="usage-sub">By feature</h4>
+              <h4 className="usage-sub" title="OpenCode calls are read from its local history; Claude Code sessions bill their own account and are not counted">By feature</h4>
               <Breakdown rows={features} label="Feature" />
-              <p className="muted small">OpenCode's calls are read from its local history and counted here. Claude Code sessions bill their own account and are not.</p>
             </>
           )}
 
@@ -228,12 +227,9 @@ export default function UsageView(): JSX.Element {
         </>
       )}
 
-      <h4>Prices</h4>
-      <p className="muted small">
-        {proxy
-          ? 'Read from your LiteLLM proxy. A price you enter here wins. Saving re-prices the history.'
-          : 'Fireworks list prices are built in. Other directly-called providers show cost as unknown until you enter a price ($ per million tokens). Saving re-prices the history; calls priced earlier keep their cost.'}
-      </p>
+      <h4 title={proxy
+        ? 'Read from your LiteLLM proxy. A price you enter here wins'
+        : 'Fireworks list prices are built in; other providers show cost as unknown until you enter a price'}>Prices</h4>
       <PriceEditor report={report} onSaved={(prices) => setReport((r) => (r ? { ...r, prices } : r))} />
     </div>
   )

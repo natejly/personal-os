@@ -136,7 +136,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     **PERMISSION_DEFAULTS,
     # loop lane: agent-loop tunables (limits.LOOP_DEFAULTS has the defaults, limits.RANGES the bounds)
     **LOOP_DEFAULTS,
-    "stuckDetection": "standard",  # off | relaxed | standard | strict: how soon the stuck detector steps in (stuck.limits_for)
+    "stuckSensitivity": "standard",  # off | relaxed | standard | strict: how soon the stuck detector steps in (stuck.limits_for)
     "parallelReads": 0,  # read-only calls of one round that run together; 0 = automatic (limits.worker_slots), 1 = one at a time
     # codemode lane: run_python(tools=...) lets a script drive app tools (toolbridge.py).
     "codeMode": True,  # off: run_python refuses `tools`; scripts cannot call app tools
@@ -160,7 +160,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "dictationChord": "Control+Alt+D",
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
     "homeWidgets": {},
-    "hiddenViews": [],  # a fresh install gets the lean profile (app._seed_hidden_modules); an install without the key keeps every view on
+    "hiddenViews": [],  # a fresh install starts with no extensions enabled (app._seed_hidden_modules); an install without the key keeps every view on
     "pickerModels": [],  # model ids the picker lists; [] = every keyed provider's preset models
     # Rows hidden from the sidebar only; they stay reachable everywhere else. Default: only Files, Lists, Calendar, Library, Jobs, Canvases and Projects show.
     "sidebarHidden": ["mail", "health"],
@@ -296,6 +296,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "planner": {"workStart": "09:00", "workEnd": "17:30", "workDays": [1, 2, 3, 4, 5], "bufferMin": 10, "minBlockMin": 15,
                 "maxBlockMin": 120, "slotStepMin": 15, "lookaheadDays": 7, "calendarName": "Grain Todos",
                 "busyCalendarIds": []},
+    # ext lane: where the extensions catalog index (a JSON list of installable extensions) is fetched from.
+    "extensionCatalogUrl": "https://raw.githubusercontent.com/natejly/personal-os/main/examples/extensions/catalog.json",
 }
 
 

@@ -643,7 +643,7 @@ def test_memory_tree_status_counts_per_scope(env: Env, monkeypatch: pytest.Monke
 def test_the_manifest_declares_the_contract(env: Env) -> None:
     m = env.scope.manifest
     assert (m.id, m.name, m.enabled, m.version) == ("memory-tree", "History digest", False, "1.0.0")
-    assert set(m.hooks) == {"app.start", "memory.written", "memory.deleted", "turn.settled"} and set(env.scope.tools) == {"memory_zoom", "memory_tree_status"}
+    assert set(m.hooks) == {"app.start", "ext.changed", "memory.written", "memory.deleted", "turn.settled"} and set(env.scope.tools) == {"memory_zoom", "memory_tree_status"}
     assert set(m.data["tables"]) == {"memory_tree_leaf", "memory_tree_node"} and "runtime:memory" in m.permissions
     assert env.host.check_setting("ext.memory-tree.memoryTreeDigestTokens", 1000) == 1000
     for key, bad in (("memoryTreeDigestTokens", 100), ("memoryTreeDigestTokens", 9000), ("memoryTreeMergesPerTurn", 11), ("memoryTreeMergeModel", "huge")):
@@ -693,3 +693,61 @@ def test_selecting_the_digest_provider_for_one_chat_changes_what_it_recalls() ->
     off = appmod.convos.create(None, "Off", "test-model")["id"]
     appmod.convos.update(off, {"settings": {"useMemory": False, "runtime": {"memory.system": "memory-tree/digest"}}})
     assert "History digest" not in assemble(off)
+
+
+# ---- backfill on first enable ----
+def test_turning_it_on_files_the_memories_written_while_it_was_off(env: Env) -> None:
+    pid = env.projects.create("Bees")["id"]
+    env.hidden.append("memory-tree")
+    env.host.refresh_enabled()
+    env.memories.create(None, "told", valid_from=BASE)
+    env.memories.create(pid, "project fact", valid_from=BASE)
+    assert env.store.leaves("personal") == []
+
+    async def go() -> None:
+        env.host.bus.loop = asyncio.get_running_loop()
+        env.hidden.clear()
+        env.host.refresh_enabled()
+        await asyncio.sleep(0.3)
+    asyncio.run(go())
+    assert len(env.store.leaves("personal")) == 1 and len(env.store.leaves(f"project:{pid}")) == 1
+
+
+def test_a_second_enable_does_not_rebuild_a_scope_that_has_leaves(env: Env) -> None:
+    env.hidden.append("memory-tree")
+    env.host.refresh_enabled()
+    env.memories.create(None, "told", valid_from=BASE)
+
+    async def cycle(on: bool) -> None:
+        env.host.bus.loop = asyncio.get_running_loop()
+        env.hidden[:] = [] if on else ["memory-tree"]
+        env.host.refresh_enabled()
+        await asyncio.sleep(0.3)
+    asyncio.run(cycle(True))
+    assert len(env.store.leaves("personal")) == 1
+    env.store.append("personal", "marker", "marker line", BASE)  # a sign the log is not rewritten
+    asyncio.run(cycle(False))
+    asyncio.run(cycle(True))
+    assert [x.text for x in env.store.leaves("personal")][-1] == "marker line" and len(env.store.leaves("personal")) == 2
+
+
+def test_it_does_nothing_while_disabled(env: Env) -> None:
+    env.hidden.append("memory-tree")
+    env.host.refresh_enabled()
+    env.memories.create(None, "told", valid_from=BASE)
+    asyncio.run(env.ext.backfill())
+    assert env.store.leaves("personal") == []
+
+
+def test_app_start_backfills_when_enabled_and_the_log_is_empty(env: Env) -> None:
+    env.hidden.append("memory-tree")
+    env.host.refresh_enabled()
+    env.memories.create(None, "told", valid_from=BASE)
+    env.hidden.clear()  # enabled again without an ext.changed (as at a fresh start)
+    env.host._enabled["memory-tree"] = True
+
+    async def go() -> None:
+        await env.ext.start(None)
+        await asyncio.sleep(0.3)
+    asyncio.run(go())
+    assert len(env.store.leaves("personal")) == 1

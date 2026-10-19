@@ -1761,6 +1761,8 @@ export interface Settings {
   surfaceTone?: 'neutral' | 'warm' | 'cool' | 'black'
   /** Interface typeface; missing means system. */
   uiFont?: 'system' | 'serif' | 'rounded' | 'mono' | 'avenir' | 'helvetica' | 'gill' | 'futura' | 'charter' | 'georgia' | 'iowan' | 'palatino' | 'menlo'
+  /** URL (or local path) of the extensions catalog index; missing means the default catalog. */
+  extensionCatalogUrl?: string
   /** Which creature draws the faces; missing means the Grain mascot. */
   mascot?: 'grain' | 'blobs' | 'off'
   /** Code and monospace typeface; missing means default. */

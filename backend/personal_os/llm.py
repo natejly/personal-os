@@ -290,6 +290,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "planner": {"workStart": "09:00", "workEnd": "17:30", "workDays": [1, 2, 3, 4, 5], "bufferMin": 10, "minBlockMin": 15,
                 "maxBlockMin": 120, "slotStepMin": 15, "lookaheadDays": 7, "calendarName": "Grain Todos",
                 "busyCalendarIds": []},
+    # ext lane: where the extensions catalog index (a JSON list of installable extensions) is fetched from.
+    "extensionCatalogUrl": "https://raw.githubusercontent.com/natejly/personal-os/main/examples/extensions/catalog.json",
 }
 
 

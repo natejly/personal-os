@@ -12,9 +12,9 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ... import autoreview, shell
+from ... import shell
 from ...jobs import next_fire, valid_cron
-from .recipes import RecipeError, failure_text
+from .recipes import RecipeError, failure_text, unattended_mode
 from .sessions import CodingError
 
 if TYPE_CHECKING:
@@ -61,9 +61,9 @@ class RecipeTrigger:
         """Start the job's recipe run now and return its id. A clock slot starts it as "job"; Run now is the user's own
         start ("palette"), which fails at once when no session is free and never counts toward the job's failure streak."""
         cfg = config(job)
-        mode = autoreview.mode_of(self.coding.tb.settings())
-        ctx = {"conversation_id": None, "run_id": None, "settings": self.coding.tb.settings(),  # Allow everything does not lift an unattended run to bypass
-               "permission_mode": "auto" if mode == "allow_all" else mode, "tainted": False, "taint_sources": []}
+        settings = self.coding.tb.settings()
+        ctx = {"conversation_id": None, "run_id": None, "settings": settings, "permission_mode": unattended_mode(settings),
+               "tainted": False, "taint_sources": []}
         try:
             out = await self.coding.recipes.run(cfg["recipe"], cfg.get("inputs"), origin, ctx, version=cfg["version"], job_id=job["id"])
         except shell.ShellError as e:

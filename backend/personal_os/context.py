@@ -371,7 +371,7 @@ class RetrievalSources:
     @staticmethod
     def _block(name: str, owner: str, items: list[dict[str, Any]] | None) -> Block | None:
         lines = [f"- {_one_line(str(i.get('text') or ''))}" + (f" [{_one_line(str(i['ref']), 80)}]" if i.get("ref") else "")
-                 for i in items or () if isinstance(i, dict) and str(i.get("text") or "").strip()]
+                 for i in (items if isinstance(items, (list, tuple)) else ()) if isinstance(i, dict) and str(i.get("text") or "").strip()]
         return Block(f"## {name}\n" + "\n".join(lines), "volatile", owner) if lines else None
 
 

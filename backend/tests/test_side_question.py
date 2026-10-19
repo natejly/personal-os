@@ -53,6 +53,32 @@ def test_side_question_beside_live_run() -> None:
     assert any(m.get("kind") == "side_note" for m in convos.get(cid)["messages"])  # but the chat keeps it
 
 
+def test_one_shot_calls_about_a_chat_are_attributed_to_it() -> None:
+    """The model client is selected per chat and project, so these calls must carry the chat they send content from."""
+    import asyncio
+    from personal_os import branch_summary
+    pid = appmod.projects.create("p")["id"]
+    cid = convos.create(pid, "t", "m")["id"]
+    first = convos.add_message(cid, "user", "hello")["id"]
+    convos.add_message(cid, "assistant", "hi there")
+    seen: list[dict[str, Any]] = []
+
+    async def fake(settings: Any, model: str, messages: list[dict[str, Any]], kind: str = "other", **kw: Any) -> str:
+        seen.append(dict(llm.usage_context.get()))
+        return "Greeting"
+
+    c = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
+    prev, llm.complete = llm.complete, fake  # type: ignore[assignment]
+    try:
+        c.post(f"/chats/{cid}/side-question", json={"question": "x"})
+        c.post(f"/conversations/{cid}/title")
+        llm.usage_context.set({})
+        asyncio.run(branch_summary.add(convos, appmod.settings(), cid, first, cid))
+    finally:
+        llm.complete = prev  # type: ignore[assignment]
+    assert len(seen) == 3 and all(u.get("conversation_id") == cid and u.get("project_id") == pid for u in seen)
+
+
 if __name__ == "__main__":
     test_side_question_beside_live_run()
     print("ok")

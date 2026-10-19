@@ -487,7 +487,8 @@ class Jobs:
         # Re-arm from now whenever the schedule or the switch changes: a job disabled across a slot has no
         # missed slot to catch up on, and a new cron expression must not inherit the old one's pending slot.
         # A one-off given a new run_at stops being spent, so this is also how a fired task is rescheduled.
-        if self.RE_ARM & cols.keys():
+        # A polled kind may keep its schedule in the prompt (a coding_recipe job's cron), so saving one re-arms it too.
+        if self.RE_ARM & cols.keys() or ("prompt" in cols and merged["kind"] not in CLOCKED):
             cols["next_due_at"] = next_due_for(merged, t) if merged["enabled"] else None
         if not cols:
             return job

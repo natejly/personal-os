@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ... import guards, permrules, shell
+from ... import autoreview, guards, permrules, shell
 from ...db import new_id
 from ...dispatch import dispatch_tool
 from ...jobs import Jobs
@@ -244,6 +244,12 @@ def failure_text(run: dict[str, Any]) -> str | None:
     return f"Recipe run {run['status']}" + (f": {tail[-1][:200]}" if tail else "")
 
 
+def unattended_mode(settings: dict[str, Any]) -> str:
+    """The mode a job-started run asks under: Allow everything must not lift an unattended run to bypass."""
+    mode = autoreview.mode_of(settings)
+    return "auto" if mode == "allow_all" else mode
+
+
 class Recipes:
     """The recipe tables, and the runs of recipes over `coding.sessions`."""
 
@@ -450,8 +456,12 @@ class Recipes:
                 log.warning("recipe watcher failed", exc_info=True)
 
     def _ctx(self, run: dict[str, Any]) -> dict[str, Any]:
-        return {"conversation_id": run["conversation_id"] or f"recipe:{run['id']}", "run_id": f"recipe:{run['id']}",
-                "settings": self.coding.api.app.chat_settings(run["conversation_id"]), "tainted": False, "taint_sources": []}
+        settings = self.coding.api.app.chat_settings(run["conversation_id"])
+        ctx = {"conversation_id": run["conversation_id"] or f"recipe:{run['id']}", "run_id": f"recipe:{run['id']}",
+               "settings": settings, "tainted": False, "taint_sources": []}
+        if run["origin"] == "job":
+            ctx["permission_mode"] = unattended_mode(settings)
+        return ctx
 
     async def advance(self, run_id: str) -> None:
         """One step of one run. Several steps never overlap: a run being verified is left alone until that finishes."""

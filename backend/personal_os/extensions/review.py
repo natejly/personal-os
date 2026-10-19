@@ -45,8 +45,11 @@ class Review:
 
     async def stand_down(self, ext_id: str) -> None:
         """Disable and unload, so that it cannot come back except through `enable`."""
+        scope = self.host.extensions.get(ext_id)
+        if scope and scope.manifest.kind == "profile":
+            scope.defaults.revert(ext_id)  # a profile's defaults are not tied to hiddenViews: undo them here, as its own disable does
         self._hide(ext_id, True)
-        if scope := self.host.extensions.get(ext_id):
+        if scope:
             self.toolbox().drop_extension_tools(list(scope.tools))
             await self.host.unload(ext_id)
 

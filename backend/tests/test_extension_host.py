@@ -49,6 +49,10 @@ class Loose(unittest.TestCase):
 
 
 class ManifestTests(unittest.TestCase):
+    def test_the_host_id_is_reserved(self) -> None:
+        with self.assertRaisesRegex(ManifestError, "reserved"):
+            Manifest.from_dict(manifest(id="core"))
+
     def test_minimal_manifest_gets_defaults(self) -> None:
         m = Manifest.from_dict(BASE)
         self.assertEqual((m.kind, m.enabled, m.activation, m.hooks), ("extension", True, ("startup",), {}))

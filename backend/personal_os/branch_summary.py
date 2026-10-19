@@ -61,6 +61,7 @@ async def add(convos: Any, cfg: dict[str, Any], src_id: str, upto_mid: str, new_
         rows = src["messages"][at + 1:]
         if not rows:
             return
+        llm.usage_context.set({"conversation_id": src_id, "project_id": src["project_id"]})
         summary = await summarise(cfg, src["model"], rows)
         if summary:
             # Right after the fork point (the copied rows keep their times), not after what the user typed meanwhile.

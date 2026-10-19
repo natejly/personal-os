@@ -400,3 +400,20 @@ def test_a_draft_folder_that_is_itself_a_link_is_refused(tmp_path: Path) -> None
         assert "symbolic links" in propose()["error"]
     finally:
         root.unlink()
+
+
+def test_disabling_an_installed_profile_puts_back_the_defaults_it_applied() -> None:
+    root = review.drafts.drafts / "rl-look"
+    root.mkdir(parents=True)
+    (root / "extension.json").write_text(json.dumps({
+        "id": "rl-look", "name": "Look", "version": "0.1.0", "apiVersion": 1, "kind": "profile",
+        "contributes": {"defaults": {"effort": "low"}}}), "utf-8")
+    before = appmod.settings()
+    propose("rl-look")
+    assert accept("rl-look").status_code == 200 and enable("rl-look").status_code == 200
+    assert client.post("/profiles/rl-look/enable").status_code == 200
+    assert appmod.settings()["defaultEffort"] == "low"
+    assert client.post("/extensions/rl-look/disable").status_code == 200
+    after = appmod.settings()
+    assert after["defaultEffort"] == before["defaultEffort"]
+    assert "rl-look" not in (after.get("extDefaults") or {})

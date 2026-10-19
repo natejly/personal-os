@@ -515,8 +515,9 @@ async def side_question_route(conv_id: str, body: SideQuestionIn) -> dict[str, A
     q = body.question.strip()
     if not q:
         raise HTTPException(400, "Ask a question after /btw")
-    if not convos.get(conv_id, with_messages=False):
+    if not (conv := convos.get(conv_id, with_messages=False)):
         raise HTTPException(404, "No such conversation")
+    llm.usage_context.set({"conversation_id": conv_id, "project_id": conv["project_id"]})  # the model client is selected per chat and project
     try:
         a = await side_question.answer(settings(), compactor, convos, run_store, conv_id, q)
     except llm.LLMError as e:
@@ -1683,6 +1684,7 @@ async def retitle_conversation(id: str) -> dict[str, Any]:
         raise HTTPException(404)
     texts = [m["content"] for m in c["messages"] if _said(m)]
     cfg = settings()
+    llm.usage_context.set({"conversation_id": id, "project_id": c["project_id"]})
     try:
         new = await titles.generate(cfg, router.concrete(c["model"], cfg), titles.pick_texts(texts))
     except Exception as e:  # noqa: BLE001

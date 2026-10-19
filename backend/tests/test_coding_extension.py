@@ -419,6 +419,34 @@ def test_run_now_on_a_recipe_job_starts_the_recipe_run_and_its_dry_run_is_refuse
         appmod.coding.recipes.archive(saved["recipe_id"])
 
 
+def test_editing_a_recipe_jobs_cron_re_arms_its_next_slot(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from personal_os import app as appmod
+    c = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    saved = appmod.coding.recipes.save({"name": "re-arm", "prompt": "do it", "repo_path": str(repo), "driver": "claude", "verify": {"command": "true"}}, "user")
+    cfg = lambda cron: json.dumps({"recipe": "re-arm", "version": 1, "cron": cron})  # noqa: E731
+    job = c.post("/jobs", json={"name": "rj-rearm", "kind": "coding_recipe", "enabled": True, "prompt": cfg("0 3 * * *")}).json()
+    try:
+        with appmod.jobs.db.tx() as con:
+            con.execute("UPDATE jobs SET next_due_at=? WHERE id=?", (time.time() + 86400, job["id"]))
+        out = c.patch(f"/jobs/{job['id']}", json={"prompt": cfg("*/5 * * * *")}).json()
+        assert out["next_due_at"] <= time.time() + 1  # polled next, which books the new cron's slot
+    finally:
+        c.delete(f"/jobs/{job['id']}")
+        appmod.coding.recipes.archive(saved["recipe_id"])
+
+
+def test_a_queued_job_run_starts_under_the_same_mode_an_immediate_one_does():
+    from personal_os.extensions.coding.recipes import Recipes
+    recipes = Recipes.__new__(Recipes)
+    recipes.coding = SimpleNamespace(api=SimpleNamespace(app=SimpleNamespace(chat_settings=lambda _cid: {"permissionMode": "allow_all"})))
+    run = {"id": "r1", "conversation_id": None}
+    assert recipes._ctx({**run, "origin": "job"})["permission_mode"] == "auto"  # Allow everything must not lift an unattended run to bypass
+    assert "permission_mode" not in recipes._ctx({**run, "origin": "chat"})
+
+
 def test_a_dispatched_call_carries_its_id_to_the_result_error_and_post_hooks():
     seen: dict[str, Any] = {}
     host = ExtensionHost()

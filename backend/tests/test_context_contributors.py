@@ -200,6 +200,15 @@ def test_a_failing_timing_out_or_empty_source_contributes_nothing() -> None:
     assert time.monotonic() - start < 3
 
 
+def test_a_source_returning_a_non_iterable_contributes_nothing() -> None:
+    reg = RetrievalSources()
+    for name, value in (("int", 5), ("float", 1.5), ("flag", True)):
+        async def src(p: Any, value: Any = value) -> Any:
+            return value
+        reg.register(name, src, owner="demo")
+    assert asyncio.run(reg.gather({})) == ({}, [])
+
+
 def test_a_name_registers_once() -> None:
     reg = RetrievalSources()
 

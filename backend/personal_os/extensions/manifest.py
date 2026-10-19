@@ -81,6 +81,7 @@ class Manifest:
             if key not in raw:
                 raise ManifestError(f"missing {key!r}")
         _check(isinstance(raw["id"], str) and ID.fullmatch(raw["id"]), "id must match [a-z][a-z0-9-]*")
+        _check(raw["id"] != "core", "id \"core\" is reserved for the host")
         _check(_is_str(raw["name"]), "name must be a non-empty string")
         _check(isinstance(raw["version"], str) and _SEMVER.fullmatch(raw["version"]), "version must be semver")
         api = raw["apiVersion"]

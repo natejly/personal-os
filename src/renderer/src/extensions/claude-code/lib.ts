@@ -37,7 +37,7 @@ export interface CcFleet {
   id: string
   session_ids: string[]
   cost_usd: number
-  by_model: Record<string, number>
+  by_model: Record<string, { cost_usd?: number; input_tokens?: number; output_tokens?: number } | number>
   counts: Record<string, number>
 }
 

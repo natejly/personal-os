@@ -34,7 +34,7 @@ export const useClaudeCode = create<CcState>((set, get) => ({
   setFleets: (fleets) => set({ fleets }),
   addEvents: (id, e) => set((st) => { const events = addEvents(st.events, id, e); return events === st.events ? st : { events } }),
   refresh: async () => {
-    const [sessions, fleets] = await Promise.all([route<CcSession[]>('sessions'), route<CcFleet[]>('fleets').catch(() => get().fleets)])
+    const [sessions, fleets] = await Promise.all([route<{ sessions: CcSession[] }>('sessions').then((r) => r.sessions), route<{ fleets: CcFleet[] }>('fleets').then((r) => r.fleets).catch(() => get().fleets)])
     set({ sessions: sessionMap(Array.isArray(sessions) ? sessions : []), fleets: Array.isArray(fleets) ? fleets : [] })
   },
   loadEvents: async (id) => {
@@ -42,7 +42,7 @@ export const useClaudeCode = create<CcState>((set, get) => ({
       // Events that arrived live before the first load are only the tail: the first fetch starts from the beginning.
       const have = loaded.has(id) ? get().events[id] : undefined
       const after = have?.length ? have[have.length - 1].seq : 0
-      const events = await route<CcEvent[]>(`sessions/${encodeURIComponent(id)}/events?after=${after}`)
+      const events = (await route<{ events: CcEvent[] }>(`sessions/${encodeURIComponent(id)}/events?after=${after}`)).events
       loaded.add(id)
       if (Array.isArray(events)) get().addEvents(id, events)
     } catch { /* the timeline stays as it was; live events fill it */ }

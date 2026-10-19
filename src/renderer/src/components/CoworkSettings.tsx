@@ -33,8 +33,7 @@ function SignIns(): JSX.Element | null {
   return (
     <div className="workspace-roots">
       <span><b>Browser sign-ins</b></span>
-      <p className="muted small">Removing a site signs out both the agent's browser and page reads.</p>
-      {rows && rows.length === 0 && <p className="muted small">Nothing saved.</p>}
+      {rows && rows.length === 0 && <p className="muted small">No sign-ins</p>}
       {rows && rows.length > 0 && (
         <ul className="plain-list">
           {rows.map((r) => (
@@ -52,7 +51,7 @@ function SignIns(): JSX.Element | null {
 }
 
 /** A list of hostnames, type, Enter or Add, remove with the x. An entry also allows its subdomains. */
-export function HostList({ title, help, value, onChange }: { title: string; help?: string; value: string[]; onChange: (next: string[]) => void }): JSX.Element {
+export function HostList({ title, value, onChange }: { title: string; help?: string; value: string[]; onChange: (next: string[]) => void }): JSX.Element {
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const add = (): void => {
@@ -66,7 +65,6 @@ export function HostList({ title, help, value, onChange }: { title: string; help
   return (
     <div className="workspace-roots">
       <span><b>{title}</b></span>
-      {help && <p className="muted small">{help}</p>}
       {value.length > 0 && (
         <ul className="plain-list">
           {value.map((h) => (
@@ -78,7 +76,7 @@ export function HostList({ title, help, value, onChange }: { title: string; help
         </ul>
       )}
       <div className="workspace-roots-add">
-        <input value={text} placeholder="example.com" spellCheck={false} aria-label={`${title}: add a hostname`} aria-invalid={error ? true : undefined}
+        <input value={text} placeholder="example.com" title="Hostnames only; a name also allows its subdomains" spellCheck={false} aria-label={`${title}: add a hostname`} aria-invalid={error ? true : undefined}
           onChange={(e) => { setText(e.target.value); setError(null) }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }} />
         <button type="button" onClick={add} disabled={!text.trim()}>Add</button>
       </div>
@@ -92,11 +90,6 @@ const NETWORK: { mode: NetworkMode; label: string }[] = [
   { mode: 'registries', label: 'Registries and allowed hosts' },
   { mode: 'open', label: 'Open' }
 ]
-const NETWORK_HELP: Record<NetworkMode, string> = {
-  off: 'Commands a desk runs have no network at all.',
-  registries: 'Commands can reach package registries and the hosts listed below, and nothing else.',
-  open: 'Commands can reach any address.'
-}
 
 /** What a build of the work environment is doing: nothing yet, running, or failed with the reason. */
 function WorkEnv({ draft, saved, patch }: { draft: Settings; saved: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
@@ -124,11 +117,10 @@ function WorkEnv({ draft, saved, patch }: { draft: Settings; saved: Settings; pa
     <div className="cowork-env">
       <div className="cowork-env-row">
         <b>{st === null ? 'Checking…' : st.ready ? 'Ready' : st.error ? 'Setup failed' : 'Not set up'}</b>
-        <button type="button" className="ghost-btn" disabled={busy || unsaved} onClick={() => void setup()}>
+        <button type="button" className="ghost-btn" disabled={busy || unsaved} title={unsaved ? 'Save settings first' : undefined} onClick={() => void setup()}>
           {busy ? 'Working, this can take a few minutes…' : st?.ready ? 'Update' : 'Set up'}
         </button>
       </div>
-      {unsaved && <p className="muted small">Save your settings first: the build reads the saved package list.</p>}
       {st && st.packages.length > 0 && (
         <p className="muted small">
           <code>{shown.join(', ')}</code>
@@ -179,7 +171,7 @@ export function ShellNetwork({ draft, patch }: { draft: Settings; patch: (p: Par
   return (
     <div className="cowork-settings">
       <div className="send-hold cowork-net">
-        <span className="toggle-text"><b>Network for commands</b><small>{NETWORK_HELP[mode]}</small></span>
+        <span className="toggle-text"><b>Network for commands</b></span>
         <div className="seg" role="group" aria-label="Network for commands">
           {NETWORK.map((n) => (
             <button key={n.mode} type="button" className={mode === n.mode ? 'on' : ''} aria-pressed={mode === n.mode} onClick={() => pickMode(n.mode)}>{n.label}</button>
@@ -188,7 +180,7 @@ export function ShellNetwork({ draft, patch }: { draft: Settings; patch: (p: Par
         {mode === 'open' && <p className="cowork-error">Open network lets a command send files off this Mac, and whatever it downloads is untrusted text. Prefer allowed hosts.</p>}
       </div>
       {mode !== 'off' && (
-        <HostList title="Allowed hosts" help="Hostnames only, such as pypi.org. A name also allows its subdomains."
+        <HostList title="Allowed hosts"
           value={hosts} onChange={(shellAllowedDomains) => patch({ shellAllowedDomains })} />
       )}
     </div>
@@ -199,9 +191,9 @@ export function ShellNetwork({ draft, patch }: { draft: Settings; patch: (p: Par
 export function BrowserAccess({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
   return (
     <div className="cowork-settings">
-      <Toggle title="Let desks use a browser" help="Asks before submitting forms, entering passwords or uploading."
+      <Toggle title="Let desks use a browser"
         checked={draft.browserEnabled !== false} onChange={(browserEnabled) => patch({ browserEnabled })} />
-      <HostList title="Allowed sites" help="Opened without asking even when a link came from something it read. A name also allows its subdomains."
+      <HostList title="Allowed sites"
         value={draft.browserAllowlist ?? []} onChange={(browserAllowlist) => patch({ browserAllowlist })} />
       <SignIns />
     </div>
@@ -227,11 +219,11 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
   return (
     <div className="cowork-settings">
       <h4>Desks</h4>
-      <Toggle title="Start new chats working autonomously" help="A new chat hands its task to a desk that works on its own until it is done or needs you."
+      <Toggle title="Start new chats working autonomously"
         checked={draft.autonomousByDefault !== false} onChange={(autonomousByDefault) => patch({ autonomousByDefault })} />
-      <Toggle title="Resume desks after a restart" help="A desk with an unknown outcome, or waiting on your approval or plan, still waits for you."
+      <Toggle title="Resume desks after a restart"
         checked={draft.deskAutoResume === true} onChange={(deskAutoResume) => patch({ deskAutoResume })} />
-      <Toggle title="Notify me" help="When a desk needs you or finishes."
+      <Toggle title="Notify me"
         checked={draft.deskNotify !== false} onChange={(deskNotify) => patch({ deskNotify })} />
 
       <h4>Work environment</h4>

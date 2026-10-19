@@ -62,7 +62,6 @@ export default function DataSettings(): JSX.Element {
   return (
     <section>
       <h3>Data</h3>
-      <p className="muted">Backups snapshot the database only, daily and before any update that changes its structure. Export also takes the files.</p>
       {settings.secretsKeychain === false && (
         <p className="muted">Keys and sign-in tokens are stored unencrypted on this computer{settings.secretsReason ? ` (${settings.secretsReason})` : ''}.</p>
       )}
@@ -77,7 +76,7 @@ export default function DataSettings(): JSX.Element {
 
       {info?.pending_restore && (
         <div className="data-row pending" role="status">
-          <span className="toggle-text"><b>A restore is waiting</b><small>It is applied the next time Grain starts.</small></span>
+          <span className="toggle-text"><b>A restore is waiting</b></span>
           <div className="button-row">
             <button className="ghost-btn" onClick={() => void cancelRestore()}>Cancel restore</button>
             <button className="ghost-btn" onClick={() => void window.os.data.relaunch()}>Restart now</button>
@@ -115,8 +114,8 @@ export default function DataSettings(): JSX.Element {
 
       <h4>Export and location</h4>
       <div className="data-row">
-        <span className="toggle-text"><b>Export all data</b><small>A zip with a full database copy, your uploads, pasted images, desk outputs, and conversations, memories and files as readable Markdown and JSON. API keys and tokens stay in your Keychain and are not included. The export still holds your personal data, so keep it private.</small></span>
-        <button className="ghost-btn" onClick={() => void exportAll()} disabled={busy !== null}><Download size={14} /> {busy === 'export' ? 'Exporting…' : 'Export all data…'}</button>
+        <span className="toggle-text"><b>Export all data</b></span>
+        <button className="ghost-btn" title="Excludes API keys and tokens" onClick={() => void exportAll()} disabled={busy !== null}><Download size={14} /> {busy === 'export' ? 'Exporting…' : 'Export all data…'}</button>
       </div>
 
       {info && (

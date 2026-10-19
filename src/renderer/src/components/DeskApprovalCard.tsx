@@ -33,16 +33,13 @@ export default function DeskApprovalCard({ approval, conversationId, event }: {
   }
   const decide = async (ok: boolean, edited?: Record<string, unknown>, note?: string): Promise<void> =>
     approveTool(ev.id, ok ? 'allow' : 'deny', conversationId, edited || note ? { ...(edited ? { arguments: edited } : {}), ...(note ? { note } : {}) } : undefined)
-  const parked = approval.parked_at && !approval.live
-  const note = parked ? <p className="muted small">The desk let go of this while it waited. Answering wakes it.</p> : null
 
-  if (QUESTION_TOOLS.has(ev.name)) return <AskQuestion event={ev} conversationId={conversationId} note={note} />
-  if (ev.name === 'browser') return <BrowserApproval event={ev} decide={decide} conversationId={conversationId} note={note} />
+  if (QUESTION_TOOLS.has(ev.name)) return <AskQuestion event={ev} conversationId={conversationId} />
+  if (ev.name === 'browser') return <BrowserApproval event={ev} decide={decide} conversationId={conversationId} />
 
   const Card = TOOL_CARDS[ev.name]
   return (
     <div className="desk-approval">
-      {note}
       {Card ? <><Card event={ev} pending decide={decide} conversationId={conversationId} /><ApprovalRules event={ev} conversationId={conversationId} /></>
         : <GenericApproval event={ev} conversationId={conversationId} decide={(ok) => decide(ok)} />}
     </div>
@@ -59,7 +56,7 @@ const sentAnswers = new Map<string, string>()
  * "question · answer". The store is read in the handler, never subscribed to: inline, this mounts inside a streaming
  * message.
  */
-export function AskQuestion({ event, conversationId, note = null }: { event: ToolEvent; conversationId: string; note?: JSX.Element | null }): JSX.Element {
+export function AskQuestion({ event, conversationId }: { event: ToolEvent; conversationId: string }): JSX.Element {
   const a = event.arguments as { question?: unknown; context?: unknown; options?: unknown }
   const options = Array.isArray(a.options) ? a.options.map(String).filter(Boolean).slice(0, 4) : []
   const [text, setText] = useState('')
@@ -83,7 +80,6 @@ export function AskQuestion({ event, conversationId, note = null }: { event: Too
   }
   return (
     <div className="desk-ask">
-      {note}
       <p className="ask-question">{String(a.question ?? '')}</p>
       {a.context ? <p className="muted small">{String(a.context)}</p> : null}
       {options.length > 0 && (
@@ -107,11 +103,10 @@ export function AskQuestion({ event, conversationId, note = null }: { event: Too
 }
 
 /** The agent's browser asking mid-call: a sentence about what it is about to do, the host in bold, never raw arguments. */
-function BrowserApproval({ event, decide, conversationId, note }: {
+function BrowserApproval({ event, decide, conversationId }: {
   event: ToolEvent
   decide: (ok: boolean) => Promise<void>
   conversationId: string
-  note: JSX.Element | null
 }): JSX.Element {
   const [busy, setBusy] = useState(false)
   const s = browserSentence(event.arguments)
@@ -123,10 +118,8 @@ function BrowserApproval({ event, decide, conversationId, note }: {
   }
   return (
     <div className="desk-approval browser" role="group" aria-label="Browser approval">
-      <header className="desk-approval-head"><Globe size={14} /><b>{handoff ? 'The browser needs you' : 'The browser is asking'}</b></header>
-      {note}
+      <header className="desk-approval-head"><Globe size={14} /><b title={handoff ? 'Finish in the browser window, then press “Hand back”' : undefined}>{handoff ? 'The browser needs you' : 'The browser is asking'}</b></header>
       <p className="desk-approval-sentence">{s.before}{s.host && <strong className="desk-approval-host">{s.host}</strong>}{s.after}</p>
-      {handoff && <p className="muted small">The browser window is open for you. Finish what the page needs, then press “Hand back”.</p>}
       <div className="approval-actions">
         <button type="button" className="primary-btn" disabled={busy} onClick={() => void go(true)}>{browserAllowLabel(event.arguments)}</button>
         <button type="button" className="ghost-btn danger" disabled={busy} onClick={() => void go(false)}>{handoff ? 'Cancel' : 'Deny'}</button>

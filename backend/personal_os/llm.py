@@ -135,6 +135,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Every permission key (tools, alwaysAsk, permissionRules, ...) and its default: permissions.py.
     **PERMISSION_DEFAULTS,
     "parallelReads": 0,  # read-only calls of one round that run together; 0 = automatic (limits.worker_slots), 1 = one at a time
+    # codemode lane: run_python(tools=...) lets a script drive app tools (toolbridge.py).
+    "codeMode": True,  # off: run_python refuses `tools`; scripts cannot call app tools
+    "codeModeMaxCalls": 100,  # inner tool calls one script may make (1..500)
     # Bank long messages the user writes as style samples and keep their voice profile current (style.py).
     # Independent of autoLearn: wanting the app to learn facts is not the same as wanting it to copy your voice.
     "learnStyle": True,

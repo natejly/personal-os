@@ -1909,6 +1909,10 @@ export interface Settings {
   autoArchiveDays?: number
   /** Seconds before a plan the assistant rates high-confidence goes ahead unanswered (default 30, 0 = off, 0-600). Never in manual mode. */
   planAutoApproveSeconds?: number
+  /** run_python may drive app tools from a script (grain_tools). Missing means on. */
+  codeMode?: boolean
+  /** Most inner tool calls one script may make (default 100, 1-500). */
+  codeModeMaxCalls?: number
   /** Hosts fetch_url may still read once the reply has seen untrusted content. */
   fetchAllowlist?: string[]
   /** Snapshot granted folders before a reply changes them, so Undo covers shell effects. Missing means on. */

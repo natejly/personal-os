@@ -469,6 +469,7 @@ for _m in modules:
     if (_r := _m.router()) is not None:
         app.include_router(_r)
 host.mount(app, host.load_builtin("health", _ext_ctx))
+host.mount(app, host.load_builtin("memory-tree", _ext_ctx))
 host.mount(app, host.load_builtin("spaces", _ext_ctx))
 canvases = _ext_ctx.services["canvases"]()
 for _p in _PROFILES:

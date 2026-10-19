@@ -13,6 +13,7 @@ import tempfile
 import threading
 import time
 import zipfile
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -315,7 +316,7 @@ def test_put_settings_accepts_declared_extension_keys_and_keeps_secrets_out_of_t
 
         assert c.put("/settings", json={"ext.demo.limit": "many"}).status_code == 422
         assert c.put("/settings", json={"ext.demo.limit": None}).status_code == 200  # null unsets any type
-        assert c.get("/settings").json()["ext.demo.limit"] is None
+        assert "ext.demo.limit" not in appmod.db.get_settings()  # unset, not a stored null: the manifest default applies again
         r = c.put("/settings", json={"ext.demo.limit": 1.5})
         assert r.status_code == 422 and "must be an integer" in r.json()["detail"]
         r = c.put("/settings", json={"ext.demo.token": 5})
@@ -498,6 +499,22 @@ def test_host_migrate_backs_up_once_then_applies_each_extensions_steps(tmp_path:
     assert [b["kind"] for b in backups.list_backups(db.data_dir)] == ["premigrate"]
     host.migrate(db)  # applied: no second backup
     assert len(backups.list_backups(db.data_dir)) == 1
+
+
+def test_host_migrate_takes_no_second_backup_after_the_core_migrations_took_one(tmp_path: Path) -> None:
+    db = Database(tmp_path / "data")
+    with closing(db.connect()) as c:  # as if the file were one migration behind
+        c.execute("DELETE FROM schema_migrations WHERE version=(SELECT MAX(version) FROM schema_migrations)")
+        c.execute(f"PRAGMA user_version = {c.execute('PRAGMA user_version').fetchone()[0] - 1}")
+        c.commit()
+    db = Database(tmp_path / "data")
+    root = tmp_path / "demo"
+    (root / "migrations").mkdir(parents=True)
+    (root / "migrations" / "0001_init.sql").write_text("CREATE TABLE demo_t(x);\n")
+    host = ExtensionHost()
+    host._add(manifest(data={"tables": ["demo_t"], "migrations": "migrations/"}), root=root)
+    host.migrate(db)
+    assert [b["kind"] for b in backups.list_backups(db.data_dir)] == ["premigrate"]
 
 
 def test_host_migrate_takes_no_backup_of_a_database_this_start_created(tmp_path: Path) -> None:

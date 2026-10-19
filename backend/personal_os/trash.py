@@ -241,12 +241,11 @@ class Trash:
             handler = self.kinds.get(kind)
             assert handler is not None
             try:
-                rows = handler.items()
+                items = [{"type": kind, "id": r["id"], "title": (r["title"] or "").strip()[:160] or "Untitled", "deleted_at": r["deleted_at"],
+                          "purge_at": r["deleted_at"] + RETENTION_DAYS * DAY, "project_id": None, "project_name": None} for r in handler.items()]
             except Exception:  # noqa: BLE001 - one extension's trash must not blank the rest
                 log.warning("trash: listing %s failed", kind, exc_info=True)
                 continue
-            items = [{"type": kind, "id": r["id"], "title": (r["title"] or "").strip()[:160] or "Untitled", "deleted_at": r["deleted_at"],
-                      "purge_at": r["deleted_at"] + RETENTION_DAYS * DAY, "project_id": None, "project_name": None} for r in rows]
             if items:
                 out.append({"kind": kind, "label": handler.label, "items": items})
         return out

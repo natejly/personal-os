@@ -298,6 +298,14 @@ def test_a_trash_kind_is_named_after_its_extension_and_a_failing_handler_hides_o
     assert trash.list()["extensions"] == []
 
 
+def test_a_trash_row_without_deleted_at_hides_only_its_extensions_group(work: Path) -> None:
+    rig = Rig(work)
+    rig.scope.trash_handler("demo:note", TrashHandler("Demo", lambda: [{"id": "a", "title": "x"}], lambda i: False, lambda i: False))
+    db = rig.ctx.db
+    trash = trash_mod.Trash(db, Todos(db), Docs(db), HookBus(), rig.host.trash_kinds)
+    assert trash.list()["extensions"] == [] and trash.empty() == 0
+
+
 # ---- HookCtx and the nesting of hook-made tool calls ----
 def sub(bus: HookBus, hook: str, fn: Any, owner: str = "x", priority: int = 50, **kw: Any) -> None:
     bus.subscribe(hook, fn, owner=owner, order=0, priority=priority, **kw)

@@ -1147,8 +1147,9 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
     before = db.get_settings()
     if perm:
         permissions.save(db, perm)
-    db.set_settings({**clean, **ext_values})
+    db.set_settings({**clean, **{k: v for k, v in ext_values.items() if v is not None}})
     with db.tx() as c:
+        c.executemany("DELETE FROM settings WHERE key=?", [(k,) for k, v in ext_values.items() if v is None])  # null unsets: the manifest default shows again
         setting_sources.stamp(c, [*clean, *ext_values, *ext_secrets], "user")
     for k, v in ext_secrets.items():
         if v:

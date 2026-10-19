@@ -27,3 +27,17 @@ test('a profile switch applies its defaults at once and turning it off puts them
   await flip(page, 'Focus')
   await expect.poll(async () => (await api('/settings')).defaultEffort).toBe('high')
 })
+
+test('a profile that hides Lists takes its todo chips off the Calendar', async ({ grain }) => {
+  const { page, api } = grain
+  await api('/todos', { method: 'POST', body: { title: 'Chip probe', due: new Date().toISOString().slice(0, 10) } })
+  await page.reload()
+  const chips = page.locator('.cal-chip.todo')
+  await row(page, 'Calendar').click()
+  await expect(chips).toHaveCount(1)
+  await openSettings(page, 'Sidebar')
+  await flip(page, 'Focus')
+  await expect(row(page, 'Lists')).toHaveCount(0)
+  await dialog(page).getByRole('button', { name: 'Close' }).first().click()
+  await expect(chips).toHaveCount(0)
+})

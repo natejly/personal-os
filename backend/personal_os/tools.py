@@ -362,6 +362,8 @@ def coerce_args(spec: "ToolSpec", args: dict[str, Any]) -> dict[str, Any] | None
         v, t = args[key], (props.get(key) or {}).get("type")
         if v is None and key not in required and key in props:
             del args[key]
+        elif t == "array" and isinstance(v, str):  # a bare string would be walked one character at a time
+            return tool_error(f"{spec.name}: {key} must be a list, not a string.", field=key, expected=t, example=(spec.examples or [None])[0])
         elif not isinstance(v, str) or t not in ("boolean", "integer", "number"):
             continue
         elif t == "boolean" and v.strip().lower() in ("true", "false"):
@@ -915,7 +917,8 @@ class Toolbox:
         """Some tools need an integration to be connected, and a view turned off in Settings → Sidebar takes its tools with it.
         Pass google_ok and hidden to avoid one settings read per tool."""
         spec = self.specs.get(name)
-        if (view := llm.tool_view(name) or self.tool_owner.get(name)) and view in (self.settings().get("hiddenViews") or () if hidden is None else hidden):
+        views = llm.tool_views(name) or [v for v in [self.tool_owner.get(name)] if v]
+        if any(v in (self.settings().get("hiddenViews") or () if hidden is None else hidden) for v in views):
             return False
         if spec and spec.group == "google":
             if name.startswith("google_tasks_"):  # two-way sync makes them todos; todo_* is the one way in

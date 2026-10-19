@@ -40,19 +40,20 @@ session_affinity: ContextVar[str | None] = ContextVar("session_affinity", defaul
 
 
 # Views the model-facing side honours: a view in `hiddenViews` is off, so its tools, loops and prompt data stand down.
-# `spaces` is the canvas view's key (the sidebar row it hides is Canvases).
+# `spaces` is the canvas view's key (the sidebar row it hides is Canvases). propose_times_draft reads the calendar and
+# writes a Gmail draft, so either view off takes it away. todo_write is the working checklist, not Lists.
 TOOL_VIEWS = (("health_", "health"), ("todo_list", "todos"), ("todo_add", "todos"), ("todo_update", "todos"),
               ("todo_delete", "todos"), ("google_tasks_", "todos"), ("calendar_", "calendar"), ("meeting_brief", "calendar"),
-              ("propose_times_draft", "calendar"), ("schedule_suggest", "calendar"), ("gmail_", "mail"),
-              ("mail_followups", "mail"), ("space_", "spaces"))  # todo_write is the working checklist, not Lists
+              ("propose_times_draft", "calendar"), ("propose_times_draft", "mail"), ("schedule_suggest", "calendar"),
+              ("gmail_", "mail"), ("mail_followups", "mail"), ("space_", "spaces"))
 
 
 def view_on(settings: dict[str, Any], view: str) -> bool:
     return view not in (settings.get("hiddenViews") or ())
 
 
-def tool_view(name: str) -> str | None:
-    return next((v for p, v in TOOL_VIEWS if name.startswith(p)), None)
+def tool_views(name: str) -> list[str]:
+    return [v for p, v in TOOL_VIEWS if name.startswith(p)]
 
 
 def parse_usage(raw: dict[str, Any] | None) -> dict[str, Any]:

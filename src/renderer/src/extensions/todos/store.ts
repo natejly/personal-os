@@ -23,8 +23,8 @@ export const useTodos = create<TodosState>()((set, get) => ({
   // Latest request wins: a slower, older fetch (another scope, or the mount's) must not overwrite the one the view asked for last.
   refreshTodos: async (scope = 'all', includeDone = false, sort = 'due') => {
     // The routes are not mounted while Lists is off; callers that refresh alongside other data must not fail on it.
+    const n = ++seq  // also retires a fetch still in flight when Lists goes off
     if (viewHidden(useStore.getState().settings, 'todos')) { set({ todos: [] }); return }
-    const n = ++seq
     const rows = await api.todos.list(scope, includeDone, '', sort)
     if (n === seq) set({ todos: rows })
   },

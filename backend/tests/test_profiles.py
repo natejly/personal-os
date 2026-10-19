@@ -140,6 +140,13 @@ class DefaultsTests(unittest.TestCase):
         self.defaults.revert("wide")
         self.assertEqual(self.hidden(), [])
 
+    def test_an_earlier_profile_whose_value_the_user_changed_is_not_an_heir(self) -> None:
+        self.defaults.apply(profile("narrow", views={"mail": False}))
+        self.db.set_settings({"hiddenViews": []})  # the user showed Mail again: narrow's claim lapsed
+        self.defaults.apply(profile("wide", views={"mail": False}))
+        self.defaults.revert("wide")
+        self.assertEqual(self.hidden(), [])
+
     def test_revert_of_a_never_applied_extension_changes_nothing(self) -> None:
         self.defaults.revert("demo")
         self.assertNotIn("extDefaults", self.db.get_settings())

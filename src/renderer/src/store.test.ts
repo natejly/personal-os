@@ -1594,6 +1594,21 @@ test('with Lists off the todos are not fetched, so a refresh that rides along ot
   assert.equal(calls.length, 1)
 })
 
+test('a todos fetch still in flight when Lists goes off does not put its rows back', async (t) => {
+  const orig = useStore.getState().settings
+  t.after(() => useStore.setState({ settings: orig }))
+  let release!: () => void
+  stubFetch(t, () => new Promise<Response>((resolve) => { release = () => resolve(json([{ id: 't1' }])) }))
+  useStore.setState({ settings: { ...orig, hiddenViews: [] } })
+  useTodos.setState({ todos: [] })
+  const inFlight = useTodos.getState().refreshTodos()
+  useStore.setState({ settings: { ...orig, hiddenViews: ['todos'] } })
+  await useTodos.getState().refreshTodos()
+  release()
+  await inFlight
+  assert.deepEqual(useTodos.getState().todos, [])
+})
+
 test('a view turned off in Settings is not entered by setView, which says how to turn it on', (t) => {
   const orig = useStore.getState()
   t.after(() => useStore.setState({ settings: orig.settings, view: orig.view, toasts: orig.toasts }))

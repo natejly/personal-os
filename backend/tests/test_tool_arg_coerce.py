@@ -38,3 +38,9 @@ def test_gate_sees_the_coerced_value() -> None:
     args = {"command": "ls", "unsandboxed": "false"}
     tb.gate("shell_run", "on", {}, args)
     assert args["unsandboxed"] is False
+
+
+def test_a_bare_string_for_a_list_is_an_error() -> None:
+    err = tb.precheck("search_documents", {"queries": "a b"})
+    assert err and err["field"] == "queries" and err["expected"] == "array"
+    assert tb.precheck("search_documents", {"queries": ["a", "b"]}) is None

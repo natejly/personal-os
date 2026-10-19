@@ -3,6 +3,8 @@
 Each default is recorded as source `ext:<id>` in the private setting `extDefaults`, as {id: {key: {"was", "set"}}}.
 Revert puts `was` back only while the value is still `set`: whatever the user changed in the meantime stays.
 When two enabled extensions set the same value, the one still enabled keeps it: the other's `was` is handed over.
+Only an extension applied later inherits, and only if it found the value already in place: an earlier one whose value the user
+changed since lost its claim, so reverting the later one restores what the user had.
 A permission preset looser than the current one is never applied unless the caller says the user clicked for it, and revert never loosens it.
 A runtime slot default (`runtime:<slot>`) is only that record: the profile layer of a slot's selection is read from the records of the
 enabled extensions, and a provider looser than the one in effect is held like a looser permission preset.
@@ -114,12 +116,13 @@ class Defaults:
         records = dict(self.db.get_settings().get(KEY) or {})
         if (recorded := records.pop(ext_id, None)) is None:
             return
+        later = list(records.values())[list(self.db.get_settings()[KEY]).index(ext_id):]  # applied after it
         stored = self.db.get_settings()
         back = []
         for key, r in recorded.items():
             if r["was"] == r["set"] or key.startswith(RUNTIME):
                 continue  # it changed nothing, or is only a record: there is nothing to put back
-            if heir := next((rec[key] for rec in records.values() if rec.get(key, {}).get("set") == r["set"]), None):
+            if heir := next((rec[key] for rec in later if rec.get(key, {}).get("set") == r["set"] == rec[key]["was"]), None):
                 heir["was"] = r["was"]  # another enabled extension wants this value too: it inherits the way back
             elif (now := self._read(stored, key)) == r["set"] and not Change(key, now, r["was"]).looser:
                 back.append((key, r["was"]))

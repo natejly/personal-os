@@ -103,6 +103,27 @@ class ToolTests(unittest.TestCase):
         cfg["googleTasksSync"] = {"enabled": False}
         self.assertTrue(box.available("google_tasks_list"))
 
+    def test_propose_times_draft_needs_both_the_calendar_and_mail_views(self) -> None:
+        from personal_os import app as appmod
+        for hidden, on in [([], True), (["mail"], False), (["calendar"], False)]:
+            appmod.db.set_settings({"hiddenViews": hidden})
+            self.assertEqual(toolbox.available("propose_times_draft", google_ok=True), on, hidden)
+        appmod.db.set_settings({"hiddenViews": []})
+
+    def test_suggest_times_is_a_409_while_google_is_not_connected(self) -> None:
+        body = {"duration_minutes": 30, "window_start": "2026-10-26", "window_end": "2026-10-28"}
+        spec = toolbox.specs["calendar_find_time"]
+        orig = spec.fn
+
+        async def fail(*a: object, **k: object) -> None:
+            raise GoogleNotConnected("Google account not connected")
+        spec.fn = fail  # type: ignore[assignment]
+        try:
+            r = client.post("/integrations/google/gmail/suggest-times", json=body)
+        finally:
+            spec.fn = orig  # type: ignore[assignment]
+        self.assertEqual((r.status_code, r.json()["detail"]), (409, "Google account not connected"))
+
     def test_tools_use_the_extensions_store(self) -> None:
         t = asyncio.run(toolbox.specs["todo_add"].fn({"project_id": None}, title="module tool todo"))
         try:

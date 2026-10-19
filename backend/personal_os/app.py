@@ -7371,7 +7371,10 @@ class SuggestTimesIn(BaseModel):
 @app.post("/integrations/google/gmail/suggest-times")
 async def google_gmail_suggest_times(body: SuggestTimesIn) -> Any:
     """Compose box: free slots as draft text. Creates no draft, no event, sends nothing."""
-    found = await toolbox.specs["calendar_find_time"].fn({}, body.duration_minutes, body.window_start, body.window_end, None, body.working_hours)
+    try:
+        found = await toolbox.specs["calendar_find_time"].fn({}, body.duration_minutes, body.window_start, body.window_end, None, body.working_hours)
+    except GoogleNotConnected:
+        raise HTTPException(409, "Google account not connected") from None
     if not isinstance(found, dict) or not found.get("slots"):
         raise HTTPException(422, (found or {}).get("note") or (found or {}).get("error") or "No free slot found")
     return {"body": times_body(found), "slots": found["slots"]}

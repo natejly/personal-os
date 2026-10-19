@@ -63,7 +63,7 @@ def test_the_tool_list_is_byte_for_byte_what_the_parent_offered_with_the_new_too
 def test_the_extension_owns_its_tools_routes_tables_and_service():
     from personal_os.app import host, toolbox
     scope = host.extensions["coding"]
-    assert scope.manifest.enabled is True and scope.manifest.provides_services == ("coding",)
+    assert scope.manifest.enabled is False and scope.manifest.provides_services == ("coding",)
     declared = [t["name"] for t in scope.manifest.contributes["tools"]]
     assert set(declared) == {"opencode_run", *SESSION_TOOLS, *NEW_TOOLS} and all(toolbox.tool_owner[n] == "coding" for n in declared)
     assert set(scope.manifest.data["tables"]) == {"coding_sessions", "coding_session_events", "coding_recipes", "coding_recipe_versions",

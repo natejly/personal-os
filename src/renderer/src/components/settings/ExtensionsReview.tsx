@@ -32,7 +32,8 @@ function Facts({ card }: { card: ExtensionCard }): JSX.Element {
 }
 
 /** Settings > Advanced > Extensions: extensions the assistant drafted wait here as a diff; accepting installs one switched off, and only Enable here turns it on. */
-export default function ExtensionsReview({ onChanged }: { onChanged: () => Promise<void> }): JSX.Element {
+/** `pendingOnly`: list only drafts and installed extensions whose files changed; the rest are on the Installed cards. */
+export default function ExtensionsReview({ onChanged, pendingOnly = false }: { onChanged: () => Promise<void>; pendingOnly?: boolean }): JSX.Element {
   const [listing, setListing] = useState<Listing | null>(null)
   const [granted, setGranted] = useState<Record<string, string[]>>({})
   const [error, setError] = useState<string | null>(null)
@@ -68,7 +69,7 @@ export default function ExtensionsReview({ onChanged }: { onChanged: () => Promi
           </div>
         </details>
       ))}
-      {listing.installed.map((x) => (
+      {listing.installed.filter((x) => !pendingOnly || x.changed).map((x) => (
         <details key={x.id} className="adv-group">
           <summary>{x.name} <small>{x.id} {x.version} ({x.enabled ? 'on' : 'off'}{x.changed ? ', files changed' : ''})</small></summary>
           <Facts card={x} />
@@ -86,7 +87,7 @@ export default function ExtensionsReview({ onChanged }: { onChanged: () => Promi
           </div>
         </details>
       ))}
-      {!listing.proposals.length && !listing.installed.length && <p className="set-help">Nothing waiting and nothing installed.</p>}
+      {!listing.proposals.length && !listing.installed.filter((x) => !pendingOnly || x.changed).length && <p className="set-help">Nothing waiting and nothing installed.</p>}
     </>
   )
 }

@@ -55,6 +55,7 @@
  "embeddingModel": "",
  "exaApiKey": "",
  "ext.demo.note": "hi",
+ "extensionCatalogUrl": "https://raw.githubusercontent.com/natejly/personal-os/main/examples/extensions/catalog.json",
  "extractionModel": "openrouter/some/model",
  "fastModel": "",
  "fetchAllowlist": [],

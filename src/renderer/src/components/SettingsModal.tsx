@@ -24,6 +24,7 @@ import SidebarTab from './settings/SidebarTab'
 import SystemTab from './settings/SystemTab'
 import AdvancedTab from './settings/AdvancedTab'
 import './settings/RuntimeTab'
+import './settings/ExtensionsSection'
 import { useShortcuts } from './settings/useShortcuts'
 
 type Tab = SettingsTab

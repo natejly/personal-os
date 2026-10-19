@@ -1875,7 +1875,7 @@ export const useStore = create<State>((set, get) => {
     pageContext: null,
     traceMessageId: null,
     settingsOpen: false,
-    settingsTab: 'appearance',
+    settingsTab: 'general',
     settingsGroup: null,
     projectModal: null,
     uploadPreview: null,
@@ -2082,7 +2082,7 @@ export const useStore = create<State>((set, get) => {
     setContextTab: (contextTab) => set({ contextTab }),
     openTrace: (traceMessageId) => set((s) => ({ traceMessageId, contextOpen: false, deskPanel: true, deskTabRequest: { tab: 'traces', n: (s.deskTabRequest?.n ?? 0) + 1, at: Date.now() } })),
     // A plain open (⌘, or the sidebar button) starts on Provider, as it always has.
-    setSettingsOpen: (settingsOpen) => set(settingsOpen ? { settingsOpen, settingsTab: 'appearance', settingsGroup: null } : { settingsOpen }),
+    setSettingsOpen: (settingsOpen) => set(settingsOpen ? { settingsOpen, settingsTab: 'general', settingsGroup: null } : { settingsOpen }),
     openHelp: (section) => set(section ? { helpOpen: true, helpSection: section } : { helpOpen: false }),
     openSettings: (id, group) => { const r = resolveTab(id); set({ settingsOpen: true, settingsTab: r.tab, settingsGroup: group ?? r.group ?? null }) },
     setProjectModal: (projectModal) => set({ projectModal }),

@@ -6,6 +6,7 @@ import type { Settings } from '@shared/types'
 import { useStore } from '../store'
 import { useCanvas } from '../canvas/store'
 import CommandPalette from './CommandPalette'
+import './SettingsModal' // registers the Runtime settings panel, as the app does
 
 // useModal reads the focused element while rendering.
 ;(globalThis as { document?: unknown }).document = { activeElement: null }

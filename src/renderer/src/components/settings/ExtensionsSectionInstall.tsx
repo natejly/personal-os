@@ -19,7 +19,6 @@ export default function ExtensionsSectionInstall({ busy, onFetch }: {
   }
   return (
     <form className="ext-install" onSubmit={(e) => { e.preventDefault(); submit() }}>
-      <p className="set-help">Extensions from a URL or folder are not checked by anyone else. Fetching downloads them for review and runs nothing.</p>
       <div className="ext-install-row">
         <input
           type="text" value={text} onChange={(e) => setText(e.target.value)} spellCheck={false}

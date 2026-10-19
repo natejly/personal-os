@@ -47,7 +47,6 @@ export default function ExtensionCardView({ card, names, busy, mode, ...act }: {
       {card.state === 'invalid' && <p className="ext-note error" role="status">{card.reason || 'Its manifest is not valid, so it cannot be turned on.'}</p>}
       {card.state === 'needs-review' && <p className="ext-note warn" role="status">{card.reason || 'Review it before turning it on.'}</p>}
       {card.state === 'disabled-dependency' && <p className="ext-note warn" role="status">{card.reason || `Needs ${needsOthers.join(', ')} switched on.`}</p>}
-      {mode === 'available' && needsOthers.length > 0 && <p className="ext-meta">Works with {needsOthers.join(', ')}.</p>}
       {requiredBy && <p className="ext-meta">{requiredBy}</p>}
       {card.uiNotLoaded && <p className="ext-note" role="status">{UI_NOT_LOADED_TEXT}.</p>}
       {sha && (
@@ -74,7 +73,6 @@ export default function ExtensionCardView({ card, names, busy, mode, ...act }: {
             <button type="button" className="primary-btn sm" disabled={busy || card.state === 'invalid'} onClick={act.onAdd}>
               {card.source === 'bundled' ? 'Enable' : 'Install'}
             </button>
-            {card.source === 'bundled' && <small>Included with Grain</small>}
           </div>
         )}
       </div>

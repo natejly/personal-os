@@ -7,9 +7,6 @@ import { useStore } from '../store'
 import PopMenu from './PopMenu'
 import { MODES, modeOf, needsConfirm, pillLabel, pillTitle, type PermissionMode } from '../lib/permissionMode'
 
-/** The description without its "Label — " lead, as a sentence of its own. */
-const blurb = (d: string): string => { const s = d.replace(/^[^—]*— /, ''); return s.charAt(0).toUpperCase() + s.slice(1) }
-
 /** Three radio cards for the global permission mode. Choosing Allow everything asks first; the choice goes into the Settings draft and applies on Save. */
 export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; onPick: (m: PermissionMode) => void }): JSX.Element {
   const [ask, setAsk] = useState(false)
@@ -35,7 +32,6 @@ export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; on
           <button key={m.id} type="button" role="radio" data-mode={m.id} aria-checked={mode === m.id} tabIndex={mode === m.id ? 0 : -1}
             className={`mode-card ${m.id === 'allow_all' ? 'danger' : ''} ${mode === m.id ? 'on' : ''}`} onClick={() => pick(m.id)}>
             <b>{m.id === 'allow_all' ? <ShieldAlert size={14} /> : <ShieldCheck size={14} />} {m.label}</b>
-            <span>{blurb(m.description)}</span>
           </button>
         ))}
       </div>
@@ -45,11 +41,11 @@ export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; on
           <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="allow-all-title">
             <header><h2 id="allow-all-title">Allow everything?</h2></header>
             <section>
-              <p>Grain will not check actions with a second AI and will not show any approval card. It will run commands, delete files, send email, accept its own document edits and schedule tasks without asking.</p>
+              <p>Commands, deletes, email and edits run without asking.</p>
               <ul>
                 <li>Deny rules still apply.</li>
                 <li>Grain&apos;s own data and app stay off limits.</li>
-                <li>Permanent deletes, disk wipes, force-pushes, credential access and sent email are not confirmed first.</li>
+                <li>Destructive actions are not confirmed first.</li>
                 <li>Every action is still logged in approval history.</li>
               </ul>
             </section>
@@ -64,8 +60,7 @@ export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; on
   )
 }
 
-/** What the pill's menu offers a chat: each permission preset, applied to this chat alone. One that allows more than the chat has
-    now lists what would change and applies on the second click. */
+/** The pill menu's presets, applied to one chat; a looser one asks first. */
 function ChatPresets({ conversationId, close, onApplied }: { conversationId: string; close: () => void; onApplied: () => void }): JSX.Element {
   const [presets, setPresets] = useState<PermissionPreset[]>([])
   const [held, setHeld] = useState<{ preset: PermissionPreset; diff: PresetDiff } | null>(null)
@@ -99,8 +94,6 @@ function ChatPresets({ conversationId, close, onApplied }: { conversationId: str
   )
 }
 
-/** The composer pill: the current mode, in red text under Allow everything and otherwise plain. Its menu applies a preset to this
-    chat and opens Settings on Permissions, which also holds the domains and MCP controls. */
 export function PermissionModePill({ conversationId = null }: { conversationId?: string | null }): JSX.Element {
   const globalMode = useStore((s) => modeOf(s.settings))
   const [chatMode, setChatMode] = useState<PermissionMode | null>(null)

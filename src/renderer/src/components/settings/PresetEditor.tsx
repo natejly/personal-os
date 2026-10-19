@@ -51,9 +51,6 @@ export default function PresetEditor({ preset, onDone }: { preset: PermissionPre
       </Part>
       <Part title="Per-tool access" {...part('tools', { tools: {} })}>
         <ToolGlobalToggles value={body.tools?.tools ?? {}} onChange={(tools) => patch({ tools: { ...body.tools, tools } })} />
-        {(Object.keys(body.tools?.groups ?? {}).length > 0 || Object.keys(body.tools?.danger ?? {}).length > 0) && (
-          <p className="muted small">This preset also sets whole groups and danger tiers, which are kept as they are (edit them by exporting and importing the preset).</p>
-        )}
       </Part>
       <div className="preset-actions">
         <button className="ghost-btn" onClick={() => onDone(false)}>Cancel</button>

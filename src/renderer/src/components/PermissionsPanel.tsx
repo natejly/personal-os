@@ -80,13 +80,13 @@ export function PermissionsPanel({ compact }: { compact?: boolean }): JSX.Elemen
         <button type="button" className="ghost-btn" disabled={busy} onClick={() => void refresh()}>Re-check</button>
         <span className="muted small" role="status" aria-live="polite">{progress}</span>
       </div>
-      {noElectron && <p className="muted small">Not running in the desktop app, so statuses cannot be read.</p>}
+      {noElectron && <p className="muted small">Desktop app only.</p>}
       <ul className="plain-list">
         {rows.map((r) => (
           <li key={r.id} className="perm-row">
             <span className="perm-main">
               <span className="perm-label">{r.label}</span>
-              <span className="perm-reason">{r.reason}{notes[r.id] ? ` ${notes[r.id]}` : ''}</span>
+              {(compact || notes[r.id]) && <span className="perm-reason">{compact ? r.reason : ''}{notes[r.id] ? ` ${notes[r.id]}` : ''}</span>}
             </span>
             <span className={`perm-badge ${r.state}`}>{stateLabel(r.state)}</span>
             {r.state !== 'granted' && (
@@ -101,14 +101,12 @@ export function PermissionsPanel({ compact }: { compact?: boolean }): JSX.Elemen
           <h4>Terminal</h4>
           <p className="small">{shell === null ? 'Checking the agent\'s shell…' : shell.ok ? `The agent's shell runs (cwd ${shell.cwd ?? 'unknown'}).` : `The agent's shell failed: ${shell.error ?? 'unknown error'}`}</p>
           <h4>Where Grain works</h4>
-          <p className="small">Grain can read and write anywhere on this Mac, in every permission mode. Two kinds of place are held back.</p>
           <p className="small"><b>Off limits</b> (never, in any mode): {backend?.scope?.protected.length ? backend.scope.protected.join(', ') : 'its own data folder and the Grain app'}.</p>
           <p className="small"><b>Always asks first</b> (reads and writes, in every mode): {backend?.scope?.sensitive.length ? backend.scope.sensitive.join(', ') : 'passwords, keys and sign-in files'}.</p>
           {backend && <ul className="small"><CliLine name="claude" cli={backend.clis.claude} /><CliLine name="opencode" cli={backend.clis.opencode} /><CliLine name="pi" cli={backend.clis.pi} /></ul>}
         </>
       )}
 
-      <p className="muted small">Some grants only take effect after Grain restarts. Rows marked Unknown are ones macOS gives no way to check; Grant opens the right pane.</p>
     </div>
   )
 }

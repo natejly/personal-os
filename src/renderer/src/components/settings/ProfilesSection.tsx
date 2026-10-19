@@ -37,11 +37,10 @@ export default function ProfilesSection({ onApplied }: { onApplied: () => Promis
   if (!profiles.length) return null
   return (
     <>
-      <h3>Profiles</h3>
-      <p className="muted small">A profile sets defaults in one step: which views are on, the reasoning effort and colours new work starts with. Turning it off puts back what it changed, except anything you have changed since.</p>
+      <h4>Profiles</h4>
       <Sec id="profiles">
         <div className="setting-list">
-          {profiles.map((p) => <Switch key={p.id} plain={false} title={p.name} help={p.description} label={p.name} checked={p.enabled} onChange={(on) => toggle(p, on)} />)}
+          {profiles.map((p) => <Switch key={p.id} plain={false} title={p.name} label={p.name} checked={p.enabled} onChange={(on) => toggle(p, on)} />)}
         </div>
         {held && (
           <div role="alert">

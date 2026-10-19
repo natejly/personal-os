@@ -3,22 +3,24 @@ import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { expect } from '@playwright/test'
 
-export const TABS = ['General', 'Models', 'Agents', 'Memory', 'Integrations', 'Permissions', 'System access', 'Sidebar', 'Usage', 'Advanced']
+export const TABS = ['General', 'Models', 'Agent', 'Context and memory', 'Permissions', 'Extensions', 'Hooks and automations', 'Integrations', 'Sidebar and layout', 'Usage', 'Advanced']
 
 export const dialog = (page) => page.getByRole('dialog', { name: 'Settings' })
 
-/** A Settings tab by label. Tabs carry a hint after the label ("Model" + its current model), so match the tab id, not the name. */
-export const tabBtn = (page, label) => dialog(page).locator(`#settings-tab-${label === 'General' ? 'appearance' : label === 'System access' ? 'system' : label === 'Models' ? 'model' : label.toLowerCase()}`)
+const TAB_ID = { General: 'general', Models: 'models', Agent: 'agent', 'Context and memory': 'context', Permissions: 'permissions', Extensions: 'extensions', 'Hooks and automations': 'hooks', Integrations: 'integrations', 'Sidebar and layout': 'layout', Usage: 'usage', Advanced: 'advanced' }
+
+/** A Settings section by label. Rail tabs may carry a hint after the label, so match the tab id, not the name. */
+export const tabBtn = (page, label) => dialog(page).locator(`#settings-tab-${TAB_ID[label] ?? label}`)
 
 export async function openSettings(page, tab) {
   if (!(await dialog(page).count())) await page.locator('.settings-btn').click()
   await expect(dialog(page)).toBeVisible()
-  if (tab) await tabBtn(page, tab === 'Appearance' ? 'General' : tab).click()
+  if (tab) await tabBtn(page, tab).click()
   return dialog(page)
 }
 
 /** Where each former Advanced group now lives. Only Memory search and Data/Developer are still collapsed groups. */
-const GROUP_TAB = { Assistant: 'Model', Approvals: 'Permissions', 'Files and web': 'Permissions', 'Desks and workers': 'Agents', 'Voice and shortcuts': 'General', Search: 'Memory', Data: 'Advanced', Developer: 'Advanced' }
+const GROUP_TAB = { Assistant: 'Models', Approvals: 'Permissions', 'Files and web': 'Permissions', 'Desks and workers': 'Agent', 'Voice and shortcuts': 'General', Search: 'Context and memory', Data: 'Advanced', Developer: 'Advanced' }
 
 /** Open the Settings tab holding `group` (a former Advanced group name), expanding it when it is still collapsed. */
 export async function openAdvanced(page, group) {
@@ -30,7 +32,7 @@ export async function openAdvanced(page, group) {
 
 /** Open Settings on its Memory tab; `layout` ('Split' | 'List' | 'Graph' | 'Voice') picks the panel layout, Split being the default. */
 export async function openMemory(page, layout) {
-  const d = await openSettings(page, 'Memory')
+  const d = await openSettings(page, 'Context and memory')
   if (layout) await d.getByRole('group', { name: 'Memory layout' }).getByRole('button', { name: layout, exact: true }).click()
   return d
 }

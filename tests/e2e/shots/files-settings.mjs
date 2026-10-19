@@ -139,6 +139,6 @@ if (want('settings')) await session(async (g) => {
     await sleep(300)
   })
   for (const l of ['List', 'Graph', 'Voice']) await snap(g, 'settings-memory-' + slug(l), async () => { await openMemory(page, l); await sleep(900) })
-  await snap(g, 'settings-narrow', async () => { await openSettings(page, 'Model'); await size(g, 820, 520); await sleep(700) })
+  await snap(g, 'settings-narrow', async () => { await openSettings(page, 'Models'); await size(g, 820, 520); await sleep(700) })
 })
 console.log('done')

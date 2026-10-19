@@ -56,8 +56,7 @@ export function ToolOverrides({ value, onChange, effectiveBase, compact = false 
   )
 }
 
-/** The tools that always show a card: no mode switches one on, no card grants it whole-tool, and untrusted content
- *  in the reply forces its card. Only tools that act outside the app or book unattended work can be listed. */
+/** The tools that always show a card; only external or scheduling tools can be listed. */
 export function AlwaysAsk({ value, onChange }: { value: string[]; onChange: (next: string[]) => void }): JSX.Element {
   const tools = useStore((s) => s.tools)
   // calendar_propose is itself the review card, so it is locked whatever this list says.
@@ -67,11 +66,11 @@ export function AlwaysAsk({ value, onChange }: { value: string[]; onChange: (nex
     <div className="tool-perms">
       {lockable.map((t) => (
         <label key={t.name} className={`toggle-row plain ${!t.available ? 'unavailable' : ''}`}>
-          <span className="toggle-text"><b>{toolLabel(t.name)} <small className="muted">{humanizeName(t.group)}</small></b><small className="clamp-2" title={t.description}>{t.description}</small></span>
+          <span className="toggle-text"><b>{toolLabel(t.name)} <small className="muted">{humanizeName(t.group)}</small></b></span>
           <input type="checkbox" checked={value.includes(t.name)} onChange={(e) => toggle(t.name, e.target.checked)} /><span className="switch" />
         </label>
       ))}
-      {lockable.length === 0 && <p className="muted small">No tool here acts outside the app yet.</p>}
+      {lockable.length === 0 && <p className="muted small">No tools.</p>}
     </div>
   )
 }
@@ -85,7 +84,7 @@ export function ToolGlobalToggles({ value, onChange }: { value: Record<string, T
   const groups = [...new Set(shown.map((t) => t.group))]
   const current = (name: string, fallback: ToolMode): ToolMode => normalize(value[name], fallback)
   const set = (name: string, mode: ToolMode): void => onChange({ ...Object.fromEntries(Object.entries(value).map(([k, v]) => [k, normalize(v, 'on')])), [name]: mode })
-  // Groups start collapsed and open while filtering; the full model-facing description is the row's tooltip.
+  // Groups start collapsed and open while filtering.
   return (
     <div className="tool-perms">
       <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter tools" aria-label="Filter tools" spellCheck={false} />
@@ -100,8 +99,7 @@ export function ToolGlobalToggles({ value, onChange }: { value: Record<string, T
               const label = toolLabel(t.name)
               return (
                 <div key={t.name} className={`tool-perm row ${mode === 'off' ? 'off' : ''} ${!t.available ? 'unavailable' : ''}`}>
-                  {/* The description is written for the model and runs long: two lines here, all of it on hover. */}
-                  <span className="toggle-text"><b>{label} <small className="muted">{DANGER_LABEL[t.danger]}</small></b><small className="clamp-2" title={t.description}>{t.description}</small></span>
+                          <span className="toggle-text"><b>{label} <small className="muted">{DANGER_LABEL[t.danger]}</small></b></span>
                   <div className="seg" role="group" aria-label={`Permission for ${label}`} title={locked ? LOCKED_TIP : undefined}>
                     {((locked ? ['ask', 'off'] : ['on', 'ask', 'off']) as ToolMode[]).map((m) => <button key={m} type="button" className={mode === m ? 'on' : ''} aria-pressed={mode === m} onClick={() => set(t.name, m)}>{m}</button>)}
                   </div>

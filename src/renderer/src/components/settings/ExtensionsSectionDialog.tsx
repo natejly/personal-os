@@ -4,7 +4,7 @@ import './extensionsSection.css'
 
 /** A small confirm dialog: focus moves in, Escape cancels. */
 export default function ExtensionsSectionDialog({ title, children, confirm, cancel, danger, busy, onConfirm, onCancel }: {
-  title: string; children: ReactNode; confirm: string; cancel: string; danger?: boolean; busy?: boolean
+  title: string; children?: ReactNode; confirm: string; cancel: string; danger?: boolean; busy?: boolean
   onConfirm: () => void; onCancel: () => void
 }): JSX.Element {
   const id = useId()

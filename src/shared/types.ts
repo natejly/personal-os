@@ -1906,18 +1906,23 @@ export interface Settings {
   telegramPushWorkerResults?: boolean
   /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
   llmRetries?: number
-  // loop lane: agent-loop tunables (backend limits.LOOP_DEFAULTS / RANGES)
-  loopMaxRounds?: number // 0 = no cap
+  llmIdleSeconds?: number
+  // settings lane; loop lane defines the backend
+  /** Agent loop limits. loopMaxRounds 0 = no cap (0-200); loopModelCalls 5-500; loopRepeatLimit 2-20; loopToolErrorLimit 1-10; loopDoomLimit 1-10. */
+  loopMaxRounds?: number
   loopModelCalls?: number
   loopRepeatLimit?: number
   loopToolErrorLimit?: number
   loopDoomLimit?: number
   stuckSensitivity?: 'off' | 'relaxed' | 'standard' | 'strict'
+  /** Seconds kept for the final round (10-600). */
   finalRoundSeconds?: number
+  /** Characters of a tool result kept inline before the rest is stored aside (2000-60000). */
   toolResultInlineChars?: number
   planLoopMaxSteps?: number
   planLoopVerifyPasses?: number
-  llmIdleSeconds?: number
+  /** Read-only calls of one round that run together; 0 = automatic, 1 = one at a time. */
+  parallelReads?: number
   /** Archive chats and inbox messages whose last activity is older than this many days (restorable). 0 or missing = off. */
   autoArchiveDays?: number
   /** Seconds before a plan the assistant rates high-confidence goes ahead unanswered (default 30, 0 = off, 0-600). Never in manual mode. */

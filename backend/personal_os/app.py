@@ -4115,11 +4115,12 @@ async def _accept_turn(row: dict[str, Any], body: ChatIn, atts: list[dict[str, A
     out = await host.bus.pipe("turn.accept", {"conversation_id": row["id"], "origin": body.origin, "content": body.content, "attachments": atts})
     if isinstance(out, Deny):
         raise HTTPException(403, out.reason)
-    if out["content"] == body.content:
+    new = out.get("content") if isinstance(out, dict) else None
+    if not isinstance(new, str) or new == body.content:  # a handler that returned something else keeps the typed text
         return body
-    if too_long := _message_too_long(out["content"], settings(), str(row.get("model") or "")):
+    if too_long := _message_too_long(new, settings(), str(row.get("model") or "")):
         raise HTTPException(413, too_long)
-    return body.model_copy(update={"content": out["content"]})
+    return body.model_copy(update={"content": new})
 
 
 @app.post("/conversations/{id}/chat")
@@ -6066,6 +6067,8 @@ async def accept_proposal(pid: str, body: ProposalIn | None = None) -> dict[str,
                            "settings": chat_settings(claimed["conversation_id"]),
                            "proposal_only": False, "message_id": claimed["message_id"],
                            "user_accepted": True}  # the accept is the approval the destructive floor asks for
+    if mcp_is(claimed["tool"]) and mcp_store.effective_mode(claimed["tool"], ctx["project_id"], claimed["conversation_id"])["mode"] == "off":
+        ctx["modes"][claimed["tool"]] = "off"  # a connector's grant lives in mcp_grants, not in the toolbox's map
     spec = toolbox.specs.get(claimed["tool"])
     danger = spec.danger if spec else MCP_DANGER
     why, _ = await guards.settle(toolbox, ctx, claimed["tool"], claimed["args"], danger=danger, mode="on")
@@ -6557,7 +6560,10 @@ def import_memories(body: MemoryImportIn) -> dict[str, int]:
             kind = m.get("kind") if m.get("kind") in learn.KINDS else "fact"
             exp = m.get("expires_at")
             exp = float(exp) if isinstance(exp, (int, float)) and not isinstance(exp, bool) and exp > time.time() else None  # a past expiry is skipped
-            memories.create(pid, m["content"], kind, "user", bool(m.get("pinned")), expires_at=exp)
+            try:
+                memories.create(pid, m["content"], kind, "user", bool(m.get("pinned")), expires_at=exp)
+            except MemoryRefused:  # a handler refused this one: the rest of the file still goes in
+                continue
     added = len(memories.list(pid, "", False)) - before
     return {"added": added, "skipped": len(items) - added}
 
@@ -6661,12 +6667,14 @@ def update_memory(id: str, body: MemoryPatch) -> dict[str, Any]:
     content = patch.pop("content", None)
     if content is not None and content.strip() and content.strip() != cur["content"]:
         # A hand edit is a new version, like the model's: the old wording stays in history and can be restored.
-        new = memories.supersede(id, content, kind=patch.pop("kind", None), source="user", keep_pinned=True)
+        new = memories.supersede(id, content, kind=patch.pop("kind", None), source="user", keep_pinned=True, pinned=patch.pop("pinned", None))
         if not new:
             raise HTTPException(409, "This memory is no longer current")
         id = new["id"]
     elif content is not None:
-        patch["content"] = content  # unchanged text is a no-op; empty text is refused by update()
+        if not content.strip():
+            raise HTTPException(400, "Memory content cannot be empty")
+        patch["content"] = content  # unchanged text is a no-op
     m = memories.get(id) if id != cur["id"] and not patch else memories.update(id, patch)  # the new version already fired memory.written
     if not m:
         raise HTTPException(404)

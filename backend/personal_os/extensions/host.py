@@ -462,6 +462,8 @@ class ExtensionScope:
             if inspect.isawaitable(out):
                 out = await out
             if isinstance(out, Contribution):
+                if not isinstance(out.text, str):
+                    raise TypeError(f"Contribution text must be a string, not {type(out.text).__name__}")
                 return Block(out.text, slot, self.manifest.id, share, out.version)
             if out is not None:
                 log.warning("extension %s: context handler returned %s, not a Contribution", self.manifest.id, type(out).__name__)

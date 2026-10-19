@@ -142,6 +142,15 @@ def test_a_failing_or_slow_handler_is_dropped_and_reported() -> None:
     assert sorted(skipped) == ["bad", "slow"]
 
 
+def test_a_contribution_with_non_string_text_is_dropped_and_reported() -> None:
+    host = ExtensionHost()
+    scope(host, "bad").context(lambda p: Contribution(123), slot="volatile")  # type: ignore[arg-type]
+    scope(host, "fine").context(lambda p: Contribution("ok"), slot="volatile")
+    skipped: list[str] = []
+    assert collect(host, skipped) == [Block("ok", "volatile", "fine")]
+    assert skipped == ["bad"]
+
+
 def test_a_slow_volatile_handler_gets_a_second_not_a_hundred_ms() -> None:
     host = ExtensionHost()
 

@@ -118,6 +118,22 @@ def test_hand_edit_fires_memory_written_once() -> None:
     assert seen == ["User takes the 8am train"]
 
 
+def test_editing_text_and_pin_together_fires_memory_written_once_with_the_final_state() -> None:
+    mem, seen = appmod.memories, []
+    old = mem.create(None, "User drinks tea at four")
+    sub = appmod.host.bus.subscribe("memory.written", lambda p: seen.append(p["memory"]["pinned"]), owner="test", order=0)
+    try:
+        new = client.put(f"/memories/{old['id']}", json={"content": "User drinks tea at five", "pinned": True}).json()
+    finally:
+        sub.dispose()
+    assert new["pinned"] and seen == [1]
+
+
+def test_blank_content_is_a_400_not_a_500() -> None:
+    old = appmod.memories.create(None, "User keeps bees")
+    assert client.put(f"/memories/{old['id']}", json={"content": "   "}).status_code == 400
+
+
 def test_hand_edit_of_a_pinned_row_stays_pinned_and_keeps_history() -> None:
     mem = appmod.memories
     old = mem.create(None, "User's badge number is on the fridge", pinned=True)

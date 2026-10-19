@@ -12,7 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from personal_os import app as appmod  # noqa: E402
 from personal_os.app import AUTH_TOKEN, app, memories  # noqa: E402
+from personal_os.extensions.hooks import Deny  # noqa: E402
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 
@@ -33,6 +35,17 @@ def test_round_trip_and_dedupe():
     assert r["added"] == 2
     got = {m["content"]: m for m in memories.list(p["id"], "", False)}
     assert got["Likes tea"]["pinned"] and got["Likes tea"]["kind"] == "preference"
+
+
+def test_import_skips_a_memory_a_handler_refuses_and_keeps_going():
+    sub = appmod.host.bus.subscribe("memory.before_write", lambda p: Deny("no secrets") if "DENYME" in p["content"] else None, owner="test", order=0)
+    try:
+        items = [{"content": "imp one"}, {"content": "DENYME imp"}, {"content": "imp three"}]
+        r = client.post("/memories/import", json={"file": {"grain_memories": 1, "memories": items}})
+    finally:
+        sub.dispose()
+    assert r.status_code == 200 and r.json() == {"added": 2, "skipped": 1}
+    assert {m["content"] for m in memories.list(None, "", False)} >= {"imp one", "imp three"}
 
 
 def test_bad_files_are_refused():

@@ -25,6 +25,7 @@ from personal_os import llm, workers as workers_mod  # noqa: E402
 from personal_os.chat_files import ChatFiles  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.docs import Docs  # noqa: E402
+from personal_os.extensions import hooks as hooks_mod  # noqa: E402
 from personal_os.extensions.hooks import Deny, HookBus  # noqa: E402
 
 client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
@@ -102,6 +103,18 @@ def test_turn_accept_deny_refuses_the_message_before_anything_is_stored() -> Non
     finally:
         h.dispose()
     assert settled(cid)[0]["content"] == "hello"
+
+
+def test_a_turn_accept_handler_returning_no_content_keeps_the_typed_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hooks_mod, "STRICT", False)  # the contract check would stop a non-conforming handler first
+    h = sub("turn.accept", lambda p: {"conversation_id": p["conversation_id"]})
+    try:
+        cid = new_chat()
+        assert send(cid, "hello").status_code == 200
+        user = settled(cid)[0]
+    finally:
+        h.dispose()
+    assert user["content"] == "hello"
 
 
 def test_a_rewrite_meets_the_length_limit_again(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -227,6 +227,17 @@ def test_two_identical_proposals_are_both_executed_on_accept() -> None:
     assert len(ran) == 2
 
 
+def test_accepting_a_proposal_for_a_connector_turned_off_since_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    run_id = "run-connector-off"
+    appmod.run_store.create(run_id, None, kind="job")
+    pid = appmod.proposals.create(run_id=run_id, tool="mcp__fake__echo", args={}, job_id=None, conversation_id=None,
+                                  message_id=None, call_id="c1")["id"]
+    monkeypatch.setattr(appmod.mcp_store, "effective_mode", lambda *a, **k: {"mode": "off"})
+    r = client.post(f"/proposals/{pid}/accept")
+    assert r.status_code == 403 and r.json()["detail"] == "turned off for this run"
+    assert appmod.proposals.get(pid)["status"] == "pending"
+
+
 # ---- 9. Settings types ----------------------------------------------------------------------------------------
 @pytest.mark.parametrize("patch", [{"tools": "x"}, {"systemPrompt": None}, {"defaultModel": None},
                                    {"fetchAllowlist": 5}, {"gmailSendHold": 5}, {"autoLearn": "yes"}])

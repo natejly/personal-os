@@ -24,6 +24,7 @@ export default function Sprout({ name, mood = 'idle', size, live, title, hue, to
   const lash = small ? 5 : 4
   return (
     <svg className={cls} width={size} height={size} viewBox="0 0 100 100" data-mood={mood} role={title ? 'img' : undefined} aria-label={title} aria-hidden={title ? undefined : true}>
+      {title && <title>{title}</title>}
       <g className="sp-fx">
         <g className="sp-bob">
           <g transform={`translate(${look.cx} ${look.cy}) rotate(${look.tilt})`}>

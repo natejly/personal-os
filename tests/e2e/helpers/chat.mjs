@@ -19,7 +19,7 @@ export async function openContextPanel(page) {
 /** Unfold one group (Memories, Files, ...) of the Context tab's usage breakdown. */
 export async function openContextGroup(page, label) {
   const head = page.locator('.ctx-group-head').filter({ hasText: label })
-  if ((await head.getAttribute('aria-selected')) !== 'true') await head.click()
+  if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click()
 }
 
 export async function newChat(page) {

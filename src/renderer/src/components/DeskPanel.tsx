@@ -65,6 +65,9 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   const slotTabs = useSlot('sidepanel.tab').filter((t) => !t.shown || t.shown(tabProps))
   const current = slotTabs.find((t) => t.id === active) ?? slotTabs[0]
 
+  // Keep the chosen tab in view when the strip scrolls (many tabs, or a tab requested from elsewhere).
+  useEffect(() => { strip.current?.querySelector<HTMLElement>('.side-tab.active')?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' }) }, [current?.id])
+
   const onKeys = (e: React.KeyboardEvent): void => {
     const i = slotTabs.findIndex((t) => t.id === current?.id)
     const to = e.key === 'ArrowRight' ? (i + 1) % slotTabs.length : e.key === 'ArrowLeft' ? (i - 1 + slotTabs.length) % slotTabs.length : e.key === 'Home' ? 0 : e.key === 'End' ? slotTabs.length - 1 : -1

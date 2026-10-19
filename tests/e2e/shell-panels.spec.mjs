@@ -99,6 +99,10 @@ test('page agent: width resizes with the handle and persists; hints send on clic
 test('workspace panel (Context card) opens and closes in a chat as floating cards', async ({ grain }) => {
   const { page } = grain
   await page.locator('.sidebar .new-chat').click()
+  const box = page.locator('main').getByRole('textbox', { name: 'Message' })
+  await box.fill('!!reply ready')
+  await box.press('Enter')
+  await expect(page.locator('.msg.assistant').last()).toContainText('ready', { timeout: 30_000 })
   const drawer = page.locator('aside.desk-panel')
   await menu(grain, 'Toggle Context Panel')
   await expect(drawer).toBeVisible()

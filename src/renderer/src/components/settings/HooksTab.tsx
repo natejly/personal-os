@@ -21,7 +21,6 @@ function useLoaded<T>(load: () => Promise<T>): Loaded<T> {
 
 const dueText = (at: number): string => new Date(at * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 
-/** Settings > Hooks and automations: what extensions hooked into and which jobs are scheduled. Read-only. */
 export default function HooksTab(): JSX.Element {
   const ext = useLoaded<Listing>(() => api.devExtensions.list())
   const jobs = useLoaded<Job[]>(() => api.jobs.list())
@@ -33,7 +32,6 @@ export default function HooksTab(): JSX.Element {
     <section>
       <Sec id="hooks">
         <h4>Hooks</h4>
-        <p className="set-help">An extension can run code when something happens in the app, such as before a tool runs. Hooks are managed from the owning extension. The event catalog is in the docs (docs/extension-hooks.md).</p>
         {ext.state === 'loading' && <p className="hooks-note">Loading…</p>}
         {ext.state === 'error' && <p className="hooks-note" role="status">Hooks could not be read right now ({ext.message}).</p>}
         {ext.state === 'ok' && groups.length === 0 && <p className="hooks-note">No extension has registered a hook.</p>}

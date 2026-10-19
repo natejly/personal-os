@@ -38,9 +38,6 @@ export interface SettingsPanelDef {
   label: string
   /** Words Settings search matches besides the label. */
   keys?: string
-  /** The Settings group the section is listed under, and its place among that group's sections (lower first). */
-  group?: string
-  order?: number
   Component: FC
   /** The Settings section the panel is shown in (a section id such as 'agent'); default 'advanced'. */
   group?: string

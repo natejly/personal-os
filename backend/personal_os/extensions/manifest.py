@@ -138,7 +138,7 @@ def _check_static_text(root: Path, manifest: Manifest) -> None:
         if path and path.is_file():
             try:
                 texts[f"tool {tool['name']}"] += schema_descriptions(json.loads(path.read_text("utf-8")))
-            except ValueError:
+            except (ValueError, RecursionError):
                 pass  # reported by the tool-schema lint
     found = [f"{where}: text that claims a permission or tells the assistant not to ask ({f['excerpt']})"
              for where, parts in texts.items() for text in parts if text for f in _authority(text, where)]
@@ -186,6 +186,7 @@ def _contributes(raw: dict[str, Any]) -> dict[str, Any]:
     tools = c.get("tools", [])
     _check(isinstance(tools, list) and all(isinstance(t, dict) and _is_str(t.get("name")) for t in tools),
            "contributes.tools must be a list of objects with a name")
+    _check(all(isinstance(t.get("description", ""), str) for t in tools), "contributes.tools: description must be text")
     _check(all(_is_str(t["after"]) for t in tools if "after" in t), "contributes.tools 'after' must be the name of an existing tool")
     slots = c.get("slots", {})
     _check(isinstance(slots, dict) and all(isinstance(v, list) and all(isinstance(i, dict) for i in v) for v in slots.values()),

@@ -114,9 +114,9 @@ def test_handlers_may_be_async_and_get_the_conversation_ids() -> None:
 def test_nothing_returned_adds_nothing_and_a_disabled_extension_is_silent() -> None:
     host = ExtensionHost()
     s = scope(host)
+    s.enabled = lambda: False  # type: ignore[method-assign]
     s.context(lambda p: None, slot="volatile")
     s.context(lambda p: Contribution("x"), slot="volatile")
-    s.enabled = lambda: False  # type: ignore[method-assign]
     assert collect(host) == []
 
 

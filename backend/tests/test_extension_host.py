@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 import unittest
+from collections import deque
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -137,6 +138,17 @@ class ManifestTests(unittest.TestCase):
             self.assertIsNone(stale_api_warning(Manifest.from_dict(manifest(apiVersion=3))))
             self.assertIsNone(stale_api_warning(Manifest.from_dict(manifest(apiVersion=2))))
             self.assertIn("deprecation window", stale_api_warning(Manifest.from_dict(manifest(apiVersion=1))))
+
+    def test_load_manifest_refuses_odd_tool_text_and_a_schema_nested_too_deep(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            for description in (5, ["a"]):
+                (root / "extension.json").write_text(json.dumps(manifest(contributes={"tools": [{"name": "demo_x", "description": description}]})))
+                with self.assertRaisesRegex(ManifestError, "description must be text"):
+                    load_manifest(root / "extension.json")
+            (root / "s.json").write_text("[" * 5000 + "]" * 5000)
+            (root / "extension.json").write_text(json.dumps(manifest(contributes={"tools": [{"name": "demo_x", "schema": "s.json"}]})))
+            load_manifest(root / "extension.json")
 
     def test_load_manifest_lints_static_text_that_claims_authority(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -276,11 +288,13 @@ class EmitTests(Loose):
             run(bus.emit("chat.created", None))
         self.assertEqual(ok, [1])
 
-    def test_a_declared_gate_budget_is_capped(self) -> None:
+    def test_a_declared_budget_is_capped_where_the_turn_waits(self) -> None:
         bus = HookBus()
-        sub(bus, "tool.pre", lambda p: None, timeout_ms=60000)
-        sub(bus, "chat.created", lambda p: None, timeout_ms=60000)
+        for hook in ("tool.pre", "context.contribute", "turn.start", "chat.created"):
+            sub(bus, hook, lambda p: None, timeout_ms=60000)
         self.assertEqual(bus._timeout(bus._subs["tool.pre"][0], "gate"), 3.0)
+        self.assertEqual(bus._timeout(bus._subs["context.contribute"][0], "collect"), 3.0)
+        self.assertEqual(bus._timeout(bus._subs["turn.start"][0], "emit"), 3.0)
         self.assertEqual(bus._timeout(bus._subs["chat.created"][0], "emit"), 60.0)
 
     def test_timeout_cancels_the_handler_task(self) -> None:
@@ -778,6 +792,17 @@ class BuiltinExtensionTests(unittest.TestCase):
         hidden.clear()
         run(scope.bus.emit("chat.created", CHAT))
         self.assertCountEqual(seen, ["changed", "sync", "async"])
+
+    def test_a_disabled_extension_handler_is_neither_counted_nor_shown_a_payload(self) -> None:
+        hidden = ["demo"]
+        scope = self.scope(hidden, hooks={"chat.created": {}})
+        scope.on("chat.created", lambda p: None)
+        run(scope.bus.emit("chat.created", CHAT))
+        self.assertEqual(scope.bus.subscriptions("demo")[0].calls, 0)
+        self.assertEqual(scope.bus.subscriptions("demo")[0].payloads, deque())
+        hidden.clear()
+        run(scope.bus.emit("chat.created", CHAT))
+        self.assertEqual(scope.bus.subscriptions("demo")[0].calls, 1)
 
     def test_a_disabled_extension_channel_and_routes_are_out_of_reach(self) -> None:
         from fastapi import APIRouter, FastAPI

@@ -101,7 +101,7 @@ PAYLOAD_WINDOW = 5  # payloads kept per handler, redacted, for the dev panel
 PAYLOAD_CHARS = 300  # characters of one payload the dev panel shows
 TIMEOUT_S = {"emit": 2.0, "collect": 1.0, "pipe": 1.0, "gate": 2.0}
 MAX_ADDED_TEXT = 10_000  # characters of text a handler outside the core may add to a value; a longer return counts as a failure
-GATE_CEILING_S = 3.0  # a declared budget cannot hold a tool call longer than this
+DECLARED_CEILING_S = 3.0  # a declared budget cannot hold longer than this a call the caller waits on (every kind but emit, and turn.start)
 STRICT = os.environ.get("GRAIN_HOOKS_STRICT") == "1"
 CALL_KIND = {"emit": "emit", "emit_sync": "emit", "fire": "emit", "collect": "collect", "pipe": "pipe", "pipe_sync": "pipe", "gate": "gate"}
 
@@ -140,6 +140,7 @@ class Subscription:
     on_failure: Literal["ask", "deny"]
     seq: int
     with_ctx: bool  # the handler takes a HookCtx as its second argument
+    enabled: Callable[[], bool] | None = None  # while it answers False the handler has no opinion: it is neither called nor counted
     failures: int = field(default=0)
     muted: bool = field(default=False)
     calls: int = field(default=0)
@@ -209,11 +210,12 @@ class HookBus:
 
     def subscribe(self, hook: str, fn: Callable[[Any], Any], *, owner: str, order: int,
                   priority: int | None = None, timeout_ms: int | None = None,
-                  on_failure: Literal["ask", "deny"] = "ask", with_ctx: bool | None = None) -> Disposable:
+                  on_failure: Literal["ask", "deny"] = "ask", with_ctx: bool | None = None,
+                  enabled: Callable[[], bool] | None = None) -> Disposable:
         self._known(hook)
         sub = Subscription(hook, fn, owner, order, DEFAULT_PRIORITY if priority is None else priority,
                            None if timeout_ms is None else timeout_ms / 1000, on_failure, next(self._seq),
-                           takes_ctx(fn) if with_ctx is None else with_ctx)
+                           takes_ctx(fn) if with_ctx is None else with_ctx, enabled)
         self._subs[hook] = tuple(sorted((*self._subs.get(hook, ()), sub), key=lambda s: s.sort_key))
         return Disposable(lambda: self._remove(sub))
 
@@ -255,7 +257,7 @@ class HookBus:
         """Core handlers were never time-limited; only an explicit budget bounds one. app.stop handlers share the one
         budget ExtensionScope.stop puts on the whole emit."""
         if sub.timeout_s is not None:
-            return min(sub.timeout_s, GATE_CEILING_S) if kind == "gate" else sub.timeout_s
+            return min(sub.timeout_s, DECLARED_CEILING_S) if kind != "emit" or sub.hook == "turn.start" else sub.timeout_s
         return None if sub.owner == "core" or sub.hook == "app.stop" else TIMEOUT_S[kind]
 
     async def _invoke(self, sub: Subscription, arg: Any, kind: str, ctx: HookCtx) -> Any:
@@ -271,6 +273,8 @@ class HookBus:
         return f"returned {added} characters of text, over the cap of {MAX_ADDED_TEXT}" if added > MAX_ADDED_TEXT else None
 
     async def _try(self, sub: Subscription, arg: Any, kind: str, ctx: HookCtx) -> tuple[bool, Any]:
+        if sub.enabled and not sub.enabled():
+            return True, None
         started = time.perf_counter()
         sub.see(arg)
         try:
@@ -328,6 +332,8 @@ class HookBus:
 
     def _inline(self, sub: Subscription, arg: Any) -> tuple[bool, Any]:
         """Call a handler on the caller's thread. One that answers with an awaitable cannot be waited for here."""
+        if sub.enabled and not sub.enabled():
+            return True, None
         started = time.perf_counter()
         sub.see(arg)
         try:

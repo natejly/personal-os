@@ -29,7 +29,7 @@ from .channels import ChannelAdapter, Channels
 from .defaults import DEFAULT_KEYS, Defaults
 from .directives import Directive, Directives
 from .disposables import Disposable, Scope
-from .hooks import HookBus, Subscription, takes_ctx
+from .hooks import HookBus, Subscription
 from .manifest import Manifest, load_manifest, stale_api_warning
 from .notes import ExtNotes, InboxItem
 from .prechecks import Precheck, Prechecks
@@ -171,7 +171,7 @@ class ExtSettings:
                     if inspect.isawaitable(out):
                         await out
         scope = self._scope
-        return scope.disposables.add(scope._bus.subscribe("settings.changed", scope._while_enabled(changed), owner=scope.manifest.id, order=scope.index))
+        return scope.disposables.add(scope._bus.subscribe("settings.changed", changed, owner=scope.manifest.id, order=scope.index, enabled=scope.enabled))
 
 
 @dataclass
@@ -296,21 +296,6 @@ class ExtensionScope:
         if permission not in self.manifest.permissions:
             raise ValueError(f"extension {self.manifest.id!r} did not declare permission {permission!r}")
 
-    def _while_enabled(self, fn: Callable[..., Any]) -> Callable[..., Any]:
-        """`fn` as the bus should call it: a disabled extension has no opinion. Sync stays sync, so the bus runs it where it ran.
-        The wrapper takes the HookCtx too, which it passes on only when `fn` asks for one."""
-        with_ctx = takes_ctx(fn)
-        if inspect.iscoroutinefunction(fn):
-            async def guarded_async(arg: Any, ctx: Any) -> Any:
-                if self.enabled():
-                    return await (fn(arg, ctx) if with_ctx else fn(arg))
-            return guarded_async
-
-        def guarded(arg: Any, ctx: Any) -> Any:
-            if self.enabled():
-                return fn(arg, ctx) if with_ctx else fn(arg)
-        return guarded
-
     def require_enabled(self) -> None:
         """A dependency of the extension's routes: while it is disabled they answer 404."""
         if not self.enabled():
@@ -323,7 +308,8 @@ class ExtensionScope:
             raise ValueError(f"extension {self.manifest.id!r} did not declare hook {hook!r}")
         declared = self.manifest.hooks[hook]
         sub = self._bus.subscribe(
-            hook, fn if hook in LIFECYCLE_HOOKS else self._while_enabled(fn), owner=self.manifest.id, order=self.index,
+            hook, fn, owner=self.manifest.id, order=self.index,
+            enabled=None if hook in LIFECYCLE_HOOKS else self.enabled,
             priority=declared.get("priority") if priority is None else priority,
             timeout_ms=declared.get("timeoutMs") if timeout_ms is None else timeout_ms,
             on_failure=declared.get("onFailure", "ask"))

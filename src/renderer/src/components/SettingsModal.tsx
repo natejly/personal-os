@@ -1,45 +1,39 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useSlidingPill } from "../lib/useSlidingPill"
-import { X, Search, Plug, Cpu, Bot, Palette, ShieldCheck, SlidersHorizontal, KeyRound, Gauge, Brain, PanelLeft, Package, type Icon } from '../icons'
+import { X, Search } from '../icons'
 import { useShallow } from 'zustand/react/shallow'
 import { useStore, setSettingsGuard } from '../store'
 import { useTodos } from '../extensions/todos/store'
 import { modeOf, MODES } from '../lib/permissionMode'
-import { resolveTab, searchSettings, shownTab, DEFAULT_TAB, type SettingsTab } from '../lib/settingsTabs'
+import { resolveTab, searchSettings, type SettingsSectionId, type SettingsTab } from '../lib/settingsTabs'
+import { SETTINGS_SECTIONS } from '../lib/settingsSections'
+import { hintOf, locate, panelsFor, startsCluster } from '../lib/settingsShell'
 import { api } from '../lib/api'
 import { useModal } from '../lib/useModal'
 import { applyAppearance } from '../lib/appearance'
 import { modelLabel } from '../lib/modelLabel'
 import { settingsPanels } from '../extensions/host'
 import { viewHidden } from '../moduleToggles'
-import type { Settings } from '@shared/types'
+import type { ExtensionInfo, Settings } from '@shared/types'
 import ModelTab from './settings/ModelTab'
 import UsageTab from './settings/UsageTab'
 import PermissionsTab from './settings/PermissionsTab'
 import IntegrationsTab from './settings/IntegrationsTab'
 import AgentsTab from './settings/AgentsTab'
-import MemoryTab from './settings/MemoryTab'
+import ContextTab from './settings/ContextTab'
+import HooksTab from './settings/HooksTab'
 import GeneralTab, { THEMES } from './settings/GeneralTab'
 import SidebarTab from './settings/SidebarTab'
 import SystemTab from './settings/SystemTab'
 import AdvancedTab from './settings/AdvancedTab'
+import ExtensionsReview from './settings/ExtensionsReview'
+import { EffectiveProvider } from './settings/useEffective'
+import { Sec } from './settings/shared'
 import './settings/RuntimeTab'
+import '../styles/settings-shell.css'
 import { useShortcuts } from './settings/useShortcuts'
 
-type Tab = SettingsTab
-
-const TABS: { id: Tab; label: string; icon: Icon }[] = [
-  { id: 'appearance', label: 'General', icon: Palette },
-  { id: 'model', label: 'Models', icon: Cpu },
-  { id: 'agents', label: 'Agents', icon: Bot },
-  { id: 'memory', label: 'Memory', icon: Brain },
-  { id: 'integrations', label: 'Integrations', icon: Plug },
-  { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
-  { id: 'system', label: 'System access', icon: KeyRound },
-  { id: 'sidebar', label: 'Sidebar', icon: PanelLeft },
-  { id: 'usage', label: 'Usage', icon: Gauge },
-  { id: 'advanced', label: 'Advanced', icon: SlidersHorizontal }
-]
+type Tab = SettingsSectionId
 
 /**
  * One save model: every control that writes /settings edits `draft`, and Save writes what changed and closes.
@@ -52,10 +46,8 @@ export default function SettingsModal(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const view = useStore((s) => s.view)
   const { saveSettings, setSettingsOpen, setView, toast } = useStore(useShallow((s) => ({ saveSettings: s.saveSettings, setSettingsOpen: s.setSettingsOpen, setView: s.setView, toast: s.toast })))
-  // Sections that extensions contribute, listed while their extension is on.
+  // Panels that extensions contribute, shown inside their section while their extension is on.
   const panels = settingsPanels.filter((p) => !viewHidden(settings, p.extension))
-  const tabs = [...TABS, ...panels.map((p) => ({ id: p.tab, label: p.label, icon: Package }))]
-  const tabIds = tabs.map((x) => x.id)
   const [draft, setDraft] = useState<Settings>(settings)
   const [saving, setSaving] = useState(false)
   // Set while the footer asks whether to throw the draft away; it remembers what the answer leads to.
@@ -63,26 +55,36 @@ export default function SettingsModal(): JSX.Element {
   const { shortcuts, apply: applyShortcuts } = useShortcuts()
   const storeTab = useStore((s) => s.settingsTab)
   const storeGroup = useStore((s) => s.settingsGroup)
-  const [tab, setTabState] = useState<Tab>(() => shownTab(resolveTab(storeTab).tab, tabIds))
-  // The store keeps the shown tab, so openSettings from a toast or a link switches the open modal too.
+  /** Any tab id the store may hold (a legacy name, a section, a registered panel's `ext:` id) as a section plus the anchor to scroll to. */
+  const place = (id: string): { section: Tab; anchor?: string } => {
+    const r = resolveTab(id)
+    const at = locate(r.tab, panels)
+    return { section: at.section, anchor: at.anchor ?? r.group }
+  }
+  const [tab, setTabState] = useState<Tab>(() => place(storeTab).section)
+  // The store keeps the shown section, so openSettings from a toast or a link switches the open modal too.
   const setTab = (t: Tab): void => { setTabState(t); useStore.setState({ settingsTab: t }) }
-  // Advanced groups start collapsed; one opens when Settings was asked for a topic inside it.
+  // Groups that start collapsed; one opens when Settings was asked for a topic inside it.
   const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(() => new Set(useStore.getState().settingsGroup ? [useStore.getState().settingsGroup as string] : []))
   const toggleGroup = (id: string, open: boolean): void => setOpenGroups((g) => { const n = new Set(g); if (open) n.add(id); else n.delete(id); return n })
   const gp = { openGroups, toggle: toggleGroup }
   const [q, setQ] = useState('')
-  const [jump, setJump] = useState<string | null>(null)
-  const [offExtensions, setOffExtensions] = useState<ReadonlySet<string>>(new Set())
+  const [jump, setJump] = useState<string | null>(() => place(storeTab).anchor ?? null)
+  const [extList, setExtList] = useState<readonly ExtensionInfo[] | null>(null)
   useEffect(() => {
-    api.devExtensions.list().then((r) => setOffExtensions(new Set(r.extensions.filter((e) => !e.enabled).map((e) => e.id)))).catch(() => undefined)
+    api.devExtensions.list().then((r) => setExtList(r.extensions)).catch(() => undefined)
   }, [])
-  const hits = searchSettings(q, panels.map((p) => ({ tab: p.tab, sec: '', title: p.label, keys: p.keys ?? '' })), offExtensions)
+  const offExtensions: ReadonlySet<string> = new Set((extList ?? []).filter((e) => !e.enabled).map((e) => e.id))
+  const hits = searchSettings(q, panels.map((p) => ({ tab: p.tab, sec: p.id, title: p.label, keys: p.keys ?? '' })), offExtensions)
   const google = useStore((s) => s.google)
-  /** Go to a search hit: its tab, any collapsed group around it opened, then scrolled to once it has rendered. */
-  const goTo = (h: { tab: Tab; sec: string }): void => {
-    setTab(h.tab)
-    if (h.tab === 'advanced' || h.sec === 'search') setOpenGroups((g) => new Set(g).add(h.sec))
-    setJump(h.sec)
+  /** A search hit as the section it lives in (a registered panel's hit lands in its group) and the anchor inside it. */
+  const hitAt = (h: { tab: SettingsTab; sec: string }): { section: Tab; sec: string } => ({ section: locate(h.tab, panels).section, sec: h.sec })
+  /** Go to a search hit: its section, any collapsed group around it opened, then scrolled to once it has rendered. */
+  const goTo = (h: { tab: SettingsTab; sec: string }): void => {
+    const at = hitAt(h)
+    setTab(at.section)
+    setOpenGroups((g) => new Set(g).add(at.sec))
+    setJump(at.sec)
     setQ('')
   }
   useEffect(() => {
@@ -95,14 +97,15 @@ export default function SettingsModal(): JSX.Element {
     setJump(null)
     return () => window.clearTimeout(t)
   }, [jump, tab, openGroups])
-  // An extension turned off while its tab is open takes the tab away: fall back to the first one.
-  useEffect(() => { if (shownTab(tab, tabIds) !== tab) setTab(DEFAULT_TAB) }, [tab, tabIds.join()])
   useEffect(() => {
-    if (tabs.some((x) => x.id === storeTab)) setTabState(storeTab)
+    const at = place(storeTab)
+    setTabState(at.section)
+    if (at.anchor) setJump(at.anchor)
     if (storeGroup) setOpenGroups((g) => new Set(g).add(storeGroup))
   }, [storeTab, storeGroup])
   const mode = modeOf(settings)
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({})
+  const paneRef = useRef<HTMLDivElement>(null)
   const patch = (p: Partial<Settings>): void => setDraft((d) => ({ ...d, ...p }))
 
   // The backend changes settings on its own (an "always allow" writes a permission rule, a tool toggle),
@@ -188,7 +191,7 @@ export default function SettingsModal(): JSX.Element {
     setSaving(true)
     try {
       const bound = await applyShortcuts(draft, settings)
-      if (!bound) { setTab('appearance'); setJump('shortcuts'); return }
+      if (!bound) { setTab('general'); setJump('shortcuts'); return }
       // Only what was edited here: a whole-draft PUT would put back anything the backend changed since it was taken.
       const changed = changedFields({ ...draft, ...bound })
       try {
@@ -206,26 +209,29 @@ export default function SettingsModal(): JSX.Element {
     }
   }
 
-  /** One line under a tab's name, from what the store already holds. */
-  const hintOf = (id: Tab): string | null => {
-    if (id === 'model') return settings.defaultModel ? modelLabel(settings.defaultModel) : null
-    if (id === 'permissions') return MODES.find((m) => m.id === mode)?.label ?? null
-    if (id === 'integrations') return google?.connected ? google.email ?? 'Google connected' : 'Google not connected'
-    if (id === 'appearance') return THEMES.find((t) => t.id === settings.theme)?.label ?? null
-    return null
-  }
+  /** One line under a section's name, from what the store and the extension list already hold. */
+  const hint = (id: Tab): string | null => hintOf(id, {
+    themeLabel: THEMES.find((t) => t.id === settings.theme)?.label,
+    modelLabel: settings.defaultModel ? modelLabel(settings.defaultModel) : null,
+    modeLabel: MODES.find((m) => m.id === mode)?.label,
+    google,
+    autoCompact: settings.autoCompact ?? true,
+    extensionsOn: extList ? extList.filter((e) => e.enabled).length : null,
+    hooks: extList ? extList.filter((e) => e.enabled).reduce((n, e) => n + e.hooks.length, 0) : null
+  })
 
   // Vertical tablist: arrows move and select, Home/End jump to the ends.
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>): void => {
     if ((e.target as HTMLElement).tagName === 'INPUT') return
+    const tabs = SETTINGS_SECTIONS
     const i = tabs.findIndex((t) => t.id === tab)
     const next = e.key === 'ArrowDown' ? (i + 1) % tabs.length
       : e.key === 'ArrowUp' ? (i - 1 + tabs.length) % tabs.length
         : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : -1
     if (next < 0) return
     e.preventDefault()
-    setTab(tabs[next].id)
-    tabRefs.current[tabs[next].id]?.focus()
+    setTab(tabs[next].id as Tab)
+    tabRefs.current[tabs[next].id as Tab]?.focus()
   }
   // Escape answers the footer's question with "keep editing" rather than asking it again.
   const onModalKey = (e: KeyboardEvent<HTMLDivElement>): void => {
@@ -235,12 +241,35 @@ export default function SettingsModal(): JSX.Element {
   }
 
   const tabProps = { draft, patch }
+  const meta = SETTINGS_SECTIONS.find((x) => x.id === tab) ?? SETTINGS_SECTIONS[0]
+  // Panels that extensions registered into the shown section, each a titled group at its end.
+  const sectionPanels = panelsFor(tab, panels)
+  useEffect(() => { paneRef.current?.scrollTo?.({ top: 0 }) }, [tab])
+  const content = (): JSX.Element | null => {
+    switch (tab) {
+      case 'general': return <GeneralTab {...tabProps} shortcuts={shortcuts} />
+      case 'models': return <ModelTab {...tabProps} onProvidersChanged={providersChanged} />
+      case 'agent': return <AgentsTab {...tabProps} />
+      case 'context': return <ContextTab {...tabProps} {...gp} />
+      case 'permissions': return <><PermissionsTab {...tabProps} onPresetApplied={providersChanged} /><SystemTab /></>
+      case 'extensions':
+        // hook point: the extensions lane registers a panel with group 'extensions'; this fallback goes away then
+        return sectionPanels.length ? null : <section><Sec id="extensions"><ExtensionsReview onChanged={profileApplied} /></Sec></section>
+      case 'hooks': return <HooksTab />
+      case 'integrations': return <IntegrationsTab {...tabProps} onSaveCreds={saveGoogleCreds} />
+      case 'layout': return <SidebarTab {...tabProps} onProfileApplied={profileApplied} />
+      case 'usage': return <UsageTab />
+      case 'advanced': return <AdvancedTab {...tabProps} {...gp} onExtensionsChanged={profileApplied} />
+      default: return null
+    }
+  }
 
   return (
     <div className="modal-backdrop" {...backdrop}>
       <div className="modal settings-modal" {...modal} onKeyDown={onModalKey}>
         <header><h2 id={titleId}>Settings</h2><button className="icon-btn" aria-label="Close settings" title="Close" onClick={requestClose}><X size={16} /></button></header>
 
+        <EffectiveProvider>
         <div className="settings-body">
           <div className="settings-rail">
             {/* modal-free keeps the generic `.modal label` / `.modal input` form rules off the search field. */}
@@ -253,38 +282,42 @@ export default function SettingsModal(): JSX.Element {
               <div className="settings-hits" role="list" aria-label="Search results">
                 {hits.length ? hits.map((h) => (
                   <button key={`${h.tab}-${h.sec}`} type="button" role="listitem" onClick={() => goTo(h)}>
-                    <span>{h.title}</span><small>{tabs.find((t) => t.id === h.tab)?.label}</small>
+                    <span>{h.title}</span><small>{SETTINGS_SECTIONS.find((t) => t.id === hitAt(h).section)?.label}</small>
                   </button>
                 )) : <p className="muted small">No settings match.</p>}
               </div>
             ) : (
               <nav className="settings-tabs pill-group" ref={tabsPill} role="tablist" aria-orientation="vertical" aria-label="Settings sections" onKeyDown={onTabKey}>
-                {tabs.map(({ id, label, icon: Icon }) => {
-                  const hint = hintOf(id)
+                {SETTINGS_SECTIONS.map(({ id, label, icon: Icon }) => {
+                  const sid = id as Tab
+                  const line = hint(sid)
                   return (
-                    <button key={id} ref={(el) => { tabRefs.current[id] = el }} role="tab" id={`settings-tab-${id}`} aria-controls="settings-pane"
-                      aria-selected={tab === id} tabIndex={tab === id ? 0 : -1} className={tab === id ? 'active' : undefined} onClick={() => setTab(id)}>
-                      <Icon size={15} /><span>{label}{hint && <small className="tab-hint">{hint}</small>}</span>
-                    </button>
+                    <Fragment key={id}>
+                      {startsCluster(sid) && <div className="settings-tab-divider" role="separator" aria-orientation="horizontal" />}
+                      <button ref={(el) => { tabRefs.current[sid] = el }} role="tab" id={`settings-tab-${id}`} aria-controls="settings-pane"
+                        aria-selected={tab === id} tabIndex={tab === id ? 0 : -1} className={tab === id ? 'active' : undefined} onClick={() => setTab(sid)}>
+                        <Icon size={15} /><span>{label}{line && <small className="tab-hint">{line}</small>}</span>
+                      </button>
+                    </Fragment>
                   )
                 })}
               </nav>
             )}
           </div>
-          <div className="settings-pane" id="settings-pane" role="tabpanel" aria-labelledby={`settings-tab-${tab}`}>
-            {tab === 'model' && <ModelTab {...tabProps} onProvidersChanged={providersChanged} />}
-            {tab === 'usage' && <UsageTab />}
-            {tab === 'permissions' && <PermissionsTab {...tabProps} onPresetApplied={providersChanged} />}
-            {tab === 'integrations' && <IntegrationsTab {...tabProps} onSaveCreds={saveGoogleCreds} />}
-            {tab === 'agents' && <AgentsTab {...tabProps} />}
-            {tab === 'memory' && <MemoryTab {...tabProps} {...gp} />}
-            {tab === 'appearance' && <GeneralTab {...tabProps} shortcuts={shortcuts} />}
-            {tab === 'sidebar' && <SidebarTab {...tabProps} onProfileApplied={profileApplied} />}
-            {tab === 'system' && <SystemTab />}
-            {tab === 'advanced' && <AdvancedTab {...tabProps} {...gp} onExtensionsChanged={profileApplied} />}
-            {panels.map((p) => tab === p.tab && <p.Component key={p.tab} />)}
+          <div className="settings-pane" id="settings-pane" role="tabpanel" aria-labelledby={`settings-tab-${tab}`} ref={paneRef}>
+            <section className="set-head">
+              <h3>{meta.label}</h3>
+              <p className="set-help">{meta.description}</p>
+            </section>
+            {content()}
+            {sectionPanels.length > 0 && (
+              <section className="set-panels">
+                {sectionPanels.map((p) => <Sec key={p.tab} id={p.id}><h4>{p.label}</h4><p.Component /></Sec>)}
+              </section>
+            )}
           </div>
         </div>
+        </EffectiveProvider>
 
         <footer>
           {pending ? (
@@ -308,5 +341,3 @@ export default function SettingsModal(): JSX.Element {
   )
 }
 
-/** The tab list, for the command palette. */
-export { TABS as SETTINGS_TABS }

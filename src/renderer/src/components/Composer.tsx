@@ -25,6 +25,7 @@ import { appendToDraft, clearRedirect, composerKey, dropDraft, getDraft, moveDra
 import { promptList, recallKey, step, type Recall } from '../lib/promptHistory'
 import { enqueue, enterAction, removeQueued, requeueFront, sendNext, updateQueue, type QueuedItem } from '../lib/followQueue'
 import QueueTray from './QueueTray'
+import KernelSpinner from './KernelSpinner'
 import { followupsFor } from '../lib/followups'
 import { conversationContext } from '../lib/composerSuggest'
 import { tip } from '../lib/tip'
@@ -487,7 +488,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
         <div className="composer-files" aria-label="Attached files">
           {uploading.map((u) => (
             <span key={`up-${u.id}`} className="file-chip" title={`Uploading ${u.name}`} aria-busy="true">
-              <Loader2 size={12} className="spin" /><span>{u.name}</span>
+              <KernelSpinner size={12} /><span>{u.name}</span>
             </span>
           ))}
           {files.map((a) => (

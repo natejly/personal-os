@@ -24,8 +24,10 @@ export const HUE_MAX = 110
 
 /** The house agent keeps the logo grain, drawn exactly as build/grain.svg. */
 export const HOUSE_NAME = 'Grain'
+export const GRAIN_FILL = '#e9c46a'
+export const GRAIN_STROKE = '#8a5a2b'
 const HOUSE: SproutLook = {
-  fill: '#e9c46a', stroke: '#8a5a2b',
+  fill: GRAIN_FILL, stroke: GRAIN_STROKE,
   cx: 45, cy: 61, rx: 22, ry: 35, tilt: 18, gap: 8,
   tipX: 55.8, tipY: 27.7, leaf: 1
 }

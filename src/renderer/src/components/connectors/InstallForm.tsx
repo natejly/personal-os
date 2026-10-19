@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, ExternalLink, Loader2, X } from '../../icons'
+import { Check, ExternalLink, X } from '../../icons'
+import KernelSpinner from '../KernelSpinner'
 import { api } from '../../lib/api'
 import type { McpCatalogEntry, McpServer } from '@shared/types'
 import { POLL_MS, fieldsValid, initialValues, needsSignIn } from './catalog'
@@ -107,7 +108,7 @@ export function InstallStatus({ serverId, name, oauth, onClose }: {
   return (
     <div className={`mcp-server open connector-status ${ready ? 'ok' : failed ? 'bad' : ''}`} role="status" aria-live="polite">
       <div className="mcp-head">
-        {ready ? <Check size={14} /> : failed ? null : <Loader2 size={14} className="spin" />}
+        {ready ? <Check size={14} /> : failed ? null : <KernelSpinner size={14} />}
         <b>{name}: {word}</b>
         <button className="icon-btn" aria-label="Dismiss" onClick={onClose}><X size={14} /></button>
       </div>

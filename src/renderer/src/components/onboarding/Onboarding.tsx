@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type KeyboardEvent } from 'react'
-import { ArrowLeft, ArrowRight, Loader2, Lock } from '../../icons'
+import { ArrowLeft, ArrowRight, Lock } from '../../icons'
 import GrainLogo from '../GrainLogo'
+import KernelSpinner from '../KernelSpinner'
 import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import { useOnboarding } from './onboardingStore'
@@ -109,7 +110,7 @@ export default function Onboarding(): JSX.Element {
         {state.step === 'provider' && (
           <>
             {loadError && <p className="ob-error" role="alert">Could not load providers: {loadError}</p>}
-            {!providers && !loadError && <p className="muted"><Loader2 size={13} className="spin" /> Loading…</p>}
+            {!providers && !loadError && <p className="muted"><KernelSpinner size={13} /> Loading…</p>}
             <div className="ob-cards" role="radiogroup" aria-label="AI provider">
               {providers?.map((p) => {
                 const on = p.id === state.providerId

@@ -1,6 +1,7 @@
 import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
+import GrainWave from './GrainWave'
 import { citeInfo, openCite, splitSources } from '../lib/remarkCites'
 import { AlertCircle, User, FileText, Activity, ChevronRight, Play, Pencil, GitBranch, Trash2 } from '../icons'
 import type { Attachment, Message, RunChanges, ToolEvent } from '@shared/types'
@@ -224,7 +225,8 @@ function StatusLine({ className, text, urgent }: { className: string; text: stri
   const m = / \d+s$/.exec(text)
   const words = m ? text.slice(0, m.index) : text
   return (
-    <div className={className}>
+    <div className={`${className} status-wave`}>
+      <GrainWave />
       <span role={urgent ? 'alert' : 'status'}>{words}</span>{m && <span aria-hidden="true">{m[0]}</span>}
     </div>
   )

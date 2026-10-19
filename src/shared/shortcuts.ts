@@ -147,11 +147,11 @@ export function formatAccelerator(accel: string): string {
 }
 
 const KEY_NAMES: Record<string, string> = {
-  return: 'enter', esc: 'escape', plus: '+', arrowup: 'up', arrowdown: 'down', arrowleft: 'left', arrowright: 'right'  // a key event's names → Electron's
+  return: 'enter', esc: 'escape', plus: '+', numadd: '+', minus: '-', arrowup: 'up', arrowdown: 'down', arrowleft: 'left', arrowright: 'right'  // a key event's names → Electron's
 }
 /** What a shifted key press reports (US layout) → the key it is spelled as in a binding ('Shift+1' arrives as '!'). */
 const UNSHIFTED = Object.fromEntries([...'!@#$%^&*()'].map((c, i) => [c, String((i + 1) % 10)]).concat(
-  [['~', '`'], ['_', '-'], ['{', '['], ['}', ']'], ['|', '\\'], [':', ';'], ['"', "'"], ['<', ','], ['>', '.'], ['?', '/']]))
+  [['~', '`'], ['_', '-'], ['{', '['], ['}', ']'], ['|', '\\'], [':', ';'], ['"', "'"], ['<', ','], ['>', '.'], ['?', '/'], ['+', '=']]))
 
 /** A modifier spelling → its canonical name. 'mod' is the primary modifier: ⌘ on macOS, Ctrl elsewhere, so there Control and CmdOrCtrl are one key. */
 function modifierName(lower: string, mac: boolean): string | undefined {
@@ -179,6 +179,7 @@ export function canonicalAccelerator(accel: string, mac: boolean): string {
     if (mod) mods.add(mod)
     else key = KEY_NAMES[lower] ?? lower
   }
+  if (key === '+' && mods.has('shift')) key = '='  // Shift+= types '+' on a US layout, and acceleratorOf names that press '='
   return [...[...mods].sort(), key].join('+')
 }
 

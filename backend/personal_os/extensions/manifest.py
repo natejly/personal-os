@@ -308,6 +308,7 @@ def _defaults(c: dict[str, Any]) -> None:
     _check(d.get("effort", "high") in EFFORTS, f"defaults.effort must be one of {', '.join(EFFORTS)}")
     _check(d.get("theme", "dark") in _THEMES, f"defaults.theme must be one of {', '.join(_THEMES)}")
     _check(d.get("permissions", "auto") in PERMISSION_MODES, f"defaults.permissions must be one of {', '.join(PERMISSION_MODES)}")
+    _check(not {"permissions", "permissionPreset"} <= set(d), "defaults.permissions and defaults.permissionPreset both set the permission mode: give one")
     runtime = d.get("runtime", {})
     _check(isinstance(runtime, dict) and set(runtime) <= set(SLOTS), "defaults.runtime must map a runtime slot to a provider")
     for slot, value in runtime.items():

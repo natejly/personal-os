@@ -74,7 +74,7 @@ export type SlotItem<K extends SlotName> = SlotItems[K] & { id: string; order: n
 export type SlotEntry<K extends SlotName> = SlotItem<K> & { extension: string }
 
 export interface PaletteCommandDef { id: string; label: string; hint?: string; run: () => void }
-export interface KeybindingDef { id: string; keys: string; when?: (s: State) => boolean; run: () => void }
+export interface KeybindingDef { id: string; /** What the shortcut overlay calls it; the id when omitted. */ label?: string; keys: string; when?: (s: State) => boolean; run: () => void }
 /** An item of the app menu, at the end of the top-level menu `group`. Its keys, if any, are a `keybinding` of their own. */
 export interface MenuItemDef { id: string; label: string; group: MenuGroup; run: () => void }
 export interface SelectionActionDef { id: string; label: string; run: (text: string) => void }
@@ -151,7 +151,7 @@ export const paletteCommands: OwnedPaletteCommand[] = []
 export const keybindings: OwnedKeybinding[] = []
 export const menuItems: OwnedMenuItem[] = []
 export const selectionActions: OwnedSelectionAction[] = []
-const fences = new Map<string, FC<FenceRendererProps>>()
+const fences = new Map<string, { Component: FC<FenceRendererProps>; owner: string }>()
 /** The canvas catalog: every widget kind a window can host, whoever registered it. */
 export const WIDGETS = {} as Record<WidgetKind, WidgetDef>
 const widgetOwners = new Map<WidgetKind, string>()
@@ -161,16 +161,22 @@ function add<T>(list: T[], item: T): Disposable {
   return { dispose: () => { const i = list.indexOf(item); if (i >= 0) list.splice(i, 1) } }
 }
 
-/** Add to a list whose entries have a unique `id`; a repeat is a bug in the registering code. */
-function assertUnique(list: { id: string }[], what: string, id: string): void {
-  if (list.some((x) => x.id === id)) throw new Error(`${what} "${id}" is already registered`)
+/**
+ * Make room for an entry of `owner` in a list whose entries have a unique `id`; a repeat is a bug in the registering code.
+ * The one exception is a core module that the dev server reloads: its registrations run again and replace the old ones.
+ */
+function assertUnique(list: { id: string; extension: string }[], what: string, id: string, owner: string): void {
+  const i = list.findIndex((x) => x.id === id)
+  if (i < 0) return
+  if (owner !== CORE || list[i].extension !== CORE) throw new Error(`${what} "${id}" is already registered`)
+  list.splice(i, 1)
 }
 
 export const registerSettingsPanel = (owner: string, def: SettingsPanelDef): Disposable =>
   add(settingsPanels, { ...def, tab: `ext:${owner}:${def.id}`, extension: owner })
 
-function addUnique<T extends { id: string }>(list: T[], what: string, item: T): Disposable {
-  assertUnique(list, what, item.id)
+function addUnique<T extends { id: string; extension: string }>(list: T[], what: string, item: T): Disposable {
+  assertUnique(list, what, item.id, item.extension)
   return add(list, item)
 }
 
@@ -180,7 +186,7 @@ export const slotItems = <K extends SlotName>(slot: K): SlotEntry<K>[] => slots[
 export function registerSlot<K extends SlotName>(owner: string, slot: K, item: SlotItem<K>): Disposable {
   const list = slotItems(slot)
   const entry: SlotEntry<K> = Object.assign({}, item, { extension: owner })
-  assertUnique(list, `slot ${slot} item`, entry.id)
+  assertUnique(slots[slot] as { id: string; extension: string }[], `slot ${slot} item`, entry.id, owner)
   const after = list.findIndex((x) => x.order > entry.order)
   list.splice(after < 0 ? list.length : after, 0, entry)
   return { dispose: () => { const i = list.indexOf(entry); if (i >= 0) list.splice(i, 1) } }
@@ -203,15 +209,16 @@ export const registerMenuItem = (owner: string, def: MenuItemDef): Disposable =>
 export const registerSelectionAction = (owner: string, def: SelectionActionDef): Disposable =>
   addUnique(selectionActions, 'selection action', { ...def, extension: owner })
 
-export function registerFenceRenderer(language: string, Component: FC<FenceRendererProps>): Disposable {
+export function registerFenceRenderer(owner: string, language: string, Component: FC<FenceRendererProps>): Disposable {
   const lang = language.toLowerCase()  // a fence's language is looked up lower-cased
-  if (fences.has(lang)) throw new Error(`a fence renderer for "${lang}" is already registered`)
-  fences.set(lang, Component)
-  return { dispose: () => { if (fences.get(lang) === Component) fences.delete(lang) } }
+  const held = fences.get(lang)
+  if (held && (owner !== CORE || held.owner !== CORE)) throw new Error(`a fence renderer for "${lang}" is already registered`)
+  fences.set(lang, { Component, owner })
+  return { dispose: () => { if (fences.get(lang)?.Component === Component) fences.delete(lang) } }
 }
 
 export function registerWidget(owner: string, def: WidgetDef): Disposable {
-  if (WIDGETS[def.kind]) throw new Error(`a widget of kind "${def.kind}" is already registered`)
+  if (WIDGETS[def.kind] && (owner !== CORE || widgetOwners.get(def.kind) !== CORE)) throw new Error(`a widget of kind "${def.kind}" is already registered`)
   WIDGETS[def.kind] = def
   widgetOwners.set(def.kind, owner)
   return { dispose: () => { if (WIDGETS[def.kind] === def) { delete WIDGETS[def.kind]; widgetOwners.delete(def.kind) } } }
@@ -221,7 +228,7 @@ export function registerWidget(owner: string, def: WidgetDef): Disposable {
 export const widgetOn = (settings: Settings, kind: WidgetKind): boolean =>
   ownerOn(settings, extensionModules.find((m) => m.widget?.kind === kind)?.key ?? widgetOwners.get(kind) ?? CORE)
 
-export const fenceRenderer = (lang: string): FC<FenceRendererProps> | undefined => fences.get(lang)
+export const fenceRenderer = (lang: string): FC<FenceRendererProps> | undefined => fences.get(lang)?.Component
 
 /**
  * Run an extension's `activate`. Each registration is also kept in the extension's scope, so the returned Disposable
@@ -249,7 +256,7 @@ export function activateExtension(id: string, ext: ExtensionModule, permissions:
     keybinding: (def) => keep(registerKeybinding(id, def)),
     menuItem: (def) => keep(registerMenuItem(id, def)),
     toolCard: (name, Component, display) => keep(registerToolCard(name, Component, display)),
-    fenceRenderer: (lang, Component) => keep(registerFenceRenderer(lang, Component)),
+    fenceRenderer: (lang, Component) => keep(registerFenceRenderer(id, lang, Component)),
     selectionAction: (def) => keep(registerSelectionAction(id, def)),
     widget: (def) => keep(registerWidget(id, def)),
     store: extStore(id),

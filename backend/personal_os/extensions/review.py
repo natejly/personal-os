@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from .defaults import Defaults
 from .devapi import adopt, set_hidden_view
 from .drafts import Drafts, DraftError
 
@@ -86,6 +87,7 @@ class Review:
                 await self._load(ext_id)
             except Exception as e:  # noqa: BLE001 - the app starts either way
                 log.warning("installed extension %s is disabled: %s", ext_id, e)
+                Defaults(self.ctx.db, self.ctx.preset_keys).revert(ext_id)  # a profile that never loads cannot revert itself; nothing recorded is a no-op
                 self._hide(ext_id, True)
 
     def listing(self) -> dict[str, Any]:

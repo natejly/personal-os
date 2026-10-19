@@ -17,7 +17,7 @@ import ChartBlock from './ChartBlock'
 import InteractiveBlock from './InteractiveBlock'
 import MermaidBlock from './MermaidBlock'
 import HtmlBlock, { SvgBlock } from './HtmlBlock'
-import { fenceRenderer, registerFenceRenderer, type FenceRendererProps } from '../extensions/host'
+import { CORE, fenceRenderer, registerFenceRenderer, type FenceRendererProps } from '../extensions/host'
 import remarkWikilinks from '../features/notes/remarkWikilinks'
 import remarkFilePaths, { filePathOf, hrefPath } from '../lib/pathLinks'
 import { openPathLink } from '../lib/useChatFiles'
@@ -133,12 +133,12 @@ const InteractiveFence = ({ code, streaming }: FenceRendererProps): JSX.Element 
 const MermaidFence = ({ code, streaming }: FenceRendererProps): JSX.Element => <MermaidBlockM source={code} streaming={streaming} />
 const HtmlFence = ({ code, streaming }: FenceRendererProps): JSX.Element => <HtmlBlockM source={code} streaming={streaming} />
 const SvgFence = ({ code, streaming }: FenceRendererProps): JSX.Element => <SvgBlockM source={code} streaming={streaming} />
-registerFenceRenderer('chart', ChartFence)
-registerFenceRenderer('interactive', InteractiveFence)
-registerFenceRenderer('mermaid', MermaidFence)
-registerFenceRenderer('html', HtmlFence)
-registerFenceRenderer('htm', HtmlFence)
-registerFenceRenderer('svg', SvgFence)
+registerFenceRenderer(CORE, 'chart', ChartFence)
+registerFenceRenderer(CORE, 'interactive', InteractiveFence)
+registerFenceRenderer(CORE, 'mermaid', MermaidFence)
+registerFenceRenderer(CORE, 'html', HtmlFence)
+registerFenceRenderer(CORE, 'htm', HtmlFence)
+registerFenceRenderer(CORE, 'svg', SvgFence)
 
 function Pre({ node, ...props }: React.HTMLAttributes<HTMLPreElement> & { node?: unknown }): JSX.Element {
   void node // react-markdown's AST node must not reach the DOM

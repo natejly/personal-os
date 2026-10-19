@@ -1,19 +1,18 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useStore, type View } from '../store'
-import { OPTIONAL_VIEWS } from '../modules'
 import { viewHidden } from '../moduleToggles'
 import { useModal } from '../lib/useModal'
 import { plainTitle } from '../lib/chatRows'
 import { SETTINGS_TABS } from './SettingsModal'
 import { useCanvas } from '../canvas/store'
 import { CORE, ownerOn, paletteCommands, registerCommand, settingsPanels } from '../extensions/host'
+import { useSlot } from '../extensions/slot'
 
 type Entry = { key: string; label: string; hint: string; run: () => void }
 
 const VIEWS: { view: View; label: string }[] = [
   { view: 'chat', label: 'Chats' },
-  { view: 'docs', label: 'Files' },
-  ...OPTIONAL_VIEWS
+  { view: 'docs', label: 'Files' }
 ]
 const RECENT = 8
 registerCommand(CORE, { id: 'new-chat', label: 'New chat', hint: 'Create', run: () => useStore.getState().newChat(null) })
@@ -30,6 +29,7 @@ export default function CommandPalette(): JSX.Element {
   const [pick, setPick] = useState<string | null>(null) // by key, so entries arriving after a keypress do not move the highlight
   const list = useRef<HTMLUListElement>(null)
   const settings = useStore((s) => s.settings)
+  const navRows = useSlot('sidebar.row')
   const conversations = useStore((s) => s.conversations)
   const docs = useStore((s) => s.docs)
   const projects = useStore((s) => s.projects)
@@ -39,7 +39,7 @@ export default function CommandPalette(): JSX.Element {
   const s = useStore.getState()
 
   const entries: Entry[] = [
-    ...VIEWS.filter((v) => !viewHidden(settings, v.view)).map((v) => ({ key: `view:${v.view}`, label: v.label, hint: 'Go to', run: () => s.setView(v.view) })),
+    ...[...VIEWS, ...navRows].filter((v) => !viewHidden(settings, v.view)).map((v) => ({ key: `view:${v.view}`, label: v.label, hint: 'Go to', run: () => s.setView(v.view) })),
     // Places with no number key, and the ones a hidden sidebar row leaves reachable only from here.
     { key: 'inbox', label: 'Agent inbox and jobs', hint: 'Go to', run: () => s.openInbox() },
     ...projects.map((p) => ({ key: `project:${p.id}`, label: p.name, hint: 'Project', run: () => s.openProject(p.id) })),

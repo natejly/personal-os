@@ -111,6 +111,7 @@ class ManifestTests(unittest.TestCase):
             "runtime slot an object": manifest(contributes={"runtime": [{"slot": {}, "id": "a", "label": "l"}]}),
             "preset not text": manifest(contributes={"defaults": {"permissionPreset": []}}),
             "preset an object": manifest(contributes={"defaults": {"permissionPreset": {}}}),
+            "preset and permission mode together": manifest(contributes={"defaults": {"permissionPreset": "builtin:allow-all", "permissions": "manual"}}),
             "unknown hook": manifest(hooks={"tool.preee": {}}),
             "unknown hook option": manifest(hooks={"app.start": {"retries": 3}}),
             "onFailure allow": manifest(hooks={"tool.pre": {"onFailure": "allow"}}, permissions=["hooks:gate"]),

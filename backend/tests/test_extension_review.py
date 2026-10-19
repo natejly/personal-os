@@ -418,6 +418,25 @@ def test_disabling_an_installed_profile_puts_back_the_defaults_it_applied() -> N
     assert "rl-look" not in (after.get("extDefaults") or {})
 
 
+def test_startup_puts_back_the_defaults_of_a_profile_whose_files_changed() -> None:
+    root = review.drafts.drafts / "rl-look"
+    root.mkdir(parents=True)
+    (root / "extension.json").write_text(json.dumps({
+        "id": "rl-look", "name": "Look", "version": "0.1.0", "apiVersion": 1, "kind": "profile",
+        "contributes": {"defaults": {"effort": "low"}}}), "utf-8")
+    before = appmod.settings()
+    propose("rl-look")
+    assert accept("rl-look").status_code == 200 and enable("rl-look").status_code == 200
+    assert appmod.settings()["defaultEffort"] == "low"
+    on_loop(appmod.host.unload("rl-look"))  # as after a restart: enabled in settings, nothing loaded
+    manifest = review.drafts.installed / "rl-look" / "extension.json"
+    manifest.write_text(manifest.read_text("utf-8") + " ", "utf-8")
+    on_loop(review.load_installed())
+    after = appmod.settings()
+    assert "rl-look" in after["hiddenViews"] and after["defaultEffort"] == before["defaultEffort"]
+    assert "rl-look" not in (after.get("extDefaults") or {})
+
+
 def loose_profile(ext_id: str = "rl-loose") -> None:
     root = review.drafts.drafts / ext_id
     root.mkdir(parents=True)

@@ -228,6 +228,7 @@ test('the runtime runs a matching keybinding whose `when` holds, and tells subsc
   let allowed = false
   const gone = withExtension('rundemo', (ui) => {
     ui.keybinding({ id: 'rundemo:go', keys: 'Control+Alt+J', when: () => allowed, run: () => ran.push('go') })
+    ui.keybinding({ id: 'rundemo:typed', keys: 'Shift+J', run: () => ran.push('typed') })
     ui.on('ui.view.opened', (e) => opened.push(e.view))
   })
   const press = (over: Partial<KeyboardEvent>): void => listeners[0]({ key: 'j', ctrlKey: true, altKey: true, metaKey: false, shiftKey: false, defaultPrevented: false, preventDefault: () => ran.push('prevented'), ...over } as KeyboardEvent)
@@ -238,13 +239,16 @@ test('the runtime runs a matching keybinding whose `when` holds, and tells subsc
     press({ shiftKey: true })
     press({ defaultPrevented: true })
     press({})
+    const shiftJ = { key: 'J', ctrlKey: false, altKey: false, shiftKey: true }
+    press({ ...shiftJ, target: { closest: () => ({}) } as never })  // typing in a text field
+    press({ ...shiftJ, target: { closest: () => null } as never })
     useStore.setState({ view: 'jobs' })
   } finally {
     globalThis.fetch = real
     stop()
     gone()
   }
-  assert.deepEqual(ran, ['prevented', 'go'])
+  assert.deepEqual(ran, ['prevented', 'go', 'prevented', 'typed'])
   assert.deepEqual(opened, ['jobs'])
   assert.deepEqual(posted, ['/extensions/activate {"event":"onView:jobs"}'])
 })
@@ -419,4 +423,14 @@ test('the Lists and Calendar widgets are offered only while those extensions are
   assert.equal(widgetOn({ hiddenViews: ['todos'] } as never, 'todos'), false)
   assert.equal(widgetOn({ hiddenViews: ['calendar'] } as never, 'calendar'), false)
   assert.equal(widgetOn({ hiddenViews: ['todos', 'calendar'] } as never, 'memory'), true)
+})
+
+test('a core module reloaded by the dev server replaces its registrations, while an extension may not reuse a core id', () => {
+  const core = registerSlot('core', 'message.header', { id: 'hot', order: 1, Component })
+  const again = registerSlot('core', 'message.header', { id: 'hot', order: 2, Component })
+  assert.deepEqual(slotItems('message.header').filter((i) => i.id === 'hot').map((i) => i.order), [2])
+  assert.throws(() => registerSlot('ext', 'message.header', { id: 'hot', order: 3, Component }), /already registered/)
+  core.dispose()
+  again.dispose()
+  assert.deepEqual(ids('message.header'), [])
 })

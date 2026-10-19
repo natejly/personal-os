@@ -4,6 +4,7 @@ import { useModal } from '../lib/useModal'
 import { api } from '../lib/api'
 import { insertIntoComposer } from '../lib/composerInsert'
 import { SHORTCUTS, formatAccelerator, type Shortcut } from '@shared/shortcuts'
+import { keybindings, ownerOn } from '../extensions/host'
 import MarkdownPreview from './MarkdownPreview'
 import '../styles/help.css'
 
@@ -19,6 +20,7 @@ const sections = (md: string): string[] => md.split(/^(?=## )/m).filter((s) => s
 export default function HelpOverlay(): JSX.Element {
   const section = useStore((s) => s.helpSection)
   const chord = useStore((s) => s.settings.dictationChord)
+  const settings = useStore((s) => s.settings)
   const close = (): void => useStore.getState().openHelp(null)
   const m = useModal(close)
   const [q, setQ] = useState('')
@@ -45,7 +47,9 @@ export default function HelpOverlay(): JSX.Element {
 
   const keysOf = (s: Shortcut): string => (s.id === 'dictation' ? chord || s.keys : live[s.id] || s.keys)
   const needle = q.trim().toLowerCase()
-  const shown = SHORTCUTS.filter((s) => s.keys && (!needle || `${s.label} ${s.group} ${formatAccelerator(keysOf(s))}`.toLowerCase().includes(needle)))
+  const extensionShortcuts: Shortcut[] = keybindings.filter((k) => ownerOn(settings, k.extension))
+    .map((k) => ({ id: `ext:${k.extension}:${k.id}`, label: k.label ?? k.id, keys: k.keys, group: 'Extensions', scope: 'component' }))
+  const shown = [...SHORTCUTS, ...extensionShortcuts].filter((s) => s.keys && (!needle || `${s.label} ${s.group} ${formatAccelerator(keysOf(s))}`.toLowerCase().includes(needle)))
   const groups = [...new Set(shown.map((s) => s.group))]
   const guideShown = guide ? sections(guide).filter((s) => !needle || s.toLowerCase().includes(needle)) : []
 

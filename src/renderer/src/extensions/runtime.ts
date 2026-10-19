@@ -14,6 +14,8 @@ export function startExtensionRuntime(): () => void {
   const mac = window.os.platform === 'darwin'
   const onKey = (e: KeyboardEvent): void => {
     if (e.defaultPrevented) return
+    // A plain or Shift key in a text field is typing, not a shortcut.
+    if (!(e.ctrlKey || e.metaKey || e.altKey) && (e.target as HTMLElement | null)?.closest?.('input, textarea, select, [contenteditable]')) return
     const chord = acceleratorOf(e, mac)
     const state = useStore.getState()
     const hit = keybindings.find((k) => canonicalAccelerator(k.keys, mac) === chord && ownerOn(state.settings, k.extension) && (!k.when || k.when(state)))

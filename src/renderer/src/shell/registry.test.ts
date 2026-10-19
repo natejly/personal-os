@@ -4,7 +4,6 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { OPTIONAL_VIEWS } from '../modules'
 import { WIDGETS } from '../canvas/registry'
 import { navEntries } from './nav'
 import { MODULES, moduleForView } from './registry'
@@ -18,9 +17,9 @@ test('module keys, view ids, widget kinds are unique', () => {
   assert.ok(unique(MODULES.flatMap((m) => (m.widget ? [m.widget.kind] : []))))
 })
 
-test('an optional view is in OPTIONAL_VIEWS', () => {
+test('an optional view has a sidebar row', () => {
   for (const m of MODULES) {
-    if (m.view?.optional) assert.ok(OPTIONAL_VIEWS.some((o) => o.view === m.view!.id), `${m.key}: view ${m.view.id}`)
+    if (m.view?.optional) assert.ok(navEntries().some((o) => o.view === m.view!.id), `${m.key}: view ${m.view.id}`)
   }
 })
 

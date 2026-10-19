@@ -83,3 +83,12 @@ test('acceleratorOf matches the spelling of a binding for arrows, shifted symbol
   assert.equal(acceleratorOf({ ...press, key: 'a', code: 'KeyQ', ctrlKey: true, altKey: true }, false), canonicalAccelerator('CmdOrCtrl+Alt+A', false))  // AZERTY: the layout's A sits on KeyQ
   assert.equal(acceleratorOf({ ...press, key: 'ø', code: 'KeyO', ctrlKey: false, metaKey: true, altKey: true }, true), canonicalAccelerator('CmdOrCtrl+Alt+O', true))
 })
+
+test('a binding spelled Minus, Shift+= or numadd matches the key press that types it', () => {
+  const press = { key: '', metaKey: false, ctrlKey: true, altKey: false, shiftKey: false }
+  assert.equal(acceleratorOf({ ...press, key: '-' }, false), canonicalAccelerator('CmdOrCtrl+Minus', false))
+  assert.equal(acceleratorOf({ ...press, key: '_', shiftKey: true }, false), canonicalAccelerator('CmdOrCtrl+Shift+Minus', false))
+  assert.equal(acceleratorOf({ ...press, key: '+', shiftKey: true }, false), canonicalAccelerator('CmdOrCtrl+Shift+=', false))
+  assert.equal(acceleratorOf({ ...press, key: '+', shiftKey: true }, false), canonicalAccelerator('CmdOrCtrl+Shift+Plus', false))
+  assert.equal(acceleratorOf({ ...press, key: '+' }, false), canonicalAccelerator('CmdOrCtrl+numadd', false))
+})

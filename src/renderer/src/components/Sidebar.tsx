@@ -6,8 +6,8 @@ import GrainLogo from './GrainLogo'
 import { chatAttentionOf, useStore, type View } from '../store'
 import ResizeHandle from './ResizeHandle'
 import { rowHidden } from '../moduleToggles'
-import { navEntries, navTitle } from '../shell/nav'
-import { Slot } from '../extensions/slot'
+import { navTitle } from '../shell/nav'
+import { Slot, useSlot } from '../extensions/slot'
 import { dragProps } from '../canvas/dnd'
 import { useCanvas } from '../canvas/store'
 import { api } from '../lib/api'
@@ -261,7 +261,7 @@ export default function Sidebar(): JSX.Element {
 
   // Module badges are pure functions of the store; useShallow compares the array element-wise, so a
   // fresh array with the same counts does not re-render.
-  const rows = navEntries()
+  const rows = useSlot('sidebar.row')
   const rowBadges = useStore(useShallow((s) => rows.map((r) => r.badge?.(s) ?? null)))
   const libCount = (v: View): number | null => {
     const ri = rows.findIndex((r) => r.view === v && r.badge)
@@ -308,10 +308,10 @@ export default function Sidebar(): JSX.Element {
           that scrolled, so with a few projects open it was squeezed to a sliver at the bottom. */}
       <div className="sidebar-scroll">
       <nav className="nav pill-group" ref={navPill}>
-        {[...TOP, ...navEntries()]
+        {[...TOP, ...rows]
           .filter((n) => (n.view ? !rowHidden(settings, n.view) : inCanvas)).map(navItem)}
         {/* Hidden views leave no trace otherwise; this is the way back to them. */}
-        {[...TOP, ...navEntries(), { view: 'spaces' }, { view: 'projects' }].some((e) => rowHidden(settings, e.view as string)) && (
+        {[...TOP, ...rows, { view: 'spaces' }, { view: 'projects' }].some((e) => rowHidden(settings, e.view as string)) && (
           <button className="nav-item nav-more" title="Turn on hidden rows in Settings → Sidebar"
             onClick={() => useStore.getState().openSettings('sidebar')}>
             <Plus size={15} /><span>More rows…</span>

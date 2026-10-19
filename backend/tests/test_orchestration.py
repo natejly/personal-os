@@ -313,6 +313,8 @@ def test_a_second_trigger_during_a_slow_report_handler_does_not_rebuild_the_wake
         g.set()
     wait(lambda: all(w["status"] == "done" for w in workers_of(cid)), "both workers done")
     mgr.on_end = real
+    appmod._job_wakes[cid] = [{"id": "run-x", "label": "Scheduled task", "title": "Digest", "goal": "g", "status": "done",  # noqa: SLF001
+                               "text": "Digest result", "tainted": False}]  # a booked report must ride in the one wake only
 
     async def slow(_p: dict[str, Any]) -> dict[str, str]:
         await asyncio.sleep(0.3)
@@ -329,7 +331,8 @@ def test_a_second_trigger_during_a_slow_report_handler_does_not_rebuild_the_wake
         msgs = settle(cid)
     finally:
         h.dispose()
-    assert len([m for m in msgs if m.get("kind") == "wake"]) == 1
+    wakes = [m for m in msgs if m.get("kind") == "wake"]
+    assert len(wakes) == 1 and "Digest result" in wakes[0]["content"]
 
 
 # ---------------- 2. a stale report is silent ----------------

@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os.db import Database  # noqa: E402
 from personal_os.docs import Docs  # noqa: E402
+from personal_os.extensions.hooks import HookBus  # noqa: E402
 from personal_os.gtasks import TasksSync  # noqa: E402
 from personal_os.repos import Conversations, Documents, Memories, Projects  # noqa: E402
 from personal_os.todos import Todos  # noqa: E402
@@ -160,6 +161,17 @@ class ProjectCascadeTests(_Base):
         self.assertEqual(len(self.memories.list(pid)), 1)
         self.assertEqual(len(self.documents.search("__all__", "narwhal")), 1)
         self.assertIsNone(self.convos.get(self.other_conv["id"]))  # was in the trash before the project
+
+    def test_restoring_a_project_announces_only_its_live_memories(self) -> None:
+        pid = self.p["id"]
+        newer = self.memories.supersede(self.mem["id"], "Atlas uses sqlite")
+        bus = HookBus()
+        seen: list[str] = []
+        bus.subscribe("memory.written", lambda p: seen.append(p["memory"]["id"]), owner="test", order=0)
+        self.trash.hooks = bus
+        self.trash.trash("project", pid)
+        self.trash.restore("project", pid)
+        self.assertEqual(seen, [newer["id"]])
 
     def test_restoring_a_child_of_a_trashed_project_lands_in_personal(self) -> None:
         pid = self.p["id"]

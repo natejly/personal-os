@@ -582,3 +582,23 @@ def test_run_now_refuses_a_job_whose_trigger_extension_is_off() -> None:
     finally:
         sub.dispose()
         appmod.jobs.delete(job["id"])
+
+
+def test_a_job_whose_trigger_check_now_fails_can_still_be_renamed_and_switched_off() -> None:
+    class Adapter:
+        def check(self, job: dict[str, Any]) -> str | None:
+            return "its recipe is gone"
+
+    sub = appmod.host.triggers.register("probe_kind", Adapter(), lambda: True)  # type: ignore[arg-type]
+    job = appmod.jobs.create("nightly", "0 3 * * *", "p")
+    with appmod.db.tx() as c:
+        c.execute("UPDATE jobs SET kind='probe_kind' WHERE id=?", (job["id"],))
+    try:
+        with client() as c:
+            assert c.patch(f"/jobs/{job['id']}", json={"name": "renamed"}).json()["name"] == "renamed"
+            assert c.patch(f"/jobs/{job['id']}", json={"enabled": False}).json()["enabled"] is False
+            assert c.patch(f"/jobs/{job['id']}", json={"enabled": True}).status_code == 400
+            assert c.patch(f"/jobs/{job['id']}", json={"prompt": "{}"}).status_code == 400
+    finally:
+        sub.dispose()
+        appmod.jobs.delete(job["id"])

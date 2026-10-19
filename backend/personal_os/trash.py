@@ -135,7 +135,8 @@ class Trash:
                     moved = True
             if kind == "project":
                 c.execute("UPDATE projects SET deleted_at=NULL WHERE id=?", (id,))
-                mem_ids = [r["id"] for r in c.execute("SELECT id FROM memories WHERE deleted_with=?", (id,)).fetchall()]  # before deleted_with is cleared
+                mem_ids = [r["id"] for r in c.execute(  # before deleted_with is cleared; a superseded or expired row comes back dead, so it is not announced
+                    "SELECT id FROM memories WHERE deleted_with=? AND invalid_at IS NULL AND (expires_at IS NULL OR expires_at > ?)", (id, now())).fetchall()]
                 for ct in CHILD_TABLES:
                     c.execute(f"UPDATE {ct} SET deleted_at=NULL, deleted_with=NULL WHERE deleted_with=?", (id,))
                 sync_memories_fts(c, mem_ids)

@@ -4211,10 +4211,17 @@ async def _wake_conversation(conv_id: str) -> None:
         return
     claimed = [r["run_id"] for r in pending]
     _wake_inflight.update(claimed)  # held across the handlers' awaits: a second worker ending meanwhile must not rebuild this wake
+    booked = _job_wakes.pop(conv_id, [])  # taken for the same reason; put back when no turn starts
+
+    def unclaim() -> None:
+        _wake_inflight.difference_update(claimed)
+        if booked:
+            _job_wakes[conv_id] = booked + _job_wakes.get(conv_id, [])
+
     try:
         text, wake = workers_mod.build_wake(await _noted_reports(_wake_reports(pending)) + booked)
     except BaseException:
-        _wake_inflight.difference_update(claimed)
+        unclaim()
         raise
     if desk_id := row["settings"].get("deskId"):
         # A desk-bound chat is woken through its desk, so the turn runs under the desk runtime, supervisor and settle.
@@ -4222,14 +4229,12 @@ async def _wake_conversation(conv_id: str) -> None:
         if started is None:  # a run is still live on the conversation (its learn tail), or the desk is in no status that takes a message
             _wake_waiting.add(conv_id)
         if isinstance(started, Run):
-            _job_wakes.pop(conv_id, None)
             started.task.add_done_callback(lambda _t: _wake_inflight.difference_update(claimed))
         else:
-            _wake_inflight.difference_update(claimed)
+            unclaim()
         return
     body = ChatIn(content=text, wake=wake)
     run = bus.start(conv_id, lambda r: _run_chat(r, body), input=body.model_dump())
-    _job_wakes.pop(conv_id, None)
     run.task.add_done_callback(lambda _t: _wake_inflight.difference_update(claimed))
 
 
@@ -5637,6 +5642,9 @@ def _cron_error(expr: str | None) -> str:
             if expr else "A repeating job needs a cron expression (five fields, e.g. '30 7 * * *')")
 
 
+SCHEDULE_FIELDS = {"kind", "cron", "timezone", "run_at", "watch_dir", "prompt"}  # what a job's schedule check reads from its own row
+
+
 def _check_schedule(kind: str, expr: str | None, tz: str | None, run_at: float | None, *, fresh_time: bool,
                     watch_dir: str | None = None, job: dict[str, Any] | None = None) -> None:
     """Reject a schedule the scheduler could not read. Always checked against the schedule the row would *end up*
@@ -5789,7 +5797,9 @@ async def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     if merged.get("target") == "desk" and not merged.get("desk_autonomy"):
         patch["desk_autonomy"] = "plan"
     orphaned = not jobs.known(cur["kind"])  # no extension serves its kind now: it can still be renamed, disabled or moved to a kind that is served
-    if not (orphaned and "kind" not in patch and not patch.get("enabled")):
+    # A trigger's check reads state beyond the row (a recipe's archive, say), so a rename or a switch off must not be refused for it.
+    inert = merged["kind"] in host.triggers and not patch.get("enabled") and not SCHEDULE_FIELDS & patch.keys()
+    if not (orphaned and "kind" not in patch and not patch.get("enabled")) and not inert:
         _check_schedule(merged["kind"], merged["cron"], patch.get("timezone"), merged["run_at"],
                         fresh_time="run_at" in patch, watch_dir=merged.get("watch_dir"), job=merged)
     if "enabled" in patch or "kind" in patch:

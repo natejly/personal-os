@@ -56,8 +56,7 @@ export function ToolOverrides({ value, onChange, effectiveBase, compact = false 
   )
 }
 
-/** The tools that always show a card: no mode switches one on, no card grants it whole-tool, and untrusted content
- *  in the reply forces its card. Only tools that act outside the app or book unattended work can be listed. */
+/** The tools that always show a card; only external or scheduling tools can be listed. */
 export function AlwaysAsk({ value, onChange }: { value: string[]; onChange: (next: string[]) => void }): JSX.Element {
   const tools = useStore((s) => s.tools)
   // calendar_propose is itself the review card, so it is locked whatever this list says.
@@ -85,7 +84,7 @@ export function ToolGlobalToggles({ value, onChange }: { value: Record<string, T
   const groups = [...new Set(shown.map((t) => t.group))]
   const current = (name: string, fallback: ToolMode): ToolMode => normalize(value[name], fallback)
   const set = (name: string, mode: ToolMode): void => onChange({ ...Object.fromEntries(Object.entries(value).map(([k, v]) => [k, normalize(v, 'on')])), [name]: mode })
-  // Groups start collapsed and open while filtering; the full model-facing description is the row's tooltip.
+  // Groups start collapsed and open while filtering.
   return (
     <div className="tool-perms">
       <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter tools" aria-label="Filter tools" spellCheck={false} />

@@ -27,8 +27,8 @@ const detail = (it: TrashItem): string => {
   return parts.join(' · ')
 }
 
-/** Settings → Data → Trash: everything deleted in the last 30 days, restorable until it is purged. */
 export default function TrashPanel(): JSX.Element {
+  // Settings → Data → Trash: restorable until purged.
   const toast = useStore((s) => s.toast)
   const restoreTrashed = useStore((s) => s.restoreTrashed)
   const [list, setList] = useState<TrashListing | null>(null)

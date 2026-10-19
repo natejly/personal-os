@@ -4,12 +4,7 @@ import Switch from './settings/Switch'
 
 type Props = { draft: Settings; patch: (p: Partial<Settings>) => void }
 
-/**
- * Standing safety settings in Settings > Permissions: which hosts fetch_url may still read after a reply has seen
- * untrusted content, and whether such a reply may run networked commands and write outside its desk without a card.
- * (Snapshot folders, the third of these, lives under Advanced.) They edit the modal's `draft` through `patch`, so
- * nothing is saved until Save. The permission mode itself lives in PermissionMode.tsx.
- */
+/** Standing safety settings in Settings > Permissions; they edit the draft and save with Save. */
 export default function RunSafetySettings({ draft, patch }: Props): JSX.Element {
   return (
     <>
@@ -20,8 +15,7 @@ export default function RunSafetySettings({ draft, patch }: Props): JSX.Element 
   )
 }
 
-/** Off by default. Its help text says plainly that it reduces protection: a reply that has read outside content can
- *  then run networked commands and write outside its desk without a card, while the hard blocks still ask. */
+/** Off by default; turning it on reduces protection. */
 export function TrustExternalToggle({ draft, patch }: Props): JSX.Element {
   return (
     <Switch danger={!!draft.trustExternalContent} title="Trust content from outside Grain" label="Trust content from outside Grain"

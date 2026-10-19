@@ -4,8 +4,8 @@ import { chatRows, groupByProvider, pickerVisible, togglePicker } from '../lib/p
 import Switch from './settings/Switch'
 import type { ModelInfo, Settings } from '@shared/types'
 
-/** Which models the composer picker offers (part of the Settings draft). */
 export default function ModelsSettings({ settings, models, pickerModels, setPickerModels }: { settings: Settings; models: ModelInfo[]; pickerModels: string[] | undefined; setPickerModels: (ids: string[]) => void }): JSX.Element {
+  // The composer picker's models (part of the Settings draft).
   const [query, setQuery] = useState('')
   const name = (id: string): string => settings.providers?.find((p) => p.id === id)?.name ?? id
   const shown = new Set(pickerVisible(models, pickerModels).map((m) => m.id))

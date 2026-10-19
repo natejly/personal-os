@@ -12,7 +12,7 @@ const openInbox = async (page) => {
 test('Settings → Sidebar turns each sidebar row on and off on Save', async ({ grain }) => {
   const { page, api } = grain
   const shown = async (name) => (await page.locator('.sidebar .nav-item', { hasText: new RegExp(`^${name}`) }).count()) > 0
-  await openSettings(page, 'Sidebar')
+  await openSettings(page, 'Sidebar and layout')
   // One switch per sidebar row.
   const rows = dialog(page).locator('label.toggle-row').filter({ has: page.locator('input[type=checkbox]') })
   const sw = (n) => rows.getByRole('checkbox', { name: n, exact: true })
@@ -26,7 +26,7 @@ test('Settings → Sidebar turns each sidebar row on and off on Save', async ({ 
     await expect(sw(n)).toBeChecked({ checked: on })
   }
   // Changes are a draft: Save applies them and closes, so each step reopens the tab.
-  const apply = async (fn) => { await openSettings(page, 'Sidebar'); await fn(); await save(page) }
+  const apply = async (fn) => { await openSettings(page, 'Sidebar and layout'); await fn(); await save(page) }
   await apply(async () => { for (const n of views) await set(n, true) }) // Mail and Health only left the sidebar; turning them on first makes the off below a real view-off
   await apply(async () => { for (const n of views) await set(n, false) })
   await expect.poll(async () => (await api('/settings')).hiddenViews.sort()).toEqual(['calendar', 'health', 'library', 'mail', 'todos'])
@@ -53,7 +53,7 @@ test('Settings → Sidebar turns each sidebar row on and off on Save', async ({ 
 test('hiding the view you are on sends you to a new chat', async ({ grain }) => {
   const { page } = grain
   await page.locator('.sidebar .nav-item', { hasText: 'Library' }).first().click()
-  await openSettings(page, 'Sidebar')
+  await openSettings(page, 'Sidebar and layout')
   await dialog(page).getByRole('checkbox', { name: 'Library', exact: true }).locator('xpath=following-sibling::span[@class="switch"]').click()
   await save(page)
   await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()

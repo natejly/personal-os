@@ -48,7 +48,7 @@ export default function ExtensionConsentSheet({ consent, kind, busy, error, onCo
         </header>
         <div className="ext-sheet-body">
           {card.description && <p className="ext-desc">{card.description}</p>}
-          {!bundled && <p className="ext-note" role="status">Publisher not verified. Read what it can do below; nothing has run yet.</p>}
+          {!bundled && <p className="ext-note" role="status">Publisher not verified.</p>}
           {consent.typosquat && (
             <p className="ext-note warn" role="alert">Its name is very close to {consent.typosquat.similarTo}. Make sure it is the one you meant.</p>
           )}
@@ -85,7 +85,7 @@ export default function ExtensionConsentSheet({ consent, kind, busy, error, onCo
           <Group title="Permissions">
             {card.permissionText.length
               ? <ul className="ext-list">{card.permissionText.map((t) => <li key={t}>{t}</li>)}</ul>
-              : <p className="ext-desc">It asks for no permissions.</p>}
+              : <p className="ext-desc">No permissions.</p>}
           </Group>
 
           <Group title="Context cost"><p className="ext-desc">{contextCostText(card.contextCostTokens)}.</p></Group>
@@ -98,7 +98,6 @@ export default function ExtensionConsentSheet({ consent, kind, busy, error, onCo
 
           {consent.commands.length > 0 && (
             <Group title="Commands its instructions mention" warn>
-              <p className="ext-desc">Grain does not run these. Read them before you do.</p>
               <pre className="ext-code" tabIndex={0}>{consent.commands.join('\n')}</pre>
             </Group>
           )}

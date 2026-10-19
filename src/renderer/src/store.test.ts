@@ -1250,24 +1250,24 @@ test('the side chat parks its model and effort until its thread exists, and a pi
 test('Memory lives in Settings: split by default, and every way in lands on its tab', () => {
   const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
   assert.equal(st().memoryMode, 'split')
-  const reset = (): void => { useStore.setState({ settingsOpen: false, settingsTab: 'model', memoryMode: 'list', memoryFocus: ['old'], view: 'chat' }) }
+  const reset = (): void => { useStore.setState({ settingsOpen: false, settingsTab: 'models', memoryMode: 'list', memoryFocus: ['old'], view: 'chat' }) }
   reset()
   st().openMemory()
   assert.equal(st().settingsOpen, true)
-  assert.equal(st().settingsTab, 'memory')
+  assert.equal(st().settingsTab, 'context')
   assert.equal(st().memoryMode, 'split')
   assert.equal(st().memoryFocus, null)
   assert.equal(st().view, 'chat', 'no page to navigate to')
   reset()
   st().openMemory('graph')
-  assert.equal(st().settingsTab, 'memory')
+  assert.equal(st().settingsTab, 'context')
   assert.equal(st().memoryMode, 'graph')
   reset()
   st().showMemories(['x'])
-  assert.deepEqual([st().settingsOpen, st().settingsTab, st().memoryMode, st().memoryFocus], [true, 'memory', 'list', ['x']])
+  assert.deepEqual([st().settingsOpen, st().settingsTab, st().memoryMode, st().memoryFocus], [true, 'context', 'list', ['x']])
   reset()
   st().openSettings('modules')
-  assert.equal(st().settingsTab, 'sidebar')
+  assert.equal(st().settingsTab, 'layout')
 })
 
 test('a run this window did not stream: finishing off screen leaves a dot and a banner, on screen in focus neither, a silent wake nothing; opening the chat clears it', async () => {
@@ -1366,7 +1366,7 @@ test('the learned toast body opens exactly the memories the pass created, and Un
     assert.deepEqual(st.memoryFocus, ['m1', 'm2'], 'it opens the rows that were stored, in order')
     assert.equal(st.memoryMode, 'list')
     assert.equal(st.settingsOpen, true)
-    assert.equal(st.settingsTab, 'memory')
+    assert.equal(st.settingsTab, 'context')
   } finally {
     useStore.setState({ ...before, toasts: [] })
   }

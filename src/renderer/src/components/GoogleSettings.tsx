@@ -175,7 +175,7 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
 
           <ol className="setup-steps muted small">
             <li>
-              Create or pick a Google Cloud project.
+              Create a Cloud project
               <button className="link-btn" onClick={() => openExternal(CONSOLE.project)}><ExternalLink size={11} /> New project</button>
             </li>
             <li>

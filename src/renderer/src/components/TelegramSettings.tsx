@@ -5,6 +5,8 @@ import { api } from '../lib/api'
 import { ApiError } from '../lib/apiError'
 import NumberField from './settings/NumberField'
 import { Sec } from './settings/shared'
+import { useStore } from '../store'
+import { ownerOn } from '../extensions/host'
 import Switch from './settings/Switch'
 
 type Tone = '' | 'needs-you' | 'working' | 'done' | 'failed'
@@ -15,8 +17,8 @@ function statusView(st: TelegramStatus | null): { tone: Tone; text: string } {
     case 'connected': return { tone: 'done', text: st.owner_name ? `Connected to ${st.owner_name}` : 'Connected' }
     case 'not_paired': return { tone: 'needs-you', text: 'Not paired' }
     case 'error': return { tone: 'failed', text: st.last_error ? `Polling error: ${st.last_error}` : 'Polling error' }
-    case 'bad_token': return { tone: 'failed', text: 'Telegram rejected the token. Paste a new one.' }
-    case 'conflict': return { tone: 'failed', text: 'Something else is reading this bot\'s updates: a webhook, another program, or a Grain on another Mac that does not know about this one. Give each Mac its own bot.' }
+    case 'bad_token': return { tone: 'failed', text: 'Telegram rejected the token' }
+    case 'conflict': return { tone: 'failed', text: 'Another reader holds this bot\'s updates (webhook, program or Mac)' }
     case 'claimed_elsewhere': return { tone: 'needs-you', text: st.claimed_by ? `This bot is used by Grain on ${st.claimed_by}.` : 'This bot is used by Grain on another Mac.' }
     case 'locked': return { tone: 'working', text: 'Another Grain is polling this bot' }
     case 'no_token': return { tone: '', text: 'No bot token yet' }
@@ -36,7 +38,8 @@ function expiryLabel(expiresAt: number): string {
 export default function TelegramSettings({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element | null {
   const [st, setSt] = useState<TelegramStatus | null>(null)
   const [stErr, setStErr] = useState<string | null>(null)
-  const [off, setOff] = useState(false)  // the extension is turned off: its routes answer 404
+  const [serverOff, setOff] = useState(false)
+  const ownerIsOn = useStore((s) => ownerOn(s.settings, 'telegram'))  // the extension is turned off: its routes answer 404
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -73,7 +76,7 @@ export default function TelegramSettings({ draft, patch }: { draft: Settings; pa
     void navigator.clipboard.writeText(code).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => undefined)
   }
 
-  if (off) return null
+  if (serverOff || !ownerIsOn) return null
   const view = statusView(st)
   const pairing = st?.pairing ?? null
   const hasToken = !!st?.has_token

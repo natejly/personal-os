@@ -1,16 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Download, FolderOpen, History, RotateCcw } from '../icons'
-import { useStore } from '../store'
 import { api } from '../lib/api'
-import type { DataOverview } from '@shared/types'
 import { KIND_LABEL, ago, formatBytes } from './dataFormat'
+import type { DataOverview } from '@shared/types'
+import { useStore } from '../store'
 
-/**
- * Settings → Data: backups, restore and export. Everything lives in one SQLite file plus uploads/, so
- * "Back up now" and the daily snapshot are the safety net and "Export all data" is the way out.
- * Restore never swaps the live database: it stages a choice the backend applies at its next start.
- */
 export default function DataSettings(): JSX.Element {
+  // Settings → Data: backups, restore (staged for the next start) and export.
   const toast = useStore((s) => s.toast)
   const settings = useStore((s) => s.settings)
   const [info, setInfo] = useState<DataOverview | null>(null)
@@ -86,14 +82,14 @@ export default function DataSettings(): JSX.Element {
 
       {info?.restore_failed && !info.pending_restore && (
         <div className="data-row pending" role="alert">
-          <span className="toggle-text"><b>The last restore was not applied</b><small>The restore staged before the last start could not be applied ({info.restore_failed.error}), so your data was left as it was.</small></span>
+          <span className="toggle-text"><b>The last restore was not applied</b><small>{info.restore_failed.error}</small></span>
           <button className="ghost-btn" onClick={() => void cancelRestore()}>Dismiss</button>
         </div>
       )}
 
       {(info?.schema_drift?.length ?? 0) > 0 && (
         <div className="data-row pending" role="alert">
-          <span className="toggle-text"><b>Your data was changed by a different version of Grain</b><small>{info?.schema_drift?.join('; ')}. Some features may fail until you update Grain or restore a backup made before then.</small></span>
+          <span className="toggle-text"><b>Your data was changed by a different version of Grain</b><small>{info?.schema_drift?.join('; ')}</small></span>
         </div>
       )}
 

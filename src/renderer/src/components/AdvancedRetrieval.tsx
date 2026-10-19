@@ -11,9 +11,8 @@ export async function rebuildIndex(docs: Docs = api.documents): Promise<Awaited<
   return docs.embedBackfill()
 }
 
-/** The retrieval switches the backend reads (retrieval.py, context.py, fetch_url). No hooks, so it
- *  stays a plain function of draft + patch. */
 export default function AdvancedRetrieval({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
+  // The retrieval switches the backend reads. No hooks: a plain function of draft + patch.
   return <>
     <Switch title="Search my Docs for context" checked={draft.useDocsInContext !== false} onChange={(v) => patch({ useDocsInContext: v })} />
     <label><span className="toggle-text"><b>Search by</b></span>

@@ -50,8 +50,8 @@ function SignIns(): JSX.Element | null {
   )
 }
 
-/** A list of hostnames, type, Enter or Add, remove with the x. An entry also allows its subdomains. */
-export function HostList({ title, value, onChange }: { title: string; help?: string; value: string[]; onChange: (next: string[]) => void }): JSX.Element {
+/** A list of hostnames; an entry also allows its subdomains. */
+export function HostList({ title, value, onChange }: { title: string; value: string[]; onChange: (next: string[]) => void }): JSX.Element {
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const add = (): void => {
@@ -163,7 +163,6 @@ function PackageList({ value, onChange }: { value: string[]; onChange: (next: st
   )
 }
 
-/** Network for shell commands (the egress proxy), and the hosts it lets through. */
 export function ShellNetwork({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
   const mode = networkMode(draft)
   const hosts = draft.shellAllowedDomains ?? []
@@ -177,7 +176,7 @@ export function ShellNetwork({ draft, patch }: { draft: Settings; patch: (p: Par
             <button key={n.mode} type="button" className={mode === n.mode ? 'on' : ''} aria-pressed={mode === n.mode} onClick={() => pickMode(n.mode)}>{n.label}</button>
           ))}
         </div>
-        {mode === 'open' && <p className="cowork-error">Open network lets a command send files off this Mac, and whatever it downloads is untrusted text. Prefer allowed hosts.</p>}
+        {mode === 'open' && <p className="cowork-error">Open lets a command send files off this Mac.</p>}
       </div>
       {mode !== 'off' && (
         <HostList title="Allowed hosts"
@@ -187,7 +186,6 @@ export function ShellNetwork({ draft, patch }: { draft: Settings; patch: (p: Par
   )
 }
 
-/** The agent's browser: whether desks get one, the sites it may open after reading untrusted content, its sign-ins. */
 export function BrowserAccess({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
   return (
     <div className="cowork-settings">
@@ -200,7 +198,7 @@ export function BrowserAccess({ draft, patch }: { draft: Settings; patch: (p: Pa
   )
 }
 
-/** What a desk may do without a card, and what it must pass before it may finish. */
+/** Desk shell and finishing checks. */
 export function DeskGates({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
   return (
     <div className="cowork-settings">

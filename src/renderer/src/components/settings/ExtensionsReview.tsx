@@ -48,7 +48,6 @@ export default function ExtensionsReview({ onChanged, pendingOnly = false }: { o
   if (!listing) return <>{error && <p className="set-help" role="status">{error}</p>}</>
   return (
     <>
-      <p className="set-help">Extensions the assistant writes for you wait here. Accepting installs one switched off; you turn it on yourself.</p>
       {error && <p className="set-help" role="status">{error}</p>}
       {listing.proposals.map((p) => (
         <details key={p.id} className="adv-group" open>
@@ -73,11 +72,11 @@ export default function ExtensionsReview({ onChanged, pendingOnly = false }: { o
         <details key={x.id} className="adv-group">
           <summary>{x.name} <small>{x.id} {x.version} ({x.enabled ? 'on' : 'off'}{x.changed ? ', files changed' : ''})</small></summary>
           <Facts card={x} />
-          {x.changed && <p className="set-help" role="status">Its files are not the ones you accepted, so it stays off until the assistant proposes it again.</p>}
+          {x.changed && <p className="set-help" role="status">Files changed; stays off.</p>}
           {!x.enabled && x.needsGrant.map((perm) => (
             <label key={perm}>
               <input type="checkbox" checked={(granted[x.id] ?? []).includes(perm)} onChange={(e) => grant(x.id, perm, e.target.checked)} />
-              {' '}Allow {perm}: it can narrow or change what you have approved
+              {' '}Allow {perm}
             </label>
           ))}
           <div className="test-row">

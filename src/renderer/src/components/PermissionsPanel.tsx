@@ -80,7 +80,7 @@ export function PermissionsPanel({ compact }: { compact?: boolean }): JSX.Elemen
         <button type="button" className="ghost-btn" disabled={busy} onClick={() => void refresh()}>Re-check</button>
         <span className="muted small" role="status" aria-live="polite">{progress}</span>
       </div>
-      {noElectron && <p className="muted small">Not running in the desktop app, so statuses cannot be read.</p>}
+      {noElectron && <p className="muted small">Desktop app only.</p>}
       <ul className="plain-list">
         {rows.map((r) => (
           <li key={r.id} className="perm-row">

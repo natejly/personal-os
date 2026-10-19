@@ -19,10 +19,10 @@ test('saved values show: hosts listed, snapshots off', () => {
   assert.doesNotMatch(html, /type="checkbox"[^>]*checked/)
 })
 
-test('without snapshot support the switch is disabled and says why', () => {
+test('without snapshot support the switch is disabled and names the requirement', () => {
   const html = renderToStaticMarkup(createElement(SnapshotToggle, { draft: { snapshotsAvailable: false } as Settings, patch: () => {} }))
   assert.match(html, /<input type="checkbox" disabled=""/)
-  assert.ok(html.includes('Unavailable on this Mac'))
+  assert.ok(html.includes('Needs git installed'))
 })
 
 test('the retired run-safety controls are gone', () => {

@@ -4,10 +4,10 @@ import type { PermissionEvaluation, PermissionRules as Rules } from '@shared/typ
 import { api } from '../lib/api'
 import { TESTERS, testBody, type TesterTool } from '../lib/permTester'
 
-const KINDS: { key: keyof Rules; label: string; hint: string }[] = [
-  { key: 'deny', label: 'Deny', hint: 'Refused before the tool runs. Beats ask and allow.' },
-  { key: 'ask', label: 'Ask', hint: 'Always shows a card, even when the tool is on.' },
-  { key: 'allow', label: 'Allow', hint: 'Runs without a card. Never lifts a forced approval.' }
+const KINDS: { key: keyof Rules; label: string }[] = [
+  { key: 'deny', label: 'Deny' },
+  { key: 'ask', label: 'Ask' },
+  { key: 'allow', label: 'Allow' }
 ]
 
 /** Allow / ask / deny lists of `Tool(pattern)` rules, with a box that says what they decide for one call. */
@@ -39,7 +39,7 @@ export default function PermissionRules({ value, onChange }: { value: Rules | un
       <h4 title="Tool or Tool(pattern), e.g. Bash(git push *), Read(~/Documents/**), Agent(researcher). * matches any run of characters, ? one. Deny wins over ask, ask over allow.">Permission rules</h4>
       {KINDS.map((k) => (
         <div key={k.key} className="perm-rule-group">
-          <span className="toggle-text"><b title={k.hint}>{k.label}</b></span>
+          <span className="toggle-text"><b>{k.label}</b></span>
           <ul>
             {rules[k.key].map((r) => (
               <li key={r}><code>{r}</code>

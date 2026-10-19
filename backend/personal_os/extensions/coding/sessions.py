@@ -425,6 +425,13 @@ class CodingSessions:
             rows = [dict(r) for r in c.execute(f"SELECT * FROM coding_sessions WHERE status IN ({','.join('?' * len(LIVE))})", LIVE)]
         return [r for r in map(self.refresh, rows) if r["status"] in LIVE]  # a session that ended unseen must not hold a slot
 
+    def live_count(self) -> int:
+        """Coding sessions starting, working or waiting on the user, for an extension that shares the concurrency cap."""
+        return len(self._live())
+
+    def max_concurrent(self) -> int:
+        return self._max_concurrent()
+
     def _check_capacity(self) -> None:
         n = len(self._live())
         if n >= self._max_concurrent():
@@ -1030,7 +1037,10 @@ class CodingSessions:
         return f"; its worktree stays at {where}" if branch else ""
 
     async def diff(self, sid: str, full: bool = False) -> dict[str, Any]:
-        row = self._known(sid)
+        return await self.diff_row(self._known(sid), full)
+
+    async def diff_row(self, row: dict[str, Any], full: bool = False) -> dict[str, Any]:
+        """The diff of any row that has `worktree`, `branch` and (optionally) `base_sha`: also another extension's sessions."""
         wt = row["worktree"]
         if not os.path.isdir(wt):
             raise CodingError(f"{wt} no longer exists.")

@@ -5,13 +5,13 @@ import { useStore } from '../store'
 const TEXT = 'Memory search is keyword-only.'
 const KEY = 'grain.embeddingHintDismissed'
 
-/** One informational line for Settings → Memory while search has no embedding model. */
+/** A few-word status for Settings → Memory while search has no embedding model. */
 export default function EmbeddingHint(): JSX.Element | null {
   const keywordOnly = useStore((s) => s.settings.embeddingKeywordOnly)
-  return keywordOnly ? <p className="muted small">{TEXT}</p> : null
+  return keywordOnly ? <p className="muted small">Keyword search only</p> : null
 }
 
-/** The same line as a dismissible app notice, with a way into Settings → Model. The dismissal is remembered. */
+/** The full sentence as a dismissible app notice, with a way into Settings → Model. The dismissal is remembered. */
 export function EmbeddingNotice(): JSX.Element | null {
   const keywordOnly = useStore((s) => s.settings.embeddingKeywordOnly)
   const openSettings = useStore((s) => s.openSettings)

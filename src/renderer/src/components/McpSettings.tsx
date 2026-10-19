@@ -541,11 +541,11 @@ export default function McpSettings(): JSX.Element {
                       if (text.trim().startsWith('{') && applyPaste(text)) e.preventDefault()
                     }} />
                 </label>
-                <label><span>Working directory <small className="muted">(optional)</small></span>
+                <label><span>Working directory</span>
                   <input value={draft.cwd} onChange={(e) => setDraft({ ...draft, cwd: e.target.value })} placeholder="~/code/project" spellCheck={false} />
                 </label>
-                <label><span>Environment <small className="muted">(KEY=value, one per line)</small></span>
-                  <textarea rows={2} value={draft.envText} onChange={(e) => setDraft({ ...draft, envText: e.target.value })} spellCheck={false} />
+                <label><span>Environment</span>
+                  <textarea rows={2} placeholder="KEY=value" value={draft.envText} onChange={(e) => setDraft({ ...draft, envText: e.target.value })} spellCheck={false} />
                 </label>
                 <label><span title="Kept in the backend; never sent to a model or shown again">Secrets <small className="muted">(KEY=value)</small></span>
                   <textarea rows={2} value={draft.secretsText} onChange={(e) => setDraft({ ...draft, secretsText: e.target.value })} spellCheck={false} />

@@ -9,7 +9,7 @@ interface Props {
   providerId: string
   /** Given: a provider select is shown. Absent: the caller has its own provider picker. */
   onProvider?: (id: string) => void
-  /** Provider ids that are already added and cannot be chosen again. */
+  /** Already added: not selectable. */
   taken?: ReadonlySet<string>
   baseUrl: string
   onBaseUrl: (v: string) => void
@@ -23,8 +23,8 @@ interface Props {
   onModel?: (v: string) => void
 }
 
-/** Provider, address, key (and for a custom endpoint a name and a model id): the fields the first-run key step and Settings → Models share. */
 export default function ProviderForm(p: Props): JSX.Element {
+  // Provider, address, key and custom-endpoint fields, shared by the first-run key step and Settings.
   const [showKey, setShowKey] = useState(false)
   const { provider } = p
   const editable = !provider || showsBaseUrl(p.providerId)

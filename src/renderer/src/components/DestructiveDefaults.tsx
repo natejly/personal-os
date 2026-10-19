@@ -13,7 +13,6 @@ const ACTIONS: { id: DestructiveAction; label: string }[] = [
 ]
 export const DEFAULT_DESTRUCTIVE: Defaults = { shell: 'block', files: 'block', items: 'block', send: 'block' }
 
-/** What Manual mode does with each kind of destructive action: refuse it, ask first, or leave it to the usual rules. */
 export function DestructiveDefaults({ value, onChange }: { value?: Partial<Defaults>; onChange: (next: Defaults) => void }): JSX.Element {
   const cur = { ...DEFAULT_DESTRUCTIVE, ...value }
   return (

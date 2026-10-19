@@ -410,9 +410,7 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
                     <option value="custom">Custom (RRULE)…</option>
                   </select>
                 </label>
-              ) : (
-                isRecurring && <p className="muted small">Repeats — switch to “All events” to change the recurrence.</p>
-              )}
+              ) : null}
               {canEditRecurrence && rruleKey === 'custom' && (
                 <label>
                   <span>RRULE lines (e.g. RRULE:FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261231)</span>

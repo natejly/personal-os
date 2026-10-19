@@ -53,12 +53,11 @@ function BackfillControl({ projectId }: { projectId: string | null }): JSX.Eleme
         </div>
       ) : (
         <>
-          <button className="ghost-btn" onClick={() => void start()}>Rebuild graph from my messages</button>
+          <button className="ghost-btn" title="Reads your messages in this scope, oldest first; one model call each" onClick={() => void start()}>Rebuild graph from my messages</button>
           {watched && st && <span className="muted small">{st.cancelled ? 'Cancelled' : `Done: ${st.done} messages read${st.errors ? `, ${st.errors} failed` : ''}`}</span>}
         </>
       )}
       {err && <span className="muted small">{err}</span>}
-      <span className="muted small">Reads only your own messages in this scope, oldest first. Each message is one model call.</span>
     </div>
   )
 }
@@ -296,7 +295,7 @@ export default function GraphView({ projectId: scopedProjectId, query = '', paus
           <button className="icon-btn" aria-label="Reset graph view" title="Reset view" onClick={() => setView({ x: 0, y: 0, k: 1 })}><Maximize2 size={15} /></button>
         </div>
         <BackfillControl projectId={projectId ?? (scope === 'all' ? 'all' : null)} />
-        {graph.nodes.length === 0 && <p className="empty-hint big center">No entities yet. Chat with auto-learn on, or add one here.</p>}
+        {graph.nodes.length === 0 && <p className="empty-hint big center">No entities</p>}
         <svg width={size.w} height={size.h} onPointerDown={(e) => { if (e.target === e.currentTarget) { setSelected(null); onPointerDown(e) } }}>
           <defs><marker id="arrow" viewBox="0 0 10 10" refX="22" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--text-faint)" /></marker></defs>
           <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>

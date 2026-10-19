@@ -36,15 +36,10 @@ export default function PermissionRules({ value, onChange }: { value: Rules | un
 
   return (
     <div className="perm-rules">
-      <h4>Permission rules</h4>
-      <p className="muted small">
-        A rule is <code>Tool</code> or <code>Tool(pattern)</code>: <code>Bash(git push *)</code>, <code>Read(~/Documents/**)</code>, <code>Edit(~/Projects/app/**)</code>, <code>Agent(researcher)</code>.
-        <code>*</code> matches any run of characters, <code>?</code> one. A command line is split on <code>&amp;&amp; || ; |</code> and every part is judged.
-        Deny wins over ask, ask over allow.
-      </p>
+      <h4 title="Tool or Tool(pattern), e.g. Bash(git push *), Read(~/Documents/**), Agent(researcher). * matches any run of characters, ? one. Deny wins over ask, ask over allow.">Permission rules</h4>
       {KINDS.map((k) => (
         <div key={k.key} className="perm-rule-group">
-          <span className="toggle-text"><b>{k.label}</b><small>{k.hint}</small></span>
+          <span className="toggle-text"><b title={k.hint}>{k.label}</b></span>
           <ul>
             {rules[k.key].map((r) => (
               <li key={r}><code>{r}</code>
@@ -60,7 +55,7 @@ export default function PermissionRules({ value, onChange }: { value: Rules | un
       ))}
       {bad && <p className="small err" role="alert">{bad}</p>}
       <div className="perm-rule-test">
-        <span className="toggle-text"><b>Test a call</b><small>The test reads the rules you have saved. Rules are conveniences; the sandbox is the boundary.</small></span>
+        <span className="toggle-text"><b title="Checks against the saved rules">Test a call</b></span>
         <form className="perm-rule-add" onSubmit={(e) => { e.preventDefault(); void test() }}>
           <select value={tool} onChange={(e) => { setTool(e.target.value as TesterTool); setResult(null) }} aria-label="Tool to test">
             {TESTERS.map((t) => <option key={t.tool} value={t.tool}>{t.label}</option>)}
@@ -73,7 +68,7 @@ export default function PermissionRules({ value, onChange }: { value: Rules | un
             <b>{result.action === 'none' ? 'No rule applies' : result.action}</b>
             {result.hardline ? ' (never allowed)' : result.rule ? <> by <code>{result.rule}</code></> : null}
             {result.reason && !result.hardline ? ` - ${result.reason}` : ''}
-            {result.action === 'none' && ' - the tool’s own setting decides.'}
+           
             {result.subjects.length > 0 && <><br /><small className="muted">Matched on {result.subjects.map((s) => <code key={s}>{s} </code>)}</small></>}
           </p>
         )}

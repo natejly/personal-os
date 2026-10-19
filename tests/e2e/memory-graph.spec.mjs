@@ -12,7 +12,7 @@ async function openGraph(page) {
 test('graph: empty state, add an entity, select it, edit label/type, add and delete a relation, delete the entity', async ({ grain }) => {
   const { page, api } = grain
   await openGraph(page)
-  await expect(page.getByText('No entities yet.')).toBeVisible()
+  await expect(page.getByText('No entities')).toBeVisible()
   await page.getByLabel('New entity name').fill('Ada')
   await page.getByLabel('New entity name').press('Enter')
   await expect(page.locator('g.node')).toHaveCount(1)

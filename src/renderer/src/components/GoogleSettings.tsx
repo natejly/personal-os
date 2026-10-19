@@ -104,9 +104,7 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
           <small>
             {google?.connected
               ? <><Check size={11} /> Signed in as {google.email}</>
-              : hasClient
-                ? 'Signing in turns on two-way Todos ↔ Google Tasks sync, which you can switch off.'
-                : 'Needs a one-time OAuth client (about two minutes) before the first sign-in.'}
+              : null}
           </small>
         </div>
         {google?.connected ? (
@@ -122,7 +120,7 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
       </div>
 
       {needsReauth && (
-        <p className="integration-warn"><AlertTriangle size={13} /> {google?.reauth_reason ?? 'This connection needs to be renewed.'} Click Reconnect to sign in again.</p>
+        <p className="integration-warn"><AlertTriangle size={13} /> {google?.reauth_reason ?? 'Sign-in expired.'}</p>
       )}
 
       {google?.connected && (
@@ -142,7 +140,7 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
                   ? `Last sync failed: ${tasksSync.last_error}`
                   : tasksSync.last_sync
                     ? `Synced ${new Date(tasksSync.last_sync * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-                    : 'Not synced yet — press Sync now'}
+                    : 'Not synced yet'}
               </small>
             </div>
           )}
@@ -152,13 +150,13 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
       {google?.connected && (
         <div className="tasks-sync">
           <div className="tasks-sync-row">
-            <span className="toggle-text"><b>Back up files to Google Drive</b><small>Uploads and documents are copied daily to a folder in Drive that is specific to this computer{folder ? `: “${folder.name}”` : ''}. Chats, memories and settings are not.</small></span>
+            <span className="toggle-text"><b>Back up files to Google Drive</b>{folder && <small>{folder.name}</small>}</span>
             <button className="ghost-btn" onClick={() => void backUpNow()} disabled={backingUp}>
               <Upload size={13} className={backingUp ? 'spin' : ''} /> {backingUp ? 'Backing up…' : 'Back up now'}
             </button>
           </div>
           <label className="tasks-sync-row">
-            <span className="toggle-text"><b>This computer's name</b><small>Names its backup folder, so another Grain on this Google account keeps its own. Changing it starts a new folder; the old one stays in Drive. Saved with Save.</small></span>
+            <span className="toggle-text"><b>This computer's name</b></span>
             <input value={backupLabel} onChange={(e) => onChange({ driveBackupLabel: e.target.value })} placeholder={folder?.label ?? ''} spellCheck={false} />
           </label>
           {last && (
@@ -181,33 +179,30 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
               <button className="link-btn" onClick={() => openExternal(CONSOLE.project)}><ExternalLink size={11} /> New project</button>
             </li>
             <li>
-              Enable the APIs the app calls:
+              Enable the APIs:
               {CONSOLE.apis.map(([label, url]) => (
                 <button key={url} className="link-btn" onClick={() => openExternal(url)}><ExternalLink size={11} /> {label}</button>
               ))}
             </li>
             <li>
-              Fill in the OAuth consent screen (<b>External</b>), then add your own Google account under
-              <b> Test users</b> — Google blocks the sign-in otherwise.
+              OAuth consent screen (<b>External</b>); add your Google account under <b>Test users</b>.
               <button className="link-btn" onClick={() => openExternal(CONSOLE.consent)}><ExternalLink size={11} /> Consent screen</button>
             </li>
             <li>
-              Create credentials → OAuth client ID → application type <b>Desktop app</b>, then download its JSON.
-              A <i>Web application</i> client cannot work here: the callback lands on a loopback port that changes
-              every launch, and only Desktop clients may vary the port.
+              Create credentials → OAuth client ID → <b>Desktop app</b> (not Web application); download its JSON.
               <button className="link-btn" onClick={() => openExternal(CONSOLE.client)}><ExternalLink size={11} /> Create client</button>
             </li>
-            <li>Load that JSON below, then press the button above to sign in.</li>
+            <li>Load the JSON below, then sign in.</li>
           </ol>
 
           <div className="setup-drop" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); loadFile(e.dataTransfer.files[0]) }}>
-            <button className="ghost-btn" onClick={() => fileRef.current?.click()}><Upload size={13} /> Load client_secret….json</button>
-            <span className="muted small">or drop the file here — you can also paste the JSON into Client ID</span>
+            <button className="ghost-btn" title="Or drop the file here, or paste the JSON into Client ID" onClick={() => fileRef.current?.click()}><Upload size={13} /> Load client_secret….json</button>
+            
             <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(e) => loadFile(e.target.files?.[0] ?? undefined)} />
           </div>
 
           <label><span className="toggle-text"><b>Client ID</b></span>
-            <input ref={idRef} value={clientId} onChange={(e) => onChange({ googleClientId: e.target.value })} onPaste={onPasteMaybeJson} placeholder="…apps.googleusercontent.com — or paste the whole JSON" spellCheck={false} />
+            <input ref={idRef} value={clientId} onChange={(e) => onChange({ googleClientId: e.target.value })} onPaste={onPasteMaybeJson} placeholder="…apps.googleusercontent.com" spellCheck={false} />
           </label>
           <label><span className="toggle-text"><b>Client secret</b></span>
             <input type="password" value={clientSecret} onChange={(e) => onChange({ googleClientSecret: e.target.value })} onPaste={onPasteMaybeJson} placeholder={secretSaved ? 'Saved. Type to replace' : 'GOCSPX-…'} spellCheck={false} />
@@ -216,8 +211,6 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
           {draftHasClient && !google?.configured && (
             <button className="primary-btn" onClick={() => void signIn()}><span className="g-logo g-logo-sm">G</span> Save and sign in</button>
           )}
-
-          <p className="muted small">Scopes requested: calendar, gmail.modify, tasks, drive.readonly, drive.file, documents, spreadsheets, email. Tokens stay in the local database. Sending email is a separate tool you can keep off.</p>
         </details>
       )}
     </div>

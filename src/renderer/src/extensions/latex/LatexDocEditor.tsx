@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { AlertCircle, ChevronDown, Download, FileCode2, FileText, Loader2, Play, Sparkles, Trash2, Upload } from '../../icons'
+import { AlertCircle, ChevronDown, Download, FileCode2, FileText, Loader2, Play, Plus, Sparkles, Trash2, Upload } from '../../icons'
 import type { FullDoc } from '@shared/types'
-import { saveDownload } from '../../lib/api'
+import { api, saveDownload } from '../../lib/api'
 import { useStore } from '../../store'
 import { pdfSrc } from '../../lib/showPanel'
 import { oneLine } from '../../lib/emailAsk'
@@ -13,6 +13,15 @@ import { ENGINES, latexApi, type CompileResult, type Engine, type LatexContext }
 import '../../styles/latex.css'
 
 const SOURCE_CAP = 20_000 // what ⌘I carries of the open file
+
+/** The name typed for a new file, made into a path the compile accepts (the backend's rule: no leading . or -, no .., no odd characters). */
+export function newFilePath(raw: string): string | null {
+  let p = raw.trim().replace(/\\/g, '/')
+  if (!p) return null
+  if (!/\.(tex|bib|sty|cls)$/i.test(p)) p += '.tex'
+  const segs = p.split('/')
+  return segs.every((g) => g && g === g.trim() && !/[\x00-\x1f]/.test(g) && !/^[.-]/.test(g) && g.length <= 200) ? p : null
+}
 
 /** The Files editor for a LaTeX source: the project's files, CodeMirror on the doc (saved like any note), compile and the PDF. */
 export default function LatexDocEditor({ doc }: { doc: FullDoc }): JSX.Element {
@@ -31,6 +40,7 @@ export default function LatexDocEditor({ doc }: { doc: FullDoc }): JSX.Element {
   const [problemsOpen, setProblemsOpen] = useState(true)
   const [jump, setJump] = useState<{ line: number; n: number }>()
   const upload = useRef<HTMLInputElement>(null)
+  const [naming, setNaming] = useState<string | null>(null)
   const fail = useCallback((e: unknown) => toast((e as Error).message, 'error'), [toast])
 
   const body = docDraft ?? doc.content
@@ -91,6 +101,29 @@ export default function LatexDocEditor({ doc }: { doc: FullDoc }): JSX.Element {
     try { await latexApi.deleteAsset(doc.id, path); setCtx(await latexApi.context(doc.id)) } catch (e) { fail(e) }
   }
 
+  const createFile = async (): Promise<void> => {
+    if (naming === null || !ctx) return
+    const path = newFilePath(naming)
+    if (!path) return toast(`'${naming.trim()}' is not a usable LaTeX file name`, 'error')
+    if (ctx.files.some((f) => f.path.toLowerCase() === path.toLowerCase())) return toast(`${path} already exists`, 'error')
+    const cut = path.lastIndexOf('/')
+    const folder = [ctx.project.folder, cut < 0 ? '' : path.slice(0, cut)].filter(Boolean).join('/')
+    try {
+      await flushDoc()
+      const d = await api.docs.create({ title: path.slice(cut + 1), content: '', folder, project_id: ctx.project.project_id })
+      await Promise.all([useStore.getState().refreshDocs(), useStore.getState().refreshDocFolders()])
+      useStore.getState().expandTo(d.project_id ?? '', d.folder)
+      setNaming(null)
+      await openDoc(d.id)
+    } catch (e) { fail(e) }
+  }
+  const startNaming = (): void => {
+    const taken = new Set(ctx?.files.map((f) => f.path.toLowerCase()))
+    let n = 1
+    while (taken.has((n === 1 ? 'untitled.tex' : `untitled ${n}.tex`).toLowerCase())) n++
+    setNaming(n === 1 ? 'untitled.tex' : `untitled ${n}.tex`)
+  }
+
   const goto = (docId: string | null | undefined, line: number): void => {
     const id = docId ?? ctx?.project.main_doc_id ?? doc.id
     if (id === doc.id) { if (line > 0) setJump((j) => ({ line, n: (j?.n ?? 0) + 1 })) } else void openDoc(id, line > 0 ? { line } : undefined)
@@ -145,6 +178,10 @@ export default function LatexDocEditor({ doc }: { doc: FullDoc }): JSX.Element {
                 </li>
               ))}
             </ul>
+            {naming === null
+              ? <button className="ghost-btn lx-upload" onClick={startNaming}><Plus size={13} /> New file</button>
+              : <input className="lx-newname" aria-label="New file name" autoFocus value={naming} onChange={(e) => setNaming(e.target.value)} onFocus={(e) => e.currentTarget.select()}
+                  onBlur={() => setNaming(null)} onKeyDown={(e) => { if (e.key === 'Enter') void createFile(); else if (e.key === 'Escape') setNaming(null) }} />}
             <button className="ghost-btn lx-upload" onClick={() => upload.current?.click()}><Upload size={13} /> Add image or other file</button>
             <input ref={upload} type="file" multiple hidden onChange={(e) => { void onUpload(e.target.files); e.target.value = '' }} />
           </aside>

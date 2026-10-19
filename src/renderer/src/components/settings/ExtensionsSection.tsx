@@ -104,7 +104,7 @@ export default function ExtensionsSection(): JSX.Element {
     })()
   }
 
-  const needsReview = !!review && (review.proposals.length > 0 || review.installed.some((x) => x.changed || !x.enabled))
+  const needsReview = !!review && (review.proposals.length > 0 || review.installed.some((x) => x.changed))
   const list = data?.installed ?? []
   const available = data?.available ?? []
 
@@ -117,7 +117,7 @@ export default function ExtensionsSection(): JSX.Element {
       {needsReview && (
         <section className="ext-group" aria-labelledby="ext-h-review">
           <h3 id="ext-h-review">Needs review</h3>
-          <ExtensionsReview onChanged={load} />
+          <ExtensionsReview onChanged={load} pendingOnly />
         </section>
       )}
 
@@ -141,7 +141,7 @@ export default function ExtensionsSection(): JSX.Element {
         <h3 id="ext-h-available">Available</h3>
         {data?.catalogError && (
           <p className="set-help" role="status">
-            The online catalog could not be reached ({data.catalogError}). Included extensions still work.{' '}
+            <span title={data.catalogError}>The online catalog could not be reached. Included extensions still work.</span>{' '}
             <button type="button" className="ghost-btn sm" onClick={() => void load()}>Retry</button>
           </p>
         )}

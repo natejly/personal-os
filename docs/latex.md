@@ -1,31 +1,29 @@
 # LaTeX
 
-A built-in extension for writing and compiling multi-file LaTeX documents. It starts off on a fresh install; turn it on under Settings > Sidebar or Settings > Advanced > Extensions.
+A built-in extension that makes LaTeX sources ordinary Files. It has no view or sidebar row of its own: Files is its home. It starts off on a fresh install (the lean profile turns it off); turn it on under Settings > Advanced > Extensions. An install that already had it on keeps it on, because on/off follows `hiddenViews` and nothing changed there.
 
-## Where files live
+## Storage
 
-A project is a plain folder, `~/Grain/LaTeX/<name>/` (override the root with `GRAIN_LATEX_DIR`). The project name is the folder name. A new project gets a `main.tex` from a minimal article template. Because the files are real, the chat's file tools read and edit the same ones the editor shows.
+A LaTeX source is a Files doc (the `docs` table) whose title ends in `.tex`, `.bib`, `.sty` or `.cls`. The suffix is the type: there is no kind column, and the same Files tree, search, history, pending-edit review and project scopes apply. Markdown-only processing (tags, wiki links) skips these titles.
 
-The main file is `main.tex`; if that is absent, the single top-level `.tex` containing `\documentclass`. A project can pin both the main file and the engine in `.grain-latex.json` (`{"engine":"pdflatex","main":"main.tex"}`).
+A LaTeX project is a Files folder, in Personal or in a Grain project. Its main file is `main.tex`, or the one `.tex` holding `\documentclass`. Subfolders are relative paths for `\input`. A `.tex` outside any such folder is its own one-file project.
 
-Every file route resolves its path inside the project folder and refuses `..`, absolute paths, hidden names and symlinks that point outside. Text reads and writes are capped at 5 MB, uploads at 25 MB.
+Images and other binary files for `\includegraphics` are not docs. They are kept in the extension's data folder (`ext/latex/assets/<project key>/`), listed in the editor's file list, uploaded and removed there. Per-project settings (the engine) are in the extension-owned table `latex_projects`, keyed by the Grain project and the folder path; renaming the folder starts it from the defaults again.
 
-## Grain projects
+## Editor
 
-A document can belong to a Grain project: `project_id` in `.grain-latex.json` (null means none). `POST /latex/projects` takes `{name, project_id?}`, `PATCH /latex/projects/{name}` moves a document, and `GET /latex/projects?project_id=` filters. An unknown project id is refused on write; a project that is later deleted just leaves its documents unlinked, with their files untouched.
+Opening a LaTeX source in Files shows the LaTeX editor instead of the markdown one: the project's files on the left (click to switch), CodeMirror in the middle, the PDF on the right, compile (Cmd+Enter), engine select, a problems list that opens the right file at the right line, and a button to save the PDF. Text saves through the normal doc routes, so autosave, history and conflict handling are the note ones. Assistant edits arrive as pending revisions shown with the usual diff and accept or reject. With the extension off, a `.tex` doc opens as a plain note.
 
-A project's Files column lists its LaTeX documents (name, last change, whether a PDF exists) with a "New LaTeX document" action. Opening one edits it in place with the same editor, PDF preview and problems list as the LaTeX view. The extension fills the `project.files` slot, so it disappears with the view when LaTeX is turned off. The LaTeX view groups its document picker by Grain project and has a control to change a document's project.
+Cmd+I over a LaTeX file gives the page agent the open source, the project's file ids and the last compile's errors, and tells it to revise with `doc_edit` and check with `latex_compile`. "New LaTeX project" is in Files (the + menu, a project's menu and its Files column): it makes a folder with a `main.tex` from a minimal article template.
 
 ## Compile
 
-`latexmk -pdf|-xelatex|-lualatex -interaction=nonstopmode -halt-on-error -file-line-error -synctex=1 -outdir=.grain-build <main>`, run in the project folder with `openout_any=p` and never with shell escape. It times out after 120 s, one compile per project at a time. The result PDF is copied to `<main stem>.pdf` next to the sources. Errors and warnings are parsed from the log into file, line and message. TeX Live (or MacTeX) must be installed; `/Library/TeX/texbin` is added to the PATH.
+`POST /latex/compile {doc_id, engine?}` copies every LaTeX source in the project folder (relative paths from the folder) and its assets into a build folder under the extension data folder, then runs `latexmk -norc -no-shell-escape -pdf|-xelatex|-lualatex -interaction=nonstopmode -halt-on-error -file-line-error -synctex=1 -outdir=.grain-build <main>` there with `openout_any=p`. A project rc file is never read. A doc title that contains a slash, starts with `.` or `-`, or would leave the build folder is refused. It times out after 120 s, one compile per project at a time. `GET /latex/pdf?doc_id=` serves the result. Errors and warnings are parsed from the log into file, line and message, and each error carries the id of the doc it came from. TeX Live (or MacTeX) must be installed; `/Library/TeX/texbin` is added to the PATH.
 
 ## Agent tools
 
-- `latex_projects` lists documents with their folders, main files and Grain project; an optional `project` (id or name) filters.
-- `latex_new` creates a document from the template. `project` (id or name) is optional and defaults to the chat's own project.
-- `latex_compile` compiles and returns errors with file and line, so the agent can fix them with the file tools and compile again.
+- `latex_projects` lists LaTeX project folders with their Grain project and main doc id; an optional `project` filters.
+- `latex_new` makes a folder with a `main.tex`; `project` (id or name) defaults to the chat's project.
+- `latex_compile` takes any file id of the project (or a folder and project) and returns errors with doc id, file and line.
 
-## View
-
-Files on the left, a CodeMirror editor in the middle (saves on Cmd+S and 1.5 s after typing stops; Cmd+Enter compiles), the PDF on the right. Clicking a problem opens its file at that line.
+Edit with the doc tools. `doc_create` with a `.tex` title files a LaTeX source with its body untouched.

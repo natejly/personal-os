@@ -33,8 +33,8 @@ const highlight = HighlightStyle.define([
 ])
 
 export interface EditorProps {
-  /** The file's text when this editor mounts; the parent remounts (key) to switch files. */
-  initial: string
+  /** The file's text. A change that did not come from typing here (an accepted agent edit) replaces the document. */
+  value: string
   onChange: (text: string) => void
   onSave: () => void
   onCompile: () => void
@@ -42,7 +42,7 @@ export interface EditorProps {
   jump?: { line: number; n: number }
 }
 
-export default function Editor({ initial, onChange, onSave, onCompile, jump }: EditorProps): JSX.Element {
+export default function Editor({ value, onChange, onSave, onCompile, jump }: EditorProps): JSX.Element {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
   const cb = useRef({ onChange, onSave, onCompile })
@@ -52,7 +52,7 @@ export default function Editor({ initial, onChange, onSave, onCompile, jump }: E
     const v = new EditorView({
       parent: host.current!,
       state: EditorState.create({
-        doc: initial,
+        doc: value,
         extensions: [
           lineNumbers(), history(), drawSelection(), highlightActiveLine(), bracketMatching(), highlightSelectionMatches(),
           EditorView.lineWrapping, StreamLanguage.define(stex), syntaxHighlighting(highlight), theme, search({ top: true }),
@@ -67,8 +67,15 @@ export default function Editor({ initial, onChange, onSave, onCompile, jump }: E
     })
     view.current = v
     return () => v.destroy()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mounted once per file; the parent remounts with a key
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mounted once per file; the parent remounts with a key, and later changes of `value` sync below
   }, [])
+
+  useEffect(() => {
+    const v = view.current
+    if (!v || v.state.doc.toString() === value) return
+    const at = Math.min(v.state.selection.main.head, value.length)
+    v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value }, selection: { anchor: at } })
+  }, [value])
 
   useEffect(() => {
     const v = view.current

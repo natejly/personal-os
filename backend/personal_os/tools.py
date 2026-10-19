@@ -2383,7 +2383,7 @@ def _register_docs(self: Toolbox) -> None:
         return scrub_strings({"created": d["title"], "doc_id": d["id"], "words": d["words"],
                 "filed_under": (d["folder"] or "the project's root") if d["project_id"] else (d["folder"] or "Personal"),
                 "note": "Created in Files. The user can undo it from the file's revision history."})
-    R("doc_create", ToolSpec("doc_create", "Create a file in Files (markdown, LaTeX as $x$ / $$x$$) for something the user asked you to draft, write up or outline and will keep and edit. Filed under this chat's project, or Personal; `folder` must be a path doc_list has shown.",
+    R("doc_create", ToolSpec("doc_create", "Create a file in Files (markdown, LaTeX as $x$ / $$x$$; a title ending in .tex is a LaTeX source whose body is raw LaTeX) for something the user asked you to draft, write up or outline and will keep and edit. Filed under this chat's project, or Personal; `folder` must be a path doc_list has shown.",
         _obj({"title": {"type": "string"}, "content": {"type": "string", "description": "Markdown body"},
               "folder": {"type": "string", "description": "Folder path in the project tree, e.g. 'Research/2026'"}},
              ["title"]), doc_create, "docs", "writes"))

@@ -5,7 +5,7 @@
  * the same functions under the owner `core`, so a surface reads one list whoever filled it.
  */
 import type { FC, RefObject } from 'react'
-import type { FullDesk, Message, Settings, WidgetKind } from '@shared/types'
+import type { FullDesk, FullDoc, Message, Settings, WidgetKind } from '@shared/types'
 import type { MenuGroup } from '@shared/extensionMenu'
 import { sameChord, shortcutForKeys } from '@shared/shortcuts'
 import type { ModuleDef, ModuleNav } from '../shell/types'
@@ -31,6 +31,13 @@ export interface ViewDef {
   nav?: ModuleNav
   /** The canvas window that shows this view's content; its drag kind is `widget.kind`. */
   widget?: WidgetDef
+}
+
+/** An editor that takes over the Files pane for the docs it matches, in place of the markdown editor. */
+export interface DocEditorDef {
+  id: string
+  match: (doc: { title: string }) => boolean
+  Component: FC<{ doc: FullDoc }>
 }
 
 export interface SettingsPanelDef {
@@ -66,8 +73,8 @@ export interface SlotItems {
    * over the chat whenever the card is listed, collapsed or not, so a window the card opens outlives the card closing.
    */
   'sidepanel.tab': { label: string; Component: FC<SidePanelTabProps>; Overlay?: FC<SidePanelTabProps>; shown?: (p: SidePanelTabProps) => boolean; count?: (p: SidePanelTabProps) => number }
-  /** A block at the top of a Grain project's Files, for what the extension keeps for that project. */
-  'project.files': { Component: FC<{ projectId: string }> }
+  /** A "New …" entry of Files (the + menu, a project's menu, a project's Files); `run` gets the Grain project id, '' for Personal. */
+  'files.new': { label: string; icon: JSX.Element; run: (scope: string) => void }
 }
 export type SlotName = keyof SlotItems
 
@@ -98,6 +105,8 @@ export interface UiApi {
   toolCard(toolName: string, Component: FC<ToolCardProps>, display?: ToolCardDisplay): Disposable
   fenceRenderer(lang: string, Component: FC<FenceRendererProps>): Disposable
   selectionAction(def: SelectionActionDef): Disposable
+  /** An editor for the Files docs `match` accepts, while the extension is on; the first one that matches wins. */
+  docEditor(def: DocEditorDef): Disposable
   /** A canvas window kind, `ext:<id>:<name>` and declared in the manifest's `canvas.widget` slot; offered while the extension is on. */
   widget(def: WidgetDef): Disposable
   /** This extension's slice of the app store, kept across reloads; `ext:<id>:<name>` events from its backend half land in it under `<name>`. */
@@ -143,12 +152,13 @@ export const extensionModules: ModuleDef[] = []
 export const settingsPanels: SettingsPanel[] = []
 const slots: Record<SlotName, unknown[]> = {
   'sidebar.row': [], 'sidebar.section': [], 'composer.toolbar': [], 'message.header': [], 'message.footer': [],
-  'titlebar.left': [], 'titlebar.right': [], 'statusbar.item': [], 'sidepanel.tab': [], 'project.files': []
+  'titlebar.left': [], 'titlebar.right': [], 'statusbar.item': [], 'sidepanel.tab': [], 'files.new': []
 }
 export interface OwnedPaletteCommand extends PaletteCommandDef { extension: string }
 export interface OwnedKeybinding extends KeybindingDef { extension: string }
 export interface OwnedMenuItem extends MenuItemDef { extension: string }
 export interface OwnedSelectionAction extends SelectionActionDef { extension: string }
+const docEditors: (DocEditorDef & { extension: string })[] = []
 export const paletteCommands: OwnedPaletteCommand[] = []
 export const keybindings: OwnedKeybinding[] = []
 export const menuItems: OwnedMenuItem[] = []
@@ -230,6 +240,12 @@ export function registerWidget(owner: string, def: WidgetDef): Disposable {
 export const widgetOn = (settings: Settings, kind: WidgetKind): boolean =>
   ownerOn(settings, extensionModules.find((m) => m.widget?.kind === kind)?.key ?? widgetOwners.get(kind) ?? CORE)
 
+export const registerDocEditor = (owner: string, def: DocEditorDef): Disposable => add(docEditors, { ...def, extension: owner })
+
+/** The editor registered for this doc, when its extension is on. */
+export const docEditorFor = (settings: Settings, doc: { title: string }): (DocEditorDef & { extension: string }) | undefined =>
+  docEditors.find((e) => ownerOn(settings, e.extension) && e.match(doc))
+
 export const fenceRenderer = (lang: string): FC<FenceRendererProps> | undefined => fences.get(lang)?.Component
 
 /**
@@ -260,6 +276,7 @@ export function activateExtension(id: string, ext: ExtensionModule, permissions:
     toolCard: (name, Component, display) => keep(registerToolCard(name, Component, display)),
     fenceRenderer: (lang, Component) => keep(registerFenceRenderer(id, lang, Component)),
     selectionAction: (def) => keep(registerSelectionAction(id, def)),
+    docEditor: (def) => keep(registerDocEditor(id, def)),
     widget: (def) => keep(registerWidget(id, def)),
     store: extStore(id),
     call: (path, init) => req(`/ext/${id}/${path.replace(/^\//, '')}`, init),

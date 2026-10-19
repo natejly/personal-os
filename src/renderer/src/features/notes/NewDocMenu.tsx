@@ -3,6 +3,7 @@ import { CalendarDays, FolderPlus, Plus } from '../../icons'
 import { TEMPLATES, expandTemplate, userTemplates } from './templates'
 import { api } from '../../lib/api'
 import { useStore } from '../../store'
+import { useSlot } from '../../extensions/slot'
 import '../../styles/notes.css'
 import { tip } from '../../lib/tip'
 
@@ -14,6 +15,7 @@ export default function NewDocMenu({ onCreate, onDaily, onFolder }: {
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   const mine = userTemplates(useStore((s) => s.docs))
+  const extra = useSlot('files.new')
   const root = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -54,6 +56,9 @@ export default function NewDocMenu({ onCreate, onDaily, onFolder }: {
           <button role="menuitem" className="notes-menu-row" title={tip("Today's file", 'daily-note')} onClick={() => { setOpen(false); onDaily() }}>
             <CalendarDays size={13} /> Today's file
           </button>
+          {extra.map((i) => (
+            <button key={i.id} role="menuitem" className="notes-menu-row" onClick={() => { setOpen(false); i.run('') }}>{i.icon} {i.label}</button>
+          ))}
           <div className="notes-menu-sep" />
           <div className="notes-menu-label">From template</div>
           {TEMPLATES.filter((t) => t.id !== 'blank').map((t) => (

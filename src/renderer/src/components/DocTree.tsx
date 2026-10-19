@@ -14,6 +14,7 @@ import {
 } from '../lib/docTree'
 import { rowButton } from '../lib/rowButton'
 import { writeDrag } from '../canvas/dnd'
+import { useSlot } from '../extensions/slot'
 
 /**
  * What is being dragged, for the duration of the drag. `dataTransfer` only hands its payload over on
@@ -66,6 +67,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery, section 
   const toggleFolder = useStore((s) => s.toggleFolder)
   const expandTo = useStore((s) => s.expandTo)
   const createDocFolder = useStore((s) => s.createDocFolder)
+  const newItems = useSlot('files.new')
   const renameDocFolder = useStore((s) => s.renameDocFolder)
   const deleteDocFolder = useStore((s) => s.deleteDocFolder)
   const openSettings = useStore((s) => s.openSettings)
@@ -316,6 +318,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery, section 
           <div className="doc-folder-menu" onMouseDown={(e) => e.stopPropagation()}>
             <button onClick={() => { setMenu(null); void createDoc({ project_id: g.scope || null }) }}>New file here</button>
             <button onClick={() => newFolder(g.scope, '')}>New folder…</button>
+            {newItems.map((i) => <button key={i.id} onClick={() => { setMenu(null); i.run(g.scope) }}>{i.label}</button>)}
           </div>
         )}
       </div>

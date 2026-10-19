@@ -204,6 +204,14 @@ def title_from_body(body: str, fallback: str = "Sticky note", limit: int = 60) -
     return fallback
 
 
+# LaTeX sources are docs too: the title's suffix is the type. Markdown-only processing (tags, wiki links) skips them.
+LATEX_SUFFIXES = (".tex", ".bib", ".sty", ".cls")
+
+
+def is_latex_source(title: str | None) -> bool:
+    return (title or "").strip().lower().endswith(LATEX_SUFFIXES)
+
+
 # The folder daily notes live in (personal tree), and the shape of a wiki link: [[Title]] or [[Title|alias]].
 DAILY_FOLDER = "Daily"
 _DASHBOARD_BODY = re.compile(r'^\s*\{\s*"grainDashboard"\s*:\s*1\b')  # saved-dashboard envelope; saved_dashboards.py writes the marker first
@@ -379,7 +387,7 @@ class Docs:
         c.execute("DELETE FROM docs_fts WHERE doc_id=?", (doc_id,))
         c.execute("INSERT INTO docs_fts(title, content, doc_id) VALUES(?,?,?)", (title, content, doc_id))
         c.execute("DELETE FROM doc_tags WHERE doc_id=?", (doc_id,))
-        c.executemany("INSERT INTO doc_tags(doc_id, tag) VALUES(?,?)", [(doc_id, t) for t in extract_tags(content)])
+        c.executemany("INSERT INTO doc_tags(doc_id, tag) VALUES(?,?)", [(doc_id, t) for t in ([] if is_latex_source(title) else extract_tags(content))])
         self._index_chunks(c, doc_id, title, content)
 
     def _index_chunks(self, c: Any, doc_id: str, title: str, content: str) -> bool:
@@ -495,7 +503,7 @@ class Docs:
                 "SELECT * FROM doc_revisions WHERE doc_id=? AND status='pending' ORDER BY created_at", (id,)).fetchall()]
         _parse_typography(d)
         d["words"] = word_count(d["content"])
-        d["tags"] = sorted(extract_tags(d["content"]))  # as list() reports them, so a saved doc can patch its row
+        d["tags"] = [] if is_latex_source(d["title"]) else sorted(extract_tags(d["content"]))  # as list() reports them, so a saved doc can patch its row
         d["pending"] = [self._rev_view(r, d["content"]) for r in pending]  # type: ignore[arg-type]
         return d
 
@@ -731,6 +739,8 @@ class Docs:
                 (id, "%\\[[%")).fetchall()
         out: list[dict[str, Any]] = []
         for r in rows:
+            if is_latex_source(r["title"]):
+                continue  # `[[` in LaTeX is not a link
             line = _link_line(r["content"], want)
             if line is not None:
                 out.append({"id": r["id"], "title": r["title"], "folder": r["folder"], "project_id": r["project_id"],

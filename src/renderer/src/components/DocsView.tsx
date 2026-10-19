@@ -38,6 +38,7 @@ import ArtifactsView from './ArtifactsView'
 import ScopeSelect from './ScopeSelect'
 import SidebarToggle from './SidebarToggle'
 import { tip } from '../lib/tip'
+import { docEditorFor } from '../extensions/host'
 
 const PANEL_KEY = 'grain.docs.panel'
 const readPanel = (): PanelState => {
@@ -89,6 +90,9 @@ export default function DocsView(): JSX.Element {
   const setLibraryScope = useStore((s) => s.setLibraryScope)
   const { refreshDocs, openDoc, createDoc, editDoc, editDocTitle, flushDoc, setDocMode, acceptRevision, rejectRevision, restoreRevision, openDailyNote, setDocTypography } = useStore(useShallow((s) => ({ refreshDocs: s.refreshDocs, openDoc: s.openDoc, createDoc: s.createDoc, editDoc: s.editDoc, editDocTitle: s.editDocTitle, flushDoc: s.flushDoc, setDocMode: s.setDocMode, acceptRevision: s.acceptRevision, rejectRevision: s.rejectRevision, restoreRevision: s.restoreRevision, openDailyNote: s.openDailyNote, setDocTypography: s.setDocTypography })))
   const globalType = useStore((s) => s.settings.docTypography)
+  const settings = useStore((s) => s.settings)
+  // An extension's editor (LaTeX) takes the pane over for the docs it matches, along with the page context and the side panel.
+  const custom = activeDoc ? docEditorFor(settings, activeDoc) : undefined
 
   const [query, setQuery] = useState('')
   // One tabbed panel in the right-hand column (Outline, Comments, Links, History).
@@ -277,7 +281,7 @@ export default function DocsView(): JSX.Element {
   }
 
   // ⌘I over a doc answers about that doc: the text as it stands in the editor, unsaved edits and all.
-  usePageContext(() => (activeDoc
+  usePageContext(() => (custom ? undefined : activeDoc
     ? {
         view: 'docs',
         label: `File “${oneLine(activeDoc.title || 'Untitled', 80)}”`,
@@ -291,7 +295,7 @@ export default function DocsView(): JSX.Element {
         detail: `No file is open. Files are grouped by project — Personal plus one folder per project. The list shows:\n${lines(docs, (d) => `“${d.title || 'Untitled'}” (\`${d.id}\`)${d.project_id ? ` in project ${d.project_id}` : ' in Personal'}${d.folder ? `/${d.folder}` : ''}`)}`,
         refs: docs.slice(0, 40).map((d) => ({ kind: 'doc', id: d.id, name: d.title })),
         hints: ['What have I been writing about?', 'Start a file for this week’s plan']
-      }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, projectName, body, dirty, docs, comments.openCount])
+      }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, projectName, body, dirty, docs, comments.openCount, custom])
 
   return (
     <main className="page docs-page">
@@ -318,12 +322,13 @@ export default function DocsView(): JSX.Element {
             <ResizeHandle id="docs-tree-w" defaultSize={240} min={170} max={480} grows="right" onCollapse={() => setTreeOpen(false)} label="File tree width" className="docs-tree-edge" />
           </>
         )}
-        {section === 'notes' && activeDoc && panelOpen && !showDash && (
+        {section === 'notes' && activeDoc && panelOpen && !showDash && !custom && (
           <ResizeHandle id="docs-history-w" defaultSize={380} min={280} max={720} grows="left" onCollapse={() => setPanel({ ...panel, open: false })} label="Side panel width" className="docs-history-edge" />
         )}
 
         {section === 'uploads' ? <section className="docs-main"><DocumentsView embedded /></section>
           : section === 'artifacts' ? <section className="docs-main"><ArtifactsView /></section>
+          : custom && activeDoc ? <section className="docs-main"><custom.Component key={activeDoc.id} doc={activeDoc} /></section>
           : !activeDoc ? (
           <section className="empty-state">
             <FileText size={28} />
@@ -440,7 +445,7 @@ export default function DocsView(): JSX.Element {
           </section>
         )}
 
-        {section === 'notes' && activeDoc && panelOpen && !showDash && (
+        {section === 'notes' && activeDoc && panelOpen && !showDash && !custom && (
           <aside className="docs-history">
             <header className="docs-panel-tabs" role="tablist">
               {PANEL_TABS.map((t) => (

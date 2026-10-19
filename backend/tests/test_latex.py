@@ -1,15 +1,19 @@
-"""LaTeX extension: log parser, path guard, and a real latexmk compile (skipped when TeX is missing)."""
+"""LaTeX extension: log parser, projects as Files folders, assets, markdown helpers, and real latexmk compiles
+(skipped when TeX is missing). Run: cd backend && PYTHONPATH=. .venv/bin/python tests/test_latex.py"""
 from __future__ import annotations
 
 import asyncio
-import os
 import tempfile
 import unittest
 from pathlib import Path
 
+from personal_os.db import Database
+from personal_os.docs import Docs, is_latex_source
 from personal_os.extensions.latex import extension as lx
 
 HAVE_TEX = lx.shutil.which("latexmk", path=lx.tex_env()["PATH"]) is not None
+MIGRATION = Path(lx.__file__).parent / "migrations" / "0001_projects.sql"
+BROKEN = "\\documentclass{article}\n\\begin{document}\nhello\n\\nonsense\n\\end{document}\n"
 
 
 class ParseLogTests(unittest.TestCase):
@@ -28,8 +32,7 @@ class ParseLogTests(unittest.TestCase):
         log = ("LaTeX Warning: Reference `a' on page 1 undefined on input line 7.\n"
                "LaTeX Warning: Label `b' multiply\n defined on input line 9.\n"
                "Overfull \\hbox (3.0pt too wide) in paragraph at lines 20--22\n")
-        w = lx.parse_log(log)["warnings"]
-        self.assertEqual([x["line"] for x in w], [7, 9, 20])
+        self.assertEqual([x["line"] for x in lx.parse_log(log)["warnings"]], [7, 9, 20])
 
     def test_duplicates_and_cap(self) -> None:
         log = "a.tex:1: Boom.\n" * 3 + "".join(f"Overfull \\hbox (1pt) in paragraph at lines {i}--{i}\n" for i in range(80))
@@ -42,94 +45,151 @@ class ProjectTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        os.environ["GRAIN_LATEX_DIR"] = str(Path(self.tmp.name) / "LaTeX")
-        self.addCleanup(os.environ.pop, "GRAIN_LATEX_DIR", None)
+        self.db = Database(Path(self.tmp.name) / "data")
+        with self.db.tx() as c:
+            c.executescript(MIGRATION.read_text())
+            c.execute("INSERT INTO projects(id, name, created_at) VALUES('p1', 'Thesis', 0)")
+        self.docs = Docs(self.db)
+        self.names = {"p1": "Thesis"}
+        self.lx = lx.Latex(self.docs, self.db, Path(self.tmp.name) / "ext", lambda: self.names)
 
-    def test_create_and_list(self) -> None:
-        p = lx.create_project("thesis")
-        self.assertEqual((p["main"], p["has_pdf"]), ("main.tex", False))
-        self.assertIn("\\documentclass{article}", (Path(p["path"]) / "main.tex").read_text())
-        self.assertEqual([x["name"] for x in lx.list_projects()], ["thesis"])
+    def doc(self, title: str, content: str = "x", folder: str = "", project: str | None = None) -> dict:
+        return self.docs.create(title, content, project, folder)
+
+    def test_create_makes_a_folder_with_main_tex(self) -> None:
+        p = self.lx.create("thesis", "Thesis")  # a Grain project by name
+        self.assertEqual((p["folder"], p["main"], p["project_id"], p["project"]), ("thesis", "main.tex", "p1", "Thesis"))
+        self.assertIn("\\documentclass{article}", self.docs.get(p["main_doc_id"])["content"])
+        self.assertEqual(self.docs.get(p["main_doc_id"])["project_id"], "p1")
+        self.assertEqual(self.lx.create("thesis", "p1")["folder"], "thesis 2")  # a unique folder
+        self.assertEqual(self.lx.create("loose")["project_id"], None)
+        self.assertEqual([x["folder"] for x in self.lx.list_projects("Thesis")], ["thesis", "thesis 2"])
+        self.assertEqual(len(self.lx.list_projects()), 3)
+        for bad in ("a/b", "", ".."):
+            with self.assertRaises(lx.LatexError, msg=bad):
+                self.lx.create(bad)
         with self.assertRaises(lx.LatexError):
-            lx.create_project("thesis")
+            self.lx.create("x", "nope")  # an unknown Grain project
 
-    def test_bad_names(self) -> None:
-        for bad in ("", ".hidden", "a/b", "..", "x" * 65):
+    def test_main_is_main_tex_or_the_one_documentclass(self) -> None:
+        a = self.doc("paper.tex", "\\documentclass{article}", "A")
+        self.doc("intro.tex", "no class here", "A")
+        self.assertEqual(self.lx.project_for(a["id"])["main"], "paper.tex")
+        self.doc("other.tex", "\\documentclass{book}", "A")  # two candidates: no project, and a .tex alone is its own
+        self.assertEqual(self.lx.project_for(a["id"])["main_doc_id"], a["id"])
+
+    def test_subfolder_files_resolve_to_the_project_and_get_relative_paths(self) -> None:
+        p = self.lx.create("book")
+        ch = self.doc("one.tex", "chapter", "book/chapters")
+        bib = self.doc("refs.bib", "@book{}", "book")
+        self.assertEqual(self.lx.project_for(ch["id"])["folder"], "book")
+        self.assertEqual({f["path"] for f in self.lx.context(ch["id"])["files"]}, {"main.tex", "chapters/one.tex", "refs.bib"})
+        self.assertEqual(self.lx.project_for(bib["id"])["main_doc_id"], p["main_doc_id"])
+        with self.assertRaises(lx.LatexError):
+            self.lx.project_for(self.doc("note.md")["id"])
+        with self.assertRaises(lx.LatexError):
+            self.lx.project_for(self.doc("x.bib", "", "empty")["id"])
+
+    def test_materialize_writes_docs_and_assets_with_relative_paths(self) -> None:
+        p = self.lx.create("book")
+        self.doc("one.tex", "chapter", "book/chapters")
+        self.doc("elsewhere.tex", "no", "other")
+        self.lx.put_asset("", "book", "img/fig.png", b"png")
+        build, ids = self.lx.materialize(p)
+        self.assertEqual(sorted(ids), ["chapters/one.tex", "main.tex"])
+        self.assertEqual((build / "chapters" / "one.tex").read_text(), "chapter")
+        self.assertEqual((build / "img" / "fig.png").read_bytes(), b"png")
+        self.assertFalse((build / "elsewhere.tex").exists())
+        self.docs.delete(ids["chapters/one.tex"])
+        self.lx.materialize(p)
+        self.assertFalse((build / "chapters" / "one.tex").exists())  # a deleted doc leaves the build folder
+
+    def test_titles_that_escape_or_look_like_options_are_refused(self) -> None:
+        p = self.lx.create("book")
+        for bad in ("../evil.tex", "a/b.tex", "-x.tex", ".hid.tex", "a\\b.tex"):
+            d = self.doc(bad, "x", "book")
             with self.assertRaises(lx.LatexError, msg=bad):
-                lx.create_project(bad)
+                self.lx.materialize(p)
+            self.docs.delete(d["id"])
+        self.doc("fine.tex", "x", "book")
+        self.lx.materialize(p)
+        for bad in ("-main.tex", "../main.tex"):
+            with self.assertRaises(lx.LatexError):
+                lx.safe_name(bad)
 
-    def test_path_guard(self) -> None:
-        proj = lx.project_dir(lx.create_project("p")["name"])
-        outside = Path(self.tmp.name) / "secret.txt"
+    def test_asset_path_guard(self) -> None:
+        for bad in ("../x.png", "a/../../x.png", "/etc/passwd", "", ".hid.png", "-x.png"):
+            with self.assertRaises(lx.LatexError, msg=bad):
+                self.lx.put_asset("", "book", bad, b"x")
+        self.lx.put_asset("", "book", "ok/a.png", b"x")
+        self.assertEqual(self.lx.assets("", "book"), [{"path": "ok/a.png", "size": 1}])
+        outside = Path(self.tmp.name) / "secret"
         outside.write_text("s")
-        (proj / "link").symlink_to(outside)
-        for bad in ("../secret.txt", "a/../../x", "/etc/passwd", "", ".grain-latex.json", ".grain-build/x", "link"):
-            with self.assertRaises(lx.LatexError, msg=bad):
-                lx.safe_path(proj, bad)
-        self.assertEqual(lx.safe_path(proj, "sub/ok.tex"), proj / "sub" / "ok.tex")
+        (self.lx.asset_dir("", "book") / "link").symlink_to(outside.parent)
+        with self.assertRaises(lx.LatexError):
+            self.lx.put_asset("", "book", "link/pwn.txt", b"x")
+        self.assertFalse((outside.parent / "pwn.txt").exists())
+        self.lx.delete_asset("", "book", "ok/a.png")
+        self.assertNotIn("ok/a.png", [a["path"] for a in self.lx.assets("", "book")])
 
-    def test_file_list_skips_artefacts(self) -> None:
-        proj = lx.project_dir(lx.create_project("p")["name"])
-        for f in ("main.aux", "main.log", "refs.bib", "fig.png"):
-            (proj / f).write_text("x")
-        (proj / lx.BUILD_DIR).mkdir()
-        (proj / lx.BUILD_DIR / "main.pdf").write_text("x")
-        got = {f["path"]: f["kind"] for f in lx.list_files(proj)}
-        self.assertEqual(got, {"main.tex": "tex", "refs.bib": "bib", "fig.png": "image"})
+    def test_engine_setting(self) -> None:
+        p = self.lx.create("book")
+        self.assertEqual(p["engine"], "pdflatex")
+        self.lx.set_engine("", "book", "xelatex")
+        self.assertEqual(self.lx.engine_of("", "book"), "xelatex")
+        with self.assertRaises(lx.LatexError):
+            self.lx.set_engine("", "book", "perl")
 
-    def test_grain_project_link_filter_patch(self) -> None:
-        live = {"p1": "Thesis", "p2": "Work"}
-        old = lx.grain_projects
-        lx.grain_projects = lambda: live
-        self.addCleanup(setattr, lx, "grain_projects", old)
-        a = lx.create_project("a", "p1")
-        b = lx.create_project("b", "work")  # a name resolves to its id
-        c = lx.create_project("c")
-        self.assertEqual((a["project_id"], a["project"], b["project_id"], c["project_id"]), ("p1", "Thesis", "p2", None))
-        self.assertEqual([p["name"] for p in lx.list_projects("p1")], ["a"])
-        self.assertEqual(len(lx.list_projects()), 3)
-        self.assertEqual(lx.set_project("c", "p1")["project_id"], "p1")
-        self.assertIsNone(lx.set_project("c", None)["project_id"])
-        for bad in ("nope", "p9"):
-            with self.assertRaises(lx.LatexError):
-                lx.create_project("d", bad)
-            with self.assertRaises(lx.LatexError):
-                lx.set_project("a", bad)
-        self.assertFalse((Path(lx.root_dir()) / "d").exists())
-        del live["p1"]  # the Grain project is deleted: the document stays, unlinked
-        self.assertIsNone(lx.describe(lx.project_dir("a"))["project_id"])
-        self.assertTrue((lx.project_dir("a") / "main.tex").is_file())
+    def test_markdown_processing_skips_latex_sources(self) -> None:
+        self.assertTrue(all(is_latex_source(t) for t in ("a.tex", "A.BIB", "x.sty", "y.cls")))
+        self.assertFalse(is_latex_source("notes.md") or is_latex_source("tex") or is_latex_source(None))
+        tex = self.doc("t.tex", "see #todo and [[Target]]")
+        self.assertEqual(self.docs.get(tex["id"])["tags"], [])
+        note = self.doc("n.md", "see #todo")
+        self.assertEqual(self.docs.get(note["id"])["tags"], ["todo"])
+        target = self.doc("Target")
+        self.assertEqual(self.docs.backlinks(target["id"]), [])
+        self.doc("linker.md", "[[Target]]")
+        self.assertEqual([b["title"] for b in self.docs.backlinks(target["id"])], ["linker.md"])
+        self.assertEqual(self.docs.get(tex["id"])["title"], "t.tex")  # no suffix appended or stripped
 
-    def test_odd_main_files_fall_back(self) -> None:
-        proj = lx.project_dir(lx.create_project("p")["name"])
-        (proj.parent / "x.tex").write_text("x")
-        (proj / "-x.tex").write_text("\\documentclass{article}")
-        for bad in ("../x.tex", "-x.tex", "/etc/passwd", "main.txt", ".hidden.tex"):
-            lx.write_settings(proj, {"main": bad})
-            self.assertEqual(lx.main_file(proj), "main.tex", bad)
-        (proj / "main.tex").unlink()
-        self.assertEqual(lx.main_file(proj), "main.tex")  # the "-" file is not picked by the \documentclass fallback
+    @unittest.skipUnless(HAVE_TEX, "latexmk is not installed")
+    def test_compile_ok_and_error_maps_to_the_doc(self) -> None:
+        p = self.lx.create("book")
+        res = asyncio.run(self.lx.compile(p))
+        self.assertTrue(res["ok"], res)
+        self.assertTrue((self.lx.pdf_path(p)).read_bytes().startswith(b"%PDF"))
+        ch = self.doc("one.tex", "\\nonsense\n", "book/chapters")
+        main = self.docs.get(p["main_doc_id"])
+        self.docs.save(main["id"], main["content"].replace("Write here.", "\\input{chapters/one}"))
+        bad = asyncio.run(self.lx.compile(self.lx.project_for(main["id"])))
+        self.assertFalse(bad["ok"])
+        e = bad["errors"][0]
+        self.assertEqual((e["file"], e["line"], e["doc_id"]), ("chapters/one.tex", 1, ch["id"]))
+        self.assertIn("Undefined control sequence", e["message"])
 
     @unittest.skipUnless(HAVE_TEX, "latexmk is not installed")
     def test_compile_ignores_rc_files(self) -> None:
-        proj = lx.project_dir(lx.create_project("rc")["name"])
-        for rc in ("latexmkrc", ".latexmkrc"):
-            (proj / rc).write_text('system("touch marker");\n')
-        self.assertTrue(asyncio.run(lx.compile_project("rc"))["ok"])
-        self.assertFalse((proj / "marker").exists())
+        p = self.lx.create("rc")
+        self.lx.put_asset("", "rc", "latexmkrc", b'system("touch marker");\n')  # an upload can land in the build folder under any plain name
+        self.assertTrue(asyncio.run(self.lx.compile(p))["ok"])
+        build = self.lx.build_dir("", "rc")
+        self.assertTrue((build / "latexmkrc").exists())
+        self.assertFalse((build / "marker").exists())
 
     @unittest.skipUnless(HAVE_TEX, "latexmk is not installed")
-    def test_compile_ok_and_broken(self) -> None:
-        lx.create_project("doc")
-        res = asyncio.run(lx.compile_project("doc"))
-        self.assertTrue(res["ok"], res)
-        proj = lx.project_dir("doc")
-        self.assertTrue((proj / "main.pdf").read_bytes().startswith(b"%PDF"))
-        (proj / "main.tex").write_text("\\documentclass{article}\n\\begin{document}\nhello\n\\nonsense\n\\end{document}\n")
-        bad = asyncio.run(lx.compile_project("doc"))
-        self.assertFalse(bad["ok"])
-        self.assertEqual((bad["errors"][0]["file"], bad["errors"][0]["line"]), ("main.tex", 4))
-        self.assertIn("Undefined control sequence", bad["errors"][0]["message"])
+    def test_latexmk_is_run_with_norc(self) -> None:
+        seen: list[tuple[str, ...]] = []
+        real = asyncio.create_subprocess_exec
+
+        async def spy(*cmd, **kw):  # noqa: ANN002, ANN003
+            seen.append(cmd)
+            return await real(*cmd, **kw)
+
+        lx.asyncio.create_subprocess_exec = spy  # type: ignore[assignment]
+        self.addCleanup(setattr, lx.asyncio, "create_subprocess_exec", real)
+        asyncio.run(self.lx.compile(self.lx.create("flags")))
+        self.assertTrue({"-norc", "-no-shell-escape"} <= set(seen[0]))
 
 
 if __name__ == "__main__":

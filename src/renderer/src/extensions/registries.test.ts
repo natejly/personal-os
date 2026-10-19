@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { FullDesk, Message, Profile } from '@shared/types'
 import { useStore } from '../store'
 import {
-  activateExtension, fenceRenderer, keybindings, paletteCommands, registerSlot, selectionActions, slotItems, WIDGETS, widgetOn, type UiApi
+  activateExtension, docEditorFor, fenceRenderer, keybindings, paletteCommands, registerSlot, selectionActions, slotItems, WIDGETS, widgetOn, type UiApi
 } from './host'
 import { Slot } from './slot'
 import { extStore } from './events'
@@ -47,7 +47,7 @@ test('the shell registers its own items in the slots', () => {
   assert.deepEqual(ids('composer.toolbar'), ['mic'])
   assert.deepEqual(ids('message.footer'), ['model-tag', 'runtime', 'trace'])
   assert.deepEqual(ids('sidepanel.tab'), ['context', 'files', 'changes', 'review', 'traces', 'terminal'])  // the last is the coding extension's
-  assert.deepEqual(ids('sidebar.row'), ['todos', 'calendar', 'mail', 'health', 'ext:latex', 'library', 'jobs'])
+  assert.deepEqual(ids('sidebar.row'), ['todos', 'calendar', 'mail', 'health', 'library', 'jobs'])
 })
 
 test('a slot renders its items in order, and skips one whose extension is off or whose `when` is false', () => {
@@ -202,6 +202,16 @@ test('ui.view.opened reaches subscribers; ui.message.display rewrites only the s
   useStore.setState({ settings: { ...useStore.getState().settings, hiddenViews: [] } })
   gone()
   assert.equal(displayText(message, 'hello'), 'hello')
+})
+
+test('an extension doc editor takes the docs it matches while the extension is on', () => {
+  const gone = withExtension('editordemo', (ui) => ui.docEditor({ id: 'e', match: (d) => d.title.endsWith('.demo'), Component }))
+  const settings = useStore.getState().settings
+  assert.equal(docEditorFor(settings, { title: 'a.demo' })?.extension, 'editordemo')
+  assert.equal(docEditorFor(settings, { title: 'notes.md' }), undefined)
+  assert.equal(docEditorFor({ ...settings, hiddenViews: ['editordemo'] }, { title: 'a.demo' }), undefined)
+  gone()
+  assert.equal(docEditorFor(settings, { title: 'a.demo' }), undefined)
 })
 
 test('an extension side-panel tab shows in the workspace panel while its `shown` holds', () => {

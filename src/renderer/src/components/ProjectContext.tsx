@@ -5,7 +5,7 @@ import { useStore } from '../store'
 import { groupByChat, groupByKind, projectFilter, type ChatFile } from '../lib/chatFiles'
 import { chatFilesApi } from '../lib/useChatFiles'
 import { ChatFileRow } from './ChatFilesPanel'
-import { Slot } from '../extensions/slot'
+import { useSlot } from '../extensions/slot'
 import './chatFiles.css'
 
 /**
@@ -18,6 +18,7 @@ export default function ProjectContext({ projectId }: { projectId: string }): JS
   const docs = useStore((s) => s.docs)
   const documents = useStore((s) => s.documents)
   const { uploadDocuments, pinDocument, selectChat } = useStore(useShallow((s) => ({ uploadDocuments: s.uploadDocuments, pinDocument: s.pinDocument, selectChat: s.selectChat })))
+  const newItems = useSlot('files.new')
   const [files, setFiles] = useState<ChatFile[] | null>(null)
   const [cursor, setCursor] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -60,7 +61,11 @@ export default function ProjectContext({ projectId }: { projectId: string }): JS
       onDragOver={(e) => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
       onDrop={(e) => { e.preventDefault(); setDrag(false); upload(e.dataTransfer.files) }}>
       <input id="doc-upload-input-project" ref={fileRef} type="file" multiple hidden onChange={(e) => { upload(e.target.files); e.target.value = '' }} />
-      <Slot name="project.files" props={{ projectId }} />
+      {newItems.length > 0 && (
+        <div className="pf-bar">
+          {newItems.map((i) => <button key={i.id} className="ghost-btn" onClick={() => i.run(projectId)}>{i.icon} {i.label}</button>)}
+        </div>
+      )}
       {problem && <p className="empty-hint" role="alert">{problem}</p>}
       {!problem && files === null && <p className="empty-hint">Loading…</p>}
       {files?.length === 0 && (

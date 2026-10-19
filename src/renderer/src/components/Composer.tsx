@@ -100,15 +100,18 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     return () => { clearTimeout(t); host.removeAttribute('data-typing') }
   }, [text])
 
-  // The '/' menu: built-ins (lib/slashCommands.ts) beside the saved commands, read once per mount. Picking one
+  // The '/' menu: built-ins (lib/slashCommands.ts) beside the saved commands (read once per mount; the extensions' commands each time the menu opens, since enabling one changes them). Picking one
   // types `/name `; a built-in the UI handles runs on send, the rest the backend fills when the turn goes to the
   // model (commands.expand), so nothing runs until the user sends.
   const [commands, setCommands] = useState<Command[]>([])
   const [registered, setRegistered] = useState<ExtensionCommand[]>([])
   useEffect(() => {
     api.commands.list().then(setCommands).catch(() => undefined)
-    api.commands.registered().then(setRegistered).catch(() => undefined)
   }, [])
+  const slashOpen = text.startsWith('/')
+  useEffect(() => {
+    if (slashOpen) api.commands.registered().then(setRegistered).catch(() => undefined)
+  }, [slashOpen])
   const skills = useStore((s) => s.skills)
   const [slashActive, setSlashActive] = useState(0)
   const [slashClosedAt, setSlashClosedAt] = useState<string | null>(null) // Esc hides the menu until the text changes

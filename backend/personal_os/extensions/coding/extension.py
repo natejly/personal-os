@@ -107,8 +107,8 @@ class Coding:
 
     def _finished(self, row: dict[str, Any]) -> None:
         """A coding session settled: the chat that started it is owed a wake turn. Sessions started by an unattended run
-        with no chat have nobody to tell."""
-        if cid := row.get("conversation_id"):
+        with no chat have nobody to tell. A recipe run's session is not reported alone: the run wakes the chat once verify has run."""
+        if (cid := row.get("conversation_id")) and not row.get("recipe_run_id"):
             self.api.app.owe_wake(cid, *build_coding_wake(row))
 
     # ---- the repo-write refusal ----

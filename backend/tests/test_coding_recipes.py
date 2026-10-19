@@ -379,6 +379,13 @@ def test_a_restart_in_the_middle_picks_the_run_up_from_the_saved_rows(rig):
     assert again.get_run(out["run_id"])["status"] == "passed"
 
 
+def test_a_recipe_runs_session_does_not_wake_the_chat_before_verify(rig):
+    rig.recipes.save(rig.body(), "user")
+    out = rig.run()
+    rig.coding._finished(rig.coding.sessions.get(out["session_id"]))
+    assert not [e for e in rig.events if e[0] == "wake"]
+
+
 def test_a_chat_is_told_when_its_run_ends_and_a_palette_run_is_not(rig):
     rig.recipes.save(rig.body(max_retries=0), "user")
     finish(rig, rig.run(), 1)

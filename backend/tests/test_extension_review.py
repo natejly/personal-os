@@ -410,9 +410,8 @@ def test_disabling_an_installed_profile_puts_back_the_defaults_it_applied() -> N
         "contributes": {"defaults": {"effort": "low"}}}), "utf-8")
     before = appmod.settings()
     propose("rl-look")
-    assert accept("rl-look").status_code == 200 and enable("rl-look").status_code == 200
-    assert client.post("/profiles/rl-look/enable").status_code == 200
-    assert appmod.settings()["defaultEffort"] == "low"
+    assert accept("rl-look").status_code == 200 and enable("rl-look").status_code == 200  # the Review enable is the profile's switch
+    assert installed("rl-look")["enabled"] is True and appmod.settings()["defaultEffort"] == "low"
     assert client.post("/extensions/rl-look/disable").status_code == 200
     after = appmod.settings()
     assert after["defaultEffort"] == before["defaultEffort"]

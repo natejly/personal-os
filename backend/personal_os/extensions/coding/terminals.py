@@ -426,7 +426,8 @@ class Terminals:
         reply = await self._fetch(row, mode == "screen", self.cursors.get(terminal_id, 0) if cursor is None else int(cursor))
         raw = reply.get("screen") if mode == "screen" else reply.get("text")
         text, cut = tail(clean_output(str(raw or ""), cfg), cap)
-        self.cursors[terminal_id] = int(reply["cursor"])
+        if mode != "screen":
+            self.cursors[terminal_id] = int(reply["cursor"])  # a screen read is a look, not a read: what scrolled off it is still unread
         out = {"text": text, "cursor": int(reply["cursor"]), "dropped": cut, "truncated": cut > 0, "exited": bool(reply.get("exited")),
                "exit_code": reply.get("exit_code"), "user_attached": bool(row["user_attached"])}
         if reply.get("from_cursor_lost"):

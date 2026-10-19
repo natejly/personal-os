@@ -345,6 +345,15 @@ def test_screen_mode_reads_the_screen_not_the_stream(tmp_path, monkeypatch):
     assert call(tb, "terminal_read", ctx_of(cfg), terminal_id=tid, mode="screen")["text"] == "$ "
 
 
+def test_a_screen_read_leaves_the_unread_output_for_the_next_read(tmp_path, monkeypatch):
+    tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
+    ctx = ctx_of(cfg)
+    tid = opened(tb, ctx, str(home / "work"))
+    hub.feed(tid, "BUILD OK\r\n$ ")
+    call(tb, "terminal_read", ctx, terminal_id=tid, mode="screen")
+    assert "BUILD OK" in call(tb, "terminal_read", ctx, terminal_id=tid)["text"]
+
+
 def test_an_exited_terminal_stays_readable_until_it_is_closed(tmp_path, monkeypatch):
     tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
     tid = opened(tb, ctx_of(cfg), str(home / "work"))

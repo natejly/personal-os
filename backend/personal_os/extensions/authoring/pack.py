@@ -50,6 +50,8 @@ def pack(root: Path) -> Path:
         subprocess.run([esbuild(), "extension.tsx", "--bundle", "--format=esm", "--platform=browser", "--jsx=automatic",
                         *(f"--external:{m}" for m in SHARED), f"--outfile={BUNDLE}", "--log-level=warning"],
                        cwd=root, check=True, capture_output=True, text=True)
+    else:
+        (root / BUNDLE).unlink(missing_ok=True)  # a bundle left from a removed extension.tsx would be pinned and shipped
     files = content_hash(root)
     lock = root / LOCK
     lock.write_text(json.dumps({"id": manifest.id, "version": manifest.version, "hash": digest(files), "declared": declared(manifest), "files": files}, indent=2) + "\n", "utf-8")

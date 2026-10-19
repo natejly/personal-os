@@ -149,6 +149,7 @@ def _code(root: Path, manifest: Manifest) -> list[Finding]:
     subscribed: set[str] = set()
     specs: list[dict[str, str | None]] = []
     uses_context = dynamic = False
+    needed: set[str] = set()
     provides_loop = any(e["slot"] == "agent.loop" for e in manifest.contributes.get("runtime", ()))
     for path in _python_files(root):
         rel = path.relative_to(root)
@@ -163,6 +164,9 @@ def _code(root: Path, manifest: Manifest) -> list[Finding]:
         for call in (n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and _is_api(n.func.value)):
             if call.func.attr == "context":
                 uses_context = True
+                slot = next((_literal(k.value) for k in call.keywords if k.arg == "slot"), None)
+                if slot:
+                    needed.add("context:volatile" if slot == "volatile" else "prompt:inject")
             elif call.func.attr == "on":
                 if call.args and isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str):
                     subscribed.add(call.args[0].value)
@@ -179,6 +183,8 @@ def _code(root: Path, manifest: Manifest) -> list[Finding]:
             out.append(Finding("error", "undeclared-hook", f"api.on({hook!r}) but extension.json does not declare it under hooks"))
     if uses_context and "context.contribute" not in manifest.hooks:
         out.append(Finding("error", "undeclared-hook", "api.context(...) needs extension.json to declare the context.contribute hook"))
+    out += [Finding("error", "undeclared-permission", f"api.context(...) with this slot needs extension.json to declare the permission {p!r}")
+            for p in sorted(needed - set(manifest.permissions))]
     if dynamic:
         out.append(Finding("warn", "dynamic-hook", "an api.on call names its hook with something other than a string literal, so it cannot be checked"))
     else:

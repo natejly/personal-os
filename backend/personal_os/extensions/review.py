@@ -13,7 +13,7 @@ from .drafts import Drafts, DraftError
 
 if TYPE_CHECKING:
     from ..tools import Toolbox
-    from .host import ExtensionContext, ExtensionHost
+    from .host import ExtensionContext, ExtensionHost, ExtensionScope
 
 log = logging.getLogger(__name__)
 
@@ -39,9 +39,10 @@ class Review:
     def _hide(self, ext_id: str, hidden: bool) -> None:
         set_hidden_view(self.host, self.ctx, ext_id, hidden)
 
-    async def _load(self, ext_id: str) -> None:
+    async def _load(self, ext_id: str) -> ExtensionScope:
         scope = await self.host.load_dev(self.drafts.installed / ext_id, self.ctx, first_load=False)
         await adopt(self.host, self.toolbox(), scope)
+        return scope
 
     async def stand_down(self, ext_id: str) -> None:
         """Disable and unload, so that it cannot come back except through `enable`."""
@@ -59,8 +60,13 @@ class Review:
         if ext_id in self.host.extensions:
             return
         self.drafts.approve(ext_id, grants)
-        await self._load(ext_id)  # still in hiddenViews: loaded disabled
+        scope = await self._load(ext_id)  # still in hiddenViews: loaded disabled
         self._hide(ext_id, False)
+        if scope.manifest.kind == "profile":  # a profile is on when its defaults are applied, not when it leaves hiddenViews
+            before = self.ctx.db.get_settings()
+            scope.defaults.apply(scope.manifest)
+            self.host._settings_changed(before, self.ctx.db.get_settings())
+            self.host.refresh_enabled()
 
     async def load_installed(self) -> None:
         """At startup: load what the user enabled. One whose files changed, or that fails to load, is disabled instead."""

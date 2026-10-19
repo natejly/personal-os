@@ -199,6 +199,11 @@ def test_check_context_needs_the_context_contribute_hook(ext: Path) -> None:
     assert errors(ext) == ["undeclared-hook"]
 
 
+def test_check_wants_the_permission_a_context_slot_needs(ext: Path) -> None:
+    set_manifest(ext, permissions=["db:own"])
+    assert errors(ext) == ["undeclared-permission"]
+
+
 def test_check_warns_about_unused_and_unverifiable_hooks(ext: Path) -> None:
     set_manifest(ext, hooks={"context.contribute": {}, "app.stop": {}})
     assert [(f.level, f.code) for f in check(ext)] == [("warn", "unused-hook")]
@@ -219,7 +224,7 @@ def test_check_forbids_importing_the_app(ext: Path) -> None:
 def test_check_holds_an_agent_loop_provider_to_the_import_fence(ext: Path) -> None:
     edit(ext, "extension.py", lambda t: "import gc\n" + t)
     assert errors(ext) == []  # an ordinary extension may import it
-    set_manifest(ext, permissions=["runtime:loop"], contributes={"runtime": [{"slot": "agent.loop", "id": "mine", "label": "Mine"}]})
+    set_manifest(ext, permissions=["runtime:loop", "context:volatile"], contributes={"runtime": [{"slot": "agent.loop", "id": "mine", "label": "Mine"}]})
     assert errors(ext) == ["loop-fence"]
     edit(ext, "extension.py", lambda t: t.replace("import gc\n", ""))
     assert errors(ext) == []
@@ -315,6 +320,13 @@ def test_pack_without_a_renderer_half_writes_only_the_lock(ext: Path) -> None:
     (ext / "extension.tsx").unlink()
     pack.pack(ext)
     assert not (ext / "dist").exists() and (ext / "extension.lock.json").is_file()
+
+
+def test_pack_drops_a_bundle_whose_source_is_gone(ext: Path) -> None:
+    (ext / "dist").mkdir()
+    (ext / "dist" / "extension.js").write_text("old", "utf-8")
+    (ext / "extension.tsx").unlink()
+    assert "dist/extension.js" not in json.loads(pack.pack(ext).read_text("utf-8"))["files"] and not (ext / "dist" / "extension.js").exists()
 
 
 def test_pack_command_refuses_an_extension_with_errors(ext: Path, capsys: Any) -> None:

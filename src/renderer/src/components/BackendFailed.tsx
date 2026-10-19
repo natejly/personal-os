@@ -41,6 +41,7 @@ export default function BackendFailed({ message }: { message: string }): JSX.Ele
       <div className="backend-error drag" role="alert">
         <AlertTriangle size={28} />
         <h2>Grain could not start</h2>
+        <p>Your data is safe.</p>
         <div className="backend-error-actions">
           <button className="primary-btn" onClick={() => void retry()} disabled={retrying}><RefreshCw size={13} className={retrying ? 'spin' : undefined} /> {retrying ? 'Trying…' : 'Try again'}</button>
           <button className="ghost-btn" onClick={copy}><Copy size={13} /> Copy details</button>

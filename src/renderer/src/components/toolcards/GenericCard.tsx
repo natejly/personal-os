@@ -53,7 +53,9 @@ export function GenericApproval({ event, conversationId, decide, onWhy }: {
     >
       <div className="approval-text">
         <b>{d.verb}</b>{label ?? d.subject ? <> {label ?? d.subject}</> : null}
-        {event.forced && tainted && onWhy && <>{' '}<button type="button" className="link small" onClick={onWhy}>See why</button></>}
+        {event.forced && (tainted
+          ? <> <span className="muted small">Read untrusted content this reply.</span>{onWhy && <>{' '}<button type="button" className="link small" onClick={onWhy}>See why</button></>}</>
+          : <> <span className="muted small">Always asks.</span></>)}
       </div>
       {connector && (
         <div className="tc-origin small muted">

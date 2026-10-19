@@ -152,7 +152,7 @@ test('project view: sections, counts, new chat button, empty state, memory add i
   const p = await api('/projects', { method: 'POST', body: { name: 'Tabs' } })
   await page.reload()
   await sidebar(page).getByText('Tabs', { exact: true }).click()
-  await expect(page.getByText('No chats')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'No chats' })).toBeVisible()
   await openProjectSection(page, 'Memory')
   await page.getByPlaceholder(/Remember something in this project/).fill('tabs memory one')
   await page.getByPlaceholder(/Remember something in this project/).press('Enter')

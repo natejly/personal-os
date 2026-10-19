@@ -22,7 +22,7 @@ test('workflows panel: empty state, create through the editor with live validati
   await ta.fill('{ not json')
   await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
   await ta.fill(wf('hello-wf', [docStep('one', 'Hello {{who}}')]))
-  await expect(page.getByText(/^Valid\./)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.locator('.skill-name', { hasText: 'hello-wf' })).toBeVisible()
   expect(await grain.api('/workflows')).toHaveLength(1)

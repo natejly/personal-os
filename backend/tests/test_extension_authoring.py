@@ -146,9 +146,8 @@ def test_check_rejects_an_id_or_tool_name_the_app_already_has(ext: Path) -> None
     assert "id-collision" in errors(ext)
     set_manifest(ext, id="sample", contributes={"tools": [
         {"name": "health_log", "danger": "safe", "group": "g"}, {"name": "mcp__x__y", "danger": "safe", "group": "g"},
-        {"name": "run_python", "danger": "safe", "group": "g"}, {"name": "mine", "danger": "safe", "group": "g"},
-        {"name": "mine", "danger": "safe", "group": "g"}]})
-    assert errors(ext).count("tool-collision") == 4
+        {"name": "run_python", "danger": "safe", "group": "g"}, {"name": "mine", "danger": "safe", "group": "g"}]})
+    assert errors(ext).count("tool-collision") == 3
 
 
 def test_check_does_not_collide_a_built_in_with_itself() -> None:
@@ -242,8 +241,8 @@ def test_check_needs_an_activate_that_takes_the_api(ext: Path) -> None:
 
 
 def test_check_lints_tool_declarations(ext: Path) -> None:
-    set_manifest(ext, contributes={"tools": [{"name": "Bad-Name", "danger": "wild", "description": "x"}]})
-    assert errors(ext) == ["tool-schema"] * 3
+    set_manifest(ext, contributes={"tools": [{"name": "t", "danger": "safe", "description": "x"}]})
+    assert errors(ext) == ["tool-schema"]
     set_manifest(ext, contributes={"tools": [{"name": "t", "danger": "safe", "group": "g", "schema": "tools/missing.json"}]})
     assert errors(ext) == ["tool-schema"]
     set_manifest(ext, contributes={"tools": [{"name": "t", "danger": "safe", "group": "g", "schema": "../outside.json"}]})

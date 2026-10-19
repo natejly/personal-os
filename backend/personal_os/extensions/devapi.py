@@ -103,6 +103,7 @@ def router(host: ExtensionHost, ctx: ExtensionContext, toolbox: Callable[[], Too
         try:
             await adopt(host, toolbox(), scope)
         except ValueError as e:
+            host.failed[scope.root] = f"ValueError: {e}"  # adopt unloaded it after the load had cleared its entry
             raise HTTPException(400, f"ValueError: {e}") from e
         return describe(host, scope)
 

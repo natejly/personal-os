@@ -32,6 +32,7 @@ SETTING_TYPES = ("string", "number", "integer", "boolean", "secret")  # a secret
 _SETTING_KEYS = {"type", "title", "description", "default", "enum", "minimum", "maximum"}  # the JSON Schema subset a settings field takes
 _SETTING_PYTHON = {"string": (str,), "number": (int, float), "integer": (int,), "boolean": (bool,)}
 _FIELD = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
+_TOOL_NAME = re.compile(r"[a-z][a-z0-9_]*")
 _TABLE = re.compile(r"[a-z_][a-z0-9_]*")
 _PROFILE_CONTRIBUTES = {"theme", "defaults", "layout", "presets"}  # all a profile may contribute: it runs nothing
 _PROFILE_FORBIDDEN = ("requires", "provides", "hooks", "permissions", "settings", "data")
@@ -186,7 +187,14 @@ def _contributes(raw: dict[str, Any]) -> dict[str, Any]:
     tools = c.get("tools", [])
     _check(isinstance(tools, list) and all(isinstance(t, dict) and _is_str(t.get("name")) for t in tools),
            "contributes.tools must be a list of objects with a name")
+    from ..tools import DEFAULT_MODE
+    _check(all(_TOOL_NAME.fullmatch(t["name"]) for t in tools), "contributes.tools: a name must match [a-z][a-z0-9_]*")
+    _check(len({t["name"] for t in tools}) == len(tools), "contributes.tools lists a name twice")
+    _check(all(t["danger"] in DEFAULT_MODE for t in tools if "danger" in t), f"contributes.tools: danger must be one of {', '.join(DEFAULT_MODE)}")
     _check(all(isinstance(t.get("description", ""), str) for t in tools), "contributes.tools: description must be text")
+    views = c.get("views", [])
+    _check(isinstance(views, list) and all(isinstance(v, dict) and _is_str(v.get("id")) for v in views), "contributes.views must be a list of objects with an id")
+    _check(len({v["id"] for v in views}) == len(views), "contributes.views lists an id twice")
     _check(all(_is_str(t["after"]) for t in tools if "after" in t), "contributes.tools 'after' must be the name of an existing tool")
     slots = c.get("slots", {})
     _check(isinstance(slots, dict) and all(isinstance(v, list) and all(isinstance(i, dict) for i in v) for v in slots.values()),
@@ -223,8 +231,7 @@ def _activation(raw: dict[str, Any], c: dict[str, Any]) -> None:
     events = raw.get("activation", ["startup"])
     if "startup" in events:
         return
-    _check(isinstance(c.get("views", []), list), "contributes.views must be a list")
-    views = {v["id"] for v in c.get("views", []) if isinstance(v, dict) and _is_str(v.get("id"))}
+    views = {v["id"] for v in c.get("views", ())}
     commands = {e.get("name") for e in c.get("commands", ())}
     for event in events:
         kind, _, target = event.partition(":")

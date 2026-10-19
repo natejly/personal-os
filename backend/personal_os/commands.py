@@ -180,9 +180,13 @@ def _expand_slash(text: str, store: "Commands | None", skills: Any = None,
 def expand_history(history: list[dict[str, Any]], store: "Commands | None", skills: Any = None,
                    agents: Iterable[str] | None = None, front: bool = False,
                    registered: Callable[[str, str], str | None] | None = None) -> list[dict[str, Any]]:
-    """Every replayed user turn, so a later turn still carries an earlier command's instructions."""
-    return [{**m, "content": expand(m["content"], store, skills, agents, front, registered)} if m.get("role") == "user" and isinstance(m.get("content"), str)
-            and (m["content"].startswith("/") or "@" in m["content"]) else m for m in history]
+    """Every replayed user turn, so a later turn still carries an earlier command's instructions. A registered command runs
+    for the newest user turn only: its function may read the clock or have side effects, so replaying it would change the
+    cached prefix and repeat the effect on every later turn."""
+    newest = max((i for i, m in enumerate(history) if m.get("role") == "user"), default=-1)
+    return [{**m, "content": expand(m["content"], store, skills, agents, front, registered if i == newest else None)}
+            if m.get("role") == "user" and isinstance(m.get("content"), str) and (m["content"].startswith("/") or "@" in m["content"]) else m
+            for i, m in enumerate(history)]
 
 
 class Commands:

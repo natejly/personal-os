@@ -108,3 +108,16 @@ def test_a_command_steered_into_a_live_run_is_filled() -> None:
     assert len(calls) == 2, "the steer is answered in the same run"
     last = [m for m in calls[1] if m["role"] == "user"][-1]["content"]
     assert last.startswith("/standup yesterday") and "Summarise yesterday" in last
+
+
+def test_a_registered_command_runs_for_the_newest_turn_only() -> None:
+    from personal_os.commands import expand_history
+    calls: list[str] = []
+
+    def registered(name: str, args: str) -> str | None:
+        calls.append(args)
+        return f"note {args}"
+    history = [{"role": "user", "content": "/ping a"}, {"role": "assistant", "content": "ok"}, {"role": "user", "content": "/ping b"}]
+    out = expand_history(history, None, registered=registered)
+    assert calls == ["b"]
+    assert out[0]["content"] == "/ping a" and out[2]["content"].endswith("note b")

@@ -43,6 +43,7 @@ def ext() -> Any:
     d = Path(tempfile.mkdtemp(prefix="devtools-ext-"))
     root = scaffold("sample", d)
     yield root
+    appmod.host.failed.clear()
     if "sample" in appmod.host.extensions:
         import asyncio
         asyncio.run(appmod.host.unload("sample"))
@@ -166,12 +167,13 @@ def test_a_folder_cannot_take_over_a_tool_the_app_already_has(ext: Path) -> None
     core = "fs_glob"
     spec = appmod.toolbox.specs[core]
     for name in ("extension.json", "extension.py"):
-        edit(ext, name, lambda t: t.replace("sample_note", core))
+        edit(ext, name, lambda t: t.replace("sample_note", core).replace(f"{core}s", "sample_notes"))
     shutil.move(ext / "tools" / "sample_note.json", ext / f"tools/{core}.json")
     r = load(ext)
     assert r.status_code == 400 and core in r.json()["detail"]
     assert "sample" not in appmod.host.extensions and appmod.toolbox.specs[core] is spec
     assert "sample" not in appmod.settings()["hiddenViews"]
+    assert [f["path"] for f in client.get("/dev/extensions").json()["failed"]] == [str(ext.resolve())]
 
 
 def test_a_misplaced_tool_leaves_none_of_the_extensions_tools_behind(ext: Path) -> None:

@@ -101,7 +101,7 @@ PAYLOAD_WINDOW = 5  # payloads kept per handler, redacted, for the dev panel
 PAYLOAD_CHARS = 300  # characters of one payload the dev panel shows
 TIMEOUT_S = {"emit": 2.0, "collect": 1.0, "pipe": 1.0, "gate": 2.0}
 MAX_ADDED_TEXT = 10_000  # characters of text a handler outside the core may add to a value; a longer return counts as a failure
-DECLARED_CEILING_S = 3.0  # a declared budget cannot hold longer than this a call the caller waits on (every kind but emit, and turn.start)
+DECLARED_CEILING_S = 3.0  # a declared budget cannot hold longer than this a call the caller waits on (every kind but emit, and turn.start); a folder extension is held to it on every hook (ExtensionScope.on)
 STRICT = os.environ.get("GRAIN_HOOKS_STRICT") == "1"
 CALL_KIND = {"emit": "emit", "emit_sync": "emit", "fire": "emit", "collect": "collect", "pipe": "pipe", "pipe_sync": "pipe", "gate": "gate"}
 
@@ -323,6 +323,8 @@ class HookBus:
         self._settle(sub, ok)
 
     def _settle(self, sub: Subscription, ok: bool) -> None:
+        if sub.enabled and not sub.enabled():  # skipped, not succeeded: it must not clear the failures it has run up
+            return
         sub.failures = 0 if ok else sub.failures + 1
         if sub.failures >= MUTE_AFTER and sub.owner != "core":  # built-in work is retried every time, never switched off
             sub.muted = True

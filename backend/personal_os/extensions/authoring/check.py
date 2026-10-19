@@ -17,7 +17,6 @@ from ..manifest import Manifest, ManifestError, load_manifest, stale_api_warning
 
 BUILTINS = Path(__file__).parents[1]  # the built-in extensions, one folder each
 CORE_SERVICES = frozenset({"mcp", "google"})  # lent by the app through ExtensionContext.services
-TOOL_NAME = re.compile(r"[a-z][a-z0-9_]*")
 CREATE_TABLE = re.compile(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[\"`\[]?(\w+)", re.IGNORECASE)
 CODE_EXCLUDED = {"tests", "dist", "node_modules", "__pycache__"}
 
@@ -60,28 +59,24 @@ def _builtin_manifests(root: Path) -> Iterator[Manifest]:
 
 
 @functools.cache
-def _reserved_tools() -> tuple[set[str], set[str]]:
-    """(tool names a core Toolbox registers, the danger levels they use)."""
+def _reserved_tools() -> set[str]:
+    """The tool names a core Toolbox registers."""
     from ...tools import Toolbox
     box = Toolbox(None, None, None, lambda: {})  # type: ignore[arg-type]
-    return set(box.specs), {s.danger for s in box.specs.values()}
+    return set(box.specs)
 
 
 def _collisions(root: Path, manifest: Manifest, others: list[Manifest]) -> list[Finding]:
     out: list[Finding] = []
     if manifest.id in {m.id for m in others}:
         out.append(Finding("error", "id-collision", f"a built-in extension already has the id {manifest.id!r}"))
-    taken = _reserved_tools()[0] | RESERVED_TOOL_NAMES | {t["name"] for m in others for t in m.contributes.get("tools", ())}
+    taken = _reserved_tools() | RESERVED_TOOL_NAMES | {t["name"] for m in others for t in m.contributes.get("tools", ())}
     if BUILTINS in root.resolve().parents:  # the reserved list names the built-in extensions' own tools too
         taken -= {t["name"] for t in manifest.contributes.get("tools", ())}
-    seen: set[str] = set()
     for tool in manifest.contributes.get("tools", ()):
         name = tool["name"]
         if name in taken or name.startswith("mcp__"):
             out.append(Finding("error", "tool-collision", f"tool {name!r} is already taken by the app"))
-        elif name in seen:
-            out.append(Finding("error", "tool-collision", f"tool {name!r} is declared twice"))
-        seen.add(name)
     return out
 
 
@@ -100,13 +95,8 @@ def _requires(manifest: Manifest, builtin: list[Manifest]) -> list[Finding]:
 # ---- tools ----
 def _tools(root: Path, manifest: Manifest) -> list[Finding]:
     out: list[Finding] = []
-    _, dangers = _reserved_tools()
     for tool in manifest.contributes.get("tools", ()):
         name = tool["name"]
-        if not TOOL_NAME.fullmatch(name):
-            out.append(Finding("error", "tool-schema", f"tool {name!r}: the name must match [a-z][a-z0-9_]*"))
-        if tool.get("danger") not in dangers:
-            out.append(Finding("error", "tool-schema", f"tool {name!r}: danger must be one of {', '.join(sorted(dangers))}"))
         if not isinstance(tool.get("group"), str) or not tool["group"]:
             out.append(Finding("error", "tool-schema", f"tool {name!r}: declare its group"))
         if not tool.get("description"):

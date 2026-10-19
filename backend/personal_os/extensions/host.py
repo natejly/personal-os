@@ -29,7 +29,7 @@ from .channels import ChannelAdapter, Channels
 from .defaults import DEFAULT_KEYS, Defaults
 from .directives import Directive, Directives
 from .disposables import Disposable, Scope
-from .hooks import HookBus, Subscription
+from .hooks import DECLARED_CEILING_S, HookBus, Subscription
 from .manifest import Manifest, load_manifest, stale_api_warning
 from .notes import ExtNotes, InboxItem
 from .prechecks import Precheck, Prechecks
@@ -307,12 +307,14 @@ class ExtensionScope:
         if hook not in self.manifest.hooks:
             raise ValueError(f"extension {self.manifest.id!r} did not declare hook {hook!r}")
         declared = self.manifest.hooks[hook]
+        timeout_ms = declared.get("timeoutMs") if timeout_ms is None else timeout_ms
+        if timeout_ms is not None and self.tier == "user":  # the caller waits on every kind of call: only built-in code may hold it longer
+            timeout_ms = min(timeout_ms, DECLARED_CEILING_S * 1000)
         sub = self._bus.subscribe(
             hook, fn, owner=self.manifest.id, order=self.index,
             enabled=None if hook in LIFECYCLE_HOOKS else self.enabled,
             priority=declared.get("priority") if priority is None else priority,
-            timeout_ms=declared.get("timeoutMs") if timeout_ms is None else timeout_ms,
-            on_failure=declared.get("onFailure", "ask"))
+            timeout_ms=timeout_ms, on_failure=declared.get("onFailure", "ask"))
         return self.disposables.add(sub)
 
     def tool(self, spec: ToolSpec) -> Disposable:
@@ -598,6 +600,11 @@ class ExtensionHost:
             raise ValueError(f"only a built-in extension may subscribe to {', '.join(builtin_only)}")
         if manifest.id in CORE_VIEWS:
             raise ValueError(f"{manifest.id!r} is the id of a core view")
+        if taken := sorted(v["id"] for v in manifest.contributes.get("views", ()) if v["id"] in CORE_VIEWS):
+            raise ValueError(f"a core view already has the id {', '.join(taken)}")
+        ident = manifest.id.replace("-", "_")
+        if foreign := [t for t in manifest.data.get("tables", ()) if not t.startswith(f"{ident}_")]:
+            raise ValueError(f"data.tables {', '.join(foreign)} must start with {ident}_: a folder extension owns only tables named for it")
         if missing := [e for e in manifest.requires_extensions if e not in self.extensions]:
             raise ValueError(f"requires extension {', '.join(missing)}, which is not loaded")
         provided = ctx.services.keys() | {s for x in self.extensions.values() for s in x.manifest.provides_services}

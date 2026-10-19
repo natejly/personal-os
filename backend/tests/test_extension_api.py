@@ -513,3 +513,47 @@ def test_a_failed_load_cancels_the_tasks_the_extension_spawned(work: Path, monke
 
     run(load())
     assert len(spawned) == 1 and spawned[0].cancelled()
+
+
+# ---- QA: declared budgets, disabled handlers, what a folder manifest may claim ----
+def test_a_folder_extensions_declared_timeout_is_capped_on_an_emit_the_caller_awaits(work: Path) -> None:
+    code = "def activate(api):\n    api.on('chat.created', lambda p: None, timeout_ms=600000)\n"
+    rig = Rig(work, {"hooks": {"chat.created": {"timeoutMs": 600000}}}, code)
+    (declared,) = rig.host.bus.subscriptions("demo")
+    assert declared.timeout_s == host_mod.DECLARED_CEILING_S
+
+
+def test_calls_made_while_a_handler_is_disabled_do_not_clear_its_failures() -> None:
+    bus, on = HookBus(), [True]
+
+    def raiser(_payload: Any) -> None:
+        raise RuntimeError("bug")
+    sub(bus, "chat.created", raiser, owner="flaky", enabled=lambda: on[0])
+    payload = {"id": "c1", "project_id": None}
+    for _ in range(3):
+        run(bus.emit("chat.created", payload))
+    on[0] = False
+    for _ in range(5):
+        run(bus.emit("chat.created", payload))
+    on[0] = True
+    (flaky,) = bus.subscriptions("flaky")
+    assert flaky.failures == 3 and not flaky.muted
+    for _ in range(2):
+        run(bus.emit("chat.created", payload))
+    assert flaky.muted
+
+
+def test_a_folder_manifest_cannot_name_core_tables_or_core_views(work: Path) -> None:
+    with pytest.raises(ValueError, match="must start with demo_"):
+        Rig(work, {"data": {"tables": ["settings"]}})
+    shutil.rmtree(work / "demo")
+    with pytest.raises(ValueError, match="core view"):
+        Rig(work, {"contributes": {"views": [{"id": "chat"}]}})
+
+
+def test_a_manifest_refuses_bad_tool_names_danger_levels_and_view_ids() -> None:
+    tool = {"name": "ok_tool", "danger": "safe", "group": "g"}
+    for contributes in ({"tools": [{**tool, "name": "bad name!"}]}, {"tools": [{**tool, "danger": "zzz"}]}, {"tools": [tool, tool]},
+                        {"views": [{"label": "No id"}]}, {"views": [{"id": "v"}, {"id": "v"}]}):
+        with pytest.raises(ManifestError):
+            Manifest.from_dict({"id": "x", "name": "X", "version": "1.0.0", "apiVersion": 1, "contributes": contributes})

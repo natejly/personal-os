@@ -14,7 +14,7 @@ import shutil
 import signal
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -57,6 +57,27 @@ def root_dir() -> Path:
 
 class LatexError(Exception):
     pass
+
+
+def _no_projects() -> dict[str, str]:
+    return {}
+
+
+# () -> {Grain project id: name}; activate() points it at the projects table.
+grain_projects: Callable[[], dict[str, str]] = _no_projects
+
+
+def resolve_project(ref: str | None) -> str | None:
+    """A Grain project id, or a name (any case), as its id; None for no project. Unknown is an error."""
+    if not ref:
+        return None
+    names = grain_projects()
+    if ref in names:
+        return ref
+    hit = [i for i, n in names.items() if n.lower() == ref.strip().lower()]
+    if len(hit) != 1:
+        raise LatexError(f"No Grain project '{ref}'")
+    return hit[0]
 
 
 # ---- storage and path safety ----
@@ -120,24 +141,37 @@ def engine_of(proj: Path) -> str:
 
 def describe(proj: Path) -> dict[str, Any]:
     main = main_file(proj)
-    return {"name": proj.name, "path": str(proj), "main": main, "engine": engine_of(proj),
-            "updated_at": proj.stat().st_mtime, "has_pdf": (proj / (Path(main).stem + ".pdf")).is_file()}
+    names = grain_projects()
+    pid = read_settings(proj).get("project_id")
+    pid = pid if pid in names else None  # a deleted project leaves the document in place, unlinked
+    return {"name": proj.name, "path": str(proj), "main": main, "engine": engine_of(proj), "project_id": pid, "project": names.get(pid),
+            "updated_at": max(p.stat().st_mtime for p in (proj, proj / main) if p.exists()), "has_pdf": (proj / (Path(main).stem + ".pdf")).is_file()}
 
 
-def list_projects() -> list[dict[str, Any]]:
+def list_projects(project_id: str | None = None) -> list[dict[str, Any]]:
     base = root_dir()
     if not base.is_dir():
         return []
-    return [describe(d) for d in sorted(base.iterdir()) if d.is_dir() and not d.name.startswith(".")]
+    out = [describe(d) for d in sorted(base.iterdir()) if d.is_dir() and not d.name.startswith(".")]
+    return [p for p in out if p["project_id"] == project_id] if project_id else out
 
 
-def create_project(name: str) -> dict[str, Any]:
+def set_project(name: str, project_id: str | None) -> dict[str, Any]:
+    proj = project_dir(name)
+    write_settings(proj, {"project_id": resolve_project(project_id)})
+    return describe(proj)
+
+
+def create_project(name: str, project_id: str | None = None) -> dict[str, Any]:
     name = valid_name(name)
+    project_id = resolve_project(project_id)
     d = root_dir() / name
     if d.exists():
         raise LatexError(f"A project named '{name}' already exists")
     d.mkdir(parents=True)
     (d / "main.tex").write_text(TEMPLATE)
+    if project_id:
+        write_settings(d, {"project_id": project_id})
     return describe(d)
 
 
@@ -260,6 +294,11 @@ async def compile_project(name: str, engine: str | None = None) -> dict[str, Any
 
 class NewProject(BaseModel):
     name: str
+    project_id: str | None = None
+
+
+class ProjectPatch(BaseModel):
+    project_id: str | None = None
 
 
 class CompileIn(BaseModel):
@@ -281,12 +320,16 @@ def router() -> APIRouter:
     r = APIRouter(prefix="/latex")
 
     @r.get("/projects")
-    def projects() -> list[dict[str, Any]]:
-        return list_projects()
+    def projects(project_id: str | None = None) -> list[dict[str, Any]]:
+        return list_projects(project_id)
 
     @r.post("/projects")
     def new_project(body: NewProject) -> dict[str, Any]:
-        return guard(create_project, body.name)
+        return guard(create_project, body.name, body.project_id)
+
+    @r.patch("/projects/{name}")
+    def patch_project(name: str, body: ProjectPatch) -> dict[str, Any]:
+        return guard(set_project, name, body.project_id)
 
     @r.get("/projects/{name}/files")
     def files(name: str) -> list[dict[str, Any]]:
@@ -342,18 +385,23 @@ def router() -> APIRouter:
 
 
 def register_tools(api: ExtensionScope) -> None:
-    async def latex_projects(ctx: dict[str, Any]) -> Any:
-        return {"folder": str(root_dir()), "projects": [{k: p[k] for k in ("name", "path", "main", "engine")} for p in list_projects()]}
-    api.tool(ToolSpec("latex_projects", "List the user's LaTeX projects with their folders and main files. Edit the files with the file tools.",
-                      _obj({}, []), latex_projects, "latex", examples=[{}]))
-
-    async def latex_new(ctx: dict[str, Any], name: str) -> Any:
+    async def latex_projects(ctx: dict[str, Any], project: str | None = None) -> Any:
         try:
-            return create_project(name)
+            rows = list_projects(resolve_project(project))
+        except LatexError as e:
+            return tool_error(str(e), field="project")
+        return {"folder": str(root_dir()), "projects": [{k: p[k] for k in ("name", "path", "main", "engine", "project_id", "project")} for p in rows]}
+    api.tool(ToolSpec("latex_projects", "List the user's LaTeX projects with their folders, main files and Grain project. Edit the files with the file tools.",
+                      _obj({"project": {"type": "string", "description": "only this Grain project (id or name)"}}, []), latex_projects, "latex", examples=[{}]))
+
+    async def latex_new(ctx: dict[str, Any], name: str, project: str | None = None) -> Any:
+        try:
+            return create_project(name, project or ctx.get("project_id"))  # in a project's chat, the document joins that project
         except LatexError as e:
             return tool_error(str(e), field="name", example={"name": "thesis"})
-    api.tool(ToolSpec("latex_new", "Create a LaTeX project with a minimal main.tex under ~/Grain/LaTeX/<name>.",
-                      _obj({"name": {"type": "string"}}, ["name"]), latex_new, "latex", "writes", examples=[{"name": "thesis"}]))
+    api.tool(ToolSpec("latex_new", "Create a LaTeX project with a minimal main.tex under ~/Grain/LaTeX/<name>, in a Grain project (default: this chat's).",
+                      _obj({"name": {"type": "string"}, "project": {"type": "string", "description": "Grain project id or name"}}, ["name"]),
+                      latex_new, "latex", "writes", examples=[{"name": "thesis"}]))
 
     async def latex_compile(ctx: dict[str, Any], project: str, engine: str | None = None) -> Any:
         try:
@@ -370,5 +418,11 @@ def register_tools(api: ExtensionScope) -> None:
 
 
 def activate(api: ExtensionScope) -> None:
+    global grain_projects
+
+    def names() -> dict[str, str]:
+        with api.db.tx() as c:
+            return {r["id"]: r["name"] for r in c.execute("SELECT id, name FROM projects WHERE deleted_at IS NULL")}
+    grain_projects = names
     api.router(router())
     register_tools(api)

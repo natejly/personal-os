@@ -5,6 +5,7 @@ import { useStore } from '../store'
 import { groupByChat, groupByKind, projectFilter, type ChatFile } from '../lib/chatFiles'
 import { chatFilesApi } from '../lib/useChatFiles'
 import { ChatFileRow } from './ChatFilesPanel'
+import { Slot } from '../extensions/slot'
 import './chatFiles.css'
 
 /**
@@ -59,6 +60,7 @@ export default function ProjectContext({ projectId }: { projectId: string }): JS
       onDragOver={(e) => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
       onDrop={(e) => { e.preventDefault(); setDrag(false); upload(e.dataTransfer.files) }}>
       <input id="doc-upload-input-project" ref={fileRef} type="file" multiple hidden onChange={(e) => { upload(e.target.files); e.target.value = '' }} />
+      <Slot name="project.files" props={{ projectId }} />
       {problem && <p className="empty-hint" role="alert">{problem}</p>}
       {!problem && files === null && <p className="empty-hint">Loading…</p>}
       {files?.length === 0 && (

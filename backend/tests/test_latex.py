@@ -77,6 +77,29 @@ class ProjectTests(unittest.TestCase):
         got = {f["path"]: f["kind"] for f in lx.list_files(proj)}
         self.assertEqual(got, {"main.tex": "tex", "refs.bib": "bib", "fig.png": "image"})
 
+    def test_grain_project_link_filter_patch(self) -> None:
+        live = {"p1": "Thesis", "p2": "Work"}
+        old = lx.grain_projects
+        lx.grain_projects = lambda: live
+        self.addCleanup(setattr, lx, "grain_projects", old)
+        a = lx.create_project("a", "p1")
+        b = lx.create_project("b", "work")  # a name resolves to its id
+        c = lx.create_project("c")
+        self.assertEqual((a["project_id"], a["project"], b["project_id"], c["project_id"]), ("p1", "Thesis", "p2", None))
+        self.assertEqual([p["name"] for p in lx.list_projects("p1")], ["a"])
+        self.assertEqual(len(lx.list_projects()), 3)
+        self.assertEqual(lx.set_project("c", "p1")["project_id"], "p1")
+        self.assertIsNone(lx.set_project("c", None)["project_id"])
+        for bad in ("nope", "p9"):
+            with self.assertRaises(lx.LatexError):
+                lx.create_project("d", bad)
+            with self.assertRaises(lx.LatexError):
+                lx.set_project("a", bad)
+        self.assertFalse((Path(lx.root_dir()) / "d").exists())
+        del live["p1"]  # the Grain project is deleted: the document stays, unlinked
+        self.assertIsNone(lx.describe(lx.project_dir("a"))["project_id"])
+        self.assertTrue((lx.project_dir("a") / "main.tex").is_file())
+
     def test_odd_main_files_fall_back(self) -> None:
         proj = lx.project_dir(lx.create_project("p")["name"])
         (proj.parent / "x.tex").write_text("x")

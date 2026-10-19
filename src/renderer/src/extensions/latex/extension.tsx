@@ -1,6 +1,7 @@
 import { Sigma } from '../../icons'
 import type { UiApi } from '../host'
 import LatexView from './LatexView'
+import ProjectFiles from './ProjectFiles'
 
 export function activate(ui: UiApi): void {
   ui.view({
@@ -11,4 +12,5 @@ export function activate(ui: UiApi): void {
     Component: LatexView,
     nav: { order: 19 }
   })
+  ui.slot('project.files', { id: 'latex', order: 0, Component: ProjectFiles })
 }

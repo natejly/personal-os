@@ -73,7 +73,7 @@ test('providers and models are found by what people type', () => {
 
 test('a tab that is no longer available falls back to General', () => {
   assert.equal(shownTab('ext:health', ['general', 'models', 'ext:health']), 'ext:health')
-  assert.equal(shownTab('ext:health', ['general', 'models']), 'appearance')
+  assert.equal(shownTab('ext:health', ['general', 'models']), 'general')
 })
 
 test('search also finds the sections extensions contribute', () => {

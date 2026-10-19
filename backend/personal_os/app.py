@@ -489,7 +489,8 @@ llm.caps_lookup = pricing.caps
 app.include_router(otel_export.router(db, lambda: settings()))
 compactor = compaction.Compactor(db, host.bus)
 app.include_router(compaction.router(compactor, convos, lambda: settings(),
-                                     window_fn=lambda cfg, m: compaction.window_for(cfg, m, pricing.caps(m).get("max_input_tokens"))))
+                                     window_fn=lambda cfg, m: compaction.window_for(cfg, m, pricing.caps(m).get("max_input_tokens")),
+                                     extra_fn=lambda cid: max(0, _request_extra.get(cid, 0))))
 
 
 @app.post("/conversations/{conv_id}/clear")
@@ -2754,13 +2755,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 st.tool_schemas = _schemas()
 
         led: Ledger = used["ledger"]
-        _slug_server = {t["slug"]: {x["id"]: x["name"] for x in mcp_store.servers()}.get(t["server_id"], "MCP") for t in mcp_store.tools()} if mcp_schemas else {}
-
-        def _tool_source(name: str) -> str:
-            if name in toolbox.tool_owner:
-                return f"ext:{toolbox.tool_owner[name]}"
-            return f"mcp:{SOURCE_SERVER if is_source_tool(name) else _slug_server.get(name, 'MCP')}" if name in tool_ctx["mcp_schemas"] else "core"
-
+        _tool_source = _tool_source_fn(tool_ctx["mcp_schemas"])
         used["tools_offered"] = ledger_tools(led, st.tool_schemas, tool_ctx["deferred"],
                                              lambda n: tool_ctx["mcp_schemas"].get(n) or toolbox.specs[n].schema(), _tool_source)
 
@@ -2783,10 +2778,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
         front_hint = bool(st.tool_schemas) and _front() and any(s["function"]["name"] == "delegate" for s in st.tool_schemas)
         stance_hint = FRONT_AGENT_HINT if front_hint else PROACTIVE_HINT if st.tool_schemas and not desk and not proposal_only(run) else ""
-        tools_hint = ((TOOLS_HINT_WITH_STANCE if stance_hint else TOOLS_HINT)
-                      + ("\n" + PLAN_HINT if not front_hint and any(s["function"]["name"] == "todo_write" for s in st.tool_schemas) else "")) if st.tool_schemas else ""
-        if any(s["function"]["name"] in ("save_memory", "search_memory") for s in st.tool_schemas):
-            tools_hint += "\n" + MEMORY_HINT
+        tools_hint = _base_tools_hint(st.tool_schemas, stance_hint, front_hint)
         # Static tables of contents (every tool that could be deferred, loaded or not), so the cached prefix holds as tools load.
         if mcp_defer:
             _by_server: dict[str, list[str]] = {}
@@ -2807,15 +2799,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             tools_hint = "\n\n".join(p for p in (tools_hint, _mcp_server_notes(set(mcp_modes))) if p)
         if use_tools and (_down := _mcp_down_note()):
             tools_hint = "\n\n".join(p for p in (tools_hint, _down) if p)
-        hints = (("hint:no-emoji", "Plain-text rule", NO_EMOJI_HINT), ("hint:render", "Rendering hint", RENDER_HINT),
-                 ("hint:tools", "Tools hint", tools_hint), ("hint:stance", "Working stance", stance_hint),
-                 ("hint:agents", "Agents hint", _agents_hint(modes, front=front_hint)), ("hint:job", "Scheduled job hint", _job_hint(run)),
-                 ("hint:dry-run", "Dry run hint", job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else ""),
-                 ("hint:desk", "Desk manual", DESK_HINT + _desk_manual_text() if desk else ""),
-                 ("hint:desk-plan", "Desk planning hint", DESK_PLAN_HINT if st.planning and desk else ""),
-                 ("hint:persona-folder", "Agent folder hint", PERSONA_FOLDER_HINT.format(path=folder) if folder and not desk and st.tool_schemas else ""),
-                 ("hint:channel", "Channel hint", channel.hint if st.tool_schemas and channel is not None else ""),
-                 ("hint:directives", "Directives", host.directives.text(cfg) if st.tool_schemas else ""))
+        hints = _hint_blocks(tools_hint=tools_hint, stance_hint=stance_hint, agents=_agents_hint(modes, front=front_hint), job=_job_hint(run),
+                             dry_run=job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
+                             desk=DESK_HINT + _desk_manual_text() if desk else "", desk_plan=DESK_PLAN_HINT if st.planning and desk else "",
+                             persona_folder=PERSONA_FOLDER_HINT.format(path=folder) if folder and not desk and st.tool_schemas else "",
+                             channel=channel.hint if st.tool_schemas and channel is not None else "",
+                             directives=host.directives.text(cfg) if st.tool_schemas else "")
         inputs_block = _desk_inputs_block() if desk else ""
         map_block = _map_status_block(used, conv["settings"], cfg, conv["project_id"], st.fence_nonce, st.tool_schemas, tool_ctx["deferred"])
         skipped: list[str] = []
@@ -2967,7 +2956,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         def _capture(tool_choice: str) -> None:
             """Snapshot exactly what goes to llm.stream_chat this round (messages are mutated afterwards, so copy now)."""
             with contextlib.suppress(Exception):
-                request_log.record(db.data_dir, am["id"], _round, model, messages, st.tool_schemas, tool_choice)
+                request_log.record(db.data_dir, am["id"], _round, model, messages, st.tool_schemas, tool_choice, led.texts)
 
         async def _stream_round(**options: Any) -> AsyncIterator[dict[str, Any]]:
             """The round's model stream. A provider overflow before anything streamed is recovered once per reply:
@@ -4589,6 +4578,40 @@ def _mentionable() -> list[str]:
     """Agent names an `@name` in a message can address: the built-ins and the user's approved, visible ones."""
     from .subagents import BUILTIN_ROLES
     return [*(n for n, r in BUILTIN_ROLES.items() if not r.hidden), *(d["name"] for d in agent_defs.list(approved_only=True) if not d["hidden"])]
+
+
+def _base_tools_hint(schemas: list[dict[str, Any]], stance_hint: str, front_hint: bool) -> str:
+    """The tools hint before connector notes: the working-stance variant, plan and memory lines, only for tools actually offered."""
+    names = {s["function"]["name"] for s in schemas}
+    if not schemas:
+        return ""
+    hint = (TOOLS_HINT_WITH_STANCE if stance_hint else TOOLS_HINT) + ("\n" + PLAN_HINT if not front_hint and "todo_write" in names else "")
+    if names & {"save_memory", "search_memory"}:
+        hint += "\n" + MEMORY_HINT
+    return hint
+
+
+def _hint_blocks(*, tools_hint: str, stance_hint: str, agents: str, job: str, dry_run: str, desk: str, desk_plan: str,
+                 persona_folder: str, channel: str, directives: str) -> tuple[tuple[str, str, str], ...]:
+    """The stable hint blocks of a turn as (ledger id, label, text), in prompt order. One list for a real turn and the preview."""
+    return (("hint:no-emoji", "Plain-text rule", NO_EMOJI_HINT), ("hint:render", "Rendering hint", RENDER_HINT),
+            ("hint:tools", "Tools hint", tools_hint), ("hint:stance", "Working stance", stance_hint),
+            ("hint:agents", "Agents hint", agents), ("hint:job", "Scheduled job hint", job),
+            ("hint:dry-run", "Dry run hint", dry_run), ("hint:desk", "Desk manual", desk), ("hint:desk-plan", "Desk planning hint", desk_plan),
+            ("hint:persona-folder", "Agent folder hint", persona_folder), ("hint:channel", "Channel hint", channel),
+            ("hint:directives", "Directives", directives))
+
+
+def _tool_source_fn(mcp_schemas: dict[str, Any]) -> Callable[[str], str]:
+    """name -> 'core' | 'ext:<id>' | 'mcp:<server>' for the tools_offered list."""
+    servers = {x["id"]: x["name"] for x in mcp_store.servers()} if mcp_schemas else {}
+    slug_server = {t["slug"]: servers.get(t["server_id"], "MCP") for t in mcp_store.tools()} if mcp_schemas else {}
+
+    def source(name: str) -> str:
+        if name in toolbox.tool_owner:
+            return f"ext:{toolbox.tool_owner[name]}"
+        return f"mcp:{SOURCE_SERVER if is_source_tool(name) else slug_server.get(name, 'MCP')}" if name in mcp_schemas else "core"
+    return source
 
 
 def _agents_hint(modes: dict[str, str], front: bool = False) -> str:
@@ -6471,6 +6494,24 @@ def message_requests(mid: str) -> list[dict[str, Any]]:
     return rounds
 
 
+@app.get("/messages/{mid}/context")
+def message_context(mid: str) -> dict[str, Any]:
+    """The context ledger saved with a reply, plus the system prompt and per-block texts when the request log still has the
+    reply's first round (texts are never stored in the message row)."""
+    with db.tx() as c:
+        row = c.execute("SELECT context_used FROM messages WHERE id=?", (mid,)).fetchone()
+    used = json.loads(row["context_used"]) if row and row["context_used"] else None
+    if not isinstance(used, dict):
+        raise HTTPException(404, "no context recorded for this message")
+    out: dict[str, Any] = {k: used.get(k) for k in ("blocks", "totals", "stable_hash", "cache", "skipped", "tools_offered", "tokens_estimate")}
+    rounds = request_log.read(db.data_dir, mid)
+    first = rounds[0] if rounds else None
+    if not first or not first.get("ledger_texts"):
+        return {**out, "texts_available": False}
+    system = "\n\n".join(str(m.get("content") or "") for m in first.get("messages") or [] if isinstance(m, dict) and m.get("role") == "system" and isinstance(m.get("content"), str))
+    return {**out, "texts_available": True, "system_prompt": system, "texts": first["ledger_texts"]}
+
+
 @app.post("/messages/{mid}/stop")
 async def stop_message(mid: str) -> dict[str, bool]:
     """On the event loop. A sync endpoint would set the flag from a worker thread, which does not wake a waiter."""
@@ -6487,6 +6528,7 @@ class ContextPreviewIn(BaseModel):
     project_id: str | None = None
     query: str = ""
     conv_settings: dict[str, Any] = {}
+    conversation_id: str | None = None  # an existing chat: its settings, project and replayed history are used
 
 
 async def _doc_hits(project_id: str | None, query: str, cfg: dict[str, Any], conv_settings: dict[str, Any],
@@ -6548,24 +6590,96 @@ host.retrieval.register("memory", lambda p: _memory_hits(p["project_id"], p["que
 host.retrieval.register("graph", lambda p: _graph_hits(p["project_id"], p["query"], settings(), p["conv_settings"], p["vec"]))
 
 
+def _preview_tools(cfg: dict[str, Any], project: dict[str, Any] | None, conv_settings: dict[str, Any], conv_id: str | None,
+                   project_id: str | None) -> tuple[list[dict[str, Any]], set[str], dict[str, str], dict[str, Any]]:
+    """The tool schemas a plain chat turn with these settings would offer: (schemas, held-back names, modes, MCP schemas by name).
+    A real turn derives the same from `modes` inside _chat_stream (permissions, project and chat tool maps, connectors, the
+    deferral past toolDeferAbove); this mirrors the parts that need no live run."""
+    if not conv_settings.get("useTools", True):
+        return [], set(), {}, {}
+    modes = toolbox.effective(permissions.get(cfg, "tools") or {}, (project or {}).get("tools"), conv_settings.get("tools"), None)
+    mcp_modes, mcp_schemas = _mcp_tooling(project_id, conv_id)
+    chat_off = {n for n, v in (conv_settings.get("tools") or {}).items() if v == "off"}
+    mcp_schemas = [s for s in mcp_schemas if s["function"]["name"] not in chat_off]
+    mcp_defer = mcp_search.should_defer(len(mcp_schemas), limits.MCP_DEFER_ABOVE)
+    offer = mcp_search.select_schemas(mcp_schemas, set(), mcp_defer)
+    m = {n: v for n, v in modes.items() if (spec := toolbox.specs.get(n)) is None or spec.group != "desk"}  # no desk root in a plain chat
+    if mcp_defer:
+        m["mcp_tool_search"] = "on"
+    m = workers_mod.arrange_tools(m, True)
+    search_on = m.pop("tool_search", "off") in ("on", "ask")
+    built = toolbox.schemas(m, set())
+    deferred: set[str] = set()
+    if search_on and mcp_search.should_defer(len(built), int(cfg.get("toolDeferAbove", 40) or 0)):
+        chat_core = toolcore.CURRENT.get("chat") or tools.CORE_ORDER
+        by_name = {s["function"]["name"]: s for s in built}
+        core = [n for n in by_name if tools.is_core(toolbox.specs[n], chat_core)]
+        rank = {n: i for i, n in enumerate(chat_core + tools.DESK_CORE)}
+        deferred = set(by_name) - set(core)
+        built = [toolbox.specs["tool_search"].schema()] + [by_name[n] for n in sorted(core, key=lambda n: rank.get(n, len(rank)))]
+    return built + offer, deferred, {**m, **{k: v for k, v in mcp_modes.items() if k in {s["function"]["name"] for s in offer}}}, \
+        {s["function"]["name"]: s for s in mcp_schemas}
+
+
 @app.post("/context/preview")
 async def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
+    """What a turn with this project, chat settings and query would send: the ledger of a real turn (blocks, totals, cache,
+    tools_offered) plus `system_prompt` and `texts` (block id -> text) for each system-prompt block. With `conversation_id`
+    the chat's own settings, project and replayed history are used.
+
+    Not reproducible here: a live run's desk state (desk inputs, planning mode, a job's hints), tools loaded on demand by
+    earlier tool_search calls or a pre-round pick (so deferred tools stay deferred), an agent persona, the attached page
+    and pictures, and run notes (resume, regenerate, mentions). The result is the chat's baseline turn."""
     cfg = settings()
-    project = projects.get(body.project_id) if sid(body.project_id) else None
+    conv = convos.get(body.conversation_id, with_messages=False) if body.conversation_id else None
+    if body.conversation_id and not conv:
+        raise HTTPException(404, "No such conversation")
+    project_id = conv["project_id"] if conv else sid(body.project_id)
+    project = projects.get(project_id) if project_id else None
     conv_settings = {"useMemory": True, "useGraph": True, "useDocuments": True,
-                     "useSkills": True, "useStyle": True, **body.conv_settings}
+                     "useSkills": True, "useStyle": True, **((conv or {}).get("settings") or {}), **body.conv_settings}
+    model = router.concrete(str((conv or {}).get("model") or cfg["defaultModel"]), cfg)
+    win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))
     qvec = await _query_vec(body.query, cfg, conv_settings)
-    hits, _ = await host.retrieval.gather({"query": body.query, "vec": qvec, "project_id": sid(body.project_id), "conv_settings": conv_settings})
+    hits, retrieved = await host.retrieval.gather({"query": body.query, "vec": qvec, "project_id": project_id, "conv_settings": conv_settings})
     _, used = build_context(
         memories=memories, graph=graph, documents=documents, project=project,
-        doc_hits=hits["docs"], project_id=sid(body.project_id),
+        doc_hits=hits["docs"], project_id=project_id,
         memory_hits=hits["memory"], graph_hits=hits["graph"],
         query=body.query, settings=cfg, conv_settings=conv_settings,
         global_system_prompt=cfg["systemPrompt"], skills=skills, style=style,
-        draft=bool(conv_settings.get("draftMode")),
+        draft=bool(conv_settings.get("draftMode")), window=win,
     )
-    used.pop("ledger", None)  # a live object, not JSON
-    return used
+    led: Ledger = used["ledger"]
+    schemas, deferred, modes, mcp_by_name = _preview_tools(cfg, project, conv_settings, body.conversation_id, project_id)
+    used["tools_offered"] = ledger_tools(led, schemas, deferred, lambda n: mcp_by_name.get(n) or toolbox.specs[n].schema(), _tool_source_fn(mcp_by_name))
+    front = bool(schemas) and any(s["function"]["name"] == "delegate" for s in schemas) and modes.get("delegate") in ("on", "ask")
+    stance = FRONT_AGENT_HINT if front else PROACTIVE_HINT if schemas else ""
+    hints = _hint_blocks(tools_hint=_base_tools_hint(schemas, stance, front), stance_hint=stance, agents=_agents_hint(modes, front=front),
+                         job="", dry_run="", desk="", desk_plan="", persona_folder="", channel="",
+                         directives=host.directives.text(cfg) if schemas else "")
+    map_block = _map_status_block(used, conv_settings, cfg, project_id, "preview", schemas, deferred)
+    skipped: list[str] = []
+    contributed = await host.bus.collect("context.contribute", {"conversation_id": body.conversation_id or "", "project_id": project_id}, skipped=skipped)
+    if skipped:
+        used["skipped"] = [{"owner": o, "hook": "context.contribute", "reason": "failed or timed out"} for o in skipped]
+    slots = compose([*(Block(t, "stable", id=i, label=lb) for i, lb, t in hints),
+                     *(Block(b, "volatile", record=False) for b in used["volatile_blocks"]),
+                     Block(map_block, "volatile", id="map:status", label="Workspace status", kind="map"),
+                     Block(_today_hint(), "volatile", id="volatile:today", label="Today", kind="note"),
+                     *retrieved, *contributed], win, led)
+    stable = "\n\n".join(p for p in (used["stable_system"], *slots.stable) if p)
+    used["system_prompt"] = "\n\n".join(p for p in (stable, *slots.volatile, *slots.tail) if p)
+    used["stable_hash"] = prefix_hash(stable, [*slots.versions, *(host.directives.versions(cfg) if schemas else ())])
+    used["cache"] = {"changed": False}
+    if body.conversation_id:
+        rows = convos.history_rows(body.conversation_id)
+        ledger_history(led, compactor.build_history(rows, compactor.get(body.conversation_id), bool(conv_settings.get("tainted"))))
+    used["tokens_estimate"] = led.system_tokens()
+    used["blocks"], used["totals"] = led.finish(), led.totals(win)
+    texts = dict(led.texts)
+    out = {k: v for k, v in used.items() if k not in ("ledger", "stable_system", "volatile_blocks")}
+    return {**out, "texts": texts}
 
 
 # ---------------- memories ----------------

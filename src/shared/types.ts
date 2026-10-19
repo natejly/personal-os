@@ -80,6 +80,25 @@ export interface ContextUsed {
   tools_offered?: ToolOffered[]
 }
 
+/** `GET /messages/{id}/context`: the saved ledger, plus texts while the request log still holds the reply's first round. */
+export interface MessageContext {
+  blocks: ContextBlock[] | null
+  totals: ContextTotals | null
+  stable_hash: string | null
+  cache: { changed: boolean; reason?: string } | null
+  skipped: { owner: string; hook: string; reason: string }[] | null
+  tools_offered: ToolOffered[] | null
+  tokens_estimate: number | null
+  texts_available: boolean
+  /** The system messages of the first round, joined. */
+  system_prompt?: string
+  /** Block id -> text, for every system-prompt block of that turn (stable ones too). */
+  texts?: Record<string, string>
+}
+
+/** `POST /context/preview`: a turn's ledger as it would be assembled now, with the text of each system-prompt block. */
+export type ContextPreview = ContextUsed & { texts: Record<string, string> }
+
 export interface ContextBlock {
   /** Stable per block kind and source, e.g. "memory:profile", "hint:no-emoji", "ext:health:v3". */
   id: string
@@ -882,7 +901,11 @@ export interface ExtensionsReview {
 /** GET /conversations/{id}/context-meter: the replayed history against the model window (estimates, len/4). */
 export interface ContextMeter {
   window: number
+  /** History only (kept for older callers); same number as `history_tokens`. */
   estimated_tokens: number
+  history_tokens?: number
+  /** History plus the last turn's system prompt and tool schemas; 0 extra until the chat has run a turn. */
+  turn_tokens?: number
   compact_at: number
   compact_at_tokens?: number
   summary: { summary: string; summarized_messages: number; tokens_before: number; tokens_after: number; updated_at: number } | null

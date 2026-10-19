@@ -19,6 +19,8 @@
  "browserEnabled": true,
  "chatNotify": true,
  "codeFont": "default",
+ "codeMode": true,
+ "codeModeMaxCalls": 100,
  "codingAgent": "any",
  "codingRoute": true,
  "codingSessionMaxConcurrent": 3,

@@ -1,6 +1,7 @@
 import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
+import GrainWave from './GrainWave'
 import { citeInfo, openCite, splitSources } from '../lib/remarkCites'
 import { AlertCircle, User, FileText, Activity, ChevronRight, Play, Pencil, GitBranch, Trash2 } from '../icons'
 import type { Attachment, Message, RunChanges, ToolEvent } from '@shared/types'
@@ -228,7 +229,8 @@ function StatusLine({ className, text, urgent }: { className: string; text: stri
   const m = / \d+s$/.exec(text)
   const words = m ? text.slice(0, m.index) : text
   return (
-    <div className={className}>
+    <div className={`${className} status-wave`}>
+      <GrainWave />
       <span role={urgent ? 'alert' : 'status'}>{words}</span>{m && <span aria-hidden="true">{m[0]}</span>}
     </div>
   )
@@ -336,14 +338,14 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   return (
     <div className={`msg ${message.role}`} data-message-id={message.id} aria-busy={streaming || undefined}>
       {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a face, and each thread its own. */}
-      {!isUser && <div className="avatar face-avatar"><Face name={face?.name ?? message.conversation_id} hue={face?.hue} tone={face?.tone} status={streaming ? 'streaming' : message.error ? 'error' : undefined} calm={message.outcome === 'stopped'} /></div>}
+      {!isUser && <div className="avatar face-avatar"><Face decor name={face?.name ?? message.conversation_id} hue={face?.hue} tone={face?.tone} status={streaming ? 'streaming' : message.error ? 'error' : undefined} calm={message.outcome === 'stopped'} /></div>}
       <div className="bubble">
         <Slot name="message.header" props={{ message, streaming, showContextChips }} />
         {isUser ? (
           editing ? (
             <MessageEditor message={message} onClose={() => setEditing(false)} />
           ) : (
-            <div className="user-bubble">{from && <div className="user-from"><Face name={from.face.name} hue={from.face.hue} tone={from.face.tone} size={14} /> {from.label}</div>}<AttachmentChips files={message.attachments} />{message.content && (chatFrom ? <ChatMessageText content={message.content} from={chatFrom} /> : <UserText content={shownText} />)}</div>
+            <div className="user-bubble">{from && <div className="user-from"><Face decor name={from.face.name} hue={from.face.hue} tone={from.face.tone} size={14} /> {from.label}</div>}<AttachmentChips files={message.attachments} />{message.content && (chatFrom ? <ChatMessageText content={message.content} from={chatFrom} /> : <UserText content={shownText} />)}</div>
           )
         ) : (
           <div className="msg-body">

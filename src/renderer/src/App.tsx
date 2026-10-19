@@ -220,6 +220,7 @@ export default function App(): JSX.Element {
   const uiFont = useStore((s) => s.settings.uiFont)
   const codeFont = useStore((s) => s.settings.codeFont)
   const accentCustom = useStore((s) => s.settings.accentCustom)
+  const mascot = useStore((s) => s.settings.mascot)
   const inCanvas = useStore((s) => s.view === 'canvas')
   const pageAgentOpen = useStore((s) => s.pageAgentOpen)
   const inboxOpen = useStore((s) => s.inboxOpen)
@@ -229,8 +230,8 @@ export default function App(): JSX.Element {
     void init()
   }, [init])
   useEffect(() => {
-    applyAppearance({ theme, accent, textTone, surfaceTone, uiFont, codeFont, accentCustom })
-  }, [theme, accent, textTone, surfaceTone, uiFont, codeFont, accentCustom])
+    applyAppearance({ theme, accent, textTone, surfaceTone, uiFont, codeFont, accentCustom, mascot })
+  }, [theme, accent, textTone, surfaceTone, uiFont, codeFont, accentCustom, mascot])
   // A fresh install (no key, never onboarded) opens the first-run wizard once the backend is up.
   useEffect(() => { if (ready && !backendError) void useOnboarding.getState().check() }, [ready, backendError])
   // What the user has highlighted rides along with the next ⌘I question, whatever view they are in.

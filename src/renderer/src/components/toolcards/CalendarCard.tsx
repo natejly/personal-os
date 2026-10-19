@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, ArrowRight, CalendarClock, CalendarDays, CalendarPlus, CalendarSearch, CalendarX, Check, ExternalLink, Loader2, ShieldAlert, ShieldCheck, Trash2, TriangleAlert, Video, X } from '../../icons'
 import type { CalendarEvent, ToolEvent } from '@shared/types'
+import KernelSpinner from '../KernelSpinner'
 import { api } from '../../lib/api'
 import {
   argsFromChanges, buildOverlay, cardState, changeProblem, changesFromArgs, dayHeading, findConflicts, groupByDay, notConnected,
@@ -415,7 +416,7 @@ function ProposalCard({ event, pending, decide, rules }: ToolCardProps): JSX.Ele
       {note && <p className="ccard-note">{note}</p>}
       {(notConnected(event.error) || (!connected && (editing || state === 'failed'))) && <ConnectNotice />}
 
-      {connected && existing === null && days.length > 0 && <div className="ccard-loading"><Loader2 size={12} className="spin" /> Loading your calendar…</div>}
+      {connected && existing === null && days.length > 0 && <div className="ccard-loading"><KernelSpinner size={12} /> Loading your calendar…</div>}
       {/* Without Google there are no existing events (existing = []), but the proposed changes still get the grid. */}
       {hasGrid && (
         <>

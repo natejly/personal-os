@@ -917,18 +917,44 @@ kbd {
 .msg .avatar.face-avatar { background: none; width: 38px; height: 38px; margin-top: 0; }
 .avatar.face-avatar .face { width: 100%; height: 100%; }
 .face { flex: none; display: block; }
-/* A resting face holds still until hovered. The face library keeps its idle loops (shake, blink, gaze, bob)
+/* Mascot off: a face that only decorates draws nothing, so its avatar box goes and the rows that line up with the reply text
+   drop their avatar indent. A face that carries state (rings, status rows) becomes a small dot coloured by mood. */
+.avatar.face-avatar:empty { display: none; }
+[data-mascot='off'] .regen-row { padding-left: 0; }
+[data-mascot='off'] .run-error-row { margin-left: 0; }
+.face-dot { display: grid; place-items: center; --dot: var(--text-muted); }
+.face-dot::before { content: ''; width: clamp(6px, 36%, 10px); aspect-ratio: 1; border-radius: 50%; background: var(--dot); }
+.face-dot[data-mood='thinking'] { --dot: var(--accent); }
+.face-dot[data-mood='happy'] { --dot: var(--ok); }
+.face-dot[data-mood='surprised'], .face-dot[data-mood='unsure'] { --dot: var(--warn); }
+.face-dot[data-mood='sad'], .face-dot[data-mood='scared'] { --dot: var(--danger); }
+.face-dot[data-mood='sleepy']::before { opacity: 0.5; }
+@media (prefers-reduced-motion: no-preference) {
+  .face-dot[data-live]::before { animation: face-dot-pulse 1.4s ease-in-out infinite; }
+}
+@keyframes face-dot-pulse { 50% { opacity: 0.35; } }
+/* Blobs: a resting face holds still until hovered. The face library keeps its idle loops (shake, blink, gaze, bob)
    running at zero amplitude, which forces a style recalculation every frame per face: a sidebar of chats
    alone burned ~75% of a core. Paused animations cost nothing; live ("always") faces are untouched. */
 .face.mo-root:not(.mo-always):not(:hover),
 .face.mo-root:not(.mo-always):not(:hover) * { animation-play-state: paused; }
 .face.mo-root.mo-expr:not(.mo-always):not(:hover) .mo-eye { animation-play-state: running; }
-/* Face reactions (Face.tsx useReaction, Composer typing flag). One-shot CSS animations on the head group and the svg;
-   the eyes move by transition only, so they never fight the idle saccade. Reduced motion keeps the eye position, drops the travel. */
+/* Face reactions (Face.tsx useReaction, Composer typing flag). One-shot CSS animations on the Grain mascot's .sp-fx group around
+   the body and sprout (the looping motion lives on the groups inside it) or the Blobs' .mo-bob groups, and on the svg; the eyes move
+   by transition only, so they never fight the blink or gaze. Reduced motion keeps the eye position, drops the travel. */
+.face .sp-eyes { transition: translate var(--dur-spring) var(--spring-gentle); }
+.chat-main[data-typing] .face .sp-eyes { translate: 0 2px; }
+.face.fx-down .sp-eyes { translate: 0 3px; }
 .face .mo-eyes { transition: fill var(--mo-morph) var(--mo-morph-ease), transform var(--dur-spring) var(--spring-gentle); }
 .chat-main[data-typing] .face .mo-eyes { transform: translateY(3px); }
 .face.fx-down .mo-eyes { transform: translateY(5px); }
 @media (prefers-reduced-motion: no-preference) {
+  .face[class*='fx-squish'] .sp-fx,
+  .face[class*='fx-droop'] .sp-fx { transform-origin: 50% 70%; animation-duration: var(--dur-spring); animation-timing-function: var(--ease-out); }
+  .face.fx-squish-0 .sp-fx { animation-name: face-squish-a; }
+  .face.fx-squish-1 .sp-fx { animation-name: face-squish-b; }
+  .face.fx-droop-0 .sp-fx { animation-name: face-sag-a; animation-duration: calc(var(--dur-spring) + var(--dur-snap)); }
+  .face.fx-droop-1 .sp-fx { animation-name: face-sag-b; animation-duration: calc(var(--dur-spring) + var(--dur-snap)); }
   .face[class*='fx-squish'] .mo-bob > g:not(.mo-eyes),
   .face[class*='fx-droop'] .mo-bob > g:not(.mo-eyes) { transform-box: fill-box; transform-origin: 50% 70%; animation-duration: var(--dur-spring); animation-timing-function: var(--ease-out); }
   .face.fx-squish-0 .mo-bob > g:not(.mo-eyes) { animation-name: face-squish-a; }

@@ -142,6 +142,8 @@ export function createTermHub(deps: HubDeps) {
     if (byId.get(e.termId) === e) byId.delete(e.termId)
     if (byKey.get(e.key) === e) byKey.delete(e.key)
   }
+  /** An exited agent terminal stays readable until it is closed, but holds no process: it does not count toward the limits. */
+  const running = (): Entry[] => [...byId.values()].filter((x) => !x.control?.exited)
   const own = (senderId: number, termId: unknown): Entry | null => {
     if (typeof termId !== 'string') return null
     const e = byId.get(termId)
@@ -166,7 +168,7 @@ export function createTermHub(deps: HubDeps) {
     if (!s) return { error: 'Session not found' }
     const raced = reuse()
     if (raced) return raced
-    if (byId.size >= MAX_PTYS) return { error: `At most ${MAX_PTYS} terminals can be open` }
+    if (running().length >= MAX_PTYS) return { error: `At most ${MAX_PTYS} terminals can be open` }
     const cwd = typeof s.worktree === 'string' ? s.worktree : ''
     if (!cwd.startsWith('/') || !deps.isDirectory(cwd)) return { error: 'The session folder does not exist' }
     const shell = defaultShell(deps.env, deps.platform)
@@ -213,7 +215,8 @@ export function createTermHub(deps: HubDeps) {
     if (!(argv[0] as string).startsWith('/')) return { error: 'The program must be an absolute path' }
     if (typeof cwd !== 'string' || !cwd.startsWith('/') || !deps.isDirectory(cwd)) return { error: 'The folder does not exist' }
     if (typeof env !== 'object' || env === null) return { error: 'Invalid environment' }
-    if (byId.size >= MAX_PTYS || [...byId.values()].filter((x) => x.control).length >= AGENT_MAX) return { error: 'Too many terminals are open' }
+    const live = running()
+    if (live.length >= MAX_PTYS || live.filter((x) => x.control).length >= AGENT_MAX) return { error: 'Too many terminals are open' }
     const cols = clampDim(a.cols, 120), rows = clampDim(a.rows, 30)
     let pty: Pty
     try { pty = deps.spawn(argv as string[], { cwd, env: scrubEnv(env as Record<string, string | undefined>), cols, rows }) } catch { return { error: 'Could not start the terminal' } }

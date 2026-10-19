@@ -259,6 +259,14 @@ test('at most AGENT_MAX agent terminals, and they count against MAX_PTYS', async
   assert.ok('termId' in (await hub.open(1, sid(1), 'shell', 80, 24)))  // two are left for the user's own
 })
 
+test('an exited agent terminal stays readable but frees its slot', () => {
+  const { hub, ptys } = rig()
+  for (let i = 0; i < AGENT_MAX; i++) hub.controlOpen(open({ terminal_id: `tm_${i.toString(16).padStart(16, '0')}` }))
+  ptys[0].exit(0)
+  assert.deepEqual(hub.controlOpen(open({ terminal_id: 'tm_ffffffffffffffff' })), { ok: true })
+  assert.equal(hub.controlStatus('tm_0000000000000000').alive, false)
+})
+
 test('write, read with a cursor, status and close', async () => {
   const { hub, ptys } = rig()
   hub.controlOpen(open())

@@ -352,3 +352,23 @@ def test_the_profile_layer_sits_between_the_project_and_the_global_selection(ext
         appmod.projects.update(project, {"runtime": {"model.router": "core/heuristic"}})
         assert appmod.host.runtime.resolve("model.router", appmod.runtime_selections.scopes(None, project)).source == "project"
         Defaults(appmod.db).revert("calm")
+
+
+def test_a_tool_source_that_is_selected_and_gone_is_reported_not_dropped_silently(ext: Path) -> None:
+    with Harness(ext, SETTINGS) as h:
+        h.select("tools.source", {"enable": ["gone/src"]})
+        res = appmod.host.runtime.resolve("tools.source")
+        assert (res.fell_back_from, res.default, res.provider) == ("gone/src", False, "core/builtin") and "not available" in res.reason
+
+
+def test_a_selection_and_an_accepted_dimension_written_at_once_both_survive(ext: Path, api: TestClient) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    with Harness(ext, SETTINGS):
+        for _ in range(10):
+            appmod.db.set_user_settings({"runtime": {}})
+            with ThreadPoolExecutor(2) as pool:
+                a = pool.submit(put, api, "model.router", "demo/router")
+                b = pool.submit(api.put, "/runtime/accept-partial", json={"provider": "core/os-default", "dimensions": ["network"]})
+                assert (a.result().status_code, b.result().status_code) == (200, 200)
+            assert appmod.db.get_settings()["runtime"] == {"model.router": "demo/router", "accept_partial": {"core/os-default": ["network"]}}

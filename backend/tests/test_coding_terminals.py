@@ -618,3 +618,13 @@ def test_a_pattern_that_backtracks_is_stopped_after_the_time_limit(monkeypatch):
         asyncio.run(terms.search(terms.safe_pattern("(.*)(.*)(.*)y"), "x" * 600))
     assert asyncio.run(terms.search(terms.safe_pattern(r"port \d+"), "listening on port 80")) == "port 80"
     assert asyncio.run(terms.search(terms.safe_pattern(r"zzz"), "nothing")) is None
+
+
+def test_arguments_of_the_wrong_type_or_value_are_refused_not_coerced(tmp_path, monkeypatch, quick):
+    tb, coding, hub, home, cfg = rig(tmp_path, monkeypatch)
+    tid = opened(tb, ctx_of(cfg), str(home / "work"))
+    assert "pattern must be" in wait(tb, cfg, tid, pattern=5, timeout_s=1)["error"]
+    assert "literal must be" in wait(tb, cfg, tid, literal="", timeout_s=1)["error"]
+    assert "mode must be" in call(tb, "terminal_read", ctx_of(cfg), terminal_id=tid, mode="bogus")["error"]
+    assert "text must be" in call(tb, "terminal_send", ctx_of(cfg), terminal_id=tid, text=12345)["error"]
+    assert hub.terms[tid]["written"] == []

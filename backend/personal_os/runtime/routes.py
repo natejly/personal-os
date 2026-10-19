@@ -2,8 +2,9 @@
 user's settings write here; there is no tool for it, and an extension can provide a slot but never select it."""
 from __future__ import annotations
 
+import threading
 from dataclasses import replace
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -40,6 +41,7 @@ class Selections:
 
     def __init__(self, db: Database, convos: Conversations, projects: Projects) -> None:
         self.db, self.convos, self.projects = db, convos, projects
+        self.lock = threading.Lock()  # the routes run in the thread pool: a read-merge-write must not interleave with another
 
     def scopes(self, conversation_id: str | None = None, project_id: str | None = None, *, layers: tuple[str, ...] = ("chat", "project")) -> Scopes:
         """The selections that apply to a chat and project; `layers` can leave the narrower ones out."""
@@ -67,6 +69,13 @@ class Selections:
             self.projects.update(scope_id or "", {"runtime": value})
         else:
             self.convos.update(scope_id or "", {"settings": {"runtime": value}})
+
+    def change(self, scope: str, scope_id: str | None, edit: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:
+        """Applies `edit` to a scope's selections and stores the result; returns what was there before."""
+        with self.lock:
+            current = self.read(scope, scope_id)
+            self.write(scope, scope_id, edit(current))
+            return current
 
 
 def router(rt: Runtime, selections: Selections, sources: ToolSources) -> APIRouter:
@@ -145,9 +154,8 @@ def router(rt: Runtime, selections: Selections, sources: ToolSources) -> APIRout
             wanted = body.value
         if (diff := rt.loosening(body.slot, was, wanted)) and not body.confirm:
             raise HTTPException(409, {"needs_confirm": True, "diff": diff})
-        current = selections.read(body.scope, body.scope_id)
-        new = {k: v for k, v in current.items() if k != body.slot} | ({} if body.value is None else {body.slot: body.value})
-        selections.write(body.scope, body.scope_id, new)
+        current = selections.change(body.scope, body.scope_id, lambda cur: {k: v for k, v in cur.items() if k != body.slot}
+                                    | ({} if body.value is None else {body.slot: body.value}))
         rt.bus.emit_sync("runtime.changed", {"slot": body.slot, "scope": body.scope, "scope_id": body.scope_id,
                                              "old": current.get(body.slot), "new": body.value, "by": "user"})
         return resolve(body.scope_id if body.scope == "chat" else None, body.scope_id if body.scope == "project" else None)
@@ -158,10 +166,9 @@ def router(rt: Runtime, selections: Selections, sources: ToolSources) -> APIRout
             raise HTTPException(422, f"{body.provider!r} is not a sandbox backend")
         if bad := [d for d in body.dimensions if d not in DIMENSIONS]:
             raise HTTPException(422, f"unknown dimension(s): {', '.join(bad)}")
-        current = selections.read("global", None)
-        accepted = {k: v for k, v in current.get(ACCEPT_PARTIAL, {}).items() if k != body.provider} | ({body.provider: body.dimensions} if body.dimensions else {})
-        selections.write("global", None, {**current, ACCEPT_PARTIAL: accepted})
-        return accepted
+        selections.change("global", None, lambda cur: {**cur, ACCEPT_PARTIAL: {k: v for k, v in cur.get(ACCEPT_PARTIAL, {}).items() if k != body.provider}
+                                                       | ({body.provider: body.dimensions} if body.dimensions else {})})
+        return selections.read("global", None)[ACCEPT_PARTIAL]
 
     @r.post("/runtime/tools/{slug}/accept")
     def accept_tool(slug: str) -> dict[str, bool]:

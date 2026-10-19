@@ -376,7 +376,7 @@ class CodingSessions:
         self.resumed: dict[str, float] = {}   # id -> when a follow-up started: a stale "done" in state.json is ignored for a moment
         self.cursors: dict[str, tuple[str, int]] = {}  # id -> (job id, absolute output offset) already turned into events (opencode, pi)
         self.timelines: dict[tuple[str, str], tuple[int, tuple[str, str] | None]] = {}  # (id, claude job id) -> (lines read, last event)
-        self.seen: dict[str, tuple[int, str]] = {}   # id -> (output size, job status) at the last opencode refresh
+        self.seen: dict[str, tuple[str, int, str]] = {}   # id -> (job id, output size, job status) at the last opencode refresh
         self.mtimes: dict[str, int | None] = {}  # id -> state.json mtime at the last look at a settled claude session
         # ponytail: one lock for every session's refresh (the watcher thread vs wait/status/list); per-id locks if it ever contends
         self._refresh_lock = threading.RLock()
@@ -538,6 +538,8 @@ class CodingSessions:
 
     async def wait(self, ids: list[str], mode: str = "all", timeout_s: float = 120) -> dict[str, Any]:
         """Block (asynchronously) until the sessions have settled (all of them, or any one) or the timeout passes."""
+        if not isinstance(ids, list):
+            raise CodingError("ids must be a list of session ids.")
         ids = [str(i) for i in ids][:20]
         if not ids:
             raise CodingError("ids is empty.")
@@ -620,9 +622,10 @@ class CodingSessions:
         job = self.jobs.jobs.get(row.get("external_id") or "")
         if job is None:
             return self._apply(row, status="blocked", detail="the job record is gone (the app restarted, or it expired from the job registry); Stop clears it")
-        if self.seen.get(row["id"]) == (job.total, job.status):
+        look = (job.id, job.total, job.status)
+        if self.seen.get(row["id"]) == look:
             return row  # nothing new since the last look: skip re-parsing the buffer
-        self.seen[row["id"]] = (job.total, job.status)
+        self.seen[row["id"]] = look
         status, detail = map_job(job)
         self._job_events(row, job)
         raw = job.buf
@@ -1191,7 +1194,7 @@ def specs(coding: Any) -> list[ToolSpec]:
 
     async def coding_session_wait(ctx: dict[str, Any], ids: list[str], mode: str = "all", timeout_s: int = 120) -> Any:
         try:
-            out = await coding.sessions.wait(list(ids or []), "any" if mode == "any" else "all", timeout_s)
+            out = await coding.sessions.wait(ids if ids is not None else [], "any" if mode == "any" else "all", timeout_s)
         except CodingError as e:
             return tool_error(shell._scrub(str(e)), field="ids")
         shell.taint(ctx, "coding_session:wait:" + ",".join(r["id"] for r in out["sessions"]))  # logs and details are agent-written

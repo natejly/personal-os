@@ -250,8 +250,10 @@ class Runtime:
                 source = src
             on = [i for i in (*on, *sel.get("enable", ())) if i not in sel.get("disable", ())]
         extra = tuple(dict.fromkeys(i for i in on if (p := self._providers[d.id].get(i)) is not None and not p.core and p.available))
+        missing = next((i for i in on if (p := self._providers[d.id].get(i)) is None or not (p.core or p.available)), None)
+        gone = self._fallback(d, self._providers[d.id][d.default_id], missing, scopes) if missing else None  # said once, as for a single slot
         if not extra:
-            return Resolution(d.id, d.default_id, "default", f"Using the built-in tools and connectors ({d.noun}) by default.", True)
+            return gone or Resolution(d.id, d.default_id, "default", f"Using the built-in tools and connectors ({d.noun}) by default.", True)
         names = ", ".join(self._providers[d.id][i].label for i in extra)
         return Resolution(d.id, d.default_id, source, f"Using {names} ({d.noun}) because {_phrase(source)}.", False, extra=extra)
 

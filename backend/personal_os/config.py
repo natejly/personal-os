@@ -65,12 +65,14 @@ def effective(db: Any, tools: Any, declared: dict[str, str], *, project_id: str 
     project = Projects(db).get(project_of) if project_of else None
     project_perms, chat_perms = _scoped(project, conv)
     present = {k for k in stored if k != permissions.KEY and k not in permissions.KEYS} | permissions.stored_keys(stored)
+    derived = {"provider", "baseUrl"} if stored.get("providers") else set()  # assemble() takes them from the providers list
+    present |= derived
     secret_keys = {*SECRET_SETTINGS, *(k for k, t in declared.items() if t == "secret")}
 
     values: dict[str, Any] = {}
     for key in sorted({*llm.DEFAULT_SETTINGS, *permissions.DEFAULTS, *declared} - PRIVATE_SETTINGS - secret_keys):
         default = permissions.DEFAULTS[key] if key in permissions.DEFAULTS else llm.DEFAULT_SETTINGS.get(key)
-        row = sources.get((key, "global", ""))
+        row = sources.get((key, "global", "")) or (sources.get(("providers", "global", "")) if key in derived else None)
         if key not in present:
             source, legacy = "default", False
         else:

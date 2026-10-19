@@ -258,3 +258,12 @@ def test_a_chats_own_always_ask_caps_the_tool_modes_it_reports() -> None:
     appmod.convos.update(chat, {"settings": {"permissions": {"alwaysAsk": ["write_local_file"]}}})
     assert dump(conversation_id=chat)["tools"]["write_local_file"]["mode"] == "ask"
     assert dump()["tools"]["write_local_file"]["mode"] == "on"
+
+
+def test_a_base_url_taken_from_the_providers_list_is_the_users_not_a_default() -> None:
+    appmod.db.set_settings({"providers": [{"id": "local", "kind": "custom", "name": "Local", "baseUrl": "http://127.0.0.1:9"}]})
+    try:
+        values = dump()["values"]
+        assert (values["baseUrl"]["value"], values["baseUrl"]["source"], values["provider"]["source"]) == ("http://127.0.0.1:9", "user", "user")
+    finally:
+        appmod.db.set_settings({"providers": []})

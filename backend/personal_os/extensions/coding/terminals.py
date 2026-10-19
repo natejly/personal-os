@@ -406,6 +406,8 @@ class Terminals:
         row = self.mine(ctx, terminal_id)
         if (text is None) == (key is None):
             raise TerminalError("Give exactly one of `text` or `key`.")
+        if text is not None and not isinstance(text, str):
+            raise TerminalError("text must be a string.")
         if row["user_attached"]:
             raise TerminalError("The user has this terminal open in a window, so you cannot type into it. You can still read it.",
                                 "ask the user, or open a terminal of your own")
@@ -455,6 +457,8 @@ class Terminals:
     async def read(self, ctx: dict[str, Any], terminal_id: str, mode: str = "new", cursor: int | None = None,
                    max_bytes: int | None = None) -> dict[str, Any]:
         row = self.mine(ctx, terminal_id)
+        if mode not in ("new", "screen"):
+            raise TerminalError("mode must be 'new' or 'screen'.")
         cfg = ctx.get("settings") or self.coding.tb.settings()
         cap = max(1, min(int(max_bytes or READ_MAX), READ_MAX))
         reply = await self._fetch(row, mode == "screen", self.cursors.get(terminal_id, 0) if cursor is None else int(cursor))
@@ -486,6 +490,9 @@ class Terminals:
             raise TerminalError(f"timeout_s is required, a whole number of seconds from {WAIT_MIN_S} to {WAIT_MAX_S}.")
         if pattern is not None and literal is not None:
             raise TerminalError("Give `pattern` or `literal`, not both.")
+        for name, given in (("pattern", pattern), ("literal", literal)):
+            if given is not None and (not isinstance(given, str) or not given):
+                raise TerminalError(f"{name} must be a non-empty string.")
         compiled = safe_pattern(pattern) if pattern else re.compile(re.escape(literal)) if literal else None
         if idle_ms is not None and (isinstance(idle_ms, bool) or not isinstance(idle_ms, int) or not IDLE_MS[0] <= idle_ms <= IDLE_MS[1]):
             raise TerminalError(f"idle_ms must be a whole number from {IDLE_MS[0]} to {IDLE_MS[1]}.")

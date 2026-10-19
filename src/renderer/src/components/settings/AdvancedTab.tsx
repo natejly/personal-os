@@ -14,7 +14,7 @@ export default function AdvancedTab({ draft, patch, openGroups, toggle, onExtens
     <section>
       <Sec id="data"><AdvGroup id="data" title="Data" {...gp}>
           <DataSettings />
-          <label><span className="toggle-text"><b>Auto-archive after (days)</b><small>Chats and inbox messages with no activity for this long move to Archived. They stay searchable and can be restored. 0 turns it off.</small></span>
+          <label><span className="toggle-text"><b>Auto-archive after (days, 0 = off)</b></span>
             <NumberField name="autoArchiveDays" value={draft.autoArchiveDays ?? 0} fallback={0} onChange={(autoArchiveDays) => patch({ autoArchiveDays })} />
           </label>
           <TrashPanel />
@@ -27,7 +27,7 @@ export default function AdvancedTab({ draft, patch, openGroups, toggle, onExtens
       </AdvGroup></Sec>
 
       <Sec id="developer"><AdvGroup id="developer" title="Developer" {...gp}>
-          <Switch title="Developer tools" help="Show traces, the context preview and the system prompt." checked={draft.devTools === true} onChange={(devTools) => patch({ devTools })} />
+          <Switch title="Developer tools" checked={draft.devTools === true} onChange={(devTools) => patch({ devTools })} />
           <TraceExportSettings value={draft.otelExport} onChange={(otelExport) => patch({ otelExport })} />
           {draft.devTools === true && <ExtensionsDev onChanged={onExtensionsChanged} />}
       </AdvGroup></Sec>

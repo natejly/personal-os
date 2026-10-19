@@ -22,7 +22,6 @@ export default function SidebarTab({ draft, patch, onProfileApplied }: TabProps 
     <section>
       <Sec id="sidebar">
       <h4>Sidebar rows</h4>
-      <p className="set-help">New chat, your chats and Settings always show. Hiding Files, Projects or Jobs only removes the row: ⌘K and shortcuts still open them. Hiding Lists, Calendar, Mail, Health, Canvases or Library turns that view off, and the assistant stops using its tools.</p>
       <div className="setting-list">
         {FILES.map(sectionRow)}
         {navEntries().map((e) => (

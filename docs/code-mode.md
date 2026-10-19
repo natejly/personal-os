@@ -34,6 +34,7 @@ Bridgeable tools are any tool the chat may use whose mode is `on` or `ask`, exce
 
 - tools that always show a card (the `alwaysAsk` set),
 - `agent_spawn`, `delegate`, workflow tools and scheduling tools,
+- shell and coding-agent tools (`shell_run`, `coding_*`, `terminal_*`), `tool_search`, `ask_user` and worker tools,
 - `run_python` itself.
 
 Extension tools and MCP tools are bridgeable. A name outside this set, or one that is off for the chat, is reported back
@@ -48,7 +49,7 @@ in `tools_refused` with the reason.
 | Timeout | Up to 300 s for a bridged run, approval waits excluded. |
 | Stdout | 50,000 characters shown: 40% from the start, 60% from the end, the middle counted. |
 | Full stdout | Stored; the result carries a `result_id` for `read_tool_result` with an offset. |
-| One call's result | About 2 MB; larger results are refused for that call. |
+| One call's result | Up to 2,000,000 characters returned whole to the script; past that it is cut with a `truncated` field and a note. |
 | Concurrency | `gather` runs at most `parallelReads` calls at once, and only parallel-safe (read-only) tools run concurrently. The rest run one at a time. |
 
 ## The client API

@@ -1,7 +1,10 @@
 /* Settings > Hooks and automations: read-only summaries of extension hooks and scheduled jobs. */
 .hooks-event { margin: 10px 0 4px; }
 .hooks-event > h5 { margin: 0 0 4px; font-size: 12px; font-weight: 600; font-family: var(--mono); color: var(--text); }
-.hooks-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.hooks-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
+.hooks-table td, .hooks-table th { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hooks-table th.num, .hooks-table td.num { width: 80px; padding-right: 16px; }
+.hooks-table th:last-child, .hooks-table td:last-child { width: 88px; }
 .hooks-table th { text-align: left; font-weight: 500; color: var(--text-muted); padding: 3px 8px 3px 0; }
 .hooks-table td { padding: 3px 8px 3px 0; border-top: 1px solid var(--border); color: var(--text); }
 .hooks-table td.num, .hooks-table th.num { text-align: right; font-variant-numeric: tabular-nums; }

@@ -20,7 +20,7 @@ test('palette "Run coding recipe...": opens the recipes section, a saved recipe 
     await page.keyboard.press('Enter')
     const panel = page.getByRole('dialog').getByRole('tabpanel')
     await expect(panel).toContainText('New recipe')
-    await expect(panel).toContainText('No recipes yet')
+    await expect(panel).toContainText('No recipes')
 
     const body = { name: 'fix-test', description: 'Fix a test', prompt: 'Make this pass: {{test}}', inputs: [{ name: 'test', type: 'string' }],
       repo_path: repo, driver: 'claude', verify: { command: 'true' }, max_retries: 0 }

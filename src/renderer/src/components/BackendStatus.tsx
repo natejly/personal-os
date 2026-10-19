@@ -8,7 +8,7 @@ export function BackendBanner(): JSX.Element | null {
   return (
     <div className="backend-banner" role="status">
       <KernelSpinner size={14} />
-      <span>Restarting the backend…</span>
+      <span>The backend stopped and is restarting…</span>
     </div>
   )
 }

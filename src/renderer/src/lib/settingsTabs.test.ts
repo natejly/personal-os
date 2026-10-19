@@ -81,3 +81,8 @@ test('search also finds the sections extensions contribute', () => {
   assert.deepEqual(searchSettings('recipe', [panel]), [panel])
   assert.deepEqual(searchSettings('recipe'), [])
 })
+
+test('coding routing is not offered while the coding extension is off', () => {
+  assert.ok(searchSettings('opencode').some((e) => e.sec === 'coding'))
+  assert.deepEqual(searchSettings('opencode', [], new Set(['coding'])).filter((e) => e.sec === 'coding'), [])
+})

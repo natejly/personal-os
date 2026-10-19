@@ -4,6 +4,8 @@ import LoopGroup from './LoopGroup'
 import NumberField from './NumberField'
 import SettingRow from './SettingRow'
 import { Sec, type TabProps } from './shared'
+import { useStore } from '../../store'
+import { ownerOn } from '../../extensions/host'
 
 /** A bare on/off control for a SettingRow (the row supplies label and help). */
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }): JSX.Element {
@@ -15,6 +17,8 @@ export default function AgentsTab({ draft, patch }: TabProps): JSX.Element {
   const workerMaxConcurrent = draft.workerMaxConcurrent ?? 4
   const codingSessionMaxConcurrent = draft.codingSessionMaxConcurrent ?? 3
   const codingAgent = draft.codingAgent ?? 'any'
+  // The saved settings decide whether the coding extension is on, not the unsaved draft.
+  const codingOn = useStore((s) => ownerOn(s.settings, 'coding'))
   return (
     <section>
       <LoopGroup draft={draft} patch={patch} />
@@ -36,7 +40,7 @@ export default function AgentsTab({ draft, patch }: TabProps): JSX.Element {
           <NumberField name="workerMaxConcurrent" label="Background workers at once" value={workerMaxConcurrent} fallback={4} onChange={(n) => patch({ workerMaxConcurrent: n })} />
         </SettingRow>
       </Sec>
-      <Sec id="coding">
+      {codingOn && <Sec id="coding">
         <h4>Coding sessions</h4>
         <SettingRow title="Route coding to OpenCode / Claude Code" help="Grain's own agents plan, hand code changes to a coding session and check the result. They can't edit files or run file-changing commands inside a git repository themselves."
           value={draft.codingRoute !== false} defaultValue onReset={() => patch({ codingRoute: true })}>
@@ -54,7 +58,7 @@ export default function AgentsTab({ draft, patch }: TabProps): JSX.Element {
         <SettingRow title="Coding sessions at once" help="1 to 20." value={codingSessionMaxConcurrent} defaultValue={3} onReset={() => patch({ codingSessionMaxConcurrent: 3 })}>
           <NumberField name="codingSessionMaxConcurrent" label="Coding sessions at once" value={codingSessionMaxConcurrent} fallback={3} onChange={(n) => patch({ codingSessionMaxConcurrent: n })} />
         </SettingRow>
-      </Sec>
+      </Sec>}
       <Sec id="browser">
         <h4>Browser</h4>
         <BrowserAccess draft={draft} patch={patch} />

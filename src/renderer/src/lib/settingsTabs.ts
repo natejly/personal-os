@@ -66,7 +66,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'agent', sec: 'loop', title: 'Agent loop limits', keys: 'loop loop picker rounds max rounds model calls repeat repeat limit tool errors doom stuck sensitivity stuck detection final round tool result size inline plan steps verify passes parallel reads retries idle timeout stop runaway cap' },
   { tab: 'agent', sec: 'desks', title: 'Desks', keys: 'cowork desk folder agents workers autonomous' },
   { tab: 'agent', sec: 'workers', title: 'Background workers', keys: 'delegate delegation concurrent queue tool rounds' },
-  { tab: 'agent', sec: 'coding', title: 'Coding sessions', keys: 'opencode claude code repo git coding agent' },
+  { tab: 'agent', sec: 'coding', title: 'Coding sessions', keys: 'opencode claude code repo git coding agent', ext: 'coding' },
   { tab: 'agent', sec: 'browser', title: 'Browser', keys: 'web pages visible session sites access' },
   { tab: 'agent', sec: 'checks', title: 'Checks and commands', keys: 'gates test lint build verify commands' },
   { tab: 'agent', sec: 'runtime', title: 'Runtime', keys: 'runtime sandbox router client tool source runtime slot where tools run' },

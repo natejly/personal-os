@@ -5,6 +5,8 @@ import { api } from '../lib/api'
 import { ApiError } from '../lib/apiError'
 import NumberField from './settings/NumberField'
 import { Sec } from './settings/shared'
+import { useStore } from '../store'
+import { ownerOn } from '../extensions/host'
 import Switch from './settings/Switch'
 
 type Tone = '' | 'needs-you' | 'working' | 'done' | 'failed'
@@ -36,7 +38,8 @@ function expiryLabel(expiresAt: number): string {
 export default function TelegramSettings({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element | null {
   const [st, setSt] = useState<TelegramStatus | null>(null)
   const [stErr, setStErr] = useState<string | null>(null)
-  const [off, setOff] = useState(false)  // the extension is turned off: its routes answer 404
+  const [serverOff, setOff] = useState(false)
+  const ownerIsOn = useStore((s) => ownerOn(s.settings, 'telegram'))  // the extension is turned off: its routes answer 404
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -74,7 +77,7 @@ export default function TelegramSettings({ draft, patch }: { draft: Settings; pa
     void navigator.clipboard.writeText(code).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => undefined)
   }
 
-  if (off) return null
+  if (serverOff || !ownerIsOn) return null
   const view = statusView(st)
   const pairing = st?.pairing ?? null
   const hasToken = !!st?.has_token

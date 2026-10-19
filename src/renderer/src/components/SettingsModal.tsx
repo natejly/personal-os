@@ -74,7 +74,8 @@ export default function SettingsModal(): JSX.Element {
   useEffect(() => {
     api.devExtensions.list().then((r) => setExtList(r.extensions)).catch(() => undefined)
   }, [])
-  const offExtensions: ReadonlySet<string> = new Set((extList ?? []).filter((e) => !e.enabled).map((e) => e.id))
+  const hiddenViews = useStore((s) => s.settings.hiddenViews)
+  const offExtensions: ReadonlySet<string> = new Set([...(extList ?? []).filter((e) => !e.enabled).map((e) => e.id), ...(hiddenViews ?? [])])
   const hits = searchSettings(q, panels.map((p) => ({ tab: p.tab, sec: p.id, title: p.label, keys: p.keys ?? '' })), offExtensions)
   const google = useStore((s) => s.google)
   /** A search hit as the section it lives in (a registered panel's hit lands in its group) and the anchor inside it. */

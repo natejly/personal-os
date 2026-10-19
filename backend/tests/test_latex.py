@@ -77,6 +77,24 @@ class ProjectTests(unittest.TestCase):
         got = {f["path"]: f["kind"] for f in lx.list_files(proj)}
         self.assertEqual(got, {"main.tex": "tex", "refs.bib": "bib", "fig.png": "image"})
 
+    def test_odd_main_files_fall_back(self) -> None:
+        proj = lx.project_dir(lx.create_project("p")["name"])
+        (proj.parent / "x.tex").write_text("x")
+        (proj / "-x.tex").write_text("\\documentclass{article}")
+        for bad in ("../x.tex", "-x.tex", "/etc/passwd", "main.txt", ".hidden.tex"):
+            lx.write_settings(proj, {"main": bad})
+            self.assertEqual(lx.main_file(proj), "main.tex", bad)
+        (proj / "main.tex").unlink()
+        self.assertEqual(lx.main_file(proj), "main.tex")  # the "-" file is not picked by the \documentclass fallback
+
+    @unittest.skipUnless(HAVE_TEX, "latexmk is not installed")
+    def test_compile_ignores_rc_files(self) -> None:
+        proj = lx.project_dir(lx.create_project("rc")["name"])
+        for rc in ("latexmkrc", ".latexmkrc"):
+            (proj / rc).write_text('system("touch marker");\n')
+        self.assertTrue(asyncio.run(lx.compile_project("rc"))["ok"])
+        self.assertFalse((proj / "marker").exists())
+
     @unittest.skipUnless(HAVE_TEX, "latexmk is not installed")
     def test_compile_ok_and_broken(self) -> None:
         lx.create_project("doc")

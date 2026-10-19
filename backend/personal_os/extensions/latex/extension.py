@@ -101,11 +101,15 @@ def write_settings(proj: Path, patch: dict[str, Any]) -> None:
 def main_file(proj: Path) -> str:
     """The configured main file; else main.tex; else the one top-level .tex holding \\documentclass."""
     want = read_settings(proj).get("main")
-    if isinstance(want, str) and (proj / want).is_file():
-        return want
+    if isinstance(want, str) and want.endswith(".tex") and not Path(want).name.startswith("-"):  # a leading "-" would reach latexmk as an option
+        try:
+            if safe_path(proj, want).is_file():
+                return want
+        except LatexError:
+            pass
     if (proj / "main.tex").is_file():
         return "main.tex"
-    docs = [f.name for f in sorted(proj.glob("*.tex")) if "\\documentclass" in f.read_text(errors="replace")]
+    docs = [f.name for f in sorted(proj.glob("*.tex")) if not f.name.startswith("-") and "\\documentclass" in f.read_text(errors="replace")]
     return docs[0] if len(docs) == 1 else "main.tex"
 
 
@@ -223,7 +227,7 @@ async def compile_project(name: str, engine: str | None = None) -> dict[str, Any
         raise LatexError(f"The main file '{main}' does not exist")
     async with _locks.setdefault(proj.name, asyncio.Lock()):
         t0 = time.monotonic()
-        cmd = [latexmk, ENGINES[engine_of(proj)], "-interaction=nonstopmode", "-halt-on-error", "-file-line-error",
+        cmd = [latexmk, "-norc", "-no-shell-escape", ENGINES[engine_of(proj)], "-interaction=nonstopmode", "-halt-on-error", "-file-line-error",
                "-synctex=1", f"-outdir={BUILD_DIR}", main]
         proc = await asyncio.create_subprocess_exec(*cmd, cwd=proj, env=env, stdin=asyncio.subprocess.DEVNULL,
                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,

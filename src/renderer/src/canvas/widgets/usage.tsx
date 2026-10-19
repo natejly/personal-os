@@ -63,9 +63,9 @@ function UsageWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element 
       {error ? (
         <div className="widget-error"><span><AlertCircle size={14} /> Couldn't load usage: {error}</span></div>
       ) : !report || !charts || !t ? (
-        <div className="widget-empty">{loading ? 'Loading usage…' : 'No usage recorded yet.'}</div>
+        <div className="widget-empty">{loading ? 'Loading…' : 'No usage'}</div>
       ) : t.calls === 0 ? (
-        <div className="widget-empty">No model calls in this range.</div>
+        <div className="widget-empty">No calls</div>
       ) : (
         <div className="widget-scroll">
           <div className="usage-tiles">

@@ -78,7 +78,7 @@ export default function CardShell({ event, pending, decide, rules, icon, title, 
             {approveLabel}
           </button>
           <button type="button" className="ghost-btn sm" disabled={busy} onClick={() => void send(false)}>{denyLabel}</button>
-          {invalid ? <span className="tc-hint err">{invalid}</span> : <span className="tc-hint">⌘↵ to approve</span>}
+          {invalid && <span className="tc-hint err">{invalid}</span>}
         </footer>
       ) : null}
       {pending && rules}

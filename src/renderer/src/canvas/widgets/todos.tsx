@@ -146,7 +146,7 @@ function TodosWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element 
           <TodoBoard todos={rows} groupBy={c.groupBy} list={c.list || null} projectId={projectId} onChanged={() => useTodos.getState().refreshTodos('all', true)} />
         </div>
       ) : <div className="widget-scroll">
-        {!rows.length && <p className="widget-sub">{q.trim() || c.scope !== 'all' ? 'Nothing matches.' : 'No todos yet.'}</p>}
+        {!rows.length && <p className="widget-sub">{q.trim() || c.scope !== 'all' ? 'No matches' : 'No todos'}</p>}
         {section('Overdue', overdue)}
         {section('Today', dueToday)}
         {section('Upcoming', upcoming)}

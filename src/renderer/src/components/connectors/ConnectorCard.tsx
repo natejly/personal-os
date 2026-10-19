@@ -15,7 +15,7 @@ export default function ConnectorCard({ entry, warning, onInstall }: {
   const detect = detectionLabel(entry)
   const missing = !!detect && !detect.found
   return (
-    <div className="connector-card">
+    <div className="connector-card" title={entry.description || undefined}>
       <div className="connector-head">
         <span className="connector-icon"><Icon size={18} /></span>
         <span className="connector-title">
@@ -31,7 +31,6 @@ export default function ConnectorCard({ entry, warning, onInstall }: {
             ? <span className="tag" title="Not found on this Mac">Not installed</span>
             : <button className="primary-btn small" aria-label={`Install ${entry.name}`} onClick={onInstall}>Install</button>}
       </div>
-      <p className="connector-desc">{entry.description}</p>
       {detect && !installed && <p className="connector-detect">{detect.text}</p>}
       <div className="connector-tags">
         {TRANSPORT_WORD[entry.transport] && <span className="tag">{TRANSPORT_WORD[entry.transport]}</span>}

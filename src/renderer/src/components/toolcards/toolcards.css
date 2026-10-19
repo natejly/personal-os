@@ -159,7 +159,6 @@
   background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
 .setup-card .setup-icon { flex: none; display: inline-flex; color: var(--accent); }
 .setup-card .setup-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.setup-card .setup-text small { color: var(--text-muted); font-size: 11.5px; }
 .setup-card .primary-btn { flex: none; }
 .setup-card .setup-ok { flex: none; color: var(--accent); font-weight: 600; }
 

@@ -484,7 +484,6 @@ function AwaitingRead({ decide, rules }: Pick<ToolCardProps, 'decide' | 'rules'>
   const [busy, setBusy] = useState(false)
   return (
     <div className="ccard-foot">
-      <p className="ccard-muted">This tool is set to ask first. It only reads your calendar.</p>
       <div className="ccard-actions">
         <button className="primary-btn sm" disabled={busy} onClick={() => { setBusy(true); void decide(true).finally(() => setBusy(false)) }}>Approve</button>
         <button className="ghost-btn sm" disabled={busy} onClick={() => { setBusy(true); void decide(false).finally(() => setBusy(false)) }}>Deny</button>

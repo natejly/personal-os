@@ -95,8 +95,7 @@ export default function Overview(): JSX.Element {
     <div className="overview" onClick={() => useCanvas.getState().toggleOverview()}>
       <div className="overview-head">
         <b>Overview</b>
-        <span>Click a canvas to open it · drag a window onto another canvas · Esc to close</span>
-        <button className="icon-btn" aria-label="Close overview" title={tip('Close', 'canvas-deselect')}><X size={15} /></button>
+                <button className="icon-btn" aria-label="Close overview" title={tip('Close', 'canvas-deselect')}><X size={15} /></button>
       </div>
       {order.map((id) => canvases[id] && <Thumb key={id} canvas={canvases[id]} />)}
     </div>

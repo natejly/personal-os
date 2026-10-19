@@ -52,12 +52,8 @@ export function GenericApproval({ event, conversationId, decide, onWhy }: {
       onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !(e.target as HTMLElement).closest('form, input, textarea')) { e.preventDefault(); void decide(true) } }}
     >
       <div className="approval-text">
-        <b>{d.verb}</b>{label ?? d.subject ? <> {label ?? d.subject}</> : null}. {event.forced
-          ? tainted
-            ? <>This chat has read untrusted content, so this needs your OK each time.
-              {onWhy && <>{' '}<button type="button" className="link small" onClick={onWhy}>See why</button></>}</>
-            : 'This needs your OK each time.'
-          : 'This acts outside the app.'}
+        <b>{d.verb}</b>{label ?? d.subject ? <> {label ?? d.subject}</> : null}
+        {event.forced && tainted && onWhy && <>{' '}<button type="button" className="link small" onClick={onWhy}>See why</button></>}
       </div>
       {connector && (
         <div className="tc-origin small muted">

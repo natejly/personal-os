@@ -83,7 +83,7 @@ function DocWidget({ window: win, live, onConfig, onTitle }: WidgetProps): JSX.E
   // Closing the window mid-edit still writes.
   useEffect(() => () => { if (pending.current !== null) save(pending.current) }, [save])
 
-  if (!id) return <div className="widget-empty">A doc window needs a doc.</div>
+  if (!id) return <div className="widget-empty">No doc</div>
   if (error) return <div className="widget-error">{error}</div>
   if (!live) {
     return (

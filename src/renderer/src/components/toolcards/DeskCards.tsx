@@ -21,7 +21,7 @@ export function DeliverCard(props: ToolCardProps): JSX.Element {
       ]} />
       {str(a.summary) && <LongText text={str(a.summary)} />}
       {d && str(d.warning) && <div className="tc-hint warn tc-warning"><TriangleAlert size={12} /> {str(d.warning)}</div>}
-      {d && !event.error && <div className="tc-muted">Waiting in the Files tab for your review.</div>}
+      {d && !event.error && <div className="tc-muted">Awaiting review</div>}
       <ErrorLine event={event} />
     </CardShell>
   )
@@ -69,7 +69,7 @@ export function AskCard(props: ToolCardProps): JSX.Element {
       {answered ? (
         <div className="tc-statusrow"><Badge tone="ok">Your answer</Badge><span>{answer || 'Approved without a typed answer'}</span></div>
       ) : d?.status === 'no_answer' ? <div className="tc-muted">Approved without a typed answer.</div>
-        : d ? <div className="tc-muted">Waiting for your answer{event.name === 'desk_ask' ? ' in Needs you' : ''}.</div> : null}
+        : d ? <div className="tc-muted">Waiting for your answer</div> : null}
       <ErrorLine event={event} />
     </CardShell>
   )

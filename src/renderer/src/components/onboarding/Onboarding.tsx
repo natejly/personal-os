@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type KeyboardEvent } from 'react'
-import { ArrowLeft, ArrowRight, Lock } from '../../icons'
+import { ArrowLeft, ArrowRight } from '../../icons'
 import GrainLogo from '../GrainLogo'
 import KernelSpinner from '../KernelSpinner'
 import { api } from '../../lib/api'
@@ -99,14 +99,6 @@ export default function Onboarding(): JSX.Element {
         {state.step === 'welcome' && <GrainLogo size={44} />}
         <h1 id="ob-title" tabIndex={-1}>{TITLES[state.step]}</h1>
 
-        {state.step === 'welcome' && (
-          <>
-            <p className="ob-lead">Chat, files, notes and projects in one place, with an assistant that works across all of it. Lists, Calendar, Mail, Health and Canvases are off to start; turn them on in Settings → Sidebar.</p>
-            <p className="ob-privacy"><Lock size={13} /> Your data is stored on this Mac. Your messages, the context Grain adds to them (memories, files, mail and calendar the assistant reads) and background learning go to the AI provider you choose. Web search and page reading use outside services.</p>
-            <p className="muted">Most providers need an API key. Local models do not.</p>
-          </>
-        )}
-
         {state.step === 'provider' && (
           <>
             {loadError && <p className="ob-error" role="alert">Could not load providers: {loadError}</p>}
@@ -122,7 +114,6 @@ export default function Onboarding(): JSX.Element {
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); e.stopPropagation(); dispatch({ type: 'pick', provider: p }); rawDispatch({ type: 'next', provider_: p }) } }}
                   >
                     <b>{p.name}</b>
-                    <small>{p.note ?? (p.needsKey ? 'Needs an API key' : 'Runs without a key')}</small>
                   </button>
                 )
               })}
@@ -139,12 +130,7 @@ export default function Onboarding(): JSX.Element {
               model={state.model} onModel={(v) => field({ model: v })}
             />
             {state.test.state === 'fail' && <p className="ob-error" role="alert">{state.test.error}</p>}
-            <p className="muted small"><Lock size={11} /> Your key is stored on this Mac only.</p>
           </>
-        )}
-
-        {state.step === 'done' && (
-          <p className="ob-lead" role="status">Grain is connected to {provider?.name}. Start a chat and ask it anything.</p>
         )}
 
         {blocker && state.step === 'key' && <p className="ob-hint">{blocker}</p>}
@@ -158,12 +144,11 @@ export default function Onboarding(): JSX.Element {
           {state.step === 'done' ? (
             <button type="button" className="primary-btn" data-autofocus onClick={finish}>Start chatting <ArrowRight size={13} /></button>
           ) : (
-            <button type="button" className="primary-btn" disabled={state.step === 'welcome' ? false : !!blocker || testing} onClick={() => state.step === 'key' ? void submit() : dispatch({ type: 'next' })}>
+            <button type="button" className="primary-btn" title={state.step === 'key' ? 'Enter to continue, Esc to go back' : undefined} disabled={state.step === 'welcome' ? false : !!blocker || testing} onClick={() => state.step === 'key' ? void submit() : dispatch({ type: 'next' })}>
               {state.step === 'welcome' ? 'Get started' : testing ? 'Connecting…' : 'Continue'} <ArrowRight size={13} />
             </button>
           )}
         </div>
-        {state.step === 'key' && <p className="ob-keys muted small">Enter to continue, Esc to go back</p>}
       </div>
     </div>
   )

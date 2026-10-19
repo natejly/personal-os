@@ -78,3 +78,12 @@ if __name__ == "__main__":
     for fn in fns:
         fn()
         print("ok", fn.__name__)
+
+
+def test_a_new_conversation_starts_on_the_default_effort() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        db = Database(d)
+        convos = Conversations(db)
+        assert convos.create(None, "a", "m")["settings"]["effort"] == "high"
+        db.set_settings({"defaultEffort": "low"})
+        assert convos.create(None, "b", "m")["settings"]["effort"] == "low"

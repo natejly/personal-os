@@ -20,7 +20,7 @@ from .db import new_id, now
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 _PLACE = re.compile(r"\$(ARGUMENTS|[1-9][0-9]?)")
 MAX_BODY = 20_000
-RESERVED = frozenset({"skill", "skills", "schedule", "loop", "research", "clear", "btw", "compact", "commands"})  # the app's own: a saved or registered command cannot take these names
+RESERVED = frozenset({"skill", "skills", "schedule", "loop", "research", "clear", "btw", "compact", "commands"})  # the app's own: a registered command cannot take these names, and a saved one is shadowed by them
 
 
 def parse(text: str) -> dict[str, Any]:

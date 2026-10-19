@@ -29,6 +29,7 @@ from ... import mac, shell
 from ...bounds import clamp_int
 from ...tools import scrub_strings
 from . import route
+from .limited import run_limited
 from .sessions import CLAUDE_HINT, MODEL_RE, claude_binary, claude_env, floor_settings
 
 if TYPE_CHECKING:
@@ -108,7 +109,11 @@ def argv_for(exe: str, schema: dict[str, Any], tools: list[str], settings_json: 
             "--max-budget-usd", f"{budget:g}"]
 
 
-def interpret(out: str, schema: dict[str, Any], max_steps: int, counted: int) -> dict[str, Any]:
+_VALIDATE = ("import json,sys;from jsonschema import Draft202012Validator as V;d=json.load(sys.stdin);"
+             "print(json.dumps([[list(e.absolute_path),e.validator,e.validator_value] for e in V(d['s']).iter_errors(d['v'])]))")
+
+
+async def interpret(out: str, schema: dict[str, Any], max_steps: int, counted: int) -> dict[str, Any]:
     """The value the run produced, from the one JSON object it printed, or a StructuredError naming the first thing wrong."""
     try:
         result = json.loads(out)
@@ -123,8 +128,11 @@ def interpret(out: str, schema: dict[str, Any], max_steps: int, counted: int) ->
     value = result.get("structured_output")
     if value is None:
         raise StructuredError("no_structured_output", "the run ended without a structured answer")
-    errors = [f"{'/'.join(str(p) for p in e.absolute_path) or '(root)'}: fails {e.validator} {json.dumps(e.validator_value)[:100]}"
-              for e in Draft202012Validator(schema).iter_errors(value)]  # where and which rule, never the offending value
+    found = await run_limited(_VALIDATE, {"s": schema, "v": value})  # a schema `pattern` can backtrack without bound
+    if found is None:
+        raise StructuredError("schema_mismatch", "checking the answer against the schema took too long and was stopped")
+    errors = [f"{'/'.join(str(p) for p in path) or '(root)'}: fails {rule} {json.dumps(limit)[:100]}"
+              for path, rule, limit in found]  # where and which rule, never the offending value
     if errors:
         raise StructuredError("schema_mismatch", "the answer does not fit the schema", errors=errors[:ERRORS_SHOWN])
     return {"ok": True, "value": scrub_strings(value), "num_turns": result.get("num_turns"), "cost_usd": result.get("total_cost_usd"),
@@ -163,7 +171,7 @@ async def run(coding: Any, ctx: dict[str, Any], prompt: str, schema: dict[str, A
         if not ok and "[killed after" in out:
             raise StructuredError("run_failed", f"the run did not finish within {timeout_s}s and was stopped", stderr=tail)
         try:
-            return interpret(out, schema, max_steps, counter.stat().st_size if counter.exists() else 0)
+            return await interpret(out, schema, max_steps, counter.stat().st_size if counter.exists() else 0)
         except StructuredError as e:
             if e.code == "run_failed":
                 e.extra["stderr"] = tail

@@ -31,6 +31,7 @@ from ... import logs, mac, permrules, redact, reliability, shell
 from ...bounds import clamp_int
 from ...db import new_id
 from . import opencode, route
+from .limited import run_limited
 
 if TYPE_CHECKING:
     from .extension import Coding
@@ -168,6 +169,17 @@ def safe_pattern(pattern: str) -> re.Pattern[str]:
     if why := _risky(parsed, False, _parser):
         raise TerminalError(f"pattern is refused ({why}).", "use `literal`, or a simpler pattern")
     return compiled
+
+
+_SEARCH = "import json,re,sys;d=json.load(sys.stdin);m=re.search(d['p'],d['t']);print(json.dumps({'hit':m and m.group(0)}))"
+
+
+async def search(compiled: re.Pattern[str], text: str) -> str | None:
+    """What the pattern first matches in `text`, or None. A pattern that backtracks past the time limit is stopped and refused."""
+    done = await run_limited(_SEARCH, {"p": compiled.pattern, "t": text})
+    if done is None:
+        raise TerminalError("pattern took too long to match and was stopped.", "use `literal`, or a simpler pattern")
+    return done["hit"]
 
 
 def _risky(items: Any, inside_loop: bool, parser: Any) -> str | None:
@@ -498,11 +510,11 @@ class Terminals:
                     dropped, text = dropped + len(text) - MATCH_CAP, text[-MATCH_CAP:]
             cursor = int(reply["cursor"])
             quiet = time.monotonic() - last_output
-            hit = compiled.search(text[-MATCH_CAP:]) if compiled and text else None
+            hit = await search(compiled, text[-MATCH_CAP:]) if compiled and fresh else None
             if reply.get("exited"):
                 reason, extra = "exited", {"exit_code": reply.get("exit_code")}
-            elif hit:
-                reason, extra = "matched", {"match": hit.group(0)[:200]}
+            elif hit is not None:
+                reason, extra = "matched", {"match": hit[:200]}
             elif quiet >= QUIET_PROMPT_S and await self._looks_for_input(row):
                 reason, extra = "stdin_read", {"confidence": "heuristic"}
             elif idle_ms is not None and quiet * 1000 >= idle_ms:

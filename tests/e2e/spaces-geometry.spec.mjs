@@ -51,7 +51,7 @@ test('move and resize persist exact geometry (snap off), min size honoured', asy
   expect(await tr()).toBe('200px 150px')
   const p = await gripPoint(page, id)
   await drag(page, p, { x: p.x + 137, y: p.y + 83 })
-  await expect.poll(async () => (await geo(grain, s.id, id)).x).toBe(337)
+  await expect.poll(async () => px(await geo(grain, s.id, id)).x).toBe(337)
   expect(px(await geo(grain, s.id, id))).toMatchObject({ x: 337, y: 233, w: 320, h: 260 })
   await expect.poll(tr).toBe('337px 233px')
 

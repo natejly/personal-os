@@ -7,6 +7,7 @@ Run: PYTHONPATH=backend python -m pytest -q backend/tests/test_coding_structured
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
@@ -20,7 +21,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from coding_ext import call, coding_box  # noqa: E402
-from personal_os.extensions.coding import headless  # noqa: E402
+from personal_os.extensions.coding import headless, limited  # noqa: E402
 from personal_os.workspace import Workspace  # noqa: E402
 
 SCHEMA = {"type": "object", "properties": {"n": {"type": "integer"}, "tags": {"type": "array", "items": {"type": "string"}}},
@@ -176,9 +177,17 @@ def test_a_run_that_fails_to_start_or_print_gives_the_scrubbed_stderr_tail(rig):
 
 def test_the_step_counter_tripping_discards_the_answer_even_if_it_validates(rig):
     with pytest.raises(headless.StructuredError) as e:
-        headless.interpret(json.dumps(ok_result()), SCHEMA, 20, counted=21)
+        asyncio.run(headless.interpret(json.dumps(ok_result()), SCHEMA, 20, counted=21))
     assert e.value.code == "step_cap"
-    assert headless.interpret(json.dumps(ok_result()), SCHEMA, 20, counted=20)["ok"] is True
+    assert asyncio.run(headless.interpret(json.dumps(ok_result()), SCHEMA, 20, counted=20))["ok"] is True
+
+
+def test_a_schema_pattern_that_backtracks_is_stopped_not_run_on_the_event_loop(rig, monkeypatch):
+    monkeypatch.setattr(headless, "run_limited", lambda code, payload: limited.run_limited(code, payload, 1.0))
+    answer = json.dumps({"subtype": "success", "structured_output": "a" * 40 + "b"})
+    with pytest.raises(headless.StructuredError) as e:
+        asyncio.run(headless.interpret(answer, {"type": "string", "pattern": "(a+)+$"}, 20, counted=0))
+    assert e.value.code == "schema_mismatch" and "too long" in e.value.detail
 
 
 def test_a_run_past_its_time_is_killed_and_reported(rig, monkeypatch):

@@ -185,7 +185,7 @@ def test_a_snapshot_is_dropped_when_the_call_fails(repo_rig):
     assert "killed" in out["error"] and r.coding.snapshots == {}
 
 
-@pytest.mark.parametrize("hook", ["run.after", "subagent.stop"])
+@pytest.mark.parametrize("hook", ["run.after", "subagent.stop", "ext.changed"])
 def test_the_hooks_that_stop_sessions_outlast_the_default_emit_timeout(repo_rig, hook):
     """Stopping a session runs `claude stop` and a git status per session; the default 2 s would cancel it half way."""
     sub = next(s for s in repo_rig.host.bus._subs[hook] if s.owner == "coding")

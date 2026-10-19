@@ -312,10 +312,11 @@ class Conversations:
     def create(self, project_id: str | None, title: str, model: str) -> dict[str, Any]:
         cid = new_id()
         t = now()
+        effort = self.db.get_settings().get("defaultEffort")  # every way to start a chat begins on the user's default
         with self.db.tx() as c:
             c.execute(
                 "INSERT INTO conversations(id,project_id,title,model,settings,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-                (cid, project_id, title, model, "{}", t, t),
+                (cid, project_id, title, model, json.dumps({"effort": effort} if effort else {}), t, t),
             )
         return self.get(cid)  # type: ignore[return-value]
 

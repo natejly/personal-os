@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from coding_ext import FakeHub, call, coding_box, fake_terminals  # noqa: E402
 from personal_os import logs, permrules, shell  # noqa: E402
-from personal_os.extensions.coding import terminals as terms  # noqa: E402
+from personal_os.extensions.coding import limited, terminals as terms  # noqa: E402
 from personal_os.workspace import Workspace  # noqa: E402
 
 CHAT = {"conversation_id": "c-chat"}
@@ -594,3 +594,11 @@ def test_node_pty_is_imported_in_one_file_only():
     hits = [str(p.relative_to(root)) for p in root.rglob("*.ts*") if not p.name.endswith(".test.ts")
             and re.search(r"""(from|require\()\s*['"]node-pty['"]|import\(['"]node-pty['"]""", p.read_text("utf-8", "replace"))]
     assert hits == ["main/terminals.ts"]
+
+
+def test_a_pattern_that_backtracks_is_stopped_after_the_time_limit(monkeypatch):
+    monkeypatch.setattr(terms, "run_limited", lambda code, payload: limited.run_limited(code, payload, 1.0))
+    with pytest.raises(terms.TerminalError, match="too long"):
+        asyncio.run(terms.search(terms.safe_pattern("(.*)(.*)(.*)y"), "x" * 600))
+    assert asyncio.run(terms.search(terms.safe_pattern(r"port \d+"), "listening on port 80")) == "port 80"
+    assert asyncio.run(terms.search(terms.safe_pattern(r"zzz"), "nothing")) is None

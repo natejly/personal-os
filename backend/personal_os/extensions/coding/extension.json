@@ -34,7 +34,7 @@
   },
   "hooks": {
     "app.start": {},
-    "ext.changed": {},
+    "ext.changed": { "timeoutMs": 60000 },
     "chat.deleted": {},
     "tool.pre": { "timeoutMs": 30000 },
     "tool.result": {},

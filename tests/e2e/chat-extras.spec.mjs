@@ -124,3 +124,13 @@ test('a multi-step checklist is the Progress card above the composer, not a stat
   await page.getByRole('button', { name: 'Workspace panel', exact: true }).click()
   await expect(page.locator('.desk-panel').getByRole('button', { name: 'Checklist' })).toHaveCount(0)
 })
+
+test('a chat with files shows the file count badge in the sidebar', async ({ grain }) => {
+  const { page, api } = grain
+  await newChat(page)
+  await sayAndWait(page, '!!reply one', 'one')
+  const [c0] = await api('/conversations')
+  await page.route(/\/chat-files\/counts/, (route) => route.fulfill({ json: { counts: { [c0.id]: 3 }, projects: {} } }))
+  await sayAndWait(page, '!!reply two', 'two')
+  await expect(page.locator('.convo-files').first()).toHaveText('3', { timeout: 15_000 })
+})

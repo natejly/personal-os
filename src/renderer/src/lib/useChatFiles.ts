@@ -23,7 +23,7 @@ export const useChatFileCount = (conversationId: string): number => useCounts((s
 export const useProjectFileCount = (projectId: string): number => useCounts((s) => s.projects[projectId] ?? 0)
 
 /**
- * Mount once, in the sidebar. The conversation list is replaced whenever a run finishes or a chat is
+ * Mount once, in App. The conversation list is replaced whenever a run finishes or a chat is
  * added or removed, so its identity is the refresh signal; a short wait folds a burst into one fetch.
  */
 export function useChatFileCountsSync(): void {

@@ -35,6 +35,7 @@ import Onboarding from './components/onboarding/Onboarding'
 import { useOnboarding } from './components/onboarding/onboardingStore'
 import { applyAppearance } from './lib/appearance'
 import { api } from './lib/api'
+import { useChatFileCountsSync } from './lib/useChatFiles'
 
 /**
  * One native notification per desk per transition into a state that needs you (a plan, an approval, a
@@ -225,6 +226,7 @@ export default function App(): JSX.Element {
   const pageAgentOpen = useStore((s) => s.pageAgentOpen)
   const inboxOpen = useStore((s) => s.inboxOpen)
   const wizardOpen = useOnboarding((s) => s.open)
+  useChatFileCountsSync()
 
   useEffect(() => {
     void init()

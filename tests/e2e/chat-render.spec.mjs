@@ -89,7 +89,10 @@ test('model menu: pick mock-chat-2, effort picker, and the request carries the m
   await opt.click()
   await expect(pop).toHaveCount(0)
   await expect(trigger).toContainText(/chat-2|chat 2/i)
-  await page.getByRole('combobox', { name: 'Effort level' }).selectOption({ label: 'High' })
+  await trigger.click()
+  await page.getByRole('dialog', { name: 'Models' }).getByRole('combobox', { name: 'Effort level' }).selectOption({ label: 'High' })
+  await expect(trigger).toContainText('High')
+  await page.keyboard.press('Escape')
   await sayAndWait(page, '!!reply with model two', 'with model two')
   // the extraction / title calls run on their own model; look at the reply's request
   const call = llm.calls.find((c) => JSON.stringify(c.messages).includes('with model two') && (c.tools || []).length > 0)
@@ -98,6 +101,8 @@ test('model menu: pick mock-chat-2, effort picker, and the request carries the m
   const p2 = await grain.relaunch()
   await p2.locator('.convo-list .convo-item').first().click()
   await expect(p2.locator('.model-menu-trigger')).toContainText(/chat-2|chat 2/i)
+  await expect(p2.locator('.model-menu-trigger')).toContainText('High')
+  await p2.locator('.model-menu-trigger').click()
   await expect(p2.getByRole('combobox', { name: 'Effort level' })).toHaveValue(/high/i)
 })
 

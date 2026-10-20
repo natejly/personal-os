@@ -18,6 +18,7 @@ export default function ApprovalRules({ event, conversationId, decide }: {
   const perm = event.permission
   const [rules, setRules] = useState<string[]>(perm?.suggestions ?? [])
   const [noting, setNoting] = useState(false)
+  const [editRule, setEditRule] = useState(false)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const canSave = !event.forced && rules.length > 0
@@ -39,7 +40,7 @@ export default function ApprovalRules({ event, conversationId, decide }: {
       {perm?.kind === 'destructive' && <p className="muted small">Irreversible{perm.subject ? `: ${perm.subject}` : ''}</p>}
       {perm?.kind === 'external_directory' && <p className="muted small">Protected location</p>}
       {perm?.rule && perm.kind === 'rule' && <p className="muted small">Rule <code>{perm.rule}</code></p>}
-      {canSave && (
+      {canSave && editRule && (
         <div className="approval-rule-list">
           {rules.map((r, i) => (
             <label key={i} className="approval-rule">
@@ -63,11 +64,13 @@ export default function ApprovalRules({ event, conversationId, decide }: {
           <button type="button" className="link" disabled={busy} title="Always allow this tool in this chat"
             onClick={() => void grant('always_chat')()}>in this chat</button>
         )}
-        {canSave ? (
+        {canSave ? (<>
           <button type="button" className="link" disabled={busy} title="Save and always allow what matches"
             onClick={() => void grant('always_rule', { rules: rules.map((r) => r.trim()).filter(Boolean) })()}>
             for {rules.length === 1 ? <code>{rules[0]}</code> : `these ${rules.length} rules`}
           </button>
+          {!editRule && <button type="button" className="link" disabled={busy} onClick={() => setEditRule(true)}>Edit rule</button>}
+        </>
         ) : wholeTool && (
           <button type="button" className="link" disabled={busy} title="Always allow this tool, in every chat"
             onClick={() => void grant('always_global')()}>in every chat</button>

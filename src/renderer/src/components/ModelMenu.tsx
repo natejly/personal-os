@@ -179,7 +179,8 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
   }
 
   const shown = model ? modelLabel(model) : 'Select model'
-  const label = suffix ? `${shown}, ${suffix}` : shown
+  const effortLabel = effortShown && effort !== 'default' ? (EFFORTS.find((e) => e.id === effort)?.label ?? '') : ''
+  const label = [shown, suffix, effortLabel].filter(Boolean).join(', ')
 
   return (
     <div className="model-menu">
@@ -195,19 +196,8 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
       >
         <span className="model-menu-name">{shown}</span>
         {suffix && <span className="model-menu-suffix">{suffix}</span>}
+        {effortLabel && <span className="model-menu-suffix">{effortLabel}</span>}
       </button>
-      {effortShown && <label className="composer-ctl model-menu-effort">
-        <span>Effort</span>
-        <select
-          className="chat-control"
-          aria-label="Effort level"
-          title="Effort level"
-          value={effort}
-          onChange={(e) => onChange({ effort: e.target.value as Effort })}
-        >
-          {EFFORTS.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
-        </select>
-      </label>}
       {open && createPortal(
         <>
           <div
@@ -265,6 +255,20 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
                 )
               })}
             </div>
+            {effortShown && (
+              <label className="model-menu-effort">
+                <span>Effort</span>
+                <select
+                  className="chat-control"
+                  aria-label="Effort level"
+                  title="Effort level"
+                  value={effort}
+                  onChange={(e) => onChange({ effort: e.target.value as Effort })}
+                >
+                  {EFFORTS.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
+                </select>
+              </label>
+            )}
           </div>
           {editing && (
             <div

@@ -153,6 +153,55 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual([b["title"] for b in self.docs.backlinks(target["id"])], ["linker.md"])
         self.assertEqual(self.docs.get(tex["id"])["title"], "t.tex")  # no suffix appended or stripped
 
+    def test_upload_files_sources_become_docs_and_the_rest_assets(self) -> None:
+        p = self.lx.create("book")
+        a = self.lx.upload("", "book", "intro.tex", b"intro")
+        self.assertEqual((a["kind"], a["path"]), ("doc", "intro.tex"))
+        d = self.docs.get(a["doc_id"])
+        self.assertEqual((d["title"], d["folder"], d["content"]), ("intro.tex", "book", "intro"))
+        sub = self.lx.upload("", "book", "chapters/two.bib", "caf\xe9".encode("latin-1"))  # not UTF-8: still readable
+        self.assertEqual(self.docs.get(sub["doc_id"])["folder"], "book/chapters")
+        self.assertEqual(self.docs.get(sub["doc_id"])["content"], "caf\xe9")
+        self.assertEqual(self.lx.upload("", "book", "fig.png", b"png")["kind"], "asset")
+        self.assertEqual([x["path"] for x in self.lx.assets("", "book")], ["fig.png"])
+        self.assertIn("intro.tex", [f["path"] for f in self.lx.context(p["main_doc_id"])["files"]])
+
+    def test_upload_clash_replaces_the_untouched_template_only(self) -> None:
+        p = self.lx.create("book")
+        r = self.lx.upload("", "book", "main.tex", b"\\documentclass{book}")
+        self.assertEqual((r["replaced"], r["doc_id"]), (True, p["main_doc_id"]))
+        self.assertEqual(self.docs.get(p["main_doc_id"])["content"], "\\documentclass{book}")
+        r2 = self.lx.upload("", "book", "main.tex", b"other")  # now it is the user's text
+        self.assertFalse(r2["replaced"])
+        self.assertEqual(self.docs.get(r2["doc_id"])["title"], "main (uploaded).tex")
+        self.assertEqual(self.docs.get(p["main_doc_id"])["content"], "\\documentclass{book}")
+        r3 = self.lx.upload("", "book", "main.tex", b"third")
+        self.assertEqual(self.docs.get(r3["doc_id"])["title"], "main (uploaded 2).tex")
+
+    def test_old_source_assets_convert_once_and_stay_on_failure(self) -> None:
+        p = self.lx.create("book")
+        self.lx.put_asset("", "book", "intro.tex", b"intro")
+        self.lx.put_asset("", "book", "chapters/refs.bib", b"@book{a}")
+        self.lx.put_asset("", "book", "fig.png", b"png")
+        self.lx.put_asset("", "book", "main.tex", b"\\documentclass{book}")  # clashes with the untouched template
+        orig = self.lx.import_source
+        def flaky(scope, folder, rel, data):
+            if rel == "intro.tex":
+                raise RuntimeError("disk full")
+            return orig(scope, folder, rel, data)
+        self.lx.import_source = flaky  # type: ignore[method-assign]
+        self.assertEqual(self.lx.convert_assets("", "book"), 2)
+        self.assertEqual(sorted(a["path"] for a in self.lx.assets("", "book")), ["fig.png", "intro.tex"])  # the failed one is kept
+        self.lx.import_source = orig  # type: ignore[method-assign]
+        ctx = self.lx.context(p["main_doc_id"])  # converts the rest
+        self.assertEqual(sorted(f["path"] for f in ctx["files"]), ["chapters/refs.bib", "intro.tex", "main.tex"])
+        self.assertEqual([a["path"] for a in ctx["assets"]], ["fig.png"])
+        self.assertEqual(self.docs.get(p["main_doc_id"])["content"], "\\documentclass{book}")
+        self.assertEqual(self.lx.convert_assets("", "book"), 0)  # idempotent
+        self.assertEqual(len([d for d in self.docs.list(None) if d["title"].startswith("intro")]), 1)
+        build, ids = self.lx.materialize(self.lx.project_for(p["main_doc_id"]))
+        self.assertEqual((build / "intro.tex").read_text(), "intro")
+
     @unittest.skipUnless(HAVE_TEX, "latexmk is not installed")
     def test_compile_ok_and_error_maps_to_the_doc(self) -> None:
         p = self.lx.create("book")

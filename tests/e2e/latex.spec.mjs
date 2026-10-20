@@ -126,6 +126,34 @@ test('New file in the file list: unique default, suffix, subfolder, bad names re
   expect(errorsOf(g)).toEqual([])
 })
 
+test('Upload files: a .tex becomes an editable doc, a .png stays an asset, and both compile', async ({ grain: g }) => {
+  const { page } = g
+  await mkDoc(g, { title: 'main.tex', folder: 'up', content: '\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n\\input{intro}\n\\includegraphics[width=1cm]{fig}\n\\end{document}\n' })
+  await openFiles(page)
+  await page.locator('.doc-folder-name', { hasText: 'up' }).click()
+  await page.locator('.doc-tree .doc-row', { hasText: 'main.tex' }).last().click()
+  await expect(cm(page)).toContainText('documentclass')
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  await page.locator('.lx-side input[type=file]').setInputFiles([
+    { name: 'intro.tex', mimeType: 'text/plain', buffer: Buffer.from('Uploaded intro.\n') },
+    { name: 'fig.png', mimeType: 'image/png', buffer: png }
+  ])
+  await expect(fileBtn(page, 'intro.tex')).toBeVisible()
+  await expect(page.locator('.lx-asset', { hasText: 'fig.png' })).toBeVisible()
+  await expect(page.locator('.doc-tree .doc-row', { hasText: 'intro.tex' }).last()).toBeVisible()
+  await fileBtn(page, 'intro.tex').click()
+  await expect(cm(page)).toContainText('Uploaded intro.')
+  await cm(page).click()
+  await page.keyboard.insertText('Edited. ')
+  await fileBtn(page, 'main.tex').click()
+  await expect(cm(page)).toContainText('documentclass')
+  const docs = await g.api('/docs')
+  expect((await g.api(`/docs/${docs.find((d) => d.title === 'intro.tex').id}`)).content).toContain('Edited.')
+  await page.getByRole('button', { name: /Compile/ }).click()
+  await expect(page.locator('.lx-status')).toContainText('OK', { timeout: 120_000 })
+  expect(errorsOf(g)).toEqual([])
+})
+
 for (const width of [1160, 900]) {
   test(`narrow window ${width}px: compile button and PDF pane stay on screen`, async ({ grain: g }) => {
     const { page } = g

@@ -92,9 +92,15 @@ export default function LatexDocEditor({ doc }: { doc: FullDoc }): JSX.Element {
 
   const onUpload = async (list: FileList | null): Promise<void> => {
     if (!list) return
+    const files = Array.from(list) // the input is cleared right after this call, which empties the live list
     try {
-      for (const f of Array.from(list)) await latexApi.upload(doc.id, f)
+      await flushDoc()
+      let reopen = false
+      for (const f of files) reopen = (await latexApi.upload(doc.id, f)).doc_id === doc.id || reopen
+      // Sources become Files docs: the tree and this list pick them up, and the open file is reread if the upload replaced it.
+      await Promise.all([useStore.getState().refreshDocs(), useStore.getState().refreshDocFolders()])
       setCtx(await latexApi.context(doc.id))
+      if (reopen) await openDoc(doc.id)
     } catch (e) { fail(e) }
   }
   const removeAsset = async (path: string): Promise<void> => {
@@ -182,7 +188,7 @@ export default function LatexDocEditor({ doc }: { doc: FullDoc }): JSX.Element {
               ? <button className="ghost-btn lx-upload" onClick={startNaming}><Plus size={13} /> New file</button>
               : <input className="lx-newname" aria-label="New file name" autoFocus value={naming} onChange={(e) => setNaming(e.target.value)} onFocus={(e) => e.currentTarget.select()}
                   onBlur={() => setNaming(null)} onKeyDown={(e) => { if (e.key === 'Enter') void createFile(); else if (e.key === 'Escape') setNaming(null) }} />}
-            <button className="ghost-btn lx-upload" onClick={() => upload.current?.click()}><Upload size={13} /> Add image or other file</button>
+            <button className="ghost-btn lx-upload" onClick={() => upload.current?.click()}><Upload size={13} /> Upload files</button>
             <input ref={upload} type="file" multiple hidden onChange={(e) => { void onUpload(e.target.files); e.target.value = '' }} />
           </aside>
         )}

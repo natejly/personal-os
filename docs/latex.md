@@ -8,7 +8,7 @@ A LaTeX source is a Files doc (the `docs` table) whose title ends in `.tex`, `.b
 
 A LaTeX project is a Files folder, in Personal or in a Grain project. Its main file is `main.tex`, or the one `.tex` holding `\documentclass`. Subfolders are relative paths for `\input`. A `.tex` outside any such folder is its own one-file project.
 
-Images and other binary files for `\includegraphics` are not docs. They are kept in the extension's data folder (`ext/latex/assets/<project key>/`), listed in the editor's file list, uploaded and removed there. Per-project settings (the engine) are in the extension-owned table `latex_projects`, keyed by the Grain project and the folder path; renaming the folder starts it from the defaults again.
+Images and other binary files for `\includegraphics` are not docs. "Upload files" in the editor files a LaTeX source (`.tex/.bib/.sty/.cls`, UTF-8 or latin-1) as a doc in the project folder, replacing a same-named doc only while it is the untouched new-project template (otherwise it arrives as `<name> (uploaded).tex`); sources an older version left in the asset folder become docs the next time the project is opened. Everything else is kept in the extension's data folder (`ext/latex/assets/<project key>/`), listed in the editor's file list, uploaded and removed there. Per-project settings (the engine) are in the extension-owned table `latex_projects`, keyed by the Grain project and the folder path; renaming the folder starts it from the defaults again.
 
 ## Editor
 

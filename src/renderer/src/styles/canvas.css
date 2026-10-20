@@ -359,7 +359,7 @@
   place-items: center;
   padding: 0;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: transparent;
   color: var(--text-muted);
   font-size: 14px;
@@ -416,7 +416,7 @@
   align-items: center;
   gap: 16px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   font-size: var(--fs-md);
   color: var(--text);
   text-align: left;
@@ -547,7 +547,7 @@
   transform: translateX(-50%);
   max-width: 140px;
   padding: 2px 6px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: var(--material-opaque);
   border: 1px solid var(--border);
   font-size: var(--fs-xs);
@@ -576,7 +576,7 @@
 .spaces-inset { flex: 0 0 calc(var(--lights-w) - 8px); align-self: stretch; }
 .spaces-bar .icon-btn.on { color: var(--accent); }
 .spaces-bar .app-switcher .icon-btn { width: 24px; height: 24px; }
-.space-snap { height: 24px; padding: 0 4px; font-size: var(--fs-sm); color: var(--text-muted); background: transparent; border: 1px solid var(--border); border-radius: 6px; }
+.space-snap { height: 24px; padding: 0 4px; font-size: var(--fs-sm); color: var(--text-muted); background: transparent; border: 1px solid var(--border); border-radius: var(--r-sm); }
 
 .space-tab {
   display: flex;
@@ -585,7 +585,7 @@
   max-width: 180px;
   height: 24px;
   padding: 0 9px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   border: 1px solid transparent;
   font-size: var(--fs-sm);
   color: var(--text-muted);
@@ -688,7 +688,7 @@
   max-width: 150px;
   padding: 1px 5px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   background: var(--material-opaque);
   font-size: 10px;
   color: var(--text);
@@ -732,7 +732,7 @@
   overflow: hidden;
   contain: layout paint style;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   transition: border-color var(--dur-hover) ease, box-shadow var(--dur-hover) ease;
   -webkit-app-region: no-drag;
 }
@@ -787,7 +787,7 @@
   gap: 6px;
   padding: 6px 8px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: var(--material-thick);
   backdrop-filter: var(--material-blur);
   box-shadow: var(--shadow-float);

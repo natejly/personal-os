@@ -47,7 +47,7 @@
 .doc-group-row {
   position: relative;
   display: flex; align-items: center; gap: 5px;
-  padding: 5px 6px; margin-top: 2px; border-radius: 8px;
+  padding: 5px 6px; margin-top: 2px; border-radius: var(--r-md);
   color: var(--text); font-size: var(--fs-md);
 }
 .doc-group-row:first-child { margin-top: 0; }
@@ -66,7 +66,7 @@
 .doc-folder-row {
   position: relative;
   display: flex; align-items: center; gap: 4px;
-  padding: 4px 6px; border-radius: 8px;
+  padding: 4px 6px; border-radius: var(--r-md);
   color: var(--text-muted); font-size: var(--fs-md);
   cursor: grab;
 }
@@ -80,7 +80,7 @@
 }
 .doc-folder-rename {
   flex: 1; min-width: 0; font: inherit; font-size: var(--fs-md);
-  background: var(--bg-input); border: 1px solid var(--control-border); border-radius: 6px;
+  background: var(--bg-input); border: 1px solid var(--control-border); border-radius: var(--r-sm);
   padding: 2px 6px; color: var(--text); outline: 0;
 }
 .doc-folder-row .icon-btn.xs { opacity: 0; flex: none; }
@@ -88,11 +88,11 @@
 .doc-folder-menu {
   position: absolute; top: 100%; right: 4px; z-index: 5;
   display: flex; flex-direction: column; min-width: 150px; padding: 4px;
-  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--r-md);
   box-shadow: var(--shadow-float);
 }
 .doc-folder-menu button {
-  text-align: left; padding: 6px 8px; border-radius: 6px;
+  text-align: left; padding: 6px 8px; border-radius: var(--r-sm);
   color: var(--text-muted); font-size: var(--fs-sm);
 }
 .doc-folder-menu button:hover { background: var(--hover); color: var(--text); }
@@ -100,7 +100,7 @@
 
 .doc-row {
   display: flex; align-items: center; gap: 6px;
-  padding: 5px 6px; border-radius: 8px; cursor: pointer;
+  padding: 5px 6px; border-radius: var(--r-md); cursor: pointer;
   color: var(--text-muted);
 }
 .doc-row[draggable='true']:active { cursor: grabbing; }
@@ -127,7 +127,7 @@
 /* An assistant edit waiting on this doc. */
 .doc-pending {
   display: inline-flex; align-items: center; gap: 2px;
-  padding: 0 4px; border-radius: 6px;
+  padding: 0 4px; border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   color: var(--accent); font-size: 10px; font-weight: 600;
 }
@@ -144,7 +144,7 @@
 }
 .doc-title-input {
   flex: 0 1 auto; min-width: 20ch; max-width: 46ch;
-  padding: 3px 6px; border: 1px solid transparent; border-radius: 6px;
+  padding: 3px 6px; border: 1px solid transparent; border-radius: var(--r-sm);
   background: none; color: var(--text);
   font: inherit; font-size: 14px; font-weight: 600;
 }
@@ -154,7 +154,7 @@
 /* `.seg` and `.icon-btn.on` come from styles.css — this view just uses them. */
 .dot-badge {
   position: absolute; top: -2px; right: -2px;
-  min-width: 13px; padding: 0 3px; border-radius: 7px;
+  min-width: 13px; padding: 0 3px; border-radius: var(--r-sm);
   background: var(--accent-solid); color: var(--on-accent);
   font-size: 10px; line-height: 13px; text-align: center;
 }
@@ -184,7 +184,7 @@
 .doc-comment-fab button { display: inline-flex; align-items: center; gap: 5px; }
 .doc-comments { padding: 2px 2px 8px; }
 .doc-thread {
-  border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px;
+  border: 1px solid var(--border); border-radius: var(--r-lg); padding: 8px 10px; margin-bottom: 8px;
   background: var(--bg-elev); cursor: default;
 }
 .doc-thread.active { border-color: var(--accent); }
@@ -206,7 +206,7 @@
 .doc-comment-body { margin: 2px 0 0; font-size: var(--fs-md); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .doc-comment-compose textarea {
   width: 100%; margin-top: 4px; padding: 5px 7px; resize: vertical; min-height: 44px;
-  border: 1px solid var(--control-border); border-radius: 7px; background: var(--bg-input); color: var(--text);
+  border: 1px solid var(--control-border); border-radius: var(--r-sm); background: var(--bg-input); color: var(--text);
   font: inherit; font-size: var(--fs-md); outline: 0;
 }
 .doc-comment-compose textarea:focus { border-color: var(--accent); }
@@ -321,13 +321,13 @@
 .docs-panel-tabs { gap: 2px; flex-wrap: wrap; }
 .docs-panel-tab {
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 4px 8px; border-radius: 7px;
+  padding: 4px 8px; border-radius: var(--r-sm);
   color: var(--text-faint); font: inherit; font-size: var(--fs-sm);
 }
 .docs-panel-tab:hover { background: var(--hover); color: var(--text); }
 .docs-panel-tab.on { background: var(--active); color: var(--text); }
 .docs-panel-count {
-  min-width: 14px; padding: 0 4px; border-radius: 7px;
+  min-width: 14px; padding: 0 4px; border-radius: var(--r-sm);
   background: var(--accent-solid); color: var(--on-accent);
   font-size: 10px; line-height: 14px; text-align: center;
 }
@@ -335,7 +335,7 @@
 
 /* ---- diff card ---- */
 .diff-card {
-  border: 1px solid var(--border); border-radius: 10px;
+  border: 1px solid var(--border); border-radius: var(--r-lg);
   background: var(--bg-elev); margin-bottom: 10px; overflow: hidden;
 }
 .diff-card.pending { border-color: var(--await-border); }
@@ -415,7 +415,7 @@
 }
 
 .doc-tag-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 6px; }
-.doc-tag-chip { font-size: var(--fs-xs); padding: 1px 7px; border-radius: 10px; border: 1px solid var(--border); background: none; color: var(--text-muted); cursor: pointer; }
+.doc-tag-chip { font-size: var(--fs-xs); padding: 1px 7px; border-radius: var(--r-lg); border: 1px solid var(--border); background: none; color: var(--text-muted); cursor: pointer; }
 .doc-tag-chip:hover { color: var(--text); }
 .doc-tag-chip.on { color: var(--accent); border-color: var(--accent); }
 .doc-save-state { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--warn); }

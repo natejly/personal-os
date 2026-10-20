@@ -1,7 +1,7 @@
 /* Mail cards in the chat: compact Gmail compose, inbox rows, a message view. mc- prefixed; colours come from
    the app's tokens so light, dark and every accent follow along. */
 .mc {
-  border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev);
+  border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-elev);
   font-size: var(--fs-md); color: var(--text); overflow: hidden; max-width: 640px;
 }
 /* The draft is waiting on the user: the same edge and wash as every other pending card. */
@@ -9,7 +9,7 @@
 .mc-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--hover); border-bottom: 1px solid var(--border); min-height: 34px; }
 .mc-head svg { color: var(--text-muted); flex-shrink: 0; }
 .mc-head b { font-size: var(--fs-md); font-weight: 600; }
-.mc-tag { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); padding: 1px 8px; border-radius: 10px; background: var(--hover); color: var(--text-muted); }
+.mc-tag { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); padding: 1px 8px; border-radius: var(--r-lg); background: var(--hover); color: var(--text-muted); }
 .mc-tag.ask { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); margin-left: auto; }
 .mc-tag.edited { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--text); }
 .mc-tag.edited + .mc-tag, .mc-tag.ask + .mc-tag.edited { margin-left: 0; }
@@ -28,7 +28,7 @@
 .mc-more:hover { color: var(--text); background: var(--hover); }
 
 .mc-chips { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.mc-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 2px 4px 2px 9px; border-radius: 12px; background: var(--active); font-size: var(--fs-sm); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 2px 4px 2px 9px; border-radius: var(--r-xl); background: var(--active); font-size: var(--fs-sm); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mc-attach .mc-chip { padding-right: 9px; }
 .mc-chip.invalid { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); padding-left: 6px; }
 .mc-chip-x { display: inline-flex; padding: 3px; border-radius: 50%; color: var(--text-muted); cursor: pointer; }
@@ -77,7 +77,7 @@ p.mc-problem { margin: 8px 12px; }
 .mc-status-why { margin-top: 4px; font-size: var(--fs-sm); color: var(--text-muted); }
 .mc-status.bad .mc-status-why { color: var(--danger); }
 .mc-count { font-variant-numeric: tabular-nums; }
-.mc-badge { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-xs); padding: 1px 7px; border-radius: 10px; }
+.mc-badge { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-xs); padding: 1px 7px; border-radius: var(--r-lg); }
 .mc-badge.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
 .mc-badge.bad { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
 .mc-link { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-sm); color: var(--text-muted); text-decoration: underline; }
@@ -101,7 +101,7 @@ p.mc-problem { margin: 8px 12px; }
 .mc-query { font-size: var(--fs-sm); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .mc-count-label { margin-left: auto; font-size: var(--fs-xs); }
 .mc-faint { color: var(--text-faint); font-size: var(--fs-sm); }
-.mc-back { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; color: var(--text-muted); border-radius: 6px; padding: 2px 4px; }
+.mc-back { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; color: var(--text-muted); border-radius: var(--r-sm); padding: 2px 4px; }
 .mc-back:hover { color: var(--text); background: var(--active); }
 .mc-read { padding: 10px 12px 12px; }
 .mc-read-subject { margin: 0 0 8px; font-size: var(--fs-lg); }
@@ -117,7 +117,7 @@ p.mc-problem { margin: 8px 12px; }
 .mc-details summary:hover { color: var(--text-muted); }
 .mc-details-body { padding: 0 12px 10px; }
 .mc-details-body h6 { margin: 6px 0 2px; font-size: var(--fs-xs); color: var(--text-faint); font-weight: 600; }
-.mc-details-body pre { margin: 0; padding: 8px; max-height: 180px; overflow: auto; background: var(--bg-input); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mc-details-body pre { margin: 0; padding: 8px; max-height: 180px; overflow: auto; background: var(--bg-input); border-radius: var(--r-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 @media (max-width: 520px) {
   .mc-label { width: 44px; }

@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { test, expect } from './fixtures.mjs'
 import { openFiles, mkDoc, errorsOf, patient } from './helpers/files.mjs'
+import { setNarrow } from './helpers/shell.mjs'
 
 test.describe.configure({ timeout: 300_000 })
 const HAVE_LATEXMK = (() => { try { execFileSync('which', ['latexmk'], { stdio: 'ignore' }); return true } catch { return false } })()
@@ -163,7 +164,7 @@ test('Upload files: a .tex becomes an editable doc, a .png stays an asset, and b
 for (const width of [1160, 900]) {
   test(`narrow window ${width}px: compile button and PDF pane stay on screen`, async ({ grain: g }) => {
     const { page } = g
-    await g.app.evaluate(({ BrowserWindow }, w) => BrowserWindow.getAllWindows()[0].setSize(w, 700), width)
+    await setNarrow(g, width, 700)
     await mkDoc(g, { title: 'main.tex', folder: 'thesis', content: MAIN })
     await openFiles(page)
     await page.locator('.doc-folder-name', { hasText: 'thesis' }).click()

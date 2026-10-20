@@ -1,6 +1,7 @@
 import { test, expect } from './fixtures.mjs'
 import { callWith, msgText, openProjectSection, send, shrink, sleep, systemOf } from './helpers/kb.mjs'
 import { openMemory as openMemoryTab } from './helpers/home.mjs'
+import { setNarrow } from './helpers/shell.mjs'
 
 const clean = (g) => expect(g.consoleErrors.filter((e) => !/favicon|ResizeObserver|502 \(Bad Gateway\)/.test(e))).toEqual([])
 
@@ -160,7 +161,7 @@ test('voice panel at 820x520 with a long profile and 50 samples stays scrollable
   const { page, api } = grain
   await api('/style', { method: 'PUT', body: { ...PROFILE, guidelines: Array.from({ length: 30 }, (_, i) => `guideline ${i} ` + 'word '.repeat(30)) } })
   await Promise.all(Array.from({ length: 50 }, (_, i) => api('/style/samples', { method: 'POST', body: { text: `Sample number ${i}. ` + 'I like writing plainly and with some warmth. '.repeat(10) } })))
-  await shrink(grain)
+  await setNarrow(grain)
   await openVoice(page)
   await expect(page.locator('.style-sample')).toHaveCount(50)
   const over = await page.evaluate(() => { const e = document.querySelector('.knowledge-body'); return e.scrollWidth - e.clientWidth })

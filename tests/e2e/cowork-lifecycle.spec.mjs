@@ -1,6 +1,7 @@
 import { test } from './fixtures.mjs'
 import { scriptLLM } from './helpers/scriptllm.mjs'
 import { expect, realErrors, resize, newChat, say, deskStatus, waitStatus, deskChat, openChat, chatRow, strip, panel, openPanel, turnOn, deskOf, WRITE, DELIVER, DONE, settingsFor } from './helpers/cowork.mjs'
+import { setNarrow, withSidebar } from './helpers/shell.mjs'
 test.describe.configure({ timeout: 300_000 })
 
 test('desk_ask: the chat waits on the question and the answer resumes it', async ({ grain }) => {
@@ -201,12 +202,12 @@ test('a desk started elsewhere (agent tool, scheduled job) shows up among chats 
 })
 
 test('a chat with a 100 KB brief and a long title works autonomously and renders', async ({ grain }) => {
-  await resize(grain)
+  await setNarrow(grain)
   const { page } = grain
   const brief = ('lorem ipsum dolor sit amet '.repeat(4000)).slice(0, 100_000)
   const { desk } = await deskChat(grain, { brief, title: 'T'.repeat(300), autonomy: 'plan', start: false })
   await page.reload() // made before this window's event stream was up
-  await page.waitForSelector('.sidebar')
+  await withSidebar(page) // the reload starts folded at this width
   await chatRow(page, 'TTTT').click()
   await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
   await expect(strip(page)).toHaveCount(0)

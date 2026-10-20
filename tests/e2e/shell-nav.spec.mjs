@@ -72,8 +72,8 @@ test('hidden views are not in the sidebar; More rows opens Settings → Sidebar'
   await expect(sidebarItem(page, 'Library')).toHaveCount(0)
   await page.getByRole('button', { name: /More rows/ }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
-  await expect(page.locator('#settings-tab-layout')).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByRole('dialog').getByRole('heading', { name: 'Sidebar', level: 3 })).toBeVisible()
+  await expect(page.locator('#settings-tab-general')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('dialog').getByRole('heading', { name: 'Sidebar rows', level: 4 })).toBeVisible()
   await expect(page.getByRole('dialog').getByRole('checkbox', { name: 'Library', exact: true })).not.toBeChecked()
 })
 
@@ -167,7 +167,9 @@ test('command palette: opens, fuzzy filters, arrows + Enter run, every command e
   await expect(pal.getByText('Nothing matches')).toBeVisible()
   await input.fill('')
   await input.fill('cale')
-  await expect(pal.getByRole('option')).toHaveCount(1)
+  await expect(pal.getByRole('option')).toHaveCount(2) // the Calendar view, then its Refresh command
+  await expect(pal.getByRole('option', { name: /^Calendar/ })).toHaveCount(1)
+  await expect(pal.getByRole('option', { name: /^Refresh calendar/ })).toHaveCount(1)
   await page.keyboard.press('Enter')
   await expect(pal).toHaveCount(0)
   await heading(page, /Calendar/)
@@ -175,7 +177,7 @@ test('command palette: opens, fuzzy filters, arrows + Enter run, every command e
   for (const [q, h] of [['Files', /Files/], ['Lists', /Lists/], ['Mail', /Mail/], ['Library', /Library/]]) {
     await menu(grain, 'Command Palette…')
     await pal.getByPlaceholder('Go to, create, open…').fill(q)
-    await pal.getByRole('option').first().click()
+    await pal.getByRole('option', { name: new RegExp(`^${q}`) }).first().click() // the view, not its Refresh command
     await heading(page, h)
   }
   // arrows wrap and Enter picks the highlighted entry
@@ -260,7 +262,7 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   await menu(grain, 'Chats'); await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
   // Memory… opens Settings on the Memory tab, split: graph and list side by side
   await menu(grain, 'Memory…')
-  await expect(page.locator('#settings-tab-context')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('#settings-tab-assistant')).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('dialog').locator('.knowledge-body .graph-body')).toBeVisible()
   await expect(page.getByRole('dialog').locator('.knowledge-body .mem-pane')).toBeVisible()
   await menu(grain, 'Settings…')

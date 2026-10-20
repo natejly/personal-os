@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures.mjs'
 import { openLibrary, sendChat, resize, noOverflow, PY, STUB } from './helpers/library.mjs'
+import { setNarrow } from './helpers/shell.mjs'
 
 const stubBody = (name, mode = 'friendly') => ({ name, transport: 'stdio', command: PY, args: [STUB, '--mode', mode], enabled: true })
 
@@ -164,7 +165,7 @@ test('enable/disable toggle; 820x520 layout; hostile server is flagged', async (
   await api('/mcp/servers', { method: 'POST', body: stubBody('Stub') })
   await api('/mcp/servers', { method: 'POST', body: stubBody('Hostile', 'hostile') })
   await ready(api, 'Stub', 5)
-  await resize(grain)
+  await setNarrow(grain)
   await openLibrary(page, 'Connectors')
   const srv = page.locator('.mcp-server', { hasText: 'Stub' }).first()
   await srv.locator('label.switch-wrap').click()

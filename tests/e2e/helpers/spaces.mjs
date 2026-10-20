@@ -24,7 +24,7 @@ export const windowsOf = async (g, id) => (await g.api('/canvases/' + id)).windo
 /** Enter the canvas view in the first space. */
 export async function enterCanvas(g) {
   g.page.setDefaultTimeout(40_000) // the machine is shared and often loaded
-  await g.page.waitForSelector('.sidebar')
+  await g.page.waitForSelector('.sidebar', { state: 'attached' }) // folded away below 900px
   await sleep(500)
   // The menu IPC can land before the renderer listens; toggle again only while the bar is still absent.
   for (let i = 0; i < 4 && !(await g.page.locator('.spaces-bar').count()); i++) {

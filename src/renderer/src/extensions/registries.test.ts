@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { FullDesk, Message, Profile } from '@shared/types'
 import { useStore } from '../store'
 import {
-  activateExtension, fenceRenderer, keybindings, paletteCommands, registerSlot, selectionActions, slotItems, WIDGETS, widgetOn, type UiApi
+  activateExtension, docEditorFor, fenceRenderer, keybindings, paletteCommands, registerSlot, selectionActions, slotItems, WIDGETS, widgetOn, type UiApi
 } from './host'
 import { Slot } from './slot'
 import { extStore } from './events'
@@ -202,6 +202,16 @@ test('ui.view.opened reaches subscribers; ui.message.display rewrites only the s
   useStore.setState({ settings: { ...useStore.getState().settings, hiddenViews: [] } })
   gone()
   assert.equal(displayText(message, 'hello'), 'hello')
+})
+
+test('an extension doc editor takes the docs it matches while the extension is on', () => {
+  const gone = withExtension('editordemo', (ui) => ui.docEditor({ id: 'e', match: (d) => d.title.endsWith('.demo'), Component }))
+  const settings = useStore.getState().settings
+  assert.equal(docEditorFor(settings, { title: 'a.demo' })?.extension, 'editordemo')
+  assert.equal(docEditorFor(settings, { title: 'notes.md' }), undefined)
+  assert.equal(docEditorFor({ ...settings, hiddenViews: ['editordemo'] }, { title: 'a.demo' }), undefined)
+  gone()
+  assert.equal(docEditorFor(settings, { title: 'a.demo' }), undefined)
 })
 
 test('an extension side-panel tab shows in the workspace panel while its `shown` holds', () => {

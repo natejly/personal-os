@@ -1,0 +1,21 @@
+{
+  "id": "latex",
+  "name": "LaTeX",
+  "description": "Write and compile LaTeX in Files: .tex notes open in an editor with a PDF preview, and a folder with a main.tex is a project.",
+  "version": "2.0.0",
+  "apiVersion": 1,
+  "kind": "extension",
+  "enabled": false,
+  "activation": ["startup"],
+  "requires": { "services": ["docs"] },
+  "contributes": {
+    "tools": [
+      { "name": "latex_projects", "danger": "safe", "group": "latex" },
+      { "name": "latex_new", "danger": "writes", "group": "latex" },
+      { "name": "latex_compile", "danger": "executes", "group": "latex" }
+    ],
+    "routes": { "prefix": "/latex" }
+  },
+  "permissions": ["db:own", "service:docs"],
+  "data": { "tables": ["latex_projects"], "migrations": "migrations/" }
+}

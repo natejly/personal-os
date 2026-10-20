@@ -188,6 +188,7 @@ export {
   ShareNetwork as Share2,
   ShieldWarning as ShieldAlert,
   ShieldCheck,
+  Sigma,
   Shield as ShieldQuestion,
   ArrowsIn as Shrink,
   SlackLogo as Slack,

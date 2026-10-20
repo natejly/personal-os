@@ -39,7 +39,7 @@ def _route_set() -> set[tuple[str, str]]:
 class HostTests(unittest.TestCase):
     def test_modules_and_built_in_extensions_load_and_the_app_starts_through_the_lifespan(self) -> None:
         from personal_os import app as appmod
-        self.assertEqual(list(appmod.host.extensions), ["google", "todos", "calendar", "mail", *(m.key for m in modules), "health", "spaces", "lean", "focus", "coding", "claude-code", "memory-tree", "telegram"])
+        self.assertEqual(list(appmod.host.extensions), ["google", "todos", "calendar", "mail", *(m.key for m in modules), "health", "spaces", "latex", "lean", "focus", "coding", "claude-code", "memory-tree", "telegram"])
         self.assertIs(appmod.google, appmod._ext_ctx.services["google"]())
         self.assertEqual(app.router.on_startup + app.router.on_shutdown, [])  # no @app.on_event handlers remain
         with TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN}) as c:  # runs the lifespan
@@ -57,7 +57,7 @@ class ToolTests(unittest.TestCase):
     def test_health_tools_keep_their_place_after_the_modules_tools(self) -> None:
         names = list(toolbox.specs)
         i = names.index("health_summary")
-        self.assertEqual(names[i - 2:i + 4], ["mail_followups", "schedule_suggest", "health_summary", "health_log", "health_delete_entry", "doc_list"])
+        self.assertEqual(names[i - 2:i + 4], ["mail_followups", "schedule_suggest", "health_summary", "health_log", "health_delete_entry", "latex_projects"])
 
     def test_calendar_tools_keep_their_place_before_the_gmail_tools(self) -> None:
         names = list(toolbox.specs)

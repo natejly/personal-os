@@ -443,7 +443,7 @@ def _publish_event(name: str, data: Any) -> None:
 ext_drafts = Drafts(db.data_dir)
 # sid/wsid/owe_wake are defined further down, so the contexts look them up late.
 _ext_ctx = ExtensionContext(db=db, hidden_views=lambda: settings().get("hiddenViews") or (), services={"mcp": lambda: mcp, "extundo": lambda: extundo, "memories": lambda: memories,
-                                      "documents": lambda: documents, "uploads": lambda: _store_upload},
+                                      "documents": lambda: documents, "uploads": lambda: _store_upload, "docs": lambda: docs},
                             settings=settings, set_settings=db.set_settings, sid=lambda p: sid(p), wsid=lambda p: wsid(p), publish=_publish_event,
                             widget_kinds=lambda: (*host.widget_kinds(), *ext_drafts.widget_kinds()), owe_wake=lambda c, t, w: owe_wake(c, t, w),
                             record_job_run=lambda *a: _record_job_run(*a),
@@ -471,6 +471,7 @@ for _m in modules:
         app.include_router(_r)
 host.mount(app, host.load_builtin("health", _ext_ctx))
 host.mount(app, host.load_builtin("spaces", _ext_ctx))
+host.mount(app, host.load_builtin("latex", _ext_ctx))
 canvases = _ext_ctx.services["canvases"]()
 for _p in _PROFILES:
     host.load_builtin(_p, _ext_ctx)

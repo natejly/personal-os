@@ -37,7 +37,11 @@ export async function deskChat(grain, { title = 'Task chat', brief = 'Write a sh
 }
 /** The sidebar row of a chat, by title. */
 export const chatRow = (page, title) => page.locator('.sidebar .convo-item', { hasText: title }).first()
-export const openChat = async (page, title) => { await chatRow(page, title).click() }
+export const openChat = async (page, title) => {
+  // below 900px the sidebar is folded away until "Show sidebar"
+  if (!(await chatRow(page, title).isVisible())) { const show = page.getByRole('button', { name: 'Show sidebar' }); if (await show.isVisible()) await show.click() }
+  await chatRow(page, title).click()
+}
 export const strip = (page) => page.locator('.desk-strip')
 export const panel = (page) => page.locator('.desk-panel')
 /** Bring a workspace tab forward (only the active tab's body is in the DOM). */

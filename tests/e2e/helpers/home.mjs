@@ -13,7 +13,11 @@ const TAB_ID = { General: 'general', Models: 'models', Agent: 'agent', 'Context 
 export const tabBtn = (page, label) => dialog(page).locator(`#settings-tab-${TAB_ID[label] ?? label}`)
 
 export async function openSettings(page, tab) {
-  if (!(await dialog(page).count())) await page.locator('.settings-btn').click()
+  if (!(await dialog(page).count())) {
+    // below 900px the sidebar is folded away and the settings button lives in it
+    if (!(await page.locator('.settings-btn').isVisible())) await page.getByRole('button', { name: 'Show sidebar' }).click()
+    await page.locator('.settings-btn').click()
+  }
   await expect(dialog(page)).toBeVisible()
   if (tab) await tabBtn(page, tab).click()
   return dialog(page)

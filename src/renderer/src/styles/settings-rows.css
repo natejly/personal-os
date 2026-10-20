@@ -4,7 +4,9 @@
 .settings-pane .set-row-x > .set-control > input[type='number'] { width: 96px; min-width: 0; }
 .settings-pane .set-row-x > .set-control > select { width: auto; min-width: 160px; }
 .set-meta { position: relative; display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; flex: none; min-width: 92px; }
-.set-modified { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; }
+.set-modified { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; padding: 0; border: 0; }
+button.set-modified { cursor: pointer; box-sizing: content-box; border: 4px solid transparent; background-clip: padding-box; width: 6px; height: 6px; }
+button.set-modified:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 0; }
 .set-scope { font: inherit; font-size: 11px; line-height: 1; padding: 3px 7px; border-radius: 999px; color: var(--text-muted); background: transparent; border: 1px solid var(--border-strong); cursor: pointer; }
 .set-scope:hover, .set-scope[aria-expanded='true'] { color: var(--text); border-color: var(--control-border); }
 .set-scope:focus-visible, .set-reset:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }

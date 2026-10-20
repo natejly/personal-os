@@ -8,6 +8,7 @@ import ModelsSettings from '../ModelsSettings'
 import ModelSelect from '../ModelSelect'
 import ModelDuels from '../ModelDuels'
 import SettingRow from './SettingRow'
+import Disclosure from './Disclosure'
 import { Sec, type TabProps } from './shared'
 import type { Settings } from '@shared/types'
 
@@ -21,31 +22,35 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
 export default function ModelTab({ draft, patch, onProvidersChanged }: TabProps & { onProvidersChanged: () => Promise<void> }): JSX.Element {
   const settings = useStore((s) => s.settings)
   const models = useStore((s) => s.models)
+  const renderField = (f: (typeof MODEL_FIELDS)[number]): JSX.Element => {
+    const locked = f.key === 'embeddingModel' && embeddingLocked(settings)
+    const value = draft[f.key] ?? ''
+    return (
+      <Fragment key={f.key}>
+        <SettingRow settingKey={f.key} title={f.label} help={locked ? 'Fixed: the search index is built with it.' : undefined}
+          value={value} defaultValue={DEFAULT_MODEL_VALUE} onReset={locked ? undefined : () => patch({ [f.key]: DEFAULT_MODEL_VALUE })}>
+          <ModelSelect kind={f.kind} label={f.label} blank={f.blank} disabled={locked} value={value} onChange={(v) => patch({ [f.key]: v })} />
+        </SettingRow>
+        {f.key === 'workerModel' && (
+          <SettingRow settingKey="workerEffort" title="Worker effort"
+            value={draft.workerEffort ?? 'medium'} defaultValue="medium" onReset={() => patch({ workerEffort: 'medium' })}>
+            <select aria-label="Worker effort" value={draft.workerEffort ?? 'medium'} onChange={(e) => patch({ workerEffort: e.target.value as Settings['workerEffort'] })}>
+              <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="chat">Same as chat</option>
+            </select>
+          </SettingRow>
+        )}
+      </Fragment>
+    )
+  }
   return (
     <section>
       <Sec id="provider"><ProvidersSettings onChanged={onProvidersChanged} /></Sec>
       <Sec id="models">
         <h4>Models</h4>
-        {MODEL_FIELDS.map((f) => {
-          const locked = f.key === 'embeddingModel' && embeddingLocked(settings)
-          const value = draft[f.key] ?? ''
-          return (
-            <Fragment key={f.key}>
-              <SettingRow settingKey={f.key} title={f.label} help={locked ? 'Fixed: the search index is built with it.' : undefined}
-                value={value} defaultValue={DEFAULT_MODEL_VALUE} onReset={locked ? undefined : () => patch({ [f.key]: DEFAULT_MODEL_VALUE })}>
-                <ModelSelect kind={f.kind} label={f.label} blank={f.blank} disabled={locked} value={value} onChange={(v) => patch({ [f.key]: v })} />
-              </SettingRow>
-              {f.key === 'workerModel' && (
-                <SettingRow settingKey="workerEffort" title="Worker effort"
-                  value={draft.workerEffort ?? 'medium'} defaultValue="medium" onReset={() => patch({ workerEffort: 'medium' })}>
-                  <select aria-label="Worker effort" value={draft.workerEffort ?? 'medium'} onChange={(e) => patch({ workerEffort: e.target.value as Settings['workerEffort'] })}>
-                    <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="chat">Same as chat</option>
-                  </select>
-                </SettingRow>
-              )}
-            </Fragment>
-          )
-        })}
+        {MODEL_FIELDS.filter((f) => f.key === 'defaultModel').map(renderField)}
+        <Disclosure id="model-roles" title="Model roles">
+          {MODEL_FIELDS.filter((f) => f.key !== 'defaultModel').map(renderField)}
+        </Disclosure>
       </Sec>
       <Sec id="picker"><ModelsSettings settings={settings} models={models} pickerModels={draft.pickerModels} setPickerModels={(pickerModels) => patch({ pickerModels })} /></Sec>
       <h4>Fast replies</h4>
@@ -79,10 +84,6 @@ export default function ModelTab({ draft, patch, onProvidersChanged }: TabProps 
         <SettingRow settingKey="selectionToolbar" title="Selection toolbar"
           value={draft.selectionToolbar !== false} defaultValue={true} onReset={() => patch({ selectionToolbar: true })}>
           <Toggle label="Selection toolbar" checked={draft.selectionToolbar !== false} onChange={(selectionToolbar) => patch({ selectionToolbar })} />
-        </SettingRow>
-        <SettingRow settingKey="autoCompact" title="Summarize old messages automatically"
-          value={draft.autoCompact !== false} defaultValue={true} onReset={() => patch({ autoCompact: true })}>
-          <Toggle label="Summarize old messages automatically" checked={draft.autoCompact !== false} onChange={(autoCompact) => patch({ autoCompact })} />
         </SettingRow>
       </Sec>
       {draft.devTools === true && <Sec id="duels"><ModelDuels /></Sec>}

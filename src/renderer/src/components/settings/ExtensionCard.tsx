@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { CatalogCard } from '@shared/types'
-import { BADGE_TEXT, UI_NOT_LOADED_TEXT, authorSource, badgeKind, canToggle, contextCostText, contributionChips, requiredByText, shortHash } from '../../lib/extensionsCatalog'
+import { BADGE_TEXT, capabilityLines, UI_NOT_LOADED_TEXT, authorSource, badgeKind, canToggle, contextCostText, contributionChips, requiredByText, shortHash } from '../../lib/extensionsCatalog'
+import Disclosure from './Disclosure'
 import Switch from './Switch'
 import './extensionsSection.css'
 
@@ -18,6 +19,7 @@ export default function ExtensionCardView({ card, names, busy, mode, ...act }: {
   const [copied, setCopied] = useState(false)
   const badge = badgeKind(card)
   const chips = contributionChips(card)
+  const caps = capabilityLines(card.permissionText)
   const needsOthers = card.requires.extensions.map((id) => names[id] ?? id)
   const requiredBy = requiredByText(card, names)
   const sha = card.pinned?.sha256
@@ -29,34 +31,37 @@ export default function ExtensionCardView({ card, names, busy, mode, ...act }: {
     <article className="ext-card" aria-label={card.name}>
       <div className="ext-card-top">
         <b className="ext-name">{card.name}</b>
-        <span className="ext-ver">{card.version}</span>
-        <span className={`ext-badge ${badge}`}>{BADGE_TEXT[badge]}</span>
         <span className="ext-grow" />
         {mode === 'installed' && canToggle(card) && act.onToggle && (
           <Switch plain={false} title={card.enabled ? 'On' : 'Off'} label={`${card.enabled ? 'Disable' : 'Enable'} ${card.name}`} checked={card.enabled} disabled={busy} onChange={act.onToggle} />
         )}
       </div>
-      <div className="ext-meta">{authorSource(card)}</div>
       {card.description && <p className="ext-desc">{card.description}</p>}
+      {card.state === 'invalid' && <p className="ext-note error" role="status">{card.reason || 'Its manifest is not valid, so it cannot be turned on.'}</p>}
+      {card.state === 'needs-review' && <p className="ext-note warn" role="status">{card.reason || 'Review it before turning it on.'}</p>}
+      {card.state === 'disabled-dependency' && <p className="ext-note warn" role="status">{card.reason || `Needs ${needsOthers.join(', ')} switched on.`}</p>}
+      {card.uiNotLoaded && <p className="ext-note" role="status">{UI_NOT_LOADED_TEXT}.</p>}
+      <Disclosure id={'ext-details-' + card.id} title="Details">
+        <div className="ext-meta">
+          <span className="ext-ver">{card.version}</span> <span className={`ext-badge ${badge}`}>{BADGE_TEXT[badge]}</span>
+        </div>
+      <div className="ext-meta">{authorSource(card)}</div>
       {chips.length > 0 && (
         <ul className="ext-chips" aria-label="Contributions">
           {chips.map((c) => <li key={c.label} className={c.warn ? 'warn' : ''}>{c.label}</li>)}
         </ul>
       )}
-      {card.permissionText.length > 0 && <p className="ext-meta">{card.permissionText.join('; ')}</p>}
-      {card.state === 'invalid' && <p className="ext-note error" role="status">{card.reason || 'Its manifest is not valid, so it cannot be turned on.'}</p>}
-      {card.state === 'needs-review' && <p className="ext-note warn" role="status">{card.reason || 'Review it before turning it on.'}</p>}
-      {card.state === 'disabled-dependency' && <p className="ext-note warn" role="status">{card.reason || `Needs ${needsOthers.join(', ')} switched on.`}</p>}
+      {caps.length > 0 && <p className="ext-meta">{caps.join('; ')}</p>}
       {requiredBy && <p className="ext-meta">{requiredBy}</p>}
-      {card.uiNotLoaded && <p className="ext-note" role="status">{UI_NOT_LOADED_TEXT}.</p>}
       {sha && (
         <p className="ext-meta">
           Pinned <code title={sha}>{shortHash(sha)}</code>{' '}
           <button type="button" className="ghost-btn sm" onClick={copy} aria-label={`Copy pinned hash of ${card.name}`}>{copied ? 'Copied' : 'Copy'}</button>
         </p>
       )}
+        <p className="ext-meta">{contextCostText(card.contextCostTokens)}</p>
+      </Disclosure>
       <div className="ext-card-foot">
-        <span className="ext-meta">{contextCostText(card.contextCostTokens)}</span>
         <span className="ext-grow" />
         {mode === 'installed' && card.tier === 'installed' && (
           <>

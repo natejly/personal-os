@@ -2,6 +2,7 @@ import { sourceText } from '../../lib/settingSource'
 import type { ReactNode } from 'react'
 import type { Settings } from '@shared/types'
 import { slotNoun } from '../../lib/runtime'
+import Disclosure from './Disclosure'
 import NumberField from './NumberField'
 import SettingRow from './SettingRow'
 import { ScopeButtons, SelectNotices, SlotPicker } from './RuntimeParts'
@@ -68,20 +69,22 @@ export default function LoopGroup({ draft, patch }: TabProps): JSX.Element {
         {slot && <small data-testid={`runtime-${LOOP_SLOT}-reason`}>{sourceText(slot.resolution.source)}</small>}
         {slot && <SlotPicker slot={slot} rt={rt} />}
       </div>
-      {sections.map((g) => (
-        <div key={g}>
-          <h5 className="set-subhead">{g}</h5>
-          {g === 'Stuck detection' && (
-            <SettingRow settingKey="stuckSensitivity" title="Stuck detection" value={stuck} defaultValue={LOOP_DEFAULTS.stuckSensitivity}
-              onReset={() => patch({ stuckSensitivity: LOOP_DEFAULTS.stuckSensitivity })}>
-              <select aria-label="Stuck detection" value={stuck} onChange={(e) => patch({ stuckSensitivity: e.target.value as StuckMode })}>
-                {STUCK_MODES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-              </select>
-            </SettingRow>
-          )}
-          {NUMBERS.filter((n) => n.group === g).map(row)}
-        </div>
-      ))}
+      <Disclosure id="agent-limits" title="Limits">
+        {sections.map((g) => (
+          <div key={g}>
+            <h5 className="set-subhead">{g}</h5>
+            {g === 'Stuck detection' && (
+              <SettingRow settingKey="stuckSensitivity" title="Stuck detection" value={stuck} defaultValue={LOOP_DEFAULTS.stuckSensitivity}
+                onReset={() => patch({ stuckSensitivity: LOOP_DEFAULTS.stuckSensitivity })}>
+                <select aria-label="Stuck detection" value={stuck} onChange={(e) => patch({ stuckSensitivity: e.target.value as StuckMode })}>
+                  {STUCK_MODES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                </select>
+              </SettingRow>
+            )}
+            {NUMBERS.filter((n) => n.group === g).map(row)}
+          </div>
+        ))}
+      </Disclosure>
     </Sec>
   )
 }

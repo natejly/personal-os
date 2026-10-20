@@ -3,6 +3,10 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { openAdvanced, save } from './helpers/home.mjs'
 import { expect, newChat, say, homeScratch, rmScratch, pending, realErrors, resize, SHELL_SANDBOX } from './helpers/cowork.mjs'
+const openPerTool = async (page) => {
+  const d = page.locator('details[data-disclosure="per-tool-access"]')
+  if (!(await d.evaluate((e) => e.open))) await d.locator('summary').click()
+}
 test.describe.configure({ timeout: 300_000 })
 
 const touch = (ws, cmd) => `!!tool shell_run ${JSON.stringify({ command: cmd, cwd: ws })}`
@@ -17,6 +21,7 @@ test('Settings → Advanced → Approvals: add rules in the UI, bad rules are re
   const { page } = grain
   await resize(grain)
   await openAdvanced(page, 'Approvals')
+  await openPerTool(page)
   const add = async (kind, text, ok = true) => {
     const input = page.getByLabel(`New ${kind} rule`)
     await input.scrollIntoViewIfNeeded()
@@ -36,6 +41,7 @@ test('Settings → Advanced → Approvals: add rules in the UI, bad rules are re
   await expect.poll(async () => (await grain.api('/settings')).permissionRules).toMatchObject({ allow: ['Bash(touch *)'], deny: ['Bash(touch blocked*)'], ask: ['Bash(touch ask*)'] })
   // Save closes the modal: reopen it so the tester runs against what was saved
   await openAdvanced(page, 'Approvals')
+  await openPerTool(page)
   // the tester reads saved rules
   const test1 = async (cmd) => {
     await page.getByLabel('Command: command to test').fill(cmd)

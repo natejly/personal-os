@@ -4,6 +4,10 @@ import { TABS, setToggle, dialog, tabBtn, openAdvanced, openSettings, closeSetti
 const benign = (e) => /ResizeObserver|Autofocus|favicon/i.test(e)
 const noErrors = (grain) => expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
 const field = (page, label) => dialog(page).getByLabel(label).first()
+const openRoles = async (page) => {
+  const d = dialog(page).locator('details[data-disclosure="model-roles"]')
+  if (!(await d.evaluate((e) => e.open))) await d.locator('summary').click()
+}
 
 test('every settings tab opens and renders cleanly', async ({ grain }) => {
   const { page } = grain
@@ -99,6 +103,7 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
   // Model
   await tabBtn(page, 'Models').click()
   await field(page, 'Chat model').selectOption('custom/mock-chat-2')
+  await openRoles(page)
   await field(page, 'Low tier').selectOption('custom/mock-chat-2')
   await save(page)
 
@@ -166,6 +171,8 @@ test('invalid values are clamped or rejected without breaking the modal', async 
   const rounds = 'Delegate after this many tool rounds'
   for (const [v, want] of [['999', 20], ['-5', 1], ['0', 4], ['2.6', 3], ['', 4]]) {
     await openAdvanced(page, 'Desks and workers')
+    const lim = dialog(page).locator('details[data-disclosure="agent-workers"]')
+    if (!(await lim.evaluate((e) => e.open))) await lim.locator('summary').click()
     await field(page, rounds).fill(v)
     await dialog(page).getByRole('button', { name: 'Save', exact: true }).click()
     await expect(dialog(page)).toHaveCount(0)
@@ -222,6 +229,7 @@ test('model pickers list every model from the providers with a key and leave the
   const options = (label) => field(page, label).locator('option').evaluateAll((os) => os.map((o) => o.value))
   await expect.poll(() => options('Chat model')).toEqual(expect.arrayContaining(['custom/mock-chat', 'custom/mock-chat-2']))
   expect(await options('Chat model')).not.toContain('custom/mock-embed')
+  await openRoles(page)
   expect(await options('Search model')).toContain('mock-embed')
   await closeSettings(page)
   noErrors(grain)

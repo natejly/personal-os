@@ -4,6 +4,10 @@ import { join } from 'node:path'
 test.describe.configure({ timeout: 300_000 })
 import { openAdvanced } from './helpers/home.mjs'
 import { expect, newChat, say, homeScratch, rmScratch, pending, realErrors, resize, SHELL_SANDBOX } from './helpers/cowork.mjs'
+const openPerTool = async (page) => {
+  const d = page.locator('details[data-disclosure="per-tool-access"]')
+  if (!(await d.evaluate((e) => e.open))) await d.locator('summary').click()
+}
 
 // shell_run is `ask` by default and `touch` is not on the read-only list, so it always gets a card.
 const touch = (ws, name, extra = '') => `!!tool shell_run {"command":"touch ${name}","cwd":"${ws}"${extra}}`
@@ -85,6 +89,7 @@ test('always allow in this chat: grant listed in Settings, next call runs withou
 
     // Settings → Advanced → Approvals lists it, and Revoke takes it away
     await openAdvanced(page, 'Approvals')
+    await openPerTool(page)
     const revoke = page.getByRole('button', { name: /^Revoke shell_run in / })
     await expect(revoke).toBeVisible()
     await revoke.click()

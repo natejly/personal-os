@@ -43,6 +43,7 @@ PERMISSION_TEXT = {
     "coding:read": "Reads your coding sessions.",
     "terminal:control": "Can control terminal sessions.",
 }
+SERVICE_LABELS = {"google": "your Google account", "mcp": "connected tool servers"}
 _SLOT_PERMISSIONS = {d.permission: d.noun for d in SLOTS.values()}
 
 
@@ -53,21 +54,21 @@ def permission_text(manifest: Manifest) -> list[str]:
     tools = manifest.contributes.get("tools", ())
     risky = [t["name"] for t in tools if t.get("danger", "safe") != "safe"]
     if tools:
-        lines.append(f"Adds {len(tools)} tool{'s' if len(tools) != 1 else ''} for the assistant" + (f"; {len(risky)} can change things or reach outside Grain ({', '.join(risky)})." if risky else "."))
+        lines.append(f"Adds {len(tools)} tool{'s' if len(tools) != 1 else ''} for the assistant" + (f"; {len(risky)} can change things or reach outside Grain" if risky else ""))
     for perm in manifest.permissions:
         if perm in PERMISSION_TEXT:
-            lines.append(PERMISSION_TEXT[perm])
+            lines.append(PERMISSION_TEXT[perm].rstrip("."))
         elif perm in _SLOT_PERMISSIONS:
-            lines.append(f"Can replace a core part of Grain: the {_SLOT_PERMISSIONS[perm]}.")
+            lines.append(f"Can replace a core part of Grain: the {_SLOT_PERMISSIONS[perm]}")
         elif perm.startswith("service:"):
-            lines.append(f"Uses the {perm.removeprefix('service:')} service.")
-        else:
-            lines.append(f"Holds the capability {perm}.")
+            name = perm.removeprefix("service:")
+            if name in SERVICE_LABELS:
+                lines.append(f"Uses {SERVICE_LABELS[name]}")
     if manifest.hooks:
-        lines.append(f"Listens to {len(manifest.hooks)} app event{'s' if len(manifest.hooks) != 1 else ''}: {', '.join(sorted(manifest.hooks))}.")
+        lines.append(f"Listens to {len(manifest.hooks)} app event{'s' if len(manifest.hooks) != 1 else ''}")
     if manifest.contributes.get("views") or manifest.contributes.get("slots"):
-        lines.append("Adds screens or panels to the app.")
-    return lines
+        lines.append("Adds screens or panels to the app")
+    return [ln.rstrip(". ") for ln in lines if ln.strip(". ")]
 
 
 def contributes(manifest: Manifest) -> dict[str, Any]:

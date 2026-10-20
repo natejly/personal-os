@@ -21,15 +21,18 @@ export default function SettingRow({ settingKey, title, help, value, defaultValu
     document.addEventListener('keydown', key, true)
     return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', key, true) }
   }, [open])
-  const showMeta = modified || !!entry
+  const showScope = !!entry && (entry.scope !== 'global' || entry.source !== 'default')
+  const showMeta = modified || showScope
   return (
     <div className={`setting-row set-row-x${danger ? ' danger' : ''}`} data-setting={settingKey}>
       <span className="toggle-text"><b title={typeof help === 'string' ? help : undefined}>{title}</b></span>
       <span className="set-control">{children}</span>
       {showMeta && (
         <span className="set-meta" ref={box}>
-          {modified && <span className="set-modified" role="img" title="Modified from the default" aria-label="Modified from the default" />}
-          {entry && (
+          {modified && (entry
+            ? <button type="button" className="set-modified" title="Modified from the default" aria-label="Modified from the default" aria-expanded={open} aria-controls={open ? pop : undefined} onClick={() => setOpen((o) => !o)} />
+            : <span className="set-modified" role="img" title="Modified from the default" aria-label="Modified from the default" />)}
+          {showScope && entry && (
             <button type="button" className="set-scope" aria-expanded={open} aria-controls={open ? pop : undefined} onClick={() => setOpen((o) => !o)}>{scopeLabel(entry.scope)}</button>
           )}
           {modified && onReset && (

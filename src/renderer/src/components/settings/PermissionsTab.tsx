@@ -2,6 +2,7 @@ import ConfirmDanger from './ConfirmDanger'
 import NumberField from './NumberField'
 import PresetsSection from './PresetsSection'
 import Switch from './Switch'
+import Disclosure from './Disclosure'
 import GrantsPanel from '../GrantsPanel'
 import PermissionRules from '../PermissionRules'
 import { ShellNetwork } from '../CoworkSettings'
@@ -21,7 +22,6 @@ export default function PermissionsTab({ draft, patch, onPresetApplied }: TabPro
   const [ask, setAsk] = useState<'connections' | 'edits' | null>(null)
   return (
     <section className="permissions-tab">
-      <PresetsSection onApplied={onPresetApplied} />
       <Sec id="mode">
         <h4>Permission mode</h4>
         <PermissionModeCards mode={mode} onPick={(permissionMode) => patch({ permissionMode })} />
@@ -50,16 +50,6 @@ export default function PermissionsTab({ draft, patch, onPresetApplied }: TabPro
           </label>
         </details>
       )}
-      <Sec id="tools">
-        <h4>Per-tool access</h4>
-        <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
-      </Sec>
-      <Sec id="always-ask">
-        <h4>Always ask first</h4>
-        <AlwaysAsk value={draft.alwaysAsk ?? []} onChange={(alwaysAsk) => patch({ alwaysAsk })} />
-        <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />
-        <GrantsPanel draft={draft} patch={patch} />
-      </Sec>
       <Sec id="file-edits">
         <h4>File edits</h4>
         <div className="setting-row">
@@ -78,6 +68,20 @@ export default function PermissionsTab({ draft, patch, onPresetApplied }: TabPro
         <SnapshotToggle draft={draft} patch={patch} />
         <ShellNetwork draft={draft} patch={patch} />
       </Sec>
+      <Sec id="presets">
+        <Disclosure id="permission-presets" title="Presets">
+          <PresetsSection onApplied={onPresetApplied} />
+        </Disclosure>
+      </Sec>
+      <Sec id="tools"><Disclosure id="per-tool-access" title="Per-tool access">
+        <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
+        <Sec id="always-ask">
+          <h4>Always ask first</h4>
+          <AlwaysAsk value={draft.alwaysAsk ?? []} onChange={(alwaysAsk) => patch({ alwaysAsk })} />
+          <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />
+          <GrantsPanel draft={draft} patch={patch} />
+        </Sec>
+      </Disclosure></Sec>
     </section>
   )
 }

@@ -7,6 +7,7 @@ import AdvancedRetrieval, { rebuildIndex } from '../AdvancedRetrieval'
 import EmbeddingHint from '../EmbeddingHint'
 import MemoryPanel from '../MemoryPanel'
 import ScopeSelect from '../ScopeSelect'
+import Disclosure from './Disclosure'
 import NumberField from './NumberField'
 import SettingRow from './SettingRow'
 import Switch from './Switch'
@@ -74,12 +75,14 @@ function CompactionGroup({ draft, patch }: TabProps): JSX.Element {
       <SettingRow settingKey="autoCompact" title="Summarize long chats" value={auto} defaultValue={d.autoCompact} onReset={() => patch({ autoCompact: d.autoCompact })}>
         <Toggle label="Summarize long chats" checked={auto} onChange={(autoCompact) => patch({ autoCompact })} />
       </SettingRow>
-      {num('compactAt', 'Summarize at (fraction of window)', 0.05)}
-      {num('compactAtTokens', 'Also summarize past (tokens)')}
-      {num('compactKeepRecent', 'Recent messages kept')}
-      {num('compactKeepTokens', 'Recent history kept (tokens)')}
-      {num('microAt', 'Clear old tool results at (fraction of window)', 0.05)}
-      {num('microKeep', 'Tool results left intact')}
+      <Disclosure id="context-thresholds" title="Thresholds">
+        {num('compactAt', 'Summarize at (fraction of window)', 0.05)}
+        {num('compactAtTokens', 'Also summarize past (tokens)')}
+        {num('compactKeepRecent', 'Recent messages kept')}
+        {num('compactKeepTokens', 'Recent history kept (tokens)')}
+        {num('microAt', 'Clear old tool results at (fraction of window)', 0.05)}
+        {num('microKeep', 'Tool results left intact')}
+      </Disclosure>
       {num('contextWindow', 'Context window (tokens, 0 = automatic)')}
       {num('toolDeferAbove', 'Defer tools above (0 = never)')}
     </Sec>

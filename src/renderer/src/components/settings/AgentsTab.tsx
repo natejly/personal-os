@@ -1,5 +1,6 @@
 import type { Settings } from '@shared/types'
 import CoworkSettings, { BrowserAccess, DeskGates } from '../CoworkSettings'
+import Disclosure from './Disclosure'
 import LoopGroup from './LoopGroup'
 import NumberField from './NumberField'
 import SettingRow from './SettingRow'
@@ -31,14 +32,21 @@ export default function AgentsTab({ draft, patch }: TabProps): JSX.Element {
           value={draft.delegationForce !== false} defaultValue onReset={() => patch({ delegationForce: true })}>
           <Toggle label="Delegate long work" checked={draft.delegationForce !== false} onChange={(delegationForce) => patch({ delegationForce })} />
         </SettingRow>
-        {draft.delegationForce !== false && (
-          <SettingRow title="Delegate after this many tool rounds" value={delegationAfterRounds} defaultValue={4} onReset={() => patch({ delegationAfterRounds: 4 })}>
-            <NumberField name="delegationAfterRounds" label="Delegate after this many tool rounds" value={delegationAfterRounds} fallback={4} onChange={(n) => patch({ delegationAfterRounds: n })} />
+        <Disclosure id="agent-workers" title="Limits">
+          {draft.delegationForce !== false && (
+            <SettingRow title="Delegate after this many tool rounds" value={delegationAfterRounds} defaultValue={4} onReset={() => patch({ delegationAfterRounds: 4 })}>
+              <NumberField name="delegationAfterRounds" label="Delegate after this many tool rounds" value={delegationAfterRounds} fallback={4} onChange={(n) => patch({ delegationAfterRounds: n })} />
+            </SettingRow>
+          )}
+          <SettingRow title="Background workers at once" value={workerMaxConcurrent} defaultValue={4} onReset={() => patch({ workerMaxConcurrent: 4 })}>
+            <NumberField name="workerMaxConcurrent" label="Background workers at once" value={workerMaxConcurrent} fallback={4} onChange={(n) => patch({ workerMaxConcurrent: n })} />
           </SettingRow>
-        )}
-        <SettingRow title="Background workers at once" value={workerMaxConcurrent} defaultValue={4} onReset={() => patch({ workerMaxConcurrent: 4 })}>
-          <NumberField name="workerMaxConcurrent" label="Background workers at once" value={workerMaxConcurrent} fallback={4} onChange={(n) => patch({ workerMaxConcurrent: n })} />
-        </SettingRow>
+          {codingOn && (
+            <SettingRow title="Coding sessions at once" value={codingSessionMaxConcurrent} defaultValue={3} onReset={() => patch({ codingSessionMaxConcurrent: 3 })}>
+              <NumberField name="codingSessionMaxConcurrent" label="Coding sessions at once" value={codingSessionMaxConcurrent} fallback={3} onChange={(n) => patch({ codingSessionMaxConcurrent: n })} />
+            </SettingRow>
+          )}
+        </Disclosure>
       </Sec>
       {codingOn && <Sec id="coding">
         <h4>Coding sessions</h4>
@@ -54,9 +62,6 @@ export default function AgentsTab({ draft, patch }: TabProps): JSX.Element {
             <option value="opencode">OpenCode</option>
             <option value="pi">pi</option>
           </select>
-        </SettingRow>
-        <SettingRow title="Coding sessions at once" value={codingSessionMaxConcurrent} defaultValue={3} onReset={() => patch({ codingSessionMaxConcurrent: 3 })}>
-          <NumberField name="codingSessionMaxConcurrent" label="Coding sessions at once" value={codingSessionMaxConcurrent} fallback={3} onChange={(n) => patch({ codingSessionMaxConcurrent: n })} />
         </SettingRow>
       </Sec>}
       <Sec id="browser">

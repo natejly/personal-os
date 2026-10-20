@@ -34,7 +34,7 @@ export default function PlannerPanel({ initial, days = 1, onApplied, command }: 
   }, [initialKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const suggestRef = useRef<() => Promise<void>>(async () => {})
-  useViewCommand(command ?? '', () => { if (command && connected) void suggestRef.current() })
+  useViewCommand(command ?? '', () => { if (command) void suggestRef.current() }, !!command && !!connected)
   if (!connected) return <></>
 
   const suggest = async (): Promise<void> => {

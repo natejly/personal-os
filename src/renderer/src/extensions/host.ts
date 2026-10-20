@@ -96,7 +96,7 @@ export type SlotName = keyof SlotItems
 export type SlotItem<K extends SlotName> = SlotItems[K] & { id: string; order: number; when?: (s: State) => boolean }
 export type SlotEntry<K extends SlotName> = SlotItem<K> & { extension: string }
 
-export interface PaletteCommandDef { id: string; label: string; hint?: string; run: () => void }
+export interface PaletteCommandDef { id: string; label: string; hint?: string; /** Listed only while this holds; always when omitted. */ when?: (s: State) => boolean; run: () => void }
 export interface KeybindingDef { id: string; /** What the shortcut overlay calls it; the id when omitted. */ label?: string; keys: string; when?: (s: State) => boolean; run: () => void }
 /** An item of the app menu, at the end of the top-level menu `group`. Its keys, if any, are a `keybinding` of their own. */
 export interface MenuItemDef { id: string; label: string; group: MenuGroup; run: () => void }

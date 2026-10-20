@@ -17,7 +17,7 @@ import { lines, usePageContext } from '../../lib/pageContext'
 import { calendarViewKey, readView, writeView } from '../../lib/viewCache'
 import { rangeLabel } from '../../lib/dates'
 import AppSwitcher from '../../components/AppSwitcher'
-import { useViewCommand } from '../../lib/viewCommands'
+import { takeViewCommand, useViewCommand } from '../../lib/viewCommands'
 import SyncStatus from '../../components/SyncStatus'
 import PlannerPanel from '../../components/PlannerPanel'
 import SidebarToggle from '../../components/SidebarToggle'
@@ -132,19 +132,22 @@ export default function CalendarView(): JSX.Element {
       if (seq.current === mine) setLoading(false)
     }
   }
-  useViewCommand('calendar:refresh', () => { void load(true) })
   useEffect(() => {
     const mine = ++seq.current
     if (!google?.connected || query == null) return
     if (!query) return
     const key = calendarViewKey(rangeStart.toISOString(), rangeDays, query)
     let alive = true
-    api.google.calendarRange(rangeStart.toISOString(), rangeDays, query)
+    // A palette refresh that arrived before this mounted is folded into this load as a forced one.
+    const refresh = takeViewCommand('calendar:refresh')
+    if (refresh) setLoading(true)
+    api.google.calendarRange(rangeStart.toISOString(), rangeDays, query, refresh)
       .then((list) => { writeView(key, list); if (alive && seq.current === mine) { setSyncedAt(Date.now()); setEvents(list); setError(null) } })
       .catch((e) => { if (alive && seq.current === mine) setError((e as Error).message) })
       .finally(() => { if (alive && seq.current === mine) setLoading(false) })
     return () => { alive = false }
   }, [week, mode, google?.connected, query])
+  useViewCommand('calendar:refresh', () => { void load(true) }, !!google?.connected && !!query)
   useEffect(() => { void refreshTodos('all', false) }, [refreshTodos])
   useEffect(() => {
     if (google?.connected) void primeCalendarMeta().then(() => setMetaTick((t) => t + 1))

@@ -11,7 +11,7 @@ import { oneLine } from '../../lib/emailAsk'
 import { fenced, lines, usePageContext } from '../../lib/pageContext'
 import { readView, writeView } from '../../lib/viewCache'
 import AppSwitcher from '../../components/AppSwitcher'
-import { useViewCommand } from '../../lib/viewCommands'
+import { takeViewCommand, useViewCommand } from '../../lib/viewCommands'
 import SyncStatus from '../../components/SyncStatus'
 import { MailWatchChips, MailWatchList, useMailWatch } from './MailWatchPanel'
 import { rowButton } from '../../lib/rowButton'
@@ -343,8 +343,9 @@ export default function MailView(): JSX.Element {
       if (seq.current === mine) setLoading(false)
     }
   }
-  useViewCommand('mail:refresh', () => { void load(true) })
-  useEffect(() => { void load() }, [query, google?.connected])
+  // A palette refresh that arrived before this mounted is folded into the mount load, so its forced result is not superseded.
+  useEffect(() => { void load(google?.connected ? takeViewCommand('mail:refresh') : false) }, [query, google?.connected])
+  useViewCommand('mail:refresh', () => { void load(true) }, !!google?.connected)
   useEffect(() => {
     if (!google?.connected) return
     api.google.gmailLabels().then(setLabels).catch(() => setLabels([]))

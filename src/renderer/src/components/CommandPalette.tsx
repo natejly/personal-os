@@ -39,7 +39,7 @@ export default function CommandPalette(): JSX.Element {
   const s = useStore.getState()
 
   const entries: Entry[] = [
-    ...paletteCommands.filter((c) => ownerOn(settings, c.extension))
+    ...paletteCommands.filter((c) => ownerOn(settings, c.extension) && (!c.when || c.when(s)))
       .map((c) => ({ key: `command:${c.id}`, label: c.label, hint: c.hint ?? 'Command', run: c.run })),
     ...recent(conversations).map((c) => ({ key: `chat:${c.id}`, label: plainTitle(c.title) || 'Untitled chat', hint: 'Chat', run: () => void s.selectChat(c.id) })),
     ...[...VIEWS, ...navRows].filter((v) => !viewHidden(settings, v.view)).map((v) => ({ key: `view:${v.view}`, label: v.label, hint: 'Go to', run: () => s.setView(v.view) })),

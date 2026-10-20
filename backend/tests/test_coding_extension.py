@@ -38,6 +38,8 @@ PACKAGE = Path(__file__).resolve().parents[1] / "personal_os"
 GOLDEN = Path(__file__).parent / "golden" / "tools.txt"
 NEW_TOOLS = ["terminal_open", "terminal_send", "terminal_read", "terminal_wait_for", "terminal_close", "coding_recipe_list", "coding_recipe_show",
              "coding_recipe_save", "coding_recipe_run", "coding_recipe_status", "coding_run_structured"]
+CLAUDE_CODE_TOOLS = ["claude_code_run", "claude_code_fleet", "claude_code_status", "claude_code_send", "claude_code_stop", "claude_code_result",
+                     "claude_code_wait", "claude_code_permission"]  # the default-off claude-code extension loads right after coding
 SESSION_TOOLS = ["coding_session_start", "coding_session_list", "coding_session_status", "coding_session_wait", "coding_session_summary",
                  "coding_session_send", "coding_session_stop", "coding_session_diff"]
 
@@ -56,14 +58,14 @@ def test_the_tool_list_is_byte_for_byte_what_the_parent_offered_with_the_new_too
     names = [n for n, _ in actual]
     assert names.index("opencode_run") == names.index("shell_kill") + 1  # mid-list, where the shell tools end
     assert names[len(golden) - len(SESSION_TOOLS):len(golden)] == SESSION_TOOLS  # the eight coding_session_* tools last
-    assert names[len(golden):] == NEW_TOOLS  # what this step adds comes after, in the manifest's order
+    assert names[len(golden):] == [*NEW_TOOLS, *CLAUDE_CODE_TOOLS]  # what this step adds comes after, in the manifest's order
     assert all(toolbox.specs[n].group == "shell" for n in [*SESSION_TOOLS, "opencode_run", *NEW_TOOLS])
 
 
 def test_the_extension_owns_its_tools_routes_tables_and_service():
     from personal_os.app import host, toolbox
     scope = host.extensions["coding"]
-    assert scope.manifest.enabled is True and scope.manifest.provides_services == ("coding",)
+    assert scope.manifest.enabled is False and scope.manifest.provides_services == ("coding",)
     declared = [t["name"] for t in scope.manifest.contributes["tools"]]
     assert set(declared) == {"opencode_run", *SESSION_TOOLS, *NEW_TOOLS} and all(toolbox.tool_owner[n] == "coding" for n in declared)
     assert set(scope.manifest.data["tables"]) == {"coding_sessions", "coding_session_events", "coding_recipes", "coding_recipe_versions",
@@ -472,3 +474,10 @@ def test_the_directive_is_part_of_the_prefix_hash_by_its_version(repo_rig):
     older = Directives()
     older.register("coding", lambda cfg: "same text", 1, lambda: True)
     assert older.text({}) == newer.text({}) and prefix_hash("p", older.versions({})) != prefix_hash("p", newer.versions({}))
+
+
+def test_the_claude_code_tools_are_not_offered_while_the_extension_is_off():
+    from personal_os.app import toolbox
+    assert all(toolbox.tool_owner[n] == "claude-code" for n in CLAUDE_CODE_TOOLS)
+    assert not any(toolbox.available(n, True, ["claude-code"]) for n in CLAUDE_CODE_TOOLS)
+    assert toolbox.available("claude_code_run", True, [])

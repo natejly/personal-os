@@ -330,7 +330,7 @@ export default function Sidebar(): JSX.Element {
       </div>
       {projectsOpen && (
         <div className="project-list nested">
-          {projects.length === 0 && <p className="empty-hint">No projects yet.</p>}
+          {projects.length === 0 && <p className="empty-hint">No projects</p>}
           {projects.map((p) => {
             const rows = chatsByProject[p.id] ?? []
             const open = projectGroupOpen(p.id, collapsed)
@@ -432,7 +432,7 @@ export default function Sidebar(): JSX.Element {
         {filtering && (
           <section>
             <h4>Needs you</h4>
-            {wanting.length === 0 && <p className="empty-hint">Nothing needs you.</p>}
+            {wanting.length === 0 && <p className="empty-hint">None</p>}
             {wanting.map((x) => ('conv' in x
               ? <ChatRow key={x.conv.id} conv={x.conv} active={x.conv.id === focusedId && view === 'chat'} lead={projectDot(x.conv)} />
               : <JobRow key={`j${x.job.id}`} job={x.job} onOpen={() => openJobs(x.job.id)} />))}
@@ -444,7 +444,7 @@ export default function Sidebar(): JSX.Element {
             {pinned.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} trail={<Snippet hit={hitById.get(c.id)} />} />)}
           </section>
         )}
-        {!filtering && groups.length === 0 && pinned.length === 0 && inMessages.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No personal chats yet.'}</p>}
+        {!filtering && groups.length === 0 && pinned.length === 0 && inMessages.length === 0 && <p className="empty-hint">{query ? 'No matches' : 'No chats'}</p>}
         {!filtering && groups.map((g) => {
           // A search always shows its hits, folded or not.
           const folded = foldedDates.has(g.label) && !query.trim()
@@ -474,7 +474,7 @@ export default function Sidebar(): JSX.Element {
         )}
         <section>
           <h4 className="archived-head"><button className="section-toggle" aria-expanded={archivedOpen} onClick={() => setArchivedOpen((o) => !o)}><ChevronRight size={11} className={archivedOpen ? 'rot90' : ''} /> Archived</button></h4>
-          {archivedShown && shownArchived.length === 0 && <p className="empty-hint">{archived.length ? 'No archived chats match.' : 'Nothing archived.'}</p>}
+          {archivedShown && shownArchived.length === 0 && <p className="empty-hint">{archived.length ? 'No matches' : 'None'}</p>}
           {archivedShown && shownArchived.map((c) => (
             <div key={c.id} className="convo-item archived" {...rowButton(() => openConversation(c.id))}>
               <span className="convo-title">{c.title}</span>

@@ -20,8 +20,8 @@ export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { sho
   const zoom = draft.uiZoom ?? DEFAULT_ZOOM
   return (
     <section>
-      <h3>General</h3>
       <Sec id="look">
+      <h4>Appearance</h4>
       <div className="preset-row" role="radiogroup" aria-label="Appearance presets">
         {PRESETS.map((p) => {
           const on = activePreset(draft) === p.id
@@ -93,7 +93,7 @@ export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { sho
         </div>
       </div>
       <div className="setting-row">
-        <span className="toggle-text"><b>Background</b><small>Black is for dark theme only.</small></span>
+        <span className="toggle-text"><b>Background</b></span>
         <div className="seg" role="radiogroup" aria-label="Background">
           {SURFACE_TONES.map((t) => (
             <button key={t.id} type="button" role="radio" aria-checked={surfaceToneId(draft.surfaceTone) === t.id} className={surfaceToneId(draft.surfaceTone) === t.id ? 'on' : ''} onClick={() => patch({ surfaceTone: t.id })}>{t.label}</button>
@@ -101,7 +101,7 @@ export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { sho
         </div>
       </div>
       <div className="setting-row">
-        <span className="toggle-text"><b>Mascot</b><small>The face on replies, agents and chats. Off keeps a small status dot where a face shows progress.</small></span>
+        <span className="toggle-text"><b>Mascot</b></span>
         <div className="seg" role="radiogroup" aria-label="Mascot">
           {MASCOTS.map((m) => (
             <button key={m.id} type="button" role="radio" aria-checked={mascotId(draft.mascot) === m.id} className={mascotId(draft.mascot) === m.id ? 'on' : ''} onClick={() => patch({ mascot: m.id })}>{m.label}</button>
@@ -125,7 +125,7 @@ export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { sho
         </div>
       </div>
       <div className="setting-row">
-        <span className="toggle-text"><b>Zoom</b><small>Scales the whole interface, in every window. ⌘= and ⌘− step it, ⌥⌘0 resets.</small></span>
+        <span className="toggle-text"><b>Zoom</b></span>
         <div className="seg" role="group" aria-label="Zoom">
           <button type="button" aria-label="Zoom out" title={tip('Zoom out', 'zoom-out')} onClick={() => patch({ uiZoom: stepZoom(zoom, -1) })}>−</button>
           <button type="button" disabled>{zoom}%</button>
@@ -134,31 +134,31 @@ export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { sho
         </div>
       </div>
       <Switch title="Daily recap on new chats" checked={homeModuleOn(draft, 'recap')} onChange={(on) => patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), recap: on } })} />
-      <Switch title="Start chat windows as blobs" help="A chat added to a canvas starts as just its creature, no frame. Click it to open the chat." checked={!!draft.compactChats} onChange={(compactChats) => patch({ compactChats })} />
+      <Switch title="Start chat windows as blobs" checked={!!draft.compactChats} onChange={(compactChats) => patch({ compactChats })} />
       <div className="setting-row">
-        <span className="toggle-text"><b>Default file font</b><small>How files read and edit unless a file has its own choice. Auto keeps the app's own size and line width.</small></span>
+        <span className="toggle-text"><b>Default file font</b></span>
         <TypographyControls value={draft.docTypography ?? {}} onChange={(t) => patch({ docTypography: { ...(draft.docTypography ?? {}), ...t } })}
           onReset={draft.docTypography && Object.keys(draft.docTypography).length ? () => patch({ docTypography: {} }) : undefined} />
       </div></Sec>
       <Sec id="notifications">
         <h4>Notifications</h4>
-        <Switch title="Notify me when a chat finishes" help="An unread dot on the chat, and a system notification when a reply or autonomous run finishes, fails or needs your approval while you are not looking at that chat." checked={draft.chatNotify !== false} onChange={(chatNotify) => patch({ chatNotify })} />
-        <Switch title="Notify me about scheduled jobs" help="When a job fails, is paused or leaves something for you while the app is in the background." checked={draft.notifyJobs !== false} onChange={(notifyJobs) => patch({ notifyJobs })} />
+        <Switch title="Notify me when a chat finishes" checked={draft.chatNotify !== false} onChange={(chatNotify) => patch({ chatNotify })} />
+        <Switch title="Notify me about scheduled jobs" checked={draft.notifyJobs !== false} onChange={(notifyJobs) => patch({ notifyJobs })} />
       </Sec>
       <Sec id="shortcuts">
         <h4>Shortcuts <button type="button" className="link-btn" title={tip('Keyboard shortcuts', 'help')} onClick={() => useStore.getState().openHelp('shortcuts')}>Show all shortcuts</button></h4>
         {SHORTCUT_KEYS.map((k) => { const s = shortcuts[k]; return s && !s.ok && <p key={k} className="test-msg fail">{s.message ?? `${s.accelerator} could not be registered.`}</p> })}
-        <label><span className="toggle-text"><b>Dictation key</b><small>In the chat box: hold to dictate, tap to keep it on.</small></span>
+        <label><span className="toggle-text"><b>Dictation key</b></span>
           <input value={draft.dictationChord ?? ''} onChange={(e) => patch({ dictationChord: e.target.value })} placeholder="Control+Alt+D" spellCheck={false} />
         </label>
         <VoiceInputSettings />
-        <label><span className="toggle-text"><b>Bring widgets to front</b><small>Works anywhere on your Mac.</small></span>
+        <label><span className="toggle-text"><b>Bring widgets to front</b></span>
           <input value={draft.gatherShortcut} onChange={(e) => patch({ gatherShortcut: e.target.value })} placeholder={shortcuts.gatherShortcut?.accelerator || 'Control+Alt+Command+Space'} spellCheck={false} />
         </label>
-        <label><span className="toggle-text"><b>Quick note shortcut</b><small>Works anywhere on your Mac.</small></span>
+        <label><span className="toggle-text"><b>Quick note shortcut</b></span>
           <input value={draft.quickCaptureShortcut ?? ''} onChange={(e) => patch({ quickCaptureShortcut: e.target.value })} placeholder="CommandOrControl+Shift+Space" spellCheck={false} />
         </label>
-        <label><span className="toggle-text"><b>Quick ask shortcut</b><small>Works anywhere on your Mac.</small></span>
+        <label><span className="toggle-text"><b>Quick ask shortcut</b></span>
           <input value={draft.quickAskShortcut ?? ''} onChange={(e) => patch({ quickAskShortcut: e.target.value })} placeholder="Alt+Space" spellCheck={false} />
         </label>
       </Sec>

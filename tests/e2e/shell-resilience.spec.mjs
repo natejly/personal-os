@@ -147,7 +147,7 @@ for (const [name, go] of VIEWS) {
       await go(g.page, g)
       await g.page.waitForTimeout(1000)
       // with the page agent open too
-      await menu(g, 'Quick chat (in a chat: Context panel)').catch(() => {})
+      await menu(g, 'Context panel / Quick chat').catch(() => {})
       await g.page.waitForTimeout(19_000)
       expect(g.consoleErrors).toEqual([])
     })

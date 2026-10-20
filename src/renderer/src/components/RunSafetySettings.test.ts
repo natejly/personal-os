@@ -19,10 +19,10 @@ test('saved values show: hosts listed, snapshots off', () => {
   assert.doesNotMatch(html, /type="checkbox"[^>]*checked/)
 })
 
-test('without snapshot support the switch is disabled and says why', () => {
+test('without snapshot support the switch is disabled and names the requirement', () => {
   const html = renderToStaticMarkup(createElement(SnapshotToggle, { draft: { snapshotsAvailable: false } as Settings, patch: () => {} }))
   assert.match(html, /<input type="checkbox" disabled=""/)
-  assert.ok(html.includes('Unavailable on this Mac'))
+  assert.ok(html.includes('Needs git installed'))
 })
 
 test('the retired run-safety controls are gone', () => {
@@ -31,10 +31,9 @@ test('the retired run-safety controls are gone', () => {
   assert.ok(!html.includes('Review gate'))
 })
 
-test('trust external content is off by default and says it reduces protection', () => {
+test('trust external content is off by default', () => {
   const off = renderToStaticMarkup(createElement(TrustExternalToggle, { draft: {} as Settings, patch: () => {} }))
   assert.ok(off.includes('Trust content from outside Grain'))
-  assert.ok(off.includes('Off by default'))
   assert.doesNotMatch(off, /type="checkbox"[^>]*checked/)
   const on = renderToStaticMarkup(createElement(TrustExternalToggle, { draft: { trustExternalContent: true } as Settings, patch: () => {} }))
   assert.match(on, /type="checkbox"[^>]*checked/)

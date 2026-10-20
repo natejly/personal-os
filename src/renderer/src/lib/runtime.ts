@@ -2,7 +2,7 @@ import { ApiError } from './apiError'
 import type { RuntimeProvider, RuntimeResolution, RuntimeSelection } from '@shared/types'
 
 const NOUN: Record<string, string> = {
-  'model.client': 'Model client', 'model.router': 'Model router', 'tools.source': 'Tool source', 'sandbox.backend': 'Sandbox backend', 'agent.loop': 'Agent loop'
+  'model.client': 'Model client', 'model.router': 'Model router', 'tools.source': 'Tool source', 'sandbox.backend': 'Sandbox backend', 'agent.loop': 'Agent loop', 'memory.system': 'Memory system'
 }
 export const slotNoun = (slot: string): string => NOUN[slot] ?? slot
 

@@ -9,7 +9,7 @@ const CUSTOM: ProviderPreset = { id: 'custom', name: 'Custom (OpenAI-compatible)
 
 const host = (url: string): string => { try { return new URL(url).host } catch { return url } }
 
-/** The status line of one provider: a chip, and the provider's own message when it has one. */
+/** One provider's status chip. */
 function chip(p: ProviderEntry): { cls: string; text: string } {
   if (p.status === 'blocked') return { cls: 'bad', text: 'Key rejected' }
   if (p.status === 'nokey') return { cls: 'warn', text: 'No key' }
@@ -147,11 +147,8 @@ function AddForm({ presets, entries, onAdded, onCancel }: { presets: ProviderPre
   )
 }
 
-/**
- * The providers Grain can use: add one, replace its key, change its address, remove it. Every key is checked with
- * the provider before it is saved, and these actions save at once, outside the Settings draft and its Save button.
- */
 export default function ProvidersSettings({ onChanged }: { onChanged: () => Promise<void> }): JSX.Element {
+  // Add, re-key, re-address and remove providers. Saves at once, outside the Settings draft.
   const [presets, setPresets] = useState<ProviderPreset[] | null>(null)
   const [entries, setEntries] = useState<ProviderEntry[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -175,15 +172,14 @@ export default function ProvidersSettings({ onChanged }: { onChanged: () => Prom
   return (
     <>
       <h4>Providers</h4>
-      <p className="muted small">Add a provider and its key. Grain checks the key before saving it, and every model from a provider with a key can be picked below. These changes apply at once, not with Save.</p>
       {loadError && <p className="prov-err" role="alert">Could not load providers: {loadError}</p>}
       {entries.length > 0 && (
         <div className="setting-list">
           {entries.map((p) => <Row key={p.id} p={p} onChanged={changed} onRemoved={async (s) => { setStale(s); await changed() }} />)}
         </div>
       )}
-      {entries.length === 0 && presets && !adding && <p className="muted small">No provider yet. Add one to start chatting.</p>}
-      {stale.length > 0 && <p className="prov-err" role="status">Still set to the removed provider: {stale.join(', ')}. Pick another model below.</p>}
+      {entries.length === 0 && presets && !adding && <p className="muted small">No providers</p>}
+      {stale.length > 0 && <p className="prov-err" role="status">Still set to the removed provider: {stale.join(', ')}.</p>}
       {adding && presets ? (
         <AddForm presets={presets} entries={entries} onCancel={() => setAdding(false)} onAdded={async () => { setAdding(false); setStale([]); await changed() }} />
       ) : (

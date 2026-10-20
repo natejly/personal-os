@@ -66,11 +66,11 @@ function DiffPane({ diff }: { diff: DeskDiff }): JSX.Element {
     <div className="desk-diff">
       <p className="muted small">
         <span className="plus">+{diff.added}</span> <span className="minus">−{diff.removed}</span>
-        {!diff.has_baseline && ' · the desk created this file, so it diffs against nothing'}
+        {!diff.has_baseline && ' · new file'}
         {diff.truncated && ' · truncated'}
       </p>
       {rows.length === 0
-        ? <p className="muted small">No change against the baseline.</p>
+        ? <p className="muted small">No changes</p>
         : rows.map((r, i) => (
           r.hunk
             ? <div key={i} className="desk-diff-hunk">{r.hunk}</div>
@@ -248,7 +248,7 @@ export default function DeskFiles({ desk }: { desk: FullDesk }): JSX.Element {
           <button className="icon-btn ghost xs" title="Add input files (copied into the read-only inputs/ folder)" onClick={() => void addInputs()}><FilePlus size={12} /></button>
           <button className="icon-btn ghost xs" title="Reload" onClick={() => void loadDeskFiles(desk.id)}><RefreshCw size={12} /></button>
         </div>
-        {files.length === 0 && <p className="empty-hint">Nothing in the workspace yet.</p>}
+        {files.length === 0 && <p className="empty-hint">No files</p>}
         {groups.map(([g, items]) => (
           <section key={g || '_root'}>
             {g && (
@@ -281,7 +281,7 @@ export default function DeskFiles({ desk }: { desk: FullDesk }): JSX.Element {
 
       <div className="desk-preview">
         {!path ? (
-          <p className="empty-hint">Pick a file to read it.</p>
+          <p className="empty-hint">No file selected</p>
         ) : (
           <>
             <div className="desk-preview-head">

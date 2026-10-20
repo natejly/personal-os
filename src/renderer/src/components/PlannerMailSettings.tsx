@@ -53,7 +53,6 @@ export default function PlannerMailSettings(): JSX.Element | null {
         </div>
         <p className="muted small">Calendars that count as busy</p>
         {Array.isArray(cals) && cals.length > 0 ? <>
-          <p className="muted small">{plan.busyCalendarIds.length ? 'Only the calendars ticked below block time.' : 'Every calendar you have checked on in Google blocks time. Tick one to choose exactly which.'}</p>
           <div className="input-row" role="group" aria-label="Calendars that count as busy">
             {cals.map((c) => {
               const on = plan.busyCalendarIds.includes(c.id)
@@ -65,11 +64,11 @@ export default function PlannerMailSettings(): JSX.Element | null {
               )
             })}
           </div>
-        </> : <p className="muted small">{cals === null ? 'Loading calendars...' : 'Calendars could not be loaded. Every calendar you have checked on in Google blocks time.'}</p>}
+        </> : <p className="muted small">{cals === null ? 'Loading calendars...' : 'Calendars could not be loaded'}</p>}
       </>}
       {mail && <>
         <h4>Reply tracker</h4>
-        <Switch title="Track replies" help="Read recent Gmail threads to find mail you owe a reply and mail waiting on someone else." checked={mail.enabled} onChange={(v) => saveMail({ enabled: v })} />
+        <Switch title="Track replies" checked={mail.enabled} onChange={(v) => saveMail({ enabled: v })} />
         <label className="inline"><span>Needs a reply after</span>
           <input type="number" min={1} max={720} defaultValue={mail.needsReplyAfterHours} key={`h${mail.needsReplyAfterHours}`} onBlur={(e) => Number(e.target.value) !== mail.needsReplyAfterHours && saveMail({ needsReplyAfterHours: Number(e.target.value) })} />
           <span>hours</span>

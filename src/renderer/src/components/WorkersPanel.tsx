@@ -35,7 +35,7 @@ function MainAgentRow({ conversationId }: { conversationId: string }): JSX.Eleme
       </div>
       {on && (
         <div className="worker-chat">
-          {spans.length ? <div className="worker-steps"><TraceView spans={spans} live={!!streamingId && msg?.id === streamingId} model={msg?.model ?? null} reasoning={msg?.reasoning} /></div> : <p className="muted small">No steps yet.</p>}
+          {spans.length ? <div className="worker-steps"><TraceView spans={spans} live={!!streamingId && msg?.id === streamingId} model={msg?.model ?? null} reasoning={msg?.reasoning} /></div> : <p className="muted small">No steps</p>}
         </div>
       )}
     </li>

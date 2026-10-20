@@ -456,9 +456,9 @@ function ProposalCard({ event, pending, decide, rules }: ToolCardProps): JSX.Ele
           </ul>
         )
       })()}
-      {finished && parsed.truncated && <p className="ccard-muted">The saved result was cut short, so some changes show no outcome. Open the calendar to check them.</p>}
+      {finished && parsed.truncated && <p className="ccard-muted">Result cut short; some outcomes missing.</p>}
       {state === 'failed' && !outcomes.length && event.error && !notConnected(event.error) && <div className="ccard-warn bad"><AlertCircle size={12} /> {event.error}</div>}
-      {state === 'denied' && <p className="ccard-muted">You declined this. Nothing was changed.</p>}
+      {state === 'denied' && <p className="ccard-muted">Declined</p>}
 
       {editing && (
         <footer className="ccard-foot">
@@ -484,7 +484,6 @@ function AwaitingRead({ decide, rules }: Pick<ToolCardProps, 'decide' | 'rules'>
   const [busy, setBusy] = useState(false)
   return (
     <div className="ccard-foot">
-      <p className="ccard-muted">This tool is set to ask first. It only reads your calendar.</p>
       <div className="ccard-actions">
         <button className="primary-btn sm" disabled={busy} onClick={() => { setBusy(true); void decide(true).finally(() => setBusy(false)) }}>Approve</button>
         <button className="ghost-btn sm" disabled={busy} onClick={() => { setBusy(true); void decide(false).finally(() => setBusy(false)) }}>Deny</button>

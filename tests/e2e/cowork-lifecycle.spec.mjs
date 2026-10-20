@@ -160,7 +160,7 @@ test('workspace panel: Files lists the workspace, Changes lists the turns, Revie
   await waitStatus(grain, desk.id, 'review')
   await openChat(page, 'Tabby')
   await openPanel(page)
-  await expect(panel(page).getByTestId('desk-tab-review')).toHaveAttribute('aria-expanded', 'true') // a desk in review expands Review once it loads
+  await expect(panel(page).getByTestId('desk-tab-review')).toHaveAttribute('aria-selected', 'true') // a desk in review brings Review forward once it loads
   await openPanel(page, 'Files')
   await expect(panel(page).getByText('report.md').first()).toBeVisible()
   // the chat's own file list sits above the workspace tree; the tree is the one that previews

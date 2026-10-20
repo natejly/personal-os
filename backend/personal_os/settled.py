@@ -9,9 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 from typing import Any, Callable
 
-from . import learn, titles
+from . import titles
 from .extensions.hooks import HookBus
-from .learn import LearnJob
+from .runtime.memory_api import MemoryScope
 from .style import learn_style_from_exchange, looks_like_prose
 from .tools import scrub_strings
 from .trace import Tracer
@@ -54,7 +54,7 @@ def view_of(s: Settled, public_cfg: Callable[[], dict[str, Any]]) -> SettledView
     return SettledView(cfg=public_cfg(), **shared)
 
 
-def register(bus: HookBus, *, style: Any, relearn: Callable[[str | None, str], None], learner: Any, skills: Any,
+def register(bus: HookBus, *, style: Any, relearn: Callable[[str | None, str], None], memory: Callable[[str, str | None], Any],
              followup_jobs: Any, title_jobs: Any, set_trace: Callable[[str, list[dict[str, Any]]], None],
              get_conversation: Callable[..., dict[str, Any] | None], said: Callable[[dict[str, Any]], bool]) -> None:
     async def learn_style(s: Settled) -> None:
@@ -91,15 +91,8 @@ def register(bus: HookBus, *, style: Any, relearn: Callable[[str | None, str], N
                 or not s.cfg.get("autoLearn", True) or not s.conv["settings"].get("autoLearn", True)
                 or not s.conv["settings"].get("useMemory", True)):  # memory off: nothing written for other chats to read
             return
-        user_only = s.tainted
-        learner.submit(LearnJob(
-            conversation_id=s.conversation_id, message_id=s.message_id, project_id=s.conv["project_id"],
-            user_text="\n\n".join(s.run_user_texts) if user_only else s.user_text,
-            assistant_text="" if user_only else s.reply, model=s.model, settings=s.cfg,
-            spans=list(s.tracer.spans), tool_events=[] if user_only else list(s.tool_events),
-            skills_in_use=[] if user_only else learn.skills_seen(s.used["skills"], s.tool_events, skills, s.conv["project_id"]),
-            user_only=user_only, user_message_id=s.user_message_id, learn_graph=bool(s.conv["settings"].get("useGraph", True)),
-        ))
+        # What is learned, and where it is kept, is the chat's memory system's: the built-in one queues an extraction job.
+        await memory(s.conversation_id, s.conv["project_id"]).learn(s, MemoryScope(s.conv["project_id"], s.conversation_id, dict(s.conv["settings"])))
 
     async def follow_ups(s: Settled) -> None:
         # Chips after a finished reply only: not an error, a Stop, or an unattended run.

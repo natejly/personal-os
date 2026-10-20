@@ -865,12 +865,12 @@ class BuiltinExtensionTests(unittest.TestCase):
         self.assertFalse(scope.enabled())
         self.assertTrue({"todos", "tasks_sync"} <= set(ctx.services))
 
-    def test_load_builtin_spaces_provides_the_store_and_its_tools_and_stays_on_when_hidden(self) -> None:
+    def test_load_builtin_spaces_provides_the_store_and_its_tools_and_follows_hidden_views(self) -> None:
         ctx = builtin_ctx({})
         ctx.hidden_views = lambda: ("spaces",)
         scope = ExtensionHost().load_builtin("spaces", ctx)
         self.assertEqual(list(scope.tools), ["space_list", "space_add_widget", "space_arrange"])
-        self.assertTrue(scope.enabled())
+        self.assertFalse(scope.enabled())
         self.assertIs(ctx.services["canvases"]().db, ctx.db)
         paths = {route.path for r in scope.routers for route in r.routes}  # type: ignore[attr-defined]
         self.assertTrue({"/canvases", "/canvases/{id}/windows", "/windows/{wid}"} <= paths)

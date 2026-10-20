@@ -38,12 +38,15 @@ import { pauseQueue, sendNext, updateQueue, type DoneInfo } from './lib/followQu
 import { DEFAULT_ZOOM, stepZoom } from './lib/zoom'
 import { inputChip } from './lib/deskFiles'
 import { cmdIAction } from './lib/cmdI'
+
+/** Set by the canvas store: toggles the focused chat window's side panel and returns true, or false when no chat window has focus. */
+export const canvasPanelHook: { toggleFocused: () => boolean } = { toggleFocused: () => false }
 import { isInternal, upsertWorker, withoutInternal } from './lib/workers'
 import { appendDelta, settleHeld } from './lib/noReply'
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-type BuiltinView = 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'library' | 'jobs' | 'project' | 'canvas'
-/** `health` is the id of a built-in extension's view: it predates `ext:` ids, and `hiddenViews` already stores it. */
+type BuiltinView = 'chat' | 'todos' | 'health' | 'claude-code' | 'calendar' | 'mail' | 'docs' | 'library' | 'jobs' | 'project' | 'canvas'
+/** `health` and `claude-code` are ids of built-in extensions' views: it predates `ext:` ids, and `hiddenViews` already stores it. */
 export type View = BuiltinView | `ext:${string}`
 /** Which tab a project page shows. */
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
@@ -1026,10 +1029,10 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'chat:next') s.stepChat(1)
       else if (action === 'chat:prev') s.stepChat(-1)
       else if (action === 'chat:search') s.searchChats()
-      else if (action === 'toggle-context') s.toggleContext()
+      else if (action === 'toggle-context') { if (!(s.view === 'canvas' && canvasPanelHook.toggleFocused())) s.toggleContext() }
       else if (action === 'toggle-desk') s.toggleDeskPanel()
       else if (action === 'panel-context') s.togglePanelContext()
-      else if (action === 'page-agent') { if (cmdIAction(s.view) === 'panel-context') s.togglePanelContext(); else s.togglePageAgent() }
+      else if (action === 'page-agent') { if (s.view === 'canvas' && canvasPanelHook.toggleFocused()) { /* the focused chat window's own panel */ } else if (cmdIAction(s.view) === 'panel-context') s.togglePanelContext(); else s.togglePageAgent() }
       else if (action === 'view:graph') s.openMemory('graph')
       else if (action === 'view:memory') s.openMemory()
       else if (action === 'view:documents') s.openFiles('uploads')
@@ -1875,7 +1878,7 @@ export const useStore = create<State>((set, get) => {
     pageContext: null,
     traceMessageId: null,
     settingsOpen: false,
-    settingsTab: 'appearance',
+    settingsTab: 'general',
     settingsGroup: null,
     projectModal: null,
     uploadPreview: null,
@@ -2082,7 +2085,7 @@ export const useStore = create<State>((set, get) => {
     setContextTab: (contextTab) => set({ contextTab }),
     openTrace: (traceMessageId) => set((s) => ({ traceMessageId, contextOpen: false, deskPanel: true, deskTabRequest: { tab: 'traces', n: (s.deskTabRequest?.n ?? 0) + 1, at: Date.now() } })),
     // A plain open (⌘, or the sidebar button) starts on Provider, as it always has.
-    setSettingsOpen: (settingsOpen) => set(settingsOpen ? { settingsOpen, settingsTab: 'appearance', settingsGroup: null } : { settingsOpen }),
+    setSettingsOpen: (settingsOpen) => set(settingsOpen ? { settingsOpen, settingsTab: 'general', settingsGroup: null } : { settingsOpen }),
     openHelp: (section) => set(section ? { helpOpen: true, helpSection: section } : { helpOpen: false }),
     openSettings: (id, group) => { const r = resolveTab(id); set({ settingsOpen: true, settingsTab: r.tab, settingsGroup: group ?? r.group ?? null }) },
     setProjectModal: (projectModal) => set({ projectModal }),

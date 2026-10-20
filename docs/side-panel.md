@@ -1,11 +1,45 @@
 # Side panel
 
+Grain has one right-hand surface, built on a shared shell (`src/renderer/src/components/SidePanel.tsx`),
+and this page covers both what lives in it and the separate show panel beside the transcript.
+
+## The workspace panel
+
+The workspace panel is the chat's side surface: a tab strip over one scrolling body.
+
+- **Tabs** come from the `sidepanel.tab` slot, in slot order: Context, Files, Changes, Review, Traces,
+  then tabs added by extensions, with Terminal last. A tab can hide itself (`shown`) and show a count.
+  A draft chat with no id has only Context. The strip is a `tablist` (arrow keys, Home and End move
+  between tabs); only the active tab's body is in the page.
+- **One scroll area.** The active tab fills the panel's height and the body scrolls; the running
+  checklist and the workers list lead the panel above the strip. The Files tab keeps its tree and
+  preview split inside the body.
+- **Width.** Resizable from its left edge, 300 to 720 pixels, default 380. The width is remembered per
+  window (the `--side-panel-w` variable, stored by the resize handle). Dragging it well under the
+  minimum closes it.
+- **Narrow windows.** When the chat is 900 pixels wide or less the panel floats over the transcript
+  instead of taking a column.
+- **Opening.** In a chat, Cmd+I toggles the panel on the Context tab (Control+Command+I does the
+  same, and the Workspace button in the title bar opens the same panel). Anywhere else Cmd+I opens
+  the Page agent. A request for Traces, Terminal, Files or Review opens the panel on that tab, and a
+  chat whose desk is in review opens on Review. While the panel stays open it remembers the tab you
+  chose. Escape closes it. A layout profile can keep it shut (the `sidepanel` region); asking for it then
+  shows a notice instead.
+- **Canvas chat windows** have the same panel: a Workspace panel button in the window's header opens it over that window's right edge, and Cmd+I (or Control+Command+I) toggles it for the focused chat window. Its tabs show that window's chat only.
+- **Page agent** (Cmd+I outside a chat) uses the same shell and the same width. Under its header a
+  "Sent" line shows the size of the page block (about one token per four characters)
+  with a disclosure that reveals the exact text; it is absent when the screen sends nothing.
+- **Extensions** add tabs by registering a `sidepanel.tab` slot item with a label and a component
+  (and optionally an overlay drawn over the chat, as Terminal does for its window).
+
+## The show panel
+
 A panel beside the chat for content the assistant wants you to look at while it talks about it:
 a full-page HTML mock-up, an SVG, a diagram, a chart, markdown, or a file on this Mac. It is per
 chat (a chat window in a canvas gets its own), resizable from its left edge, and closes with the ×
 or by dragging it shut.
 
-## How it opens
+## How the show panel opens
 
 - **The `show` tool** (`backend/personal_os/tools.py`, group `utility`, always offered). The model
   passes `kind` (`html`, `svg`, `mermaid`, `chart`, `interactive`, `markdown` or `file`) with

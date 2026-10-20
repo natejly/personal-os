@@ -128,7 +128,7 @@ test('compose, save draft, then send -> held in the undoable outbox; Undo cancel
   await expect(pending).toContainText('Held mail')
   expect((await grain.fake.state()).sent.length).toBe(0) // nothing went out yet
   await pending.getByRole('button', { name: 'Undo' }).click()
-  await expect(toast(page, 'Send cancelled')).toBeVisible()
+  await expect(toast(page, 'Cancelled')).toBeVisible()
   await expect(pending).toHaveCount(0)
   expect((await grain.fake.state()).sent.length).toBe(0)
   const out = await grain.api('/outbox/gmail')

@@ -67,14 +67,14 @@ test('context drawer lists the excerpts that were sent, and opens them', async (
   await send(page, 'Tell me about Marrowbone compost !!reply Compost every autumn [1].')
   await expect(page.locator('.msg.assistant').last()).toContainText('Compost every autumn', { timeout: 30_000 })
   await openContextPanel(page)
-  await openContextGroup(page, 'Files')
-  const drawer = page.locator('aside, .ctx-drawer, [class*=context]').filter({ hasText: /Uploads \(/ }).last()
-  await expect(drawer.getByText(/Uploads \(\d+ excerpt/)).toBeVisible()
-  await expect(drawer.getByRole('button', { name: /garden\.txt/ }).first()).toBeVisible()
-  await drawer.getByRole('button', { name: /garden\.txt/ }).first().click()
-  await expect(page.locator('.modal.wide h2')).toHaveText('garden.txt')
-  await page.getByRole('button', { name: 'Close excerpt' }).click()
-  clean(grain)
+  await openContextGroup(page, 'Retrieved sources')
+  const row = page.locator('.ctx-irow').filter({ hasText: 'Retrieved sources' })
+  const item = row.locator('.ctx-item').filter({ hasText: 'File excerpts' })
+  await expect(item).toBeVisible()
+  await item.getByRole('button', { name: 'View', exact: true }).click()
+  await expect(item.locator('.ctx-prompt')).toContainText('Marrowbone')
+  // the texts route may be absent: its 404 is the expected, handled path
+  expect(grain.consoleErrors.filter((e) => !/favicon|ResizeObserver|status of 404/.test(e))).toEqual([])
 })
 
 test('retrieval respects project scope: project docs only in that project, isolated hides personal docs', async ({ grain }) => {
@@ -120,7 +120,9 @@ test('Advanced retrieval settings persist across relaunch and clamp out-of-range
   await page.getByLabel('Search by').selectOption('bm25')
   await setToggle(page.getByRole('checkbox', { name: /Re-rank document search/ }), true)
   await page.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect.poll(async () => (await api('/settings')).retrievalMode).toBe('bm25')
+  // Save sends only the fields that changed, so wait on the switch's own key, and on the dialog closing (the PUT has returned).
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect.poll(async () => (await api('/settings')).retrievalRerank).toBe(true)
   expect(await api('/settings')).toMatchObject({ retrievalMode: 'bm25', retrievalRerank: true })
   // The per-document cap, similarity floor and candidate count have no controls any more; the API still holds their ranges.
   for (const body of [{ retrievalPerDocCap: 99 }, { retrievalCandidates: 1 }, { retrievalMinSimilarity: 7 }]) {

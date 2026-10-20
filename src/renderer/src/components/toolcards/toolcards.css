@@ -135,7 +135,7 @@
 .ship-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .ship-actions:empty { display: none; }
 
-/* Coding sessions (CodingSessionCard.tsx, CodingSessions.tsx): the status dot sits inline in a row. */
+/* Coding sessions (CodingSessionCard.tsx): the status dot sits inline in a row. */
 .coding-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .coding-list li { display: flex; align-items: center; gap: 8px; }
 .coding-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -159,6 +159,13 @@
   background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
 .setup-card .setup-icon { flex: none; display: inline-flex; color: var(--accent); }
 .setup-card .setup-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.setup-card .setup-text small { color: var(--text-muted); font-size: 11.5px; }
 .setup-card .primary-btn { flex: none; }
 .setup-card .setup-ok { flex: none; color: var(--accent); font-weight: 600; }
+
+.tc-trace { margin-top: 6px; font-size: 12px; }
+.tc-trace ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.tc-trace li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tc-trace-name { font-family: var(--mono, monospace); min-width: 0; overflow-wrap: anywhere; }
+.tc-trace-summary { margin-top: 6px; }
+.tc-trace-toggle { margin-top: 4px; padding: 0; border: 0; background: none; color: var(--text-muted); font-size: 11px; cursor: pointer; }
+.tc-trace-toggle:hover { color: var(--text); }

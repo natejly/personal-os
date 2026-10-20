@@ -41,9 +41,8 @@ export default function MessageEditor({ message, onClose }: { message: Message; 
         }}
       />
       <div className="msg-editor-row">
-        <span className="msg-editor-note">Replies after this message are hidden</span>
         <button type="button" className="ghost-btn" onClick={onClose}>Cancel</button>
-        <button type="button" className="primary-btn" disabled={busy || !text.trim()} onClick={() => void submit()}>Resend</button>
+        <button type="button" className="primary-btn" title="Replies after this message are hidden" disabled={busy || !text.trim()} onClick={() => void submit()}>Resend</button>
       </div>
     </div>
   )

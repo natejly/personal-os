@@ -64,7 +64,7 @@ function BrowserCard(props: ToolCardProps): JSX.Element {
           )}
           {watch && (
             <DeskBrowser session={props.browserSession} live={!!props.streaming}
-              emptyText="This browser is closed (it shuts after a few idle minutes)." />
+              emptyText="Browser closed" />
           )}
         </>
       )}

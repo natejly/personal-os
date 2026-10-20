@@ -20,7 +20,7 @@ test('Agent inbox renders proposals from scheduled runs and a bare Inbox with no
   }
   // Nothing yet: the card still renders.
   await open()
-  await expect(grain.page.locator('.agent-inbox')).toContainText('Nothing waiting')
+  await expect(grain.page.locator('.agent-inbox')).toContainText('Inbox empty')
   await grain.page.getByRole('button', { name: 'Close inbox' }).click()
 
   seedJobRuns(grain, 1)

@@ -24,7 +24,7 @@ test('rapid repeated memory actions: double Add, double Pin, double Forget leave
   const shown = await pane(page).locator('.mem-row.pinned').count()
   expect(!!pinned).toBe(shown === 1) // the UI and the backend agree whichever way the clicks landed
   await page.getByRole('button', { name: /^Forget memory/ }).dblclick()
-  await expect(pane(page).getByText('No memories yet.')).toBeVisible()
+  await expect(pane(page).getByText('No memories')).toBeVisible()
   expect(await api('/memories')).toHaveLength(0)
   expect(grain.consoleErrors.filter((e) => !ignorable.test(e))).toEqual([])
 })

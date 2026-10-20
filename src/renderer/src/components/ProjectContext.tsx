@@ -71,8 +71,7 @@ export default function ProjectContext({ projectId }: { projectId: string }): JS
       {files?.length === 0 && (
         <div className="empty-state">
           <FileText size={28} />
-          <h2>No files yet</h2>
-          <p>Uploads, notes and what this project&apos;s chats make or read show up here. Drop files anywhere on this page.</p>
+          <h2>No files</h2>
           {uploadBtn}
         </div>
       )}
@@ -86,7 +85,7 @@ export default function ProjectContext({ projectId }: { projectId: string }): JS
           </span>
         </div>
       )}
-      {!!files?.length && !shown.length && <p className="empty-hint">Nothing in this project's files matches.</p>}
+      {!!files?.length && !shown.length && <p className="empty-hint">No matches</p>}
       {byChat
         ? groupByChat(shown).map((g) => <section key={g.conversationId}><h4>{g.title}</h4>{g.files.map((f) => row(f, false))}</section>)
         : groupByKind(shown).map((g) => <section key={g.kind}><h4>{g.label}</h4>{g.files.map((f) => row(f, true))}</section>)}

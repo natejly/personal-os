@@ -66,7 +66,7 @@ const elapsed = (a: { started_at: number | null; ended_at: number | null }): str
 function AgentCard({ a }: { a: CrewAgent }): JSX.Element {
   return (
     <div className="crew-pop">
-      <p>{a.task || <span className="muted">No task recorded.</span>}</p>
+      <p>{a.task || <span className="muted">No task</span>}</p>
       {(a.state === 'running' || a.status === 'running') && <p className="crew-pop-now">Now: {a.now || 'thinking'}</p>}
       {a.error && <p className="crew-pop-err">{a.error}</p>}
       <small className="muted">
@@ -275,7 +275,7 @@ function CrewWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
         )}
         {!running && (tree.length > 0
           ? <div className="crew-tree">{tree}</div>
-          : <div className="widget-empty">{root.kind === 'workflow' ? 'This workflow has not run yet.' : ROOT_LIVE.has(root.status) ? 'No agents yet.' : 'No agents worked on this.'}</div>)}
+          : <div className="widget-empty">{root.kind === 'workflow' ? 'Not run yet' : 'No agents'}</div>)}
       </div>
     </div>
   )

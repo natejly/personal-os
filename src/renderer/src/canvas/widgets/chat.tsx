@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { isSideNote, isBranchNote, isClear, sinceClear } from '../../lib/workers'
 import BranchNote from '../../components/BranchNote'
 import SideNote from '../../components/SideNote'
-import { Check, MessageSquare, MessagesSquare, Pencil, Smile } from '../../icons'
+import { Check, MessageSquare, MessagesSquare, Pencil, Smile, SlidersHorizontal } from '../../icons'
+import DeskPanel from '../../components/DeskPanel'
 import type { Attachment, CanvasWindow, DragKind, DragPayload, Rect } from '@shared/types'
 import MessageView from '../../components/Message'
 import RegenRow from '../../components/RegenRow'
@@ -175,6 +176,8 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
   const streaming = useIsStreaming(convId)
   const streamingId = useStreamingMessageId(convId)
   const { status } = useRingStatus(convId)
+  const panelOn = useCanvas((s) => !!s.chatPanels[win.id])
+  const toggleChatPanel = useCanvas((s) => s.toggleChatPanel)
   // Blob view: the window shows only this chat's creature, posed by this chat's own state. A window
   // that has never chosen follows Settings › Behavior › Compact chats; the head's button overrides it.
   const compactOn = useStore((s) => !!s.settings.compactChats)
@@ -256,7 +259,7 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
 
   const drop = useDropTarget(ACCEPTS, (p, e) => void onDrop(p, e))
 
-  if (!convId) return <div className="widget-empty">A chat window needs a conversation.</div>
+  if (!convId) return <div className="widget-empty">No chat</div>
   if (gone) {
     // The conversation was deleted from another surface; the window lives on, so give it a future:
     // type to start a fresh chat in place, or re-point the window at an existing one.
@@ -271,7 +274,7 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
     return (
       <div className="widget chat-gone">
         <MessageSquare size={18} />
-        <p className="widget-sub">This chat was deleted.</p>
+        <p className="widget-sub">Chat deleted</p>
         <div className="chat-gone-send">
           <input autoFocus aria-label="Message for a new chat" placeholder="Send a message to start a new chat…"
             value={draft} onChange={(e) => setDraft(e.target.value)}
@@ -280,7 +283,6 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
         </div>
         {others.length > 0 && (
           <>
-            <p className="widget-sub">or pick up an existing chat:</p>
             <div className="chat-gone-list">
               {others.slice(0, 6).map((c) => (
                 <button key={c.id} className="ghost-btn" title={c.title || 'Untitled chat'}
@@ -327,6 +329,7 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
   const actions = (
     <>
       <ChatSwitcher win={win} convId={convId} />
+      <button className={`icon-btn ghost xs${panelOn ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={panelOn} onClick={() => toggleChatPanel(win.id)}><SlidersHorizontal size={11} /></button>
       <button className="icon-btn ghost xs" title="Shrink to a face" aria-label="Shrink to a face" onClick={() => setBlob(win, true)}><Smile size={11} /></button>
     </>
   )
@@ -338,6 +341,7 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
     if (el) setStick(el.scrollHeight - el.scrollTop - el.clientHeight < 80)
   }
   return (
+    <div className="chat-split">
     <div ref={root} className={drop.over ? 'widget drop-over' : 'widget'} {...drop.handlers}>
       <ChatTitle convId={convId} title={convo?.title ?? ''} actions={actions} />
       <div className="messages" ref={scroll} onScroll={onScroll}>
@@ -345,10 +349,12 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
           {msgs.map((m) => isClear(m) ? <div key={m.id} className="day-divider" role="separator">Context cleared</div> : isSideNote(m) ? <SideNote key={m.id} content={m.content} /> : isBranchNote(m) ? <BranchNote content={m.content} /> : <MessageView key={m.id} message={m} face={face} streaming={streaming && streamingId === m.id} last={m.id === last?.id}
             browserSession={m.id === watchId ? chatBrowserSession(m.conversation_id) : undefined} />)}
           <RegenRow conversationId={convId} last={last} streaming={streaming} />
-          {!msgs.length && <p className="widget-sub">No messages yet.</p>}
+          {!msgs.length && <p className="widget-sub">No messages</p>}
         </div>
       </div>
       <Composer conversationId={convId} compact footer={<ChatControls conversationId={convId} />} />
+    </div>
+    {panelOn && <DeskPanel key={convId} conversationId={convId} onClose={() => toggleChatPanel(win.id)} />}
     </div>
   )
 }

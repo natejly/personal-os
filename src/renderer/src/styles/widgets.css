@@ -414,3 +414,8 @@
 .win[data-kind='doc'] .widget-bar .grow { flex: 1; min-width: 0; }
 /* The doc window's rendered view: fills the body under the bar and scrolls on its own. */
 .widget .docs-render.widget-doc-render { flex: 1; min-height: 0; padding: 10px var(--widget-pad); }
+
+/* A chat window's side panel (the shared DeskPanel): floats over the window below its header strip (the header keeps the toggle); the window is small. */
+.chat-split { position: relative; display: flex; height: 100%; min-height: 0; min-width: 0; }
+.chat-split > .widget { flex: 1; min-width: 0; }
+.chat-split > .side-panel { position: absolute; top: 26px; right: 0; bottom: 0; width: min(var(--side-panel-w, 380px), calc(100% - 16px)); z-index: 8; box-shadow: 0 8px 24px rgb(0 0 0 / 0.22); }

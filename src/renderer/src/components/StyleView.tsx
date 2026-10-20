@@ -20,8 +20,8 @@ function Lines({ label, hint, items, onChange }: { label: string; hint: string; 
   }
   return (
     <section className="style-lines">
-      <h5>{label} <span className="muted small">{hint}</span></h5>
-      {items.length === 0 && <p className="muted small">None yet.</p>}
+      <h5 title={hint}>{label}</h5>
+      {items.length === 0 && <p className="muted small">None</p>}
       <ul>
         {items.map((item, i) => (
           <li key={`${i}-${item}`}>
@@ -106,12 +106,7 @@ export default function StyleView({ projectId }: { projectId?: string }): JSX.El
 
       <section className="style-head">
         <div className="style-head-text">
-          <h4><PenLine size={14} /> {isProject ? 'This project’s voice' : 'Your voice'}</h4>
-          <p className="muted small">
-            {isProject
-              ? 'Used for drafts in this project instead of your personal voice. Without one, your personal voice is used.'
-              : 'Used when the assistant drafts something you will send as your own — email, messages, docs. Its replies to you keep their own voice.'}
-          </p>
+          <h4 title={isProject ? 'Used for drafts in this project instead of your personal voice' : 'Used when the assistant drafts something you will send as your own'}><PenLine size={14} /> {isProject ? 'This project’s voice' : 'Your voice'}</h4>
         </div>
         <div className="style-head-actions">
           <button className="primary-btn" disabled={learning || stats.samples === 0} onClick={() => void learnStyle()}>
@@ -126,17 +121,13 @@ export default function StyleView({ projectId }: { projectId?: string }): JSX.El
         </div>
       </section>
 
-      {!profile && (
-        <p className="empty-hint big">
-          {stats.samples === 0
-            ? 'Nothing learned yet. Long messages you write and files you save are banked below as samples; or paste a piece of your own writing to start.'
-            : `${stats.samples} sample${stats.samples === 1 ? '' : 's'} banked. Learn your style to turn them into a profile.`}
-        </p>
+      {!profile && stats.samples > 0 && (
+        <p className="empty-hint big">{stats.samples} sample{stats.samples === 1 ? '' : 's'} banked</p>
       )}
 
       {!profile && inherited && effective && (
         <p className="muted small">
-          Drafts here currently use your personal voice.
+          Using your personal voice
           <button className="link" onClick={() => openMemory('style')}>see it</button>
         </p>
       )}
@@ -145,7 +136,7 @@ export default function StyleView({ projectId }: { projectId?: string }): JSX.El
         <>
           <div className="style-meta muted small">
             {profile.edited
-              ? <><Pencil size={11} /> Hand-edited, so it is left alone by auto-learn. “Re-read my writing” replaces it from your samples.</>
+              ? <span title="Left alone by auto-learn. “Re-read my writing” replaces it from your samples"><Pencil size={11} /> Hand-edited</span>
               : <>Learned from {profile.sample_count} sample{profile.sample_count === 1 ? '' : 's'} ({profile.sample_chars.toLocaleString()} chars){profile.model ? ` · ${profile.model}` : ''} · {new Date(profile.updated_at * 1000).toLocaleString()}</>}
           </div>
 
@@ -187,14 +178,11 @@ export default function StyleView({ projectId }: { projectId?: string }): JSX.El
             {stats.samples} passage{stats.samples === 1 ? '' : 's'}, {stats.chars.toLocaleString()} chars{stats.pending > 0 ? ` · ${stats.pending} not folded in yet` : ''}
           </span>
         </h5>
-        <p className="muted small">
-          Delete anything that isn’t your own writing.
-        </p>
         <div className="add-row style-paste">
           <textarea rows={2} placeholder="Paste a piece of your own writing…" value={paste} onChange={(e) => setPaste(e.target.value)} />
           <button className="ghost-btn" onClick={() => void add()} disabled={!paste.trim()}><Plus size={14} /> Add sample</button>
         </div>
-        {samples.length === 0 && <p className="empty-hint">No samples in this scope yet.</p>}
+        {samples.length === 0 && <p className="empty-hint">No samples</p>}
         {samples.map((s) => <SampleRow key={s.id} s={s} />)}
       </section>
     </div>

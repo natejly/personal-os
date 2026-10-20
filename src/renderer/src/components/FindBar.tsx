@@ -135,7 +135,6 @@ export default function FindBar({ scope, resetKey }: { scope: RefObject<HTMLElem
       <button className="icon-btn" aria-label="Previous match" title={tip('Previous', 'find-prev')} onClick={() => step(-1)}><ChevronUp size={14} /></button>
       <button className="icon-btn" aria-label="Next match" title={tip('Next', 'find-next')} onClick={() => step(1)}><ChevronDown size={14} /></button>
       <button className="icon-btn" aria-label="Close find" title="Close (Esc)" onClick={close}><X size={14} /></button>
-      <span className="find-hint">Collapsed tool rows and reasoning are not searched.</span>
     </div>
   )
 }

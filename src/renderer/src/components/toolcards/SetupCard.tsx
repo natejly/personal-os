@@ -33,7 +33,7 @@ export default function SetupCard({ setup }: { setup: Setup }): JSX.Element {
   return (
     <div className={`setup-card ${done ? 'done' : ''}`} role="status">
       <span className="setup-icon">{done ? <Check size={14} /> : <Plug size={14} />}</span>
-      <span className="setup-text"><b>{done ? `${setup.feature === 'google' ? 'Google' : setup.title} connected` : setup.title}</b>{!done && <small>{setup.why}</small>}</span>
+      <span className="setup-text" title={!done ? setup.why : undefined}><b>{done ? `${setup.feature === 'google' ? 'Google' : setup.title} connected` : setup.title}</b></span>
       {done
         ? <span className="setup-ok">Connected ✓</span>
         : <button className="primary-btn sm" onClick={go}>{isGoogle ? (setup.reauth ? 'Reconnect' : 'Connect') : setup.action === 'view' ? 'Open' : 'Open settings'}</button>}

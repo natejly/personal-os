@@ -67,7 +67,7 @@ export default function PlannerPanel({ initial, days = 1, onApplied }: { initial
       {plan && (
         <section className="todo-section">
           <h4 className="section-h">Proposed blocks <span>{plan.blocks.length}</span></h4>
-          {plan.blocks.length === 0 && <p className="empty-hint">Nothing to place. Give todos a due date or an estimate in minutes.</p>}
+          {plan.blocks.length === 0 && <p className="empty-hint">Nothing to place</p>}
           {plan.blocks.map((b) => (
             <label key={key(b)} className="planner-row" title={why(b)}>
               <input type="checkbox" checked={picked.has(key(b))} onChange={() => setPicked((p) => { const n = new Set(p); n.has(key(b)) ? n.delete(key(b)) : n.add(key(b)); return n })} />
@@ -75,7 +75,7 @@ export default function PlannerPanel({ initial, days = 1, onApplied }: { initial
               <span className="planner-when">{when(b)}</span>
             </label>
           ))}
-          {plan.unplaced.length > 0 && <p className="empty-hint">{plan.unplaced.length} could not fit before their due date.</p>}
+          {plan.unplaced.length > 0 && <p className="empty-hint">{plan.unplaced.length} unplaced</p>}
           <div className="planner-row">
             <button className="primary-btn" onClick={() => void apply()} disabled={busy || picked.size === 0}>Add selected to calendar</button>
             <button className="ghost-btn" onClick={() => { asked.current = false; setPlan(null) }} disabled={busy}>Dismiss</button>

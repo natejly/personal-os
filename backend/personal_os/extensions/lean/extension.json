@@ -5,10 +5,10 @@
   "version": "1.0.0",
   "apiVersion": 1,
   "kind": "profile",
-  "enabled": true,
+  "enabled": false,
   "contributes": {
     "defaults": {
-      "views": { "todos": false, "calendar": false, "mail": false, "health": false, "spaces": false, "latex": false }
+      "views": { "todos": false, "calendar": false, "mail": false, "health": false, "spaces": false, "claude-code": false, "latex": false }
     }
   }
 }

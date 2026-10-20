@@ -577,8 +577,6 @@ export function JobRow({ job }: { job: Job }): JSX.Element {
             onChange={() => void saveTools(job.allowed_tools ?? ['current_time'])} /> <span>Only these</span>
         </label>
         {job.allowed_tools !== null && <ToolPicker value={job.allowed_tools} onChange={(n) => void saveTools(n)} />}
-        <p className="muted small">A run can only use tools it is given here, on top of your own tool settings. Anything
-          that leaves the app is still a proposal.</p>
         <JobRunSettings job={job} save={save} />
       </li>
     )}
@@ -625,8 +623,6 @@ function ShipStart({ jobId, prev }: { jobId: string; prev: ShipChecklist | null 
       <button type="button" className="primary-btn sm" disabled={busy || !f.repo_path.trim() || !f.branch.trim()} onClick={() => void start()}>
         {prev ? 'Run again' : 'Start'}
       </button>
-      <p className="muted small">Runs the tests, then pushes the branch, then opens a pull request. The merge waits for you;
-        nothing is ever force-pushed or pushed to main.</p>
     </div>
   )
 }
@@ -758,7 +754,7 @@ export function NewTask({ onDone, job, agentId }: { onDone: () => void; job?: Jo
     <form className="new-task" onSubmit={(e) => void submit(e)}>
       <input placeholder="Name, e.g. Chase the invoice" value={f.name} maxLength={120}
         onChange={(e) => setF({ ...f, name: e.target.value })} />
-      <textarea rows={2} placeholder="What should it do? It runs in a fresh chat, so write it so it stands alone."
+      <textarea rows={2} placeholder="What should it do? Runs in a fresh chat"
         value={f.prompt} maxLength={8000} onChange={(e) => setF({ ...f, prompt: e.target.value })} />
       <div className="new-task-when">
         <select value={f.mode} aria-label="When it runs" onChange={(e) => setF({ ...f, mode: e.target.value as typeof f.mode })}>
@@ -889,7 +885,7 @@ export default function AgentInbox(): JSX.Element | null {
         {box.counts.needs_you > 0 && <span className="chip needs">{box.counts.needs_you} need{box.counts.needs_you === 1 ? 's' : ''} you</span>}
         <span className="spacer" />
         {box.scheduler.next_due_at && <span className="muted small"><Timer size={11} /> next job {fmtWhen(box.scheduler.next_due_at)}</span>}
-        {box.scheduler.wake_unavailable && <span className="muted small" title="This Mac is not woken for a job: jobs run while the Mac is awake and Grain is open, and a slot missed while asleep runs as soon as it wakes">needs Grain open</span>}
+        {box.scheduler.wake_unavailable && <span className="muted small" title="Jobs run only while the Mac is awake and Grain is open">needs Grain open</span>}
         <button className={`ghost-btn sm ${showArchived ? 'on' : ''}`} aria-expanded={showArchived} onClick={() => setShowArchived((v) => !v)}>
           <Archive size={12} /> Archived
         </button>
@@ -907,14 +903,11 @@ export default function AgentInbox(): JSX.Element | null {
               onClick={() => setAdding((v) => !v)}><Plus size={13} /></button>
           </h5>
           {adding && <NewTask onDone={() => setAdding(false)} />}
-          {jobs.length === 0 ? <p className="muted">None yet.</p> : <ul>{jobs.map((j) => <JobRow key={j.id} job={j} />)}</ul>}
-          <p className="muted small">A scheduled task can read, search and write inside Grain. Anything that leaves the
-            app — mail, calendar, Docs — comes back here as a proposal; accepting it is what sends it. You can also just
-            ask in a chat: “tomorrow at 3pm, check whether they replied”.</p>
+          {jobs.length === 0 ? <p className="muted">No tasks</p> : <ul>{jobs.map((j) => <JobRow key={j.id} job={j} />)}</ul>}
         </div>
       )}
 
-      {quiet && <p className="muted">Nothing waiting, nothing ran.</p>}
+      {quiet && <p className="muted">Inbox empty</p>}
 
       {box.counts.needs_you > 0 && (
         <div className="inbox-group">
@@ -992,7 +985,7 @@ export default function AgentInbox(): JSX.Element | null {
         <div className="inbox-group">
           <h5>Archived <span className="muted small">{archivedRuns.length} message{archivedRuns.length === 1 ? '' : 's'}</span></h5>
           {archivedRuns.length > 0 && <input type="search" className="inbox-archive-search" placeholder="Search archived messages" aria-label="Search archived messages" value={archivedQ} onChange={(e) => setArchivedQ(e.target.value)} />}
-          {archivedRuns.length === 0 ? <p className="muted">Nothing archived.</p> : (
+          {archivedRuns.length === 0 ? <p className="muted">No archived messages</p> : (
             <ul className="inbox-list">
               {archivedRuns.filter((r) => `${r.job} ${r.error ?? ''} ${r.summary ?? ''}`.toLowerCase().includes(archivedQ.trim().toLowerCase())).map((r) => (
                 <li className="inbox-item inbox-msg seen" key={r.run_id}>

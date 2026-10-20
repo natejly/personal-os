@@ -139,7 +139,7 @@ test('search 300 chats: unique word finds the one chat; no matches; Esc clears',
   await expect(users(page).first()).toContainText('zyxwvutsr')
   await page.getByRole('button', { name: 'Search chats' }).click()
   await q.fill('qqqqnothingqqqq')
-  await expect(page.getByText('No matches.')).toBeVisible()
+  await expect(page.getByText('No matches', { exact: true })).toBeVisible()
   await q.press('Escape')
   await expect(q).toHaveCount(0)
   expect(ids.length).toBe(300)

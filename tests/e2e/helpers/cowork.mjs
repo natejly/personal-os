@@ -40,10 +40,10 @@ export const chatRow = (page, title) => page.locator('.sidebar .convo-item', { h
 export const openChat = async (page, title) => { await chatRow(page, title).click() }
 export const strip = (page) => page.locator('.desk-strip')
 export const panel = (page) => page.locator('.desk-panel')
-/** Expand a workspace card (a click on an open card would collapse it). */
+/** Bring a workspace tab forward (only the active tab's body is in the DOM). */
 export const expandCard = async (page, key) => {
   const head = page.getByTestId(`desk-tab-${key}`)
-  if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click()
+  if ((await head.getAttribute('aria-selected')) !== 'true') await head.click()
 }
 /** The chat's side panel (the header button opens it, desk or not), on `tab` (Files, Changes or Review). */
 export async function openPanel(page, tab) {

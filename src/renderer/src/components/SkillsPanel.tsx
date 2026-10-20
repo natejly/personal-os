@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Check, ChevronDown, ChevronRight, Download, Eye, Globe, Plus, Sparkles, Trash2, Undo2, Upload, X } from '../icons'
+import { Check, ChevronDown, ChevronRight, Download, Eye, Globe, MoreHorizontal, Plus, Sparkles, Trash2, Undo2, Upload, X } from '../icons'
 import { useStore } from '../store'
 import type { Skill, SkillFinding, SkillPreview } from '@shared/types'
 import { PRESET_KIND_LABEL, SKILL_PRESETS, type SkillPreset } from '@shared/skillPresets'
 import ProjectChip from './ProjectChip'
+import ContextMenu, { type MenuEntry } from '../canvas/Menu'
 import { api } from '../lib/api'
 import { rowButton } from '../lib/rowButton'
 import { debounceLatest, LINT_DELAY_MS } from '../lib/skillLint'
@@ -231,6 +232,13 @@ export default function SkillsPanel(): JSX.Element {
 
   const importPreset = (p: SkillPreset): Promise<boolean> => importFrom({ url: p.url }, p.name)
 
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
+  const menuItems: MenuEntry[] = [
+    { label: 'Import skill file', icon: <Upload size={14} />, run: () => setImporting(!importing) },
+    { label: 'Popular skills', icon: <Globe size={14} />, run: () => setBrowsing(!browsing) },
+    { label: 'What the assistant sees', icon: <Eye size={14} />, run: () => void togglePreview() }
+  ]
+
   const empty = skills.length === 0 && !adding && !importing && !browsing
 
   return (
@@ -240,12 +248,12 @@ export default function SkillsPanel(): JSX.Element {
         <div className="library-toolbar">
           <div className="library-toolbar-row">
             <button className="primary-btn" aria-expanded={adding} onClick={() => setAdding(!adding)}><Plus size={14} /> New skill</button>
-            <button className={`ghost-btn${importing ? ' on' : ''}`} aria-expanded={importing} onClick={() => setImporting(!importing)}><Upload size={14} /> Import skill file</button>
-            <button className={`ghost-btn${browsing ? ' on' : ''}`} aria-expanded={browsing} onClick={() => setBrowsing(!browsing)}><Globe size={14} /> Popular skills</button>
-            <button className={`ghost-btn${preview ? ' on' : ''}`} aria-pressed={!!preview} onClick={() => void togglePreview()}><Eye size={14} /> What the assistant sees</button>
+            <button className={`icon-btn ghost${menuAt ? ' on' : ''}`} title="More" aria-label="More" aria-haspopup="menu" aria-expanded={!!menuAt}
+              onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenuAt({ x: r.left, y: r.bottom + 4 }) }}><MoreHorizontal size={14} /></button>
           </div>
         </div>
       )}
+      {menuAt && <ContextMenu at={menuAt} items={menuItems} onClose={() => setMenuAt(null)} />}
       {browsing && (
         <div className="skill-body standalone">
           {(Object.keys(PRESET_KIND_LABEL) as SkillPreset['kind'][]).map((kind) => (

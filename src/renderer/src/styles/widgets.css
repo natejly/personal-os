@@ -292,8 +292,8 @@
   border-radius: 6px;
   outline: 0;
 }
-.chat-rename { opacity: 0; transition: opacity var(--dur-hover) ease; }
-.chat-head:hover .chat-rename { opacity: 1; }
+.chat-head .icon-btn { opacity: 0; transition: opacity var(--dur-hover) ease; }
+.chat-head:hover .icon-btn, .chat-head:focus-within .icon-btn { opacity: 1; }
 
 /* A widget is not a page: drop the 808px centring and the page gutters that leave a chat panel mostly
    margin, and lose the disclaimer line that costs a whole row of vertical space. */

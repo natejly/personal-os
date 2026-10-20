@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Activity, Droplet, Footprints, Gauge, HeartPulse, Link2, Moon, Pill, Plus, Scale, Settings2, Smile, Trash2, Zap } from '../../icons'
 import type { HealthEntry, HealthMetric, HealthSummary } from '@shared/types'
@@ -36,6 +36,7 @@ export default function HealthView(): JSX.Element {
   const [entries, setEntries] = useState<HealthEntry[]>([])
   const [manage, setManage] = useState(false)
   const [connect, setConnect] = useState(false)
+  const [focusTick, setFocusTick] = useState(0)
 
   // Sparklines need 14 days even when the range is a week, so fetch at least that much and slice.
   const load = useCallback(async () => {
@@ -120,12 +121,13 @@ export default function HealthView(): JSX.Element {
           </div>
         ) : (
           <>
+            <LogRow rows={rows} m={selected} today={today} focusTick={focusTick} onPick={setSel} onLog={log} />
             <div className="hl-tiles">
               {rows.map((m) => (
-                <Tile key={m.key} m={m} today={today} selected={selected?.key === m.key} onSelect={() => setSel(m.key)} onLog={(v) => log(m.key, v)} />
+                <Tile key={m.key} m={m} today={today} selected={selected?.key === m.key} onSelect={() => { setSel(m.key); setFocusTick((t) => t + 1) }} />
               ))}
             </div>
-            {selected && <Detail full={selected} days={days} today={today} entries={entries} onLog={log} onChanged={changed} />}
+            {selected && <Detail full={selected} days={days} today={today} entries={entries} onChanged={changed} />}
           </>
         )}
       </div>
@@ -133,8 +135,8 @@ export default function HealthView(): JSX.Element {
   )
 }
 
-function Tile({ m, today, selected, onSelect, onLog }: {
-  m: HealthSummary; today: string; selected: boolean; onSelect: () => void; onLog: (v: number) => Promise<boolean>
+function Tile({ m, today, selected, onSelect }: {
+  m: HealthSummary; today: string; selected: boolean; onSelect: () => void
 }): JSX.Element {
   const p = progress(m, m.today)
   const met = meets(m, m.today)
@@ -155,51 +157,12 @@ function Tile({ m, today, selected, onSelect, onLog }: {
         )}
         <Sparkline metric={m} points={m.series.slice(-SPARK_DAYS)} />
       </button>
-      <QuickLog m={m} onLog={onLog} />
     </section>
   )
 }
 
-/** The one-tap log on a tile: a number box, the five scale steps, or Yes / No. */
-function QuickLog({ m, onLog }: { m: HealthSummary; onLog: (v: number) => Promise<boolean> }): JSX.Element {
-  const [v, setV] = useState('')
-  const [busy, setBusy] = useState(false)
-  const go = async (n: number): Promise<void> => {
-    setBusy(true)
-    const ok = await onLog(n)
-    setBusy(false)
-    if (ok) setV('')
-  }
-  if (m.kind === 'check') {
-    return (
-      <div className="seg hl-quick" role="group" aria-label={`${m.label} today`}>
-        {[1, 0].map((n) => <button key={n} disabled={busy} className={m.today === n ? 'on' : ''} onClick={() => void go(n)}>{n ? 'Yes' : 'No'}</button>)}
-      </div>
-    )
-  }
-  if (m.kind === 'scale') {
-    // Lit: the step last tapped today. The tile's number is the day's average, which can sit between taps.
-    const cur = m.last?.day === m.series[m.series.length - 1]?.day ? Math.round(m.last.value) : null
-    return (
-      <div className="seg hl-quick" role="group" aria-label={`Log ${m.label}, 1 to 5`}>
-        {[1, 2, 3, 4, 5].map((n) => <button key={n} disabled={busy} className={cur === n ? 'on' : ''} title={`Log ${n}/5`} onClick={() => void go(n)}>{n}</button>)}
-      </div>
-    )
-  }
-  const n = Number(v)
-  const ok = v.trim() !== '' && Number.isFinite(n) && n >= 0
-  return (
-    <form className="hl-quick hl-quick-num" onSubmit={(e) => { e.preventDefault(); if (ok) void go(n) }}>
-      <input type="number" inputMode="decimal" min={0} step="any" value={v} onChange={(e) => setV(e.target.value)}
-        placeholder={m.unit || 'value'} aria-label={`${m.agg === 'sum' ? 'Add to' : 'Log'} ${m.label}${m.unit ? ` (${m.unit})` : ''}`} />
-      <button type="submit" className="ghost-btn" disabled={!ok || busy}>{m.agg === 'sum' ? <><Plus size={13} /> Add</> : 'Log'}</button>
-    </form>
-  )
-}
-
-function Detail({ full, days, today, entries, onLog, onChanged }: {
-  full: HealthSummary; days: number; today: string; entries: HealthEntry[]
-  onLog: (metric: string, value: number, day?: string, note?: string) => Promise<boolean>; onChanged: () => Promise<void>
+function Detail({ full, days, today, entries, onChanged }: {
+  full: HealthSummary; days: number; today: string; entries: HealthEntry[]; onChanged: () => Promise<void>
 }): JSX.Element {
   const toast = useStore((s) => s.toast)
   // The fetch covers at least 14 days, so on the 7-day range the week before is already in the series;
@@ -232,7 +195,6 @@ function Detail({ full, days, today, entries, onLog, onChanged }: {
         </dl>
       </header>
       <TrendChart metric={m} today={today} />
-      <LogForm m={m} today={today} onLog={onLog} />
       <h4 className="section-h">Entries <span>{entries.length}</span></h4>
       {entries.length === 0 ? <p className="empty-hint">Nothing logged yet.</p> : (
         <table className="hl-entries">
@@ -253,12 +215,19 @@ function Detail({ full, days, today, entries, onLog, onChanged }: {
   )
 }
 
-/** Log against any day, with a note: last night's sleep, a missed day, a reading with context. */
-function LogForm({ m, today, onLog }: { m: HealthSummary; today: string; onLog: (metric: string, value: number, day?: string, note?: string) => Promise<boolean> }): JSX.Element {
+/** The one place to log: pick a metric, enter a value, optionally a day and note. Tiles only summarise. */
+function LogRow({ rows, m, today, focusTick, onPick, onLog }: {
+  rows: HealthSummary[]; m: HealthSummary | null; today: string; focusTick: number; onPick: (key: string) => void
+  onLog: (metric: string, value: number, day?: string, note?: string) => Promise<boolean>
+}): JSX.Element | null {
   const [day, setDay] = useState(today)
-  const [v, setV] = useState(m.kind === 'number' ? '' : m.kind === 'scale' ? '3' : '1')
+  const initial = (k?: string): string => (k === 'number' ? '' : k === 'scale' ? '3' : '1')
+  const [v, setV] = useState(initial(m?.kind))
   const [note, setNote] = useState('')
-  useEffect(() => { setV(m.kind === 'number' ? '' : m.kind === 'scale' ? '3' : '1'); setNote('') }, [m.key, m.kind])
+  const valRef = useRef<HTMLInputElement & HTMLSelectElement>(null)
+  useEffect(() => { setV(initial(m?.kind)); setNote('') }, [m?.key, m?.kind])
+  useEffect(() => { if (focusTick > 0) valRef.current?.focus() }, [focusTick])
+  if (!m) return null
   const n = Number(v)
   const ok = v.trim() !== '' && Number.isFinite(n) && n >= 0 && day !== ''
   const submit = async (): Promise<void> => {
@@ -269,15 +238,18 @@ function LogForm({ m, today, onLog }: { m: HealthSummary; today: string; onLog: 
     }
   }
   return (
-    <form className="add-row hl-log" onSubmit={(e) => { e.preventDefault(); void submit() }}>
-      <input type="date" aria-label="Day" value={day} max={today} onChange={(e) => setDay(e.target.value)} className="date-input" />
+    <form className="add-row hl-log" aria-label="Log" onSubmit={(e) => { e.preventDefault(); void submit() }}>
+      <select aria-label="Metric" value={m.key} onChange={(e) => onPick(e.target.value)}>
+        {rows.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+      </select>
       {m.kind === 'number'
-        ? <input type="number" inputMode="decimal" min={0} step="any" aria-label={`${m.label}${m.unit ? ` (${m.unit})` : ''}`} placeholder={m.unit || 'value'} value={v} onChange={(e) => setV(e.target.value)} className="hl-log-val" />
-        : <select aria-label={m.label} value={v} onChange={(e) => setV(e.target.value)}>
+        ? <input ref={valRef} type="number" inputMode="decimal" min={0} step="any" aria-label={`Value${m.unit ? ` (${m.unit})` : ''}`} placeholder={m.unit || 'value'} value={v} onChange={(e) => setV(e.target.value)} className="hl-log-val" />
+        : <select ref={valRef} aria-label="Value" value={v} onChange={(e) => setV(e.target.value)}>
             {m.kind === 'scale' ? [1, 2, 3, 4, 5].map((k) => <option key={k} value={k}>{k}/5</option>) : <><option value="1">Yes</option><option value="0">No</option></>}
           </select>}
+      <input type="date" aria-label="Day" value={day} max={today} onChange={(e) => setDay(e.target.value)} className="date-input" />
       <input type="text" aria-label="Note (optional)" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
-      <button type="submit" className="primary-btn" disabled={!ok}><Plus size={14} /> Log</button>
+      <button type="submit" className="primary-btn" disabled={!ok}><Plus size={14} /> Add</button>
     </form>
   )
 }

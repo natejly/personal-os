@@ -194,4 +194,5 @@ def test_permission_text_is_plain_language() -> None:
     m = Manifest.from_dict({"id": "xc-text", "name": "T", "version": "1.0.0", "apiVersion": 1, "permissions": ["db:own", "hooks:gate", "service:mcp"],
                             "hooks": {"tool.permission": {}}})
     text = " ".join(catalog_index.permission_text(m))
-    assert "own data" in text and "block a tool call" in text and "mcp service" in text and "tool.permission" in text
+    assert "own data" in text and "block a tool call" in text and "connected tool servers" in text
+    assert "tool.permission" not in text and "1 app event" in text and ".." not in text

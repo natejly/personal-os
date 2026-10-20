@@ -38,6 +38,12 @@ export function contributionChips(card: Pick<CatalogCard, 'contributes'>): Chip[
   return out
 }
 
+/** The capability sentences as short fragments: no trailing full stops, no empties, no repeats. */
+export function capabilityLines(lines: readonly string[]): string[] {
+  const out = lines.map((l) => l.trim().replace(/[.\s]+$/, '').replace(/\.{2,}/g, '.')).filter(Boolean)
+  return out.filter((l, i) => out.indexOf(l) === i)
+}
+
 /** "adds about 120 tokens every turn". */
 export function contextCostText(tokens: number): string {
   if (!tokens || tokens <= 0) return 'Adds nothing to the prompt'

@@ -24,6 +24,6 @@
   transform-origin: top left;
 }
 /* Section heads: the `.win-menu-head` metrics, with room between sections. */
-.preset-pop h4 { margin: 0; padding: 6px 8px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
+.preset-pop h4 { margin: 0; padding: 6px 8px 4px; font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
 .preset-pop h4 ~ h4 { margin-top: 6px; }
-.preset-pop .empty-hint { padding: 2px 8px 6px; font-size: 12px; margin: 0; }
+.preset-pop .empty-hint { padding: 2px 8px 6px; font-size: var(--fs-sm); margin: 0; }

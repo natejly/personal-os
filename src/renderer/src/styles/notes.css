@@ -7,7 +7,7 @@
   padding: 4px;
   background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-  font-family: var(--font); font-size: 12.5px;
+  font-family: var(--font); font-size: var(--fs-md);
 }
 .caret-menu-row {
   display: flex; align-items: baseline; justify-content: flex-start; gap: 10px; min-width: 0; text-align: left;
@@ -15,7 +15,7 @@
 }
 .caret-menu-row.on { background: var(--active); }
 .caret-menu-label { flex: none; font-weight: 600; white-space: nowrap; }
-.caret-menu-hint { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-family: var(--font); font-size: 11.5px; text-align: left; }
+.caret-menu-hint { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-family: var(--font); font-size: var(--fs-sm); text-align: left; }
 
 /* Colour only: the mirror's metrics must not change. */
 .tk-tag { color: color-mix(in srgb, var(--accent) 65%, var(--text-muted)); }
@@ -28,25 +28,25 @@
 .outline { display: flex; flex-direction: column; gap: 1px; padding: 6px; overflow-y: auto; min-height: 0; }
 .outline-item {
   text-align: left; padding: 4px 8px; border-radius: 5px;
-  background: transparent; color: var(--text-muted); font-size: 12px;
+  background: transparent; color: var(--text-muted); font-size: var(--fs-sm);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .outline-item:hover { background: var(--hover); color: var(--text); }
 .outline-item.on { background: var(--active); color: var(--text); }
-.outline-empty { padding: 12px; color: var(--text-faint); font-size: 12px; }
+.outline-empty { padding: 12px; color: var(--text-faint); font-size: var(--fs-sm); }
 
 /* ---- backlinks ---- */
 .backlinks { padding: 10px 22px 18px; border-top: 1px solid var(--border); }
-.backlinks-head { margin: 0 0 6px; font-size: 11px; font-weight: 600; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
-.backlinks-empty { color: var(--text-faint); font-size: 12px; }
+.backlinks-head { margin: 0 0 6px; font-size: var(--fs-xs); font-weight: 600; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
+.backlinks-empty { color: var(--text-faint); font-size: var(--fs-sm); }
 .backlink {
   display: flex; flex-direction: column; gap: 2px; width: 100%;
   text-align: left; padding: 6px 8px; margin: 0 -8px; border-radius: 6px;
   background: transparent; color: var(--text);
 }
 .backlink:hover { background: var(--hover); }
-.backlink-title { font-size: 12.5px; font-weight: 500; }
-.backlink-snippet { font-size: 11.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.backlink-title { font-size: var(--fs-md); font-weight: 500; }
+.backlink-snippet { font-size: var(--fs-sm); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- new / export menus ---- */
 .newdoc { position: relative; display: inline-flex; align-items: center; }
@@ -54,7 +54,7 @@
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; min-width: 190px;
   padding: 4px; display: flex; flex-direction: column;
   background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25); font-size: 12.5px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25); font-size: var(--fs-md);
 }
 .notes-menu.right { left: auto; right: 0; }
 .notes-menu-row {
@@ -63,7 +63,7 @@
 }
 .notes-menu-row:hover { background: var(--hover); }
 .notes-menu-sep { height: 1px; margin: 4px 0; background: var(--border); }
-.notes-menu-label { padding: 4px 8px 2px; font-size: 10.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
+.notes-menu-label { padding: 4px 8px 2px; font-size: var(--fs-xs); color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
 
 /* ---- preview: wikilinks and clickable tasks ---- */
 a.wikilink { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
@@ -79,7 +79,7 @@ input[type='checkbox'].tick:focus-visible, .task-list-item input[type='checkbox'
 
 /* ---- formatting bar above the editor ---- */
 .fmt-bar { display: flex; align-items: center; gap: 2px; padding: 4px 10px; border-bottom: 1px solid var(--border); flex: 0 0 auto; overflow-x: auto; }
-.fmt-btn { min-width: 26px; height: 24px; padding: 0 6px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: inherit; opacity: 0.75; font-size: 11px; font-weight: 600; cursor: pointer; }
+.fmt-btn { min-width: 26px; height: 24px; padding: 0 6px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: inherit; opacity: 0.75; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; }
 .fmt-btn:hover { background: rgba(127, 127, 127, 0.15); opacity: 1; }
 .fmt-sep { width: 1px; height: 14px; margin: 0 4px; background: var(--border); }
 

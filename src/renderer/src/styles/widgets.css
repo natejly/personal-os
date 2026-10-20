@@ -53,7 +53,7 @@
   border-radius: 7px;
   background: var(--accent-solid);
   color: var(--on-accent);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 600;
   line-height: 13px;
   text-align: center;
@@ -86,7 +86,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 /* `.widget` is also the Today card in styles.css (padding, an opaque --bg-elev fill, rounded corners,
    a 120px floor), and that rule is global. Inside a window it put an inset opaque slab under the
@@ -108,7 +108,7 @@
   padding: 0 var(--widget-pad);
   border-bottom: 1px solid var(--border);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .widget-scroll {
@@ -138,7 +138,7 @@
 .widget-row.dragging { opacity: 0.45; }
 .widget-row .grow { flex: 1; min-width: 0; }
 .widget-title { font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.widget-sub { font-size: 11px; color: var(--text-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.widget-sub { font-size: var(--fs-xs); color: var(--text-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .widget-meta { font-size: 10px; color: var(--text-faint); font-family: var(--mono); white-space: nowrap; }
 
 /* 19px to look at, so it fits the 24px bar; the ::before makes it 25px to hit. (A <select> chip has
@@ -151,7 +151,7 @@
   border-radius: 999px;
   background: var(--bg-input);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   white-space: nowrap;
 }
 .widget-chip::before { content: ''; position: absolute; inset: -3px -1px; }
@@ -167,7 +167,7 @@
   background: var(--bg-input);
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 .widget-input:focus { border-color: var(--accent); outline: none; }
 
@@ -179,7 +179,7 @@
   height: 100%;
   padding: 16px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-faint);
 }
 .widget-error { color: var(--danger); }
@@ -215,8 +215,8 @@
   overflow: auto;
   color: var(--text);
 }
-.widget-error-head { display: flex; align-items: center; gap: 8px; color: var(--danger); font-size: 12px; }
-.widget-error-head .ghost-btn { margin-left: auto; font-size: 11px; }
+.widget-error-head { display: flex; align-items: center; gap: 8px; color: var(--danger); font-size: var(--fs-sm); }
+.widget-error-head .ghost-btn { margin-left: auto; font-size: var(--fs-xs); }
 .widget-error-body {
   margin: 0;
   font: 11px/1.5 var(--mono);
@@ -272,7 +272,7 @@
 .chat-title {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text);
   white-space: nowrap;
@@ -310,14 +310,14 @@
 .widget .messages-inner .avatar.face-avatar { width: 28px; height: 28px; margin-top: 0; }
 /* Rows that line up with the reply text, re-aligned to the 28px face + 8px gap (the page uses 46px). */
 .widget .regen-row { padding-left: 36px; margin-top: -8px; }
-.widget .run-error-row { margin-left: 36px; font-size: 12px; }
+.widget .run-error-row { margin-left: 36px; font-size: var(--fs-sm); }
 [data-mascot='off'] .widget .regen-row { padding-left: 0; }
 [data-mascot='off'] .widget .run-error-row { margin-left: 0; }
 .widget .messages-inner .msg-actions { min-height: 22px; }
 /* Page-sized headings read as shouting in a panel, and an image wider than the window scrolls it sideways. */
-.widget .markdown h1 { font-size: 15px; }
+.widget .markdown h1 { font-size: var(--fs-lg); }
 .widget .markdown h2 { font-size: 14px; }
-.widget .markdown h3 { font-size: 13px; }
+.widget .markdown h3 { font-size: var(--fs-md); }
 .widget .markdown h1, .widget .markdown h2, .widget .markdown h3, .widget .markdown h4 { margin: 12px 0 6px; }
 .widget .markdown img { max-width: 100%; height: auto; }
 .widget .messages-inner .msg.user .user-bubble { padding: 6px 10px; }
@@ -341,7 +341,7 @@
 /* The blob's speech bubble: what the reply is doing now, hung off the face's upper right; the sharp corner is its tail. */
 .blob-say {
   position: absolute; left: 82%; bottom: 78%; max-width: 220px; padding: 5px 9px;
-  font-size: 11px; line-height: 1.3; color: var(--text-muted); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: var(--fs-xs); line-height: 1.3; color: var(--text-muted); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 10px 10px 10px 2px; box-shadow: var(--shadow-float);
   pointer-events: none; animation: win-open var(--dur-window) var(--spring);
 }
@@ -355,7 +355,7 @@
 .crew-sat { position: absolute; width: 22%; height: 22%; padding: 0; border: 0; background: var(--bg-elev); border-radius: 50%; transform: translate(-50%, -50%); cursor: pointer; }
 .crew-sat-btn { padding: 0; border: 0; background: none; border-radius: 50%; cursor: pointer; }
 .crew-ring-box { position: relative; width: 160px; height: 160px; margin: 0 auto 6px; }
-.crew-up { position: absolute; left: 0; top: 0; z-index: 1; padding: 0 6px; font-size: 11px; color: var(--text-muted); background: none; border: 0; cursor: pointer; }
+.crew-up { position: absolute; left: 0; top: 0; z-index: 1; padding: 0 6px; font-size: var(--fs-xs); color: var(--text-muted); background: none; border: 0; cursor: pointer; }
 .crew-up:hover { color: var(--text); }
 .crew-sat .face { width: 100%; height: 100%; }
 .chat-blob:hover .crew-sat .face, .chat-blob:hover .crew-center .face { transform: none; }
@@ -367,7 +367,7 @@
 .crew-head { gap: 8px; }
 .crew-head .crew-title { font-weight: 500; color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 45%; }
 .crew-now {
-  flex: none; padding: 4px var(--widget-pad) 0; font-size: 11px; color: var(--text-muted);
+  flex: none; padding: 4px var(--widget-pad) 0; font-size: var(--fs-xs); color: var(--text-muted);
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
 .crew-tree { display: flex; flex-direction: column; gap: 2px; }
@@ -378,9 +378,9 @@
 .crew-row:not(.step) { cursor: pointer; }
 .crew-row:not(.step):hover, .crew-row.on { background: var(--widget-row-hover); }
 .crew-row .crew-name { font-weight: 500; white-space: nowrap; }
-.crew-row .crew-what { flex: 1; min-width: 0; font-size: 11px; color: var(--text-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.crew-row .crew-mark { flex: none; width: 14px; text-align: center; font-size: 11px; color: var(--text-muted); }
-.crew-state { flex: none; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.crew-row .crew-what { flex: 1; min-width: 0; font-size: var(--fs-xs); color: var(--text-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.crew-row .crew-mark { flex: none; width: 14px; text-align: center; font-size: var(--fs-xs); color: var(--text-muted); }
+.crew-state { flex: none; font-size: var(--fs-xs); color: var(--text-muted); white-space: nowrap; }
 .crew-state.working, .crew-mark.working { color: var(--st-working); }
 .crew-state.needs-you, .crew-mark.needs-you { color: var(--st-needs-you); }
 .crew-state.done, .crew-mark.done { color: var(--st-done); }
@@ -388,7 +388,7 @@
 /* The card under a clicked row: the task, the live tool call and the numbers. */
 .crew-pop {
   margin: 0 7px 4px 7px; padding: 8px 10px; border-radius: var(--win-radius-sm);
-  background: var(--widget-row); border: 1px solid var(--border); font-size: 12px; line-height: 1.4;
+  background: var(--widget-row); border: 1px solid var(--border); font-size: var(--fs-sm); line-height: 1.4;
 }
 .crew-pop p { margin: 0 0 4px; overflow-wrap: anywhere; }
 .crew-pop .crew-pop-now { color: var(--st-working); }
@@ -398,7 +398,7 @@
 .crew-signal {
   display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px;
   border: 1px solid var(--signal, var(--border-strong)); color: var(--signal, var(--text)); background: color-mix(in srgb, var(--signal, var(--border)) 14%, transparent);
-  font-size: 11px; font-weight: 500; cursor: pointer; animation: crew-pulse 1.1s ease-out 3;
+  font-size: var(--fs-xs); font-weight: 500; cursor: pointer; animation: crew-pulse 1.1s ease-out 3;
 }
 .crew-signal.done { --signal: var(--st-done); }
 .crew-signal.failed { --signal: var(--st-failed); }

@@ -230,12 +230,16 @@ export default function TodosView(): JSX.Element {
                     <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Show done
                   </label>
                 )}
-                <label className="pop-menu-field">Sort
+                <label className="view-menu-row">
+                  <span>Sort</span>
                   <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as 'due' | 'urgency')}><option value="due">Due</option><option value="urgency">Urgency</option></select>
                 </label>
-                <div className="seg" role="group" aria-label="Layout">
-                  <button className={`icon-btn${board ? '' : ' on'}`} aria-pressed={!board} title="List view" aria-label="List view" onClick={() => setView('list')}><List size={14} /></button>
-                  <button className={`icon-btn${board ? ' on' : ''}`} aria-pressed={board} title="Board view" aria-label="Board view" onClick={() => setView('board')}><KanbanSquare size={14} /></button>
+                <div className="view-menu-row">
+                  <span>Layout</span>
+                  <div className="seg" role="group" aria-label="Layout">
+                    <button type="button" aria-pressed={!board} title="List view" aria-label="List view" onClick={() => setView('list')}>List</button>
+                    <button type="button" aria-pressed={board} title="Board view" aria-label="Board view" onClick={() => setView('board')}>Board</button>
+                  </div>
                 </div>
               </>
             )}

@@ -2200,6 +2200,9 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .tasks-sync-row small { margin-left: auto; }
 .tasks-sync-row > .toggle-text { flex: 1; text-align: left; }
 .tasks-sync-row > input { flex: 0 1 220px; }
+/* Inside a dialog `.modal label` stacks children as a column, which turned the input's 220px flex-basis into a height. */
+.modal .tasks-sync label.tasks-sync-row:not(.modal-free *) { flex-direction: row; align-items: center; margin: 0; }
+.modal .tasks-sync .tasks-sync-row > input:not(.modal-free *) { flex: 0 1 220px; width: auto; min-width: 0; height: auto; }
 .g-logo { width: 32px; height: 32px; border-radius: 8px; background: #fff; color: #4285f4; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; }
 .g-logo-sm { width: 18px; height: 18px; border-radius: 4px; font-size: 12px; margin-right: 2px; }
 .setup { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
@@ -2634,10 +2637,11 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .cal-nav { display: flex; align-items: center; gap: 2px; }
 .cal-nav .ghost-btn { margin-right: 4px; }
 .cal-nav .seg { margin-left: 6px; }
-.cal-range { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.cal-page .page-header { gap: 8px; }
+.cal-range { flex: 1 0 auto; min-width: 0; font-size: 13.5px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .cal-body { flex: 1; min-height: 0; display: flex; }
 .cal-cals {
-  width: 196px; flex: 0 0 196px; overflow: auto;
+  width: 160px; flex: 0 0 160px; overflow: auto;
   border-right: 1px solid var(--border); padding: 10px 8px 16px;
 }
 .cal-cals h3 {
@@ -2666,7 +2670,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .cal-scroll { flex: 1; min-width: 0; overflow: auto; position: relative; }
 /* minmax(0, 1fr), not 1fr: plain 1fr floors each track at its content width, so a
    long all-day chip used to stretch its own day column. */
-.cal-grid { display: grid; grid-template-columns: 56px repeat(7, minmax(0, 1fr)); min-width: 760px; }
+.cal-grid { display: grid; grid-template-columns: 48px repeat(7, minmax(0, 1fr)); min-width: 640px; }
 .cal-corner, .cal-dayhead, .cal-allday-label, .cal-allday { position: sticky; background: var(--bg); z-index: 2; border-bottom: 1px solid var(--border); }
 .cal-corner, .cal-dayhead { top: 0; }
 .cal-allday-label, .cal-allday { top: 46px; min-height: 26px; }
@@ -3398,7 +3402,13 @@ select:focus-visible {
 .recap-inline > header { font-weight: 500; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
 .recap-inline .markdown { font-size: 12.5px; }
 .recap-inline .markdown.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; cursor: pointer; }
-.page-header .pop-menu-panel { bottom: auto; top: calc(100% + 6px); left: auto; right: 0; width: 200px; }
+.page-header .pop-menu-panel { bottom: auto; top: calc(100% + 6px); left: auto; right: 0; width: 220px; }
+.view-menu-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 8px; font-size: 13px; color: var(--text); }
+.view-menu-row > span { color: var(--text-muted); }
+.view-menu-row select { width: auto; max-width: 110px; }
+.view-menu-row .seg button { padding: 3px 10px; }
+.todo-titlerow { display: flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 100%; }
+.todo-titlerow .g-logo-sm { flex: 0 0 auto; margin: 0; align-self: center; }
 .pop-menu-check { flex-direction: row; align-items: center; gap: 6px; }
 .sync-status { font-size: 12px; color: var(--text-faint); }
 .page-header .pop-menu-panel .seg { margin: 4px 8px; align-self: flex-start; }

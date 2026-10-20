@@ -90,7 +90,10 @@ function TodoItem({ todo, showProject = true, compact = false, depth = 0, onTag 
         {editing ? (
           <input autoFocus aria-label="Todo title" value={title} onChange={(e) => setTitle(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setTitle(startTitle.current); setEditing(false) } }} />
         ) : (
-          <span className="todo-title" title="Click to rename" {...rowButton(beginEdit)}>{todo.title}</span>
+          <span className="todo-titlerow">
+            <span className="todo-title" title="Click to rename" {...rowButton(beginEdit)}>{todo.title}</span>
+            {todo.external_id && <span className="g-logo g-logo-sm" title="Synced with Google Tasks">G</span>}
+          </span>
         )}
         {!compact && todo.notes && <span className="todo-notes">{todo.notes}</span>}
         {sub !== null && (
@@ -103,7 +106,6 @@ function TodoItem({ todo, showProject = true, compact = false, depth = 0, onTag 
         {!!todo.blocked_count && !todo.done && <span className="todo-blocked" title={`Waiting on ${todo.blocked_count} open todo${todo.blocked_count > 1 ? 's' : ''}`}><Lock size={11} /></span>}
         {todo.tags?.map((t) => <button key={t} className="todo-tag" title={`Filter by #${t}`} onClick={() => onTag?.(t)}>#{t}</button>)}
         {todo.repeat && <span className="todo-repeat" title={`Repeats every ${todo.repeat.every > 1 ? todo.repeat.every + ' ' : ''}${todo.repeat.unit}${todo.repeat.every > 1 ? 's' : ''}${todo.repeat.mode === 'from_completion' ? ' after completion' : ''}`}><Repeat size={11} /></span>}
-        {todo.external_id && <span className="g-logo g-logo-sm" title="Synced with Google Tasks">G</span>}
         {showProject && todo.project_id && <ProjectChip projectId={todo.project_id} />}
         {/* `quiet`: a control with nothing set (or, for tags, one the chips already show) fades out until the row is hovered or focused. Its
             space is kept, so nothing moves when it comes back. */}

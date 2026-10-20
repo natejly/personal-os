@@ -134,10 +134,15 @@ export default function Sidebar(): JSX.Element {
     return () => clearTimeout(t)
   }, [query, composed])
   const searchRef = useRef<HTMLInputElement>(null)
-  // A narrow window starts (and falls) without the sidebar; the toggle still brings it back.
+  // A narrow window starts (and falls) without the sidebar; the toggle brings it back, and widening restores a fold made here.
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 899px)')
-    const fold = (): void => { if (mq.matches && useStore.getState().sidebarOpen) toggleSidebar() }
+    let auto = false // only a fold made here is undone when the window widens again
+    const fold = (): void => {
+      const open = useStore.getState().sidebarOpen
+      if (mq.matches && open) { auto = true; toggleSidebar() }
+      else if (!mq.matches && auto) { auto = false; if (!open) toggleSidebar() }
+    }
     fold()
     mq.addEventListener('change', fold)
     return () => mq.removeEventListener('change', fold)

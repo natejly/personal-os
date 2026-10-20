@@ -133,6 +133,7 @@ export async function launchSupervised({ settings = {} } = {}) {
   const env = {
     ...process.env,
     GRAIN_USER_DATA: profile,
+    TMPDIR: '/tmp', // Chromium also makes sockets under TMPDIR; the suite's TMPDIR is deep
     ...(process.env.E2E_FOREGROUND ? {} : { GRAIN_E2E_BACKGROUND: '1' }),
     GRAIN_SECRETS_BACKEND: 'file',
     FIRECRAWL_API_KEY: '', // e2e never calls the live web provider

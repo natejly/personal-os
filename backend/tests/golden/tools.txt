@@ -27,10 +27,13 @@ schedule_suggest 841d47a22933371e
 health_summary a73d9a964eaf79c5
 health_log b7fbd2b763b8d229
 health_delete_entry 09ccbdc9845214bb
+latex_projects c2e9f548cf73c804
+latex_new e52f514c4bcd1994
+latex_compile 6decd34c8da4d656
 doc_list 9521ca89eee91e16
 doc_search b9de94309e5c09ee
 doc_read 40d066271bab1c33
-doc_create 5d077f04ef793a2f
+doc_create 67cc3259b8860fd8
 doc_edit a17ce2c49a5c40dc
 doc_delete 0c503234bd7ba967
 doc_comments 9c3d982742dbb0e9

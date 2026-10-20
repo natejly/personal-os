@@ -5,7 +5,7 @@ import { openAdvanced, save } from './helpers/home.mjs'
 import { expect, newChat, say, homeScratch, rmScratch, pending, realErrors, resize, SHELL_SANDBOX } from './helpers/cowork.mjs'
 const openPerTool = async (page) => {
   const d = page.locator('details[data-disclosure="per-tool-access"]')
-  if (!(await d.evaluate((e) => e.open))) await d.locator('summary').click()
+  if (!(await d.evaluate((e) => e.open))) await d.locator(':scope > summary').click()
 }
 test.describe.configure({ timeout: 300_000 })
 

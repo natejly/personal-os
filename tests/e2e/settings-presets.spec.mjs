@@ -4,7 +4,7 @@ import { newChat, sayAndWait } from './helpers/chat.mjs'
 
 const openPresets = async (page) => {
   const d = dialog(page).locator('details[data-disclosure="permission-presets"]')
-  if (!(await d.evaluate((e) => e.open))) await d.locator('summary').click()
+  if (!(await d.evaluate((e) => e.open))) await d.locator(':scope > summary').click()
 }
 const preset = (page, id) => dialog(page).locator(`.preset-list li[data-preset="${id}"]`)
 

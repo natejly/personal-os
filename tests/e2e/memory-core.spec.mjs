@@ -19,7 +19,7 @@ test('add, edit, pin, forget a memory from Settings; counts follow', async ({ gr
   await expect(page.getByText(/^0 memories · 0 entities, 0 relations/)).toBeVisible()
   await addBox(page).fill('I live in Lisbon')
   await page.getByLabel('Kind for the new memory').selectOption('preference')
-  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await pane(page).getByRole('button', { name: 'Add', exact: true }).click()
   await expect(pane(page).getByText('I live in Lisbon')).toBeVisible()
   await expect(page.getByText(/^1 memory · /)).toBeVisible()
   await expect(addBox(page)).toHaveValue('')
@@ -82,7 +82,7 @@ test('blank memory is refused, Enter adds, whitespace-only add is disabled, mark
   const { page, api } = grain
   await openMemory(page)
   await addBox(page).fill('   ')
-  await expect(page.getByRole('button', { name: 'Add', exact: true })).toBeDisabled()
+  await expect(pane(page).getByRole('button', { name: 'Add', exact: true })).toBeDisabled()
   await addBox(page).fill('<img src=x onerror=alert(1)> **not bold**')
   await addBox(page).press('Enter')
   await expect(pane(page).getByText('<img src=x onerror=alert(1)> **not bold**')).toBeVisible()

@@ -10,7 +10,7 @@ const toggle = (page, name) => dialog(page).getByRole('checkbox', { name, exact:
 test('a sidebar row turns off on Save, stays off after a relaunch, and comes back', async ({ grain }) => {
   const { page, api } = grain
   await expect(row(page, 'Lists')).toHaveCount(1)
-  await openSettings(page, 'Sidebar and layout')
+  await openSettings(page, 'General')
   await expect(toggle(page, 'Lists')).toBeChecked()
   await toggle(page, 'Lists').locator('xpath=following-sibling::span[contains(@class,"switch")]').click()
   await expect(toggle(page, 'Lists')).not.toBeChecked()
@@ -23,7 +23,7 @@ test('a sidebar row turns off on Save, stays off after a relaunch, and comes bac
   const p2 = await grain.relaunch()
   await expect(p2.locator('.sidebar').first()).toBeVisible()
   await expect(row(p2, 'Lists')).toHaveCount(0)
-  await openSettings(p2, 'Sidebar and layout')
+  await openSettings(p2, 'General')
   await expect(toggle(p2, 'Lists')).not.toBeChecked()
   await toggle(p2, 'Lists').locator('xpath=following-sibling::span[contains(@class,"switch")]').click()
   await expect(toggle(p2, 'Lists')).toBeChecked()
@@ -40,7 +40,7 @@ test('disabling an extension in Developer is not undone by a later Sidebar Save'
   await dialog(page).locator('.adv-group > summary', { hasText: /^Coding/ }).click()
   await dialog(page).getByRole('button', { name: 'Disable', exact: true }).click()
   await expect.poll(async () => (await api('/settings')).hiddenViews).toEqual(['coding'])
-  await tabBtn(page, 'Sidebar and layout').click()
+  await tabBtn(page, 'General').click()
   await toggle(page, 'Lists').locator('xpath=following-sibling::span[contains(@class,"switch")]').click()
   await save(page)
   await expect.poll(async () => (await api('/settings')).hiddenViews.sort()).toEqual(['coding', 'todos'])

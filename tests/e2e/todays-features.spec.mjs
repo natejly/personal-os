@@ -1,6 +1,6 @@
 // Coverage for the 2026-10-12 merges: model duels, shipped sidebar rows, General first, appearance presets.
 import { test, expect } from './fixtures.mjs'
-import { dialog, openSettings } from './helpers/home.mjs'
+import { dialog, openMoreAppearance, openSettings } from './helpers/home.mjs'
 import { newChat, say, assistants, users, anyStop, msgBox } from './helpers/chat.mjs'
 
 const benign = (e) => /ResizeObserver|favicon|Autofill|DevTools/i.test(e)
@@ -10,7 +10,7 @@ test('Settings opens on General and the tabs run in the shipped order', async ({
   await openSettings(page)
   await expect(dialog(page).getByRole('tab', { selected: true })).toHaveText(/^General/)
   const tabs = await dialog(page).getByRole('tab').allInnerTexts()
-  expect(tabs.map((t) => t.trim().split('\n')[0].replace(/(Dark|Light|System)$/, ''))).toEqual(['General', 'Models', 'Agent', 'Context and memory', 'Permissions', 'Extensions', 'Hooks and automations', 'Integrations', 'Sidebar and layout', 'Usage', 'Advanced'])
+  expect(tabs.map((t) => t.trim().split('\n')[0].replace(/(Dark|Light|System)$/, ''))).toEqual(['General', 'Models', 'Assistant', 'Permissions', 'Extensions', 'Integrations', 'Advanced'])
   expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
 })
 
@@ -27,13 +27,13 @@ test('a fresh data dir shows Files, Lists, Calendar, Library, Jobs, Canvases and
 
 test('an appearance preset sets theme, accent and fonts together, and Save keeps it', async ({ grain }) => {
   const { page, api } = grain
-  const d = await openSettings(page, 'General')
+  const d = await openMoreAppearance(page)
   await d.getByRole('radiogroup', { name: 'Appearance presets' }).getByRole('radio', { name: /Terminal/ }).click()
   const attrs = () => page.evaluate(() => ({ ...document.documentElement.dataset }))
   await expect.poll(attrs).toMatchObject({ theme: 'dark', accent: 'mint', font: 'mono', code: 'menlo' })
   await d.getByRole('radiogroup', { name: 'Appearance presets' }).getByRole('radio', { name: /Paper/ }).click()
   await expect.poll(attrs).toMatchObject({ theme: 'light', accent: 'clay', font: 'serif' })
-  await d.getByRole('button', { name: /^(Save|Done)/ }).first().click()
+  await d.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(dialog(page)).toHaveCount(0)
   await expect.poll(async () => (await api('/settings')).accent).toBe('clay')
   expect((await api('/settings')).uiFont).toBe('serif')

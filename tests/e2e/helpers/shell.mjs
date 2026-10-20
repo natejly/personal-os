@@ -119,7 +119,9 @@ export async function launchSupervised({ settings = {} } = {}) {
   const scratchRoot = process.env.E2E_SCRATCH || join(process.env.CLAUDE_JOB_DIR || '/tmp', 'tmp', 'e2e-scratch')
   mkdirSync(scratchRoot, { recursive: true })
   const scratch = mkdtempSync(join(scratchRoot, 'sup-'))
-  const profile = join(scratch, 'profile')
+  // Chromium binds a Unix socket (SingletonSocket) inside the profile, and socket paths max out near 107 bytes,
+  // so a deep E2E_SCRATCH would kill Electron at launch. Keep the profile in a short directory instead.
+  const profile = mkdtempSync(join(process.platform === 'win32' ? scratch : '/tmp', 'gsup-'))
   const dataDir = join(profile, 'data')
   mkdirSync(dataDir, { recursive: true })
   const llm = await startMockLLM()
@@ -163,7 +165,7 @@ export async function launchSupervised({ settings = {} } = {}) {
   }
   return {
     app, page, llm, consoleErrors, backendPid, dataDir,
-    close: async () => { try { await app.close() } catch {} ; llm.close(); if (!process.env.E2E_KEEP) { try { rmSync(scratch, { recursive: true, force: true }) } catch {} } }
+    close: async () => { try { await app.close() } catch {} ; llm.close(); if (!process.env.E2E_KEEP) { try { rmSync(scratch, { recursive: true, force: true }) } catch {} ; try { rmSync(profile, { recursive: true, force: true }) } catch {} } }
   }
 }
 

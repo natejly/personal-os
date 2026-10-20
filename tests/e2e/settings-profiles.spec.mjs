@@ -8,7 +8,7 @@ const flip = (page, name) => profile(page, name).locator('xpath=following-siblin
 test('a profile switch applies its defaults at once and turning it off puts them back', async ({ grain }) => {
   const { page, api } = grain
   await expect(row(page, 'Lists')).toHaveCount(1)
-  await openSettings(page, 'Sidebar and layout')
+  await openSettings(page, 'General')
   // The harness starts with every view on. If a first boot recorded Lean as on, switch it off first and wait for that to land.
   if (await profile(page, 'Lean').isChecked()) {
     await flip(page, 'Lean')
@@ -39,7 +39,7 @@ test('a profile that hides Lists takes its todo chips off the Calendar', async (
   const chips = page.locator('.cal-chip.todo')
   await row(page, 'Calendar').click()
   await expect(chips).toHaveCount(1)
-  await openSettings(page, 'Sidebar and layout')
+  await openSettings(page, 'General')
   await flip(page, 'Focus')
   await expect(row(page, 'Lists')).toHaveCount(0)
   await dialog(page).getByRole('button', { name: 'Close' }).first().click()

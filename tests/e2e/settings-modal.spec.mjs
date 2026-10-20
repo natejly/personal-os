@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { TABS, setToggle, dialog, tabBtn, openAdvanced, openSettings, closeSettings, save, setWindowSize } from './helpers/home.mjs'
+import { TABS, openMoreAppearance, setToggle, dialog, tabBtn, openAdvanced, openSettings, closeSettings, save, setWindowSize } from './helpers/home.mjs'
 
 const benign = (e) => /ResizeObserver|Autofocus|favicon/i.test(e)
 const noErrors = (grain) => expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
@@ -89,7 +89,7 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
   await field(page, 'Dictation key').fill('Control+Alt+K')
   await openAdvanced(page, 'Developer')
   await setToggle(field(page, 'Developer tools'), true)
-  await openSettings(page, 'Context and memory')
+  await openSettings(page, 'Assistant')
   await dialog(page).locator('summary', { hasText: 'Learning' }).click()
   await setToggle(field(page, 'Learn from chats'), false)
   await setToggle(field(page, 'Learn how I write'), false)
@@ -316,7 +316,7 @@ test('a 200 KB system prompt saves and reloads; junk in view toggles cannot bric
   }
   const p2 = await grain.relaunch()
   await expect(p2.locator('.sidebar').first()).toBeVisible()
-  await openSettings(p2, 'Sidebar and layout')
+  await openSettings(p2, 'General')
   await expect(dialog(p2).getByRole('checkbox', { name: 'Library', exact: true })).toBeVisible()
   await closeSettings(p2)
   noErrors(grain)
@@ -356,7 +356,7 @@ test('the Mascot setting swaps the faces for blobs or a status dot, and saves', 
   const row = page.locator('.sidebar .convo-item', { hasText: 'Mascot chat' })
   await expect(row.locator('svg.face.sprout')).toHaveCount(1)
   const pick = async (label) => {
-    await openSettings(page)
+    await openMoreAppearance(page)
     await dialog(page).getByRole('radiogroup', { name: 'Mascot' }).getByRole('radio', { name: label, exact: true }).click()
     await save(page)
   }

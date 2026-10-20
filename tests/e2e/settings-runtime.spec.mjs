@@ -4,18 +4,20 @@ import { newChat, sayAndWait } from './helpers/chat.mjs'
 
 const SLOTS = ['model.client', 'model.router', 'tools.source', 'sandbox.backend', 'agent.loop', 'memory.system']
 
-test('Settings > Runtime shows every slot on its built-in provider, with where it comes from', async ({ grain }) => {
+test('the agent loop picker shows its built-in source, and Extensions shows no Runtime pickers while no provider exists', async ({ grain }) => {
   const { page, api } = grain
-  await openSettings(page, 'Agent')
-  for (const slot of SLOTS) {
-    await expect(dialog(page).getByTestId(`runtime-${slot}-reason`)).toContainText('built-in default')
-  }
-  // The model router has only its built-in provider, so there is nothing to pick; the agent loop has one built-in alternative.
-  await expect(dialog(page).getByLabel('Model router, Everywhere')).toBeDisabled()
+  await openSettings(page, 'Assistant')
+  await expect(dialog(page).getByTestId('runtime-agent.loop-reason')).toContainText('built-in default')
+  // The agent loop has one built-in alternative; it is the only slot with a choice.
   await expect(dialog(page).getByLabel('Agent loop, Everywhere').locator('option')).toHaveText(['Default (Chat loop)', 'Chat loop', 'Plan, execute, verify (built-in)'])
   const resolved = await api('/runtime/resolve')
   expect(Object.keys(resolved).sort()).toEqual([...SLOTS].sort())
   expect(Object.values(resolved).every((r) => r.default === true && r.source === 'default')).toBe(true)
+  // No extension offers a provider for the other slots, so nothing for them is rendered anywhere in Settings.
+  await openSettings(page, 'Extensions')
+  await expect(dialog(page).locator('#sec-runtime')).toBeEmpty()
+  for (const slot of SLOTS.filter((x) => x !== 'agent.loop')) await expect(dialog(page).getByTestId(`runtime-${slot}`)).toHaveCount(0)
+  await expect(dialog(page).getByText(/No extension offers/)).toHaveCount(0)
   await closeSettings(page)
 })
 
@@ -25,7 +27,7 @@ const slot = (id, providers, over = {}) => ({ id, noun: id, multi: false, defaul
   resolution: resolution(id), selected: { global: null, project: null, chat: null }, ...over })
 const PARTIAL = { 'workspace-write': { fs_write: 'full', fs_read_deny: 'partial', network: 'full', process: 'full' } }
 
-test('Settings > Runtime picks per scope, confirms a looser choice, tests a provider and accepts a partial dimension', async ({ grain }) => {
+test('Settings > Extensions > Runtime lists only slots with an alternative provider, picks per scope, confirms a looser choice, tests a provider and accepts a partial dimension', async ({ grain }) => {
   const { page } = grain
   await newChat(page)
   await sayAndWait(page, '!!reply hello', 'hello')
@@ -47,7 +49,7 @@ test('Settings > Runtime picks per scope, confirms a looser choice, tests a prov
   await page.route(/\/runtime\/test$/, (route) => route.fulfill({ json: { ok: false, detail: 'AssertionError: bad stream' } }))
   await page.route(/\/runtime\/accept-partial$/, (route) => { accepts.push(route.request().postDataJSON()); return route.fulfill({ json: {} }) })
 
-  await openSettings(page, 'Agent')
+  await openSettings(page, 'Extensions')
   // The chat is focused, so the choice can be made for this chat.
   const runtime = dialog(page).locator('#sec-runtime')
   await runtime.getByRole('button', { name: 'This chat' }).click()

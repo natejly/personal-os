@@ -4,6 +4,8 @@ import ExtensionsDev from './ExtensionsDev'
 import EffectiveConfig from './EffectiveConfig'
 import DataSettings from '../DataSettings'
 import TrashPanel from '../TrashPanel'
+import UsageView from '../UsageView'
+import HooksTab from './HooksTab'
 import NumberField from './NumberField'
 import Switch from './Switch'
 import { AdvGroup, Sec, type GroupProps, type TabProps } from './shared'
@@ -30,6 +32,14 @@ export default function AdvancedTab({ draft, patch, openGroups, toggle, onExtens
           <Switch title="Developer tools" checked={draft.devTools === true} onChange={(devTools) => patch({ devTools })} />
           <TraceExportSettings value={draft.otelExport} onChange={(otelExport) => patch({ otelExport })} />
           {draft.devTools === true && <ExtensionsDev onChanged={onExtensionsChanged} />}
+      </AdvGroup></Sec>
+
+      <Sec id="usage"><AdvGroup id="usage" title="Usage" {...gp}>
+          <UsageView />
+      </AdvGroup></Sec>
+
+      <Sec id="hooks"><AdvGroup id="hooks" title="Hooks and scheduled jobs" {...gp}>
+          <HooksTab />
       </AdvGroup></Sec>
     </section>
   )

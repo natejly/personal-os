@@ -8,7 +8,7 @@ import Switch from './Switch'
 import { ScopeButtons, SelectNotices, SlotPicker } from './RuntimeParts'
 import { useRuntimeSelect } from './useRuntimeSelect'
 
-/** The agent loop is chosen in the Agent section's Loop group. */
+/** The agent loop is chosen in the Assistant section's Loop group. */
 const LOOP_SLOT = 'agent.loop'
 
 function Enforcement({ enforcement }: { enforcement: NonNullable<RuntimeResolution['enforcement']> }): JSX.Element {
@@ -42,18 +42,21 @@ export default function RuntimeTab(): JSX.Element {
             <Switch key={p.id} title={p.label} checked={sourceShown(at, s.selected[at], s.resolution, p.id)} disabled={!p.available}
               onChange={(on) => select(s.id, toggleSource(s.selected[at], p.id, on))} />
           ))}
-          {!s.providers.some((p) => !p.core) && <p className="set-help">No extension offers a {s.noun}.</p>}
         </>
       )
     }
     return <SlotPicker slot={s} rt={rt} />
   }
 
+  // A slot is worth a picker only once an extension offers something besides the built-in; with none, nothing shows.
+  const slots = view?.slots.filter((s) => s.id !== LOOP_SLOT && s.providers.some((p) => !p.core)) ?? []
+  if (!view || !slots.length) return <></>
   return (
     <>
+      <h4>Runtime</h4>
       <ScopeButtons rt={rt} />
       <SelectNotices rt={rt} />
-      {view?.slots.filter((s) => s.id !== LOOP_SLOT).map((s) => (
+      {slots.map((s) => (
         <div key={s.id} className="set-sec" data-testid={`runtime-${s.id}`}>
           <h4>{slotNoun(s.id)}</h4>
           <small data-testid={`runtime-${s.id}-reason`}>{sourceText(s.resolution.source)}{s.resolution.locality ? ` · ${s.resolution.locality}` : ''}</small>
@@ -82,4 +85,4 @@ export default function RuntimeTab(): JSX.Element {
   )
 }
 
-registerSettingsPanel(CORE, { id: 'runtime', label: 'Runtime', keys: 'agent loop sandbox terminal', Component: RuntimeTab, group: 'agent', order: 100 })
+registerSettingsPanel(CORE, { id: 'runtime', label: 'Runtime', keys: 'agent loop sandbox terminal', Component: RuntimeTab, group: 'extensions', order: 200 })

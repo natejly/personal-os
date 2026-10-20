@@ -14,7 +14,7 @@ test('rapid repeated memory actions: double Add, double Pin, double Forget leave
   const { page, api } = grain
   await openMemory(page)
   await page.getByPlaceholder(/Remember something/).fill('rapid fire memory')
-  await page.getByRole('button', { name: 'Add', exact: true }).dblclick()
+  await pane(page).getByRole('button', { name: 'Add', exact: true }).dblclick()
   await expect(pane(page).getByText('rapid fire memory')).toBeVisible()
   await page.waitForTimeout(500)
   expect((await api('/memories')).filter((m) => m.content === 'rapid fire memory')).toHaveLength(1)
@@ -36,7 +36,7 @@ test('backend dies while the Memory panel is open: the app stays up and recovers
   await expect(pane(page).getByText('survivor memory')).toBeVisible()
   backend.child.kill('SIGKILL')
   await page.getByPlaceholder(/Remember something/).fill('written into the void')
-  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await pane(page).getByRole('button', { name: 'Add', exact: true }).click()
   await page.waitForTimeout(1500)
   // the panel is still rendered and the old row is still shown
   await expect(pane(page).getByText('survivor memory')).toBeVisible()

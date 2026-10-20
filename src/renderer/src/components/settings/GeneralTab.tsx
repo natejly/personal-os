@@ -22,20 +22,6 @@ export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { sho
     <section>
       <Sec id="look">
       <h4>Appearance</h4>
-      <div className="preset-row" role="radiogroup" aria-label="Appearance presets">
-        {PRESETS.map((p) => {
-          const on = activePreset(draft) === p.id
-          return (
-            <button key={p.id} type="button" role="radio" aria-checked={on} className={`preset-card${on ? ' on' : ''}`}
-              onClick={() => patch({ theme: p.theme, accent: p.accent, uiFont: p.uiFont, codeFont: p.codeFont })}>
-              <span className="preset-prev" style={{ background: p.bg, color: p.fg, fontFamily: UI_FONTS.find((f) => f.id === p.uiFont)?.stack }}>
-                Aa<i style={{ background: p.dot }} />
-              </span>
-              <b>{p.label}</b>
-            </button>
-          )
-        })}
-      </div>
       <div className="setting-row">
         <span className="toggle-text"><b>Theme</b></span>
         <div className="seg" role="radiogroup" aria-label="Theme">
@@ -70,6 +56,22 @@ export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { sho
               onChange={(e) => patch({ accent: CUSTOM_ACCENT, accentCustom: e.target.value })} />
           </label>
         </div>
+      </div>
+      <details className="adv-group more-appearance">
+        <summary>More appearance</summary>
+      <div className="preset-row" role="radiogroup" aria-label="Appearance presets">
+        {PRESETS.map((p) => {
+          const on = activePreset(draft) === p.id
+          return (
+            <button key={p.id} type="button" role="radio" aria-checked={on} className={`preset-card${on ? ' on' : ''}`}
+              onClick={() => patch({ theme: p.theme, accent: p.accent, uiFont: p.uiFont, codeFont: p.codeFont })}>
+              <span className="preset-prev" style={{ background: p.bg, color: p.fg, fontFamily: UI_FONTS.find((f) => f.id === p.uiFont)?.stack }}>
+                Aa<i style={{ background: p.dot }} />
+              </span>
+              <b>{p.label}</b>
+            </button>
+          )
+        })}
       </div>
       <div className="setting-row">
         <span className="toggle-text"><b>Text colour</b><small>{TEXT_TONES.find((t) => t.id === textToneId(draft.textTone))?.label}</small></span>
@@ -133,6 +135,7 @@ export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { sho
           <button type="button" title={tip('Actual size', 'zoom-reset')} onClick={() => patch({ uiZoom: DEFAULT_ZOOM })}>Reset</button>
         </div>
       </div>
+      </details>
       <Switch title="Daily recap on new chats" checked={homeModuleOn(draft, 'recap')} onChange={(on) => patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), recap: on } })} />
       <Switch title="Start chat windows as blobs" checked={!!draft.compactChats} onChange={(compactChats) => patch({ compactChats })} />
       <div className="setting-row">

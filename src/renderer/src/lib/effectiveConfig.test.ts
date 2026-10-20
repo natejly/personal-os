@@ -44,6 +44,6 @@ test('a key links to the tab that edits it', () => {
   assert.equal(tabFor('tools.shell_run'), 'permissions')
   assert.equal(tabFor('defaultEffort'), 'models')
   assert.equal(tabFor('accent'), 'general')
-  assert.equal(tabFor('hiddenViews'), 'layout')
+  assert.equal(tabFor('hiddenViews'), 'general')
   assert.equal(tabFor('toolDeferAbove'), null)
 })

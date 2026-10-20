@@ -1,34 +1,36 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveTab, searchSettings, SECTION_ORDER, SETTINGS_INDEX, sectionOf, shownTab } from './settingsTabs'
+import { resolveTab, searchSettings, SECTION_ALIAS, SECTION_ORDER, SETTINGS_INDEX, sectionOf, shownTab } from './settingsTabs'
 
 test('old tab ids map to the new sections', () => {
   assert.deepEqual(resolveTab('appearance'), { tab: 'general' })
   assert.deepEqual(resolveTab('model'), { tab: 'models' })
   assert.deepEqual(resolveTab('models'), { tab: 'models' })
   assert.deepEqual(resolveTab('provider'), { tab: 'models', group: 'provider' })
-  assert.deepEqual(resolveTab('agents'), { tab: 'agent' })
-  assert.deepEqual(resolveTab('cowork'), { tab: 'agent', group: 'desks' })
-  assert.deepEqual(resolveTab('memory'), { tab: 'context' })
-  assert.deepEqual(resolveTab('learning'), { tab: 'context', group: 'learning' })
+  assert.deepEqual(resolveTab('agents'), { tab: 'assistant' })
+  assert.deepEqual(resolveTab('cowork'), { tab: 'assistant', group: 'desks' })
+  assert.deepEqual(resolveTab('memory'), { tab: 'assistant', group: 'memories' })
+  assert.deepEqual(resolveTab('learning'), { tab: 'assistant', group: 'learning' })
   assert.deepEqual(resolveTab('system'), { tab: 'permissions', group: 'system' })
-  assert.deepEqual(resolveTab('sidebar'), { tab: 'layout' })
-  assert.deepEqual(resolveTab('modules'), { tab: 'layout', group: 'sidebar' })
+  assert.deepEqual(resolveTab('sidebar'), { tab: 'general', group: 'sidebar' })
+  assert.deepEqual(resolveTab('modules'), { tab: 'general', group: 'sidebar' })
   assert.deepEqual(resolveTab('data'), { tab: 'advanced', group: 'data' })
   assert.deepEqual(resolveTab('workspace'), { tab: 'permissions' })
   assert.deepEqual(resolveTab('permissions'), { tab: 'permissions' })
   assert.deepEqual(resolveTab('extensions'), { tab: 'extensions' })
-  assert.deepEqual(resolveTab('spending'), { tab: 'usage' })
+  assert.deepEqual(resolveTab('spending'), { tab: 'advanced', group: 'usage' })
   assert.deepEqual(resolveTab('nope'), { tab: 'models' })
+  for (const [old, to] of Object.entries(SECTION_ALIAS)) assert.deepEqual(resolveTab(old), to)
+  assert.deepEqual(Object.keys(SECTION_ALIAS).sort(), ['agent', 'context', 'hooks', 'layout', 'usage'])
   for (const id of SECTION_ORDER) assert.deepEqual(resolveTab(id), { tab: id })
 })
 
-test('an extension section resolves to itself, except the runtime panel which lives in Agent', () => {
+test('an extension section resolves to itself, except the runtime panel which lives in Extensions', () => {
   assert.deepEqual(resolveTab('ext:demo:panel'), { tab: 'ext:demo:panel' })
-  assert.deepEqual(resolveTab('ext:core:runtime'), { tab: 'agent', group: 'runtime' })
-  assert.equal(sectionOf('ext:core:runtime'), 'agent')
+  assert.deepEqual(resolveTab('ext:core:runtime'), { tab: 'extensions', group: 'runtime' })
+  assert.equal(sectionOf('ext:core:runtime'), 'extensions')
   assert.equal(sectionOf('ext:demo:panel'), 'advanced')
-  assert.equal(sectionOf('hooks'), 'hooks')
+  assert.equal(sectionOf('advanced'), 'advanced')
 })
 
 test('behavior and texting land on their new homes', () => {
@@ -38,7 +40,7 @@ test('behavior and texting land on their new homes', () => {
 
 test('every index entry sits in a real section and the new groups are findable', () => {
   for (const e of SETTINGS_INDEX) assert.ok((SECTION_ORDER as readonly string[]).includes(e.tab), e.sec)
-  for (const [q, sec] of [['doom', 'loop'], ['sandbox', 'runtime'], ['auto compact', 'compaction'], ['what the model sees', 'inspector'], ['cron', 'jobs'], ['hook latency', 'hooks']] as const) assert.ok(searchSettings(q).some((e) => e.sec === sec), q)
+  for (const [q, sec] of [['doom', 'loop'], ['sandbox', 'runtime'], ['auto compact', 'compaction'], ['what the model sees', 'inspector'], ['cron', 'hooks'], ['hook latency', 'hooks']] as const) assert.ok(searchSettings(q).some((e) => e.sec === sec), q)
 })
 
 test('search matches every typed word against titles and keywords', () => {

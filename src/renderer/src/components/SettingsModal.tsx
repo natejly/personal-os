@@ -16,12 +16,10 @@ import { settingsPanels } from '../extensions/host'
 import { viewHidden } from '../moduleToggles'
 import type { ExtensionInfo, Settings } from '@shared/types'
 import ModelTab from './settings/ModelTab'
-import UsageTab from './settings/UsageTab'
 import PermissionsTab from './settings/PermissionsTab'
 import IntegrationsTab from './settings/IntegrationsTab'
 import AgentsTab from './settings/AgentsTab'
 import ContextTab from './settings/ContextTab'
-import HooksTab from './settings/HooksTab'
 import GeneralTab, { THEMES } from './settings/GeneralTab'
 import SidebarTab from './settings/SidebarTab'
 import SystemTab from './settings/SystemTab'
@@ -217,8 +215,7 @@ export default function SettingsModal(): JSX.Element {
     modeLabel: MODES.find((m) => m.id === mode)?.label,
     google,
     autoCompact: settings.autoCompact ?? true,
-    extensionsOn: extList ? extList.filter((e) => e.enabled).length : null,
-    hooks: extList ? extList.filter((e) => e.enabled).reduce((n, e) => n + e.hooks.length, 0) : null
+    extensionsOn: extList ? extList.filter((e) => e.enabled).length : null
   })
 
   // Vertical tablist: arrows move and select, Home/End jump to the ends.
@@ -248,16 +245,12 @@ export default function SettingsModal(): JSX.Element {
   useEffect(() => { paneRef.current?.scrollTo?.({ top: 0 }) }, [tab])
   const content = (): JSX.Element | null => {
     switch (tab) {
-      case 'general': return <GeneralTab {...tabProps} shortcuts={shortcuts} />
+      case 'general': return <><GeneralTab {...tabProps} shortcuts={shortcuts} /><SidebarTab {...tabProps} onProfileApplied={profileApplied} /></>
       case 'models': return <ModelTab {...tabProps} onProvidersChanged={providersChanged} />
-      case 'agent': return <AgentsTab {...tabProps} />
-      case 'context': return <ContextTab {...tabProps} {...gp} />
+      case 'assistant': return <><AgentsTab {...tabProps} /><h3 className="set-part">Memory and context</h3><ContextTab {...tabProps} {...gp} /></>
       case 'permissions': return <><PermissionsTab {...tabProps} onPresetApplied={providersChanged} /><SystemTab /></>
       case 'extensions': return null  // the Extensions panel registers into this section's group
-      case 'hooks': return <HooksTab />
       case 'integrations': return <IntegrationsTab {...tabProps} onSaveCreds={saveGoogleCreds} />
-      case 'layout': return <SidebarTab {...tabProps} onProfileApplied={profileApplied} />
-      case 'usage': return <UsageTab />
       case 'advanced': return <AdvancedTab {...tabProps} {...gp} onExtensionsChanged={profileApplied} />
       default: return null
     }
@@ -317,7 +310,7 @@ export default function SettingsModal(): JSX.Element {
         </div>
         </EffectiveProvider>
 
-        <footer>
+        {(pending || dirty) && <footer>
           {pending ? (
             <>
               <span className="footer-note ask" role="alert">Discard unsaved changes?</span>
@@ -330,10 +323,8 @@ export default function SettingsModal(): JSX.Element {
               <button className="ghost-btn" onClick={requestClose}>Cancel</button>
               <button className="primary-btn" disabled={saving} onClick={() => void save()}>Save</button>
             </>
-          ) : (
-            <button className="primary-btn" onClick={requestClose}>Done</button>
-          )}
-        </footer>
+          ) : null}
+        </footer>}
       </div>
     </div>
   )

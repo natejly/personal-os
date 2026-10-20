@@ -12,7 +12,7 @@ const openInbox = async (page) => {
 test('Settings → Sidebar turns each sidebar row on and off on Save', async ({ grain }) => {
   const { page, api } = grain
   const shown = async (name) => (await page.locator('.sidebar .nav-item', { hasText: new RegExp(`^${name}`) }).count()) > 0
-  await openSettings(page, 'Sidebar and layout')
+  await openSettings(page, 'General')
   // One switch per sidebar row.
   const rows = dialog(page).locator('label.toggle-row').filter({ has: page.locator('input[type=checkbox]') })
   const sw = (n) => rows.getByRole('checkbox', { name: n, exact: true })
@@ -26,7 +26,7 @@ test('Settings → Sidebar turns each sidebar row on and off on Save', async ({ 
     await expect(sw(n)).toBeChecked({ checked: on })
   }
   // Changes are a draft: Save applies them and closes, so each step reopens the tab.
-  const apply = async (fn) => { await openSettings(page, 'Sidebar and layout'); await fn(); await save(page) }
+  const apply = async (fn) => { await openSettings(page, 'General'); await fn(); await save(page) }
   await apply(async () => { for (const n of views) await set(n, true) }) // Mail and Health only left the sidebar; turning them on first makes the off below a real view-off
   await apply(async () => { for (const n of views) await set(n, false) })
   await expect.poll(async () => (await api('/settings')).hiddenViews.sort()).toEqual(['calendar', 'health', 'library', 'mail', 'todos'])
@@ -53,7 +53,7 @@ test('Settings → Sidebar turns each sidebar row on and off on Save', async ({ 
 test('hiding the view you are on sends you to a new chat', async ({ grain }) => {
   const { page } = grain
   await page.locator('.sidebar .nav-item', { hasText: 'Library' }).first().click()
-  await openSettings(page, 'Sidebar and layout')
+  await openSettings(page, 'General')
   await dialog(page).getByRole('checkbox', { name: 'Library', exact: true }).locator('xpath=following-sibling::span[@class="switch"]').click()
   await save(page)
   await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
@@ -114,7 +114,7 @@ test('Usage: five chats give real totals, never NaN', async ({ grain }) => {
     await expect(page.locator('.msg.assistant').last()).toContainText(`answer ${i}`, { timeout: 30_000 })
   }
   await expect.poll(async () => (await api('/usage')).totals.calls, { timeout: 20_000 }).toBeGreaterThanOrEqual(5)
-  await openSettings(page, 'Usage')
+  await openAdvanced(page, 'Usage')
   const usage = dialog(page).locator('.usage')
   await expect(usage.locator('.usage-periods .usage-tile')).toHaveCount(3) // today, this week, this month
   await expect(usage.locator('.usage-tiles:not(.usage-periods) .usage-tile')).toHaveCount(6)
@@ -147,7 +147,7 @@ test('Usage: 500 seeded rows with null costs render without NaN', async ({ grain
     const resp = await api(`/usage?days=${d}`, { raw: true })
     expect(resp.status).toBeLessThan(500)
   }
-  await openSettings(page, 'Usage')
+  await openAdvanced(page, 'Usage')
   const usage = dialog(page).locator('.usage')
   await expect(usage.locator('.usage-tile').first()).toBeVisible()
   expect(await usage.innerText()).not.toMatch(/NaN|Infinity|undefined/)

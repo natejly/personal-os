@@ -57,7 +57,7 @@ export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { sho
           </label>
         </div>
       </div>
-      <details className="adv-group more-appearance" data-opens="look">
+      <details className="settings-disclosure more-appearance" data-opens="look">
         <summary>More appearance</summary>
       <div className="preset-row" role="radiogroup" aria-label="Appearance presets">
         {PRESETS.map((p) => {
@@ -138,11 +138,8 @@ export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { sho
       </details>
       <Switch title="Daily recap on new chats" checked={homeModuleOn(draft, 'recap')} onChange={(on) => patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), recap: on } })} />
       <Switch title="Start chat windows as blobs" checked={!!draft.compactChats} onChange={(compactChats) => patch({ compactChats })} />
-      <div className="setting-row">
-        <span className="toggle-text"><b>Default file font</b></span>
-        <TypographyControls value={draft.docTypography ?? {}} onChange={(t) => patch({ docTypography: { ...(draft.docTypography ?? {}), ...t } })}
-          onReset={draft.docTypography && Object.keys(draft.docTypography).length ? () => patch({ docTypography: {} }) : undefined} />
-      </div></Sec>
+      <TypographyControls rows value={draft.docTypography ?? {}} onChange={(t) => patch({ docTypography: { ...(draft.docTypography ?? {}), ...t } })}
+          onReset={draft.docTypography && Object.keys(draft.docTypography).length ? () => patch({ docTypography: {} }) : undefined} /></Sec>
       <Sec id="notifications">
         <h4>Notifications</h4>
         <Switch title="Notify me when a chat finishes" checked={draft.chatNotify !== false} onChange={(chatNotify) => patch({ chatNotify })} />

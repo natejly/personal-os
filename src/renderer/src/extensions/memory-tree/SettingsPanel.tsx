@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useStore } from '../../store'
 import { DIGEST_TOKENS, MERGES_PER_TURN, SETTING_PREFIX, clampInt, type RebuildResult } from './cover'
 import { useDigest } from './store'
+import SettingRow from '../../components/settings/SettingRow'
+import Switch from '../../components/settings/Switch'
 
 const key = (name: string): never => `${SETTING_PREFIX}${name}` as never
 
@@ -21,29 +23,26 @@ export default function DigestSettings(): JSX.Element {
   }
   return (
     <>
-      <label className="set-row">Digest size
-        <input type="number" min={DIGEST_TOKENS.min} max={DIGEST_TOKENS.max} value={get('memoryTreeDigestTokens', DIGEST_TOKENS.fallback)}
+      <SettingRow title="Digest size">
+        <input type="number" aria-label="Digest size" min={DIGEST_TOKENS.min} max={DIGEST_TOKENS.max} value={get('memoryTreeDigestTokens', DIGEST_TOKENS.fallback)}
           onChange={(e) => put('memoryTreeDigestTokens', clampInt(e.target.value, DIGEST_TOKENS.min, DIGEST_TOKENS.max, DIGEST_TOKENS.fallback))} />
-      </label>
-      <label className="set-row">Summaries built per turn
-        <input type="number" min={MERGES_PER_TURN.min} max={MERGES_PER_TURN.max} value={get('memoryTreeMergesPerTurn', MERGES_PER_TURN.fallback)}
+      </SettingRow>
+      <SettingRow title="Summaries per turn">
+        <input type="number" aria-label="Summaries per turn" min={MERGES_PER_TURN.min} max={MERGES_PER_TURN.max} value={get('memoryTreeMergesPerTurn', MERGES_PER_TURN.fallback)}
           onChange={(e) => put('memoryTreeMergesPerTurn', clampInt(e.target.value, MERGES_PER_TURN.min, MERGES_PER_TURN.max, MERGES_PER_TURN.fallback))} />
-      </label>
-      <label className="set-row">Summary model
-        <select value={get('memoryTreeMergeModel', 'fast')} onChange={(e) => put('memoryTreeMergeModel', e.target.value)}>
+      </SettingRow>
+      <SettingRow title="Summary model">
+        <select aria-label="Summary model" value={get('memoryTreeMergeModel', 'fast')} onChange={(e) => put('memoryTreeMergeModel', e.target.value)}>
           <option value="fast">Fast model</option>
           <option value="default">Default model</option>
         </select>
-      </label>
-      <label className="set-row">
-        <input type="checkbox" checked={get('memoryTreeIncludeAuto', true)} onChange={(e) => put('memoryTreeIncludeAuto', e.target.checked)} />
-        Include memories the assistant saved on its own
-      </label>
-      <div className="set-row">
-        <button type="button" className="ghost-btn sm" disabled={busy} onClick={run}>{busy ? 'Rebuilding…' : 'Rebuild digest'}</button>
+      </SettingRow>
+      <Switch title="Automatic memories" checked={get('memoryTreeIncludeAuto', true)} onChange={(v) => put('memoryTreeIncludeAuto', v)} />
+      <SettingRow title="Rebuild digest">
         {result && <span className="set-help" role="status">{result.leaves} entries, {result.nodes} summaries</span>}
         {error && <span className="set-help" role="status">{error}</span>}
-      </div>
+        <button type="button" className="ghost-btn sm" disabled={busy} onClick={run}>{busy ? 'Rebuilding…' : 'Rebuild'}</button>
+      </SettingRow>
     </>
   )
 }

@@ -4,7 +4,6 @@ import { api } from '../../lib/api'
 import { diffRows, presetOrigin, SCOPE_LABEL, scopeId, scopesFor } from '../../lib/presets'
 import { useStore } from '../../store'
 import PresetEditor from './PresetEditor'
-import { Sec } from './shared'
 
 /** A preset's diff, the changes that allow more first. Nothing has been applied while it is on screen. */
 function Diff({ diff }: { diff: PresetDiff }): JSX.Element {
@@ -61,8 +60,7 @@ export default function PresetsSection({ onApplied }: { onApplied: () => Promise
   }
 
   return (
-    <Sec id="presets">
-      <h4>Presets</h4>
+    <div className="set-sec">
       <div className="preset-scope" role="group" aria-label="Apply to">
         {scopes.map((s) => <button key={s} type="button" className={`ghost-btn ${where === s ? 'on' : ''}`} aria-pressed={where === s} onClick={() => { setScope(s); setHeld(null) }}>{SCOPE_LABEL[s]}</button>)}
       </div>
@@ -95,6 +93,6 @@ export default function PresetsSection({ onApplied }: { onApplied: () => Promise
         </div>
       )}
       {editing && <PresetEditor preset={editing === 'new' ? null : editing} onDone={(saved) => { setEditing(null); if (saved) reload() }} />}
-    </Sec>
+    </div>
   )
 }

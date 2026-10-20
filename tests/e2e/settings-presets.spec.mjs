@@ -2,11 +2,16 @@ import { test, expect } from './fixtures.mjs'
 import { dialog, openAdvanced, openSettings } from './helpers/home.mjs'
 import { newChat, sayAndWait } from './helpers/chat.mjs'
 
+const openPresets = async (page) => {
+  const d = dialog(page).locator('details[data-disclosure="permission-presets"]')
+  if (!(await d.evaluate((e) => e.open))) await d.locator('summary').click()
+}
 const preset = (page, id) => dialog(page).locator(`.preset-list li[data-preset="${id}"]`)
 
 test('a stricter preset applies at once and one that allows more shows its diff first', async ({ grain }) => {
   const { page, api } = grain
   await openSettings(page, 'Permissions')
+  await openPresets(page)
   await expect(dialog(page).locator('.preset-list li')).toHaveCount(4)
 
   await preset(page, 'builtin:read-only').getByRole('button', { name: 'Apply Read only' }).click()
@@ -30,6 +35,7 @@ test('a stricter preset applies at once and one that allows more shows its diff 
 test('your own preset can be made, duplicated and deleted', async ({ grain }) => {
   const { page } = grain
   await openSettings(page, 'Permissions')
+  await openPresets(page)
   await dialog(page).getByRole('button', { name: 'New preset' }).click()
   const editor = dialog(page).getByRole('group', { name: 'New preset' })
   await editor.getByLabel('Preset name').fill('Careful')
@@ -46,6 +52,7 @@ test('your own preset can be made, duplicated and deleted', async ({ grain }) =>
 test('the effective configuration lists every setting with its source and is read-only', async ({ grain }) => {
   const { page } = grain
   await openSettings(page, 'Permissions')
+  await openPresets(page)
   await preset(page, 'builtin:allow-all').getByRole('button', { name: 'Apply Allow everything' }).click()
   await dialog(page).getByRole('alert').getByRole('button', { name: 'Apply anyway' }).click()
   await expect(page.getByText('Allow everything applied')).toBeVisible()

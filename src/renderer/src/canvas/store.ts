@@ -4,7 +4,7 @@ import { api, getBase, getToken } from '../lib/api'
 import { useStore, canvasPanelHook } from '../store'
 import { viewHidden } from '../moduleToggles'
 import { clampOpacity, nextOpacity } from './opacity'
-import { GAP } from './layout'
+import { FIT_MARGIN, GAP, fitInView } from './layout'
 import { tidyLayout, visibleRect, zoneRect, type Point, type Size, type Viewport } from './snapping'
 
 /**
@@ -176,6 +176,12 @@ export const setDefaultSizes = (f: (kind: WidgetKind) => Size | undefined): void
   sizeOf = f
 }
 
+let minOf: ((kind: WidgetKind) => Size | undefined) | null = null
+/** The same injection for each widget's `minSize`, which bounds how far a window is shrunk to fit the view. */
+export const setMinSizes = (f: (kind: WidgetKind) => Size | undefined): void => {
+  minOf = f
+}
+
 let configOf: ((kind: WidgetKind) => Record<string, unknown> | undefined) | null = null
 /** The same injection for §6's `defaultConfig`: an explicit config still wins, key by key. */
 export const setDefaultConfigs = (f: (kind: WidgetKind) => Record<string, unknown> | undefined): void => {
@@ -276,6 +282,33 @@ const viewportOf = (c: Canvas): Viewport => {
  * instead of stacking them. Only when the viewport is genuinely full does it fall back to the old
  * cascade off the top-left.
  */
+/** A rect of `kind` fitted wholly inside what `vp` shows (see `fitInView`). */
+const fitToView = (kind: WidgetKind, r: { x: number; y: number; w: number; h: number }, vp: Viewport): { x: number; y: number; w: number; h: number } =>
+  vp.width > 0 && vp.height > 0 ? fitInView(r, visibleRect(vp), minOf?.(kind) ?? { w: 200, h: 160 }) : r
+
+/**
+ * Shrinks and slides every normal window of `canvasId` that is larger than the visible canvas so it fits.
+ * A window that already fits keeps whatever size and place the user gave it.
+ */
+export const fitOversizedWindows = (canvasId: string): void => {
+  const s = useCanvas.getState()
+  const c = s.canvases[canvasId]
+  if (!c || c.locked || canvasId !== s.activeCanvasId) return
+  const vp = viewport()
+  if (vp.width <= 0 || vp.height <= 0) return
+  const vis = visibleRect(vp)
+  const ids: string[] = []
+  for (const w of c.windows) {
+    if (w.state !== 'normal') continue
+    if (w.w <= vis.w - 2 * FIT_MARGIN && w.h <= vis.h - 2 * FIT_MARGIN) continue
+    const r = fitToView(w.kind, w, vp)
+    if (r.x === w.x && r.y === w.y && r.w === w.w && r.h === w.h) continue
+    s.patchWindow(w.id, r)
+    ids.push(w.id)
+  }
+  if (ids.length) s.markLayoutDirty(ids)
+}
+
 const spawnAt = (windows: CanvasWindow[], size?: Size, vp: Viewport = viewport()): Point => {
   const v = visibleRect(vp)
   const w = size?.w ?? 420
@@ -569,15 +602,19 @@ export const useCanvas = create<CanvasState>((set, get) => {
       if (!canvasId || !canvas) return null
       if (blocked(canvasId)) return null
       const isActive = canvasId === s.activeCanvasId
-      const pos = at ?? spawnAt(canvas.windows, sizeOf?.(kind), isActive ? viewport() : viewportOf(canvas))
+      const vp = isActive ? viewport() : viewportOf(canvas)
+      const size = sizeOf?.(kind)
+      const pos = at ?? spawnAt(canvas.windows, size, vp)
+      // Spawn scan, a drop point and an oversized default all end up wholly inside what the plane shows.
+      const box = size ? fitToView(kind, { ...pos, ...size }, vp) : { ...pos, w: 0, h: 0 }
       try {
         const w = await api.canvases.addWindow(canvasId, {
           kind,
           ref_id: refId,
           project_id: canvas.project_id,
-          x: Math.round(pos.x),
-          y: Math.round(pos.y),
-          ...(sizeOf?.(kind) ?? {}),
+          x: Math.round(box.x),
+          y: Math.round(box.y),
+          ...(size ? { w: box.w, h: box.h } : {}),
           config: { ...(configOf?.(kind) ?? {}), ...(config ?? {}) }
         })
         putWindow(w)

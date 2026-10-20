@@ -15,7 +15,7 @@ import WindowFrame from './WindowFrame'
 import { hasDrag, hasFiles, readDrag } from './dnd'
 import { WIDGETS } from './registry'
 import { canvasFromScreen, screenFromCanvas, snapValue, visibleRect, type Point, type Viewport } from './snapping'
-import { setLiveViewport, setViewportEl, spaceLocked, useActiveCanvas, useCanvas, useWindows, viewport, viewportPoint } from './store'
+import { fitOversizedWindows, setLiveViewport, setViewportEl, spaceLocked, useActiveCanvas, useCanvas, useWindows, viewport, viewportPoint } from './store'
 import { getDragOverlay, schedule, subscribeDragOverlay } from './useDrag'
 import '../styles/canvas.css'
 import { MessageSquarePlus, Plus } from '../icons'
@@ -282,6 +282,14 @@ export default function Canvas(): JSX.Element {
     setLiveViewport(null)
     paint()
   }, [canvas?.id, paint])
+
+  // Once per space, when the plane has been measured: a window larger than the view is fitted into it.
+  const fitted = useRef<string | null>(null)
+  useEffect(() => {
+    if (!loaded || !canvas?.id || size.w <= 0 || size.h <= 0 || fitted.current === canvas.id) return
+    fitted.current = canvas.id
+    fitOversizedWindows(canvas.id)
+  }, [loaded, canvas?.id, size.w, size.h])
 
   const mount = useCallback((node: HTMLDivElement | null): void => {
     el.current = node

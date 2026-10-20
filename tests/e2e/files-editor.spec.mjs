@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures.mjs'
 import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, patient, relaunch, newDoc, treeMenu, menu, editDoc } from './helpers/files.mjs'
+import { setNarrow } from './helpers/shell.mjs'
 
 test.describe.configure({ timeout: 300_000 })
 test.beforeEach(({ grain }) => patient(grain))
@@ -369,7 +370,7 @@ test('250 KB doc: typing latency stays near the small-doc baseline (< 150 ms), p
 
 test('820x520 window with a doc open: toolbar, editor and side panel remain reachable', async ({ grain: g }) => {
   const { page } = g
-  await g.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(820, 520))
+  await setNarrow(g, 820, 520)
   await mkDoc(g, { title: 'Small', content: '# Small\n\ntext' })
   await openFiles(page)
   await open(page, 'Small')

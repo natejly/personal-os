@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures.mjs'
 import { openLibrary, sendChat, resize, noOverflow } from './helpers/library.mjs'
+import { setNarrow } from './helpers/shell.mjs'
 
 // The built-in 'grain-guide' skill and the 'author-extension' candidate are always there; the rest of the file is about the user's own.
 const mine = async (api) => (await api('/skills')).filter((s) => s.source !== 'builtin' && s.name !== 'author-extension')
@@ -113,7 +114,7 @@ test('skills: skill_view tool, import/export, 150 skills at 820x520', async ({ g
   expect(imp.skill.status).toBe('candidate')
 
   for (let i = 0; i < 150; i++) await api('/skills', { method: 'POST', body: { name: `Bulk skill ${i}`, description: `d${i}`, procedure: `1. step a ${i}\n2. step b` } })
-  await resize(grain)
+  await setNarrow(grain)
   await openLibrary(page, 'Skills')
   await expect(page.locator('.skill-row')).toHaveCount(154, { timeout: 20_000 })
   await noOverflow(page)

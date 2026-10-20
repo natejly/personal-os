@@ -1,6 +1,7 @@
 import { test, expect } from './fixtures.mjs'
 import { openProjectSection, send, shrink } from './helpers/kb.mjs'
 import { openMemory as openMemoryTab } from './helpers/home.mjs'
+import { setNarrow, withSidebar } from './helpers/shell.mjs'
 
 const pane = (page) => page.locator('.knowledge-body')
 const ignorable = /favicon|ResizeObserver|Failed to load resource|ERR_CONNECTION|fetch|NetworkError/i
@@ -67,8 +68,9 @@ test('Settings memory scope filter lists a project memory only under that projec
 test('everything at 820x520: project modal, project view tabs, memory panel, voice and graph all fit', async ({ grain }) => {
   const { page, api } = grain
   await api('/projects', { method: 'POST', body: { name: 'Tiny' } })
-  await shrink(grain)
+  await setNarrow(grain)
   await page.reload()
+  await withSidebar(page) // the reload starts folded at this width
   await page.getByRole('button', { name: 'New project' }).click()
   const modal = page.getByRole('dialog')
   const box = await modal.boundingBox()

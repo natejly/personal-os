@@ -1,5 +1,6 @@
 import { test } from './fixtures.mjs'
 import { expect, realErrors, resize, settingsFor } from './helpers/cowork.mjs'
+import { setNarrow } from './helpers/shell.mjs'
 test.describe.configure({ timeout: 300_000 })
 
 const wf = (name, steps, extra = {}) => JSON.stringify({ name, description: `${name} workflow`, params: { who: { type: 'string', default: 'World' } }, steps, ...extra })
@@ -105,7 +106,7 @@ test('editing a workflow withdraws a pending approval; a stale digest cannot be 
 
 test('a 40-step chain runs in order at 820x520 and the run card scrolls', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
-  await resize(grain)
+  await setNarrow(grain)
   const steps = Array.from({ length: 40 }, (_, i) => docStep(`s${i}`, `Chain ${i}`, i ? { needs: [`s${i - 1}`] } : {}))
   const w = await grain.api('/workflows', { method: 'POST', body: { text: wf('chain', steps) } })
   const r = await grain.api(`/workflows/${w.id}/runs`, { method: 'POST', body: { params: {} } })

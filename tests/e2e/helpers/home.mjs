@@ -2,6 +2,7 @@
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { expect } from '@playwright/test'
+import { withSidebar } from './shell.mjs'
 
 export const TABS = ['General', 'Models', 'Assistant', 'Permissions', 'Extensions', 'Integrations', 'Advanced']
 
@@ -15,7 +16,7 @@ export const tabBtn = (page, label) => dialog(page).locator(`#settings-tab-${TAB
 export async function openSettings(page, tab) {
   if (!(await dialog(page).count())) {
     // below 900px the sidebar is folded away and the settings button lives in it
-    if (!(await page.locator('.settings-btn').isVisible())) await page.getByRole('button', { name: 'Show sidebar' }).click()
+    await withSidebar(page)
     await page.locator('.settings-btn').click()
   }
   await expect(dialog(page)).toBeVisible()

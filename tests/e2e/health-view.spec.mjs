@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures.mjs'
 import { enableModules, reload, small, sql, realErrors } from './helpers/mah.mjs'
+import { setNarrow, withSidebar } from './helpers/shell.mjs'
 
 test.beforeEach(() => test.setTimeout(240_000))
 
@@ -11,6 +12,7 @@ const ymd = (daysAgo) => {
 async function openHealth(grain) {
   await enableModules(grain.api)
   await reload(grain.page)
+  await withSidebar(grain.page) // a reload at a narrow width starts folded
   await grain.page.getByRole('button', { name: 'Health', exact: true }).click()
   await expect(grain.page.getByRole('heading', { name: 'Health' }).first()).toBeVisible()
   await expect(grain.page.locator('.hl-tile').first()).toBeVisible()
@@ -249,7 +251,7 @@ test('900 readings over 90 days at 820x520: tiles, sparklines and the trend rend
       ['mood', 1 + (i % 5), ymd(i)], ['energy', 1 + ((i + 2) % 5), ymd(i)], ['weight', 180 - i * 0.05, ymd(i)], ['resting_hr', 55 + (i % 8), ymd(i)], ['meds', i % 2, ymd(i)], ['water', 1, ymd(i)])
   }
   seedEntries(dataDir, rows)
-  await small(grain.app)
+  await setNarrow(grain, 820, 520)
   await openHealth(grain)
   await page.getByRole('group', { name: 'Range' }).getByRole('button', { name: '90d' }).click()
   await expect(page.getByRole('img', { name: /Sleep over 90 days/ })).toBeVisible({ timeout: 30_000 })

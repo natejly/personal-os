@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures.mjs'
 import { enterCanvas, menuClick, resetView, sleep, spaces, windowsOf } from './helpers/spaces.mjs'
+import { setNarrow } from './helpers/shell.mjs'
 
 test.describe.configure({ timeout: 300_000 })
 
@@ -332,7 +333,7 @@ test('60 windows in one space: panning stays above 20 fps and the layout restore
 
 test('820x520 window: canvas bar and windows stay usable', async ({ grain }) => {
   const { page } = grain
-  await grain.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(820, 520))
+  await setNarrow(grain, 820, 520, { sidebar: false }) // the canvas is the subject; the sidebar stays folded
   const { s, ws } = await seed(grain, [{ kind: 'doc', x: 40, y: 40, w: 300, h: 240 }], { snap_mode: 'off' })
   await sleep(500)
   // the bar's controls are all inside the window, none clipped sideways
@@ -347,7 +348,7 @@ test('820x520 window: canvas bar and windows stay usable', async ({ grain }) => 
   expect(r.scrolls).toBe(false)
   const p = await gripPoint(page, ws[0].id)
   await drag(page, p, { x: p.x + 60, y: p.y + 30 })
-  await expect.poll(async () => (await geo(grain, s.id, ws[0].id)).x).toBe(100)
+  await expect.poll(async () => (await geo(grain, s.id, ws[0].id)).x).toBeCloseTo(100, 2) // float noise from the screen-to-canvas scale
   expect(grain.consoleErrors).toEqual([])
 })
 

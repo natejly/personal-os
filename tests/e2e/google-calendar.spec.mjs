@@ -1,4 +1,5 @@
 import { test, expect, openApp, resize } from './helpers/google.mjs'
+import { setNarrow } from './helpers/shell.mjs'
 
 test.describe.configure({ timeout: 300_000 })
 
@@ -240,7 +241,7 @@ test('200 extra events in one week render, and a warm re-render takes under 2 se
 
 test('window at 820x520 keeps the grid usable', async ({ grain }) => {
   const { page } = grain
-  await resize(grain, 820, 520)
+  await setNarrow(grain, 820, 520)
   await openCal(grain)
   await expect(ev(page, 'Standup D0')).toBeVisible()
   await page.getByRole('button', { name: 'New event' }).click()

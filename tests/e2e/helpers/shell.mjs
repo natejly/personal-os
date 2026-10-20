@@ -1,4 +1,5 @@
 // Helpers for the shell / navigation / resilience specs. Additive: nothing here changes harness semantics.
+import { expect } from '@playwright/test'
 import { join } from 'node:path'
 import { ROOT, spawnBackend, waitHealthy } from '../harness.mjs'
 
@@ -47,6 +48,32 @@ export const setWindowSize = (grain, w, h) =>
     win.setMinimumSize(1, 1)
     win.setSize(w, h)
   }, [w, h])
+
+/**
+ * Make sure the sidebar is on screen. Below about 900px the window folds it away; "Show sidebar" re-opens it
+ * (pushed, not overlaid). Idempotent: does nothing when it is already visible.
+ */
+export async function withSidebar(page) {
+  const side = page.locator('.sidebar').first()
+  const show = page.getByRole('button', { name: 'Show sidebar' }).first()
+  await expect.poll(async () => (await side.isVisible()) || (await show.isVisible()), { timeout: 30_000 }).toBe(true)
+  if (await side.isVisible()) return
+  await show.click()
+  await expect(side).toBeVisible()
+}
+
+/**
+ * Resize the window. With the default `sidebar: true` the sidebar is re-opened if the new width folded it, so the
+ * test can navigate by sidebar rows. Pass `sidebar: false` to leave it folded (the product behaviour) and assert
+ * on the content area instead.
+ */
+export async function setNarrow(grain, w = 820, h = 520, { sidebar = true } = {}) {
+  await setWindowSize(grain, w, h)
+  await grain.page.waitForFunction(([w, h]) => Math.abs(window.outerWidth - w) <= 2 && Math.abs(window.outerHeight - h) <= 2, [w, h])
+  await grain.page.waitForTimeout(300) // let the layout and the auto-fold settle
+  if (sidebar) await withSidebar(grain.page)
+  else await grain.page.waitForTimeout(300)
+}
 
 export const bodyOverflow = (page) =>
   page.evaluate(() => ({ sw: document.body.scrollWidth, cw: document.body.clientWidth, dsw: document.documentElement.scrollWidth, dcw: document.documentElement.clientWidth }))

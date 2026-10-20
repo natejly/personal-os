@@ -2,6 +2,7 @@ import { test, expect } from './fixtures.mjs'
 import { openContextPanel, openContextGroup } from './helpers/chat.mjs'
 import { openAdvanced, setToggle } from './helpers/home.mjs'
 import { callWith, send, shrink, sleep, systemOf, upload } from './helpers/kb.mjs'
+import { setNarrow } from './helpers/shell.mjs'
 
 const clean = (g) => expect(g.consoleErrors.filter((e) => !/favicon|ResizeObserver/.test(e))).toEqual([])
 const excerpts = (sys) => [...sys.matchAll(/^### \[(\d+)\] (.*)$/gm)].map((m) => ({ n: Number(m[1]), header: m[2] }))
@@ -147,7 +148,7 @@ test('a 400 KB upload and 40 small ones: indexing and retrieval still answer, wi
   await Promise.all(Array.from({ length: 40 }, (_, i) => upload(grain, `small-${i}.txt`, `small file ${i} about topic${i}`)))
   const docs = await api('/documents')
   expect(docs.length).toBe(41)
-  await shrink(grain)
+  await setNarrow(grain)
   await newChat(page)
   await send(page, 'where is the NEEDLEQUAIL sentence? !!reply found it [1]')
   await expect(page.locator('.msg.assistant').last()).toContainText('found it', { timeout: 30_000 })

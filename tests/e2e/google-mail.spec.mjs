@@ -1,5 +1,5 @@
 import { test, expect, openApp, resize } from './helpers/google.mjs'
-import { menu } from './helpers/shell.mjs'
+import { menu, setNarrow } from './helpers/shell.mjs'
 import { readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { newChat, say } from './helpers/blocks.mjs'
@@ -223,7 +223,7 @@ test('Gmail API failure shows an error bar and the list recovers on refresh', as
 
 test('mail at 820x520 keeps the toolbar, list and reader usable', async ({ grain }) => {
   const { page } = grain
-  await resize(grain, 820, 520)
+  await setNarrow(grain, 820, 520)
   await openMail(grain)
   await expect(page.getByLabel('Search mail')).toBeInViewport()
   await expect(page.getByRole('button', { name: 'Compose' })).toBeInViewport()

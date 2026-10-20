@@ -1,6 +1,6 @@
 # LaTeX
 
-A built-in extension that makes LaTeX sources ordinary Files. It has no view or sidebar row of its own: Files is its home. It starts off on a fresh install (the lean profile turns it off); turn it on under Settings > Advanced > Extensions. An install that already had it on keeps it on, because on/off follows `hiddenViews` and nothing changed there.
+A built-in extension that makes LaTeX sources ordinary Files. It has no view or sidebar row of its own: Files is its home. It starts off on a fresh install and for a built-in added after an install first recorded its extensions (`enabled: false` puts `latex` in `hiddenViews`, in the same way as every other built-in); an install with no `extensions-seeded.json` yet keeps it as it was. Turn it on under Settings > Extensions.
 
 ## Storage
 

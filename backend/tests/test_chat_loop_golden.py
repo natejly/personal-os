@@ -121,7 +121,7 @@ def _portal():  # type: ignore[no-untyped-def]
     for name, fn, danger in (("g_read", _read, "safe"), ("g_write", _write, "writes"), ("g_off", _write, "writes"), ("g_hang", _hang, "safe")):
         appmod.toolbox.specs[name] = ToolSpec(name, name, obj, fn, "test", danger)
     appmod.db.set_settings({"toolDeferAbove": 0, "permissionMode": "manual", "autoLearn": False, "baseUrl": "", "codingRoute": True,
-                                "hiddenViews": ["todos", "calendar", "mail", "health", "spaces", "claude-code", "memory-tree"]})  # what the golden was taken with: Lists, Calendar, Mail, Health, Canvases, Claude Code and History digest off; Coding on
+                                "hiddenViews": ["todos", "calendar", "mail", "health", "spaces", "claude-code", "memory-tree", "latex"]})  # what the golden was taken with: Lists, Calendar, Mail, Health, Canvases, Claude Code, History digest and LaTeX off; Coding on
     _spy(appmod.host.bus)
     with client:
         yield

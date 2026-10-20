@@ -367,3 +367,26 @@ test('folding the left of two adjacent chats and growing it back never overlaps 
   const clear = a.x + a.w + 12 <= b.x || b.x + b.w + 12 <= a.x || a.y + a.h + 12 <= b.y || b.y + b.h + 12 <= a.y
   expect(clear).toBe(true)
 })
+
+test('a new chat window, and an oversized stored one, lie wholly inside the canvas viewport', async ({ grain }) => {
+  const { page } = grain
+  const c1 = await grain.api('/conversations', { method: 'POST', body: { title: 'Dropped low' } })
+  const c2 = await grain.api('/conversations', { method: 'POST', body: { title: 'Stored tall' } })
+  const { ws } = await seed(grain, [{ kind: 'chat', ref_id: c2.id, x: 20, y: 0, w: 520, h: 1400 }])
+  const inside = async (id) => {
+    const v = await page.locator('.canvas').boundingBox()
+    const b = await win(page, id).boundingBox()
+    expect(b.x).toBeGreaterThanOrEqual(v.x)
+    expect(b.y).toBeGreaterThanOrEqual(v.y)
+    expect(b.x + b.width).toBeLessThanOrEqual(v.x + v.width)
+    expect(b.y + b.height).toBeLessThanOrEqual(v.y + v.height)
+  }
+  await expect.poll(async () => (await win(page, ws[0].id).boundingBox()).height).toBeLessThan(800)
+  await inside(ws[0].id)
+  await page.locator('.convo-item', { hasText: 'Dropped low' }).dragTo(page.locator('.canvas'), { targetPosition: { x: 500, y: 450 } })
+  const s = (await spaces(grain))[0]
+  await expect.poll(async () => (await windowsOf(grain, s.id)).filter((w) => w.ref_id === c1.id).length).toBe(1)
+  const created = (await windowsOf(grain, s.id)).find((w) => w.ref_id === c1.id)
+  await expect(win(page, created.id)).toBeVisible()
+  await inside(created.id)
+})

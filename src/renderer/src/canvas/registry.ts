@@ -1,7 +1,7 @@
 import type { FC, PointerEvent as ReactPointerEvent } from 'react'
 import type { BuiltinWidgetKind, CanvasWindow, DragKind, WidgetKind } from '@shared/types'
 import type { MenuEntry } from './Menu'
-import { setDefaultConfigs, setDefaultSizes } from './store'
+import { setDefaultConfigs, setDefaultSizes, setMinSizes } from './store'
 import { def as chat } from './widgets/chat'
 import { def as crew } from './widgets/crew'
 import { def as doc } from './widgets/doc'
@@ -86,4 +86,5 @@ export { WIDGETS }
 
 // The canvas store may not import the registry (its own note), so the catalog comes to it instead.
 setDefaultSizes((kind) => WIDGETS[kind]?.defaultSize)
+setMinSizes((kind) => WIDGETS[kind]?.minSize)
 setDefaultConfigs((kind) => WIDGETS[kind]?.defaultConfig)

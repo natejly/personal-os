@@ -34,8 +34,8 @@ test('Settings → Sidebar turns each sidebar row on and off on Save', async ({ 
   await apply(async () => { for (const n of views) await set(n, true) })
   await expect.poll(async () => (await api('/settings')).hiddenViews).toEqual([])
   for (const n of views) await expect.poll(() => shown(n), { message: `${n} shown` }).toBe(true)
-  // The title bar holds no per-view icons: nothing but the Agent inbox and Quick chat buttons.
-  await expect(page.locator('.app-switcher button')).toHaveCount(2)
+  // The title bar holds no per-view icons: nothing but Quick chat while the inbox is empty.
+  await expect(page.locator('.app-switcher button')).toHaveCount(1)
   // One at a time: hide it, then bring it back to the sidebar.
   for (const n of ['Library', 'Mail']) {
     await apply(() => set(n, false))

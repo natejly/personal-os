@@ -20,8 +20,6 @@ import { mergeChatSearch, snippetParts } from '../lib/chatSearch'
 import { useChatSelection } from '../lib/chatSelection'
 import { rowButton } from '../lib/rowButton'
 import { projectGroupOpen, toggleProjectGroup } from '../lib/projectGroups'
-import { useChatFileCountsSync } from '../lib/useChatFiles'
-import SidebarChatFiles from './SidebarChatFiles'
 import { tip } from '../lib/tip'
 import { formatAccelerator, shortcut } from '@shared/shortcuts'
 
@@ -136,11 +134,19 @@ export default function Sidebar(): JSX.Element {
     return () => clearTimeout(t)
   }, [query, composed])
   const searchRef = useRef<HTMLInputElement>(null)
+  // A narrow window starts (and falls) without the sidebar; the toggle still brings it back.
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 899px)')
+    const fold = (): void => { if (mq.matches && useStore.getState().sidebarOpen) toggleSidebar() }
+    fold()
+    mq.addEventListener('change', fold)
+    return () => mq.removeEventListener('change', fold)
+  }, [])
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [chatsOpen, setChatsOpen] = useState(true)
-  const [chatsTab, setChatsTab] = useState<'chats' | 'files'>('chats')
-  useChatFileCountsSync()
   const [needsOnly, setNeedsOnly] = useState(readNeeds)
+  /** The bell appears only while a chat or job wants the user. */
+  const wantsAny = useStore((s) => s.deskInbox.length > 0 || s.conversations.some((c) => wantsYou(chatAttentionOf(s, c))))
   const jobs = useStore((s) => s.jobs)
   const agentInbox = useStore((s) => s.agentInbox)
   // Job states come from GET /jobs. The inbox is re-read whenever a job run, proposal or pause moves, so the list follows it.
@@ -295,7 +301,7 @@ export default function Sidebar(): JSX.Element {
       {/* Leave the view 420px, plus the ⌘I panel's 280px minimum while it is open (styles.css clamps that column). */}
       <ResizeHandle id="sidebar-w" defaultSize={260} min={190} max={480} keep={pageAgentOpen ? 700 : 420} grows="right" onCollapse={toggleSidebar} label="Sidebar width" className="at-right" />
       <div className="sidebar-top drag">
-        <button className="brand no-drag" title={tip('New chat', 'new-chat')} onClick={() => newChat(null)}><GrainLogo size={15} /><span>Grain</span></button>
+        <div className="brand no-drag"><GrainLogo size={15} /><span>Grain</span></div>
         <button className="icon-btn no-drag" aria-label="Hide sidebar" title={tip('Hide sidebar', 'toggle-sidebar')} onClick={toggleSidebar}><PanelLeftClose size={16} /></button>
       </div>
 
@@ -330,7 +336,6 @@ export default function Sidebar(): JSX.Element {
       </div>
       {projectsOpen && (
         <div className="project-list nested">
-          {projects.length === 0 && <p className="empty-hint">No projects</p>}
           {projects.map((p) => {
             const rows = chatsByProject[p.id] ?? []
             const open = projectGroupOpen(p.id, collapsed)
@@ -363,21 +368,16 @@ export default function Sidebar(): JSX.Element {
 
       <div className="section-row">
         <button className="section-toggle" aria-label="Chats" aria-expanded={chatsOpen} onClick={() => setChatsOpen((o) => !o)}>
-          {/* The Chats | Documents switch beside it names the section, so the toggle carries no word of its own. */}
-          <span className="project-twist"><MessageSquare size={13} className="twist-folder" /><ChevronRight size={13} className={`twist-chevron${chatsOpen ? ' rot90' : ''}`} /></span>
+          <span className="project-twist"><MessageSquare size={13} className="twist-folder" /><ChevronRight size={13} className={`twist-chevron${chatsOpen ? ' rot90' : ''}`} /></span> Chats
           {/* Counted off the desk inbox: chats working autonomously that have something unseen for you. */}
           {needsYou > 0 && <span className="count pending" title={`${needsYou} chat${needsYou === 1 ? '' : 's'} working autonomously need${needsYou === 1 ? 's' : ''} you`}>{needsYou}</span>}
         </button>
-        <span className="cf-seg" role="group" aria-label="Chats or documents">
-          <button className={chatsTab === 'chats' ? 'on' : ''} aria-pressed={chatsTab === 'chats'} aria-label="Chat list" onClick={() => { setChatsOpen(true); setChatsTab('chats') }}>Chats</button>
-          <button className={chatsTab === 'files' ? 'on' : ''} aria-pressed={chatsTab === 'files'} aria-label="Documents from personal chats" onClick={() => { setChatsOpen(true); setChatsTab('files') }}>Documents</button>
-        </span>
-        {chatsTab === 'chats' && <>
-        <button className={`icon-btn sm${needsOnly ? ' on' : ''}`} aria-label="Show only what needs you" aria-pressed={needsOnly}
+        <span style={{ flex: 1 }} />
+        {(wantsAny || jobsWanting > 0 || needsOnly) && <button className={`icon-btn sm${needsOnly ? ' on' : ''}`} aria-label="Show only what needs you" aria-pressed={needsOnly}
           title={needsOnly ? 'Showing only what needs you or is blocked' : 'Show only what needs you'}
           onClick={() => { setChatsOpen(true); setNeedsOnly((on) => { writeNeeds(!on); return !on }) }}>
           <Bell size={13} />
-        </button>
+        </button>}
         <button
           className={`icon-btn sm${searching ? ' on' : ''}`}
           aria-label="Search chats"
@@ -393,10 +393,8 @@ export default function Sidebar(): JSX.Element {
         >
           <Search size={13} />
         </button>
-        </>}
       </div>
-      {chatsOpen && chatsTab === 'files' && <SidebarChatFiles jump={openConversation} />}
-      {chatsOpen && chatsTab === 'chats' && (<>
+      {chatsOpen && (<>
       {searching && (
         <label className="search">
           <input
@@ -444,7 +442,7 @@ export default function Sidebar(): JSX.Element {
             {pinned.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} trail={<Snippet hit={hitById.get(c.id)} />} />)}
           </section>
         )}
-        {!filtering && groups.length === 0 && pinned.length === 0 && inMessages.length === 0 && <p className="empty-hint">{query ? 'No matches' : 'No chats'}</p>}
+        {!filtering && groups.length === 0 && pinned.length === 0 && inMessages.length === 0 && query && <p className="empty-hint">No matches</p>}
         {!filtering && groups.map((g) => {
           // A search always shows its hits, folded or not.
           const folded = foldedDates.has(g.label) && !query.trim()

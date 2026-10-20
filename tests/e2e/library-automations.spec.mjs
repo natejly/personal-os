@@ -1,8 +1,10 @@
 import { test, expect } from './fixtures.mjs'
+import { openInboxFromPalette } from './helpers/shell.mjs'
 import { resize, noOverflow } from './helpers/library.mjs'
 
-async function openScheduled(page) {
-  await page.getByRole('button', { name: /^Agent inbox/ }).click()
+async function openScheduled(grain) {
+  const { page } = grain
+  await openInboxFromPalette(grain)
   const btn = page.getByRole('button', { name: /^Scheduled \(/ })
   await expect(btn).toBeVisible({ timeout: 20_000 })
   if ((await btn.getAttribute('aria-expanded')) !== 'true') await btn.click()
@@ -23,14 +25,14 @@ test('fresh install: only the seeded Reconcile job is on; scheduled list lists i
   const jobs = await api('/jobs')
   // Reconcile is seeded switched on, once per database; nothing else is.
   expect(jobs.filter((j) => j.enabled).map((j) => j.name)).toEqual(['Reconcile'])
-  await openScheduled(page)
+  await openScheduled(grain)
   await expect(page.locator('.job-name', { hasText: 'Reconcile' })).toBeVisible()
   expect(grain.consoleErrors).toEqual([])
 })
 
 test('create a repeating job for every preset the form offers, and read each back', async ({ grain }) => {
   const { page, api } = grain
-  await openScheduled(page)
+  await openScheduled(grain)
   const cases = [
     ['Hourly', null, null, '0 * * * *'],
     ['Daily', '07:30', null, '30 7 * * *'],
@@ -74,7 +76,7 @@ test('create a repeating job for every preset the form offers, and read each bac
 test('enable / disable toggle, edit, delete', async ({ grain }) => {
   const { page, api } = grain
   const j = await api('/jobs', { method: 'POST', body: job('Toggle me') })
-  await openScheduled(page)
+  await openScheduled(grain)
   const sw = page.locator('label.switch-wrap', { has: page.getByLabel('Toggle me enabled') }).locator('input')
   await expect(sw).not.toBeChecked()
   await sw.locator('xpath=..').click()
@@ -102,7 +104,7 @@ test('enable / disable toggle, edit, delete', async ({ grain }) => {
 test('run now: mock model answers, run shows in the journal / inbox / history', async ({ grain }) => {
   const { page, api } = grain
   const j = await api('/jobs', { method: 'POST', body: job('Journal job', { prompt: '!!reply the weekly digest is ready' }) })
-  await openScheduled(page)
+  await openScheduled(grain)
   await page.getByRole('button', { name: 'Run Journal job now' }).click()
   await expect.poll(async () => (await api(`/jobs/${j.id}/runs`)).length, { timeout: 30_000 }).toBe(1)
   await expect.poll(async () => (await api(`/jobs/${j.id}/runs`))[0].status, { timeout: 30_000 }).toMatch(/done|ok|complete/i)
@@ -139,7 +141,7 @@ test('one-off task fires ~5s ahead then retires; spent job cannot be re-enabled 
 
 test('one-off task created from the UI (datetime-local) schedules and fires', async ({ grain }) => {
   const { page, api } = grain
-  await openScheduled(page)
+  await openScheduled(grain)
   await addTask(page, { name: 'UI once', prompt: '!!reply ui fired', mode: 'Once' })
   const d = new Date(Date.now() + 60_000)
   const p = (n) => String(n).padStart(2, '0')
@@ -175,7 +177,7 @@ test('100 jobs listed at 820x520 without overflow', async ({ grain }) => {
   const seeded = (await api('/jobs')).length
   for (let i = 0; i < 100; i++) await api('/jobs', { method: 'POST', body: job(`Bulk ${String(i).padStart(3, '0')}`, { cron: `${i % 60} ${i % 24} * * *` }) })
   await resize(grain)
-  await openScheduled(page)
+  await openScheduled(grain)
   await expect(page.getByRole('button', { name: /^Scheduled \(\d{3,}\)/ })).toBeVisible({ timeout: 20_000 })
   await expect(page.locator('.inbox-jobs li')).toHaveCount(seeded + 100)
   await noOverflow(page)
@@ -186,7 +188,7 @@ test('jobs persist across relaunch; backend killed mid-action reports instead of
   const { api } = grain
   await api('/jobs', { method: 'POST', body: job('Persist me', { enabled: true }) })
   const page = await grain.relaunch()
-  await openScheduled(page)
+  await openScheduled(grain)
   await expect(page.locator('.job-name', { hasText: 'Persist me' })).toBeVisible()
   await expect(page.getByLabel('Persist me enabled')).toBeChecked()
   grain.backend.child.kill('SIGKILL')
@@ -197,7 +199,7 @@ test('jobs persist across relaunch; backend killed mid-action reports instead of
 
 test('double-clicking Schedule creates one job; double Run-now does not wedge the list', async ({ grain }) => {
   const { page, api } = grain
-  await openScheduled(page)
+  await openScheduled(grain)
   await addTask(page, { name: 'Dbl', prompt: '!!reply dbl' })
   await page.getByRole('button', { name: 'Schedule', exact: true }).dblclick()
   await expect(page.locator('.job-name', { hasText: 'Dbl' })).toHaveCount(1)

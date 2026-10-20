@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.mjs'
+import { openInboxFromPalette } from './helpers/shell.mjs'
 import { seedJobRuns, sql } from './helpers/home.mjs'
 
 const benign = (e) => /ResizeObserver|favicon/i.test(e)
@@ -15,7 +16,7 @@ test('Agent inbox renders proposals from scheduled runs and a bare Inbox with no
   const errors = []
   grain.page.on('pageerror', (e) => errors.push(String(e)))
   const open = async () => {
-    await grain.page.getByRole('button', { name: /^Agent inbox/ }).click()
+    await openInboxFromPalette(grain)
     await expect(grain.page.locator('.agent-inbox')).toBeVisible()
   }
   // Nothing yet: the card still renders.

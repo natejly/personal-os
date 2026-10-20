@@ -185,6 +185,7 @@ test('820x520 window: composer, controls and messages stay reachable', async ({ 
   const { page } = grain
   await resize(grain, 820, 520)
   await page.waitForTimeout(500)
+  await page.getByRole('button', { name: 'Show sidebar' }).click() // below 900px the sidebar starts folded
   await newChat(page)
   await sayAndWait(page, '!!reply small window', 'small window')
   const box = await msgBox(page).boundingBox()

@@ -69,11 +69,11 @@ export default function PermissionsTab({ draft, patch, onPresetApplied }: TabPro
         <ShellNetwork draft={draft} patch={patch} />
       </Sec>
       <Sec id="presets">
-        <Disclosure id="permission-presets" title="Presets" secs={["presets"]}>
+        <Disclosure id="permission-presets" title="Presets" secs={["presets"]} keepMounted>
           <PresetsSection onApplied={onPresetApplied} />
         </Disclosure>
       </Sec>
-      <Sec id="tools"><Disclosure id="per-tool-access" title="Per-tool access" secs={["tools", "always-ask"]}>
+      <Sec id="tools"><Disclosure id="per-tool-access" title="Per-tool access" secs={["tools", "always-ask"]} keepMounted>
         <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
         <Sec id="always-ask">
           <h4>Always ask first</h4>

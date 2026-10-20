@@ -9,8 +9,8 @@ function read(id: string): boolean {
 /** Fired by the Settings modal before it scrolls to a block (`detail` is the block's `sec-` id), so a disclosure holding it can open first. */
 export const SETTINGS_JUMP = 'grain:settings-jump'
 
-/** A collapsed-by-default group of rarely changed rows. Open state is remembered per id. Children are not mounted while closed. `secs` are the block ids inside it that a search or link may jump to: a jump to one opens the disclosure. */
-export default function Disclosure({ id, title, secs, children }: { id: string; title: ReactNode; secs?: readonly string[]; children: ReactNode }): JSX.Element {
+/** A collapsed-by-default group of rarely changed rows. Open state is remembered per id. Children are not mounted while closed, unless `keepMounted`: then they stay mounted and are hidden, so half-written input survives a collapse. `secs` are the block ids inside it that a search or link may jump to: a jump to one opens the disclosure. */
+export default function Disclosure({ id, title, secs, keepMounted, children }: { id: string; title: ReactNode; secs?: readonly string[]; keepMounted?: boolean; children: ReactNode }): JSX.Element {
   const [open, setOpen] = useState(() => read(id))
   useEffect(() => {
     if (!secs?.length) return
@@ -31,7 +31,7 @@ export default function Disclosure({ id, title, secs, children }: { id: string; 
         try { localStorage.setItem(KEY + id, next ? '1' : '0') } catch { /* ignore */ }
       }}>
       <summary>{title}</summary>
-      {open && children}
+      {keepMounted ? <div hidden={!open}>{children}</div> : open && children}
     </details>
   )
 }

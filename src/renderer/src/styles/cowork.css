@@ -278,10 +278,10 @@
 .desk-panel .plan-panel { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font-size: 13px; line-height: 1.35; }
 
 /* The tab strip: one row of tabs (scrolling sideways when there are more than fit) and the close button. */
-.side-tabs-row { flex: none; display: flex; align-items: center; gap: 4px; padding: 6px 8px 0 16px; border-bottom: 1px solid var(--border); }
-.side-tabs { flex: 1; min-width: 0; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.side-tabs-row { flex: none; display: flex; align-items: center; gap: 4px; padding: 6px 8px 0 10px; border-bottom: 1px solid var(--border); }
+.side-tabs { flex: 1; min-width: 0; display: flex; gap: 0; overflow-x: auto; scrollbar-width: none; }
 .side-tabs::-webkit-scrollbar { display: none; }
-.side-tab { flex: none; display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 10px; border: 0; border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0; background: transparent; color: var(--text-muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.side-tab { flex: none; display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 0 7px; border: 0; border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0; background: transparent; color: var(--text-muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
 .side-tab:hover { background: var(--hover); color: var(--text); }
 .side-tab.active { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
 .side-tab:focus-visible, .desk-close:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -365,3 +365,7 @@
 .term-window-view { flex: 1; min-height: 0; padding: 6px 0 6px 10px; }
 .term-host { width: 100%; height: 100%; }
 .term-host .xterm-viewport { background-color: transparent !important; }
+
+.ctx-traces-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 0; border: 0; background: transparent; color: var(--text-muted); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
+.ctx-traces-head:hover { color: var(--text); }
+.ctx-traces .traces-pane { margin: 8px -14px -12px; }

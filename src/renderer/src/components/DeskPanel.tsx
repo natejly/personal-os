@@ -7,7 +7,6 @@ import DeskReview from './DeskReview'
 import { ChatFilesList } from './ChatFilesPanel'
 import { useStore } from '../store'
 import ContextDrawer from './ContextDrawer'
-import TracesPane from './TracesPane'
 import WorkersPanel from './WorkersPanel'
 import ProgressCard from './ProgressCard'
 import SidePanel from './SidePanel'
@@ -23,7 +22,6 @@ const FilesTab = ({ conversationId, desk }: SidePanelTabProps): JSX.Element => (
   : <ChatFilesList conversationId={conversationId ?? ''} />)
 const ChangesTab = ({ conversationId, desk }: SidePanelTabProps): JSX.Element => <div className="desk-pane scroll"><DeskChanges desk={desk ?? undefined} conversationId={conversationId ?? ''} /></div>
 const ReviewTab = ({ desk }: SidePanelTabProps): JSX.Element | null => (desk ? <div className="desk-pane scroll"><DeskReview desk={desk} /></div> : null)
-const TracesTab = ({ conversationId }: SidePanelTabProps): JSX.Element => <TracesPane conversationId={conversationId} />
 
 registerSlot(CORE, 'sidepanel.tab', { id: 'context', order: 10, label: 'Context', Component: ContextTab })
 registerSlot(CORE, 'sidepanel.tab', { id: 'files', order: 20, label: 'Files', Component: FilesTab, shown: (p) => !!p.conversationId })
@@ -35,15 +33,14 @@ registerSlot(CORE, 'sidepanel.tab', {
   id: 'review', order: 40, label: 'Review', Component: ReviewTab,
   shown: (p) => !!p.desk && (p.desk.outputs.length > 0 || p.desk.status === 'review'), count: (p) => p.desk?.outputs.length ?? 0
 })
-registerSlot(CORE, 'sidepanel.tab', { id: 'traces', order: 50, label: 'Traces', Component: TracesTab, shown: (p) => !!p.conversationId })
 
 /**
  * The side panel of a chat: a resizable column (SidePanel) with a tab strip over one scrolling body. Tabs are the
  * `sidepanel.tab` slot items in slot order: Context, Files, Changes (once the chat has files or its desk has runs),
- * Review (once a desk has outputs or is in review), Traces, then extension tabs such as Terminal. A draft chat with
+ * Review (once a desk has outputs or is in review), then extension tabs such as Terminal. A draft chat with
  * no id has only Context. The running checklist (ProgressCard) and the workers list lead the panel above the strip.
  * It opens on Context, on Review when its desk is in review, and on the tab a request names (the store's
- * `deskTabRequest`: traces, terminal, files, review); the last tab chosen is kept while the panel stays mounted.
+ * `deskTabRequest`: terminal, files, review; a traces request opens Context with its Traces section expanded); the last tab chosen is kept while the panel stays mounted.
  * Escape closes it.
  */
 export default function DeskPanel({ desk, conversationId, onClose }: { desk?: FullDesk | null; conversationId?: string; onClose: () => void }): JSX.Element {
@@ -55,7 +52,7 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
   const fileCount = useChatFileCount(id)
   const tracesRequest = useStore((s) => s.deskTabRequest?.n)
   useEffect(() => { if (contextOpen) setActive('context') }, [contextOpen])
-  useEffect(() => { const r = useStore.getState().deskTabRequest; if (r && Date.now() - r.at < 3000) { useStore.setState({ contextOpen: false, deskPanel: true }); setActive(r.tab) } }, [tracesRequest])
+  useEffect(() => { const r = useStore.getState().deskTabRequest; if (r && Date.now() - r.at < 3000) { useStore.setState({ contextOpen: false, deskPanel: true }); setActive(r.tab === 'traces' ? 'context' : r.tab) } }, [tracesRequest])
   useEffect(() => {
     const esc = (e: KeyboardEvent): void => { if (e.key === 'Escape' && !e.defaultPrevented && !(e.target as HTMLElement | null)?.closest?.('.xterm, .term-window, input, textarea, [contenteditable]')) onClose() }
     window.addEventListener('keydown', esc)

@@ -29,7 +29,7 @@ function announce(kind: CodingTransition, c: CodingSession): void {
 
 export function activate(ui: UiApi): void {
   for (const name of CARD_TOOLS) ui.toolCard(name, CodingSessionCard)
-  // After Traces (50) in the side panel. It lists once the app has said it can host terminals.
+  // Last in the side panel. It lists once the app has said it can host terminals.
   ui.slot('sidepanel.tab', { id: 'terminal', order: 60, label: 'Terminal', Component: TerminalTab, Overlay: TerminalOverlay, shown: (p) => !!p.conversationId, when: () => terminalsOn })
   void termAvailable().then((ok) => { terminalsOn = ok; if (ok) useStore.setState({}) })  // the nudge makes every slot re-read its `when`
   ui.on('coding_session', (data) => {

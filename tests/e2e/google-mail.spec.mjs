@@ -1,4 +1,5 @@
 import { test, expect, openApp, resize } from './helpers/google.mjs'
+import { menu } from './helpers/shell.mjs'
 import { readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { newChat, say } from './helpers/blocks.mjs'
@@ -186,7 +187,10 @@ test('Escape on an untouched compose closes; on a typed one it stays', async ({ 
 test('mail watch: needs reply / awaiting reply chips, rescan, dismiss', async ({ grain }) => {
   const { page } = grain
   await openMail(grain)
-  await page.getByRole('button', { name: 'Re-scan recent threads' }).click()
+  const pal = page.getByRole('dialog', { name: 'Command palette' })
+  await menu(grain, 'Command Palette…')
+  await pal.getByPlaceholder('Go to, create, open…').fill('Re-scan mail')
+  await page.keyboard.press('Enter')
   const needs = page.locator('.chip-check', { hasText: 'Needs reply' })
   const awaiting = page.locator('.chip-check', { hasText: 'Awaiting reply' })
   await expect(needs).toContainText(/Needs reply [1-9]/)
@@ -209,10 +213,10 @@ test('Gmail API failure shows an error bar and the list recovers on refresh', as
   const { page } = grain
   await openMail(grain)
   await grain.fake.fail('gmail', 5)
-  await page.getByRole('button', { name: 'Refresh mail' }).click()
+  await page.getByRole('button', { name: 'Sync mail' }).click()
   await expect(page.locator('.notice-bar.error')).toBeVisible()
   await grain.fake.fail('gmail', 0)
-  await page.getByRole('button', { name: 'Refresh mail' }).click()
+  await page.getByRole('button', { name: 'Sync mail' }).click()
   await expect(page.locator('.notice-bar.error')).toHaveCount(0)
   await expect(rows(page).first()).toBeVisible()
 })

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Check, ChevronLeft, ChevronRight, Calendar as CalIcon, Plus, RefreshCw } from '../../icons'
+import { Check, ChevronLeft, ChevronRight, Calendar as CalIcon, Plus } from '../../icons'
 import { useStore } from '../../store'
 import { PIM_SETTINGS_TAB, pimLabel, pimStatus } from '../../lib/pim'
 import { api } from '../../lib/api'
@@ -17,6 +17,8 @@ import { lines, usePageContext } from '../../lib/pageContext'
 import { calendarViewKey, readView, writeView } from '../../lib/viewCache'
 import { rangeLabel } from '../../lib/dates'
 import AppSwitcher from '../../components/AppSwitcher'
+import { useViewCommand } from '../../lib/viewCommands'
+import SyncStatus from '../../components/SyncStatus'
 import PlannerPanel from '../../components/PlannerPanel'
 import SidebarToggle from '../../components/SidebarToggle'
 
@@ -65,6 +67,7 @@ export default function CalendarView(): JSX.Element {
   const todos = useTodos((s) => s.todos)
   const { refreshTodos, updateTodo } = useTodos(useShallow((s) => ({ refreshTodos: s.refreshTodos, updateTodo: s.updateTodo })))
   const { toast, setView } = useStore(useShallow((s) => ({ toast: s.toast, setView: s.setView })))
+  const [syncedAt, setSyncedAt] = useState<number | null>(null)
   const [week, setWeek] = useState(() => startOfWeek(new Date()))
   // Week or month grid. `week` stays the anchor for both: the month shown is the one holding that week's Thursday.
   const [mode, setModeState] = useState<'week' | 'month'>(() => { try { return localStorage.getItem('calendar.mode') === 'month' ? 'month' : 'week' } catch { return 'week' } })
@@ -120,6 +123,7 @@ export default function CalendarView(): JSX.Element {
       const list = await api.google.calendarRange(rangeStart.toISOString(), rangeDays, query, refresh)
       writeView(key, list)
       if (seq.current !== mine) return
+      setSyncedAt(Date.now())
       setEvents(list)
       setError(null)
     } catch (e) {
@@ -128,6 +132,7 @@ export default function CalendarView(): JSX.Element {
       if (seq.current === mine) setLoading(false)
     }
   }
+  useViewCommand('calendar:refresh', () => { void load(true) })
   useEffect(() => {
     const mine = ++seq.current
     if (!google?.connected || query == null) return
@@ -135,7 +140,7 @@ export default function CalendarView(): JSX.Element {
     const key = calendarViewKey(rangeStart.toISOString(), rangeDays, query)
     let alive = true
     api.google.calendarRange(rangeStart.toISOString(), rangeDays, query)
-      .then((list) => { writeView(key, list); if (alive && seq.current === mine) { setEvents(list); setError(null) } })
+      .then((list) => { writeView(key, list); if (alive && seq.current === mine) { setSyncedAt(Date.now()); setEvents(list); setError(null) } })
       .catch((e) => { if (alive && seq.current === mine) setError((e as Error).message) })
       .finally(() => { if (alive && seq.current === mine) setLoading(false) })
     return () => { alive = false }
@@ -229,8 +234,8 @@ export default function CalendarView(): JSX.Element {
         </div>
         <span className="cal-range">{mode === 'month' ? span : rangeLabel(days[0], days[6])}</span>
         <div className="no-drag header-right">
-          {google?.connected && <button className="icon-btn" title="Refresh" aria-label="Refresh calendar" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>}
-          <div className="cal-plan"><PlannerPanel days={7} onApplied={() => void load(true)} /></div>
+          {google?.connected && <SyncStatus at={syncedAt} busy={loading} label="calendar" onRefresh={() => void load(true)} />}
+          <div className="cal-plan"><PlannerPanel days={7} command="calendar:plan-week" onApplied={() => void load(true)} /></div>
           {google?.connected && <button className="primary-btn" onClick={() => setEditing({ event: null, draft: {} })}><Plus size={14} /> New event</button>}
         </div>
         <AppSwitcher />

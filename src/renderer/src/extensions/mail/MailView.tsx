@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type Dispatch, type SetStateAction } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Mail as MailIcon, RefreshCw, Search, Star, Archive, MailOpen, Mail, ExternalLink, MessageSquare, Paperclip, SquarePen, Reply, Sparkles, Send, X, Forward, Download, File as FileIcon, FileText, FileSpreadsheet, FileArchive, Image as ImageIcon } from '../../icons'
+import { Mail as MailIcon, Search, Star, Archive, MailOpen, Mail, ExternalLink, MessageSquare, Paperclip, SquarePen, Reply, Sparkles, Send, X, Forward, Download, File as FileIcon, FileText, FileSpreadsheet, FileArchive, Image as ImageIcon } from '../../icons'
 import { useStore } from '../../store'
 import { PIM_SETTINGS_TAB, pimLabel, pimStatus } from '../../lib/pim'
 import { api } from '../../lib/api'
@@ -11,6 +11,8 @@ import { oneLine } from '../../lib/emailAsk'
 import { fenced, lines, usePageContext } from '../../lib/pageContext'
 import { readView, writeView } from '../../lib/viewCache'
 import AppSwitcher from '../../components/AppSwitcher'
+import { useViewCommand } from '../../lib/viewCommands'
+import SyncStatus from '../../components/SyncStatus'
 import { MailWatchChips, MailWatchList, useMailWatch } from './MailWatchPanel'
 import { rowButton } from '../../lib/rowButton'
 import { useModal } from '../../lib/useModal'
@@ -305,6 +307,7 @@ export default function MailView(): JSX.Element {
     return (): void => clearTimeout(t)
   }, [search])
 
+  const [syncedAt, setSyncedAt] = useState<number | null>(null)
   const cacheKey = google?.connected ? `mail:${query}` : ''
   // Show the saved list for this filter before the sync returns, including when the
   // filter changes, so the previous folder does not sit on screen under a spinner.
@@ -330,6 +333,7 @@ export default function MailView(): JSX.Element {
       const out = await api.google.gmail(query, 30, refresh)
       if (seq.current !== mine) return
       writeView(key, out)
+      setSyncedAt(Date.now())
       setMessages(out)
       // Snoozes wake (and get made elsewhere) between loads, so the hidden set is re-read with the list.
       api.mailWatch.snoozed().then((r) => { if (seq.current === mine) setSnoozed(r.thread_ids) }).catch(() => {})
@@ -339,6 +343,7 @@ export default function MailView(): JSX.Element {
       if (seq.current === mine) setLoading(false)
     }
   }
+  useViewCommand('mail:refresh', () => { void load(true) })
   useEffect(() => { void load() }, [query, google?.connected])
   useEffect(() => {
     if (!google?.connected) return
@@ -521,7 +526,7 @@ export default function MailView(): JSX.Element {
             <Search size={14} />
             <input placeholder="Search mail (from:, subject:, …)" aria-label="Search mail" value={search} onChange={(e) => setSearch(e.target.value)} />
           </label>
-          <button className="icon-btn" title="Refresh" aria-label="Refresh mail" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>
+          <SyncStatus at={syncedAt} busy={loading} label="mail" onRefresh={() => void load(true)} />
           <button className="primary-btn" onClick={startCompose}><SquarePen size={14} /> Compose</button>
         </div>}
         <AppSwitcher />

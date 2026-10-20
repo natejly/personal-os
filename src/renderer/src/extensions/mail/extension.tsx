@@ -1,6 +1,8 @@
 import { Mail } from '../../icons'
 import type { UiApi } from '../host'
 import { ComposeCard, OutboxCard, ReadCard, SearchCard } from './EmailCard'
+import { useStore } from '../../store'
+import { requestViewCommand } from '../../lib/viewCommands'
 import MailView from './MailView'
 
 export function activate(ui: UiApi): void {
@@ -12,6 +14,8 @@ export function activate(ui: UiApi): void {
     Component: MailView,
     nav: { order: 16 }
   })
+  ui.command({ id: 'mail:refresh', label: 'Refresh mail', run: () => { useStore.getState().setView('mail'); requestViewCommand('mail:refresh') } })
+  ui.command({ id: 'mail:rescan', label: 'Re-scan mail threads', run: () => { useStore.getState().setView('mail'); requestViewCommand('mail:rescan') } })
   ui.toolCard('gmail_send', ComposeCard)
   ui.toolCard('gmail_draft', ComposeCard)
   ui.toolCard('gmail_outbox', OutboxCard)

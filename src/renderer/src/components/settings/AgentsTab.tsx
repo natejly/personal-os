@@ -32,7 +32,7 @@ export default function AgentsTab({ draft, patch }: TabProps): JSX.Element {
           value={draft.delegationForce !== false} defaultValue onReset={() => patch({ delegationForce: true })}>
           <Toggle label="Delegate long work" checked={draft.delegationForce !== false} onChange={(delegationForce) => patch({ delegationForce })} />
         </SettingRow>
-        <Disclosure id="agent-workers" title="Limits">
+        <Disclosure id="agent-workers" title="Limits" secs={["workers"]}>
           {draft.delegationForce !== false && (
             <SettingRow title="Delegate after this many tool rounds" value={delegationAfterRounds} defaultValue={4} onReset={() => patch({ delegationAfterRounds: 4 })}>
               <NumberField name="delegationAfterRounds" label="Delegate after this many tool rounds" value={delegationAfterRounds} fallback={4} onChange={(n) => patch({ delegationAfterRounds: n })} />

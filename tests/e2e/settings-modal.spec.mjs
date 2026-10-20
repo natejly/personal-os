@@ -372,6 +372,31 @@ test('the Mascot setting swaps the faces for blobs or a status dot, and saves', 
   const p2 = await grain.relaunch()
   await expect(p2.locator('.sidebar .convo-item', { hasText: 'Mascot chat' }).locator('.face-dot')).toHaveCount(1)
   await openSettings(p2)
+  await openMoreAppearance(p2)
   await expect(dialog(p2).getByRole('radio', { name: 'Off', exact: true })).toHaveAttribute('aria-checked', 'true')
+  noErrors(grain)
+})
+
+test('searching for a setting inside a closed disclosure opens it and highlights the block', async ({ grain }) => {
+  const { page } = grain
+  await openSettings(page)
+  const d = dialog(page)
+  const search = d.getByLabel('Search settings')
+  const pick = async (q, title) => {
+    await search.fill(q)
+    await d.locator('.settings-hits button', { hasText: title }).first().click()
+  }
+  // A limits row, then an Always ask first entry (both start collapsed), then Model roles.
+  await pick('repeat', 'Agent loop limits')
+  await expect(d.locator('details[data-disclosure="agent-limits"]')).toHaveAttribute('open', '')
+  await expect(d.getByText('Repeated dead ends').first()).toBeVisible()
+  await expect(d.locator('#sec-loop')).toHaveClass(/set-flash/)
+  await pick('revoke', 'Always ask first')
+  await expect(d.locator('details[data-disclosure="per-tool-access"]')).toHaveAttribute('open', '')
+  await expect(d.locator('#sec-always-ask')).toBeVisible()
+  await expect(d.locator('#sec-always-ask')).toHaveClass(/set-flash/)
+  await pick('rerank', 'Models')
+  await expect(d.locator('details[data-disclosure="model-roles"]')).toHaveAttribute('open', '')
+  await expect(d.getByText('Search model').first()).toBeVisible()
   noErrors(grain)
 })

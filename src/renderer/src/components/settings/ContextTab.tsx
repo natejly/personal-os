@@ -75,7 +75,7 @@ function CompactionGroup({ draft, patch }: TabProps): JSX.Element {
       <SettingRow settingKey="autoCompact" title="Summarize long chats" value={auto} defaultValue={d.autoCompact} onReset={() => patch({ autoCompact: d.autoCompact })}>
         <Toggle label="Summarize long chats" checked={auto} onChange={(autoCompact) => patch({ autoCompact })} />
       </SettingRow>
-      <Disclosure id="context-thresholds" title="Thresholds">
+      <Disclosure id="context-thresholds" title="Thresholds" secs={["compaction"]}>
         {num('compactAt', 'Summarize at (fraction of window)', 0.05)}
         {num('compactAtTokens', 'Also summarize past (tokens)')}
         {num('compactKeepRecent', 'Recent messages kept')}

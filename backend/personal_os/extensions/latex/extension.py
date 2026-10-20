@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import signal
+import logging
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from ...docs import Docs
     from ..host import ExtensionScope
 
+log = logging.getLogger(__name__)
 BUILD_DIR = ".grain-build"
 ENGINES = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualatex"}
 UPLOAD_CAP = 25 * 1024 * 1024
@@ -182,6 +184,11 @@ class Latex:
             return self.describe(scope, folder, d, rows)
         raise LatexError("This file is not inside a LaTeX project (a folder with a main.tex)")
 
+    def synced(self, doc_id: str) -> dict[str, Any]:
+        """project_for, after any source files left in its asset folder by older uploads have become docs."""
+        p = self.project_for(doc_id)
+        return self.project_for(doc_id) if self.convert_assets(p["scope"], p["folder"]) else p
+
     def project_at(self, scope: str, folder: str) -> dict[str, Any]:
         rows = self.sources(scope)
         main = self.main_of(scope, folder, rows)
@@ -229,7 +236,7 @@ class Latex:
 
     def context(self, doc_id: str) -> dict[str, Any]:
         """What the editor shows beside a doc: its project, the project's source docs by relative path, and its assets."""
-        proj = self.project_for(doc_id)
+        proj = self.synced(doc_id)
         folder = proj["folder"]
         files = []
         for d in self.sources(proj["scope"]):
@@ -272,6 +279,63 @@ class Latex:
             raise LatexError(f"Path '{rel}' leaves the project")
         dest.write_bytes(data)
         return {"path": dest.relative_to(root).as_posix(), "size": len(data)}
+
+    @staticmethod
+    def decode(data: bytes) -> str:
+        try:
+            return data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            return data.decode("latin-1")  # old TeX sources are often 8-bit; better readable than refused
+
+    @staticmethod
+    def is_template(text: str) -> bool:
+        """The untouched new-project template (its date line differs by version, so ignore it)."""
+        date = re.compile(r"\\date\{[^}]*\}")
+        return date.sub("", text).strip() == date.sub("", TEMPLATE).strip()
+
+    def import_source(self, scope: str, folder: str, rel: str, data: bytes) -> dict[str, Any]:
+        """File an uploaded LaTeX source as a doc in the project folder (+ relative subpath). A doc already there is replaced only
+        while it is the untouched template; otherwise the upload becomes `<stem> (uploaded)<ext>`. Never overwrites user text."""
+        p = safe_rel(rel)
+        if len(data) > UPLOAD_CAP:
+            raise LatexError("File is too large to upload")
+        dest = "/".join(x for x in (folder, p.parent.as_posix() if p.parent.parts else "") if x)
+        text = self.decode(data)
+        taken = {d["title"]: d for d in self.docs.list(scope or None) if (d["folder"] or "") == dest}
+        title = p.name
+        if title in taken:
+            cur = self.docs.get(taken[title]["id"]) or {}
+            if self.is_template(cur.get("content") or ""):
+                d = self.docs.save(cur["id"], text, summary="Uploaded")
+                return {"kind": "doc", "doc_id": d["id"], "path": (p.parent / title).as_posix(), "replaced": True}
+            stem, ext = os.path.splitext(title)
+            n = 1
+            while title in taken:
+                title = f"{stem} (uploaded{'' if n == 1 else f' {n}'}){ext}"
+                n += 1
+        d = self.docs.create(title, text, scope or None, dest)
+        return {"kind": "doc", "doc_id": d["id"], "path": (p.parent / title).as_posix(), "replaced": False}
+
+    def upload(self, scope: str, folder: str, rel: str, data: bytes) -> dict[str, Any]:
+        if is_latex_source(Path(rel).name):
+            return self.import_source(scope, folder, rel, data)
+        return {"kind": "asset", **self.put_asset(scope, folder, rel, data)}
+
+    def convert_assets(self, scope: str, folder: str) -> int:
+        """Older uploads put .tex/.bib files in the asset folder, where they cannot be opened or edited. Turn each into a doc, and
+        remove the asset only once the doc is written. A failure on one file is logged and the rest go on. Idempotent."""
+        done = 0
+        root = self.asset_dir(scope, folder)
+        for a in self.assets(scope, folder):
+            if not is_latex_source(Path(a["path"]).name):
+                continue
+            try:
+                self.import_source(scope, folder, a["path"], (root / a["path"]).read_bytes())
+                self.delete_asset(scope, folder, a["path"])
+                done += 1
+            except Exception as e:  # noqa: BLE001 - the asset stays; try again next time
+                log.warning("latex: could not convert asset %s: %s", a["path"], e)
+        return done
 
     def delete_asset(self, scope: str, folder: str, rel: str) -> None:
         root = self.asset_dir(scope, folder)
@@ -393,7 +457,7 @@ def router(lx: Latex) -> APIRouter:
     @r.post("/compile")
     async def compile_(body: CompileIn) -> dict[str, Any]:
         try:
-            return await lx.compile(lx.project_for(body.doc_id), body.engine)
+            return await lx.compile(lx.synced(body.doc_id), body.engine)
         except LatexError as e:
             raise HTTPException(400, str(e)) from e
 
@@ -404,9 +468,9 @@ def router(lx: Latex) -> APIRouter:
 
     @r.post("/assets")
     async def upload(doc_id: str, file: UploadFile, path: str | None = None) -> dict[str, Any]:
-        proj = guard(lx.project_for, doc_id)
+        proj = guard(lx.synced, doc_id)
         data = await file.read(UPLOAD_CAP + 1)
-        return guard(lx.put_asset, proj["scope"], proj["folder"], path or Path(file.filename or "").name, data)
+        return guard(lx.upload, proj["scope"], proj["folder"], path or Path(file.filename or "").name, data)
 
     @r.delete("/assets")
     def delete_asset(doc_id: str, path: str) -> dict[str, bool]:
@@ -440,7 +504,7 @@ def register_tools(api: ExtensionScope, lx: Latex) -> None:
     async def latex_compile(ctx: dict[str, Any], doc_id: str | None = None, folder: str | None = None, project: str | None = None) -> Any:
         try:
             if doc_id:
-                proj = lx.project_for(doc_id)
+                proj = lx.synced(doc_id)
             elif folder:
                 proj = lx.project_at(lx.resolve_scope(project or ctx.get("project_id")), folder_path(folder))
             else:

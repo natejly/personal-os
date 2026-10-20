@@ -8,6 +8,8 @@ export interface LatexProject {
 }
 export interface LatexFile { doc_id: string; path: string; kind: 'tex' | 'bib' }
 export interface LatexAsset { path: string; size: number }
+/** What an upload made: a Files doc for a LaTeX source (`doc_id`), an asset for anything else. */
+export type LatexUpload = { kind: 'doc'; doc_id: string; path: string; replaced: boolean } | { kind: 'asset'; path: string; size: number; doc_id?: undefined }
 export interface LatexContext { project: LatexProject; files: LatexFile[]; assets: LatexAsset[] }
 export interface LatexProblem { file: string; line: number; message: string; doc_id?: string | null }
 export interface CompileResult { ok: boolean; pdf: boolean; errors: LatexProblem[]; warnings: LatexProblem[]; log_tail: string; duration_ms: number; main_doc_id: string }
@@ -21,7 +23,7 @@ export const latexApi = {
   upload: (docId: string, f: File) => {
     const body = new FormData()
     body.append('file', f)
-    return req<LatexAsset>(`/latex/assets?${q(docId)}`, { method: 'POST', body })
+    return req<LatexUpload>(`/latex/assets?${q(docId)}`, { method: 'POST', body })
   },
   deleteAsset: (docId: string, path: string) => req(`/latex/assets?${q(docId)}&path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
   pdfPath: (docId: string) => `/latex/pdf?${q(docId)}`,

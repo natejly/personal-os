@@ -2195,9 +2195,11 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .tasks-sync { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
 /* The column's gap spaces these; the switch rows bring a bottom margin from the dialog's label rule. */
 .modal .tasks-sync label.toggle-row:not(.modal-free *) { margin: 0; }
-.tasks-sync-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tasks-sync-row { display: flex; flex-direction: row; text-align: left; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tasks-sync-row select { max-width: 180px; }
 .tasks-sync-row small { margin-left: auto; }
+.tasks-sync-row > .toggle-text { flex: 1; text-align: left; }
+.tasks-sync-row > input { flex: 0 1 220px; }
 .g-logo { width: 32px; height: 32px; border-radius: 8px; background: #fff; color: #4285f4; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; }
 .g-logo-sm { width: 18px; height: 18px; border-radius: 4px; font-size: 12px; margin-right: 2px; }
 .setup { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
@@ -3395,6 +3397,11 @@ select:focus-visible {
 .recap-inline { max-width: 560px; width: 100%; margin: 14px auto 0; padding: 10px 14px; text-align: left; background: transparent; border: 1px solid var(--border); }
 .recap-inline > header { font-weight: 500; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
 .recap-inline .markdown { font-size: 12.5px; }
+.recap-inline .markdown.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; cursor: pointer; }
+.page-header .pop-menu-panel { bottom: auto; top: calc(100% + 6px); left: auto; right: 0; width: 200px; }
+.pop-menu-check { flex-direction: row; align-items: center; gap: 6px; }
+.sync-status { font-size: 12px; color: var(--text-faint); }
+.page-header .pop-menu-panel .seg { margin: 4px 8px; align-self: flex-start; }
 .inbox-modal { width: min(760px, 94vw); max-height: 86vh; overflow-y: auto; padding: 0; position: relative; }
 .inbox-modal > .agent-inbox { margin: 0; background: none; }
 /* Above the modal's sticky header (z-index 2), which the inbox header inherits; the header leaves room at its right end. */
@@ -3535,3 +3542,6 @@ select:focus-visible {
 .traces-tool { margin: 2px 0 2px 14px; font-size: 12px; }
 .traces-tool.error summary { color: var(--danger); }
 .traces-tool pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.sync-status { background: none; border: 0; padding: 4px 6px; border-radius: 6px; font-size: 12px; color: var(--text-faint); cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sync-status:hover:not(:disabled), .sync-status:focus-visible { color: var(--text); }

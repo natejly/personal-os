@@ -171,6 +171,8 @@ test('invalid values are clamped or rejected without breaking the modal', async 
   const rounds = 'Delegate after this many tool rounds'
   for (const [v, want] of [['999', 20], ['-5', 1], ['0', 4], ['2.6', 3], ['', 4]]) {
     await openAdvanced(page, 'Desks and workers')
+    const lim = dialog(page).locator('details[data-disclosure="agent-workers"]')
+    if (!(await lim.evaluate((e) => e.open))) await lim.locator('summary').click()
     await field(page, rounds).fill(v)
     await dialog(page).getByRole('button', { name: 'Save', exact: true }).click()
     await expect(dialog(page)).toHaveCount(0)

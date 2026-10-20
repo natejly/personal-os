@@ -8,7 +8,7 @@ import type { Canvas, CanvasWindow } from '@shared/types'
 import { liveWindows, renderOrder } from './Canvas'
 import { clampOpacity, nextOpacity } from './opacity'
 import { WIDGETS } from './registry'
-import { flushLayoutOnUnload, setLiveViewport, useCanvas, viewport } from './store'
+import { fitOversizedWindows, flushLayoutOnUnload, setLiveViewport, useCanvas, viewport } from './store'
 import type { Viewport } from './snapping'
 
 interface Call { url: string; method: string; keepalive: boolean; body: { windows?: { id: string; x: number }[] } | null }
@@ -382,4 +382,34 @@ test('tidy packs 3 windows and a blob GAP apart', () => {
   const r = (id: string, w: number, h: number) => ({ id, x: 0, y: 0, w, h })
   const out = tidyLayout([r('a', 400, 300), r('b', 400, 300), r('c', 400, 300), r('blob', 120, 120)], { zoom: 1, panX: 0, panY: 0, width: 1000, height: 800 }, 16)
   assert.deepEqual(out.map((o) => [o.x, o.y]), [[16, 16], [428, 16], [16, 328], [428, 328]])
+})
+
+// ---- fitting oversized windows on restore ------------------------------------------
+
+const withPlane = async (w: number, h: number, f: () => void | Promise<void>): Promise<void> => {
+  const win = g.window as { innerWidth: number; innerHeight: number }
+  const [ow, oh] = [win.innerWidth, win.innerHeight]
+  win.innerWidth = w
+  win.innerHeight = h
+  try { await f() } finally { win.innerWidth = ow; win.innerHeight = oh }
+}
+
+test('a saved zoom of 2 does not shrink a 700x500 window on a 1280x800 plane', async () => {
+  await withPlane(1280, 800, () => {
+    seed(canvas('c1', [win({ id: 'w1', x: 40, y: 40, w: 700, h: 500 })], { zoom: 2 }))
+    fitOversizedWindows('c1')
+    const w = rowOf('c1', 'w1')
+    assert.deepEqual([w.w, w.h], [700, 500])
+  })
+})
+
+test('a fit on restore shrinks for display and never marks the layout dirty', async () => {
+  await withPlane(600, 400, async () => {
+    seed(canvas('c1', [win({ id: 'w1', x: 24, y: 24, w: 900, h: 700 })]))
+    fitOversizedWindows('c1')
+    const w = rowOf('c1', 'w1')
+    assert.ok(w.w < 900 && w.h < 700, 'shrunk on screen')
+    await useCanvas.getState().flushLayout()
+    assert.deepEqual(layoutPuts(), [])
+  })
 })

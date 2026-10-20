@@ -283,12 +283,23 @@ export default function Canvas(): JSX.Element {
     paint()
   }, [canvas?.id, paint])
 
-  // Once per space, when the plane has been measured: a window larger than the view is fitted into it.
+  // Once per space, when the measured plane has held still for two frames: a window larger than the view
+  // is fitted into it for display only (a startup or sidebar-fold width must not shrink saved sizes).
   const fitted = useRef<string | null>(null)
   useEffect(() => {
     if (!loaded || !canvas?.id || size.w <= 0 || size.h <= 0 || fitted.current === canvas.id) return
-    fitted.current = canvas.id
-    fitOversizedWindows(canvas.id)
+    const id = canvas.id
+    let f2 = 0
+    const f1 = requestAnimationFrame(() => {
+      f2 = requestAnimationFrame(() => {
+        fitted.current = id
+        fitOversizedWindows(id)
+      })
+    })
+    return () => {
+      cancelAnimationFrame(f1)
+      cancelAnimationFrame(f2)
+    }
   }, [loaded, canvas?.id, size.w, size.h])
 
   const mount = useCallback((node: HTMLDivElement | null): void => {

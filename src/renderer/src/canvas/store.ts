@@ -282,13 +282,23 @@ const viewportOf = (c: Canvas): Viewport => {
  * instead of stacking them. Only when the viewport is genuinely full does it fall back to the old
  * cascade off the top-left.
  */
-/** A rect of `kind` fitted wholly inside what `vp` shows (see `fitInView`). */
+/**
+ * What a window may span, in canvas units: the plane's CSS size as if at zoom 1, from the visible origin.
+ * Zoom changes how much is on screen, not how large a window may be, so a saved zoom never shrinks windows.
+ */
+const spanRect = (vp: Viewport): { x: number; y: number; w: number; h: number } => {
+  const o = visibleRect(vp)
+  return { x: o.x, y: o.y, w: vp.width, h: vp.height }
+}
+
+/** A rect of `kind` fitted wholly inside the zoom-1 span of `vp` (see `fitInView`). */
 const fitToView = (kind: WidgetKind, r: { x: number; y: number; w: number; h: number }, vp: Viewport): { x: number; y: number; w: number; h: number } =>
-  vp.width > 0 && vp.height > 0 ? fitInView(r, visibleRect(vp), minOf?.(kind) ?? { w: 200, h: 160 }) : r
+  vp.width > 0 && vp.height > 0 ? fitInView(r, spanRect(vp), minOf?.(kind) ?? { w: 200, h: 160 }) : r
 
 /**
  * Shrinks and slides every normal window of `canvasId` that is larger than the visible canvas so it fits.
- * A window that already fits keeps whatever size and place the user gave it.
+ * A window that already fits keeps whatever size and place the user gave it. The fit is display-only: it is
+ * never marked dirty, so a narrow plane at startup cannot overwrite the size the user saved.
  */
 export const fitOversizedWindows = (canvasId: string): void => {
   const s = useCanvas.getState()
@@ -296,17 +306,14 @@ export const fitOversizedWindows = (canvasId: string): void => {
   if (!c || c.locked || canvasId !== s.activeCanvasId) return
   const vp = viewport()
   if (vp.width <= 0 || vp.height <= 0) return
-  const vis = visibleRect(vp)
-  const ids: string[] = []
+  const vis = spanRect(vp)
   for (const w of c.windows) {
     if (w.state !== 'normal') continue
     if (w.w <= vis.w - 2 * FIT_MARGIN && w.h <= vis.h - 2 * FIT_MARGIN) continue
     const r = fitToView(w.kind, w, vp)
     if (r.x === w.x && r.y === w.y && r.w === w.w && r.h === w.h) continue
     s.patchWindow(w.id, r)
-    ids.push(w.id)
   }
-  if (ids.length) s.markLayoutDirty(ids)
 }
 
 const spawnAt = (windows: CanvasWindow[], size?: Size, vp: Viewport = viewport()): Point => {

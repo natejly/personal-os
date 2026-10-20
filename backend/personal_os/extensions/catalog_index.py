@@ -62,8 +62,9 @@ def permission_text(manifest: Manifest) -> list[str]:
             lines.append(f"Can replace a core part of Grain: the {_SLOT_PERMISSIONS[perm]}")
         elif perm.startswith("service:"):
             name = perm.removeprefix("service:")
-            if name in SERVICE_LABELS:
-                lines.append(f"Uses {SERVICE_LABELS[name]}")
+            lines.append(f"Uses {SERVICE_LABELS[name]}" if name in SERVICE_LABELS else "Uses another service")
+        else:
+            lines.append("Holds an extra capability")
     if manifest.hooks:
         lines.append(f"Listens to {len(manifest.hooks)} app event{'s' if len(manifest.hooks) != 1 else ''}")
     if manifest.contributes.get("views") or manifest.contributes.get("slots"):

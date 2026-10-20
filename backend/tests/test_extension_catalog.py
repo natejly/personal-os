@@ -196,3 +196,15 @@ def test_permission_text_is_plain_language() -> None:
     text = " ".join(catalog_index.permission_text(m))
     assert "own data" in text and "block a tool call" in text and "connected tool servers" in text
     assert "tool.permission" not in text and "1 app event" in text and ".." not in text
+
+
+def test_permission_text_falls_back_for_unmapped_ids_and_counts_risky_tools() -> None:
+    from personal_os.extensions.manifest import Manifest
+    m = Manifest.from_dict({"id": "xc-fallback", "name": "T", "version": "1.0.0", "apiVersion": 1, "permissions": ["service:acme"],
+                            "contributes": {"tools": [{"name": "a", "danger": "writes"}, {"name": "b"}]}})
+    import dataclasses
+    m = dataclasses.replace(m, permissions=(*m.permissions, "mystery:power"))  # a manifest the loader would refuse still gets a line
+    lines = catalog_index.permission_text(m)
+    assert "Uses another service" in lines and "Holds an extra capability" in lines
+    assert any("2 tools" in ln and "1 can change things" in ln for ln in lines)
+    assert "acme" not in " ".join(lines) and "mystery" not in " ".join(lines)

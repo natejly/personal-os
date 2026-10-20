@@ -139,3 +139,9 @@ export async function launchSupervised({ settings = {} } = {}) {
     close: async () => { try { await app.close() } catch {} ; llm.close(); if (!process.env.E2E_KEEP) { try { rmSync(scratch, { recursive: true, force: true }) } catch {} } }
   }
 }
+
+/** The agent inbox from the command palette: the title-bar icon only shows while the inbox has items. */
+export async function openInboxFromPalette(grain) {
+  await menu(grain, 'Command Palette…')
+  await grain.page.getByRole('option', { name: /Agent inbox and jobs/ }).click()
+}

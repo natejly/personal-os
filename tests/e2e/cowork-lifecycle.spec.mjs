@@ -180,6 +180,7 @@ test('25 autonomous chats list among chats at 820x520 without overflowing', asyn
   const { page } = grain
   for (let i = 0; i < 25; i++) await deskChat(grain, { brief: `brief ${i}`, title: `Desk ${String(i).padStart(2, '0')}`, autonomy: 'plan', start: false })
   await page.reload()
+  await page.getByRole('button', { name: 'Show sidebar' }).click() // below 900px the sidebar starts folded
   await page.waitForSelector('.sidebar')
   await expect(page.locator('.sidebar .convo-item', { hasText: /^Desk \d\d/ })).toHaveCount(25, { timeout: 30_000 })
   await openChat(page, 'Desk 03')

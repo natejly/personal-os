@@ -107,7 +107,7 @@ async function surfaces(g) {
   const { page } = g
   if (want('shell')) {
     await attempt('new chat', async () => { await page.getByRole('button', { name: /New chat/ }).first().click(); await sleep(700); await shot(g, '01-chat-empty') })
-    await attempt('today', async () => { await page.locator('.sidebar .brand').click(); await sleep(900); await shot(g, '02-today') })
+    await attempt('today', async () => { await page.locator('.sidebar .new-chat').click(); await sleep(900); await shot(g, '02-today') })
   }
   if (want('chat')) {
     await attempt('chat long', async () => {

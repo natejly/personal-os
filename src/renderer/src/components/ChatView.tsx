@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { isSideNote, isBranchNote, isClear, sinceClear } from '../lib/workers'
 import BranchNote from '../components/BranchNote'
 import SideNote from '../components/SideNote'
-import { Pencil, Sparkles, ArrowDown, SlidersHorizontal } from '../icons'
+import { Pencil, Sparkles, ArrowDown, PanelRight } from '../icons'
 import { useStore, useProject, useChatFace, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
 import MessageView, { PendingUserMessage, Thinking } from './Message'
 import RegenRow from './RegenRow'
@@ -169,7 +169,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
         {/* The full-window chat gives the last title-bar slot to its own workspace panel. ⌘I toggles the same panel on Context here, and opens the quick chat in other views. */}
         <AppSwitcher last={conversationId || sidePanelClosed ? undefined : (
           <button className={`icon-btn${deskPanel || contextOpen ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={deskPanel || contextOpen}
-            onClick={() => { if (contextOpen) toggleContext(); setDeskPanel(!(deskPanel || contextOpen)) }}><SlidersHorizontal size={15} /></button>
+            onClick={() => { if (contextOpen) toggleContext(); setDeskPanel(!(deskPanel || contextOpen)) }}><PanelRight size={15} /></button>
         )} />
       </header>
 

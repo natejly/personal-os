@@ -813,7 +813,7 @@ kbd {
 /* Model picker: trigger, searchable list, Edit panel for effort and Fast. */
 .model-menu { position: relative; display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; flex: 0 1 auto; }
 /* The label and its select read as one control; the select draws no box of its own. */
-.model-menu-effort { padding-right: 2px; }
+.model-menu-effort { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 4px; border-top: 1px solid var(--border); font-size: 12px; }
 .model-menu-effort > span { color: var(--text-faint); }
 .model-menu-effort .chat-control {
   max-width: none;
@@ -1006,6 +1006,9 @@ kbd {
 .msg.assistant .msg-actions { opacity: 1; }
 .msg.assistant .msg-actions > :not(.msg-time):not(.model-tag) { opacity: 0; transition: opacity 0.15s; }
 .msg.assistant:hover .msg-actions > *, .msg.assistant:focus-within .msg-actions > *, .msg.assistant:last-child .msg-actions > * { opacity: 1; }
+/* The time, model and token line waits for hover or focus too; it stays in the DOM and keeps its tooltip. */
+.msg.assistant .msg-time, .msg.assistant .model-tag { opacity: 0; transition: opacity 0.15s; }
+.msg.assistant:hover .msg-time, .msg.assistant:hover .model-tag, .msg.assistant:focus-within .msg-time, .msg.assistant:focus-within .model-tag { opacity: 1; }
 /* The row doubles as the gap to the next message, so its buttons stay one size smaller than the header's. */
 .msg-actions .icon-btn { width: 24px; height: 24px; }
 .msg-actions .ghost-btn { padding: 2px 8px; }
@@ -1050,6 +1053,9 @@ kbd {
 .jump-count { min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--accent-solid); color: var(--on-accent); font-size: 11px; line-height: 16px; text-align: center; }
 .regen-row.followup-chips { flex-wrap: wrap; margin-top: 6px; }
 .regen-row { display: flex; justify-content: flex-start; align-items: center; gap: 8px; padding-left: 46px; margin-top: -4px; }
+/* Regenerate waits for hover or focus on the reply above or on the row itself. */
+.regen-row:not(.followup-chips) { opacity: 0; transition: opacity 0.15s; }
+.regen-row:not(.followup-chips):hover, .regen-row:not(.followup-chips):focus-within, .msg:hover ~ .regen-row:not(.followup-chips), .msg:focus-within ~ .regen-row:not(.followup-chips) { opacity: 1; }
 /* Regenerate is a quiet text control under the reply, not a boxed button fighting the hover actions above it. */
 .regen-row:not(.followup-chips) > .ghost-btn { border: 0; padding: 2px 6px; font-size: 12px; }
 .variant-switcher { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }

@@ -214,6 +214,7 @@ test('820x520 window: tree collapses and re-opens, editor stays usable', async (
   const { page } = g
   await smallWindow(g)
   await mkDoc(g, { title: 'Tiny', content: 'tiny body' })
+  await page.getByRole('button', { name: 'Show sidebar' }).click() // below 900px the sidebar starts folded
   await openFiles(page)
   await page.locator('.doc-row', { hasText: 'Tiny' }).last().click()
   await editDoc(page)

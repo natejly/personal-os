@@ -4,7 +4,7 @@ import { menu, menuTable, withGrain, ALL_VIEWS_ON, setWindowSize, bodyOverflow }
 const sidebarItem = (page, name) => page.locator('.sidebar .nav-item', { hasText: new RegExp(`^\\s*${name}`) }).first()
 const heading = (page, re) => expect(page.locator('main h2, .page h2').filter({ hasText: re }).first()).toBeVisible()
 
-test('every sidebar nav item opens its view and is marked current; the brand button brings you back to a chat', async () => {
+test('every sidebar nav item opens its view and is marked current; the New chat row brings you back to a chat', async () => {
   await withGrain({ settings: ALL_VIEWS_ON }, async ({ page, consoleErrors }) => {
     const rows = [['Files', /Files/], ['Library', /Library/]]
     for (const [name, h] of rows) {
@@ -13,7 +13,7 @@ test('every sidebar nav item opens its view and is marked current; the brand but
       await expect(sidebarItem(page, name)).toHaveAttribute('aria-current', 'page')
     }
     await sidebarItem(page, 'Files').click()
-    await page.locator('.sidebar .brand').click()
+    await page.locator('.sidebar .new-chat').click()
     await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
     expect(consoleErrors).toEqual([])
   })
@@ -42,8 +42,8 @@ test('the title-bar Quick chat button opens and closes the page agent panel', as
   // A chat gives that slot to its own Workspace panel button, so use a list view.
   await page.locator('.sidebar .nav-item', { hasText: /^\s*Lists/ }).first().click()
   const panel = page.getByRole('complementary', { name: 'Page agent' })
-  // one Quick chat button per title bar, beside the Agent inbox button in the switcher slot
-  await expect(page.locator('.app-switcher button')).toHaveCount(2)
+  // one Quick chat button per title bar; the inbox icon is absent while the inbox is empty
+  await expect(page.locator('.app-switcher button')).toHaveCount(1)
   await expect(page.locator('.app-switcher').getByRole('button', { name: 'Quick chat' })).toHaveCount(1)
   await expect(btn).toHaveAttribute('aria-pressed', 'false')
   await expect(panel).toHaveCount(0)
@@ -328,6 +328,8 @@ test('nothing overflows horizontally at 820x520 on any view', async () => {
     const { page } = grain
     await setWindowSize(grain, 820, 520)
     await expect.poll(() => page.evaluate(() => window.innerWidth)).toBeLessThanOrEqual(820)
+    // below 900px the sidebar folds away; the toggle pushes it back in
+    await page.getByRole('button', { name: 'Show sidebar' }).click()
     const check = async (label) => {
       await page.waitForTimeout(300)
       const o = await bodyOverflow(page)

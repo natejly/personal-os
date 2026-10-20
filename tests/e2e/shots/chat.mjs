@@ -126,7 +126,6 @@ if (want('desk')) await session(async (g) => {
     const names = await page.locator('button[aria-label]').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')).filter((n) => /chat|file|doc/i.test(n)))
     console.log('top buttons', names)
     await page.getByRole('button', { name: /in this chat/ }).first().click(); await sleep(700); await snap(g, 'chat-files-panel'); await page.keyboard.press('Escape')
-    await page.getByRole('button', { name: 'Documents from personal chats' }).click(); await sleep(700); await snap(g, 'chat-files-sidebar-tab')
   })
 })
 

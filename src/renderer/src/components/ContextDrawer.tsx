@@ -1,5 +1,6 @@
 import { modelLabel } from '../lib/modelLabel'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import TracesPane from './TracesPane'
 import { ChevronRight, ChevronDown, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, ShieldAlert, MonitorDot, PenLine } from '../icons'
 import { ToolOverrides } from './ToolPermissions'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
@@ -465,6 +466,13 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
   const hasStyle = useStore((s) => Boolean(s.style?.effective))
   const cs: ConversationSettings = convo?.settings ?? { effort: DEFAULT_EFFORT, useMemory: true, useGraph: true, useDocuments: true, useStyle: true, useMap: true, autoLearn: true, useTools: true, tools: {}, ...draftChatSettings }
   const [toolsOpen, setToolsOpen] = useState(false)
+  const [tracesOpen, setTracesOpen] = useState(false)
+  const tracesRef = useRef<HTMLElement>(null)
+  const tracesReq = useStore((s) => s.deskTabRequest?.n)
+  useEffect(() => {
+    const r = useStore.getState().deskTabRequest
+    if (r?.tab === 'traces' && Date.now() - r.at < 3000) { setTracesOpen(true); setTimeout(() => tracesRef.current?.scrollIntoView?.({ block: 'start' }), 0) }
+  }, [tracesReq])
   const allTools = useStore((s) => s.tools)
   const norm = (v: unknown, fb: 'on' | 'ask' | 'off'): 'on' | 'ask' | 'off' => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fb)
   const projectBase = Object.fromEntries(allTools.map((t) => {
@@ -535,6 +543,15 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
           )
         })()}
       </section>
+
+      {convo && (
+        <section ref={tracesRef} className="ctx-section ctx-traces">
+          <button type="button" className="ctx-traces-head" aria-expanded={tracesOpen} onClick={() => setTracesOpen((o) => !o)}>
+            {tracesOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}<span>Traces</span>
+          </button>
+          {tracesOpen && <TracesPane conversationId={conversationId} />}
+        </section>
+      )}
     </div>
   )
 }

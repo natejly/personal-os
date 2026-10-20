@@ -7,6 +7,7 @@ import { dayStr, seed } from '../helpers/todos.mjs'
 import { openLibrary } from '../helpers/library.mjs'
 import { enableModules, reload, sql as mahSql } from '../helpers/mah.mjs'
 import { seedJobRuns } from '../helpers/home.mjs'
+import { openInboxFromPalette as openInbox } from '../helpers/shell.mjs'
 
 const INV = join(homedir(), '.claude/jobs/66435b7a/tmp/inventory-views.md')
 if (!process.env.ONLY) writeFileSync(INV, '# Inventory: views\n')
@@ -178,7 +179,7 @@ if (want('library')) await session(async (g) => {
     await page.keyboard.press('Escape'); await sleep(400)
   })
   await attempt('today-scheduled-task', async () => {
-    await page.getByRole('button', { name: /^Agent inbox/ }).click()
+    await openInbox(g)
     const btn = page.getByRole('button', { name: /^Scheduled \(/ })
     await btn.waitFor({ timeout: 20000 })
     if ((await btn.getAttribute('aria-expanded')) !== 'true') await btn.click()
@@ -208,7 +209,7 @@ if (want('library')) await session(async (g) => {
 if (want('inbox')) await session(async (g) => {
   seedJobRuns(g, 3)
   await g.relaunch()
-  await g.page.getByRole('button', { name: /^Agent inbox/ }).click()
+  await openInbox(g)
   await g.page.locator('.agent-inbox .inbox-item').first().waitFor({ timeout: 30000 })
   await shot(g, 'inbox-agent')
   await g.page.locator('.agent-inbox .inbox-item').first().getByRole('button', { name: /Show the report/ }).click().catch(() => {})

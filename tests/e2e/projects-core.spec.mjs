@@ -173,6 +173,7 @@ test('50 projects and 200 chats in one project: sidebar and project view stay us
   await shrink(grain)
   const t0 = Date.now()
   await page.reload()
+  await page.getByRole('button', { name: 'Show sidebar' }).click() // below 900px the sidebar starts folded
   await expect(sidebar(page).getByText('Proj 49', { exact: true })).toBeAttached()
   expect(Date.now() - t0).toBeLessThan(15_000)
   // the group never lists more than 4 rows even with 200 chats

@@ -39,14 +39,14 @@ export default function CommandPalette(): JSX.Element {
   const s = useStore.getState()
 
   const entries: Entry[] = [
+    ...paletteCommands.filter((c) => ownerOn(settings, c.extension))
+      .map((c) => ({ key: `command:${c.id}`, label: c.label, hint: c.hint ?? 'Command', run: c.run })),
+    ...recent(conversations).map((c) => ({ key: `chat:${c.id}`, label: plainTitle(c.title) || 'Untitled chat', hint: 'Chat', run: () => void s.selectChat(c.id) })),
     ...[...VIEWS, ...navRows].filter((v) => !viewHidden(settings, v.view)).map((v) => ({ key: `view:${v.view}`, label: v.label, hint: 'Go to', run: () => s.setView(v.view) })),
     // Places with no number key, and the ones a hidden sidebar row leaves reachable only from here.
     { key: 'inbox', label: 'Agent inbox and jobs', hint: 'Go to', run: () => s.openInbox() },
     ...projects.map((p) => ({ key: `project:${p.id}`, label: p.name, hint: 'Project', run: () => s.openProject(p.id) })),
     ...(viewHidden(settings, 'spaces') ? [] : canvases).map((c) => ({ key: `space:${c.id}`, label: c.name, hint: 'Canvas', run: () => void useCanvas.getState().enterSpace(c.id) })),
-    ...paletteCommands.filter((c) => ownerOn(settings, c.extension))
-      .map((c) => ({ key: `command:${c.id}`, label: c.label, hint: c.hint ?? 'Command', run: c.run })),
-    ...recent(conversations).map((c) => ({ key: `chat:${c.id}`, label: plainTitle(c.title) || 'Untitled chat', hint: 'Chat', run: () => void s.selectChat(c.id) })),
     ...recent(docs).map((d) => ({ key: `doc:${d.id}`, label: d.title || 'Untitled', hint: 'File', run: () => void s.openDoc(d.id) })),
     ...SETTINGS_SECTIONS.map((t) => ({ key: `settings:${t.id}`, label: t.label, hint: 'Settings', run: () => s.openSettings(t.id) })),
     ...settingsPanels.filter((p) => ownerOn(settings, p.extension)).map((p) => ({ key: `settings:${p.tab}`, label: p.label, hint: 'Settings', run: () => s.openSettings(p.tab) })),

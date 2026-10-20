@@ -5,7 +5,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useStore, setSettingsGuard } from '../store'
 import { useTodos } from '../extensions/todos/store'
 import { modeOf, MODES } from '../lib/permissionMode'
-import { resolveTab, searchSettings, type SettingsSectionId, type SettingsTab } from '../lib/settingsTabs'
+import { RUNTIME_EXT, resolveTab, searchSettings, type SettingsSectionId, type SettingsTab } from '../lib/settingsTabs'
 import { SETTINGS_SECTIONS } from '../lib/settingsSections'
 import { hintOf, locate, panelsFor, startsCluster } from '../lib/settingsShell'
 import { api } from '../lib/api'
@@ -14,7 +14,8 @@ import { applyAppearance } from '../lib/appearance'
 import { modelLabel } from '../lib/modelLabel'
 import { settingsPanels } from '../extensions/host'
 import { viewHidden } from '../moduleToggles'
-import type { ExtensionInfo, Settings } from '@shared/types'
+import type { ExtensionInfo, RuntimeView, Settings } from '@shared/types'
+import { runtimeSlotsShown } from '../lib/runtime'
 import ModelTab from './settings/ModelTab'
 import { SETTINGS_JUMP } from './settings/Disclosure'
 import PermissionsTab from './settings/PermissionsTab'
@@ -74,16 +75,23 @@ export default function SettingsModal(): JSX.Element {
     api.devExtensions.list().then((r) => setExtList(r.extensions)).catch(() => undefined)
   }, [])
   const hiddenViews = useStore((s) => s.settings.hiddenViews)
-  const offExtensions: ReadonlySet<string> = new Set([...(extList ?? []).filter((e) => !e.enabled).map((e) => e.id), ...(hiddenViews ?? [])])
+  const [runtimeView, setRuntimeView] = useState<RuntimeView | null>(null)
+  useEffect(() => {
+    api.runtime.get(null, null).then(setRuntimeView).catch(() => undefined)
+  }, [])
+  const offExtensions: ReadonlySet<string> = new Set([
+    ...(extList ?? []).filter((e) => !e.enabled).map((e) => e.id), ...(hiddenViews ?? []),
+    ...(runtimeSlotsShown(runtimeView).length ? [] : [RUNTIME_EXT])
+  ])
   const hits = searchSettings(q, panels.map((p) => ({ tab: p.tab, sec: p.id, title: p.label, keys: p.keys ?? '' })), offExtensions)
   const google = useStore((s) => s.google)
   /** A search hit as the section it lives in (a registered panel's hit lands in its group) and the anchor inside it. */
   const hitAt = (h: { tab: SettingsTab; sec: string }): { section: Tab; sec: string } => ({ section: locate(h.tab, panels).section, sec: h.sec })
   /** Go to a search hit: its section, any collapsed group around it opened, then scrolled to once it has rendered. */
-  const goTo = (h: { tab: SettingsTab; sec: string }): void => {
+  const goTo = (h: { tab: SettingsTab; sec: string; open?: string }): void => {
     const at = hitAt(h)
     setTab(at.section)
-    setOpenGroups((g) => new Set(g).add(at.sec))
+    setOpenGroups((g) => new Set(g).add(h.open ?? at.sec))
     setJump(at.sec)
     setQ('')
   }

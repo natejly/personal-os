@@ -64,7 +64,10 @@ export function shownTab(tab: SettingsTab, available: readonly string[]): Settin
 }
 
 /** One findable block of settings: the section it lives in, its group anchor id (`sec-<sec>` in the pane) and the words people type for it. `ext` is the extension that renders the block: with it off there is nothing to scroll to. */
-export interface SettingsEntry { tab: SettingsTab; sec: string; title: string; keys: string; ext?: string }
+/** `open` is the collapsed group that holds the block when that is not the block's own id. */
+export interface SettingsEntry { tab: SettingsTab; sec: string; title: string; keys: string; ext?: string; open?: string }
+/** Stands in for the `ext` of the Runtime block: it renders nothing until some slot has a non-core provider, so a search hit needs that to be off the `off` set. */
+export const RUNTIME_EXT = 'core:runtime'
 export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'general', sec: 'look', title: 'Theme, accent, fonts and zoom', keys: 'preset presets dark light colour color custom accent font typeface code monospace size scale recap blobs' },
   { tab: 'general', sec: 'notifications', title: 'Notifications', keys: 'notify alerts unread dot jobs finish' },
@@ -79,7 +82,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'assistant', sec: 'coding', title: 'Coding sessions', keys: 'opencode claude code repo git coding agent', ext: 'coding' },
   { tab: 'assistant', sec: 'browser', title: 'Browser', keys: 'web pages visible session sites access' },
   { tab: 'assistant', sec: 'checks', title: 'Checks and commands', keys: 'gates test lint build verify commands' },
-  { tab: 'extensions', sec: 'runtime', title: 'Runtime', keys: 'runtime sandbox router client tool source runtime slot where tools run' },
+  { tab: 'extensions', sec: 'runtime', title: 'Runtime', keys: 'runtime sandbox router client tool source runtime slot where tools run', ext: RUNTIME_EXT },
   { tab: 'assistant', sec: 'learning', title: 'Learning', keys: 'learn from chats writing style remember profile' },
   { tab: 'assistant', sec: 'search', title: 'Memory search and index', keys: 'embedding rebuild index retrieval vectors passages hybrid reranker chunks' },
   { tab: 'assistant', sec: 'map', title: 'Map', keys: 'map graph connections knowledge related notes' },
@@ -96,7 +99,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'permissions', sec: 'system', title: 'System access', keys: 'macos accessibility screen recording automation folders privacy permission' },
   { tab: 'extensions', sec: 'extensions', title: 'Extensions', keys: 'review proposed assistant drafted install enable disable permissions diff accept reject' },
   { tab: 'advanced', sec: 'hooks', title: 'Hooks', keys: 'hook hooks event events latency calls extension on tool call before after automation' },
-  { tab: 'advanced', sec: 'hooks', title: 'Scheduled jobs', keys: 'jobs scheduled schedule cron background recurring automation run' },
+  { tab: 'advanced', sec: 'jobs', open: 'hooks', title: 'Scheduled jobs', keys: 'jobs scheduled schedule cron background recurring automation run' },
   { tab: 'integrations', sec: 'accounts', title: 'Mail and Calendar account', keys: 'google gmail calendar sign in oauth client outbox undo send' },
   { tab: 'integrations', sec: 'connectors', title: 'Connectors', keys: 'mcp library tools planner mail' },
   { tab: 'integrations', sec: 'web-search', title: 'Web search', keys: 'firecrawl brave tavily exa searxng github token reader api key' },

@@ -1,5 +1,5 @@
 import { ApiError } from './apiError'
-import type { RuntimeProvider, RuntimeResolution, RuntimeSelection } from '@shared/types'
+import type { RuntimeProvider, RuntimeResolution, RuntimeSelection, RuntimeSlot, RuntimeView } from '@shared/types'
 
 const NOUN: Record<string, string> = {
   'model.client': 'Model client', 'model.router': 'Model router', 'tools.source': 'Tool source', 'sandbox.backend': 'Sandbox backend', 'agent.loop': 'Agent loop', 'memory.system': 'Memory system'
@@ -56,3 +56,10 @@ export function confirmDiff(e: unknown): string[] | null {
   const d = e instanceof ApiError && e.status === 409 ? (e.body as { detail?: { needs_confirm?: boolean; diff?: string[] } } | null)?.detail : undefined
   return d?.needs_confirm && Array.isArray(d.diff) ? d.diff : null
 }
+
+/** The agent loop is chosen in the Assistant section's Loop group, not in Runtime. */
+export const LOOP_SLOT = 'agent.loop'
+
+/** The slots worth a picker: only once an extension offers something besides the built-in. With none, the Runtime block is empty. */
+export const runtimeSlotsShown = (view: Pick<RuntimeView, 'slots'> | null | undefined): RuntimeSlot[] =>
+  view?.slots.filter((s) => s.id !== LOOP_SLOT && s.providers.some((p) => !p.core)) ?? []

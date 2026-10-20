@@ -2,14 +2,11 @@ import { sourceText } from '../../lib/settingSource'
 import { useState } from 'react'
 import type { RuntimeProvider, RuntimeResolution, RuntimeSlot } from '@shared/types'
 import { api } from '../../lib/api'
-import { partialDimensions, slotNoun, sourceShown, toggleSource } from '../../lib/runtime'
+import { LOOP_SLOT, partialDimensions, runtimeSlotsShown, slotNoun, sourceShown, toggleSource } from '../../lib/runtime'
 import { CORE, registerSettingsPanel } from '../../extensions/host'
 import Switch from './Switch'
 import { ScopeButtons, SelectNotices, SlotPicker } from './RuntimeParts'
 import { useRuntimeSelect } from './useRuntimeSelect'
-
-/** The agent loop is chosen in the Assistant section's Loop group. */
-const LOOP_SLOT = 'agent.loop'
 
 function Enforcement({ enforcement }: { enforcement: NonNullable<RuntimeResolution['enforcement']> }): JSX.Element {
   const modes = Object.entries(enforcement)
@@ -49,7 +46,7 @@ export default function RuntimeTab(): JSX.Element {
   }
 
   // A slot is worth a picker only once an extension offers something besides the built-in; with none, nothing shows.
-  const slots = view?.slots.filter((s) => s.id !== LOOP_SLOT && s.providers.some((p) => !p.core)) ?? []
+  const slots = runtimeSlotsShown(view)
   if (!view || !slots.length) return <></>
   return (
     <>

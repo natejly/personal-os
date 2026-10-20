@@ -118,6 +118,8 @@ test('removing a provider drops its models; a selection on it stays visible, dis
     await expect(rows(page).filter({ hasText: 'Second server' })).toHaveCount(0, { timeout: 20_000 })
     await expect.poll(() => options(page, 'Chat model')).not.toContain('custom-2/alpha-1')
     await expect(dialog(page).getByRole('status').filter({ hasText: 'Still set to the removed provider' })).toBeVisible()
+    const roles = dialog(page).locator('details[data-disclosure="model-roles"]')
+    if (!(await roles.evaluate((e) => e.open))) await roles.locator('summary').click()
     const stale = dialog(page).getByLabel('Low tier').first().locator('option:disabled')
     await expect(stale).toContainText('provider removed')
     await closeSettings(page)

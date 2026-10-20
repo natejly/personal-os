@@ -1254,20 +1254,20 @@ test('Memory lives in Settings: split by default, and every way in lands on its 
   reset()
   st().openMemory()
   assert.equal(st().settingsOpen, true)
-  assert.equal(st().settingsTab, 'context')
+  assert.equal(st().settingsTab, 'assistant')
   assert.equal(st().memoryMode, 'split')
   assert.equal(st().memoryFocus, null)
   assert.equal(st().view, 'chat', 'no page to navigate to')
   reset()
   st().openMemory('graph')
-  assert.equal(st().settingsTab, 'context')
+  assert.equal(st().settingsTab, 'assistant')
   assert.equal(st().memoryMode, 'graph')
   reset()
   st().showMemories(['x'])
-  assert.deepEqual([st().settingsOpen, st().settingsTab, st().memoryMode, st().memoryFocus], [true, 'context', 'list', ['x']])
+  assert.deepEqual([st().settingsOpen, st().settingsTab, st().memoryMode, st().memoryFocus], [true, 'assistant', 'list', ['x']])
   reset()
   st().openSettings('modules')
-  assert.equal(st().settingsTab, 'layout')
+  assert.equal(st().settingsTab, 'general')
 })
 
 test('a run this window did not stream: finishing off screen leaves a dot and a banner, on screen in focus neither, a silent wake nothing; opening the chat clears it', async () => {
@@ -1366,7 +1366,7 @@ test('the learned toast body opens exactly the memories the pass created, and Un
     assert.deepEqual(st.memoryFocus, ['m1', 'm2'], 'it opens the rows that were stored, in order')
     assert.equal(st.memoryMode, 'list')
     assert.equal(st.settingsOpen, true)
-    assert.equal(st.settingsTab, 'context')
+    assert.equal(st.settingsTab, 'assistant')
   } finally {
     useStore.setState({ ...before, toasts: [] })
   }

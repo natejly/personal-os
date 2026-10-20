@@ -102,12 +102,12 @@ test('a view action routes, and view:graph opens Settings → Memory on the grap
   // Memory is a Settings tab, not a page.
   fire('view:graph')
   assert.equal(useStore.getState().settingsOpen, true)
-  assert.equal(useStore.getState().settingsTab, 'context')
+  assert.equal(useStore.getState().settingsTab, 'assistant')
   assert.equal(useStore.getState().memoryMode, 'graph')
   useStore.setState({ settingsOpen: false, settingsTab: 'models' })
   fire('view:memory')
   assert.equal(useStore.getState().settingsOpen, true)
-  assert.equal(useStore.getState().settingsTab, 'context')
+  assert.equal(useStore.getState().settingsTab, 'assistant')
   assert.equal(useStore.getState().memoryMode, 'split')
   useStore.setState({ settingsOpen: false })
 })
@@ -170,7 +170,7 @@ test('a hidden view stays shut: its shortcut toasts a way to turn it on', () => 
   fire('view:todos')
   assert.equal(useStore.getState().toasts[0].text, 'Lists is turned off')
   assert.equal(useStore.getState().settingsOpen, true)
-  assert.equal(useStore.getState().settingsTab, 'layout')
+  assert.equal(useStore.getState().settingsTab, 'general')
   useStore.getState().setSettingsOpen(false)
   // A view that is on still opens.
   fire('view:calendar')

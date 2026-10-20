@@ -30,7 +30,7 @@ export default function HooksTab(): JSX.Element {
   const lines = jobSummaryLines(app, extJobs)
   return (
     <section>
-      <Sec id="hooks">
+      <div>
         <h4>Hooks</h4>
         {ext.state === 'loading' && <p className="hooks-note">Loading…</p>}
         {ext.state === 'error' && <p className="hooks-note" role="status">Hooks could not be read right now ({ext.message}).</p>}
@@ -51,7 +51,7 @@ export default function HooksTab(): JSX.Element {
             </table>
           </div>
         ))}
-      </Sec>
+      </div>
       <Sec id="jobs">
         <h4>Scheduled jobs</h4>
         {ext.state === 'loading' && jobs.state === 'loading' && <p className="hooks-note">Loading…</p>}

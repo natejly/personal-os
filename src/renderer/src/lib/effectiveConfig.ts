@@ -52,6 +52,6 @@ export function tabFor(key: string): SettingsTab | null {
   if (PERMISSION_KEYS.test(key)) return 'permissions'
   if (MODEL_KEYS.test(key)) return 'models'
   if (LOOK_KEYS.test(key)) return 'general'
-  if (key === 'hiddenViews' || key.startsWith('sidebar')) return 'layout'
+  if (key === 'hiddenViews' || key.startsWith('sidebar')) return 'general'
   return null
 }

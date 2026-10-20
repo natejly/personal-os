@@ -15,6 +15,7 @@ import { viewHidden } from '../moduleToggles'
 import { registerToolCard, type ToolCardDisplay, type ToolCardProps } from '../components/toolcards/registry'
 import { UNSUPPORTED_CSS } from '../lib/extensionsDev'
 import { req } from '../lib/api'
+import { SECTION_ALIAS } from '../lib/settingsTabs'
 import { notify } from '../lib/notify'
 import { extStore, onExtEvent, onMessageDisplay, onSelection, onViewOpened, type AppEvent, type ExtStore, type HostEvents } from './events'
 import { addTheme, type Scheme, type Tokens } from './theme'
@@ -46,14 +47,14 @@ export interface SettingsPanelDef {
   /** Words Settings search matches besides the label. */
   keys?: string
   Component: FC
-  /** The Settings section the panel is shown in (a section id such as 'agent'); default 'advanced'. */
+  /** The Settings section the panel is shown in (a section id such as 'assistant'; a removed id is mapped by `SECTION_ALIAS`); default 'advanced'. */
   group?: string
   /** Sort position inside the section, lower first; default 100. Equal orders keep registration order. */
   order?: number
 }
 
 /** The section a panel is shown in. */
-export const panelGroup = (p: { group?: string }): string => p.group ?? 'advanced'
+export const panelGroup = (p: { group?: string }): string => SECTION_ALIAS[p.group ?? '']?.tab ?? p.group ?? 'advanced'
 
 /** The panels of `section`, by `order` (default 100) then registration order. */
 export function panelsIn<T extends { group?: string; order?: number }>(section: string, list: readonly T[]): T[] {

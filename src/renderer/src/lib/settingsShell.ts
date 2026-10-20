@@ -1,11 +1,10 @@
 /** Pure helpers for the Settings dialog: the rail's one-line status, which section a registered panel lands in, and the rail's clusters. */
-import { SECTION_ORDER, sectionOf, type SettingsSectionId, type SettingsTab } from './settingsTabs'
+import { SECTION_ALIAS, SECTION_ORDER, sectionOf, type SettingsSectionId, type SettingsTab } from './settingsTabs'
 
 /** Sections that sit together in the rail; a divider is drawn between clusters. */
 export const RAIL_CLUSTERS: readonly (readonly SettingsSectionId[])[] = [
-  ['general', 'models', 'agent', 'context', 'permissions'],
-  ['extensions', 'hooks', 'integrations'],
-  ['layout', 'usage', 'advanced']
+  ['general', 'models', 'assistant', 'permissions'],
+  ['extensions', 'integrations', 'advanced']
 ]
 
 /** True when `id` opens a new cluster (a divider goes above it). */
@@ -15,7 +14,7 @@ export function startsCluster(id: SettingsSectionId): boolean {
 
 /** A group id as a section: a known section id stays, anything else (missing, misspelt) falls into Advanced. */
 export function panelSection(p: { group?: string }): SettingsSectionId {
-  const g = p.group ?? 'advanced'
+  const g = SECTION_ALIAS[p.group ?? '']?.tab ?? p.group ?? 'advanced'
   return (SECTION_ORDER as readonly string[]).includes(g) ? (g as SettingsSectionId) : 'advanced'
 }
 
@@ -40,7 +39,6 @@ export interface HintInput {
   google?: { connected?: boolean; email?: string | null } | null
   autoCompact?: boolean | null
   extensionsOn?: number | null
-  hooks?: number | null
 }
 
 /** The line under a section's name in the rail, from data already at hand; null when there is nothing worth saying. */
@@ -50,9 +48,8 @@ export function hintOf(id: SettingsSectionId, h: HintInput): string | null {
     case 'models': return h.modelLabel || null
     case 'permissions': return h.modeLabel ?? null
     case 'integrations': return h.google?.connected ? h.google.email || 'Google connected' : 'Google not connected'
-    case 'context': return h.autoCompact == null ? null : h.autoCompact ? 'Auto-compact on' : 'Auto-compact off'
+    case 'assistant': return h.autoCompact == null ? null : h.autoCompact ? 'Auto-compact on' : 'Auto-compact off'
     case 'extensions': return h.extensionsOn == null ? null : `${h.extensionsOn} on`
-    case 'hooks': return h.hooks == null ? null : `${h.hooks} hook${h.hooks === 1 ? '' : 's'}`
     default: return null
   }
 }

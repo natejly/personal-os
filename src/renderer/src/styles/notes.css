@@ -6,7 +6,7 @@
   min-width: 190px; max-width: min(320px, 90%); max-height: 280px; overflow-y: auto; overflow-x: hidden;
   padding: 4px;
   background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: var(--r-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-pop);
   font-family: var(--font); font-size: var(--fs-md);
 }
 .caret-menu-row {
@@ -54,7 +54,7 @@
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; min-width: 190px;
   padding: 4px; display: flex; flex-direction: column;
   background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: var(--r-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25); font-size: var(--fs-md);
+  box-shadow: var(--shadow-pop); font-size: var(--fs-md);
 }
 .notes-menu.right { left: auto; right: 0; }
 .notes-menu-row {

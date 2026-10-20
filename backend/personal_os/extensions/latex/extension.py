@@ -380,7 +380,7 @@ class Latex:
         env = tex_env()
         latexmk = shutil.which("latexmk", path=env["PATH"])
         if not latexmk:
-            raise LatexError("TeX is not installed: latexmk was not found. Install TeX Live or MacTeX.")
+            raise LatexError("latexmk not found")
         main = safe_name(proj["main"])
         async with self._locks.setdefault(project_key(scope, folder), asyncio.Lock()):
             t0 = time.monotonic()

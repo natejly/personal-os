@@ -36,6 +36,7 @@ export default function LatexDocEditor({ doc }: { doc: FullDoc }): JSX.Element {
   const [engine, setEngine] = useState<Engine>('pdflatex')
   const [compiling, setCompiling] = useState(false)
   const [result, setResult] = useState<CompileResult | null>(null)
+  const [compileError, setCompileError] = useState<string | null>(null)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [problemsOpen, setProblemsOpen] = useState(true)
   const [jump, setJump] = useState<{ line: number; n: number }>()
@@ -81,11 +82,12 @@ export default function LatexDocEditor({ doc }: { doc: FullDoc }): JSX.Element {
     if (compiling || !ctx) return
     await flushDoc()
     setCompiling(true)
+    setCompileError(null)
     try {
       const r = await latexApi.compile(doc.id, engine)
       setResult(r)
       if (r.ok) void showPdf()
-    } catch (e) { fail(e) } finally { setCompiling(false) }
+    } catch (e) { setCompileError((e as Error).message); fail(e) } finally { setCompiling(false) }
   }, [compiling, ctx, flushDoc, doc.id, engine, showPdf, fail])
   const compileRef = useRef(compile)
   compileRef.current = compile
@@ -136,7 +138,7 @@ export default function LatexDocEditor({ doc }: { doc: FullDoc }): JSX.Element {
   }
 
   const problems = result ? [...result.errors, ...result.warnings.map((w) => ({ ...w, warn: true }))] : []
-  const status = compiling ? 'Compiling…' : !result ? '' : result.ok ? `OK in ${result.duration_ms} ms` : `${result.errors.length} error${result.errors.length === 1 ? '' : 's'}`
+  const status = compiling ? 'Compiling…' : compileError ? compileError : !result ? '' : result.ok ? `OK in ${result.duration_ms} ms` : `${result.errors.length} error${result.errors.length === 1 ? '' : 's'}`
 
   // ⌘I over this file: the source as it stands in the editor, the project around it, and the last compile's errors.
   usePageContext(() => ({
@@ -227,7 +229,7 @@ export default function LatexDocEditor({ doc }: { doc: FullDoc }): JSX.Element {
               <select aria-label="Engine" value={engine} onChange={(e) => setEngine(e.target.value as Engine)}>
                 {ENGINES.map((x) => <option key={x}>{x}</option>)}
               </select>
-              <span className={`lx-status ${result && !result.ok && !compiling ? 'bad' : ''}`} role="status">{status}</span>
+              <span className={`lx-status ${(compileError || (result && !result.ok)) && !compiling ? 'bad' : ''}`} role="status">{status}</span>
             </div>
             {pdfUrl ? <iframe className="lx-pdf" title="PDF preview" src={pdfSrc(pdfUrl, true)} /> : <p className="empty-hint big">Compile to preview the PDF.</p>}
           </section>

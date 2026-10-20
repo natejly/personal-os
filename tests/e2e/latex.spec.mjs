@@ -1,7 +1,10 @@
+import { execFileSync } from 'node:child_process'
 import { test, expect } from './fixtures.mjs'
 import { openFiles, mkDoc, errorsOf, patient } from './helpers/files.mjs'
 
 test.describe.configure({ timeout: 300_000 })
+const HAVE_LATEXMK = (() => { try { execFileSync('which', ['latexmk'], { stdio: 'ignore' }); return true } catch { return false } })()
+const NEEDS_LATEXMK = 'latexmk is not installed'
 test.beforeEach(({ grain }) => patient(grain))
 
 const cm = (page) => page.locator('.lx-editor .cm-content')
@@ -52,6 +55,7 @@ test('switching between the project files: file list, Files tree and a problem j
 })
 
 test('a problem in another file opens that file at its line; CRLF files switch too', async ({ grain: g }) => {
+  test.skip(!HAVE_LATEXMK, NEEDS_LATEXMK)
   const { page } = g
   const main = await mkDoc(g, { title: 'main.tex', folder: 'paper', content: '\\documentclass{article}\r\n\\begin{document}\r\n\\input{intro}\r\n\\end{document}\r\n' })
   await mkDoc(g, { title: 'intro.tex', folder: 'paper', content: 'ok line\r\n\\undefinedmacro\r\nmore\r\n' })
@@ -79,6 +83,7 @@ test('a problem in another file opens that file at its line; CRLF files switch t
 })
 
 test('New file in the file list: unique default, suffix, subfolder, bad names refused; \\input compiles', async ({ grain: g }) => {
+  test.skip(!HAVE_LATEXMK, NEEDS_LATEXMK)
   const { page } = g
   await mkDoc(g, { title: 'main.tex', folder: 'book', content: '\\documentclass{article}\n\\begin{document}\n\\input{intro}\n\\input{chapters/two}\n\\end{document}\n' })
   await openFiles(page)
@@ -127,6 +132,7 @@ test('New file in the file list: unique default, suffix, subfolder, bad names re
 })
 
 test('Upload files: a .tex becomes an editable doc, a .png stays an asset, and both compile', async ({ grain: g }) => {
+  test.skip(!HAVE_LATEXMK, NEEDS_LATEXMK)
   const { page } = g
   await mkDoc(g, { title: 'main.tex', folder: 'up', content: '\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n\\input{intro}\n\\includegraphics[width=1cm]{fig}\n\\end{document}\n' })
   await openFiles(page)

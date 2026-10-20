@@ -23,3 +23,13 @@ button.set-modified:focus-visible { outline: 2px solid var(--focus-ring); outlin
 .set-part { margin: 28px 0 4px; padding-top: 16px; border-top: 1px solid var(--border); font-size: var(--fs-md); font-weight: 600; color: var(--text); }
 .more-appearance { margin-top: 8px; }
 .set-sec:empty { display: none; }
+
+/* Titled part between two settings groups, aligned to the pane's gutter. */
+.settings-pane > .set-part { margin: 12px 28px 0; }
+/* A group that is one collapsible box takes the box border as its divider, not a second hairline. */
+.settings-pane section > .set-sec + .set-sec:has(> .adv-group:only-child) { border-top: 0; padding-top: 0; }
+/* Settings > Extensions already sits inside the section gutter. */
+.settings-pane .ext-section { padding: 0 0 16px; }
+.settings-disclosure > summary { cursor: pointer; padding: 6px 0; }
+.settings-disclosure[open] > summary { margin-bottom: 6px; }
+.settings-pane .set-sec > .adv-group:only-child { margin: 0; }

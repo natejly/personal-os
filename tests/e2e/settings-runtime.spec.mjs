@@ -14,9 +14,10 @@ test('the agent loop picker shows its built-in source, and Extensions shows no R
   expect(Object.keys(resolved).sort()).toEqual([...SLOTS].sort())
   expect(Object.values(resolved).every((r) => r.default === true && r.source === 'default')).toBe(true)
   // No extension offers a provider for the other slots, so nothing for them is rendered anywhere in Settings.
+  // The one exception is the memory system: the History digest extension built in, lists its provider.
   await openSettings(page, 'Extensions')
-  await expect(dialog(page).locator('#sec-runtime')).toBeEmpty()
-  for (const slot of SLOTS.filter((x) => x !== 'agent.loop')) await expect(dialog(page).getByTestId(`runtime-${slot}`)).toHaveCount(0)
+  await expect(dialog(page).getByTestId('runtime-memory.system')).toContainText('History digest')
+  for (const slot of SLOTS.filter((x) => x !== 'agent.loop' && x !== 'memory.system')) await expect(dialog(page).getByTestId(`runtime-${slot}`)).toHaveCount(0)
   await expect(dialog(page).getByText(/No extension offers/)).toHaveCount(0)
   await closeSettings(page)
 })

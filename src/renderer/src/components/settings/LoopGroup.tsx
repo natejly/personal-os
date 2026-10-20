@@ -69,7 +69,7 @@ export default function LoopGroup({ draft, patch }: TabProps): JSX.Element {
         {slot && <small data-testid={`runtime-${LOOP_SLOT}-reason`}>{sourceText(slot.resolution.source)}</small>}
         {slot && <SlotPicker slot={slot} rt={rt} />}
       </div>
-      <Disclosure id="agent-limits" title="Limits">
+      <Disclosure id="agent-limits" title="Limits" secs={["loop"]}>
         {sections.map((g) => (
           <div key={g}>
             <h5 className="set-subhead">{g}</h5>

@@ -48,7 +48,7 @@ export default function ModelTab({ draft, patch, onProvidersChanged }: TabProps 
       <Sec id="models">
         <h4>Models</h4>
         {MODEL_FIELDS.filter((f) => f.key === 'defaultModel').map(renderField)}
-        <Disclosure id="model-roles" title="Model roles">
+        <Disclosure id="model-roles" title="Model roles" secs={["models"]}>
           {MODEL_FIELDS.filter((f) => f.key !== 'defaultModel').map(renderField)}
         </Disclosure>
       </Sec>

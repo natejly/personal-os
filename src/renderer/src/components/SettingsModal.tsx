@@ -16,6 +16,7 @@ import { settingsPanels } from '../extensions/host'
 import { viewHidden } from '../moduleToggles'
 import type { ExtensionInfo, Settings } from '@shared/types'
 import ModelTab from './settings/ModelTab'
+import { SETTINGS_JUMP } from './settings/Disclosure'
 import PermissionsTab from './settings/PermissionsTab'
 import IntegrationsTab from './settings/IntegrationsTab'
 import AgentsTab from './settings/AgentsTab'
@@ -88,19 +89,27 @@ export default function SettingsModal(): JSX.Element {
   }
   useEffect(() => {
     if (!jump) return
-    const el = document.getElementById(`sec-${jump}`)
-    if (!el) return
-    el.scrollIntoView({ block: 'start', behavior: 'smooth' })
-    el.classList.add('set-flash')
-    const t = window.setTimeout(() => el.classList.remove('set-flash'), 1600)
+    // A disclosure holding the block opens first (its rows mount on the next render); then the block scrolls into view and flashes.
+    window.dispatchEvent(new CustomEvent(SETTINGS_JUMP, { detail: jump }))
+    const target = jump
+    let frames = 0
+    const land = (): void => {
+      const el = document.getElementById(`sec-${target}`)
+      if (!el) { if (++frames < 20) requestAnimationFrame(land); return }
+      document.querySelectorAll<HTMLDetailsElement>(`details[data-opens~="${target}"]`).forEach((d) => { d.open = true })
+      for (let d = el.parentElement?.closest('details'); d; d = d.parentElement?.closest('details')) d.open = true
+      el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      el.classList.add('set-flash')
+      window.setTimeout(() => el.classList.remove('set-flash'), 1600)
+    }
+    requestAnimationFrame(land)
     setJump(null)
-    return () => window.clearTimeout(t)
   }, [jump, tab, openGroups])
   useEffect(() => {
     const at = place(storeTab)
     setTabState(at.section)
     if (at.anchor) setJump(at.anchor)
-    if (storeGroup) setOpenGroups((g) => new Set(g).add(storeGroup))
+    if (storeGroup) { setOpenGroups((g) => new Set(g).add(storeGroup)); if (!at.anchor) setJump(storeGroup) }
   }, [storeTab, storeGroup])
   const mode = modeOf(settings)
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({})

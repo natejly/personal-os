@@ -57,7 +57,7 @@ export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { sho
           </label>
         </div>
       </div>
-      <details className="adv-group more-appearance">
+      <details className="adv-group more-appearance" data-opens="look">
         <summary>More appearance</summary>
       <div className="preset-row" role="radiogroup" aria-label="Appearance presets">
         {PRESETS.map((p) => {

@@ -10,7 +10,7 @@
 .settings-pane { scroll-behavior: auto; }
 .settings-modal .settings-pane > section.set-head { padding-top: 20px; padding-bottom: 4px; display: flex; flex-direction: column; gap: 6px; }
 .settings-pane > section.set-head h3 { margin: 0; font-size: 17px; }
-.settings-pane .set-help { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.settings-pane .set-help { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--text-muted); }
 /* Sections stacked under the header share one gutter. */
 .settings-modal .settings-pane > section:not(.set-head):not(:first-of-type) { padding-top: 8px; }
 .settings-modal .settings-pane > section.set-head + section { padding-top: 14px; }

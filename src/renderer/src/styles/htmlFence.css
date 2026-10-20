@@ -1,5 +1,5 @@
 /* Fenced ```html / ```svg blocks in a reply: the Code | Preview toggle and the sandboxed preview frame. */
 .art-fence-actions { display: flex; align-items: center; gap: 4px; }
-.art-fence .seg button { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 7px; }
+.art-fence .seg button { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); padding: 2px 7px; }
 .art-fence-frame { display: block; width: 100%; height: 320px; border: 0; background: #fff; resize: vertical; }
 .art-fence-frame.svg { height: 260px; background: transparent; }

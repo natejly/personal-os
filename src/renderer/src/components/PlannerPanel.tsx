@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { CalendarClock } from '../icons'
 import { api } from '../lib/api'
 import { useStore } from '../store'
+import { useViewCommand } from '../lib/viewCommands'
 import { pimConnected } from '../lib/pim'
 import { blockKey, blockWhen, pickedBlocks } from '../lib/todayCards'
 import type { PlannerBlock, PlannerSuggestion } from '@shared/types'
@@ -18,7 +19,7 @@ const fromBlocks = (blocks?: PlannerBlock[]): Plan | null => (blocks?.length ? {
  * "Plan my day" (or week, with `days`): proposes calendar blocks for todos with estimates. Nothing reaches
  * Google until "Add selected". `initial` shows blocks already proposed (Today's dashboard) without a call.
  */
-export default function PlannerPanel({ initial, days = 1, onApplied }: { initial?: PlannerBlock[]; days?: number; onApplied?: () => void }): JSX.Element {
+export default function PlannerPanel({ initial, days = 1, onApplied, command }: { initial?: PlannerBlock[]; days?: number; onApplied?: () => void; /** Name of a view command that asks for a plan; the panel then has no button of its own. */ command?: string }): JSX.Element {
   const toast = useStore((s) => s.toast)
   const connected = useStore(pimConnected)
   const [plan, setPlan] = useState<Plan | null>(() => fromBlocks(initial))
@@ -32,6 +33,8 @@ export default function PlannerPanel({ initial, days = 1, onApplied }: { initial
     setPlan(fromBlocks(initial)); setPicked(new Set((initial ?? []).map(key)))
   }, [initialKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const suggestRef = useRef<() => Promise<void>>(async () => {})
+  useViewCommand(command ?? '', () => { if (command && connected) void suggestRef.current() })
   if (!connected) return <></>
 
   const suggest = async (): Promise<void> => {
@@ -45,6 +48,7 @@ export default function PlannerPanel({ initial, days = 1, onApplied }: { initial
       toast((e as Error).message, 'error')
     } finally { setBusy(false) }
   }
+  suggestRef.current = suggest
   const apply = async (): Promise<void> => {
     if (!plan) return
     setBusy(true)
@@ -63,7 +67,7 @@ export default function PlannerPanel({ initial, days = 1, onApplied }: { initial
 
   return (
     <div className="planner-panel">
-      {!plan && <button className="ghost-btn" onClick={() => void suggest()} disabled={busy}><CalendarClock size={14} /> {busy ? 'Planning…' : days > 1 ? 'Plan my week' : 'Plan my day'}</button>}
+      {!plan && !command && <button className="ghost-btn" onClick={() => void suggest()} disabled={busy}><CalendarClock size={14} /> {busy ? 'Planning…' : days > 1 ? 'Plan my week' : 'Plan my day'}</button>}
       {plan && (
         <section className="todo-section">
           <h4 className="section-h">Proposed blocks <span>{plan.blocks.length}</span></h4>

@@ -107,8 +107,10 @@ test('grid snapping lands on the pitch; guides snap to a neighbour and draw whil
   await expect(page.locator('.guide-v, .guide-h')).toHaveCount(0)
 
   // grid mode: everything lands on a multiple of 24
+  await page.getByRole('button', { name: 'Layout' }).click()
   await page.locator('select[aria-label="Snapping"]').selectOption('grid')
   await page.locator('select[aria-label="Grid size"]').selectOption('24')
+  await page.keyboard.press('Escape')
   await expect.poll(async () => (await grain.api('/canvases/' + s.id)).grid_size).toBe(24)
   const pa = await gripPoint(page, a.id)
   await drag(page, pa, { x: pa.x + 101, y: pa.y + 213 })
@@ -118,7 +120,9 @@ test('grid snapping lands on the pitch; guides snap to a neighbour and draw whil
   expect(ga.y % 24).toBe(0)
 
   // switching to "No snap" is persisted and survives reload
+  await page.getByRole('button', { name: 'Layout' }).click()
   await page.locator('select[aria-label="Snapping"]').selectOption('off')
+  await page.keyboard.press('Escape')
   await expect.poll(async () => (await grain.api('/canvases/' + s.id)).snap_mode).toBe('off')
   expect(grain.consoleErrors).toEqual([])
 })

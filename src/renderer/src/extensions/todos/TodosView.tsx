@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { useSlidingPill } from "../../lib/useSlidingPill"
 import { useShallow } from 'zustand/react/shallow'
-import { Plus, ListChecks, RefreshCw, Bookmark, X, ChevronDown, KanbanSquare, List, SlidersHorizontal, Pencil, Trash2, Inbox, Layers } from '../../icons'
+import { Plus, ListChecks, Bookmark, X, ChevronDown, KanbanSquare, List, SlidersHorizontal, Pencil, Trash2, Inbox, Layers } from '../../icons'
 import type { TodoFilter, TodoRepeat } from '@shared/types'
 import { api } from '../../lib/api'
 import { useStore, type Scope } from '../../store'
@@ -18,6 +17,7 @@ import { clearHandoff, peekHandoff } from '../../lib/handoff'
 import SidebarToggle from '../../components/SidebarToggle'
 import { rowButton } from '../../lib/rowButton'
 import ErrorState from '../../components/ErrorState'
+import PopMenu from '../../components/PopMenu'
 
 type Todo = ReturnType<typeof useTodos.getState>['todos'][number]
 /** A just-completed row that has left the data: it shows the finished state, then folds shut and removes itself. */
@@ -35,9 +35,9 @@ function LeavingTodo({ todo, onGone }: { todo: Todo; onGone: () => void }): JSX.
 const DEFAULT_LIST = 'Todos'
 
 export default function TodosView(): JSX.Element {
-  const viewPill = useSlidingPill<HTMLDivElement>()
   const todos = useTodos((s) => s.todos)
   const tasksSync = useStore((s) => s.tasksSync)
+  const projects = useStore((s) => s.projects)
   const googleConnected = useStore((s) => !!s.google?.connected)
   const { refreshTodos, addTodo } = useTodos(useShallow((s) => ({ refreshTodos: s.refreshTodos, addTodo: s.addTodo })))
   const { refreshTasksSync, runTasksSync, toast } = useStore(useShallow((s) => ({ refreshTasksSync: s.refreshTasksSync, runTasksSync: s.runTasksSync, toast: s.toast })))
@@ -217,26 +217,35 @@ export default function TodosView(): JSX.Element {
         <h2><ListChecks size={16} /> Lists</h2>
         <div className="no-drag header-right">
           {tasksSync?.config.enabled && googleConnected && (
-            <button className="icon-btn" onClick={() => void runTasksSync()} disabled={tasksSync.syncing}
+            <button className={`ghost-btn sync-status${tasksSync.last_error ? ' integration-warn' : ''}`} onClick={() => void runTasksSync()} disabled={tasksSync.syncing}
               title={tasksSync.last_error ? `Google Tasks sync failed: ${tasksSync.last_error}` : 'Sync with Google Tasks now'}>
-              <RefreshCw size={14} className={tasksSync.syncing ? 'spin' : ''} />
+              {tasksSync.syncing ? 'Syncing…' : tasksSync.last_error ? 'Sync failed' : tasksSync.last_sync ? `Synced ${new Date(tasksSync.last_sync * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Not synced'}
             </button>
           )}
-          {!board && (
-            <label className={`chip-check ${showDone ? 'on' : ''}`}>
-              <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Show done
-            </label>
-          )}
-          <label className="model-picker" title="Urgency scores due date, priority and age">
-            <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as 'due' | 'urgency')}><option value="due">Sort: Due</option><option value="urgency">Sort: Urgency</option></select>
-            <ChevronDown size={14} />
-          </label>
-          <div className="seg pill-group" ref={viewPill} role="group" aria-label="View">
-            <button className={`icon-btn${board ? '' : ' on'}`} aria-pressed={!board} title="List view" aria-label="List view" onClick={() => setView('list')}><List size={14} /></button>
-            <button className={`icon-btn${board ? ' on' : ''}`} aria-pressed={board} title="Board view" aria-label="Board view" onClick={() => setView('board')}><KanbanSquare size={14} /></button>
-          </div>
+          <PopMenu className="ghost-btn" aria-label="View" label={<><SlidersHorizontal size={13} aria-hidden /> View</>}>
+            {() => (
+              <>
+                {!board && (
+                  <label className="pop-menu-item pop-menu-check">
+                    <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Show done
+                  </label>
+                )}
+                <label className="view-menu-row">
+                  <span>Sort</span>
+                  <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as 'due' | 'urgency')}><option value="due">Due</option><option value="urgency">Urgency</option></select>
+                </label>
+                <div className="view-menu-row">
+                  <span>Layout</span>
+                  <div className="seg" role="group" aria-label="Layout">
+                    <button type="button" aria-pressed={!board} title="List view" aria-label="List view" onClick={() => setView('list')}>List</button>
+                    <button type="button" aria-pressed={board} title="Board view" aria-label="Board view" onClick={() => setView('board')}>Board</button>
+                  </div>
+                </div>
+              </>
+            )}
+          </PopMenu>
           {board && <label className="model-picker"><select aria-label="Columns" value={groupBy} onChange={(e) => setGroupBy(e.target.value as BoardGroup)}><option value="status">Columns: Status</option><option value="list">Columns: List</option></select><ChevronDown size={14} /></label>}
-          <ScopeSelect value={scope} onChange={setScope} />
+          {projects.length > 0 && <ScopeSelect value={scope} onChange={setScope} />}
         </div>
         <AppSwitcher />
       </header>

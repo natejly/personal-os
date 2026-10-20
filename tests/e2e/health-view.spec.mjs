@@ -15,6 +15,15 @@ async function openHealth(grain) {
   await expect(grain.page.getByRole('heading', { name: 'Health' }).first()).toBeVisible()
   await expect(grain.page.locator('.hl-tile').first()).toBeVisible()
 }
+const logRow = (page) => page.getByRole('form', { name: 'Log' })
+async function addReading(page, metric, value) {
+  const row = logRow(page)
+  await row.getByLabel('Metric').selectOption({ label: metric })
+  const val = row.getByLabel(/^Value/)
+  if (typeof value === 'number' || /^-?[\d.]+$/.test(value)) await val.fill(String(value))
+  else await val.selectOption({ label: value })
+  await row.getByRole('button', { name: 'Add' }).click()
+}
 const tile = (page, label) => page.locator('.hl-tile', { has: page.locator('.hl-tile-label', { hasText: label }) })
 
 function seedEntries(dataDir, rows) {
@@ -43,42 +52,42 @@ test('Health renders empty: nine metric tiles with no values, range switch, empt
   expect(realErrors(grain.consoleErrors)).toEqual([])
 })
 
-test('quick logging: number, additive sum, scale and yes/no tiles format like the unit tests say', async ({ grain }) => {
+test('logging from the Log row: number, additive sum, scale and yes/no metrics format like the unit tests say', async ({ grain }) => {
   const { page, api } = grain
   await openHealth(grain)
-  // sleep (latest-style number box "Add to" for sum metrics): 7.46 h reads "7.5 h"
+  // sleep: 7.46 h reads "7.5 h"
   const sleep = tile(page, 'Sleep')
-  await sleep.getByLabel(/Add to Sleep/).fill('7.46')
-  await sleep.getByRole('button', { name: 'Add' }).click()
+  await addReading(page, 'Sleep', 7.46)
   await expect(sleep.locator('.hl-tile-value')).toHaveText('7.5 h')
   // steps sum: 3,000 + 5,000 = 8,000 steps, goal met
   const steps = tile(page, 'Steps')
-  await steps.getByLabel(/Add to Steps/).fill('3000')
-  await steps.getByRole('button', { name: 'Add' }).click()
+  await addReading(page, 'Steps', 3000)
   await expect(steps.locator('.hl-tile-value')).toHaveText('3,000 steps')
-  await steps.getByLabel(/Add to Steps/).fill('5000')
-  await steps.getByRole('button', { name: 'Add' }).click()
+  await addReading(page, 'Steps', 5000)
   await expect(steps.locator('.hl-tile-value')).toHaveText('8,000 steps')
   await expect(steps.getByRole('meter')).toHaveAttribute('aria-valuenow', '1')
   // weight is "last", so the second log replaces the first for the day
   const weight = tile(page, 'Weight')
-  await weight.getByLabel(/Log Weight/).fill('180.4')
-  await weight.getByRole('button', { name: 'Log' }).click()
+  await addReading(page, 'Weight', 180.4)
   await expect(weight.locator('.hl-tile-value')).toHaveText('180.4 lb')
-  await weight.getByLabel(/Log Weight/).fill('179.1')
-  await weight.getByRole('button', { name: 'Log' }).click()
+  await addReading(page, 'Weight', 179.1)
   await expect(weight.locator('.hl-tile-value')).toHaveText('179.1 lb')
   // scale and check
-  await tile(page, 'Mood').getByRole('button', { name: '4', exact: true }).click()
+  await addReading(page, 'Mood', '4/5')
   await expect(tile(page, 'Mood').locator('.hl-tile-value')).toHaveText('4/5')
-  await tile(page, 'Meds taken').getByRole('button', { name: 'Yes' }).click()
+  await addReading(page, 'Meds taken', 'Yes')
   await expect(tile(page, 'Meds taken').locator('.hl-tile-value')).toHaveText('Yes')
-  await tile(page, 'Meds taken').getByRole('button', { name: 'No' }).click()
+  await addReading(page, 'Meds taken', 'No')
   await expect(tile(page, 'Meds taken').locator('.hl-tile-value')).toHaveText('No')
+  // tiles carry no inputs of their own; clicking one picks its metric in the Log row and focuses the value
+  await expect(page.locator('.hl-tile input, .hl-tile select, .hl-tile form')).toHaveCount(0)
+  await tile(page, 'Water').locator('.hl-tile-head').click()
+  await expect(logRow(page).getByLabel('Metric')).toHaveValue('water')
+  await expect(logRow(page).getByLabel(/^Value/)).toBeFocused()
   // invalid input cannot be submitted
-  await expect(tile(page, 'Water').getByRole('button', { name: 'Add' })).toBeDisabled()
-  await tile(page, 'Water').getByLabel(/Add to Water/).fill('-3')
-  await expect(tile(page, 'Water').getByRole('button', { name: 'Add' })).toBeDisabled()
+  await expect(logRow(page).getByRole('button', { name: 'Add' })).toBeDisabled()
+  await logRow(page).getByLabel(/^Value/).fill('-3')
+  await expect(logRow(page).getByRole('button', { name: 'Add' })).toBeDisabled()
   // persisted server side
   const sum = await api('/health/summary?days=14')
   expect(sum.find((m) => m.key === 'steps').today).toBe(8000)
@@ -135,17 +144,19 @@ test('entry from the log form: any day, a note, a synced source is labelled', as
   await openHealth(grain)
   await tile(page, 'Steps').locator('.hl-tile-head').click()
   const detail = page.getByRole('region', { name: 'Steps history' })
+  const form = logRow(page)
+  await expect(form.getByLabel('Metric')).toHaveValue('steps')
   await expect(detail.locator('.hl-entries')).toContainText('4,321 steps')
   await expect(detail.locator('.hl-entries')).toContainText('COROS')
-  await detail.locator('input[aria-label="Day"]').fill(ymd(3))
-  await detail.locator('input.hl-log-val').fill('1500')
-  await detail.getByLabel('Note (optional)').fill('evening walk')
-  await detail.getByRole('button', { name: 'Log' }).click()
+  await form.locator('input[aria-label="Day"]').fill(ymd(3))
+  await form.locator('input.hl-log-val').fill('1500')
+  await form.getByLabel('Note (optional)').fill('evening walk')
+  await form.getByRole('button', { name: 'Add' }).click()
   await expect(detail.locator('.hl-entries')).toContainText('evening walk')
   const e = (await api(`/health/entries?metric=steps&since=${ymd(3)}&until=${ymd(3)}`))[0]
   expect(e.value).toBe(1500)
   // a day in the future cannot be picked
-  await expect(detail.locator('input[aria-label="Day"]')).toHaveAttribute('max', ymd(0))
+  await expect(form.locator('input[aria-label="Day"]')).toHaveAttribute('max', ymd(0))
   expect(realErrors(grain.consoleErrors)).toEqual([])
 })
 
@@ -257,12 +268,13 @@ test('backend dies while the page is open: logging reports an error and the page
   await openHealth(grain)
   backend.child.kill('SIGKILL')
   const steps = tile(page, 'Steps')
-  await steps.getByLabel(/Add to Steps/).fill('1234')
-  await steps.getByRole('button', { name: 'Add' }).click()
+  await logRow(page).getByLabel('Metric').selectOption({ label: 'Steps' })
+  await logRow(page).getByLabel(/^Value/).fill('1234')
+  await logRow(page).getByRole('button', { name: 'Add' }).click()
   // a readable error toast, the tile unchanged, the form still there
   await expect(page.locator('.toast.error, [role="alert"]').first()).toBeVisible({ timeout: 30_000 })
   await expect(steps.locator('.hl-tile-value')).toHaveText('—')
-  await expect(steps.getByLabel(/Add to Steps/)).toHaveValue('1234')
+  await expect(logRow(page).getByLabel(/^Value/)).toHaveValue('1234')
   await page.getByRole('group', { name: 'Range' }).getByRole('button', { name: '7d' }).click()
   await expect(page.locator('.sidebar')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Health' }).first()).toBeVisible()

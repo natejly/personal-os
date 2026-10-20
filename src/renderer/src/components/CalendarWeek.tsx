@@ -337,7 +337,7 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
   const nowVisible = nowHour >= startHour && nowHour <= endHour
 
   return (
-    <div ref={gridRef} className={`cal-grid ${sel || drag ? 'dragging' : ''}`} style={{ gridTemplateColumns: `56px repeat(${days.length}, 1fr)`, minWidth: days.length > 1 ? 760 : 200 }}>
+    <div ref={gridRef} className={`cal-grid ${sel || drag ? 'dragging' : ''}`} style={{ gridTemplateColumns: `48px repeat(${days.length}, minmax(0, 1fr))`, minWidth: days.length > 1 ? 640 : 200 }}>
       <div className="cal-corner">
         {(showAll || hours < 24) && (
           <button className="cal-hours-toggle" title={showAll ? 'Crop to the hours with events' : 'Show all 24 hours'}

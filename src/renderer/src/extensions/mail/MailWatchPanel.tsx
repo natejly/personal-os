@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ExternalLink, X, ListPlus, ScanSearch } from '../../icons'
 import { api } from '../../lib/api'
 import { useStore } from '../../store'
+import { useViewCommand } from '../../lib/viewCommands'
 import type { MailWatchList as WatchData, MailWatchThread } from '@shared/types'
 
 type Kind = 'to_reply' | 'awaiting_reply'
@@ -41,6 +42,7 @@ export function useMailWatch(): MailWatch {
     setBusy(true)
     try { await api.mailWatch.refresh(); await load() } catch (e) { toast((e as Error).message, 'error') } finally { setBusy(false) }
   }
+  useViewCommand('mail:rescan', () => { void refresh() })
   const dismiss = async (t: MailWatchThread): Promise<void> => {
     try { await api.mailWatch.dismiss(t.thread_id); await load() } catch (e) { toast((e as Error).message, 'error') }
   }
@@ -57,6 +59,7 @@ export function MailWatchChips({ watch }: { watch: MailWatch }): JSX.Element {
   const chip = (k: Kind): JSX.Element => (
     <button className={`chip-check ${kind === k ? 'on' : ''}`} aria-pressed={kind === k} onClick={() => setKind(kind === k ? null : k)}>{LABEL[k]} {n(k)}</button>
   )
+  if (n('to_reply') + n('awaiting_reply') === 0 && !kind) return <></>
   return (
     <>
       {chip('to_reply')}

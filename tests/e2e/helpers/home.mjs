@@ -4,11 +4,11 @@ import { join } from 'node:path'
 import { expect } from '@playwright/test'
 import { withSidebar } from './shell.mjs'
 
-export const TABS = ['General', 'Models', 'Assistant', 'Permissions', 'Extensions', 'Integrations', 'Advanced']
+export const TABS = ['General', 'Models', 'Assistant', 'Permissions', 'Extensions', 'Advanced']
 
 export const dialog = (page) => page.getByRole('dialog', { name: 'Settings' })
 
-const TAB_ID = { General: 'general', Models: 'models', Assistant: 'assistant', Permissions: 'permissions', Extensions: 'extensions', Integrations: 'integrations', Advanced: 'advanced' }
+const TAB_ID = { General: 'general', Models: 'models', Assistant: 'assistant', Permissions: 'permissions', Extensions: 'extensions', Advanced: 'advanced' }
 
 /** A Settings section by label. Rail tabs may carry a hint after the label, so match the tab id, not the name. */
 export const tabBtn = (page, label) => dialog(page).locator(`#settings-tab-${TAB_ID[label] ?? label}`)

@@ -34,8 +34,6 @@ test('an ext tab id opens the section of its panel and scrolls to it', () => {
 test('rail hints', () => {
   assert.equal(hintOf('general', { themeLabel: 'Dark' }), 'Dark')
   assert.equal(hintOf('models', { modelLabel: '' }), null)
-  assert.equal(hintOf('integrations', { google: null }), 'Google not connected')
-  assert.equal(hintOf('integrations', { google: { connected: true, email: 'a@b.c' } }), 'a@b.c')
   assert.equal(hintOf('assistant', { autoCompact: false }), 'Auto-compact off')
   assert.equal(hintOf('extensions', { extensionsOn: 3 }), '3 on')
   assert.equal(hintOf('extensions', {}), null)

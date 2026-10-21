@@ -1968,7 +1968,7 @@ export const useStore = create<State>((set, get) => {
       // Named as the sidebar shows it; nav.tsx holds the labels but importing it here would close a cycle.
       if (viewHidden(get().settings, view)) {
         const name = view === 'todos' ? 'Lists' : `${view[0].toUpperCase()}${view.slice(1)}`
-        get().toast(`${name} is turned off`, 'info', { label: 'Turn on', run: () => get().openSettings('sidebar') })
+        get().toast(`${name} is turned off`, 'info', { label: 'Turn on', run: () => get().openSettings(view === 'library' ? 'sidebar' : 'extensions') })
         return
       }
       const cur = get().view

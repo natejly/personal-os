@@ -96,9 +96,9 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
   await openAdvanced(page, 'Approvals')
   await dialog(page).getByRole('button', { name: 'Full agentic editing', exact: true }).click()
   await dialog(page).getByRole('button', { name: 'Use full agentic editing', exact: true }).click() // the risky choice asks first
-  await openSettings(page, 'Integrations')
+  await openSettings(page, 'Extensions')
   await field(page, 'Your own search server').fill('http://localhost:8080')
-  await openSettings(page, 'Integrations')
+  await openSettings(page, 'Extensions')
   await setToggle(field(page, 'Hold outgoing email so I can undo'), false)
   // Model
   await tabBtn(page, 'Models').click()

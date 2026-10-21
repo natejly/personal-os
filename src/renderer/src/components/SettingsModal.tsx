@@ -84,7 +84,6 @@ export default function SettingsModal(): JSX.Element {
     ...(runtimeSlotsShown(runtimeView).length ? [] : [RUNTIME_EXT])
   ])
   const hits = searchSettings(q, panels.map((p) => ({ tab: p.tab, sec: p.id, title: p.label, keys: p.keys ?? '' })), offExtensions)
-  const google = useStore((s) => s.google)
   /** A search hit as the section it lives in (a registered panel's hit lands in its group) and the anchor inside it. */
   const hitAt = (h: { tab: SettingsTab; sec: string }): { section: Tab; sec: string } => ({ section: locate(h.tab, panels).section, sec: h.sec })
   /** Go to a search hit: its section, any collapsed group around it opened, then scrolled to once it has rendered. */
@@ -229,7 +228,6 @@ export default function SettingsModal(): JSX.Element {
     themeLabel: THEMES.find((t) => t.id === settings.theme)?.label,
     modelLabel: settings.defaultModel ? modelLabel(settings.defaultModel) : null,
     modeLabel: MODES.find((m) => m.id === mode)?.label,
-    google,
     autoCompact: settings.autoCompact ?? true,
     extensionsOn: extList ? extList.filter((e) => e.enabled).length : null
   })
@@ -266,7 +264,6 @@ export default function SettingsModal(): JSX.Element {
       case 'assistant': return <><AgentsTab {...tabProps} /><h3 className="set-part">Memory and context</h3><ContextTab {...tabProps} {...gp} /></>
       case 'permissions': return <><PermissionsTab {...tabProps} /><SystemTab /></>
       case 'extensions': return null  // the Extensions panel registers into this section's group
-      case 'integrations': return <IntegrationsTab {...tabProps} onSaveCreds={saveGoogleCreds} />
       case 'advanced': return <AdvancedTab {...tabProps} {...gp} onExtensionsChanged={extensionsChanged} />
       default: return null
     }
@@ -322,6 +319,7 @@ export default function SettingsModal(): JSX.Element {
                 {sectionPanels.map((p) => <Sec key={p.tab} id={p.id}>{p.group !== 'extensions' && <h4>{p.label}</h4>}<p.Component /></Sec>)}
               </section>
             )}
+            {tab === 'extensions' && <IntegrationsTab {...tabProps} onSaveCreds={saveGoogleCreds} />}
           </div>
         </div>
         </EffectiveProvider>

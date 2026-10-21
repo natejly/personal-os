@@ -21,7 +21,7 @@ test('old tab ids map to the new sections', () => {
   assert.deepEqual(resolveTab('spending'), { tab: 'advanced', group: 'usage' })
   assert.deepEqual(resolveTab('nope'), { tab: 'models' })
   for (const [old, to] of Object.entries(SECTION_ALIAS)) assert.deepEqual(resolveTab(old), to)
-  assert.deepEqual(Object.keys(SECTION_ALIAS).sort(), ['agent', 'context', 'hooks', 'jobs', 'layout', 'presets', 'profiles', 'usage'])
+  assert.deepEqual(Object.keys(SECTION_ALIAS).sort(), ['agent', 'context', 'hooks', 'integrations', 'jobs', 'layout', 'presets', 'profiles', 'usage'])
   for (const id of SECTION_ORDER) assert.deepEqual(resolveTab(id), { tab: id })
 })
 
@@ -33,9 +33,15 @@ test('an extension section resolves to itself, except the runtime panel which li
   assert.equal(sectionOf('advanced'), 'advanced')
 })
 
+test('integrations and its groups land in Extensions', () => {
+  assert.deepEqual(resolveTab('integrations'), { tab: 'extensions', group: 'accounts' })
+  assert.ok(!(SECTION_ORDER as readonly string[]).includes('integrations'))
+  for (const sec of ['accounts', 'connectors', 'web-search', 'texting']) assert.equal(SETTINGS_INDEX.find((e) => e.sec === sec)?.tab, 'extensions', sec)
+})
+
 test('behavior and texting land on their new homes', () => {
   assert.deepEqual(resolveTab('behavior'), { tab: 'models', group: 'assistant' })
-  assert.deepEqual(resolveTab('texting'), { tab: 'integrations', group: 'texting' })
+  assert.deepEqual(resolveTab('texting'), { tab: 'extensions', group: 'texting' })
 })
 
 test('every index entry sits in a real section and the new groups are findable', () => {
@@ -51,7 +57,7 @@ test('Runtime is listed only with an alternative provider', () => {
 
 test('search matches every typed word against titles and keywords', () => {
   assert.deepEqual(searchSettings('telegram').map((e) => e.sec), ['texting'])
-  assert.equal(searchSettings('firecrawl key')[0].tab, 'integrations')
+  assert.equal(searchSettings('firecrawl key')[0].tab, 'extensions')
   assert.ok(searchSettings('dictation').some((e) => e.tab === 'general'))
   assert.deepEqual(searchSettings('  '), [])
   assert.deepEqual(searchSettings('zzzz'), [])

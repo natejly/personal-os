@@ -11,17 +11,15 @@ const open = async (page, title) => {
 // 1x1 transparent PNG
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
 
-test('Uploads and Artifacts open from the tree; scope select only on Uploads', async ({ grain: g }) => {
+test('Uploads opens from the tree; scope select only on Uploads', async ({ grain: g }) => {
   const { page } = g
   await openFiles(page)
   await expect(page.getByTitle('Filter by project')).toHaveCount(0)
   await section(page, 'Uploads')
   await expect(page.getByText('No uploads yet')).toBeVisible()
   await expect(page.getByTitle('Filter by project')).toBeVisible()
-  await section(page, 'Artifacts')
-  await expect(page.getByTitle('Filter by project')).toHaveCount(0)
   // hammer the rows
-  for (let i = 0; i < 6; i++) for (const n of ['Uploads', 'Artifacts']) await section(page, n)
+  for (let i = 0; i < 6; i++) await section(page, 'Uploads')
   await expect(page.getByPlaceholder('Search files')).toBeVisible()
   expect(errorsOf(g)).toEqual([])
 })

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight, FileText, LayoutDashboard, Folder, FolderOpen, MoreHorizontal, Pin, Plus, Search, Sparkles, Star,
-  Trash2, Upload, User, Package
+  Trash2, Upload, User
 } from '../icons'
 import type { Doc } from '@shared/types'
 import { useStore, type FilesSection } from '../store'
@@ -454,12 +454,12 @@ export default function DocTree({ hits, docs, activeId, query, onQuery, section 
         </>}
 
       {!searching && <div className="doc-tree-tail" aria-hidden />}
-      {!searching && (['uploads', 'artifacts'] as const).map((k) => (
-        <div key={k} className={`doc-row ${section === k ? 'active' : ''}`} {...rowButton(() => openFiles(k))}>
-          {k === 'uploads' ? <Upload size={13} className="doc-row-icon" /> : <Package size={13} className="doc-row-icon" />}
-          <span className="doc-row-main"><span className="doc-row-title">{k === 'uploads' ? 'Uploads' : 'Artifacts'}</span></span>
+      {!searching && (
+        <div className={`doc-row ${section === 'uploads' ? 'active' : ''}`} {...rowButton(() => openFiles('uploads'))}>
+          <Upload size={13} className="doc-row-icon" />
+          <span className="doc-row-main"><span className="doc-row-title">Uploads</span></span>
         </div>
-      ))}
+      )}
       {!searching && (
         <div className="doc-row" role="button" tabIndex={0} onClick={() => openSettings('data')}
           onKeyDown={(e) => { if (e.key === 'Enter') openSettings('data') }}>

@@ -1,13 +1,21 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Upload, Trash2, FileText, Pin } from '../icons'
+import { Upload, Trash2, FileText, Pin, Download, ExternalLink, FolderOpen, Package } from '../icons'
 import { useStore, type Scope } from '../store'
 import ProjectChip from './ProjectChip'
 import { tip } from '../lib/tip'
+import { saveDownload } from '../lib/api'
+import { itemRawPath } from '../lib/showPanel'
+import { artifactShowItem, type ChatFile } from '../lib/chatFiles'
+import { chatFilesApi } from '../lib/useChatFiles'
+import UploadPreview from './UploadPreview'
+import './chatFiles.css'
+
+type Kind = 'all' | 'uploads' | 'artifacts'
 
 
 /**
- * Uploads, for Files → Uploads and a project. Always hosted by another view, so it is a body
+ * Uploads and, outside a project, every chat's artifacts as rows of the same list (kind chips filter), for Files → Uploads and a project. Always hosted by another view, so it is a body
  * with no page header of its own; `embedded` is accepted for those callers, it is the only mode.
  */
 export default function DocumentsView({ projectId }: { projectId?: string; embedded?: boolean }): JSX.Element {
@@ -18,6 +26,37 @@ export default function DocumentsView({ projectId }: { projectId?: string; embed
   const scope: Scope = projectId ?? libraryScope
   const fileRef = useRef<HTMLInputElement>(null)
   const [drag, setDrag] = useState(false)
+  const [kind, setKind] = useState<Kind>('all')
+  const conversations = useStore((s) => s.conversations)
+  const toast = useStore((s) => s.toast)
+  const [artifacts, setArtifacts] = useState<ChatFile[]>([])
+  const [cursor, setCursor] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState<ChatFile | null>(null)
+  const gen = useRef(0)  // bumped on every reload, so a Load more page from before it is dropped
+  const withArtifacts = !projectId
+  const reload = useCallback((): void => {
+    const g = ++gen.current
+    chatFilesApi.artifacts().then((r) => { if (g === gen.current) { setArtifacts(r.files); setCursor(r.next_cursor) } }).catch(() => {})
+  }, [])
+  // The conversation list is replaced whenever a run finishes or a chat comes or goes: the refresh signal.
+  useEffect(() => {
+    if (!withArtifacts) return
+    const t = setTimeout(reload, 300)
+    return () => clearTimeout(t)
+  }, [reload, conversations, withArtifacts])
+  const more = (): void => {
+    if (!cursor || busy) return
+    setBusy(true)
+    const g = gen.current
+    chatFilesApi.artifacts(cursor)
+      .then((r) => { if (g !== gen.current) return; setArtifacts((cur) => [...cur, ...r.files]); setCursor(r.next_cursor) })
+      .catch((e: Error) => toast(e.message, 'error'))
+      .finally(() => setBusy(false))
+  }
+  const run = (p: Promise<unknown>): void => { p.catch((e: Error) => toast(e.message, 'error')) }
+  const shownDocs = kind === 'artifacts' ? [] : documents
+  const shownArtifacts = withArtifacts && kind !== 'uploads' ? artifacts : []
 
   useEffect(() => { void loadScope(scope) }, [scope, loadScope])
   const targetProject = scope === 'all' || scope === 'personal' ? null : scope
@@ -28,12 +67,19 @@ export default function DocumentsView({ projectId }: { projectId?: string; embed
       onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) void uploadDocuments(e.dataTransfer.files, targetProject) }}>
       <input id={projectId ? 'doc-upload-input-project' : 'doc-upload-input'} ref={fileRef} type="file" multiple hidden
         onChange={(e) => { if (e.target.files?.length) void uploadDocuments(e.target.files, targetProject); e.target.value = '' }} />
+      {withArtifacts && artifacts.length > 0 && (
+        <div className="doc-tag-chips">
+          {(['all', 'uploads', 'artifacts'] as const).map((k) => (
+            <button key={k} type="button" className={`doc-tag-chip${kind === k ? ' on' : ''}`} aria-pressed={kind === k} onClick={() => setKind(k)}>{k === 'all' ? 'All' : k === 'uploads' ? 'Uploads' : 'Artifacts'}</button>
+          ))}
+        </div>
+      )}
       {documents.length > 0 && (
         <div className="add-row">
           <button className="primary-btn" title={tip('Upload file', 'upload')} onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
         </div>
       )}
-      {documents.length === 0 && (
+      {documents.length === 0 && shownArtifacts.length === 0 && (
         <div className="empty-state">
           <FileText size={28} />
           <h2>No uploads yet</h2>
@@ -41,7 +87,7 @@ export default function DocumentsView({ projectId }: { projectId?: string; embed
         </div>
       )}
       <div className="doc-grid">
-        {documents.map((d) => (
+        {shownDocs.map((d) => (
           <div key={d.id} className="doc-card" onClick={() => openUploadPreview(d.id)}>
             <div className="doc-head">
               <FileText size={16} />
@@ -55,7 +101,27 @@ export default function DocumentsView({ projectId }: { projectId?: string; embed
             <div className="doc-meta">{scope === 'all' && <ProjectChip projectId={d.project_id} showPersonal />} {new Date(d.created_at * 1000).toLocaleDateString()}</div>
           </div>
         ))}
+        {shownArtifacts.map((f) => (
+          <div key={f.id} className="doc-card" data-testid="artifact-row" onClick={() => setOpen(f)}>
+            <div className="doc-head">
+              <Package size={16} />
+              <span className="doc-name" title={f.name}>{f.name}</span>
+            </div>
+            <p className="doc-preview">{f.conversation_title || 'Untitled chat'}</p>
+            <div className="doc-meta">Artifact {new Date(f.created_at * 1000).toLocaleDateString()}</div>
+          </div>
+        ))}
       </div>
+      {withArtifacts && cursor && kind !== 'uploads' && <button type="button" className="ghost-btn cf-more" disabled={busy} onClick={more}>{busy ? 'Loading…' : 'Load more'}</button>}
+      {open && (
+        <UploadPreview item={artifactShowItem(open)} onClose={() => setOpen(null)} actions={
+          <>
+            <button className="icon-btn" title="Open in default app" aria-label="Open in default app" onClick={() => run(chatFilesApi.openArtifact(open.id))}><ExternalLink size={14} /></button>
+            <button className="icon-btn" title="Reveal in Finder" aria-label="Reveal in Finder" onClick={() => run(chatFilesApi.revealArtifact(open.id))}><FolderOpen size={14} /></button>
+            <button className="icon-btn" title="Save a copy" aria-label="Save a copy" onClick={() => run(saveDownload(itemRawPath(artifactShowItem(open)), open.name))}><Download size={14} /></button>
+          </>
+        } />
+      )}
     </div>
   )
 }

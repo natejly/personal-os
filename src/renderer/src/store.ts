@@ -33,6 +33,7 @@ import type { PanelState, Pane } from './lib/panelPanes'
 import { uploadToast, uploadTooBig, type UploadOutcome } from './lib/uploadNote'
 import { pauseQueue, sendNext, updateQueue, type DoneInfo } from './lib/followQueue'
 import { DEFAULT_ZOOM, stepZoom } from './lib/zoom'
+import { flippedTheme } from './lib/appearance'
 import { inputChip } from './lib/deskFiles'
 
 /** Set by the canvas store: toggles the focused chat window's side panel and returns true, or false when no chat window has focus. */
@@ -989,6 +990,7 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'new-note') void s.createDoc({})
       else if (action === 'daily-note') { s.openFiles('notes'); void s.openDailyNote() }
       else if (action === 'toggle-sidebar') s.toggleSidebar()
+      else if (action === 'toggle-theme') void s.saveSettings({ theme: flippedTheme(s.settings.theme) })
       else if (action.startsWith('zoom:')) {
         const cur = s.settings.uiZoom ?? DEFAULT_ZOOM
         void s.saveSettings({ uiZoom: action === 'zoom:reset' ? DEFAULT_ZOOM : stepZoom(cur, action === 'zoom:in' ? 1 : -1) })

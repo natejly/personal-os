@@ -1,4 +1,11 @@
 import { useEffect, useRef } from 'react'
+import { CORE, registerCommand } from '../extensions/host'
+import { useStore } from '../store'
+
+/** Palette commands that set the theme at once. Imported for its side effect by App. */
+for (const [id, label, theme] of [['light', 'Theme: Light', 'light'], ['dark', 'Theme: Dark', 'dark'], ['system', 'Theme: System', 'system']] as const) {
+  registerCommand(CORE, { id: `theme:${id}`, label, hint: 'Appearance', run: () => void useStore.getState().saveSettings({ theme }) })
+}
 
 /**
  * A palette command aimed at a view that may not be mounted yet. The request is held until the view

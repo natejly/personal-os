@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.mjs'
+import { menu } from './helpers/shell.mjs'
 import { TABS, openMoreAppearance, setToggle, dialog, tabBtn, openAdvanced, openSettings, closeSettings, save, setWindowSize } from './helpers/home.mjs'
 
 const benign = (e) => /ResizeObserver|Autofocus|favicon/i.test(e)
@@ -398,5 +399,55 @@ test('searching for a setting inside a closed disclosure opens it and highlights
   await pick('rerank', 'Models')
   await expect(d.locator('details[data-disclosure="model-roles"]')).toHaveAttribute('open', '')
   await expect(d.getByText('Search model').first()).toBeVisible()
+  noErrors(grain)
+})
+
+test('the sidebar footer button cycles Light, Dark, System and saves at once; the shortcut and palette commands set the theme', async ({ grain }) => {
+  const { page, api } = grain
+  const html = page.locator('html')
+  const btn = page.locator('.sidebar-bottom .theme-btn')
+  await api('/settings', { method: 'PUT', body: { theme: 'dark' } })
+  await page.reload()
+  await expect(btn).toHaveAttribute('aria-label', 'Theme: Dark')
+  await btn.click()
+  await expect(html).toHaveAttribute('data-theme', 'system')
+  await expect(btn).toHaveAttribute('aria-label', 'Theme: System')
+  await expect.poll(async () => (await api('/settings')).theme).toBe('system')
+  await btn.click()
+  await expect(html).toHaveAttribute('data-theme', 'light')
+  await expect.poll(async () => (await api('/settings')).theme).toBe('light')
+  await btn.click()
+  await expect(html).toHaveAttribute('data-theme', 'dark')
+  await expect(btn).toHaveAttribute('aria-label', 'Theme: Dark')
+  // The Toggle Theme chord flips light and dark.
+  await menu(grain, 'Toggle Theme')
+  await expect(html).toHaveAttribute('data-theme', 'light')
+  await menu(grain, 'Toggle Theme')
+  await expect(html).toHaveAttribute('data-theme', 'dark')
+  await expect.poll(async () => (await api('/settings')).theme).toBe('dark')
+  // Palette commands.
+  const pal = page.getByRole('dialog', { name: 'Command palette' })
+  await menu(grain, 'Command Palette…')
+  await pal.getByPlaceholder('Go to, create, open…').fill('theme: light')
+  await pal.getByRole('option', { name: /^Theme: Light/ }).click()
+  await expect(html).toHaveAttribute('data-theme', 'light')
+  await expect.poll(async () => (await api('/settings')).theme).toBe('light')
+  noErrors(grain)
+})
+
+test('General keeps Theme, Accent and Mascot; presets, text colour, background and zoom are gone; removed font ids load as the default', async ({ grain }) => {
+  const { page, api } = grain
+  await api('/settings', { method: 'PUT', body: { uiFont: 'georgia', codeFont: 'courier' } })
+  await page.reload()
+  await expect(page.locator('html')).toHaveAttribute('data-font', 'system')
+  await expect(page.locator('html')).toHaveAttribute('data-code', 'default')
+  const d = await openMoreAppearance(page)
+  await expect(d.getByRole('radiogroup', { name: 'Theme' })).toBeVisible()
+  await expect(d.getByRole('radiogroup', { name: 'Accent color' })).toBeVisible()
+  await expect(d.getByRole('radiogroup', { name: 'Mascot' })).toBeVisible()
+  await expect(d.getByRole('radiogroup', { name: 'Interface font' }).getByRole('radio')).toHaveCount(3)
+  await expect(d.getByRole('radiogroup', { name: 'Code font' }).getByRole('radio')).toHaveCount(2)
+  for (const gone of ['Appearance presets', 'Text color', 'Background']) await expect(d.getByRole('radiogroup', { name: gone })).toHaveCount(0)
+  await expect(d.getByRole('group', { name: 'Zoom' })).toHaveCount(0)
   noErrors(grain)
 })

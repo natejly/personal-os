@@ -279,6 +279,7 @@ function buildMenu(): void {
         item('zoom-reset'),
         item('zoom-in'),
         item('zoom-out'),
+        item('toggle-theme'),
         { type: 'separator' },
         { role: 'togglefullscreen' },
         ...extensionItems('View')

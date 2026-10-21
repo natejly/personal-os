@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { actionLabel, artifactShowItem, artifactsQuery, filesQuery, formatCount, groupByChat, groupByKind, kindLabel, projectFilter, rowAction, soleOutput, uploadTarget, type ChatFile } from './chatFiles'
+import { FILES_KINDS, actionLabel, artifactShowItem, artifactsQuery, filesQuery, formatCount, keepsChat, keepsNotes, keepsUploads, groupByChat, groupByKind, kindLabel, projectFilter, rowAction, soleOutput, uploadTarget, type ChatFile } from './chatFiles'
 
 const f = (id: string, kind: ChatFile['kind'], chat: string, at: number, over: Partial<ChatFile> = {}): ChatFile => ({
   id, conversation_id: chat, conversation_title: `Chat ${chat}`, project_id: null, kind, ref: id, name: id, action: 'created', message_id: null, chat_count: 1, pinned: false, created_at: at, missing: false, rel: null, ...over
@@ -8,7 +8,7 @@ const f = (id: string, kind: ChatFile['kind'], chat: string, at: number, over: P
 
 test('groupByKind: fixed order, empty kinds left out', () => {
   const g = groupByKind([f('a', 'local', 'c1', 3), f('b', 'upload', 'c1', 2), f('c', 'local', 'c2', 1)])
-  assert.deepEqual(g.map((x) => x.label), ['Uploads', 'Local files'])
+  assert.deepEqual(g.map((x) => x.label), ['Uploads', 'Local'])
   assert.deepEqual(g[1].files.map((x) => x.id), ['a', 'c'])
   assert.deepEqual(groupByKind([]), [])
 })
@@ -52,6 +52,7 @@ test('labels', () => {
   assert.equal(actionLabel('saved'), 'Saved')
   assert.equal(actionLabel('uploaded'), 'Uploaded')
   assert.equal(kindLabel('coding'), 'Coding')
+  assert.equal(kindLabel('output'), 'Chat')
 })
 
 test('rowAction: kind decides, coding and missing go to the chat', () => {
@@ -99,4 +100,10 @@ test('soleOutput: a path another chat saved opens only when one output has it', 
   assert.equal(soleOutput([o('a', 'work/PROGRESS.md'), o('b', 'work/PROGRESS.md')], 'work/PROGRESS.md'), null)
   assert.equal(soleOutput([o('a', 'outputs/x.md', { missing: true })], 'outputs/x.md'), null)
   assert.equal(soleOutput([f('a', 'upload', 'c', 1, { rel: 'outputs/x.md' })], 'outputs/x.md'), null)
+})
+
+test('kind filter: four labels, each list keeps its own kinds, trash keeps none', () => {
+  assert.deepEqual(FILES_KINDS.map((k) => k.label), ['All', 'Notes', 'Uploads', 'Chat'])
+  assert.deepEqual(FILES_KINDS.map((k) => [keepsNotes(k.id), keepsUploads(k.id), keepsChat(k.id)]), [[true, true, true], [true, false, false], [false, true, false], [false, false, true]])
+  assert.deepEqual([keepsNotes('trash'), keepsUploads('trash'), keepsChat('trash')], [false, false, false])
 })

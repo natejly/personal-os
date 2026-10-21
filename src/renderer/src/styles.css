@@ -1780,16 +1780,6 @@ button.tag:disabled { cursor: default; }
 .style-danger { display: flex; gap: 14px; flex-wrap: wrap; }
 .link.danger { color: var(--danger); }
 
-/* ---------- Documents ---------- */
-.doc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
-.doc-card { border-radius: var(--r-lg); padding: 12px; background: var(--bg-elev); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
-.doc-card:hover { background: color-mix(in srgb, var(--text) 5%, var(--bg-elev)); }
-.doc-head { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
-.doc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 500; }
-.doc-card .ghost { opacity: 0; }
-.doc-card:hover .ghost, .doc-card .ghost:focus-visible { opacity: 1; }
-.doc-preview { margin: 0; font-size: var(--fs-sm); color: var(--text-muted); line-height: 1.5; max-height: 52px; overflow: hidden; }
-.doc-meta { font-size: var(--fs-xs); color: var(--text-faint); }
 .modal.wide { width: 760px; }
 
 /* ---------- Command palette (⌘K) ---------- */

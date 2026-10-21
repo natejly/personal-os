@@ -48,7 +48,10 @@ export type View = BuiltinView | `ext:${string}`
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
 export type AutomationsKind = 'all' | 'jobs' | 'workflows' | 'commands'
 export type LibraryTab = 'skills' | 'agents' | 'automations' | 'connectors'
-export type FilesSection = 'notes' | 'uploads'
+/** Which kind the Files list shows. `trash` lists what was deleted; the filter row offers the other four. */
+export type FilesKind = 'all' | 'notes' | 'uploads' | 'chat' | 'trash'
+/** A kind a doc can be opened under: the list the editor sits beside. */
+const docKind = (k: FilesKind): FilesKind => (k === 'notes' || k === 'all' ? k : 'all')
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
@@ -475,9 +478,12 @@ export interface State {
   openAgentId: string | null
   /** Jump to one agent's home: Library > Agents with that agent open. */
   openAgent: (id: string | null) => void
-  filesSection: FilesSection
-  /** The one way into Files: switches to it, on the given section. */
-  openFiles: (section: FilesSection) => void
+  /** The Files list's kind filter. */
+  filesKind: FilesKind
+  /** Narrows the Files list to one project; null or absent for all of them. */
+  filesProject: string | null
+  /** The one way into Files: switches to it, with the kind and project filter when given (the kind resets to All otherwise). */
+  showFiles: (opts?: { kind?: FilesKind; projectId?: string | null }) => void
   /** Everything the Library shows that it does not already hold. Safe to call on every entry. */
   refreshLibrary: () => Promise<void>
 
@@ -987,7 +993,7 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'help') s.openHelp(s.helpOpen && s.helpSection === 'shortcuts' ? null : 'shortcuts')
       else if (action === 'help:guide') s.openHelp('guide')
       else if (action === 'new-note') void s.createDoc({})
-      else if (action === 'daily-note') { s.openFiles('notes'); void s.openDailyNote() }
+      else if (action === 'daily-note') { s.showFiles({ kind: 'notes' }); void s.openDailyNote() }
       else if (action === 'toggle-sidebar') s.toggleSidebar()
       else if (action.startsWith('zoom:')) {
         const cur = s.settings.uiZoom ?? DEFAULT_ZOOM
@@ -1001,12 +1007,11 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'panel-context') { if (s.view === 'canvas') canvasPanelHook.toggleFocused(); else if (s.view === 'chat') s.togglePanelContext() }
       else if (action === 'view:graph') s.openMemory('graph')
       else if (action === 'view:memory') s.openMemory()
-      else if (action === 'view:documents') s.openFiles('uploads')
       else if (action.startsWith('open-chat:')) void s.selectChat(action.slice(10))
       else if (action.startsWith('desk:')) void s.goToDesk(action.slice(5))
       else if (action.startsWith('view:')) s.setView(action.slice(5) as View)
       else if (action === 'upload') {
-        s.openFiles('uploads')
+        s.showFiles({ kind: 'uploads' })
         setTimeout(() => document.getElementById('doc-upload-input')?.click(), 100)
       }
     })
@@ -1829,7 +1834,8 @@ export const useStore = create<State>((set, get) => {
     automationsKind: 'all',
     setAutomationsKind: (automationsKind) => set({ automationsKind }),
     openAgentId: null,
-    filesSection: 'notes',
+    filesKind: 'all',
+    filesProject: null,
     desks: [],
     activeDeskId: null,
     activeDesk: null,
@@ -2598,9 +2604,9 @@ export const useStore = create<State>((set, get) => {
       if (at) set({ docJump: { docId: id, line: at.line } })
       // A draft the flush could not save (a 409) is the user's to keep or Reload; a refetch would drop it.
       const cur = get()
-      if (cur.activeDoc?.id === id && (cur.docDraft !== null || cur.docTitleDraft !== null)) return set({ view: 'docs', filesSection: 'notes' })
+      if (cur.activeDoc?.id === id && (cur.docDraft !== null || cur.docTitleDraft !== null)) return set((st) => ({ view: 'docs', filesKind: docKind(st.filesKind) }))
       wantedDoc = id
-      set({ view: 'docs', filesSection: 'notes' })
+      set((st) => ({ view: 'docs', filesKind: docKind(st.filesKind) }))
       try {
         const doc = await api.docs.get(id)
         // A slower fetch must not clobber a doc the user has since switched away from.
@@ -2628,7 +2634,7 @@ export const useStore = create<State>((set, get) => {
         wantedDoc = doc.id
         set({
           view: 'docs',
-          filesSection: 'notes',
+          filesKind: docKind(get().filesKind),
           activeDoc: doc,
           docDraft: null,
           docFocusId: doc.id
@@ -2901,7 +2907,7 @@ export const useStore = create<State>((set, get) => {
       if (openAgentId) get().setView('library')
     },
     // A stale caller passing the retired 'artifacts' value lands on the list, where artifacts are rows now.
-    openFiles: (section) => { set({ filesSection: section === 'notes' ? 'notes' : 'uploads' }); get().setView('docs') },
+    showFiles: (opts) => { set({ filesKind: opts?.kind ?? 'all', filesProject: opts?.projectId ?? null }); get().setView('docs') },
     // The docs list is already kept live elsewhere; this is for the two things the Library reads
     // that nothing else refreshes on its behalf.
     refreshLibrary: async () => {

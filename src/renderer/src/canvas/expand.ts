@@ -23,7 +23,7 @@ export const canExpand = (w: CanvasWindow): boolean => {
 }
 
 /** Navigate the main window to the classic equivalent. Leaves the canvas; the window stays. Memory and
- * graph open Settings → Memory over the canvas instead; uploads open Files -> Uploads. */
+ * graph open Settings → Memory over the canvas instead; uploads open Files on Uploads. */
 export function expandWindow(w: CanvasWindow): void {
   if (!canExpand(w)) return
   const app = useStore.getState()
@@ -45,7 +45,7 @@ export function expandWindow(w: CanvasWindow): void {
       app.openMemory('graph')
       break
     case 'documents':
-      app.openFiles('uploads')
+      app.showFiles({ kind: 'uploads' })
       break
     case 'recap':
       app.newChat(null)

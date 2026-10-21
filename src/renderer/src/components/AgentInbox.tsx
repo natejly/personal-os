@@ -821,7 +821,7 @@ export function NewTask({ onDone, job, agentId }: { onDone: () => void; job?: Jo
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, goToDesk, selectChat, setLibraryTab, markDeskSeen, markInboxRunSeen, rejectJobProposals, clearInbox, archiveInboxRun } = useStore(useShallow((s) => ({ refreshJobs: s.refreshJobs, setJobEnabled: s.setJobEnabled, setView: s.setView, openFiles: s.openFiles, openDoc: s.openDoc, goToDesk: s.goToDesk, selectChat: s.selectChat, setLibraryTab: s.setLibraryTab, markDeskSeen: s.markDeskSeen, markInboxRunSeen: s.markInboxRunSeen, rejectJobProposals: s.rejectJobProposals, clearInbox: s.clearInbox, archiveInboxRun: s.archiveInboxRun })))
+  const { refreshJobs, setJobEnabled, setView, showFiles, openDoc, goToDesk, selectChat, setLibraryTab, markDeskSeen, markInboxRunSeen, rejectJobProposals, clearInbox, archiveInboxRun } = useStore(useShallow((s) => ({ refreshJobs: s.refreshJobs, setJobEnabled: s.setJobEnabled, setView: s.setView, showFiles: s.showFiles, openDoc: s.openDoc, goToDesk: s.goToDesk, selectChat: s.selectChat, setLibraryTab: s.setLibraryTab, markDeskSeen: s.markDeskSeen, markInboxRunSeen: s.markInboxRunSeen, rejectJobProposals: s.rejectJobProposals, clearInbox: s.clearInbox, archiveInboxRun: s.archiveInboxRun })))
   const [showArchived, setShowArchived] = useState(false)
   const [archivedRuns, setArchivedRuns] = useState<ArchivedInboxRun[]>([])
   const [archivedQ, setArchivedQ] = useState('')
@@ -864,7 +864,7 @@ export default function AgentInbox(): JSX.Element | null {
       // Straight to the first doc with an edit waiting, so the diff is on screen rather than a marker in the tree.
       const first = useStore.getState().docs.find((d) => typeof d.pending === 'number' && d.pending > 0)
       if (first) void openDoc(first.id)
-      else openFiles('notes')
+      else showFiles({ kind: 'notes' })
     }
     else if (key === 'memory') useStore.getState().openMemory('list')
     else { setLibraryTab(key === 'workflows' ? 'automations' : key); setView('library') }

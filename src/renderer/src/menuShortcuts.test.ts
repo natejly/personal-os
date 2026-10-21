@@ -117,16 +117,14 @@ const withDom = async (doc: object, fn: () => void | Promise<void>): Promise<voi
   try { await fn() } finally { delete g.document; delete g.KeyboardEvent }
 }
 
-test('view:documents and upload open Files on uploads, where the upload input renders', async () => {
-  fire('view:documents')
-  assert.equal(useStore.getState().view, 'docs')
-  assert.equal(useStore.getState().filesSection, 'uploads')
+test('upload opens Files on Uploads, where the upload input renders', async () => {
   const clicked: string[] = []
   await withDom({ activeElement: null, getElementById: (id: string) => ({ click: () => clicked.push(id) }) }, async () => {
     fire('upload')
     await new Promise((r) => setTimeout(r, 150))
   })
-  assert.equal(useStore.getState().filesSection, 'uploads')
+  assert.equal(useStore.getState().view, 'docs')
+  assert.equal(useStore.getState().filesKind, 'uploads')
   assert.deepEqual(clicked, ['doc-upload-input'])
   // ⌘, after that still opens on Model.
   fire('settings')
@@ -269,7 +267,7 @@ test('⌘1…⌘n are contiguous, each used once, each a distinct target', async
   const digits = rows.map(([d]) => d).sort((a, b) => a - b)
   assert.deepEqual(digits, digits.map((_, i) => i + 1), 'no gaps, no repeats')
   assert.equal(new Set(rows.map(([, a]) => a)).size, rows.length, 'no two digits open the same thing')
-  assert.ok(!rows.some(([, a]) => a === 'view:graph' || a === 'view:documents'))
+  assert.ok(!rows.some(([, a]) => a === 'view:graph'))
 })
 
 test('⌘I is one chord, registered once, on the panel-context action', async () => {

@@ -29,10 +29,10 @@ import TypographyControls from '../features/notes/TypographyMenu'
 import { effectiveTypography, typographyStyle } from '../features/notes/typography'
 import '../styles/docs.css'
 import AppSwitcher from './AppSwitcher'
-import DocumentsView from './DocumentsView'
+import TrashPanel from './TrashPanel'
+import { dragHasFiles } from './FilesUpload'
 import DashboardView from './DashboardView'
 import { isDashboardContent } from '../lib/dashboards'
-import ScopeSelect from './ScopeSelect'
 import SidebarToggle from './SidebarToggle'
 import { tip } from '../lib/tip'
 import { docEditorFor } from '../extensions/host'
@@ -81,9 +81,10 @@ export default function DocsView(): JSX.Element {
   const docMode = useStore((s) => s.docMode)
   const docSaving = useStore((s) => s.docSaving)
   const docFocusId = useStore((s) => s.docFocusId)
-  const section = useStore((s) => s.filesSection)
-  const libraryScope = useStore((s) => s.libraryScope)
-  const setLibraryScope = useStore((s) => s.setLibraryScope)
+  const kind = useStore((s) => s.filesKind)
+  const filesProject = useStore((s) => s.filesProject)
+  const uploadDocuments = useStore((s) => s.uploadDocuments)
+  const [dropping, setDropping] = useState(false)
   const { refreshDocs, openDoc, createDoc, editDoc, editDocTitle, flushDoc, setDocMode, acceptRevision, rejectRevision, restoreRevision, openDailyNote, setDocTypography } = useStore(useShallow((s) => ({ refreshDocs: s.refreshDocs, openDoc: s.openDoc, createDoc: s.createDoc, editDoc: s.editDoc, editDocTitle: s.editDocTitle, flushDoc: s.flushDoc, setDocMode: s.setDocMode, acceptRevision: s.acceptRevision, rejectRevision: s.rejectRevision, restoreRevision: s.restoreRevision, openDailyNote: s.openDailyNote, setDocTypography: s.setDocTypography })))
   const globalType = useStore((s) => s.settings.docTypography)
   const settings = useStore((s) => s.settings)
@@ -179,6 +180,11 @@ export default function DocsView(): JSX.Element {
   const pending = activeDoc?.pending ?? []
   const applied = useMemo(() => docRevisions.filter((r) => r.status !== 'pending'), [docRevisions])
   const scope = activeDoc ? scopeOf(activeDoc) : ''
+  // The tree lists the search matches while one is typed, and only the project's files when one is picked.
+  const treeDocs = useMemo(() => {
+    const list = query.trim() ? (matches ?? docs) : docs
+    return filesProject ? list.filter((d) => scopeOf(d) === filesProject) : list
+  }, [query, matches, docs, filesProject])
   // A doc just made by New or Today's note opens in Edit and gets the caret, at its end, so typing can
   // start at once. The editor mounts on the next render, so the jump waits for it.
   useEffect(() => {
@@ -284,27 +290,27 @@ export default function DocsView(): JSX.Element {
           aria-label="Toggle file tree" aria-pressed={treeOpen} onClick={() => setTreeOpen(!treeOpen)}
         ><FolderTree size={16} /></button>
         <h2><Files size={16} /> Files</h2>
-        <div className="no-drag header-right">
-          {section === 'uploads' && <ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} />}
-        </div>
         <AppSwitcher />
       </header>
 
-      <div className={`docs-body ${treeOpen ? '' : 'tree-hidden'}`}>
+      <div className={`docs-body ${treeOpen ? '' : 'tree-hidden'}${dropping ? ' dragging' : ''}`}
+        onDragOver={(e) => { if (dragHasFiles(e)) { e.preventDefault(); setDropping(true) } }}
+        onDragLeave={(e) => { if (e.currentTarget === e.target) setDropping(false) }}
+        onDrop={(e) => { setDropping(false); if (!e.defaultPrevented && e.dataTransfer.files.length) { e.preventDefault(); void uploadDocuments(e.dataTransfer.files, filesProject) } }}>
         {/* Both side panels scroll, so their handles live on the body, pinned to the column edges. */}
         {treeOpen && (
           <>
             <aside className="docs-side">
-              <DocTree hits={hits} docs={query.trim() ? (matches ?? docs) : docs} activeId={section === 'notes' ? activeDoc?.id ?? null : null} query={query} onQuery={setQuery} section={section} />
+              <DocTree hits={hits} docs={treeDocs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery} />
             </aside>
             <ResizeHandle id="docs-tree-w" defaultSize={240} min={170} max={480} grows="right" onCollapse={() => setTreeOpen(false)} label="File tree width" className="docs-tree-edge" />
           </>
         )}
-        {section === 'notes' && activeDoc && panelOpen && !showDash && !custom && (
+        {kind !== 'trash' && activeDoc && panelOpen && !showDash && !custom && (
           <ResizeHandle id="docs-history-w" defaultSize={380} min={280} max={720} grows="left" onCollapse={() => setPanel({ ...panel, open: false })} label="Side panel width" className="docs-history-edge" />
         )}
 
-        {section === 'uploads' ? <section className="docs-main"><DocumentsView embedded /></section>
+        {kind === 'trash' ? <section className="docs-main"><div className="page-body"><TrashPanel /></div></section>
           : custom && activeDoc ? <section className="docs-main"><custom.Component key={activeDoc.id} doc={activeDoc} /></section>
           : !activeDoc ? (
           <section className="empty-state">
@@ -421,7 +427,7 @@ export default function DocsView(): JSX.Element {
           </section>
         )}
 
-        {section === 'notes' && activeDoc && panelOpen && !showDash && !custom && (
+        {kind !== 'trash' && activeDoc && panelOpen && !showDash && !custom && (
           <aside className="docs-history">
             <header className="docs-panel-tabs" role="tablist">
               {PANEL_TABS.map((t) => (

@@ -95,18 +95,20 @@ test('every chat has a side panel: Files, and neither Changes nor Review without
   await expect(panel).toHaveCount(0)
 })
 
-test('Escape closes the permission menu and leaves the side panel open, with focus back on the pill', async ({ grain }) => {
+test('Escape closes the chat options menu and leaves the side panel open, with focus back on the trigger', async ({ grain }) => {
   const { page } = grain
   await newChat(page)
   await sayAndWait(page, '!!tool current_time {}', '')
   await page.getByRole('button', { name: 'Workspace panel', exact: true }).click()
   await expect(page.locator('.desk-panel')).toBeVisible()
-  await page.locator('.skip-perms').click()
+  await expect(page.locator('.skip-perms')).toHaveCount(0) // the mode pill shows only under Allow everything
+  await page.getByTestId('chat-menu').click()
+  await expect(page.getByTestId('chat-menu-permissions')).toContainText('Permissions: ')
   await expect(page.locator('.pop-menu-panel')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.locator('.pop-menu-panel')).toHaveCount(0)
   await expect(page.locator('.desk-panel')).toBeVisible()
-  await expect(page.locator('.skip-perms')).toBeFocused()
+  await expect(page.getByTestId('chat-menu')).toBeFocused()
 })
 
 test('a multi-step checklist is the Progress card on the side panel Context tab, not in the transcript or a status card', async ({ grain }) => {

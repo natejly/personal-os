@@ -58,10 +58,10 @@ export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; on
   )
 }
 
-export function PermissionModePill({ conversationId = null }: { conversationId?: string | null }): JSX.Element {
+/** The chat's effective permission mode: its own override when it carries one, else the global mode. */
+export function useChatPermissionMode(conversationId: string | null): PermissionMode {
   const globalMode = useStore((s) => modeOf(s.settings))
   const [chatMode, setChatMode] = useState<PermissionMode | null>(null)
-  // A chat can carry its own mode, so the pill shows the chat's effective one.
   useEffect(() => {
     setChatMode(null)
     if (!conversationId) return
@@ -69,11 +69,17 @@ export function PermissionModePill({ conversationId = null }: { conversationId?:
     api.config.effective(null, conversationId).then((c) => { if (live) setChatMode(modeOf({ permissionMode: c.values.permissionMode?.value })) }).catch(() => undefined)
     return () => { live = false }
   }, [conversationId, globalMode])
-  const mode = chatMode ?? globalMode
+  return chatMode ?? globalMode
+}
+
+/** Visible only under Allow everything, the one mode worth a standing warning; every other mode is in the chat options menu. */
+export function PermissionModePill({ conversationId = null }: { conversationId?: string | null }): JSX.Element | null {
+  const mode = useChatPermissionMode(conversationId)
   const openSettings = useStore((s) => s.openSettings)
+  if (mode !== 'allow_all') return null
   const title = pillTitle(mode)
   return (
-    <PopMenu className={`ghost-btn skip-perms ${mode === 'allow_all' ? 'on' : ''}`} title={title} aria-label={title} data-mode={mode}
+    <PopMenu className="ghost-btn skip-perms on" title={title} aria-label={title} data-mode={mode}
       label={<><ShieldCheck size={13} aria-hidden /> {pillLabel(mode)}</>}>
       {(close) => (
         <>

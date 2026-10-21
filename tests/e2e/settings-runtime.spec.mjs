@@ -78,12 +78,12 @@ test('Settings > Extensions > Runtime lists only slots with an alternative provi
   await closeSettings(page)
 })
 
-test('the chat\'s runtime menu picks the agent loop for this chat alone', async ({ grain }) => {
+test('the chat options menu picks the agent loop for this chat alone', async ({ grain }) => {
   const { page, api } = grain
   await newChat(page)
   await sayAndWait(page, '!!reply hello', 'hello')
   const chat = (await api('/conversations'))[0]
-  await page.getByRole('button', { name: 'Runtime for this chat' }).click()
+  await page.getByRole('button', { name: 'Chat options' }).click()
   await page.getByLabel('Agent loop, this chat').selectOption('core/plan-execute-verify')
   await expect.poll(async () => (await api(`/conversations/${chat.id}`)).settings.runtime?.['agent.loop']).toBe('core/plan-execute-verify')
   await expect(page.getByLabel('Agent loop, this chat')).toHaveValue('core/plan-execute-verify')

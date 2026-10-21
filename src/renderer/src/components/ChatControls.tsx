@@ -2,7 +2,7 @@ import { DEFAULT_EFFORT } from '@shared/types'
 import { useStore, useConversation } from '../store'
 import DuelControls from './DuelControls'
 import ModelMenu from './ModelMenu'
-import RuntimeMenu from './RuntimeMenu'
+import ChatMenu from './ChatMenu'
 
 /**
  * Model, effort and fast mode, under the text box rather than above the transcript — the
@@ -31,7 +31,7 @@ export default function ChatControls({ conversationId }: { conversationId?: stri
         placement="up"
         onChange={(c) => void setChatConfig(c, conversationId)}
       />
-      {convo && <RuntimeMenu conversationId={convo.id} projectId={convo.project_id} />}
+      <ChatMenu conversationId={convo?.id ?? conversationId} projectId={convo?.project_id} />
       {/* Only the main chat draws a duel's columns; a window never offers one. */}
       {!conversationId && <DuelControls />}
     </>

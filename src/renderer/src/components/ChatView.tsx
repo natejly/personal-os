@@ -11,7 +11,6 @@ import Composer from './Composer'
 import ChatControls from './ChatControls'
 import DuelPanel from './DuelPanel'
 import ShowPanel from './ShowPanel'
-import ChatFilesButton from './ChatFilesPanel'
 import AppSwitcher from './AppSwitcher'
 import SidebarToggle from './SidebarToggle'
 import { useStickToBottom } from '../lib/stickToBottom'
@@ -129,7 +128,6 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           )}
         </div>
         <div className="no-drag header-right">
-          {conversationId && <ChatFilesButton conversationId={convo?.id} />}
         </div>
         {/* The full-window chat gives the last title-bar slot to its own workspace panel. ⌘I toggles the same panel on Context here. */}
         <AppSwitcher last={conversationId ? undefined : (

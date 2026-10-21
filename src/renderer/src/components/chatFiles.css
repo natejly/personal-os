@@ -1,7 +1,4 @@
-/* Chat files: the header popover, the sidebar's Documents list and the paperclip count on a chat row. Tokens only. */
-.cf-pop { width: 320px; }
-.cf-pop h4 { margin: 0; padding: 6px 8px 2px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
-.cf-pop .empty-hint { margin: 0; padding: 6px 8px; font-size: 12px; }
+/* Chat files: the sidebar's Documents list and the paperclip count on a chat row. Tokens only. */
 
 .cf-row { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border-radius: 6px; color: var(--text); }
 .cf-row:hover { background: var(--hover); }
@@ -19,22 +16,13 @@
 .cf-side h4 { margin: 6px 10px 1px; font-size: 11px; font-weight: 600; color: var(--text-faint); }
 .cf-side .cf-row { padding: 2px 10px; }
 .cf-more { margin: 4px 10px; font-size: 12px; color: var(--text-muted); }
-.cf-seg { display: inline-flex; align-items: center; gap: 2px; margin-right: auto; }
-.cf-seg button { padding: 1px 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; border-radius: 5px; color: var(--text-faint); }
-.cf-seg button:hover { color: var(--text); background: var(--hover); }
-.cf-seg button.on { color: var(--text); background: var(--active); }
 .cf-bychat { margin: 2px 10px 4px; font-size: 11px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; }
 
 /* Paperclip + count on a chat row */
 .convo-files { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; vertical-align: middle; font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 
-/* Project Context tab */
-.pf h4 { margin: 10px 6px 2px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
-.pf-bar { display: flex; align-items: center; gap: 8px; }
-.pf-search { flex: 1; min-width: 0; height: 32px; padding: 0 10px; background: var(--bg-input); border: 1px solid var(--control-border); border-radius: 8px; outline: 0; }
-.pf-search:focus { border-color: var(--accent); }
-.pf .cf-seg { margin-right: 0; }
-.cf-pin { width: 22px; height: 22px; flex-shrink: 0; opacity: 0; }
 .cf-row:hover .cf-pin, .cf-pin:focus-visible, .cf-pin.on { opacity: 1; }
 .cf-pin.on { color: var(--accent); }
 
+.cf-upload { display: flex; justify-content: flex-end; height: 24px; }
+.cf-upload .icon-btn { width: 24px; height: 24px; }

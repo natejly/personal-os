@@ -37,7 +37,7 @@ export interface ChatFile {
   size?: number
 }
 
-/** Files → Artifacts: every chat's outputs, newest first; the backend leaves out files no longer on disk. */
+/** The Files view's chat kind: every chat's outputs, newest first; the backend leaves out files no longer on disk. */
 export const artifactsQuery = (cursor?: string | null, limit = 50): string =>
   `/chat-files/artifacts?limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
 
@@ -69,32 +69,11 @@ export function projectFilter(files: ChatFile[], q: string): ChatFile[] {
 
 export interface ChatFilesPage { files: ChatFile[]; next_cursor: string | null }
 
-const KIND_ORDER: ChatFileKind[] = ['upload', 'note', 'output', 'local', 'coding']
-const KIND_LABEL: Record<ChatFileKind, string> = { upload: 'Uploads', note: 'Notes', output: 'Outputs', local: 'Local files', coding: 'Coding' }
+const KIND_LABEL: Record<ChatFileKind, string> = { upload: 'Uploads', note: 'Notes', output: 'Chat', local: 'Local', coding: 'Coding' }
 const ACTION_LABEL: Record<ChatFileAction, string> = { attached: 'Attached', created: 'Created', edited: 'Edited', saved: 'Saved', uploaded: 'Uploaded' }
 
 export const kindLabel = (k: ChatFileKind): string => KIND_LABEL[k] ?? k
 export const actionLabel = (a: ChatFileAction): string => ACTION_LABEL[a] ?? a
-
-/** The groups Uploads, Notes, Outputs, Local files, Coding, in that order; a kind with no files is left out. */
-export function groupByKind(files: ChatFile[]): { kind: ChatFileKind; label: string; files: ChatFile[] }[] {
-  return KIND_ORDER.map((kind) => ({ kind, label: KIND_LABEL[kind], files: files.filter((f) => f.kind === kind) })).filter((g) => g.files.length > 0)
-}
-
-export interface ChatGroup { conversationId: string; title: string; /** The chat is in the trash: no live link. */ deleted: boolean; files: ChatFile[] }
-
-/** One group per chat, the chat with the newest file first; files keep the order they came in. Files no chat touched share one group with the id ''. */
-export function groupByChat(files: ChatFile[]): ChatGroup[] {
-  const by = new Map<string, ChatGroup>()
-  for (const f of files) {
-    const id = f.conversation_id ?? ''
-    const g = by.get(id)
-    if (g) g.files.push(f)
-    else by.set(id, { conversationId: id, title: id ? f.conversation_title || 'Untitled chat' : 'Not from a chat', deleted: !!f.chat_deleted, files: [f] })
-  }
-  const newest = (g: ChatGroup): number => Math.max(...g.files.map((f) => f.created_at))
-  return [...by.values()].sort((a, b) => newest(b) - newest(a))
-}
 
 /** The sidebar badge: nothing for zero, the number up to 99, then "99+". */
 export const formatCount = (n: number): string => (n <= 0 ? '' : n > 99 ? '99+' : String(n))
@@ -109,3 +88,18 @@ export function rowAction(f: Pick<ChatFile, 'kind' | 'missing'>): ChatFileClick 
 
 /** Where an upload opens: in the chat's side panel when a chat is on hand, else the standalone viewer. */
 export const uploadTarget = (chatId: string | null | undefined): 'panel' | 'viewer' => (chatId ? 'panel' : 'viewer')
+
+/** The Files view's kind filter, in the order it is offered; `trash` is reached from the tree, not from this row. */
+export const FILES_KINDS = [
+  { id: 'all', label: 'All' },
+  { id: 'notes', label: 'Notes' },
+  { id: 'uploads', label: 'Uploads' },
+  { id: 'chat', label: 'Chat' }
+] as const
+
+export type FilesKindId = (typeof FILES_KINDS)[number]['id']
+
+/** What a filter keeps of a mixed list: a kind that is not one of the four (trash) keeps nothing. */
+export const keepsUploads = (k: string): boolean => k === 'all' || k === 'uploads'
+export const keepsChat = (k: string): boolean => k === 'all' || k === 'chat'
+export const keepsNotes = (k: string): boolean => k === 'all' || k === 'notes'

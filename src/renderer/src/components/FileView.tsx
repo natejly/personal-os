@@ -31,8 +31,8 @@ export function UploadActions({ item }: { item: ShowItem }): JSX.Element | null 
   const name = item.name || item.title
   return (
     <>
-      <button className="icon-btn" title="Open in default app" aria-label="Open in default app" onClick={() => run(api.documents.open)}><ExternalLink size={14} /></button>
-      <button className="icon-btn" title="Reveal in Finder" aria-label="Reveal in Finder" onClick={() => run(api.documents.reveal)}><FolderOpen size={14} /></button>
+      <button className="icon-btn" title="Open" aria-label="Open" onClick={() => run(api.documents.open)}><ExternalLink size={14} /></button>
+      <button className="icon-btn" title="Reveal" aria-label="Reveal" onClick={() => run(api.documents.reveal)}><FolderOpen size={14} /></button>
       <button className="icon-btn" title="Save a copy" aria-label="Save a copy" onClick={() => run(() => saveDownload(itemRawPath(item), name))}><Download size={14} /></button>
     </>
   )

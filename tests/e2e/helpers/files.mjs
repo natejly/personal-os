@@ -24,8 +24,8 @@ export const relaunch = async (g) => { await g.relaunch(); patient(g); return g.
 export const treeMenu = (page) => page.getByRole('button', { name: 'New', exact: true }).click()
 /** New blank file from the tree's "+" menu. */
 export const newDoc = async (page) => { await treeMenu(page); await page.getByRole('menuitem', { name: 'New file' }).click() }
-/** Open the tree's Uploads section (artifacts are rows of its list). */
-export const section = (page, name) => page.locator('.doc-tree .doc-row', { hasText: name }).click()
+/** Pick a kind filter (All, Notes, Uploads, Chat) in the Files tree. */
+export const section = (page, name) => page.getByRole('group', { name: 'Kind' }).getByRole('button', { name, exact: true }).click()
 /** Real pointer drag: press on src, move over dst in steps, release. HTML5 drag-and-drop starts from this in Chromium. */
 export const drag = async (page, src, dst) => {
   const a = await src.boundingBox()

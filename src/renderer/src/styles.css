@@ -1544,7 +1544,7 @@ label:active > input:not(:disabled):checked + .switch::after { left: calc(16px -
   .cal-page .page-header .header-right { flex-shrink: 0; }
 }
 .page-body { flex: 1; overflow-y: auto; padding: 12px 20px 32px; max-width: 900px; width: 100%; margin: 0 auto; }
-.page-body.dragging, .pf.dragging { outline: 2px dashed var(--accent); outline-offset: -8px; border-radius: var(--r-xl); }
+.page-body.dragging { outline: 2px dashed var(--accent); outline-offset: -8px; border-radius: var(--r-xl); }
 .section-h { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-faint); margin: 18px 4px 6px; }
 .section-h span { font-weight: 400; }
 .empty-hint.big { text-align: center; padding: 60px 0; font-size: 14px; }
@@ -1630,16 +1630,6 @@ button.tag:disabled { cursor: default; }
 .style-danger { display: flex; gap: 14px; flex-wrap: wrap; }
 .link.danger { color: var(--danger); }
 
-/* ---------- Documents ---------- */
-.doc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
-.doc-card { border-radius: var(--r-lg); padding: 12px; background: var(--bg-elev); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
-.doc-card:hover { background: color-mix(in srgb, var(--text) 5%, var(--bg-elev)); }
-.doc-head { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
-.doc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 500; }
-.doc-card .ghost { opacity: 0; }
-.doc-card:hover .ghost, .doc-card .ghost:focus-visible { opacity: 1; }
-.doc-preview { margin: 0; font-size: var(--fs-sm); color: var(--text-muted); line-height: 1.5; max-height: 52px; overflow: hidden; }
-.doc-meta { font-size: var(--fs-xs); color: var(--text-faint); }
 .modal.wide { width: 760px; }
 
 /* ---------- Command palette (⌘K) ---------- */

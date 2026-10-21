@@ -186,3 +186,5 @@ div.tc-toggle { padding: 8px 12px; flex-wrap: wrap; }
 .tc-filepath { flex: 1 1 120px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tc-filebar .tc-more { position: relative; padding: 0 2px; }
 .tc-diff .tc-add { display: block; color: var(--ok); }
+.tc-fileline { display: flex; align-items: center; gap: 8px; padding: 6px 10px; }
+.tc-fileline-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

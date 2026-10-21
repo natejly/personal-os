@@ -7,7 +7,6 @@ import { rowButton } from '../lib/rowButton'
 import SidebarToggle from './SidebarToggle'
 import ChatPulse from './ChatPulse'
 import MemoryPanel from './MemoryPanel'
-import ProjectContext from './ProjectContext'
 import { oneLine } from '../lib/emailAsk'
 import { useProjectFileCount } from '../lib/useChatFiles'
 import { PROJECT_SECTION_LABEL as L } from '../lib/projectTabs'
@@ -20,7 +19,7 @@ export default function ProjectView(): JSX.Element {
   const id = useStore((s) => s.projectViewId)!
   const project = useProject(id)
   const conversations = useStore((s) => s.conversations)
-  const { newChat, selectChat, deleteChat, setProjectModal, updateProject, loadScope, setView } = useStore(useShallow((s) => ({ newChat: s.newChat, selectChat: s.selectChat, deleteChat: s.deleteChat, setProjectModal: s.setProjectModal, updateProject: s.updateProject, loadScope: s.loadScope, setView: s.setView })))
+  const { newChat, selectChat, deleteChat, setProjectModal, updateProject, loadScope, setView, showFiles } = useStore(useShallow((s) => ({ showFiles: s.showFiles, newChat: s.newChat, selectChat: s.selectChat, deleteChat: s.deleteChat, setProjectModal: s.setProjectModal, updateProject: s.updateProject, loadScope: s.loadScope, setView: s.setView })))
   const fileCount = useProjectFileCount(id)
   const [prompt, setPrompt] = useState(project?.system_prompt ?? '')
   const rows = useMemo(() => conversations.filter((c) => c.project_id === id), [conversations, id])
@@ -91,8 +90,14 @@ export default function ProjectView(): JSX.Element {
             </div>
           </section>
           <section className="project-sec project-col" aria-label={L.files}>
-            {head(<Files size={14} />, L.files, fileCount)}
-            <ProjectContext key={id} projectId={id} />
+            <div className="chat-rows">
+              <div className="chat-row" data-testid="project-files-row" {...rowButton(() => showFiles({ kind: 'all', projectId: id }))}>
+                <Files size={14} />
+                <span className="chat-row-title">{L.files}</span>
+                <span className="chat-row-meta muted small">{fileCount}</span>
+                <ChevronRight size={12} />
+              </div>
+            </div>
           </section>
         </div>
         <ProjectDashboards projectId={id} />

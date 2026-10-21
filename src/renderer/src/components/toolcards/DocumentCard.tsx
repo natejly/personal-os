@@ -2,49 +2,43 @@ import { FilePlus, FileOutput } from '../../icons'
 import { str } from '../../lib/toolResult'
 import { useStore } from '../../store'
 import CardShell from './CardShell'
-import { ErrorLine, Meta, unreadable, useParsed } from './blocks'
+import { ErrorLine, unreadable, useParsed } from './blocks'
+import FileLine from './FileLine'
 import { registerToolCard, type ToolCardProps } from './registry'
 
-interface Page { page?: unknown; path?: unknown }
+const base = (p: string): string => p.split('/').filter(Boolean).pop() ?? p
 
-const kb = (n: unknown): string | null => (typeof n === 'number' ? (n < 1024 ? `${n} bytes` : `${Math.round(n / 1024).toLocaleString()} KB`) : null)
-
-/** convert_document (source → output, converter used) and render_preview (source → page image paths). Paths only; no thumbnails. */
+/** convert_document (source → output) and render_preview (source → page images): the produced file as one line that opens in the side panel. */
 function DocumentCard(props: ToolCardProps): JSX.Element {
-  const { event } = props
+  const { event, conversationId } = props
   const p = useParsed(event)
   const d = p.data
   const a = event.arguments
   const convert = event.name === 'convert_document'
-  const pages = d && Array.isArray(d.pages) ? (d.pages as Page[]).filter((x) => typeof x?.path === 'string') : []
+  const pages = d && Array.isArray(d.pages) ? (d.pages as Array<{ path?: unknown }>).map((x) => x?.path).filter((x): x is string => typeof x === 'string') : []
+  const target = convert ? str(d?.output) : pages[0] ?? ''
+  if (!props.pending && !event.pending && !event.error && target) {
+    const title = base(convert ? target : str(a.path) || target)
+    return <FileLine icon={<FileOutput size={14} />} title={title} onOpen={conversationId ? () => useStore.getState().openShow(conversationId, { kind: 'file', title: base(target), path: target, name: base(target) }) : undefined} />
+  }
   return (
-    <CardShell {...props} icon={<FileOutput size={14} />} title={convert ? 'Convert document' : 'Preview document pages'} hideResult={!unreadable(p, event)}>
-      <Meta items={[
-        ['From', <span className="mono" key="f">{str(a.path)}</span>],
-        convert ? ['To', str(d?.output) ? <span className="mono" key="t">{str(d?.output)}</span> : str(a.to) ? `.${str(a.to)}` : null] : ['Pages', str(a.pages) || null],
-        ['Converter', str(d?.converter) || null],
-        ['Size', kb(d?.bytes)]
-      ]} />
-      {!convert && pages.length > 0 && (
-        <ul className="tc-list mono">
-          {pages.map((x, i) => <li key={i}>page {String(x.page ?? i + 1)}: {String(x.path)}</li>)}
-        </ul>
-      )}
-      {!convert && d && str(d.note) && <div className="tc-muted">{str(d.note)}</div>}
+    <CardShell {...props} icon={<FileOutput size={14} />} title={convert ? 'Convert document' : 'Preview document pages'} subject={str(a.path) || undefined} hideResult={!unreadable(p, event)}>
       <ErrorLine event={event} />
     </CardShell>
   )
 }
 
-/** doc_create: the new doc's title and size, and a way to open it. The raw id and the model-facing note stay hidden. */
+/** doc_create: the new doc as one line that opens it in the Files view. */
 function DocCreateCard(props: ToolCardProps): JSX.Element {
   const { event } = props
   const p = useParsed(event)
   const id = str(p.data?.doc_id)
+  const title = str(p.data?.created) || str(event.arguments.title) || 'New doc'
+  if (!props.pending && !event.pending && !event.error && id) {
+    return <FileLine icon={<FilePlus size={14} />} title={title} onOpen={() => void useStore.getState().openDoc(id)} />
+  }
   return (
-    <CardShell {...props} icon={<FilePlus size={14} />} title="Create doc" subject={str(p.data?.created) || str(event.arguments.title) || undefined} hideResult={!unreadable(p, event)}>
-      <Meta items={[['Filed under', str(p.data?.filed_under) || str(event.arguments.folder) || null]]} />
-      {id && <button type="button" className="ghost-btn" onClick={() => void useStore.getState().openDoc(id)}>Open</button>}
+    <CardShell {...props} icon={<FilePlus size={14} />} title="Create doc" subject={title} hideResult={!unreadable(p, event)}>
       <ErrorLine event={event} />
     </CardShell>
   )

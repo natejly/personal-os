@@ -45,7 +45,7 @@ function DocumentsWidget({ window: win, live, onConfig }: WidgetProps): JSX.Elem
     void refreshDocuments()
   }, [live, refreshDocuments])
 
-  if (!live) return <div className="widget"><div className="widget-empty">Uploads · paused</div></div>
+  if (!live) return <div className="widget"><div className="widget-empty">Files · paused</div></div>
 
   const rows = documents.filter((d) => inScope(d, scope))
   return (
@@ -73,7 +73,7 @@ function DocumentsWidget({ window: win, live, onConfig }: WidgetProps): JSX.Elem
 
 export const def: WidgetDef = {
   kind: 'documents',
-  label: 'Uploads',
+  label: 'Files',
   icon: <FileText size={15} />,
   defaultSize: { w: 400, h: 480 },
   minSize: { w: 280, h: 240 },

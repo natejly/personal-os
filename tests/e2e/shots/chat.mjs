@@ -32,7 +32,7 @@ if (want('basic')) await session(async (g) => {
     await snap(g, 'chat-search'); await f.press('Escape')
   })
   await attempt('chat-context-drawer', async () => { await page.getByRole('button', { name: 'Workspace panel', exact: true }).click(); await page.getByTestId('desk-tab-context').waitFor(); await sleep(800); await snap(g, 'chat-context-drawer'); await page.getByRole('button', { name: 'Workspace panel', exact: true }).click() })
-  await attempt('chat-files-popover-empty', async () => { await page.getByRole('button', { name: 'Documents in this chat' }).click(); await sleep(600); await snap(g, 'chat-files-popover-empty'); await page.keyboard.press('Escape') })
+  await attempt('chat-files-popover-empty', async () => { await page.getByRole('button', { name: 'Workspace panel', exact: true }).click(); await sleep(600); await snap(g, 'chat-files-popover-empty'); await page.keyboard.press('Escape') })
   await attempt('chat-narrow', async () => { await resize(g, 820, 520); await sleep(800); await snap(g, 'chat-narrow'); await resize(g, 1280, 800) })
 })
 

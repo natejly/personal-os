@@ -211,13 +211,13 @@ if (want('main')) await session('main', async (g) => {
   // 7. files side panel (was a popover)
   await attempt('chat-files-popover', async () => {
     await say(page, '!!tool current_time {}'); await settle(page, 30000); await sleep(500)
-    await page.getByRole('button', { name: 'Documents in this chat' }).click(); await page.locator('aside.desk-panel').waitFor({ timeout: 10000 }); await sleep(700)
+    await page.getByRole('button', { name: 'Workspace panel', exact: true }).click(); await page.locator('aside.desk-panel').waitFor({ timeout: 10000 }); await sleep(700)
     const tabs = (await page.locator('aside.desk-panel .side-tab').allInnerTexts()).map((t) => t.trim()).filter(Boolean)
     await snap(g, 'chat-files-popover', page, 'side panel tabs: ' + tabs.join(' | '))
     await snap(g, 'chat-side-panel-files', page)
     await page.locator('aside.desk-panel .side-tab', { hasText: 'Changes' }).first().click(); await sleep(700)
     await snap(g, 'chat-side-panel-changes', page)
-    await page.getByRole('button', { name: 'Documents in this chat' }).click(); await sleep(500)
+    await page.getByRole('button', { name: 'Workspace panel', exact: true }).click(); await sleep(500)
   })
   // 8. sidebar chats
   await attempt('sidebar-chats', async () => {

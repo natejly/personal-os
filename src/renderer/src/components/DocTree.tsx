@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight, FileText, LayoutDashboard, Folder, FolderOpen, MoreHorizontal, Pin, Plus, Search, Sparkles, Star,
-  Trash2, Upload, User
+  Trash2, User, X
 } from '../icons'
 import type { Doc } from '@shared/types'
-import { useStore, type FilesSection } from '../store'
+import { useProject, useStore } from '../store'
+import { FILES_KINDS, keepsNotes } from '../lib/chatFiles'
+import { FilesUpload } from './FilesUpload'
+import FilesList from './FilesList'
 import NewDocMenu from '../features/notes/NewDocMenu'
 import { isDashboardDoc } from '../lib/dashboards'
 import type { DocHit } from '../lib/api'
@@ -43,7 +46,6 @@ interface Props {
   activeId: string | null
   query: string
   onQuery: (q: string) => void
-  section: FilesSection
 }
 
 /**
@@ -59,7 +61,7 @@ function markWords(text: string, query: string): React.ReactNode {
   return text.split(re).map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part))
 }
 
-export default function DocTree({ hits, docs, activeId, query, onQuery, section }: Props): JSX.Element {
+export default function DocTree({ hits, docs, activeId, query, onQuery }: Props): JSX.Element {
   const folders = useStore((s) => s.docFolders)
   const projects = useStore((s) => s.projects)
   const expandedList = useStore((s) => s.expandedFolders)
@@ -70,11 +72,15 @@ export default function DocTree({ hits, docs, activeId, query, onQuery, section 
   const newItems = useSlot('files.new')
   const renameDocFolder = useStore((s) => s.renameDocFolder)
   const deleteDocFolder = useStore((s) => s.deleteDocFolder)
-  const openSettings = useStore((s) => s.openSettings)
   const moveDoc = useStore((s) => s.moveDoc)
   const createDoc = useStore((s) => s.createDoc)
   const openDailyNote = useStore((s) => s.openDailyNote)
-  const openFiles = useStore((s) => s.openFiles)
+  const kind = useStore((s) => s.filesKind)
+  const project = useStore((s) => s.filesProject)
+  const showFiles = useStore((s) => s.showFiles)
+  const filterProject = useProject(project)
+  // Trash replaces the pane beside the tree, so the tree itself reads as All.
+  const showNotes = kind === 'trash' || keepsNotes(kind)
   const openDoc = useStore((s) => s.openDoc)
   const deleteDoc = useStore((s) => s.deleteDoc)
   const setDocStar = useStore((s) => s.setDocStar)
@@ -133,7 +139,11 @@ export default function DocTree({ hits, docs, activeId, query, onQuery, section 
   const { pinned, rest } = useMemo(() => splitPinned(docs), [docs])
   const starred = useMemo(() => starredDocs(rest), [rest])
   const recent = useMemo(() => recentDocs(rest), [rest])
-  const groups = useMemo(() => buildGroups(folders, rest, projects), [folders, rest, projects])
+  const groups = useMemo(() => {
+    const all = buildGroups(folders, rest, projects)
+    // A project filter leaves other groups empty; their headers go too.
+    return project ? all.filter((g) => g.roots.length > 0 || g.loose.length > 0) : all
+  }, [folders, rest, projects, project])
   const rows = useMemo(
     () => flattenGroups(
       groups,
@@ -421,10 +431,21 @@ export default function DocTree({ hits, docs, activeId, query, onQuery, section 
     <div className="doc-tree" onMouseDown={() => menu && setMenu(null)}>
       <div className="doc-tree-head">
         <label className="search mini"><Search size={12} /><input placeholder="Search files" value={query} onChange={(e) => onQuery(e.target.value)} /></label>
+        <FilesUpload projectId={project} />
         <NewDocMenu onCreate={(t) => void createDoc(t)} onDaily={() => void openDailyNote()} onFolder={() => newFolder('', '')} />
       </div>
+      <div className="seg files-kinds" role="group" aria-label="Kind">
+        {FILES_KINDS.map((k) => (
+          <button key={k.id} type="button" className={kind === k.id ? 'on' : ''} aria-pressed={kind === k.id} onClick={() => showFiles({ kind: k.id, projectId: project })}>{k.label}</button>
+        ))}
+      </div>
+      {project && (
+        <div className="doc-tag-chips">
+          <button type="button" className="tag project-tag" aria-label="Clear project filter" onClick={() => showFiles({ kind })}>{filterProject?.name ?? 'Project'} <X size={10} /></button>
+        </div>
+      )}
 
-      {allTags.current.length > 0 && (
+      {showNotes && allTags.current.length > 0 && (
         <div className="doc-tag-chips">
           {allTags.current.map((t) => (
             <button key={t} className={`doc-tag-chip${query.trim().toLowerCase() === '#' + t ? ' on' : ''}`}
@@ -434,7 +455,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery, section 
       )}
 
       {/* A search is a flat answer, not a shape: matches come back wherever they are filed. */}
-      {searching
+      {showNotes && (searching
         ? (hits ? (hits.length === 0 ? <p className="empty-hint">No matches.</p> : hits.map((h) => (
           <div key={h.doc_id} className={`doc-row ${h.doc_id === activeId ? 'active' : ''}`} role="button" tabIndex={0}
             onClick={() => void openDoc(h.doc_id)}>
@@ -451,18 +472,12 @@ export default function DocTree({ hits, docs, activeId, query, onQuery, section 
           {topSection('starred', 'Starred', starred)}
           {topSection('recent', 'Recent', recent)}
           {rows.flatMap(render)}
-        </>}
+        </>)}
+      <FilesList kind={kind === 'trash' ? 'none' : kind} query={query} project={project} />
 
       {!searching && <div className="doc-tree-tail" aria-hidden />}
       {!searching && (
-        <div className={`doc-row ${section === 'uploads' ? 'active' : ''}`} {...rowButton(() => openFiles('uploads'))}>
-          <Upload size={13} className="doc-row-icon" />
-          <span className="doc-row-main"><span className="doc-row-title">Uploads</span></span>
-        </div>
-      )}
-      {!searching && (
-        <div className="doc-row" role="button" tabIndex={0} onClick={() => openSettings('data')}
-          onKeyDown={(e) => { if (e.key === 'Enter') openSettings('data') }}>
+        <div className={`doc-row ${kind === 'trash' ? 'active' : ''}`} {...rowButton(() => showFiles({ kind: 'trash' }))}>
           <Trash2 size={13} className="doc-row-icon" />
           <span className="doc-row-main"><span className="doc-row-title">Trash</span></span>
         </div>

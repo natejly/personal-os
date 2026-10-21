@@ -42,7 +42,7 @@ function BrowserCard(props: ToolCardProps): JSX.Element {
           ['Tabs', tabs !== null && tabs > 1 ? String(tabs) : null]
         ]} />
       )}
-      {shot && <Meta items={[['Screenshot', 'saved in Uploads'], ['Size', num(shot.width) && num(shot.height) ? `${num(shot.width)} × ${num(shot.height)}` : null]]} />}
+      {shot && <Meta items={[['Screenshot', 'saved in Files'], ['Size', num(shot.width) && num(shot.height) ? `${num(shot.width)} × ${num(shot.height)}` : null]]} />}
       <Images event={event} />
       {notes.length > 0 && <ul className="tc-list tc-notes">{notes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
       {snapshot && (

@@ -131,10 +131,7 @@ export function isLightTheme(theme: unknown): boolean {
 /** One-click looks. A preset only writes the individual settings below; it is "active" while they all match. */
 export const PRESETS = [
   { id: 'default', label: 'Default', theme: 'dark', accent: 'sage', uiFont: 'system', codeFont: 'default', bg: '#1a1918', fg: '#ecebe8', dot: '#b5c9b0' },
-  { id: 'paper', label: 'Paper', theme: 'light', accent: 'clay', uiFont: 'serif', codeFont: 'default', bg: '#f7f6f3', fg: '#1f1e1c', dot: '#8f4a33' },
-  { id: 'midnight', label: 'Midnight', theme: 'dark', accent: 'indigo', uiFont: 'system', codeFont: 'default', bg: '#14161f', fg: '#e6e8f2', dot: '#aab4e8' },
-  { id: 'forest', label: 'Forest', theme: 'dark', accent: 'forest', uiFont: 'rounded', codeFont: 'default', bg: '#171c18', fg: '#e4ebe4', dot: '#9ccaa0' },
-  { id: 'terminal', label: 'Terminal', theme: 'dark', accent: 'mint', uiFont: 'mono', codeFont: 'menlo', bg: '#0e1110', fg: '#cfe9df', dot: '#a8d4c8' }
+  { id: 'paper', label: 'Paper', theme: 'light', accent: 'clay', uiFont: 'serif', codeFont: 'default', bg: '#f7f6f3', fg: '#1f1e1c', dot: '#8f4a33' }
 ] as const
 
 export type PresetId = (typeof PRESETS)[number]['id']

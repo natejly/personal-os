@@ -13,7 +13,6 @@ import PageAgentPanel from './components/PageAgentPanel'
 import SelectionToolbar from './components/SelectionToolbar'
 import StatusBar from './components/StatusBar'
 import LibraryView from './components/LibraryView'
-import JobsView from './components/JobsView'
 import RenderBoundary from './components/RenderBoundary'
 import { collectNotices } from './lib/deskNotify'
 import { notify } from './lib/notify'
@@ -298,7 +297,6 @@ export default function App(): JSX.Element {
           {ModView && <ModView />}
           {view === 'docs' && <DocsView />}
           {view === 'library' && <LibraryView />}
-          {view === 'jobs' && <JobsView />}
           {view === 'project' && <ProjectView />}
         </RenderBoundary>
       )}

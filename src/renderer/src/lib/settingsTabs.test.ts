@@ -21,7 +21,7 @@ test('old tab ids map to the new sections', () => {
   assert.deepEqual(resolveTab('spending'), { tab: 'advanced', group: 'usage' })
   assert.deepEqual(resolveTab('nope'), { tab: 'models' })
   for (const [old, to] of Object.entries(SECTION_ALIAS)) assert.deepEqual(resolveTab(old), to)
-  assert.deepEqual(Object.keys(SECTION_ALIAS).sort(), ['agent', 'context', 'hooks', 'layout', 'usage'])
+  assert.deepEqual(Object.keys(SECTION_ALIAS).sort(), ['agent', 'context', 'hooks', 'jobs', 'layout', 'usage'])
   for (const id of SECTION_ORDER) assert.deepEqual(resolveTab(id), { tab: id })
 })
 
@@ -40,11 +40,11 @@ test('behavior and texting land on their new homes', () => {
 
 test('every index entry sits in a real section and the new groups are findable', () => {
   for (const e of SETTINGS_INDEX) assert.ok((SECTION_ORDER as readonly string[]).includes(e.tab), e.sec)
-  for (const [q, sec] of [['doom', 'loop'], ['sandbox', 'runtime'], ['auto compact', 'compaction'], ['what the model sees', 'inspector'], ['cron', 'jobs']] as const) assert.ok(searchSettings(q).some((e) => e.sec === sec), q)
+  for (const [q, sec] of [['doom', 'loop'], ['sandbox', 'runtime'], ['auto compact', 'compaction'], ['what the model sees', 'inspector']] as const) assert.ok(searchSettings(q).some((e) => e.sec === sec), q)
 })
 
-test('the jobs entry has its own anchor and opens its own group; Runtime is listed only with an alternative provider', () => {
-  assert.equal(searchSettings('cron').find((e) => e.sec === 'jobs')?.open, 'jobs')
+test('Runtime is listed only with an alternative provider', () => {
+  assert.equal(searchSettings('cron').length, 0)
   assert.ok(searchSettings('sandbox').some((e) => e.sec === 'runtime'))
   assert.ok(!searchSettings('sandbox', [], new Set([RUNTIME_EXT])).some((e) => e.sec === 'runtime'))
 })

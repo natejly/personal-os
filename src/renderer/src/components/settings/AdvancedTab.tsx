@@ -5,7 +5,6 @@ import EffectiveConfig from './EffectiveConfig'
 import DataSettings from '../DataSettings'
 import TrashPanel from '../TrashPanel'
 import UsageView from '../UsageView'
-import JobsTab from './JobsTab'
 import NumberField from './NumberField'
 import Switch from './Switch'
 import { AdvGroup, Sec, type GroupProps, type TabProps } from './shared'
@@ -36,10 +35,6 @@ export default function AdvancedTab({ draft, patch, openGroups, toggle, onExtens
 
       <Sec id="usage"><AdvGroup id="usage" title="Usage" {...gp}>
           <UsageView />
-      </AdvGroup></Sec>
-
-      <Sec id="jobs"><AdvGroup id="jobs" title="Scheduled jobs" {...gp}>
-          <JobsTab />
       </AdvGroup></Sec>
     </section>
   )

@@ -47,7 +47,7 @@ test('the shell registers its own items in the slots', () => {
   assert.deepEqual(ids('composer.toolbar'), ['mic'])
   assert.deepEqual(ids('message.footer'), ['model-tag', 'runtime', 'trace'])
   assert.deepEqual(ids('sidepanel.tab'), ['context', 'files', 'changes', 'history-digest', 'review', 'terminal'])  // the digest and the last are extensions'
-  assert.deepEqual(ids('sidebar.row'), ['todos', 'calendar', 'mail', 'health', 'claude-code', 'library', 'jobs'])
+  assert.deepEqual(ids('sidebar.row'), ['todos', 'calendar', 'mail', 'health', 'claude-code', 'library'])
 })
 
 test('a slot renders its items in order, and skips one whose extension is off or whose `when` is false', () => {
@@ -252,15 +252,15 @@ test('the runtime runs a matching keybinding whose `when` holds, and tells subsc
     const shiftJ = { key: 'J', ctrlKey: false, altKey: false, shiftKey: true }
     press({ ...shiftJ, target: { closest: () => ({}) } as never })  // typing in a text field
     press({ ...shiftJ, target: { closest: () => null } as never })
-    useStore.setState({ view: 'jobs' })
+    useStore.setState({ view: 'library' })
   } finally {
     globalThis.fetch = real
     stop()
     gone()
   }
   assert.deepEqual(ran, ['prevented', 'go', 'prevented', 'typed'])
-  assert.deepEqual(opened, ['jobs'])
-  assert.deepEqual(posted, ['/extensions/activate {"event":"onView:jobs"}'])
+  assert.deepEqual(opened, ['library'])
+  assert.deepEqual(posted, ['/extensions/activate {"event":"onView:library"}'])
 })
 
 test('menu items: listed to the main process while the extension is on, run by their action, unique per extension', async () => {

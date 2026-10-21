@@ -220,3 +220,18 @@ test('a 100 KB prompt is refused cleanly, never a crash; 8000 chars is the edge 
   const ok = await api('/jobs', { method: 'POST', body: job('Edge', { prompt: 'x'.repeat(8000) }), raw: true })
   expect(ok.status).toBe(200)
 })
+
+test('Library > Automations > Jobs lists jobs, opens one with its history; no Jobs sidebar row', async ({ grain }) => {
+  const { page, api } = grain
+  const j = await api('/jobs', { method: 'POST', body: job('Card job') })
+  await expect(page.locator('.sidebar .nav-item', { hasText: /^Jobs$/ })).toHaveCount(0)
+  await page.locator('.sidebar .nav-item', { hasText: 'Library' }).first().click()
+  await page.getByRole('tab', { name: 'Automations', exact: true }).click()
+  await page.getByRole('tab', { name: 'Jobs', exact: true }).click()
+  await page.locator('.job-card', { hasText: 'Card job' }).click()
+  await expect(page.getByRole('heading', { name: 'Card job' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Run history' })).toBeVisible()
+  await page.getByRole('button', { name: 'All jobs' }).click()
+  await expect(page.locator('.job-card', { hasText: 'Card job' })).toBeVisible()
+  expect(j.id).toBeTruthy()
+})

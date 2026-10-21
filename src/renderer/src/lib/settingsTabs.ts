@@ -16,7 +16,8 @@ export const SECTION_ALIAS: Record<string, { tab: SettingsSectionId; group?: Set
   context: { tab: 'assistant', group: 'memories' },
   layout: { tab: 'general', group: 'sidebar' },
   hooks: { tab: 'advanced' },
-  usage: { tab: 'advanced', group: 'usage' }
+  usage: { tab: 'advanced', group: 'usage' },
+  jobs: { tab: 'advanced' }
 }
 
 const LEGACY: Record<LegacySettingsTab, { tab: SettingsTab; group?: SettingsGroup }> = {
@@ -98,13 +99,12 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'permissions', sec: 'network', title: 'Network for commands', keys: 'shell hosts allow list sandbox internet domains' },
   { tab: 'permissions', sec: 'system', title: 'System access', keys: 'macos accessibility screen recording automation folders privacy permission' },
   { tab: 'extensions', sec: 'extensions', title: 'Extensions', keys: 'review proposed assistant drafted install enable disable permissions diff accept reject' },
-  { tab: 'advanced', sec: 'jobs', open: 'jobs', title: 'Scheduled jobs', keys: 'jobs scheduled schedule cron background recurring automation run' },
   { tab: 'integrations', sec: 'accounts', title: 'Mail and Calendar account', keys: 'google gmail calendar sign in oauth client outbox undo send' },
   { tab: 'integrations', sec: 'connectors', title: 'Connectors', keys: 'mcp library tools planner mail' },
   { tab: 'integrations', sec: 'web-search', title: 'Web search', keys: 'firecrawl brave tavily exa searxng github token reader api key' },
   { tab: 'integrations', sec: 'texting', title: 'Telegram bot', keys: 'texting text telegram bot pairing messages phone sms chat token botfather', ext: 'telegram' },
   { tab: 'general', sec: 'profiles', title: 'Profiles', keys: 'lean focus defaults preset bundle theme effort quiet' },
-  { tab: 'general', sec: 'sidebar', title: 'Sidebar rows', keys: 'hide show lists calendar mail health library files spaces projects jobs modules views' },
+  { tab: 'general', sec: 'sidebar', title: 'Sidebar rows', keys: 'hide show lists calendar mail health library files spaces projects modules views' },
   { tab: 'advanced', sec: 'usage', title: 'Usage and cost', keys: 'tokens spend price billing calls' },
   { tab: 'advanced', sec: 'data', title: 'Data, backups and trash', keys: 'export import backup restore presets archive trash delete diagnostics support logs' },
   { tab: 'advanced', sec: 'effective', title: 'Effective configuration', keys: 'effective config dump sources where settings come from default profile preset user project chat differs json' },

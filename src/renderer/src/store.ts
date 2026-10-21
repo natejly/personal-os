@@ -45,11 +45,12 @@ import { isInternal, upsertWorker, withoutInternal } from './lib/workers'
 import { appendDelta, settleHeld } from './lib/noReply'
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-type BuiltinView = 'chat' | 'todos' | 'health' | 'claude-code' | 'calendar' | 'mail' | 'docs' | 'library' | 'jobs' | 'project' | 'canvas'
+type BuiltinView = 'chat' | 'todos' | 'health' | 'claude-code' | 'calendar' | 'mail' | 'docs' | 'library' | 'project' | 'canvas'
 /** `health` and `claude-code` are ids of built-in extensions' views: it predates `ext:` ids, and `hiddenViews` already stores it. */
 export type View = BuiltinView | `ext:${string}`
 /** Which tab a project page shows. */
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
+export type AutomationsKind = 'all' | 'jobs' | 'workflows' | 'commands'
 export type LibraryTab = 'skills' | 'agents' | 'automations' | 'connectors'
 export type FilesSection = 'notes' | 'uploads' | 'artifacts'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
@@ -500,6 +501,8 @@ export interface State {
   setPlanSteps: (conversationId: string, steps: PlanStep[]) => Promise<void>
 
   libraryTab: LibraryTab
+  automationsKind: AutomationsKind
+  setAutomationsKind: (kind: AutomationsKind) => void
   setLibraryTab: (tab: LibraryTab) => void
   /** The agent whose home Library > Agents shows (null = the list). */
   openAgentId: string | null
@@ -1818,8 +1821,8 @@ export const useStore = create<State>((set, get) => {
     inboxOpen: false,
     jobsFocusId: null,
     openJobs: (jobId) => {
-      set({ jobsFocusId: jobId ?? null, inboxOpen: false, ...closeSettings() })
-      get().setView('jobs')
+      set({ jobsFocusId: jobId ?? null, inboxOpen: false, libraryTab: 'automations', automationsKind: 'jobs', ...closeSettings() })
+      get().setView('library')
     },
     openInbox: () => set({ inboxOpen: true, ...closeSettings() }),
     closeInbox: () => set({ inboxOpen: false }),
@@ -1862,6 +1865,8 @@ export const useStore = create<State>((set, get) => {
     hiddenChrome: [],
     contextTab: 'last',
     libraryTab: 'skills',
+    automationsKind: 'all',
+    setAutomationsKind: (automationsKind) => set({ automationsKind }),
     openAgentId: null,
     filesSection: 'notes',
     desks: [],
@@ -2003,6 +2008,8 @@ export const useStore = create<State>((set, get) => {
       if (listsWereOff !== viewHidden(get().settings, 'todos')) void useTodos.getState().refreshTodos()
     },
     setView: (view) => {
+      // The standalone Jobs view is gone; a stored or old caller's `jobs` lands on Library > Automations > Jobs.
+      if ((view as string) === 'jobs') return get().openJobs()
       // A view turned off in Settings → Sidebar stays off, whoever links to it: the toast says how to turn it back on.
       // Named as the sidebar shows it; nav.tsx holds the labels but importing it here would close a cycle.
       if (viewHidden(get().settings, view)) {

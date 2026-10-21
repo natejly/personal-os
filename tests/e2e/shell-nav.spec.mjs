@@ -196,7 +196,7 @@ test('command palette: opens, fuzzy filters, arrows + Enter run, every command e
   for (const label of ['General', 'Models', 'Extensions', 'Advanced']) {
     await menu(grain, 'Command Palette…')
     await pal.getByPlaceholder('Go to, create, open…').fill(label)
-    await pal.getByRole('option', { name: label, exact: true }).click()
+    await pal.getByRole('option', { name: label, exact: true }).first().click()
     await expect(page.getByRole('dialog').filter({ has: page.getByRole('tab') }).first()).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(page.getByRole('tab').first()).toHaveCount(0)

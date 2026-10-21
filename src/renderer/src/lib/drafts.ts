@@ -1,6 +1,6 @@
 /**
  * Unsent composer text, kept per place it was typed: a chat (`c:<id>`), the chat that has no row
- * yet (`new:<project>`), or the page agent panel (`page`). A composer reads its own key, so moving
+ * yet (`new:<project>`). A composer reads its own key, so moving
  * between chats or views shows each one's draft and typing never touches the main store.
  *
  * Its own small zustand store, like the onboarding and canvas stores: a keystroke here wakes the
@@ -38,15 +38,12 @@ interface DraftsState { drafts: Record<string, DraftEntry> }
 
 export const useDrafts = create<DraftsState>(() => ({ drafts: {} }))
 
-/** Where a composer's text lives: the page agent, a chat, or the chat `send` would create. */
+/** Where a composer's text lives: a chat, or the chat `send` would create. */
 export function composerKey(args: {
   conversationId?: string | null
-  /** The composer has its own `onSend` (the page agent panel), whatever thread it shows. */
-  page?: boolean
   focusedId?: string | null
   draftProjectId?: string | null
 }): string {
-  if (args.page) return 'page'
   const id = args.conversationId ?? args.focusedId
   return id ? `c:${id}` : `new:${args.draftProjectId ?? 'personal'}`
 }

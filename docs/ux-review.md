@@ -54,7 +54,7 @@ Priority: **High** = seen on every visit or misleading; **Med** = clutter on a f
 | T1 | **Bug.** "Brief me" with no calendar connected sent the literal text `${pimName}` to the model (single-quoted template in `HomeView.tsx`). | High | Fixed |
 | T2 | The Health card rendered nine rows of "—" when nothing was logged: a wall of dashes that reads as missing data. | Med | Fixed: one line, "Nothing logged yet today", and only logged metrics listed once some are |
 | T3 | The connect strip said "Connect Google" twice: bold prefix in the sentence and again on the button. | Med | Fixed: sentence names the payoff, button names the action |
-| T4 | Header carries refresh, customise, Brief me and Quick chat; at 820px Brief me collapses to a bare sparkle. | Low | Kept (each has a title) |
+| T4 | Header carries refresh, customise and Brief me; at 820px Brief me collapses to a bare sparkle. | Low | Kept (each has a title) |
 | T5 | Greeting H1 plus "Today · Wednesday, October 7" in the header: two headlines. | Low | Kept (the greeting is the page's one moment of voice) |
 | T6 | Daily recap shows raw `Facts: {...}` JSON under the mock provider only. | — | Harness artefact |
 
@@ -66,7 +66,7 @@ Priority: **High** = seen on every visit or misleading; **Med** = clutter on a f
 | C2 | Footer chips came in two styles: model, Reasoning, Plan and Autonomous as quiet 24px controls; Private and the mode pill as bordered 13px buttons. | Med | Fixed: one chip style in the footer, state still coloured |
 | C3 | "Regenerate" was a boxed button under every reply, pulled up into the hover-action row (`margin-top: -10px`). | Med | Fixed: quiet text control with 4px breathing room; follow-up chips keep their outline |
 | C4 | Context drawer: "Save this chat as a skill… A single reply has the same button. Either way it waits in Library → Skills until you approve it." | Med | Fixed: "Waits in Library → Skills until you approve it." |
-| C5 | Quick chat (⌘I) opened with "Whatever you ask goes out with what is on screen behind this panel." | Med | Fixed: "Sees what is on screen behind this panel." |
+| C5 | The page chat opened with "Whatever you ask goes out with what is on screen behind this panel." | Med | Removed with the page chat |
 | C6 | Tool calls nest three deep (group → row → Details). Two clicks before content. | Med | Kept: the fold is PR #59's design; opening by default would undo it |
 | C7 | The approval card shows Approve, Deny, "⌘↵", a pattern box, two "Don't ask again" links, "Deny with a note…" and Details. | Med | Kept: approvals are out of scope by the brief |
 | C8 | The mail review card says "waiting for you to send" in the header and "Approval is required each time." in the footer. | Low | Kept: the card's copy is part of the safety contract |

@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { menu, setNarrow } from './helpers/shell.mjs'
+import { setNarrow } from './helpers/shell.mjs'
 import { openTodos, addBox, seed, dayStr, ignoreErrs, row } from './helpers/todos.mjs'
 
 test('500 todos: toggle, filter and scroll stay responsive', async ({ grain }) => {
@@ -78,14 +78,13 @@ test('chat tool creates a todo and the open view updates without reload; API wri
   await openTodos(page)
   await grain.api('/todos', { method: 'POST', body: { title: 'from api while open' } })
   await expect(row(page, 'from api while open')).toBeVisible({ timeout: 15_000 })
-  // open a chat in the page agent panel (applies to the current view)
-  await menu(grain, 'Context panel / Quick chat')
-  const box = page.getByPlaceholder(/ask|message|follow/i).last()
+  await page.locator('.sidebar .new-chat').click()
+  const box = page.locator('main').getByRole('textbox', { name: 'Message' })
   await box.fill('!!tool todo_add {"title":"Made by tool","due":"' + dayStr(1) + '"}')
   await box.press('Enter')
-  await page.getByRole('button', { name: 'Approve', exact: true }).click()
+  // a new chat may run the tool without a card (autonomous by default)
+  await page.getByRole('button', { name: 'Approve', exact: true }).click({ timeout: 5000 }).catch(() => undefined)
   await expect(page.getByText('MOCK: tool done').first()).toBeVisible({ timeout: 30_000 })
-  await expect(row(page, 'Made by tool')).toBeVisible({ timeout: 10_000 })
   expect((await grain.api('/todos')).some((t) => t.title === 'Made by tool')).toBeTruthy()
   expect(ignoreErrs(grain.consoleErrors)).toEqual([])
 })

@@ -4,7 +4,7 @@ import { create } from 'zustand'
 import { useMemo } from 'react'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
 import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit, PlanDecision,
-  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskEvent, DeskFile, FullDesk, PromotionResult, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleSample, StyleState, ToolInfo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job } from '@shared/types'
+  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskEvent, DeskFile, FullDesk, PromotionResult, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleSample, StyleState, ToolInfo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import { markRunsSeen, withoutInboxRuns } from './lib/inboxBadge'
@@ -16,8 +16,6 @@ import { api, backgroundStream, chatStream, getBase, getToken, setBase, type Sco
 import { applyProfileThemes, closedChrome } from './extensions/profiles'
 import { useTodos } from './extensions/todos/store'
 import { dispatchExtEvent, isAppEvent } from './extensions/events'
-import { currentSelection } from './lib/pageContext'
-import { panelConversationFor, type PagePin } from './lib/pagePanel'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
 import { chatNotice, finishNotice, type FinishInfo, fetchedStatus, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
 import { adjacentChatId, sidebarOrder } from './lib/chatRows'
@@ -37,7 +35,6 @@ import { uploadToast, uploadTooBig, type UploadOutcome } from './lib/uploadNote'
 import { pauseQueue, sendNext, updateQueue, type DoneInfo } from './lib/followQueue'
 import { DEFAULT_ZOOM, stepZoom } from './lib/zoom'
 import { inputChip } from './lib/deskFiles'
-import { cmdIAction } from './lib/cmdI'
 
 /** Set by the canvas store: toggles the focused chat window's side panel and returns true, or false when no chat window has focus. */
 export const canvasPanelHook: { toggleFocused: () => boolean } = { toggleFocused: () => false }
@@ -51,7 +48,7 @@ export type View = BuiltinView | `ext:${string}`
 /** Which tab a project page shows. */
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
 export type LibraryTab = 'skills' | 'agents' | 'automations' | 'connectors'
-export type FilesSection = 'notes' | 'uploads' | 'artifacts'
+export type FilesSection = 'notes' | 'uploads'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
@@ -244,7 +241,7 @@ export interface State {
   /** The first message of a chat that has no row yet, shown until the row exists. */
   draftPendingSend: PendingSend | null
   /** A file was attached before this draft had a row. `send` marks the new chat untrusted. */
-  uploadTaintTarget: 'draft' | 'page' | null
+  uploadTaintTarget: 'draft' | null
   /** Why that pending mark exists: `upload` for a file, `email` for a message someone else wrote. */
   uploadTaintSource: string
   /** Scope filter used by the Memory / Graph / Documents library views. */
@@ -269,22 +266,6 @@ export interface State {
   pickShow: (conversationId: string, pane: Pane, id: number) => void
   /** Closes one pane of a split; the only pane closes the panel. */
   closeShowPane: (conversationId: string, pane: Pane) => void
-  /**
-   * The page agent (⌘I): a chat pinned to whatever view is on screen. `pageContext` is republished
-   * by the active view on every change; `pageAgentId` is the thread, created on the first send.
-   */
-  pageAgentOpen: boolean
-  pageAgentId: string | null
-  /** Skip permissions picked in the ⌘I panel before its thread exists. */
-  pageAgentChatSettings: Partial<Pick<ConversationSettings, 'effort' | 'fast'>>
-  /** Model picked in the ⌘I panel before its thread exists. */
-  pageAgentModel: string | null
-  /** While set, the panel keeps this view's thread whatever view or doc is on screen. */
-  pageAgentPin: PagePin | null
-  pinPageAgent: () => void
-  /** Back to following the current view; also returns to the pinned view when it is not the one on screen. */
-  unpinPageAgent: () => void
-  pageContext: PageContext | null
   /** Message whose execution trace the Trace tab shows (null = latest assistant reply). */
   traceMessageId: string | null
   settingsOpen: boolean
@@ -393,13 +374,6 @@ export interface State {
   applyProfiles: (profiles: Profile[]) => void
   /** ⌘I: close the side panel if either flag has it open, else open it on its default (Context) tab. */
   toggleDeskPanel: () => void
-  /** ⌘I. Opening focuses the panel's composer; the thread itself waits for the first message. */
-  togglePageAgent: () => void
-  closePageAgent: () => void
-  /** Drop the current thread and start a fresh one against the page on screen. */
-  resetPageAgent: () => void
-  /** Called by the active view. Passing null means "this view has nothing to say". */
-  setPageContext: (ctx: PageContext | null) => void
   setContextTab: (t: ContextTab) => void
   openTrace: (messageId: string) => void
   setSettingsOpen: (o: boolean) => void
@@ -466,15 +440,13 @@ export interface State {
   setChatConfig: (change: { model?: string; effort?: Effort; fast?: boolean }, conversationId?: string) => Promise<void>
   setChatSettings: (patch: Partial<ConversationSettings>, conversationId?: string) => Promise<void>
   /** A library file was just attached to this chat, so the next reply treats its contents as untrusted. */
-  noteUntrustedUpload: (conversationId?: string, pending?: 'draft' | 'page', source?: string) => Promise<void>
+  noteUntrustedUpload: (conversationId?: string, pending?: 'draft', source?: string) => Promise<void>
   /** Open a new chat about an email. The subject is untrusted, so the chat starts tainted. */
   askAboutEmail: (id: string, subject: string | null | undefined) => Promise<boolean>
   /** `false` when the text was refused, so the caller must keep it. Never rejects. */
   /** `attachments`: uploaded files going with this turn; the row keeps them and the model reads their text. */
   /** `autonomy`: only the main new-chat composer passes it (lib/autonomyDefault.ts); a chat that exists already ignores it. */
   send: (text: string, conversationId?: string, attachments?: Attachment[], autonomy?: DeskAutonomy | null) => Promise<boolean>
-  /** Send from the ⌘I panel: same contract as `send`, plus the page snapshot and its own thread. */
-  sendToPageAgent: (text: string, attachments?: Attachment[]) => Promise<boolean>
   regenerate: (conversationId?: string) => Promise<void>
   /** Replace a sent user message: it and everything after it is hidden (not deleted) in the run that answers the new text. */
   editAndResend: (messageId: string, text: string, conversationId?: string) => Promise<boolean>
@@ -981,9 +953,6 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
 
-/** The id the ⌘I panel's composer carries before its thread has a row. */
-export const PAGE_AGENT_DRAFT = '\u0000page-agent'
-
 export const useStore = create<State>((set, get) => {
   /**
    * App's init effect runs twice under React.StrictMode, so both of these are latched. A second
@@ -1031,8 +1000,7 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'chat:search') s.searchChats()
       else if (action === 'toggle-context') { if (!(s.view === 'canvas' && canvasPanelHook.toggleFocused())) s.toggleContext() }
       else if (action === 'toggle-desk') s.toggleDeskPanel()
-      else if (action === 'panel-context') s.togglePanelContext()
-      else if (action === 'page-agent') { if (s.view === 'canvas' && canvasPanelHook.toggleFocused()) { /* the focused chat window's own panel */ } else if (cmdIAction(s.view) === 'panel-context') s.togglePanelContext(); else s.togglePageAgent() }
+      else if (action === 'panel-context') { if (s.view === 'canvas') canvasPanelHook.toggleFocused(); else if (s.view === 'chat') s.togglePanelContext() }
       else if (action === 'view:graph') s.openMemory('graph')
       else if (action === 'view:memory') s.openMemory()
       else if (action === 'view:documents') s.openFiles('uploads')
@@ -1677,7 +1645,7 @@ export const useStore = create<State>((set, get) => {
   const abFor = (st: ReturnType<typeof get>, convId: string): string | undefined =>
     st.settings.devTools === true && st.abOn && st.abModel && st.view === 'chat' && st.focusedConversationId === convId ? st.abModel : undefined
 
-  const runStream = async (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string; attachments?: string[]; ab_model?: string }, pendingKey?: number): Promise<boolean> => {
+  const runStream = async (convId: string, body: { content?: string; model?: string; replace_from?: string; attachments?: string[]; ab_model?: string }, pendingKey?: number): Promise<boolean> => {
     let run: ChatRunStarted
     const st = get()
     const ab = abFor(st, convId)
@@ -1783,7 +1751,6 @@ export const useStore = create<State>((set, get) => {
       }))
       return
     }
-    if (id === PAGE_AGENT_DRAFT) return // the ⌘I panel parks only effort and fast (setChatConfig)
     await writeConversation(id, { settings: patch })
   }
 
@@ -1870,12 +1837,6 @@ export const useStore = create<State>((set, get) => {
     deskFiles: [],
     deskInbox: [],
     deskBusy: false,
-    pageAgentOpen: false,
-    pageAgentId: null,
-    pageAgentChatSettings: {},
-    pageAgentModel: null,
-    pageAgentPin: null,
-    pageContext: null,
     traceMessageId: null,
     settingsOpen: false,
     settingsTab: 'general',
@@ -2061,27 +2022,6 @@ export const useStore = create<State>((set, get) => {
       void _gone
       return { shows }
     }),
-    togglePageAgent: () => set((s) => ({ pageAgentOpen: !s.pageAgentOpen })),
-    closePageAgent: () => set({ pageAgentOpen: false }),
-    resetPageAgent: () => {
-      const pin = get().pageAgentPin
-      const id = panelConversationFor({ pageAgentId: get().pageAgentId, pin })
-      // The thread stays in the chat list — the panel is a way in, not a scratchpad that eats history.
-      if (id) get().closeSession(id)
-      if (pin) set({ pageAgentPin: { ...pin, id: null } })
-      else set({ pageAgentId: null })
-    },
-    pinPageAgent: () => {
-      const { pageContext: ctx, view, activeDoc, pageAgentId } = get()
-      const doc = view === 'docs' && activeDoc ? { id: activeDoc.id, title: activeDoc.title || 'Untitled' } : null
-      set({ pageAgentPin: { view, label: ctx?.label ?? view, id: pageAgentId, ctx, doc } })
-    },
-    unpinPageAgent: () => {
-      const pin = get().pageAgentPin
-      set({ pageAgentPin: null })
-      if (pin && pin.view !== get().view) get().setView(pin.view as View)
-    },
-    setPageContext: (pageContext) => set((s) => (s.pageContext === pageContext ? {} : { pageContext })),
     setContextTab: (contextTab) => set({ contextTab }),
     openTrace: (traceMessageId) => set((s) => ({ traceMessageId, contextOpen: false, deskPanel: true, deskTabRequest: { tab: 'traces', n: (s.deskTabRequest?.n ?? 0) + 1, at: Date.now() } })),
     // A plain open (⌘, or the sidebar button) starts on Provider, as it always has.
@@ -2360,15 +2300,6 @@ export const useStore = create<State>((set, get) => {
     },
     setChatConfig: async (change, conversationId) => {
       const id = conversationId ?? get().focusedConversationId
-      if (id === PAGE_AGENT_DRAFT) {
-        // The ⌘I panel before its first message: `sendToPageAgent` applies these to the thread it creates.
-        const { effort, fast } = change
-        set((st) => ({
-          pageAgentModel: change.model ?? st.pageAgentModel,
-          pageAgentChatSettings: { ...st.pageAgentChatSettings, ...(effort !== undefined ? { effort } : {}), ...(fast !== undefined ? { fast } : {}) }
-        }))
-        return
-      }
       if (!id) {
         set((st) => ({
           draftModel: change.model ?? st.draftModel,
@@ -2396,7 +2327,7 @@ export const useStore = create<State>((set, get) => {
       }
     },
     noteUntrustedUpload: async (conversationId, pending = 'draft', source = 'upload') => {
-      const id = conversationId && conversationId !== PAGE_AGENT_DRAFT ? conversationId : undefined
+      const id = conversationId || undefined
       if (!id) {
         set({ uploadTaintTarget: pending, uploadTaintSource: source })
         return
@@ -2557,87 +2488,6 @@ export const useStore = create<State>((set, get) => {
       created(c.id)
       return ok
     },
-    sendToPageAgent: async (text, attachments) => {
-      const ids = attachments?.length ? attachments.map((a) => a.id) : undefined
-      if (!text.trim() && !ids) return false
-      const tooLong = tooLongNotice(text.length, messageCharLimit(get().settings.contextWindow))
-      if (tooLong) {
-        get().toast(tooLong, 'error')
-        return false
-      }
-      const pin = get().pageAgentPin
-      const ctx = pin ? pin.ctx : get().pageContext
-      // The selection is read at send time, not when the view published itself: the user highlights
-      // a paragraph and *then* reaches for ⌘I.
-      const selection = ctx?.selection || currentSelection()
-      const page = ctx ? { ...ctx, selection: selection || undefined } : undefined
-      let id = panelConversationFor({ pageAgentId: get().pageAgentId, pin })
-      if (id) {
-        // Mid-reply the panel steers, exactly as the composer does in a chat. The auto-learn tail
-        // is still `streaming` but no longer answering, and a steer there 409s.
-        if (get().sessions[id]?.streaming?.stopping) await untilStopped(id)
-        else if (get().sessions[id]?.streaming?.answering) {
-          try {
-            await api.steer(id, text, ids)
-            return true
-          } catch (e) {
-            // As in `send`: a hung steer may have landed, and falling through would steer the text twice.
-            if (e instanceof ApiError && e.kind === 'timeout') {
-              get().toast('The backend did not answer, so your message was not sent.', 'error')
-              return false
-            }
-            // The run ended in the gap; fall through to a normal send.
-          }
-        }
-        // The thread can have been deleted from the chat list since; fall back to a fresh one.
-        if (!get().sessions[id]) await get().openSession(id).catch(() => { id = null })
-      }
-      if (id && get().uploadTaintTarget === 'page') {
-        try {
-          await get().noteUntrustedUpload(id, 'page')
-          set({ uploadTaintTarget: null, uploadTaintSource: 'upload' })
-        } catch (e) {
-          get().toast((e as Error).message, 'error')
-          return false
-        }
-      }
-      if (!id) {
-        let c: Conversation
-        try {
-          c = await api.conversations.create(get().draftProjectId, get().pageAgentModel ?? get().settings.defaultModel)
-        } catch (e) {
-          get().toast((e as Error).message, 'error')
-          return false
-        }
-        const { pageAgentChatSettings, uploadTaintTarget, uploadTaintSource } = get()
-        const pageSettings: Partial<ConversationSettings> = { ...pageAgentChatSettings }
-        const doc = pin ? pin.doc : get().view === 'docs' ? get().activeDoc : null
-        if (doc) pageSettings.docId = doc.id
-        const fromUpload = uploadTaintTarget === 'page'
-        if (fromUpload) {
-          pageSettings.tainted = true
-          pageSettings.taint_sources = [uploadTaintSource || 'upload']
-        }
-        if (Object.keys(pageSettings).length) {
-          const patched = await api.conversations.patch(c.id, { settings: pageSettings, ...(doc ? { title: `${doc.title || 'Untitled'} — chat` } : {}) }).catch(() => null)
-          if (fromUpload && !patched?.settings?.tainted) {
-            get().toast('Could not mark this chat untrusted after the upload', 'error')
-            return false
-          }
-          if (patched) c = patched
-        }
-        if (fromUpload) set({ uploadTaintTarget: null, uploadTaintSource: 'upload' })
-        c.messages = []
-        putSession(c)
-        id = c.id
-        const live = get().pageAgentPin
-        set(live ? { pageAgentPin: { ...live, id }, pageAgentChatSettings: {}, pageAgentModel: null } : { pageAgentId: id, pageAgentChatSettings: {}, pageAgentModel: null })
-        void get().refreshProjects()
-      }
-      // Panel toggles write through the same queue as the chat page's: let a change land first.
-      await convWrites.get(id)?.catch(() => undefined)
-      return runStream(id, { content: text, page_context: page, attachments: ids })
-    },
     regenerate: async (conversationId) => {
       const id = conversationId ?? get().focusedConversationId
       if (!id || get().sessions[id]?.streaming?.answering) return
@@ -2759,10 +2609,7 @@ export const useStore = create<State>((set, get) => {
         const doc = await api.docs.get(id)
         // A slower fetch must not clobber a doc the user has since switched away from.
         if (wantedDoc === id) {
-          // The doc's chat comes with it: the newest conversation bound to this doc, else a fresh thread.
-          const bound = get().conversations.find((c) => c.settings?.docId === id)
-          set({ activeDoc: doc, docDraft: null, docTitleDraft: null, pageAgentId: bound?.id ?? null })
-          if (bound && !get().sessions[bound.id]) void get().openSession(bound.id).catch(() => undefined)
+          set({ activeDoc: doc, docDraft: null, docTitleDraft: null })
         }
         void get().refreshDocRevisions(id)
       } catch (e) {
@@ -3057,7 +2904,8 @@ export const useStore = create<State>((set, get) => {
       set({ openAgentId, ...(openAgentId ? { libraryTab: 'agents' as const } : {}) })
       if (openAgentId) get().setView('library')
     },
-    openFiles: (filesSection) => { set({ filesSection }); get().setView('docs') },
+    // A stale caller passing the retired 'artifacts' value lands on the list, where artifacts are rows now.
+    openFiles: (section) => { set({ filesSection: section === 'notes' ? 'notes' : 'uploads' }); get().setView('docs') },
     // The docs list is already kept live elsewhere; this is for the two things the Library reads
     // that nothing else refreshes on its behalf.
     refreshLibrary: async () => {

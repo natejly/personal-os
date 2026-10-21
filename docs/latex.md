@@ -14,7 +14,7 @@ Images and other binary files for `\includegraphics` are not docs. "Upload files
 
 Opening a LaTeX source in Files shows the LaTeX editor instead of the markdown one: the project's files on the left (click to switch), CodeMirror in the middle, the PDF on the right, compile (Cmd+Enter), engine select, a problems list that opens the right file at the right line, and a button to save the PDF. Text saves through the normal doc routes, so autosave, history and conflict handling are the note ones. Assistant edits arrive as pending revisions shown with the usual diff and accept or reject. With the extension off, a `.tex` doc opens as a plain note.
 
-Cmd+I over a LaTeX file gives the page agent the open source, the project's file ids and the last compile's errors, and tells it to revise with `doc_edit` and check with `latex_compile`. "New LaTeX project" is in Files (the + menu, a project's menu and its Files column): it makes a folder with a `main.tex` from a minimal article template.
+The assistant revises a LaTeX file with `doc_edit` and checks it with `latex_compile`. "New LaTeX project" is in Files (the + menu, a project's menu and its Files column): it makes a folder with a `main.tex` from a minimal article template.
 
 ## Compile
 

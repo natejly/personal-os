@@ -1768,16 +1768,6 @@ def activate_message(id: str, mid: str) -> dict[str, Any]:
     return convos.get(id)  # type: ignore[return-value]
 
 
-class PageContextIn(BaseModel):
-    """What the user had on screen when they asked, sent by the page agent (⌘I). See context.page_block."""
-    view: str = ""
-    label: str = ""
-    detail: str | None = None
-    selection: str | None = None
-    refs: list[dict[str, Any]] = []
-    hints: list[str] = []
-
-
 def _registered_channel(name: str) -> str:
     if name not in {c.name for c in host.channels}:
         raise ValueError(f"unknown channel {name!r}")
@@ -1791,7 +1781,6 @@ class ChatIn(BaseModel):
     origin: ChannelName | None = None  # the channel that sent the turn when it was not typed in the app; lands in the run's input
     content: str | None = None  # None = regenerate from existing history
     model: str | None = None
-    page_context: PageContextIn | None = None
     resume_of: str | None = None  # run_id of an interrupted run this reply continues (POST /runs/{id}/resume)
     replace_from: str | None = None  # id of an earlier user message this one replaces: it and everything after it are hidden
     attachments: list[str] | None = None  # ids of uploaded documents sent with this turn; their text is inlined for the model
@@ -2355,7 +2344,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         settings=cfg, conv_settings=conv["settings"],
         global_system_prompt="\n\n".join(p for p in (_persona_text(persona), cfg["systemPrompt"]) if p),
         skills=skills, style=style,
-        page=body.page_context.model_dump() if body.page_context else None,
         draft=bool(conv["settings"].get("draftMode")), window=win,
     )
     skills.bump_use([x["id"] for x in used["skills"] if x.get("disclosure") != "manifest"])
@@ -2435,9 +2423,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # write as an instruction. Taint the turn when any of them is in the prompt, or a standing
         # grant would send mail with no card.
         ctx_taints = context_taints(used)
-        page = used.get("page") or {}
-        if isinstance(page, dict) and (page.get("detail") or page.get("selection")):
-            ctx_taints.append("page")
         # The global permission mode (auto | manual | allow_all) decides how every call below is gated; children inherit it.
         pmode = autoreview.mode_of(cfg)
         skip_permissions = pmode == "allow_all"
@@ -7428,7 +7413,7 @@ def _artifact_or_404(id: str) -> tuple[dict[str, Any], Path]:
 
 @app.post("/chat-files/{id}/reveal")
 def artifact_reveal(id: str) -> dict[str, bool]:
-    """Files → Artifacts: show a chat's output in Finder (the raw route is in chat_files.py)."""
+    """Files list: show a chat's output in Finder (the raw route is in chat_files.py)."""
     return _run_open(str(_artifact_or_404(id)[1]), reveal=True)
 
 

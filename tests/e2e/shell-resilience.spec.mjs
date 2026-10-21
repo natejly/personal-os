@@ -146,8 +146,8 @@ for (const [name, go] of VIEWS) {
     await withGrain({ settings: ALL_VIEWS_ON }, async (g) => {
       await go(g.page, g)
       await g.page.waitForTimeout(1000)
-      // with the page agent open too
-      await menu(g, 'Context panel / Quick chat').catch(() => {})
+      // with the side panel toggled too (nothing happens outside a chat)
+      await menu(g, 'Side Panel: Context and Terminal').catch(() => {})
       await g.page.waitForTimeout(19_000)
       expect(g.consoleErrors).toEqual([])
     })

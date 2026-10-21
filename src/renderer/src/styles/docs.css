@@ -402,7 +402,7 @@
 .markdown .katex { color: var(--text); font-size: 1.04em; }
 .markdown .katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
 
-/* The pane's own width, not the window's: the page agent column or a narrow window both count. */
+/* The pane's own width, not the window's: a side panel or a narrow window both count. */
 @container docs (max-width: 860px) {
   .docs-body, .docs-body:has(.docs-history) { grid-template-columns: var(--docs-tree-w, 200px) minmax(0, 1fr); }
   .docs-body.tree-hidden, .docs-body.tree-hidden:has(.docs-history) { grid-template-columns: minmax(0, 1fr); }

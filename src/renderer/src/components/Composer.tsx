@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { Attachment, Command, DeskAutonomy, ExtensionCommand, Skill } from '@shared/types'
+import type { Command, DeskAutonomy, ExtensionCommand, Skill } from '@shared/types'
 import { SKILL_PRESETS, type SkillPreset } from '@shared/skillPresets'
 import { api } from '../lib/api'
 import CaretMenu from '../features/notes/CaretMenu'
@@ -12,7 +12,7 @@ import { ArrowUp, Square, Paperclip, Loader2, Sparkles, Download, FileText, X } 
 import { PermissionModePill } from './PermissionMode'
 import { uploadNote } from '../lib/uploadNote'
 import { hasModelKey } from '../lib/modelLabel'
-import { PAGE_AGENT_DRAFT, useStore, useIsStreaming, useIsStopping } from '../store'
+import { useStore, useIsStreaming, useIsStopping } from '../store'
 import SmartTextarea from './SmartTextarea'
 import MicButton from './MicButton'
 import { CORE, registerSlot } from '../extensions/host'
@@ -42,17 +42,13 @@ interface ComposerProps {
   footer?: ReactNode
   /** Tightens the padding, for a widget where vertical space is scarce. */
   compact?: boolean
-  /** Overrides the store's `send`, for a composer that is not a plain chat — the ⌘I page agent. */
-  onSend?: (text: string, files?: Attachment[]) => Promise<boolean>
   placeholder?: string
-  /** Where the unsent text lives (lib/drafts.ts); derived from the conversation when not given. */
-  draftKey?: string
 }
 
 /** Keys for the uploading chips. */
 let uploadSeq = 0
 
-export default function Composer({ conversationId, footer, compact = false, onSend, placeholder = 'Ask anything', draftKey }: ComposerProps): JSX.Element {
+export default function Composer({ conversationId, footer, compact = false, placeholder = 'Ask anything' }: ComposerProps): JSX.Element {
   const box = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const streaming = useIsStreaming(conversationId)
@@ -61,7 +57,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const draftProjectId = useStore((s) => s.draftProjectId)
   // The draft is read by key, so switching chats or views shows each one's own text and a refused
   // send can be handed back to the chat it came from, not whichever is showing by then.
-  const key = draftKey ?? composerKey({ conversationId, page: !!onSend, focusedId: activeId, draftProjectId })
+  const key = composerKey({ conversationId, focusedId: activeId, draftProjectId })
   const [text, setText] = useDraft(key)
   const files = useDraftFiles(key)
   // Files still uploading: shown as chips, and sending waits for them so a quick Enter does not go out without the file.
@@ -76,13 +72,12 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const openWizard = useOnboarding((s) => s.openWizard)
   const uploadDocuments = useStore((s) => s.uploadDocuments)
   const noteUntrustedUpload = useStore((s) => s.noteUntrustedUpload)
-  // The follow-up queue is a chat's: the page agent panel (`onSend`) keeps steering on Enter.
-  const queueId = !onSend && activeId ? activeId : null
+  const queueId = activeId || null
   const cardPending = useStore((s) => !!queueId && (s.sessions[queueId]?.pendingApprovals ?? 0) > 0)
   const desk = useStore((s) => !!queueId && s.desks.some((d) => d.conversation_id === queueId))
   const deskBound = useStore((s) => !!s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.settings.deskId)
-  // Only the main new-chat composer starts a chat autonomous (lib/autonomyDefault.ts): not the chat widget, page agent or a pop-out.
-  const newChat = !onSend && !compact && !activeId
+  // Only the main new-chat composer starts a chat autonomous (lib/autonomyDefault.ts): not the chat widget or a pop-out.
+  const newChat = !compact && !activeId
   const newChatAutonomy = (st: ReturnType<typeof useStore.getState>): DeskAutonomy | null =>
     startAutonomy({ autonomousByDefault: st.settings.autonomousByDefault, mainComposer: newChat, agent: st.draftChatSettings.agent })
   /** A steer that would decline an open card, waiting on the user's yes. `item` when it came from the tray. */
@@ -139,8 +134,8 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   }
   const ctx = slashClosedAt === text ? EMPTY_CONTEXT : menuCtx()
   const slash = slashClosedAt === text ? null
-    : slashItems(text, commands, skills, ctx, registered) ?? (onSend ? null : mentionItems(text, caret,
-      rankByContext(agentRows, (a) => overlap(a.description, ctx)), 8, rankChats(chatRows, ctx), dashRows))
+    : slashItems(text, commands, skills, ctx, registered) ?? mentionItems(text, caret,
+      rankByContext(agentRows, (a) => overlap(a.description, ctx)), 8, rankChats(chatRows, ctx), dashRows)
   /** `/schedule` or `/loop` without a time: the inline form (ScheduleForm), seeded with the rest of the line. */
   const [sched, setSched] = useState<{ loop: boolean; task: string } | null>(null)
   const pickSlash = (it: SlashItem | { insert: string }): void => {
@@ -158,11 +153,11 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   useEffect(() => setSlashActive(0), [text])
 
   // Skills that fit what is being typed: the user's approved ones to use now, or, with none of those fitting,
-  // one popular skill to import (it lands as a candidate). The page agent panel has no skills of its own.
-  const suggested = useMemo(() => (onSend ? [] : suggestSkills(text, skills.filter((s) => s.status === 'approved'))), [text, skills, onSend])
-  const presetHint = useMemo(() => (onSend || suggested.length ? [] : suggestSkills(text,
+  // one popular skill to import (it lands as a candidate).
+  const suggested = useMemo(() => suggestSkills(text, skills.filter((s) => s.status === 'approved')), [text, skills])
+  const presetHint = useMemo(() => (suggested.length ? [] : suggestSkills(text,
     SKILL_PRESETS.filter((p) => !skills.some((s) => skillSlug(s.name) === p.name)).map((p) => ({ ...p, description: p.blurb })), 1)),
-    [text, skills, onSend, suggested.length])
+    [text, skills, suggested.length])
   const [importingPreset, setImportingPreset] = useState<string | null>(null)
   const useSkill = (s: Skill): void => {
     setText(`/skill ${skillSlug(s.name)} ${text}`)
@@ -188,7 +183,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     const s = useStore.getState()
     if (name === 'clear') {
       // A marker row: the model's context starts after it (backend history_rows), the chat shows only what follows, and the task list is emptied.
-      if (!activeId || activeId === PAGE_AGENT_DRAFT) return s.toast('Nothing to clear yet: this chat has no history.', 'info')
+      if (!activeId) return s.toast('Nothing to clear yet: this chat has no history.', 'info')
       if (streaming) return s.toast('Stop the reply before clearing the context.', 'info')
       try {
         const row = await api.clearContext(activeId)
@@ -206,7 +201,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     if (name === 'btw') {
       // Answered beside the live reply: it is neither queued nor steered into the run, and the model's replay never holds it.
       if (!args) return s.toast('Type your question after /btw.', 'info')
-      if (!activeId || activeId === PAGE_AGENT_DRAFT) return s.toast('Start the chat first: a side question needs its context.', 'info')
+      if (!activeId) return s.toast('Start the chat first: a side question needs its context.', 'info')
       const id = activeId
       dropDraft(k0)
       try {
@@ -263,7 +258,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   // Both select to strings so the box does not re-render on every streamed token.
   const followUps = useStore((s) => s.settings.followUps !== false)
   const suggestKey = useStore((s) => {
-    if (onSend || !activeId || streaming) return ''
+    if (!activeId || streaming) return ''
     return followupsFor(s.sessions[activeId]?.conversation.messages ?? NO_MESSAGES, { live: false, enabled: followUps }).join('\u0000')
   })
   const suggestions = useMemo(() => (suggestKey && !slash && !recalling ? suggestKey.split('\u0000') : NO_SUGGESTIONS), [suggestKey, slash, recalling])
@@ -288,7 +283,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   /** The key as it stands now: a send from the not-yet-created chat ends with the created one focused. */
   const keyNow = (): string => {
     const s = useStore.getState()
-    return draftKey ?? composerKey({ conversationId, page: !!onSend, focusedId: s.focusedConversationId, draftProjectId: s.draftProjectId })
+    return composerKey({ conversationId, focusedId: s.focusedConversationId, draftProjectId: s.draftProjectId })
   }
 
   /**
@@ -303,12 +298,12 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     const k0 = key
     // The chat on screen when the files were picked, as `key` resolves it: the main view passes no id,
     // and a mark left for "the next send" would land on whichever chat sends next.
-    const real = activeId && activeId !== PAGE_AGENT_DRAFT ? activeId : undefined
+    const real = activeId || undefined
     const marks = list.map((f) => ({ id: ++uploadSeq, name: f.name }))
     setUploading((u) => [...u, ...marks])
     const saved = await uploadDocuments(list, uploadTarget).finally(() => setUploading((u) => u.filter((x) => !marks.includes(x))))
     if (!saved.length) return
-    await noteUntrustedUpload(real, onSend ? 'page' : 'draft').catch((e: unknown) => {
+    await noteUntrustedUpload(real, 'draft').catch((e: unknown) => {
       useStore.getState().toast((e as Error).message, 'error')
     })
     const { files: added } = uploadNote(saved)
@@ -363,11 +358,11 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     const t = getDraft(k0)?.text ?? ''
     const sent = getDraft(k0)?.files ?? []
     if (!t.trim() && !sent.length) return
-    const client = onSend ? null : clientCommand(t)
+    const client = clientCommand(t)
     if (client) return runClient(client, k0)
-    const form = onSend ? null : scheduleForm(t)
+    const form = scheduleForm(t)
     if (form) { dropDraft(k0); setSched(form); return }
-    const sk = onSend ? null : /^\/skill\s+(\S+)/.exec(t.trim())
+    const sk = /^\/skill\s+(\S+)/.exec(t.trim())
     if (sk && !skills.some((x) => x.status === 'approved' && skillSlug(x.name) === sk[1].toLowerCase())) {
       const waiting = skills.some((x) => skillSlug(x.name) === sk[1].toLowerCase())
       return useStore.getState().toast(waiting ? `“${sk[1]}” is waiting for approval under Library → Skills.` : `No approved skill is called “${sk[1]}”. Type /skills to list them.`, 'error')
@@ -376,7 +371,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     // The untrusted mark an upload left on a row-less draft is consumed by the next send; after a
     // relaunch only the draft remembers it, so it is re-armed here before the send reads it.
     if (entry?.taint && useStore.getState().uploadTaintTarget === null) {
-      useStore.setState({ uploadTaintTarget: onSend ? 'page' : 'draft', uploadTaintSource: entry.taint })
+      useStore.setState({ uploadTaintTarget: 'draft', uploadTaintSource: entry.taint })
     }
     setRecall(null)
     clearRedirect(k0)
@@ -384,9 +379,8 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     // "@name message": the message goes to that agent's chat, unless this chat already speaks as it.
     const st = useStore.getState()
     const here = activeId ? st.sessions[activeId]?.conversation.settings.agent : st.draftChatSettings.agent
-    const to = onSend ? null : routeMention(t, agentRows.map((a) => a.name))
-    const ok = await (onSend ? onSend(t, sent)
-      : to && to.agent !== here ? st.sendToAgent(to.agent, to.text, sent) : send(t, conversationId, sent, newChatAutonomy(st))).catch(() => false)
+    const to = routeMention(t, agentRows.map((a) => a.name))
+    const ok = await (to && to.agent !== here ? st.sendToAgent(to.agent, to.text, sent) : send(t, conversationId, sent, newChatAutonomy(st))).catch(() => false)
     const k1 = keyNow()
     // The new chat has its row now: anything typed while it was being made follows it.
     if (k0.startsWith('new:') && k1.startsWith('c:')) moveDraft(k0, k1)
@@ -423,7 +417,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
 
   /** Focus the newest card waiting in this chat (its Approve button); false when none is on screen. */
   const focusCard = (): boolean => {
-    const cards = box.current?.closest('.chat, .win, .page-agent, .quick-ask')?.querySelectorAll<HTMLElement>('.tc-approval, .tc-card.awaiting')
+    const cards = box.current?.closest('.chat, .win, .quick-ask')?.querySelectorAll<HTMLElement>('.tc-approval, .tc-card.awaiting')
     const btn = cards?.[cards.length - 1]?.querySelector<HTMLElement>('.primary-btn')
     btn?.focus()
     return !!btn
@@ -571,9 +565,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
       </div>
       <div className="composer-footer">
         {footer}
-        {conversationId !== '\u0000page-agent' && (
-          <PermissionModePill conversationId={activeId} />
-        )}
+        <PermissionModePill conversationId={activeId} />
       </div>
     </div>
   )

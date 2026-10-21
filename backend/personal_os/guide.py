@@ -44,7 +44,7 @@ Use when the user is new, or asks "teach me", "what can you do", "give me a tour
 ## Layout
 - Sidebar, top to bottom: New chat (Cmd+N), Files, Lists, Calendar, Mail, Health, Library, Jobs, then Canvases, Projects and the Chats list. Hover a row to see what it is for. Cmd+B hides the sidebar.
 - Settings -> Sidebar turns each row off. A hidden row stays reachable from Cmd+K and its shortcut, and a "More rows..." button under the nav brings them back. Turning off Lists, Calendar, Mail or Health there removes the view itself.
-- Title bar, top right: the Agent inbox button (with an unread count) and the Quick chat button (a small chat that sees the view behind it).
+- Title bar, top right: the Agent inbox button (with an unread count).
 - The Chats list has Chats and Files tabs, a search box, and a filter for chats that need you. A chat shows a status dot while it works or waits.
 - Cmd+K opens the command palette: jump to any view, chat, file or Settings tab, create things, open Help. Help -> Using Grain opens this guide as a dialog.
 
@@ -71,7 +71,7 @@ Type / at the start of the composer:
 ## Files
 - Cmd+4. Sections: Notes (your writing), Uploads (any file up to 100 MB; Cmd+U uploads one) and Artifacts (files the assistant made).
 - New file: Cmd+Shift+N. Today's file: Cmd+Shift+D. Files support markdown and LaTeX, a / menu, [[wikilinks]], backlinks, an outline, folders, templates, comments, read mode (Cmd+E toggles edit and read), a per-file font and full revision history.
-- Cmd+I on a file opens its side chat. The assistant proposes edits as diffs you accept or reject; Settings -> Permissions -> File edits -> Full agentic editing writes them straight in (still undoable from history).
+- The assistant proposes edits to a file as diffs you accept or reject; Settings -> Permissions -> File edits -> Full agentic editing writes them straight in (still undoable from history).
 - Uploads are read (text, PDF, Word), chunked and searched; the best excerpts are pulled into replies with [n] citations.
 - Delete: the assistant asks first. Deleted items go to Settings -> Advanced -> Data -> Trash, where you can restore them.
 
@@ -133,7 +133,7 @@ Tabs: General, Sidebar, Model, Models, Agents, Memory, Integrations, Permissions
 
 ## Keyboard shortcuts
 Cmd+/ (or ? outside a text field) shows them all, searchable; Help -> Keyboard Shortcuts too.
-- General: Cmd+, settings, Cmd+K palette, Cmd+/ shortcuts, Cmd+B sidebar, Cmd+I side panel, Ctrl+Cmd+I Context. Cmd+= and Cmd+- zoom, Alt+Cmd+0 actual size. Quick chat has a title-bar button, no chord.
+- General: Cmd+, settings, Cmd+K palette, Cmd+/ shortcuts, Cmd+B sidebar, Cmd+I side panel (in a chat), Ctrl+Cmd+I Context. Cmd+= and Cmd+- zoom, Alt+Cmd+0 actual size.
 - Create: Cmd+N new chat, Cmd+Shift+N new file, Cmd+Shift+D today's file, Cmd+U upload.
 - Go to: Cmd+1 Chats, 2 Lists, 3 Calendar, 4 Files, 5 Mail, 6 Memory.
 - Chat: Cmd+Shift+[ and ] previous and next chat, Cmd+Shift+F search chats, Cmd+F find (Cmd+G / Shift+Cmd+G next and previous). Enter sends (queues while a reply runs), Cmd+Enter steers, Shift+Enter new line, Esc stops. Control+Alt+D dictates.

@@ -52,7 +52,7 @@ The sidebar holds your views (Files, Lists, Calendar, Mail, Health, Library, Job
   - `/research <question>` plans sub-questions, searches in parallel and answers with `[n]` citations and a visible trail.
   - `/compact` summarises the chat so far to free room. `/clear` starts over.
   - `/skills` and `/commands` list what you have. Your own saved commands appear in the same menu.
-- **Quick ask and quick chat.** `⌥Space` from any app opens a small ask bar. `⌘I` or the **Quick chat** button in the title bar opens a chat beside any view (it sees the view behind it, including an open note).
+- **Quick ask.** `⌥Space` from any app opens a small ask bar.
 - **Selection verbs.** Select text in a chat, a note, an email or a page and choose Explain, Summarize, Verify or Ask. Verify checks claims against pages it opens and cites them.
 - **Autonomous chats.** With **Start new chats working autonomously** on (Settings → Agents, on by default), a new chat can keep working on its task in its own workspace until it is done or needs you. A strip above the composer shows state and has Pause, Resume and Stop. A side panel (`⌘I` inside a chat) shows Files, Changes, Review and a checklist. Nothing a chat writes reaches your notes or files until you accept it in Review.
 - **Helper agents.** A reply can hand work to background workers. They appear as indented rows under the reply with live status. Click one to open it and message it. A crew window on a canvas shows the lead agent with its helpers around it.
@@ -191,7 +191,7 @@ People using a packaged app only click **Sign in with Google**. A build from sou
 | `⌘U` | Upload a file |
 | `⌘⇧F` / `⌘F` | Search chats / find in this chat |
 | `⌘B` | Toggle sidebar |
-| `⌘I` | Quick chat; inside a chat, toggles the side panel on Context |
+| `⌘I` | Inside a chat, toggles the side panel on Context |
 | `⌃⌘I` | Toggle context panel |
 | `⌘⇧C` | Toggle canvases (`⌃1` to `⌃9` jump between them) |
 | `⌃⌘O` | Pop a window out of its canvas |

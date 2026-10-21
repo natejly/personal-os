@@ -68,7 +68,7 @@ export function categoryOf(b: Pick<ContextBlock, 'kind' | 'owner'>): CategoryKey
   if (b.kind === 'message' || b.kind === 'summary' || b.kind === 'plan' || b.kind === 'note') return 'conversation'
   if (b.kind === 'extension' || b.owner?.startsWith('ext:')) return 'extensions'
   if (b.kind === 'memory' || b.kind === 'style' || b.kind === 'hint') return 'memory'
-  return 'sources' // graph, files, skills, page, map, attachment
+  return 'sources' // graph, files, skills, map, attachment
 }
 
 const toolGroupLabel = (g: string): string => (g === 'core' ? 'Core tools' : g.startsWith('ext:') ? `Extension ${g.slice(4)}` : g.startsWith('mcp:') ? `MCP ${g.slice(4)}` : g)
@@ -173,7 +173,6 @@ export function fallbackText(ctx: ContextUsed, b: Pick<BreakdownItem, 'id' | 'ki
       return [...(ctx.profile ?? []), ...ctx.memories].find((m) => m.id === id)?.content ?? null
     }
     case 'map': return ctx.map?.text ?? null
-    case 'page': return ctx.page?.detail ?? null
     case 'style': return ctx.style?.block ?? null
     case 'skills': {
       const s = (ctx.skills ?? []).find((x) => x.id === b.source || x.name === b.source || x.name === b.label)

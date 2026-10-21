@@ -67,22 +67,19 @@ test('one toggle-context action toggles the context panel once', () => {
   assert.equal(useStore.getState().contextOpen, !before)
 })
 
-test('one page-agent action toggles the page agent once', () => {
-  useStore.setState({ view: 'todos' })
-  const before = useStore.getState().pageAgentOpen
-  fire('page-agent')
-  assert.equal(useStore.getState().pageAgentOpen, !before)
-  fire('page-agent')
-  assert.equal(useStore.getState().pageAgentOpen, before)
+test('in a chat the ⌘I action toggles the Context panel', () => {
+  useStore.setState({ view: 'chat', contextOpen: false })
+  fire('panel-context')
+  assert.equal(useStore.getState().contextOpen, true)
+  fire('panel-context')
+  assert.equal(useStore.getState().contextOpen, false)
 })
 
-test('in a chat the page-agent chord (⌘I) toggles the Context panel instead of Quick chat', () => {
-  useStore.setState({ view: 'chat', contextOpen: false, pageAgentOpen: false })
-  fire('page-agent')
-  assert.equal(useStore.getState().contextOpen, true)
-  assert.equal(useStore.getState().pageAgentOpen, false)
-  fire('page-agent')
+test('outside a chat and the canvas the ⌘I action does nothing', () => {
+  useStore.setState({ view: 'todos', contextOpen: false, deskPanel: false })
+  fire('panel-context')
   assert.equal(useStore.getState().contextOpen, false)
+  assert.equal(useStore.getState().deskPanel, false)
 })
 
 test('toggle-desk opens the side panel, then closes it whichever flag opened it', () => {
@@ -275,15 +272,7 @@ test('⌘1…⌘n are contiguous, each used once, each a distinct target', async
   assert.ok(!rows.some(([, a]) => a === 'view:graph' || a === 'view:documents'))
 })
 
-test('the Quick chat button and the Page Agent menu item are the same toggle', () => {
-  const was = useStore.getState().pageAgentOpen
-  fire('page-agent')
-  assert.equal(useStore.getState().pageAgentOpen, !was)
-  useStore.getState().togglePageAgent()
-  assert.equal(useStore.getState().pageAgentOpen, was)
-})
-
-test('⌘I is one chord, registered once, on the page-agent action (the renderer routes it by view)', async () => {
+test('⌘I is one chord, registered once, on the panel-context action', async () => {
   const { SHORTCUTS } = await import('@shared/shortcuts')
-  assert.deepEqual(SHORTCUTS.filter((s) => s.keys === 'CmdOrCtrl+I').map((s) => s.action), ['page-agent'])
+  assert.deepEqual(SHORTCUTS.filter((s) => s.keys === 'CmdOrCtrl+I').map((s) => s.action), ['panel-context'])
 })

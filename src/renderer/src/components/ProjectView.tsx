@@ -11,7 +11,6 @@ import ProjectContext from './ProjectContext'
 import { oneLine } from '../lib/emailAsk'
 import { useProjectFileCount } from '../lib/useChatFiles'
 import { PROJECT_SECTION_LABEL as L } from '../lib/projectTabs'
-import { fenced, lines, usePageContext } from '../lib/pageContext'
 import { ago } from './dataFormat'
 import { modelLabel } from '../lib/modelLabel'
 import AppSwitcher from './AppSwitcher'
@@ -28,20 +27,6 @@ export default function ProjectView(): JSX.Element {
 
   useEffect(() => { setPrompt(project?.system_prompt ?? '') }, [project?.id, project?.system_prompt])
   useEffect(() => { void loadScope(id) }, [id, loadScope])
-
-  usePageContext(() => (project
-    ? {
-        view: 'project',
-        label: `Project “${oneLine(project.name, 80)}”`,
-        detail: [
-          `Project \`${project.id}\`${project.description ? ` — ${oneLine(project.description, 300)}` : ''}.`,
-          project.system_prompt ? `Its instructions:\n${fenced(project.system_prompt, 2000)}` : '',
-          `Chats in it:\n${lines(conversations.filter((c) => c.project_id === project.id), (c) => `${c.title} (\`${c.id}\`)`, 20)}`
-        ].filter(Boolean).join('\n\n'),
-        refs: [{ kind: 'project', id: project.id, name: project.name }],
-        hints: ['Where did this project get to?', 'Sharpen the project instructions']
-      }
-    : null), [project, conversations])
 
   // Keeps the title bar: without it the window had no drag region and no way back to the sidebar.
   if (!project) {

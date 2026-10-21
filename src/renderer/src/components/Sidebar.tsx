@@ -98,7 +98,6 @@ export default function Sidebar(): JSX.Element {
   /** Chats working autonomously with something unseen that needs you: the one badge worth interrupting for. */
   const needsYou = useStore((s) => new Set(s.deskInbox.map((e) => e.desk_id)).size)
   const inCanvas = useStore((s) => s.view === 'canvas')
-  const pageAgentOpen = useStore((s) => s.pageAgentOpen)
   // One selector per action. Sidebar is mounted in every view, the canvas included, so a bare
   // useStore() here is what made App's whole subtree commit once per streamed token.
   const newChat = useStore((s) => s.newChat)
@@ -304,7 +303,7 @@ export default function Sidebar(): JSX.Element {
   return (
     <aside className="sidebar">
       {/* Leave the view 420px, plus the ⌘I panel's 280px minimum while it is open (styles.css clamps that column). */}
-      <ResizeHandle id="sidebar-w" defaultSize={260} min={190} max={480} keep={pageAgentOpen ? 700 : 420} grows="right" onCollapse={toggleSidebar} label="Sidebar width" className="at-right" />
+      <ResizeHandle id="sidebar-w" defaultSize={260} min={190} max={480} keep={420} grows="right" onCollapse={toggleSidebar} label="Sidebar width" className="at-right" />
       <div className="sidebar-top drag">
         <div className="brand no-drag"><GrainLogo size={15} /><span>Grain</span></div>
         <button className="icon-btn no-drag" aria-label="Hide sidebar" title={tip('Hide sidebar', 'toggle-sidebar')} onClick={toggleSidebar}><PanelLeftClose size={16} /></button>

@@ -77,7 +77,7 @@ export interface SlotItems {
   'composer.toolbar': { Component: FC<ComposerToolbarProps> }
   'message.header': { Component: FC<MessageSlotProps> }
   'message.footer': { Component: FC<MessageSlotProps> }
-  /** Left of a title bar's own controls, next to the sidebar button; right of them, before the inbox and quick chat buttons. */
+  /** Left of a title bar's own controls, next to the sidebar button; right of them, before the inbox button. */
   'titlebar.left': { Component: FC }
   'titlebar.right': { Component: FC }
   /** An item of the bar along the window's foot, which is drawn only while an item is listed. */

@@ -76,17 +76,6 @@ await run('sidebar', async (g) => {
 await run('overlays', async (g) => {
   const { page } = g
   await page.getByRole('button', { name: /New chat/ }).first().click()
-  // quick chat (⌘I)
-  await page.getByRole('button', { name: 'Quick chat' }).click()
-  await page.getByRole('complementary', { name: 'Page agent' }).waitFor()
-  await sleep(700)
-  await shot(g, 'quick-chat')
-  const ta = page.getByRole('complementary', { name: 'Page agent' }).getByRole('textbox').first()
-  await ta.fill('!!reply hi')
-  await ta.press('Enter')
-  await sleep(3000)
-  await shot(g, 'quick-chat-reply')
-  await page.getByRole('button', { name: 'Quick chat' }).click()
   // palette
   await menuClick(g.app, 'Command Palette…')
   await page.getByRole('dialog').first().waitFor({ timeout: 5000 }).catch(() => {})

@@ -7,8 +7,6 @@ import { api } from '../../lib/api'
 import { PimErrorBar } from '../../components/PimErrorBar'
 import SmartTextarea from '../../components/SmartTextarea'
 import type { Document, GmailAttachment, GmailFullMessage, GmailLabel, GmailMessage } from '@shared/types'
-import { oneLine } from '../../lib/emailAsk'
-import { fenced, lines, usePageContext } from '../../lib/pageContext'
 import { readView, writeView } from '../../lib/viewCache'
 import AppSwitcher from '../../components/AppSwitcher'
 import { takeViewCommand, useViewCommand } from '../../lib/viewCommands'
@@ -506,16 +504,6 @@ export default function MailView(): JSX.Element {
   // `open` is the row as it was when clicked; the list holds what starring it since has changed.
   const opened = open ? messages.find((x) => x.id === open.id) ?? open : null
   const folderLabel = folder === 'inbox' ? 'Inbox' : folder === 'all' ? 'All mail' : folder
-
-  usePageContext(() => ({
-    view: 'mail',
-    label: open ? `Email “${oneLine(open.subject || '') || '(no subject)'}”` : `Mail · ${folder}`,
-    detail: open
-      ? `The user has this message open — Gmail id \`${oneLine(open.id, 80)}\`, thread \`${oneLine(open.thread_id || '', 80)}\`.\nFrom: ${oneLine(open.from || '', 120)}\nSubject: ${oneLine(open.subject || '') || '(no subject)'}\nDate: ${oneLine(open.date || '', 80)}\n\n${fenced(full?.body ?? open.snippet ?? '')}`
-      : `The ${folder} list is on screen${q ? ` filtered by “${q}”` : ''}:\n${lines(messages, (m) => `${m.unread ? '[unread] ' : ''}${oneLine(m.from || '', 80)} — ${oneLine(m.subject || '') || '(no subject)'} (\`${oneLine(m.id, 80)}\`)`, 25)}`,
-    refs: open ? [{ kind: 'email', id: open.id, name: open.subject ?? '' }] : messages.slice(0, 25).map((m) => ({ kind: 'email', id: m.id, name: m.subject ?? '' })),
-    hints: open ? ['Draft a reply', 'What is being asked of me here?'] : ['What needs a reply today?', 'Summarise this inbox']
-  }), [open, full, messages, folder, q])
 
   return (
     <main className="page mail-page">

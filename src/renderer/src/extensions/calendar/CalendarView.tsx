@@ -12,8 +12,6 @@ import { useVisibleCalendars } from '../../components/useVisibleCalendars'
 import { scheduleTodo } from '../todos/TodoItem'
 import { useTodos } from '../todos/store'
 import type { CalendarEvent, GoogleCalendar } from '@shared/types'
-import { oneLine } from '../../lib/emailAsk'
-import { lines, usePageContext } from '../../lib/pageContext'
 import { calendarViewKey, readView, writeView } from '../../lib/viewCache'
 import { rangeLabel } from '../../lib/dates'
 import AppSwitcher from '../../components/AppSwitcher'
@@ -199,26 +197,7 @@ export default function CalendarView(): JSX.Element {
     }
   }
 
-  const focus = editing?.event ?? null
-  const fmtEvent = (e: CalendarEvent): string => {
-    const when = e.all_day ? e.start : new Date(e.start).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
-    const title = oneLine(e.summary || '') || '(no title)'
-    const loc = e.location ? ` at ${oneLine(e.location, 80)}` : ''
-    return `${when} — ${title} (\`${oneLine(e.id, 80)}\`)${loc}`
-  }
   const span = mode === 'month' ? monthDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : `${days[0].toDateString()} – ${days[6].toDateString()}`
-  usePageContext(() => ({
-    view: 'calendar',
-    label: focus ? `Event “${oneLine(focus.summary || '') || 'untitled'}”` : `Calendar · ${span}`,
-    detail: [
-      `The ${mode} of ${span} is on screen.`,
-      focus ? `The user is editing this event: ${fmtEvent(focus)}${focus.description ? `\n\n${oneLine(focus.description, 400)}` : ''}` : '',
-      events.length ? `Events that ${mode}:\n${lines(events, fmtEvent)}` : `No events that ${mode}.`,
-      todos.some((t) => !t.done && t.due) ? `Todos with dates:\n${lines(todos.filter((t) => !t.done && t.due), (t) => `${t.due} — ${t.title} (\`${t.id}\`)`)}` : ''
-    ].filter(Boolean).join('\n\n'),
-    refs: (focus ? [{ kind: 'event', id: focus.id, name: focus.summary }] : events.slice(0, 40).map((e) => ({ kind: 'event', id: e.id, name: e.summary }))),
-    hints: focus ? ['Move this an hour later', 'Draft a note to the guests'] : ['Where is my free time this week?', 'Schedule my overdue todos into the gaps']
-  }), [events, focus, todos, span, mode])
 
   return (
     <main className="page cal-page">

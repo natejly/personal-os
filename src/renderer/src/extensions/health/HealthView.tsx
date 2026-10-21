@@ -4,7 +4,6 @@ import { Activity, Droplet, Footprints, Gauge, HeartPulse, Link2, Moon, Pill, Pl
 import type { HealthEntry, HealthMetric, HealthSummary } from '@shared/types'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'
-import { lines, usePageContext } from '../../lib/pageContext'
 import { localDay } from '../../components/CalendarWeek'
 import AppSwitcher from '../../components/AppSwitcher'
 import { Sparkline, TrendChart } from './charts'
@@ -72,25 +71,6 @@ export default function HealthView(): JSX.Element {
     await changed()
     return true
   }
-
-  usePageContext(() => {
-    if (!rows) return null
-    const line = (m: HealthSummary): string => {
-      const parts = [`today ${fmt(m, m.today)}`]
-      if (m.avg != null) parts.push(`${days}-day avg ${fmt(m, m.avg)}`)
-      const g = goalText(m)
-      if (g) parts.push(`${g.toLowerCase()}, ${m.streak}-day streak`)
-      if (m.today == null && m.last) parts.push(`last ${fmt(m, m.last.value)} on ${m.last.day}`)
-      return `${m.label} (\`${m.key}\`): ${parts.join('; ')}`
-    }
-    return {
-      view: 'health',
-      label: 'Health',
-      detail: `Today is ${today}.\n${lines(rows, line)}`,
-      refs: rows.map((m) => ({ kind: 'health_metric', id: m.key, name: m.label })),
-      hints: ['How has my sleep been this month?', 'Log 7.5 hours of sleep for last night', 'Does my mood track my exercise?']
-    }
-  }, [rows, today, days])
 
   return (
     <main className="page">

@@ -20,15 +20,11 @@ The workspace panel is the chat's side surface: a tab strip over one scrolling b
 - **Narrow windows.** When the chat is 900 pixels wide or less the panel floats over the transcript
   instead of taking a column.
 - **Opening.** In a chat, Cmd+I toggles the panel on the Context tab (Control+Command+I does the
-  same, and the Workspace button in the title bar opens the same panel). Anywhere else Cmd+I opens
-  the Page agent. A request for Traces, Terminal, Files or Review opens the panel on that tab, and a
+  same, and the Workspace button in the title bar opens the same panel). Where there is no side panel Cmd+I does nothing. A request for Traces, Terminal, Files or Review opens the panel on that tab, and a
   chat whose desk is in review opens on Review. While the panel stays open it remembers the tab you
   chose. Escape closes it. A layout profile can keep it shut (the `sidepanel` region); asking for it then
   shows a notice instead.
 - **Canvas chat windows** have the same panel: a Workspace panel button in the window's header opens it over that window's right edge, and Cmd+I (or Control+Command+I) toggles it for the focused chat window. Its tabs show that window's chat only.
-- **Page agent** (Cmd+I outside a chat) uses the same shell and the same width. Under its header a
-  "Sent" line shows the size of the page block (about one token per four characters)
-  with a disclosure that reveals the exact text; it is absent when the screen sends nothing.
 - **Extensions** add tabs by registering a `sidepanel.tab` slot item with a label and a component
   (and optionally an overlay drawn over the chat, as Terminal does for its window).
 

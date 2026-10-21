@@ -5,14 +5,11 @@ import type { FullDoc } from '@shared/types'
 import { api, saveDownload } from '../../lib/api'
 import { useStore } from '../../store'
 import { pdfSrc } from '../../lib/showPanel'
-import { oneLine } from '../../lib/emailAsk'
-import { fenced, usePageContext } from '../../lib/pageContext'
 import DiffView from '../../components/DiffView'
 import Editor from './Editor'
 import { ENGINES, latexApi, type CompileResult, type Engine, type LatexContext } from './api'
 import '../../styles/latex.css'
 
-const SOURCE_CAP = 20_000 // what ⌘I carries of the open file
 
 /** The name typed for a new file, made into a path the compile accepts (the backend's rule: no leading . or -, no .., no odd characters). */
 export function newFilePath(raw: string): string | null {
@@ -139,15 +136,6 @@ export default function LatexDocEditor({ doc }: { doc: FullDoc }): JSX.Element {
 
   const problems = result ? [...result.errors, ...result.warnings.map((w) => ({ ...w, warn: true }))] : []
   const status = compiling ? 'Compiling…' : compileError ? compileError : !result ? '' : result.ok ? `OK in ${result.duration_ms} ms` : `${result.errors.length} error${result.errors.length === 1 ? '' : 's'}`
-
-  // ⌘I over this file: the source as it stands in the editor, the project around it, and the last compile's errors.
-  usePageContext(() => ({
-    view: 'docs',
-    label: `LaTeX file “${oneLine(title || 'Untitled', 80)}”`,
-    detail: `Open${dirty ? ', unsaved edits' : ''}. ${ctx ? `Project folder “${oneLine(ctx.project.folder || 'Files', 80)}”${ctx.project.project ? ` in project “${oneLine(ctx.project.project, 80)}”` : ''}, main file ${oneLine(ctx.project.main, 80)} (id \`${ctx.project.main_doc_id}\`), files: ${ctx.files.map((f) => `${oneLine(f.path, 80)} (\`${f.doc_id}\`)`).join(', ')}.` : 'Not inside a LaTeX project.'} Id \`${oneLine(doc.id, 80)}\`.${result && !result.ok ? ` Last compile failed: ${result.errors.slice(0, 5).map((e) => `${oneLine(e.file, 60)}:${e.line} ${oneLine(e.message, 120)}`).join('; ')}.` : ''} Revise with doc_edit (the user reviews the diff unless document edits are set to accept all), then run latex_compile to check it builds.\n\n${fenced(body, SOURCE_CAP)}`,
-    refs: [{ kind: 'doc', id: doc.id, name: doc.title }],
-    hints: ['Fix the compile errors', 'Tighten this section', 'Add a bibliography']
-  }), [doc.id, title, dirty, ctx, result, body])
 
   return (
     <div className="lx-doc-editor">

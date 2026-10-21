@@ -50,8 +50,6 @@ export interface ContextUsed {
   chunks: Citation[]
   /** Approved skills injected as procedural memory. Absent on messages written before skills existed. */
   skills?: { id: string; name: string; description: string }[]
-  /** What the user was looking at when they asked, when the turn came from the page agent (⌘I). */
-  page: PageContext | null
   /** The writing-style profile this reply drafted with; null when there is none or the chat opted out. */
   style: { project_id: string | null; summary: string; guidelines: string[]; block: string } | null
   /** Pinned documents carried whole this turn. Absent on older messages. */
@@ -221,26 +219,6 @@ export interface ToolResultHandle {
   created_at: number
 }
 
-/**
- * A snapshot of the screen the user is on, published by the active view and sent with a page-agent
- * turn. It is a description of what is visible, not a fetch: `refs` name the rows so the model can
- * read or change them with the ordinary tools.
- */
-export interface PageContext {
-  /** The view that published it — 'docs', 'calendar', ... Matches the renderer's View union. */
-  view: string
-  /** One line for the panel's chip and the system prompt's heading, e.g. `Doc “Weekly notes”`. */
-  label: string
-  /** What is on screen, as markdown the model reads: the open doc's text, the visible events, ... */
-  detail?: string
-  /** The user's current selection, when the view has one. */
-  selection?: string
-  /** Rows the page is about, so the model can act on them by id rather than searching. */
-  refs?: { kind: string; id: string; name?: string }[]
-  /** Starter prompts offered in an empty panel. Three at most; the view knows its own verbs. */
-  hints?: string[]
-}
-
 export type ToolMode = 'on' | 'ask' | 'off'
 export type ToolOverride = 'inherit' | ToolMode
 /** The mode tops out at 'ask' (tools.ASK_LOCKED_DANGER): no map can switch the tool on, and no card grants it whole-tool.
@@ -281,7 +259,7 @@ export interface ShowItem {
   size?: number
   /** kind=file: an upload; its bytes come from /documents/{id}/raw instead of a path. */
   documentId?: string
-  /** kind=file: a chat's output (Files → Artifacts); its bytes come from this backend route, since /local/raw refuses the data folder. */
+  /** kind=file: a chat's output (Files → Uploads list); its bytes come from this backend route, since /local/raw refuses the data folder. */
   rawPath?: string
   /** An upload only: the original bytes were kept (false = just the extracted text is left). */
   hasOriginal?: boolean
@@ -1043,8 +1021,6 @@ export interface ConversationSettings {
   job_id?: string
   /** Set when this conversation is a desk's transcript. Desk and job transcripts cannot be branched. */
   deskId?: string
-  /** The doc this chat is bound to: opening the doc brings the chat back in the page agent panel. */
-  docId?: string
   /** The chat this one was branched from (POST /conversations/{id}/fork). */
   forkedFrom?: string
   /** Set on the Telegram bridge's conversation: the sidebar pins it first under the label "Telegram". */
@@ -1993,7 +1969,7 @@ export interface Settings {
   chatNotify?: boolean
   /** Spaces: a chat window shows the chat's face instead of the transcript until switched. Off by default. */
   compactChats?: boolean
-  /** A small Explain / Summarize / Verify / Ask bubble over text selected in a chat, note, mail or the page agent. Missing reads as on. */
+  /** A small Explain / Summarize / Verify / Ask bubble over text selected in a chat, note or mail. Missing reads as on. */
   selectionToolbar?: boolean
   /** Interface zoom in percent, 80-160. Missing reads as 110. */
   uiZoom?: number

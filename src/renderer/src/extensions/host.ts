@@ -263,11 +263,16 @@ export const docEditorFor = (settings: Settings, doc: { title: string }): (DocEd
 
 export const fenceRenderer = (lang: string): FC<FenceRendererProps> | undefined => fences.get(lang)?.Component
 
+/** The scope of each extension that is active now, by id. */
+const active = new Map<string, Disposable>()
+
 /**
  * Run an extension's `activate`. Each registration is also kept in the extension's scope, so the returned Disposable
  * undoes all of them, newest first, whether or not the extension disposed them itself. `permissions` are the ones its manifest declares.
  */
 export function activateExtension(id: string, ext: ExtensionModule, permissions: readonly string[] = []): Disposable {
+  // Activating an id again (the dev server re-evaluating the module that activates it) replaces the earlier activation.
+  active.get(id)?.dispose()
   const scope: Disposable[] = []
   const keep = (d: Disposable): Disposable => { scope.push(d); return d }
   const requireUnsupported = (): void => {
@@ -326,5 +331,12 @@ export function activateExtension(id: string, ext: ExtensionModule, permissions:
       }
     }
   })
-  return { dispose: () => { for (const d of scope.reverse()) d.dispose() } }
+  const handle: Disposable = {
+    dispose: () => {
+      if (active.get(id) === handle) active.delete(id)
+      for (const d of scope.splice(0).reverse()) d.dispose()
+    }
+  }
+  active.set(id, handle)
+  return handle
 }

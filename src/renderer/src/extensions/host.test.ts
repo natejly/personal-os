@@ -1,7 +1,7 @@
 /** The frontend extension host: what `activate(ui)` registers, how it is disposed, and that Health arrives through it. */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { activateExtension, extensionModules, panelGroup, panelsIn, settingsPanels } from './host'
+import { activateExtension, extensionModules, paletteCommands, panelGroup, panelsIn, settingsPanels, slotItems, type UiApi } from './host'
 import { navEntries } from '../shell/nav'
 import { MODULES, moduleForView } from '../shell/registry'
 import { TOOL_CARDS } from '../components/toolcards/registry'
@@ -67,4 +67,27 @@ test('settings panels default to Advanced and sort by order then registration', 
   assert.deepEqual(panelsIn('assistant', mine).map((p) => p.id), ['d', 'b', 'c'])
   assert.deepEqual(panelsIn('advanced', mine).map((p) => p.id), ['a'])
   for (const d of ids) d.dispose()
+})
+
+test('activating an extension id again replaces the earlier activation', () => {
+  const before = [extensionModules.length, paletteCommands.length, slotItems('statusbar.item').length]
+  const activate = (ui: UiApi): void => {
+    ui.view({ id: 'ext:again', label: 'Again', icon, Component })
+    ui.command({ id: 'again:go', label: 'Go', run: () => {} })
+    ui.slot('statusbar.item', { id: 'again-item', order: 1, Component })
+  }
+  const first = activateExtension('again', { activate })
+  const second = activateExtension('again', { activate })
+  assert.deepEqual([extensionModules.length, paletteCommands.length, slotItems('statusbar.item').length], before.map((n) => n + 1))
+  assert.equal(paletteCommands.filter((c) => c.id === 'again:go').length, 1)
+  first.dispose()  // the replaced scope has nothing left to remove
+  assert.equal(paletteCommands.filter((c) => c.id === 'again:go').length, 1)
+  second.dispose()
+  assert.deepEqual([extensionModules.length, paletteCommands.length, slotItems('statusbar.item').length], before)
+})
+
+test('two different extensions registering the same command id still throw', () => {
+  const a = activateExtension('dup-a', { activate: (ui) => { ui.command({ id: 'dup:go', label: 'Go', run: () => {} }) } })
+  assert.throws(() => activateExtension('dup-b', { activate: (ui) => { ui.command({ id: 'dup:go', label: 'Go', run: () => {} }) } }), /already registered/)
+  a.dispose()
 })

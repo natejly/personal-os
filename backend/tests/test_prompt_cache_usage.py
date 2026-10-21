@@ -44,18 +44,21 @@ check(len(layout_messages("S", [], hist)) == 4, "no volatile -> no extra message
 appmod.db.set_settings({"autoLearn": False, "baseUrl": ""})
 
 
+appmod.memories.create(None, "Drinks green tea every morning", kind="fact")
+appmod.memories.create(None, "Drinks black coffee after lunch", kind="fact")
+
+
 def ctx(q: str):
     return build_context(
         memories=appmod.memories, graph=appmod.graph, documents=appmod.documents, project=None, project_id=None,
         query=q, settings=appmod.settings(), conv_settings={}, global_system_prompt="You are Grain.", skills=appmod.skills,
-        page={"label": f"Todos {q}"},
     )
 
 
 s1, u1 = ctx("tea")
 s2, u2 = ctx("coffee")
 check(u1["stable_system"] == u2["stable_system"] and u1["stable_system"].startswith("You are Grain."), "stable part query-independent")
-check(len(u1["volatile_blocks"]) >= 1 and u1["volatile_blocks"] != u2["volatile_blocks"], "volatile differs per query/page")
+check(len(u1["volatile_blocks"]) >= 1 and u1["volatile_blocks"] != u2["volatile_blocks"], "volatile differs per query")
 check(u1["system_prompt"] == "\n\n".join([u1["stable_system"], *u1["volatile_blocks"]]) == s1, "system_prompt = stable + volatile")
 
 # ---- 3. usage parsing

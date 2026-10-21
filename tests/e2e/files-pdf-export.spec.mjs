@@ -31,9 +31,9 @@ test('Download PDF asks where to save and writes the chosen path', async ({ grai
   expect(errorsOf(g)).toEqual([])
 })
 
-test('Export PDF to Uploads files the PDF as an upload', async ({ grain: g }) => {
+test('Save PDF to Files files the PDF as an upload', async ({ grain: g }) => {
   await openDoc(g, 'Pset 2')
-  await g.page.getByRole('menuitem', { name: 'Export PDF to Uploads' }).click()
+  await g.page.getByRole('menuitem', { name: 'Save PDF to Files' }).click()
   await expect.poll(async () => (await g.api('/documents')).filter((d) => d.name === 'Pset 2.pdf').length, { timeout: 60_000 }).toBe(1)
   const [d] = (await g.api('/documents')).filter((x) => x.name === 'Pset 2.pdf')
   expect(d.size).toBeGreaterThan(1024)

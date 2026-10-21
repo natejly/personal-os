@@ -11,16 +11,26 @@ const open = async (page, title) => {
 // 1x1 transparent PNG
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
 
-test('Uploads opens from the tree; scope select only on Uploads', async ({ grain: g }) => {
+const row = (page, name) => page.getByTestId('upload-row').filter({ hasText: name })
+
+test('kind filter: Uploads lists upload rows only; Trash row opens the trash', async ({ grain: g }) => {
   const { page } = g
+  await mkDoc(g, { title: 'Plain note', content: 'x' })
   await openFiles(page)
+  const kinds = page.getByRole('group', { name: 'Kind' })
+  await expect(kinds.getByRole('button')).toHaveText(['All', 'Notes', 'Uploads', 'Chat'])
+  await expect(kinds.getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByTitle('Filter by project')).toHaveCount(0)
   await section(page, 'Uploads')
-  await expect(page.getByText('No uploads yet')).toBeVisible()
-  await expect(page.getByTitle('Filter by project')).toBeVisible()
-  // hammer the rows
-  for (let i = 0; i < 6; i++) await section(page, 'Uploads')
+  await expect(page.getByText('No files')).toBeVisible()
+  await expect(page.locator('.doc-row', { hasText: 'Plain note' })).toHaveCount(0)
+  // hammer the filter
+  for (let i = 0; i < 6; i++) await section(page, i % 2 ? 'Uploads' : 'Notes')
+  await section(page, 'Notes')
+  await expect(page.locator('.doc-row', { hasText: 'Plain note' }).first()).toBeVisible()
   await expect(page.getByPlaceholder('Search files')).toBeVisible()
+  await page.locator('.doc-tree .doc-row', { hasText: 'Trash' }).click()
+  await expect(page.getByRole('heading', { name: 'Trash' })).toBeVisible()
   expect(errorsOf(g)).toEqual([])
 })
 
@@ -29,9 +39,8 @@ test('uploads: pick a file, view its text, pin, delete + undo, drop a file, unre
   await openFiles(page)
   await section(page, 'Uploads')
   await page.locator('#doc-upload-input').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('alpha bravo charlie\n'.repeat(50)) })
-  const card = page.locator('.doc-card', { hasText: 'notes.txt' })
+  const card = row(page, 'notes.txt')
   await expect(card).toBeVisible()
-  await expect(card).toContainText('alpha bravo charlie')
   await card.click()
   const viewer = page.getByRole('dialog', { name: 'notes.txt' })
   await expect(viewer).toContainText('alpha bravo charlie')
@@ -43,48 +52,43 @@ test('uploads: pick a file, view its text, pin, delete + undo, drop a file, unre
   await page.evaluate(() => {
     const dt = new DataTransfer()
     dt.items.add(new File(['dropped text body'], 'dropped.txt', { type: 'text/plain' }))
-    const target = document.querySelector('.page-body')
+    const target = document.querySelector('.docs-body')
     target.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }))
     target.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }))
   })
-  await expect(page.locator('.doc-card', { hasText: 'dropped.txt' })).toBeVisible()
+  await expect(row(page, 'dropped.txt')).toBeVisible()
   // binary with no readable text still stores but says so
   await page.locator('#doc-upload-input').setInputFiles({ name: 'blob.bin', mimeType: 'application/octet-stream', buffer: Buffer.from([0, 1, 2, 3, 255, 254, 0, 0]) })
   await expect(page.getByText(/no readable text|blob\.bin/).first()).toBeVisible()
   // delete + undo
-  await page.locator('.doc-card', { hasText: 'dropped.txt' }).getByRole('button', { name: 'Delete dropped.txt' }).click()
-  await expect(page.locator('.doc-card', { hasText: 'dropped.txt' })).toHaveCount(0)
+  await row(page, 'dropped.txt').getByRole('button', { name: 'Delete dropped.txt' }).click()
+  await expect(row(page, 'dropped.txt')).toHaveCount(0)
   await page.getByRole('button', { name: 'Undo' }).click()
-  await expect(page.locator('.doc-card', { hasText: 'dropped.txt' })).toBeVisible()
+  await expect(row(page, 'dropped.txt')).toBeVisible()
   expect((await g.api('/documents')).map((d) => d.name).sort()).toContain('dropped.txt')
   expect(errorsOf(g).filter((e) => !/status of (4\d\d)/.test(e))).toEqual([])
 })
 
-test('scope select: personal vs project uploads', async ({ grain: g }) => {
+test('project filter: uploads made under a project filter belong to it; clearing the chip shows all', async ({ grain: g }) => {
   const { page } = g
   const proj = await g.api('/projects', { method: 'POST', body: { name: 'Scope Project' } })
   await page.reload()
   patient(g)
   await openFiles(page)
   await section(page, 'Uploads')
-  const sel = page.getByTitle('Filter by project').locator('select')
-  await expect(sel.locator('option')).toHaveText(['All', 'Personal only', 'Scope Project'])
-  await sel.selectOption('personal')
   await page.locator('#doc-upload-input').setInputFiles({ name: 'mine.txt', mimeType: 'text/plain', buffer: Buffer.from('personal stuff') })
-  await expect(page.locator('.doc-card', { hasText: 'mine.txt' })).toBeVisible()
-  await sel.selectOption(proj.id)
-  await expect(page.locator('.doc-card', { hasText: 'mine.txt' })).toHaveCount(0)
+  await expect(row(page, 'mine.txt')).toBeVisible()
+  // the project page's Files row opens Files filtered to that project
+  await page.locator('.sidebar .project-name', { hasText: 'Scope Project' }).click()
+  await page.getByTestId('project-files-row').click()
+  await expect(page.getByRole('button', { name: 'Clear project filter' })).toContainText('Scope Project')
+  await section(page, 'Uploads')
+  await expect(row(page, 'mine.txt')).toHaveCount(0)
   await page.locator('#doc-upload-input').setInputFiles({ name: 'proj.txt', mimeType: 'text/plain', buffer: Buffer.from('project stuff') })
-  await expect(page.locator('.doc-card', { hasText: 'proj.txt' })).toBeVisible()
+  await expect(row(page, 'proj.txt')).toBeVisible()
   expect((await g.api(`/documents?project_id=${proj.id}&include_global=false`)).map((d) => d.name)).toEqual(['proj.txt'])
-  await sel.selectOption('all')
-  await expect(page.locator('.doc-card')).toHaveCount(2)
-  await sel.selectOption('personal')
-  await expect(page.locator('.doc-card', { hasText: 'mine.txt' })).toBeVisible()
-  await expect(page.locator('.doc-card', { hasText: 'proj.txt' })).toHaveCount(0)
-  // Notes tree: a project group exists and a file made in it lives there
-  await page.getByRole('button', { name: 'New file in Scope Project' }).click()
-  await expect.poll(async () => (await g.api('/docs')).filter((d) => d.project_id === proj.id).length).toBe(1)
+  await page.getByRole('button', { name: 'Clear project filter' }).click()
+  await expect(page.getByTestId('upload-row')).toHaveCount(2)
   expect(errorsOf(g)).toEqual([])
 })
 
@@ -137,7 +141,7 @@ test('paste or drop an image into a doc stores it and renders it; non-images are
   expect(errorsOf(g).filter((e) => !/status of (413|415)/.test(e))).toEqual([])
 })
 
-test('delete a doc: undo from the toast, then delete again and restore from Settings > Trash', async ({ grain: g }) => {
+test('delete a doc: undo from the toast, then delete again and restore from the Trash row', async ({ grain: g }) => {
   const { page } = g
   const d = await mkDoc(g, { title: 'Doomed', content: 'precious words' })
   await openFiles(page)
@@ -164,7 +168,6 @@ test('delete a doc: undo from the toast, then delete again and restore from Sett
   await expect(row).toBeVisible()
   await row.getByRole('button', { name: /Restore/ }).click()
   await expect(row).toHaveCount(0)
-  await page.getByRole('button', { name: 'Close settings' }).click()
   await expect(page.locator('.doc-row', { hasText: 'Doomed' }).last()).toBeVisible()
   expect((await g.api('/docs')).map((x) => x.title)).toEqual(['Doomed'])
   // deleting right after typing refreshes the revisions of a doc that is already in the trash (a logged 404)

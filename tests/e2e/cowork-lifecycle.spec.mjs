@@ -164,7 +164,9 @@ test('workspace panel: Files lists the workspace, Changes lists the turns, Revie
   await expect(panel(page).getByTestId('desk-tab-review')).toHaveAttribute('aria-selected', 'true') // a desk in review brings Review forward once it loads
   await openPanel(page, 'Files')
   await expect(panel(page).getByText('report.md').first()).toBeVisible()
-  // the chat's own file list sits above the workspace tree; the tree is the one that previews
+  // the chat's own file list is flat; the workspace tree sits behind a collapsed Workspace row and is the one that previews
+  await expect(panel(page).locator('.cf-ws-toggle')).toHaveAttribute('aria-expanded', 'false')
+  await panel(page).locator('.cf-ws-toggle').click()
   await panel(page).locator('.desk-files .desk-file-row', { hasText: 'report.md' }).first().click()
   await expect(panel(page).locator('.desk-preview').getByText('Hello from the desk').first()).toBeVisible()
   await openPanel(page, 'Changes')

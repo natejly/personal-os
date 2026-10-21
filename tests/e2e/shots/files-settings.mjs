@@ -73,7 +73,7 @@ if (want('files')) await session(async (g) => {
   await page.keyboard.press('Escape')
   await snap(g, 'files-uploads', async () => {
     await upload(g, 'meeting-notes.txt', 'alpha bravo charlie\n'.repeat(40))
-    await page.locator('.doc-tree .doc-row', { hasText: 'Uploads' }).click()
+    await page.getByRole('button', { name: 'Uploads', exact: true }).click()
     await sleep(1200)
   })
   await snap(g, 'files-trash', async () => {

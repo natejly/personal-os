@@ -184,7 +184,7 @@ export default function LatexDocEditor({ doc }: { doc: FullDoc }): JSX.Element {
         )}
 
         <section className="lx-mid">
-          {noProject && <p className="empty-hint">{noProject}. Compile needs a folder with a main.tex.</p>}
+          {noProject && <p className="empty-hint">{noProject}</p>}
           <Editor key={doc.id} value={body} onChange={editDoc} onSave={() => void flushDoc()} onCompile={() => void compileRef.current()} jump={jump} />
           {result && problems.length > 0 && (
             <div className="lx-problems">
@@ -219,7 +219,7 @@ export default function LatexDocEditor({ doc }: { doc: FullDoc }): JSX.Element {
               </select>
               <span className={`lx-status ${(compileError || (result && !result.ok)) && !compiling ? 'bad' : ''}`} role="status">{status}</span>
             </div>
-            {pdfUrl ? <iframe className="lx-pdf" title="PDF preview" src={pdfSrc(pdfUrl, true)} /> : <p className="empty-hint big">Compile to preview the PDF.</p>}
+            {pdfUrl ? <iframe className="lx-pdf" title="PDF preview" src={pdfSrc(pdfUrl, true)} /> : <p className="empty-hint big">No preview</p>}
           </section>
         )}
       </div>

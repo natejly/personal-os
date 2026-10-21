@@ -146,7 +146,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           {conversationId && <ChatFilesButton conversationId={convo?.id} />}
         </div>
         {/* The full-window chat gives the last title-bar slot to its own workspace panel. ⌘I toggles the same panel on Context here. */}
-        <AppSwitcher last={conversationId || sidePanelClosed ? undefined : (
+        <AppSwitcher last={conversationId ? undefined : (
           <button className={`icon-btn${deskPanel || contextOpen ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={deskPanel || contextOpen}
             onClick={() => { if (contextOpen) toggleContext(); setDeskPanel(!(deskPanel || contextOpen)) }}><PanelRight size={15} /></button>
         )} />

@@ -16,7 +16,13 @@ import { useSlot } from '../extensions/slot'
 
 // The tabs other than Terminal are `sidepanel.tab` slot items. Terminal owns the panel's attach state, so it stays in the coding extension, last.
 
-const ContextTab = ({ conversationId }: SidePanelTabProps): JSX.Element => <ContextDrawer conversationId={conversationId} />
+const ContextTab = ({ conversationId, desk }: SidePanelTabProps): JSX.Element => (
+  <>
+    <ProgressCard conversationId={conversationId} desk={desk} />
+    <WorkersPanel conversationId={conversationId} />
+    <ContextDrawer conversationId={conversationId} />
+  </>
+)
 const FilesTab = ({ conversationId, desk }: SidePanelTabProps): JSX.Element => (desk
   ? <><ChatFilesList conversationId={conversationId ?? ''} layout="above" /><h4 className="cf-ws">Workspace</h4><DeskFiles desk={desk} /></>
   : <ChatFilesList conversationId={conversationId ?? ''} />)
@@ -38,7 +44,8 @@ registerSlot(CORE, 'sidepanel.tab', {
  * The side panel of a chat: a resizable column (SidePanel) with a tab strip over one scrolling body. Tabs are the
  * `sidepanel.tab` slot items in slot order: Context, Files, Changes (once the chat has files or its desk has runs),
  * Review (once a desk has outputs or is in review), then extension tabs such as Terminal. A draft chat with
- * no id has only Context. The running checklist (ProgressCard) and the workers list lead the panel above the strip.
+ * no id has only Context.
+ * The running checklist (ProgressCard) and the workers list lead the Context tab.
  * It opens on Context, on Review when its desk is in review, and on the tab a request names (the store's
  * `deskTabRequest`: terminal, files, review; a traces request opens Context with its Traces section expanded); the last tab chosen is kept while the panel stays mounted.
  * Escape closes it.
@@ -76,12 +83,7 @@ export default function DeskPanel({ desk, conversationId, onClose }: { desk?: Fu
 
   return (
     <SidePanel label="Workspace" className="desk-panel" onClose={onClose}
-      header={
-        <div className="side-panel-lead">
-          <ProgressCard conversationId={conversationId} desk={desk} />
-          <WorkersPanel conversationId={conversationId} />
-        </div>
-      }>
+>
       <div className="side-tabs-row">
       <div ref={strip} className="side-tabs" role="tablist" aria-label="Workspace sections" onKeyDown={onKeys}>
         {slotTabs.map((t) => {

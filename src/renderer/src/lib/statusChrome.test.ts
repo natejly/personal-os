@@ -8,11 +8,13 @@ const src = (f: string): string => readFileSync(join('src/renderer/src', f), 'ut
 
 // The main agent's status bar (face, "Working", Pause / Stop / panel above the composer) came back once by being gated on
 // live workers. Nothing in a chat may render it, running or not, workers or not; no generic strip; the workers and progress cards are the only cards.
-test('no main-agent status bar renders in a chat, while workers still get their card', () => {
+test('no main-agent status bar renders in a chat, while workers get one line there and their card on the side panel', () => {
   const chat = src('components/ChatView.tsx')
   assert.doesNotMatch(chat, /<DeskStrip\b/)
   assert.doesNotMatch(src('components/DeskStrip.tsx'), /export default|desk-strip/)
-  assert.match(chat, /<WorkersPanel conversationId=/)
+  assert.doesNotMatch(chat, /<WorkersPanel\b|<ProgressCard\b/)
+  assert.match(chat, /data-testid="workers-line"/)
+  assert.match(src('components/DeskPanel.tsx'), /<WorkersPanel conversationId=/)
   assert.equal(workersCardShown(1), true)
 })
 

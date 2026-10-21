@@ -109,19 +109,20 @@ test('Escape closes the permission menu and leaves the side panel open, with foc
   await expect(page.locator('.skip-perms')).toBeFocused()
 })
 
-test('a multi-step checklist is the Progress card above the composer, not a status card or a side-panel tab', async ({ grain }) => {
+test('a multi-step checklist is the Progress card on the side panel Context tab, not in the transcript or a status card', async ({ grain }) => {
   const { page } = grain
   await newChat(page)
   const plan = { steps: [{ text: 'first step', status: 'in_progress' }, { text: 'second step', status: 'pending' }] }
   await say(page, '!!tool todo_write ' + JSON.stringify(plan))
   await expect(page.locator('.msg.assistant').last()).toContainText('MOCK: tool done', { timeout: 60_000 })
   await expect(page.getByRole('region', { name: 'Checklist' })).toHaveCount(0) // no status card for the main agent
-  const card = page.getByRole('region', { name: 'Progress' })
+  await expect(page.getByRole('region', { name: 'Progress' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Workspace panel', exact: true }).click()
+  const card = page.locator('.desk-panel').getByRole('region', { name: 'Progress' })
   await expect(card).toContainText('Step 1 of 2')
   await expect(card).toContainText('first step')
   await card.getByRole('button', { name: /the steps/ }).click()
   await expect(card.locator('.plan-step')).toHaveCount(2)
-  await page.getByRole('button', { name: 'Workspace panel', exact: true }).click()
   await expect(page.locator('.desk-panel').getByRole('button', { name: 'Checklist' })).toHaveCount(0)
 })
 

@@ -34,7 +34,9 @@ test('the Workers card shows while a background worker is live; there is still n
   // only 'ask' autonomy desks can delegate (a planning/proposing desk carries out its own steps)
   const { desk, chat } = await deskChat(grain, { brief: 'look things up', title: 'Delegator', autonomy: 'ask' })
   await openChat(page, 'Delegator')
-  await expect(page.locator('section.worker-panel')).toContainText('Alpha job', { timeout: 60_000 })
+  await expect(page.getByTestId('workers-line')).toBeVisible({ timeout: 60_000 })
+  await page.getByTestId('workers-line').click()
+  await expect(page.locator('section.worker-panel')).toContainText('Alpha job')
   await expect(strip(page)).toHaveCount(0) // the workers card is the only chrome; the desk strip is gone
   await expect.poll(async () => (await grain.api(`/conversations/${chat.id}/workers`)).workers.map((w) => w.status), { timeout: 30_000 })
     .toContain('running')

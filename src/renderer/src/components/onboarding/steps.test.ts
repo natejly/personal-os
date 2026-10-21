@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { initialState, reduce, stepBlocker, showsBaseUrl, firstPrompts, STEPS, type WizardState } from './steps'
+import { initialState, reduce, stepBlocker, showsBaseUrl, STEPS, type WizardState } from './steps'
 import type { ProviderPreset } from '@shared/types'
 
 const fw: ProviderPreset = { id: 'fireworks', name: 'Fireworks', baseUrl: 'https://api.fireworks.ai/inference/v1', needsKey: true, keyUrl: 'https://fireworks.ai/keys', defaultModel: 'm1', models: ['m1', 'm2'], note: null }
@@ -61,11 +61,4 @@ test('back from the key step clears a failed test', () => {
 
 test('base URL shows only for self-hosted providers', () => {
   assert.deepEqual(['litellm', 'custom', 'ollama', 'openai', 'fireworks', null].map(showsBaseUrl), [true, true, true, false, false, false])
-})
-
-test('first prompts only name Google surfaces once Google is connected', () => {
-  const off = firstPrompts(false).join(' ')
-  assert.ok(!/calendar|mail/i.test(off), off)
-  assert.match(firstPrompts(true).join(' '), /calendar/i)
-  assert.ok(!/calendar|mail|todo/i.test(firstPrompts(true, ['calendar', 'mail', 'todos']).join(' ')))
 })

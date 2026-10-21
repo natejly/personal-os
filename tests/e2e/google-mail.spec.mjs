@@ -221,6 +221,39 @@ test('Gmail API failure shows an error bar and the list recovers on refresh', as
   await expect(rows(page).first()).toBeVisible()
 })
 
+
+/** The header's direct children must each sit inside the bar and never overlap one another. */
+async function headerBoxes(page) {
+  return page.evaluate(() => {
+    const bar = document.querySelector('.page-header').getBoundingClientRect()
+    const kids = [...document.querySelector('.page-header').children].filter((el) => el.getBoundingClientRect().width > 0)
+    return { bar: { l: bar.left, r: bar.right }, boxes: kids.map((el) => { const b = el.getBoundingClientRect(); return { name: el.className || el.tagName, l: b.left, r: b.right, clipped: el.scrollWidth > el.clientWidth + 1 } }) }
+  })
+}
+function expectHeaderClean({ bar, boxes }) {
+  for (const b of boxes) { expect(b.l, b.name).toBeGreaterThanOrEqual(bar.l - 1); expect(b.r, b.name).toBeLessThanOrEqual(bar.r + 1) }
+  const sorted = [...boxes].sort((a, b) => a.l - b.l)
+  for (let i = 1; i < sorted.length; i++) expect(sorted[i].l, `${sorted[i - 1].name} / ${sorted[i].name}`).toBeGreaterThanOrEqual(sorted[i - 1].r - 1)
+}
+
+test('mail at 900x600 shows the title, search and compose without overlap', async ({ grain }) => {
+  const { page } = grain
+  await setNarrow(grain, 900, 600)
+  await openMail(grain)
+  const title = page.locator('.page-header h2')
+  await expect(title).toBeVisible()
+  expect(await title.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+  expectHeaderClean(await headerBoxes(page))
+  const compose = await page.getByRole('button', { name: 'Compose' }).first().boundingBox()
+  const search = await page.getByLabel('Search mail').boundingBox()
+  expect(search.x + search.width).toBeLessThanOrEqual(compose.x + 1)
+  for (const name of ['Folder or label', 'Time range']) {
+    const b = await page.getByLabel(name).boundingBox()
+    expect(b.x + b.width).toBeLessThanOrEqual(900)
+    expect(b.x).toBeGreaterThanOrEqual(0)
+  }
+})
+
 test('mail at 820x520 keeps the toolbar, list and reader usable', async ({ grain }) => {
   const { page } = grain
   await setNarrow(grain, 820, 520)

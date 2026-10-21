@@ -50,3 +50,6 @@
 .ext-check { display: flex; flex-direction: row; gap: 8px; align-items: flex-start; font-size: 13px; }
 .ext-danger-btn { background: var(--danger); color: var(--on-accent); }
 @media (max-width: 640px) { .ext-sheet, .ext-dialog { width: calc(100vw - 32px); max-width: none; } }
+/* Group headings are eyebrows (as under Permissions), with room below the tab title. */
+.settings-pane .ext-section { padding-top: var(--sp-3); }
+.settings-pane .ext-group h3:not(.modal-free *) { margin: var(--sp-2) 0; font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }

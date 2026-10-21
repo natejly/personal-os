@@ -27,7 +27,7 @@ export default function JobsPanel(): JSX.Element {
     <div className="jobs-body">
       {job ? <JobDetail job={job} onBack={() => openJobs(null)} /> : (
         <>
-          <div><button className="primary-btn sm" onClick={() => setCreating((v) => !v)}>New job</button></div>
+          <div className="jobs-actions"><button className="primary-btn sm" onClick={() => setCreating((v) => !v)}>New job</button></div>
           {creating && <div className="jobs-new"><NewTask onDone={() => setCreating(false)} /></div>}
           {jobs.length === 0 && !creating && <p className="muted">No jobs</p>}
           <div className="jobs-grid">

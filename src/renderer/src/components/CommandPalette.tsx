@@ -31,8 +31,10 @@ const VIEWS: { view: View; label: string }[] = [
   { view: 'docs', label: 'Files' }
 ]
 const RECENT = AT_REST
-registerCommand(CORE, { id: 'new-chat', label: 'New chat', run: () => useStore.getState().newChat(null) })
-registerCommand(CORE, { id: 'new-file', label: 'New file', run: () => void useStore.getState().createDoc({}) })
+/** The primary create actions lead their section, ahead of the cap. */
+const PINNED = new Set(['new-chat', 'new-file'])
+registerCommand(CORE, { id: 'new-chat', label: 'New chat', section: 'Chats', run: () => useStore.getState().newChat(null) })
+registerCommand(CORE, { id: 'new-file', label: 'New file', section: 'Files', run: () => void useStore.getState().createDoc({}) })
 registerCommand(CORE, { id: 'help', label: 'Help and keyboard shortcuts', run: () => useStore.getState().openHelp('shortcuts') })
 registerCommand(CORE, { id: 'help:guide', label: 'Using Grain', run: () => useStore.getState().openHelp('guide') })
 const recent = <T extends { updated_at: number }>(rows: T[]): T[] => [...rows].sort((a, b) => b.updated_at - a.updated_at).slice(0, RECENT)
@@ -58,7 +60,7 @@ export default function CommandPalette({ initialQuery = '' }: { initialQuery?: s
     ...[...VIEWS, ...navRows].filter((v) => !viewHidden(settings, v.view)).map((v): Entry => ({ key: `view:${v.view}`, section: 'Go to', label: v.label, run: () => s.setView(v.view) })),
     // Places with no number key, and the ones a hidden sidebar row leaves reachable only from here.
     { key: 'inbox', section: 'Go to', label: 'Agent inbox and jobs', run: () => s.openInbox() },
-    ...paletteCommands.filter((c) => ownerOn(settings, c.extension) && (!c.when || c.when(s)))
+    ...[...paletteCommands].sort((a, b) => Number(PINNED.has(b.id)) - Number(PINNED.has(a.id))).filter((c) => ownerOn(settings, c.extension) && (!c.when || c.when(s)))
       .map((c): Entry => ({ key: `command:${c.id}`, section: c.section ?? 'Go to', label: c.label, run: c.run })),
     ...recent(conversations).map((c): Entry => ({ key: `chat:${c.id}`, section: 'Chats', label: plainTitle(c.title) || 'Untitled chat', run: () => void s.selectChat(c.id) })),
     ...projects.map((p): Entry => ({ key: `project:${p.id}`, section: 'Go to', label: p.name, typed: true, run: () => s.openProject(p.id) })),

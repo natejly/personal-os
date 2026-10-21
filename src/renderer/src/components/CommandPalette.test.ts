@@ -32,12 +32,19 @@ const options = (html: string): number => (html.match(/role="option"/g) ?? []).l
 const headings = (html: string): string[] => [...html.matchAll(/palette-heading">([^<]+)</g)].map((m) => m[1])
 
 test('rows sit under section headings in a fixed order', () => {
-  assert.deepEqual(headings(palette({ hiddenViews: [] })), ['Go to', 'Settings'])
+  assert.deepEqual(headings(palette({ hiddenViews: [] })), ['Chats', 'Files', 'Go to', 'Settings'])
+})
+
+test('New chat and New file are listed at rest, under Chats and Files', () => {
+  const html = palette({ hiddenViews: [] })
+  assert.ok(html.indexOf('heading">Chats') < html.indexOf('New chat'))
+  assert.ok(html.indexOf('heading">Files') < html.indexOf('New file'))
+  assert.ok(html.indexOf('New file') < html.indexOf('heading">Go to'))
 })
 
 test('a section shows at most five rows at rest and more once a query is typed', () => {
   const html = palette({ hiddenViews: [] })
-  assert.ok(options(html) <= 10)
+  assert.ok(options(html) <= 20)
   assert.ok(options(palette({ hiddenViews: [] }, 'e')) > options(html))
 })
 

@@ -139,7 +139,11 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
   const { pinned, rest } = useMemo(() => splitPinned(docs), [docs])
   const starred = useMemo(() => starredDocs(rest), [rest])
   const recent = useMemo(() => recentDocs(rest), [rest])
-  const groups = useMemo(() => buildGroups(folders, rest, projects), [folders, rest, projects])
+  const groups = useMemo(() => {
+    const all = buildGroups(folders, rest, projects)
+    // A project filter leaves other groups empty; their headers go too.
+    return project ? all.filter((g) => g.roots.length > 0 || g.loose.length > 0) : all
+  }, [folders, rest, projects, project])
   const rows = useMemo(
     () => flattenGroups(
       groups,

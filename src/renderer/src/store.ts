@@ -2907,7 +2907,14 @@ export const useStore = create<State>((set, get) => {
       if (openAgentId) get().setView('library')
     },
     // A stale caller passing the retired 'artifacts' value lands on the list, where artifacts are rows now.
-    showFiles: (opts) => { set({ filesKind: opts?.kind ?? 'all', filesProject: opts?.projectId ?? null }); get().setView('docs') },
+    showFiles: (opts) => {
+      const projectId = opts?.projectId ?? null
+      set({ filesKind: opts?.kind ?? 'all', filesProject: projectId })
+      // A note from outside the project would otherwise stay in the editor beside a list that does not hold it.
+      const open = get().activeDoc
+      if (projectId && open && (open.project_id ?? null) !== projectId) void get().closeDoc(open.id)
+      get().setView('docs')
+    },
     // The docs list is already kept live elsewhere; this is for the two things the Library reads
     // that nothing else refreshes on its behalf.
     refreshLibrary: async () => {

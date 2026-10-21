@@ -5,8 +5,8 @@
  */
 import type { Settings } from '@shared/types'
 
-/** A missing homeWidgets key means the card is shown. */
-export const homeModuleOn = (s: Settings, key: string): boolean => s.homeWidgets?.[key] !== false
+/** A card is shown only when its homeWidgets key is true: the daily recap makes a model call, so it starts off. */
+export const homeModuleOn = (s: Settings, key: string): boolean => s.homeWidgets?.[key] === true
 export const viewHidden = (s: Settings, view: string): boolean =>
   (s.hiddenViews ?? []).includes(view)
 /** A sidebar row that is not shown: its view is turned off, or only the row is hidden (`sidebarHidden`). */

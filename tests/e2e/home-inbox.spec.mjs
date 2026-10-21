@@ -46,7 +46,7 @@ test('Settings → Sidebar turns each sidebar row on and off on Save', async ({ 
   }
   // One switch for the recap on new chats (General tab).
   await openSettings(page, 'General')
-  await expect(dialog(page).getByRole('checkbox', { name: 'Daily recap on new chats' })).toBeAttached()
+  await expect(dialog(page).getByRole('checkbox', { name: 'Daily recap on new chats' })).not.toBeChecked() // off on a fresh install
   noErrors(grain)
 })
 

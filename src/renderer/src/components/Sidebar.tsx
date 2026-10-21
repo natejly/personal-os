@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSlidingPill } from "../lib/useSlidingPill"
-import { ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, Files, Plus, Folder, FolderKanban, ChevronRight, Bell } from '../icons'
+import { ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, Files, Plus, Folder, FolderKanban, ChevronRight, Bell, Sun, Moon, MonitorDot } from '../icons'
+import { nextTheme, themeId } from '../lib/appearance'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { chatAttentionOf, useStore, type View } from '../store'
@@ -493,8 +494,20 @@ export default function Sidebar(): JSX.Element {
         <button className="settings-btn" title={tip('Settings', 'settings')} onClick={() => setSettingsOpen(true)}><Settings size={16} /><span>Settings</span>
           {memoryProposals > 0 && <span className="count pending" title={`${memoryProposals} memory tidy-up suggestion${memoryProposals === 1 ? '' : 's'} to review, under Knowledge base`}>{memoryProposals}</span>}
           <kbd>⌘,</kbd></button>
+        <ThemeButton />
       </div>
     </aside>
+  )
+}
+
+/** Cycles Light, Dark, System and saves at once; the icon shows the current mode. */
+function ThemeButton(): JSX.Element {
+  const theme = themeId(useStore((s) => s.settings.theme))
+  const label = theme === 'light' ? 'Light' : theme === 'dark' ? 'Dark' : 'System'
+  const Icon = theme === 'light' ? Sun : theme === 'dark' ? Moon : MonitorDot
+  return (
+    <button className="icon-btn theme-btn" aria-label={`Theme: ${label}`} title={tip(`Theme: ${label}`, 'toggle-theme')} data-theme-mode={theme}
+      onClick={() => void useStore.getState().saveSettings({ theme: nextTheme(theme) })}><Icon size={16} /></button>
   )
 }
 

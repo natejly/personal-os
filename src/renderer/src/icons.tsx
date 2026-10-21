@@ -195,6 +195,7 @@ export {
   SlidersHorizontal,
   Smiley as Smile,
   Sparkle as Sparkles,
+  Sun,
   Square,
   ArrowSquareOut as SquareArrowOutUpRight,
   NotePencil as SquarePen,

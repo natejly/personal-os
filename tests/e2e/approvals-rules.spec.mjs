@@ -2,6 +2,7 @@ import { test } from './fixtures.mjs'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { openAdvanced, save } from './helpers/home.mjs'
+import { setNarrow } from './helpers/shell.mjs'
 import { expect, newChat, say, homeScratch, rmScratch, pending, realErrors, resize, SHELL_SANDBOX } from './helpers/cowork.mjs'
 const openPerTool = async (page) => {
   const d = page.locator('details[data-disclosure="per-tool-access"]')
@@ -19,7 +20,7 @@ const seed = async (grain, extra = {}) => {
 
 test('Settings → Advanced → Approvals: add rules in the UI, bad rules are refused, the tester explains, Save persists', async ({ grain }) => {
   const { page } = grain
-  await resize(grain)
+  await setNarrow(grain)
   await openAdvanced(page, 'Approvals')
   await openPerTool(page)
   const add = async (kind, text, ok = true) => {

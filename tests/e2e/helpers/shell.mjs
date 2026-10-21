@@ -70,6 +70,9 @@ export async function withSidebar(page) {
 export async function setNarrow(grain, w = 820, h = 520, { sidebar = true } = {}) {
   await setWindowSize(grain, w, h)
   await grain.page.waitForFunction(([w, h]) => Math.abs(window.outerWidth - w) <= 2 && Math.abs(window.outerHeight - h) <= 2, [w, h])
+  // the viewport itself must have the new width, and two frames must have run, before the media-query auto-fold has had its say
+  await grain.page.waitForFunction((w) => window.innerWidth <= w + 2, w)
+  await grain.page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
   await grain.page.waitForTimeout(300) // let the layout and the auto-fold settle
   if (sidebar) await withSidebar(grain.page)
   else await grain.page.waitForTimeout(300)

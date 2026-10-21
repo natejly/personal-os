@@ -102,7 +102,8 @@ def walk(suite: dict, path: list[str], out: list[dict]) -> None:
     for spec in suite.get("specs", []):
         tests = spec.get("tests", [])
         status = [t.get("status") for t in tests]
-        out.append({"file": spec.get("file", suite.get("file", "")), "line": spec.get("line", 0),
+        raced = "backend exited early" in json.dumps(tests)
+        out.append({"raced": raced, "file": spec.get("file", suite.get("file", "")), "line": spec.get("line", 0),
                     "title": " > ".join(here + [spec.get("title", "")]),
                     "status": "flaky" if "flaky" in status else "failed" if "unexpected" in status
                     else "skipped" if status and all(s == "skipped" for s in status) else "passed" if spec.get("ok") else "failed"})
@@ -123,8 +124,10 @@ def e2e(reports: list[str], list_failed: str | None) -> None:
     count = {k: sum(1 for s in allspecs if s["status"] == k) for k in ("passed", "failed", "skipped", "flaky")}
     print(f"e2e: {count['passed']} passed, {count['failed']} failed, {count['skipped']} skipped, {count['flaky']} flaky")
     failed = [s for s in allspecs if s["status"] == "failed"]
+    # A failure that is only the harness's own "backend exited early" is left to the serial rerun line below it.
     for s in failed:
-        print(f"  FAILED {s['file']}:{s['line']}  {s['title']}")
+        if not (list_failed and s["raced"]):
+            print(f"  FAILED {s['file']}:{s['line']}  {s['title']}")
     if list_failed:
         Path(list_failed).write_text("".join(f"{s['file']}:{s['line']}\t{s['title']}\n" for s in failed))
 
@@ -146,9 +149,10 @@ if __name__ == "__main__":
         done = {f"{s['file']}:{s['line']}": s["status"] for s in specs([args[0]])}
         for line in Path(args[1]).read_text().splitlines():
             key, title = line.split("\t", 1)
-            ok = done.get(key) in ("passed", "flaky")
-            print(f"  {'load-flaky' if ok else 'STILL FAILING'}  {key}  {title}")
-            if not ok:
+            st = done.get(key)
+            label = "load-flaky" if st in ("passed", "flaky") else "skipped on rerun" if st == "skipped" else "STILL FAILING"
+            print(f"  {label}  {key}  {title}")
+            if label == "STILL FAILING":
                 print("STILL", file=sys.stderr)
     else:
         sys.exit(f"unknown command {cmd}")

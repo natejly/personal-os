@@ -239,6 +239,36 @@ test('200 extra events in one week render, and a warm re-render takes under 2 se
   expect(Date.now() - t1).toBeLessThan(2000)
 })
 
+
+/** The header's direct children must each sit inside the bar and never overlap one another. */
+async function headerBoxes(page) {
+  return page.evaluate(() => {
+    const bar = document.querySelector('.page-header').getBoundingClientRect()
+    const kids = [...document.querySelector('.page-header').children].filter((el) => el.getBoundingClientRect().width > 0)
+    return { bar: { l: bar.left, r: bar.right }, boxes: kids.map((el) => { const b = el.getBoundingClientRect(); return { name: el.className || el.tagName, l: b.left, r: b.right, clipped: el.scrollWidth > el.clientWidth + 1 } }) }
+  })
+}
+function expectHeaderClean({ bar, boxes }) {
+  for (const b of boxes) { expect(b.l, b.name).toBeGreaterThanOrEqual(bar.l - 1); expect(b.r, b.name).toBeLessThanOrEqual(bar.r + 1) }
+  const sorted = [...boxes].sort((a, b) => a.l - b.l)
+  for (let i = 1; i < sorted.length; i++) expect(sorted[i].l, `${sorted[i - 1].name} / ${sorted[i].name}`).toBeGreaterThanOrEqual(sorted[i - 1].r - 1)
+}
+
+test('window at 900x600 shows the title and the primary controls without overlap', async ({ grain }) => {
+  const { page } = grain
+  await setNarrow(grain, 900, 600)
+  await openCal(grain)
+  const title = page.locator('.page-header h2')
+  const today = page.locator('.cal-nav').getByRole('button', { name: 'Today' })
+  await expect(title).toBeVisible()
+  await expect(today).toBeVisible()
+  const t = await title.boundingBox(), d = await today.boundingBox()
+  expect(t.x + t.width).toBeLessThanOrEqual(d.x + 1)
+  expect(await title.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+  expectHeaderClean(await headerBoxes(page))
+  await expect(page.getByRole('button', { name: 'New event' })).toBeInViewport()
+})
+
 test('window at 820x520 keeps the grid usable', async ({ grain }) => {
   const { page } = grain
   await setNarrow(grain, 820, 520)

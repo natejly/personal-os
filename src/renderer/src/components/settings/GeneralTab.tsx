@@ -129,7 +129,6 @@ export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { sho
       </div>
       </details>
       <Switch title="Daily recap on new chats" checked={homeModuleOn(draft, 'recap')} onChange={(on) => patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), recap: on } })} />
-      <Switch title="Start chat windows as blobs" checked={!!draft.compactChats} onChange={(compactChats) => patch({ compactChats })} />
       <TypographyControls rows value={draft.docTypography ?? {}} onChange={(t) => patch({ docTypography: { ...(draft.docTypography ?? {}), ...t } })}
           onReset={draft.docTypography && Object.keys(draft.docTypography).length ? () => patch({ docTypography: {} }) : undefined} /></Sec>
       <Sec id="notifications">

@@ -1989,8 +1989,6 @@ export interface Settings {
   deskNotify?: boolean
   /** A system notification when a reply finishes, fails or needs approval in a chat that is not in front of you. */
   chatNotify?: boolean
-  /** Spaces: a chat window shows the chat's face instead of the transcript until switched. Off by default. */
-  compactChats?: boolean
   /** A small Explain / Summarize / Verify / Ask bubble over text selected in a chat, note, mail or the page agent. Missing reads as on. */
   selectionToolbar?: boolean
   /** Interface zoom in percent, 80-160. Missing reads as 110. */

@@ -26,7 +26,6 @@
  "codingSessionMaxConcurrent": 3,
  "compactAt": 0.7,
  "compactAtTokens": 30000,
- "compactChats": false,
  "compactKeepRecent": 8,
  "compactKeepTokens": 10000,
  "contextWindow": 0,

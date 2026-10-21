@@ -20,13 +20,7 @@ Each window is a widget of one kind: `chat`, `todos`, `calendar`,
 creature, thinking while any chat answers and surprised while something waits on you; a `crew` window is a
 desk or a workflow run with the agents under it, see below). An extension can add kinds of its own: it declares `ext:<id>:<name>` under `contributes.slots["canvas.widget"]` in its manifest and registers the widget with `ui.widget`. Add one by dragging a row from the sidebar (a chat, a doc, a nav row) onto the plane,
 from the **+** on the Canvases bar, or by right-clicking the plane. Several chats can stream at once,
-each with a status ring. A chat window can also shrink to a blob: the face button in its head (or
-**Shrink to a face** in the right-click menu) folds the window to just the chat's creature with no
-frame, drag the creature to move it, click it (or **Open chat** in the menu) to grow the chat back, and
-Settings › Behavior › Canvases › **Compact chats** makes the blob the default for windows that have not
-chosen. While a blob's chat is answering, a small speech bubble beside the creature says what it is
-doing: the tool call in flight, the subagents it is waiting on, or the latest line of its thinking
-(the same line the chat's activity row shows). A `doc` window edits one Files doc in place: drag a doc from the Files tree or a project group
+each with a status ring. A `doc` window edits one Files doc in place: drag a doc from the Files tree or a project group
 onto the plane or onto a canvas row in the sidebar. Sticky notes are gone: a migration turned each one into a doc (titled from its first line) and its window into a `doc` window on the same text.
 
 Windows move, resize, minimize and maximize. The Canvases bar holds the canvas tabs (drag to reorder),

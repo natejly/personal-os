@@ -101,18 +101,11 @@ test('a subagent opens from its card, takes a message while it runs, and shows i
   await expect(page.locator('.subagent-panel')).toBeVisible()
   await page.locator('.subagent-panel').getByRole('button', { name: 'Close' }).click()
 
-  // The ring: fold the window to its face; the orchestrator sits in the middle with one child on the ring.
-  await win.getByTitle('Shrink to a face').click()
-  await expect(win.locator('.crew-sat')).toHaveCount(1)
-  await expect(win.locator('.crew-lines line')).toHaveCount(1)
-  await shot(page, 'crew-ring')
-
-  // Clicking the child opens its panel, not the chat; a message reaches it before its next turn.
-  await win.locator('.crew-sat').click()
+  // Clicking the child's row opens its panel, not the chat; a message reaches it before its next turn.
+  await row.click()
   const panel = page.locator('.subagent-panel')
   await expect(panel).toBeVisible()
   await expect(panel).toContainText('researcher')
-  await expect(win.locator('.crew-sat')).toHaveCount(1) // the blob did not unfold
   await panel.getByRole('textbox').fill('and also check the weather')
   await panel.getByRole('button', { name: 'Send' }).click()
   await expect(panel.locator('.msg.user').last()).toContainText('and also check the weather', { timeout: 30_000 })

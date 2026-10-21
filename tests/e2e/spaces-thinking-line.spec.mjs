@@ -4,8 +4,8 @@ import { enterCanvas, spaces } from './helpers/spaces.mjs'
 test.describe.configure({ timeout: 300_000 })
 
 // Raw thinking never reaches the screen: a short thought produces no summary line, so the chat shows only the
-// live "Thinking" line until the answer streams, and the shrunk blob says nothing from the chain of thought.
-test('raw thinking stays off the activity line and the blob bubble', async ({ grain }) => {
+// live "Thinking" line until the answer streams.
+test('raw thinking stays off the activity line', async ({ grain }) => {
   const { page, api } = grain
   const s = (await spaces(grain))[0]
   const c = await api('/conversations', { method: 'POST', body: { title: 'Bubble chat' } })
@@ -23,10 +23,6 @@ test('raw thinking stays off the activity line and the blob bubble', async ({ gr
   await expect(win.locator('.thinking')).toBeVisible({ timeout: 20_000 })
   await expect(reply).not.toContainText('I should look at the calendar first.')
 
-  await win.getByTitle('Shrink to a face').click()
-  await expect(win.locator('.blob-say', { hasText: 'calendar' })).toHaveCount(0) // the bubble may be absent; it must never carry the thought
-
-  await win.locator('.chat-blob').click({ timeout: 40_000 })
   await expect(win.locator('.msg.assistant').last()).toContainText('All done', { timeout: 40_000 })
   await expect(reply).not.toContainText('I should look at the calendar first.')
   expect(grain.consoleErrors).toEqual([])

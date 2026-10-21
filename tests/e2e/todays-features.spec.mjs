@@ -28,9 +28,11 @@ test('a fresh data dir shows Files, Lists, Calendar, Library, Jobs, Canvases and
 test('an appearance preset sets theme, accent and fonts together, and Save keeps it', async ({ grain }) => {
   const { page, api } = grain
   const d = await openMoreAppearance(page)
-  await d.getByRole('radiogroup', { name: 'Appearance presets' }).getByRole('radio', { name: /Terminal/ }).click()
+  const presets = d.getByRole('radiogroup', { name: 'Appearance presets' })
+  await expect(presets.getByRole('radio')).toHaveCount(2)
+  await presets.getByRole('radio', { name: /Default/ }).click()
   const attrs = () => page.evaluate(() => ({ ...document.documentElement.dataset }))
-  await expect.poll(attrs).toMatchObject({ theme: 'dark', accent: 'mint', font: 'mono', code: 'menlo' })
+  await expect.poll(attrs).toMatchObject({ theme: 'dark', accent: 'sage', font: 'system', code: 'default' })
   await d.getByRole('radiogroup', { name: 'Appearance presets' }).getByRole('radio', { name: /Paper/ }).click()
   await expect.poll(attrs).toMatchObject({ theme: 'light', accent: 'clay', font: 'serif' })
   await d.getByRole('button', { name: 'Save', exact: true }).click()

@@ -19,7 +19,7 @@ test('Spaces menu: toggle shows the plane and returns; New chat in a space opens
   await menu(grain, 'Toggle Canvases')
   await expect(page.locator('.canvas')).toBeVisible()
   await expect(page.locator('.sidebar .nav-item.active')).toHaveCount(0)
-  // (chats may start as blobs, so count the space's chat windows through the API)
+  // (count the space's chat windows through the API)
   const sp = (await spaces(grain))[0]
   const chats = async () => (await windowsOf(grain, sp.id)).filter((w) => w.kind === 'chat').length
   const before = await chats()

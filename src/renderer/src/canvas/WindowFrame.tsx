@@ -176,7 +176,7 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
             <button className="ghost-btn" title={tip('Return to canvas', 'unpopout')} onClick={() => void returnToCanvas(win.id)}>Return to canvas</button>
           </div>
         ) : (
-          <WindowHost win={win} focused={focused} live={live} onMove={locked ? undefined : onDragPointerDown} />
+          <WindowHost win={win} focused={focused} live={live} />
         )}
       </div>
 

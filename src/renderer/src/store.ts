@@ -11,7 +11,7 @@ import { markRunsSeen, withoutInboxRuns } from './lib/inboxBadge'
 import { latestAgentChat } from './lib/mentions'
 import { acceptToast } from './lib/proposalToast'
 import { installRejectionToasts } from './lib/rejections'
-import { busyText, nowText } from './lib/runStatus'
+import { busyText } from './lib/runStatus'
 import { api, backgroundStream, chatStream, getBase, getToken, setBase, type Scope } from './lib/api'
 import { applyProfileThemes, closedChrome } from './extensions/profiles'
 import { useTodos } from './extensions/todos/store'
@@ -3784,13 +3784,6 @@ export const useMessageSubagents = (convId: string | undefined, messageId: strin
   const subs = useSubagents(convId)
   return useMemo(() => Object.fromEntries(Object.entries(subs).filter(([, v]) => v.message_id === messageId)), [subs, messageId])
 }
-/** One line on what the live reply is doing (see `nowText`); null when nothing is in flight. A string, so only a change re-renders. */
-export const useNowText = (convId?: string): string | null =>
-  useStore((s) => {
-    const sess = pick(s, convId)
-    const id = sess?.streaming?.answering ? sess.streaming.messageId : null
-    return id ? nowText(sess!.conversation.messages?.find((m) => m.id === id), sess!.subagents) : null
-  })
 /** Whether the streaming reply has a named busy line (see `busyText`); a boolean so only a change re-renders. False when not streaming. */
 export const useBusy = (message: Pick<Message, 'conversation_id' | 'status' | 'tool_events' | 'content'>, streaming: boolean): boolean =>
   useStore((s) => streaming && busyText(message, { nowMs: 0, subs: pick(s, message.conversation_id)?.subagents, workers: s.workers[message.conversation_id] }) !== null)

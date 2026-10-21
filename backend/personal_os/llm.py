@@ -220,8 +220,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # A system notification when a desk needs you or finishes, while the window is not focused.
     "deskNotify": True,
     "chatNotify": True,
-    # Spaces: a chat window shows the chat's face instead of the transcript until switched.
-    "compactChats": False,
     # A floating Explain / Summarize / Verify / Ask bubble over selected text.
     "selectionToolbar": True,
     # Interface zoom, percent (80-160 in steps of 5); every window applies it as its page zoom factor.

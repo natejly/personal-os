@@ -47,8 +47,6 @@ export interface WidgetProps {
   live: boolean
   onConfig: (patch: Record<string, unknown>) => void
   onTitle: (t: string) => void
-  /** The frame's move gesture, for a body that has shed its chrome and wants to be dragged by its face. Absent on a locked space. */
-  onMove?: (e: ReactPointerEvent) => void
 }
 
 /** A kind a module owns; absent means the module list and the catalog disagree, which cannot render. */

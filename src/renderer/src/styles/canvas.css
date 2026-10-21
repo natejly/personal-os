@@ -295,18 +295,6 @@
 /* A lifted window: the float shadow while it is carried (the lean is written by useDrag as `rotate`). */
 .win.dragging { box-shadow: var(--win-glow), var(--shadow-float); }
 .win.minimized { display: none; }
-/* A chat in blob view has no rectangle: no glass, border, shadow, handles, close glyph, status glyph
-   (the creature carries the mood) or move strip -- the creature itself is the drag handle (chat.tsx
-   takes the frame's move gesture through WidgetProps.onMove). Right-click keeps every option. */
-.win:has(.chat-blob) { border: 0; border-radius: 50%; background: none; box-shadow: none; }
-/* The speech bubble hangs outside the 120px frame, so the blob's window and body stop clipping
-   (`content-visibility: auto` brings paint containment of its own, hence `visible`). */
-.win:has(.chat-blob), .win:has(.chat-blob) .win-body { overflow: visible; contain: none; content-visibility: visible; }
-.win:has(.chat-blob)::before,
-.win:has(.chat-blob)::after,
-.win:has(.chat-blob) .win-resize,
-.win:has(.chat-blob) .win-close,
-.win:has(.chat-blob) .win-move { display: none; }
 .win.maximized { border-radius: var(--win-radius-sm); }
 .win.popped { opacity: 0.55; }
 .win.selected { outline: 1.5px solid var(--accent); outline-offset: 1px; }

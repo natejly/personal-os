@@ -2,40 +2,25 @@ import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { isSideNote, isBranchNote, isClear, sinceClear } from '../../lib/workers'
 import BranchNote from '../../components/BranchNote'
 import SideNote from '../../components/SideNote'
-import { Check, MessageSquare, MessagesSquare, Pencil, Smile, SlidersHorizontal } from '../../icons'
+import { Check, MessageSquare, MessagesSquare, Pencil, SlidersHorizontal } from '../../icons'
 import DeskPanel from '../../components/DeskPanel'
 import type { Attachment, CanvasWindow, DragKind, DragPayload, Rect } from '@shared/types'
 import MessageView from '../../components/Message'
 import RegenRow from '../../components/RegenRow'
 import Composer from '../../components/Composer'
-import CrewRing from '../../components/CrewRing'
 import ChatControls from '../../components/ChatControls'
 import { api } from '../../lib/api'
 import { uploadNote } from '../../lib/uploadNote'
 import { composerKey, setDraftFiles } from '../../lib/drafts'
 import { chatBrowserSession, latestBrowserMessage } from '../../lib/browserApproval'
-import { agentHue, faceSeed, libraryAgent } from '../../lib/faces'
-import { retainSession, useChatFace, useConversation, useIsStreaming, useNowText, useStore, useStreamingMessageId, useSubagents } from '../../store'
+import { retainSession, useChatFace, useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../../store'
 import { useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
-import { useCanvas, viewport } from '../store'
-import { freeSpot, unfoldRect, type BlobConfig } from '../layout'
-import { visibleRect } from '../snapping'
+import { useCanvas } from '../store'
 import { useRingStatus } from '../useRingStatus'
 
 const ACCEPTS: DragKind[] = ['todo', 'document', 'memory', 'file']
 const DEFAULT_SIZE = { w: 520, h: 640 }
-/** Blob view: the window is just the creature, this big, with no frame around it. */
-const BLOB = { w: 120, h: 120 }
-type Size = { w: number; h: number }
-
-/** What the blob's pose means, for its tooltip; the ring's words, in the user's. */
-const BLOB_LABEL: Record<string, string> = {
-  working: 'thinking…', 'needs-approval': 'needs your approval', done: 'finished', error: 'something went wrong'
-}
-
-/** Blob view: the window's own choice, else Settings › Behavior › Compact chats. */
-const isBlob = (win: CanvasWindow, compactOn: boolean): boolean => typeof win.config.blob === 'boolean' ? win.config.blob : compactOn
 
 /** Move/resize the frame in one write (optimistic rect, debounced layout PUT) and remember something in config alongside. */
 const placeAt = (win: CanvasWindow, r: Rect, config: Record<string, unknown>): void => {
@@ -43,41 +28,6 @@ const placeAt = (win: CanvasWindow, r: Rect, config: Record<string, unknown>): v
   st.patchWindow(win.id, r)
   st.markLayoutDirty([win.id])
   void st.setWindowConfig(win.id, config)
-}
-
-/** The blob's face with the latest reply's subagents around it; clicking a child opens its transcript. */
-function ChatRing({ convId, status, title }: { convId: string; status: string; title: string }): JSX.Element {
-  const conv = useConversation(convId)
-  const latest = [...(conv?.messages ?? [])].reverse().find((m) => m.role === 'assistant')?.id // the store keeps older replies' children too
-  const kids = Object.values(useSubagents(convId)).filter((k) => k.message_id === latest)
-  const face = useChatFace(conv)
-  const openSubagent = useStore((s) => s.openSubagent)
-  const defs = useStore((s) => s.agentDefs)
-  return <CrewRing center={{ ...face, status, title }}
-    kids={kids.map((k) => ({ id: k.id, ...faceSeed({ id: k.id, agent: libraryAgent(k.role), hue: agentHue(defs, libraryAgent(k.role)) }), status: k.state, title: `${k.role}: ${k.now || k.state}` }))} onPick={openSubagent} />
-}
-
-/**
- * Fold a chat window to its blob (same top-left, old rect remembered), or grow it back: exactly where it was
- * if the blob stayed put, else at the blob's new spot, nudged clear of neighbours.
- */
-/** The blob's speech bubble: what the reply is doing right now, beside the face only while something is in flight. */
-function BlobSay({ convId }: { convId: string }): JSX.Element | null {
-  const now = useNowText(convId)
-  return now ? <span className="blob-say" role="status">{now}</span> : null
-}
-
-const setBlob = (win: CanvasWindow, on: boolean): void => {
-  if (on) {
-    placeAt(win, { x: win.x, y: win.y, ...BLOB }, { blob: true, restore: { x: win.x, y: win.y, w: win.w, h: win.h }, blobAt: { x: win.x, y: win.y } })
-    return
-  }
-  const st = useCanvas.getState()
-  const cfg = win.config as BlobConfig & { full_size?: Size }
-  const bounds = visibleRect(viewport())
-  const grown = unfoldRect(win, cfg.restore ? cfg : { ...cfg, restore: undefined }, cfg.full_size ?? DEFAULT_SIZE, bounds)
-  const others = (st.canvases[win.canvas_id]?.windows ?? []).filter((w) => w.id !== win.id && (w.state === 'normal' || w.state === 'maximized'))
-  placeAt(win, freeSpot(grown, others, bounds), { blob: false, restore: null, blobAt: null })
 }
 
 /**
@@ -161,7 +111,7 @@ const ChatTitle = ({ convId, title, actions }: { convId: string; title: string; 
   )
 }
 
-function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProps): JSX.Element {
+function ChatWidget({ window: win, live, onConfig, onTitle }: WidgetProps): JSX.Element {
   const convId = win.ref_id ?? ''
   const root = useRef<HTMLDivElement>(null)
   const scroll = useRef<HTMLDivElement>(null)
@@ -178,20 +128,12 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
   const { status } = useRingStatus(convId)
   const panelOn = useCanvas((s) => !!s.chatPanels[win.id])
   const toggleChatPanel = useCanvas((s) => s.toggleChatPanel)
-  // Blob view: the window shows only this chat's creature, posed by this chat's own state. A window
-  // that has never chosen follows Settings › Behavior › Compact chats; the head's button overrides it.
-  const compactOn = useStore((s) => !!s.settings.compactChats)
-  const blob = isBlob(win, compactOn)
-  // Where the blob was pressed: a press that travels is a drag, one that stays is the click that opens.
-  const pressed = useRef<{ x: number; y: number } | null>(null)
-
-  // The frame follows the view. The buttons resize as they switch (setBlob); this catches the rest: the
-  // setting flipping with windows already on the space, or a window that arrives at the wrong size.
+  // A window an older version folded to a blob (120px, config.blob) grows back to the rect it had.
   useEffect(() => {
-    if (!convId) return
-    if (blob && win.h > BLOB.h) setBlob(win, true)
-    else if (!blob && win.h <= BLOB.h) setBlob(win, false)
-  }, [blob, win.h])
+    if (win.config.blob !== true) return
+    const r = win.config.restore as Rect | undefined
+    placeAt(win, r ?? { x: win.x, y: win.y, ...DEFAULT_SIZE }, { blob: false, restore: null, blobAt: null })
+  }, [win.config.blob])
 
   // An on-screen window is not an LRU victim for as long as it is mounted.
   useEffect(() => (convId ? retainSession(convId) : undefined), [convId])
@@ -297,23 +239,6 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
     )
   }
 
-  // Blob view: the creature alone, in a frame the CSS strips bare, posed by the same status the ring
-  // shows (thinking while working, surprised when it needs you, happy for a moment when done, sad on
-  // an error). It is cheap, so it stays up and keeps its pose off-screen too.
-  if (blob) {
-    return (
-      <button className="chat-blob" title={`${convo?.title || 'Chat'} · ${BLOB_LABEL[status] ?? 'click to open, drag to move'}`}
-        onPointerDown={(e) => { pressed.current = { x: e.clientX, y: e.clientY }; onMove?.(e) }}
-        onClick={(e) => {
-          const p = pressed.current
-          if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) < 4) setBlob(win, false)
-        }}>
-        <ChatRing convId={convId} status={status} title={convo?.title || 'Chat'} />
-        <BlobSay convId={convId} />
-      </button>
-    )
-  }
-
   // Off-screen, minimized or zoomed out: the message list unmounts, so streamed tokens stop
   // re-rendering it, while the ring stays mounted and the session keeps running.
   if (!live) {
@@ -330,7 +255,6 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
     <>
       <ChatSwitcher win={win} convId={convId} />
       <button className={`icon-btn ghost xs${panelOn ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={panelOn} onClick={() => toggleChatPanel(win.id)}><SlidersHorizontal size={11} /></button>
-      <button className="icon-btn ghost xs" title="Shrink to a face" aria-label="Shrink to a face" onClick={() => setBlob(win, true)}><Smile size={11} /></button>
     </>
   )
 
@@ -368,10 +292,6 @@ export const def: WidgetDef = {
   chrome: 'full',
   statusful: true,
   needsRef: true,
-  menu: (win) =>
-    isBlob(win, !!useStore.getState().settings.compactChats)
-      ? [{ label: 'Open chat', icon: <MessageSquare size={14} />, run: () => setBlob(win, false) }]
-      : [{ label: 'Shrink to a face', icon: <Smile size={14} />, run: () => setBlob(win, true) }],
   accepts: ACCEPTS,
   Component: ChatWidget
 }

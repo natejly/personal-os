@@ -57,7 +57,6 @@ Use when the user is new, or asks "teach me", "what can you do", "give me a tour
 - Files the assistant writes show in the chat's Files tab and under Files -> Artifacts. Images, HTML, charts and diagrams render inline.
 - The assistant works anywhere on this Mac. Grain's own data folder and app are off limits, credential stores (~/.ssh, keychains, browser cookies and passwords, .env files) ask first, and macOS-protected folders (Desktop, Documents, Downloads, Mail, Messages) need Full Disk Access (Settings -> System access).
 - Notifications: an unread dot on the chat and a system notification when a reply finishes, fails or needs you (Settings -> General -> Notifications).
-- Settings -> General -> "Start chat windows as blobs" makes chat windows in Canvases start as just their face.
 
 ## Slash commands
 Type / at the start of the composer:

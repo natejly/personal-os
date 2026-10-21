@@ -20,10 +20,10 @@ trailer<</Root 1 0 R>>`
 
 const panel = (page) => page.getByRole('complementary', { name: 'Side panel' })
 const showTool = (page, args) => say(page, '!!tool show ' + JSON.stringify(args))
-/** A `show` call needs nothing from the user, so its row is folded under the reply's "1 tool call" line. */
+/** A `show` call carries a side-panel link, so its row is never grouped. */
 async function openFold(page) {
   const last = page.locator('.msg.assistant').last()
-  // A run of plain tool rows folds into a group; open it when it is folded. A row with its own card is shown as is.
+  // Two or more finished calls of one tool fold into a group; open it when it is folded.
   const folded = last.locator('.tool-group > .tool-head[aria-expanded="false"]')
   if (await folded.count()) await folded.first().click()
   return last.locator('.tool-event').last()

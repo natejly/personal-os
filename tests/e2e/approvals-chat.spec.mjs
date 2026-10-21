@@ -59,6 +59,7 @@ test('Deny records a rejection and nothing runs; Deny with a note reaches the mo
     // second call, denied with a note: the note is in what the model is told
     await say(page, touch(ws, 'nope2.txt'))
     await expect(card(page)).toBeVisible({ timeout: 60_000 })
+    await card(page).getByRole('button', { name: 'Always allow' }).click()
     await card(page).getByRole('button', { name: 'Deny with a note…' }).click()
     await page.getByRole('textbox', { name: 'Note to the model' }).fill('use the other folder')
     await page.getByRole('button', { name: 'Deny and send' }).click()
@@ -77,7 +78,9 @@ test('always allow in this chat: grant listed in Settings, next call runs withou
     await newChat(page)
     await say(page, touch(ws, 'a1.txt'))
     await expect(card(page)).toBeVisible({ timeout: 60_000 })
-    await card(page).getByRole('button', { name: 'in this chat' }).click()
+    await card(page).getByRole('button', { name: 'Always allow' }).click()
+    await expect(card(page).getByRole('button', { name: 'Always allow' })).toHaveAttribute('aria-expanded', 'true')
+    await card(page).getByRole('button', { name: 'This chat', exact: true }).click()
     await expect(page.locator('.msg.assistant').last()).toContainText('MOCK: tool done', { timeout: 60_000 })
     expect(existsSync(join(ws, 'a1.txt'))).toBe(true)
     const g = await grain.api('/permissions/grants')
@@ -110,7 +113,8 @@ test('always allow with a saved rule: rule appears in settings and skips the car
     await newChat(page)
     await say(page, touch(ws, 'r1.txt'))
     await expect(card(page)).toBeVisible({ timeout: 60_000 })
-    await card(page).getByRole('button', { name: /^for Bash\(touch/ }).click()
+    await card(page).getByRole('button', { name: 'Always allow' }).click()
+    await card(page).getByRole('button', { name: /^For Bash\(touch/ }).click()
     await expect(page.locator('.msg.assistant').last()).toContainText('MOCK: tool done', { timeout: 60_000 })
     const rules = (await grain.api('/settings')).permissionRules
     expect(rules.allow).toContain('Bash(touch *)')
@@ -151,7 +155,7 @@ test('a forced approval is never bypassed by allow rules or chat grants', async 
     const [row] = await pending(grain)
     expect(row.forced).toBe(true)
     // forced cards offer no standing grants
-    await expect(card(page).getByRole('button', { name: 'in this chat' })).toHaveCount(0)
+    await expect(card(page).getByRole('button', { name: 'Always allow' })).toHaveCount(0)
     expect(existsSync(join(ws, 'u.txt'))).toBe(false)
     // the API refuses to turn it into a rule
     const r = await grain.api(`/approvals/${encodeURIComponent(row.call_id)}`, { method: 'POST', body: { decision: 'always_rule', rules: ['Bash(touch *)'] }, raw: true })

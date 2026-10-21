@@ -27,7 +27,7 @@ export function GenericBody({ event }: { event: ToolEvent }): JSX.Element {
 
 /**
  * The approval for a call with no dedicated card: a plain-language statement of what will happen, the arguments
- * as a list, and one action row (ApprovalRules): Approve / Deny, a note, and the standing grants.
+ * as a list, and one action row (ApprovalRules): Approve / Deny / Always allow.
  */
 export function GenericApproval({ event, conversationId, decide, onWhy }: {
   event: ToolEvent
@@ -55,7 +55,7 @@ export function GenericApproval({ event, conversationId, decide, onWhy }: {
         <b>{d.verb}</b>{label ?? d.subject ? <> {label ?? d.subject}</> : null}
         {event.forced && (tainted
           ? <> <span className="muted small">Read untrusted content this reply.</span>{onWhy && <>{' '}<button type="button" className="link small" onClick={onWhy}>See why</button></>}</>
-          : <> <span className="muted small">Always asks.</span></>)}
+          : null)}
       </div>
       {connector && (
         <div className="tc-origin small muted">

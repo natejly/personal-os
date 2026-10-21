@@ -6,7 +6,7 @@ test.describe.configure({ timeout: 240_000 })
 test('new chat button and ⌘N both reach an empty composer; empty send is disabled', async ({ grain }) => {
   const { page } = grain
   await newChat(page)
-  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  await expect(page.locator('.empty-state')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled()
   await msgBox(page).fill('   ')
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled()

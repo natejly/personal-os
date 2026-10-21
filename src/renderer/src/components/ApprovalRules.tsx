@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { askLocked, type ApprovalDecision, type ToolEvent } from '@shared/types'
 import { useStore } from '../store'
 import { allowHostOf } from '../lib/browserApproval'
+import PopMenu from './PopMenu'
 
-/** The action rows of an ask card: why it asked, Approve / Deny (only when `decide` is given; a dedicated card
- *  has its own), then one quiet "Don't ask again" line holding the grants: "in this chat", and the rules it can
- *  save (editable, shown verbatim) or else "in every chat", plus a denial with a note to the model. Forced cards
+/** The action row of an ask card: Approve / Deny (only when `decide` is given; a dedicated card has its own),
+ *  then one "Always allow" menu holding every standing grant: "this chat", the rules it can save (editable, shown
+ *  verbatim) or else "every chat", the host allow-list, and a denial with a note to the model. Forced cards
  *  (taint, plan mode, a repeated call) and external writes get no whole-tool grant; a forced card saves no rule
- *  either: the backend would answer it once anyway. */
+ *  either: the backend would answer it once anyway. A card with nothing to grant keeps only the note link. */
 export default function ApprovalRules({ event, conversationId, decide }: {
   event: ToolEvent
   conversationId: string
@@ -23,7 +24,7 @@ export default function ApprovalRules({ event, conversationId, decide }: {
   const [busy, setBusy] = useState(false)
   const canSave = !event.forced && rules.length > 0
   const wholeTool = !event.forced && !askLocked(tool ?? perm?.danger)
-  const host = event.forced ? allowHostOf(event.arguments) : ''
+  const host = event.forced && decide ? allowHostOf(event.arguments) : ''
   const anyGrant = wholeTool || canSave
   const run = (fn: () => Promise<void>) => async (): Promise<void> => {
     if (busy) return
@@ -32,14 +33,14 @@ export default function ApprovalRules({ event, conversationId, decide }: {
   }
   const grant = (d: ApprovalDecision, extra?: { rules: string[] }) => run(() => approveTool(event.id, d, conversationId, extra))
 
+  const rulesArg = { rules: rules.map((r) => r.trim()).filter(Boolean) }
+  const warning = perm?.kind === 'destructive' ? `Irreversible${perm.subject ? `: ${perm.subject}` : ''}`
+    : perm?.kind === 'external_directory' ? 'Protected location' : ''
+  const menu = anyGrant || !!host
+
   return (
-    <div className="approval-rules">
-      {event.review?.verdict === 'ask' && <p className="muted small">Review: {event.review.reason}</p>}
-      {perm?.kind === 'doom_loop' && <p className="muted small">Same call three times in a row</p>}
-      {perm?.kind === 'opaque' && <p className="muted small">Cannot be matched against rules</p>}
-      {perm?.kind === 'destructive' && <p className="muted small">Irreversible{perm.subject ? `: ${perm.subject}` : ''}</p>}
-      {perm?.kind === 'external_directory' && <p className="muted small">Protected location</p>}
-      {perm?.rule && perm.kind === 'rule' && <p className="muted small">Rule <code>{perm.rule}</code></p>}
+    <div className="approval-rules" data-testid="approval-rules">
+      {warning && <p className="muted small approval-warning">{warning}</p>}
       {canSave && editRule && (
         <div className="approval-rule-list">
           {rules.map((r, i) => (
@@ -50,32 +51,30 @@ export default function ApprovalRules({ event, conversationId, decide }: {
           ))}
         </div>
       )}
-      {decide && (
-        <div className="approval-actions">
-          <button type="button" className="primary-btn" disabled={busy} title="Approve (⌘↵)" onClick={() => void run(() => decide(true))()}>Approve</button>
-          <button type="button" className="ghost-btn danger" disabled={busy} onClick={() => void run(() => decide(false))()}>Deny</button>
-          {host && <button type="button" className="ghost-btn" disabled={busy} title="Approve and add this host to Allowed hosts"
-            onClick={() => void grant('allow_host')()}>Allow {host} from now on</button>}
-        </div>
-      )}
-      <div className="approval-more">
-        {anyGrant && <span className="approval-more-label">Don&apos;t ask again:</span>}
-        {wholeTool && (
-          <button type="button" className="link" disabled={busy} title="Always allow this tool in this chat"
-            onClick={() => void grant('always_chat')()}>in this chat</button>
+      <div className="approval-actions">
+        {decide && (<>
+          <button type="button" className="primary-btn" disabled={busy} title="Approve (⌘↵)" data-testid="approval-approve" onClick={() => void run(() => decide(true))()}>Approve</button>
+          <button type="button" className="ghost-btn danger" disabled={busy} data-testid="approval-deny" onClick={() => void run(() => decide(false))()}>Deny</button>
+        </>)}
+        {menu ? (
+          <PopMenu className="ghost-btn" label="Always allow" disabled={busy} data-testid="approval-always">
+            {(close) => (<>
+              {wholeTool && <button type="button" className="pop-menu-item" onClick={() => { close(); void grant('always_chat')() }}>This chat</button>}
+              {canSave ? (<>
+                <button type="button" className="pop-menu-item" onClick={() => { close(); void grant('always_rule', rulesArg)() }}>
+                  For {rules.length === 1 ? <code>{rules[0]}</code> : `these ${rules.length} rules`}
+                </button>
+                {!editRule && <button type="button" className="pop-menu-item" onClick={() => { close(); setEditRule(true) }}>Edit rule</button>}
+              </>) : wholeTool && (
+                <button type="button" className="pop-menu-item" onClick={() => { close(); void grant('always_global')() }}>Every chat</button>
+              )}
+              {host && <button type="button" className="pop-menu-item" onClick={() => { close(); void grant('allow_host')() }}>Allow {host} from now on</button>}
+              {!noting && <button type="button" className="pop-menu-item" onClick={() => { close(); setNoting(true) }}>Deny with a note…</button>}
+            </>)}
+          </PopMenu>
+        ) : !noting && (
+          <button type="button" className="link approval-deny-note" disabled={busy} onClick={() => setNoting(true)}>Deny with a note…</button>
         )}
-        {canSave ? (<>
-          <button type="button" className="link" disabled={busy} title="Save and always allow what matches"
-            onClick={() => void grant('always_rule', { rules: rules.map((r) => r.trim()).filter(Boolean) })()}>
-            for {rules.length === 1 ? <code>{rules[0]}</code> : `these ${rules.length} rules`}
-          </button>
-          {!editRule && <button type="button" className="link" disabled={busy} onClick={() => setEditRule(true)}>Edit rule</button>}
-        </>
-        ) : wholeTool && (
-          <button type="button" className="link" disabled={busy} title="Always allow this tool, in every chat"
-            onClick={() => void grant('always_global')()}>in every chat</button>
-        )}
-        {!noting && <button type="button" className="link approval-deny-note" disabled={busy} title="Deny with a note to the model" onClick={() => setNoting(true)}>Deny with a note…</button>}
       </div>
       {noting && (
         <form className="approval-actions" onSubmit={(e) => { e.preventDefault(); void run(() => approveTool(event.id, 'deny', conversationId, { note: note.trim() || undefined }))() }}>

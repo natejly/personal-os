@@ -73,17 +73,3 @@ export function reduce(s: WizardState, a: WizardAction, provider?: ProviderPrese
     }
   }
 }
-
-/** Chats offered on the empty screen right after setup. Google ones are left out until it is connected: they would only error,
- *  and a turned-off Lists, Calendar or Mail drops the prompt that needs it. */
-export function firstPrompts(googleConnected: boolean, hiddenViews: string[] = []): string[] {
-  const on = (v: string): boolean => !hiddenViews.includes(v)
-  return [
-    'What can you do? Give me a quick tour.',
-    'Ask me a few questions so you can get to know me.',
-    ...(googleConnected && on('calendar') ? ['What is on my calendar today, and what should I prepare for?'] : []),
-    ...(googleConnected && on('mail') ? ['Summarize the mail I have not read yet.'] : []),
-    ...(!googleConnected && on('todos') ? ['Put three things on my todo list for today.'] : []),
-    ...(!googleConnected || !on('calendar') && !on('mail') ? ['Search the web and tell me something new in my field.'] : [])
-  ]
-}

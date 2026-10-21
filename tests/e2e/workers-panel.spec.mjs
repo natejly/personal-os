@@ -18,8 +18,11 @@ test('a delegated worker shows in the Workers panel of the main chat view', asyn
     { text: 'On it.', delay: 20_000 }, { text: 'Found it.', delay: 20_000 })
   await newChat(page)
   await say(page, 'please look something up in the background')
+  // The transcript carries one "Workers N" line; the panel itself lives on the side panel's Context tab.
+  await expect(page.getByTestId('workers-line')).toHaveText('Workers 1', { timeout: 30_000 })
+  await page.getByTestId('workers-line').click()
   const panel = page.locator('section.worker-panel')
-  await expect(panel).toBeVisible({ timeout: 30_000 })
+  await expect(panel).toBeVisible()
   await expect(panel).toContainText('Alpha job')
   // A worker's row unfolds to its chat: the main agent's task, labelled, then its reply.
   await panel.locator('.worker-open', { hasText: 'Alpha job' }).click()

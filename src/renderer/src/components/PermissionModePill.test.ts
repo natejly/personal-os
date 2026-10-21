@@ -13,16 +13,12 @@ const pill = (settings: Partial<Settings>): string => {
   return renderToStaticMarkup(createElement(PermissionModePill))
 }
 
-test('Allow everything only turns the mode pill red: same single button, no extra pill', () => {
+test('the mode pill shows only under Allow everything: one red button; other modes live in the chat options menu', () => {
   const on = pill({ permissionMode: 'allow_all', allowAllConnections: true })
-  const off = pill({ permissionMode: 'auto', allowAllConnections: true })
   assert.match(on, /class="ghost-btn skip-perms on"/)
-  assert.doesNotMatch(off, /skip-perms on/)
-  for (const html of [on, off]) {
-    assert.equal(html.match(/<button/g)?.length, 1)
-    assert.doesNotMatch(html, /All domains|data-allow-all-connections/)
-    assert.match(html, /viewBox="0 0 256 256"/) // the same icon in every mode: no alert icon under Allow everything
-  }
+  assert.equal(on.match(/<button/g)?.length, 1)
+  assert.doesNotMatch(on, /All domains|data-allow-all-connections/)
+  for (const mode of ['auto', 'manual'] as const) assert.equal(pill({ permissionMode: mode, allowAllConnections: true }), '')
   const css = readFileSync('src/renderer/src/styles.css', 'utf8').match(/\.ghost-btn\.skip-perms\.on \{([^}]*)\}/)?.[1] ?? ''
   assert.match(css, /color: var\(--danger\)/)
   assert.doesNotMatch(css, /color-mix|font-weight/)

@@ -75,7 +75,7 @@ test('rules in the chat: allow skips the card, ask forces it even when the tool 
 
     await say(page, touch(ws, 'touch asked.txt'))
     await expect(card(page)).toBeVisible({ timeout: 90_000 })
-    await expect(card(page)).toContainText('Bash(touch ask*)')
+    await expect(card(page).getByTestId('approval-always')).toBeVisible()
     expect(existsSync(join(ws, 'asked.txt'))).toBe(false)
     await card(page).getByRole('button', { name: 'Deny', exact: true }).click()
     await expect.poll(async () => (await pending(grain)).length).toBe(0)
@@ -96,7 +96,7 @@ test('the opaque and the hardline cases: substitutions always ask, rm -rf / is r
     await newChat(page)
     await say(page, touch(ws, 'touch $(echo sub).txt'))
     await expect(card(page)).toBeVisible({ timeout: 90_000 })
-    await expect(card(page)).toContainText('Cannot be matched against rules')
+    await expect(card(page).getByRole('button', { name: 'Approve', exact: true })).toBeVisible()
     await card(page).getByRole('button', { name: 'Deny', exact: true }).click()
     await expect.poll(async () => (await pending(grain)).length).toBe(0)
     await say(page, touch(ws, 'rm -rf /'))

@@ -40,7 +40,7 @@ export default function DeskApprovalCard({ approval, conversationId, event }: {
   const Card = TOOL_CARDS[ev.name]
   return (
     <div className="desk-approval">
-      {Card ? <><Card event={ev} pending decide={decide} conversationId={conversationId} /><ApprovalRules event={ev} conversationId={conversationId} /></>
+      {Card ? <Card event={ev} pending decide={decide} conversationId={conversationId} rules={<ApprovalRules event={ev} conversationId={conversationId} />} />
         : <GenericApproval event={ev} conversationId={conversationId} decide={(ok) => decide(ok)} />}
     </div>
   )
@@ -121,11 +121,11 @@ function BrowserApproval({ event, decide, conversationId }: {
       <header className="desk-approval-head"><Globe size={14} /><b title={handoff ? 'Finish in the browser window, then press “Hand back”' : undefined}>{handoff ? 'The browser needs you' : 'The browser is asking'}</b></header>
       <p className="desk-approval-sentence">{s.before}{s.host && <strong className="desk-approval-host">{s.host}</strong>}{s.after}</p>
       <div className="approval-actions">
-        <button type="button" className="primary-btn" disabled={busy} onClick={() => void go(true)}>{browserAllowLabel(event.arguments)}</button>
-        <button type="button" className="ghost-btn danger" disabled={busy} onClick={() => void go(false)}>{handoff ? 'Cancel' : 'Deny'}</button>
+        <button type="button" className="primary-btn" data-testid="approval-approve" disabled={busy} onClick={() => void go(true)}>{browserAllowLabel(event.arguments)}</button>
+        <button type="button" className="ghost-btn danger" data-testid="approval-deny" disabled={busy} onClick={() => void go(false)}>{handoff ? 'Cancel' : 'Deny'}</button>
+        <ApprovalRules event={event} conversationId={conversationId} />
       </div>
       <ArgDetails event={event} />
-      <ApprovalRules event={event} conversationId={conversationId} />
     </div>
   )
 }

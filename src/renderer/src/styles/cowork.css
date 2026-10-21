@@ -273,8 +273,6 @@
 }
 @media (prefers-reduced-motion: no-preference) { .side-tab { transition: color 0.12s ease, background 0.12s ease; } }
 .desk-close { flex: none; }
-.desk-panel > .side-panel-lead { flex: none; max-height: 34%; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px 16px 0; }
-.desk-panel > .side-panel-lead:empty { display: none; }
 .desk-panel .plan-panel { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg); font-size: var(--fs-md); line-height: 1.35; }
 
 /* The tab strip: one row of tabs (scrolling sideways when there are more than fit) and the close button. */
@@ -369,3 +367,5 @@
 .ctx-traces-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 0; border: 0; background: transparent; color: var(--text-muted); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; }
 .ctx-traces-head:hover { color: var(--text); }
 .ctx-traces .traces-pane { margin: 8px -14px -12px; }
+.workers-line { align-self: flex-start; margin: 0 16px 4px; padding: 2px 4px; background: none; border: 0; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.workers-line:hover { color: var(--text); }

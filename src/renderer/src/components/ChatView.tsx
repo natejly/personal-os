@@ -1,24 +1,19 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { isSideNote, isBranchNote, isClear, sinceClear } from '../lib/workers'
+import { isSideNote, isBranchNote, isClear, sinceClear, liveWorkerCount } from '../lib/workers'
 import BranchNote from '../components/BranchNote'
 import SideNote from '../components/SideNote'
 import { Pencil, Sparkles, ArrowDown, PanelRight } from '../icons'
-import { useStore, useProject, useChatFace, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
+import { useStore, useProject, useChatFace, useConversation, useWorkers, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
 import MessageView, { PendingUserMessage, Thinking } from './Message'
 import RegenRow from './RegenRow'
 import FindBar from './FindBar'
 import Composer from './Composer'
 import ChatControls from './ChatControls'
 import DuelPanel from './DuelPanel'
-import WorkersPanel from './WorkersPanel'
-import ProgressCard from './ProgressCard'
 import ShowPanel from './ShowPanel'
 import ChatFilesButton from './ChatFilesPanel'
 import AppSwitcher from './AppSwitcher'
 import SidebarToggle from './SidebarToggle'
-import { useOnboarding } from './onboarding/onboardingStore'
-import { firstPrompts } from './onboarding/steps'
-import { pimConnected } from '../lib/pim'
 import { useStickToBottom } from '../lib/stickToBottom'
 import { dayKey, dayLabel } from '../lib/chatMeta'
 import { chatBrowserSession, deskBrowserSession, latestBrowserMessage } from '../lib/browserApproval'
@@ -28,14 +23,6 @@ import Face from './Face'
 import DailyRecap from './DailyRecap'
 import TelegramIcon from './TelegramIcon'
 import { chatLabel, isTelegramChat } from '../lib/chatRows'
-
-function greeting(): string {
-  const h = new Date().getHours()
-  if (h < 5) return 'Burning the midnight oil?'
-  if (h < 12) return 'Good morning.'
-  if (h < 18) return 'Good afternoon.'
-  return 'Good evening.'
-}
 
 /** `conversationId` is omitted in classic mode, where the focused session is the only one on screen. */
 export default function ChatView({ conversationId }: { conversationId?: string }): JSX.Element {
@@ -55,13 +42,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const toggleContext = useStore((s) => s.toggleContext)
   const renameChat = useStore((s) => s.renameChat)
   const retitleChat = useStore((s) => s.retitleChat)
-  const send = useStore((s) => s.send)
-  const showFirstPrompts = useOnboarding((s) => s.firstPrompts && !conversationId)
-  const pimOn = useStore(pimConnected)
-  const hiddenViews = useStore((s) => s.settings.hiddenViews)
-  const setFirstPrompts = useOnboarding((s) => s.setFirstPrompts)
-  // The chips are for the first empty chat only; once any conversation is open they are spent.
-  useEffect(() => { if (conversationId) setFirstPrompts(false) }, [conversationId, setFirstPrompts])
+  const liveWorkers = liveWorkerCount(useWorkers(convo?.id))
   const scrollRef = useRef<HTMLDivElement>(null)
   const [editingTitle, setEditingTitle] = useState(false)
   // The side panel (the `show` tool, or "Open in panel" on a block) belongs to this chat alone.
@@ -74,6 +55,11 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const openDesk = useStore((s) => s.openDesk)
   const markDeskSeen = useStore((s) => s.markDeskSeen)
   const deskPanel = useStore((s) => s.deskPanel)
+  // Workers and the checklist live on the side panel's Context tab; this opens it there.
+  const openWorkspace = (): void => {
+    if (conversationId) useStore.setState({ contextOpen: true })
+    else useStore.setState((st) => ({ contextOpen: false, deskPanel: true, deskTabRequest: { tab: 'context', n: (st.deskTabRequest?.n ?? 0) + 1, at: Date.now() } }))
+  }
   const setDeskPanel = useStore((s) => s.setDeskPanel)
   // The side panel: the full-window chat's Workspace column (it also hosts the step card and workers), or, in a canvas chat window, the same panel opened by the context request.
   const panelOn = conversationId ? contextOpen : (deskPanel || contextOpen)
@@ -159,14 +145,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           <div className="messages" ref={scrollRef}>
             {!convo && !draftPending ? (
               <div className="empty-state">
-                <h1>{greeting()}</h1>
                 {project && <p>New chat in {project.name}</p>}
                 {!conversationId && !project && <DailyRecap />}
-                {showFirstPrompts && (
-                  <div className="ob-first-prompts" role="group" aria-label="Things to try">
-                    {firstPrompts(pimOn, hiddenViews).map((t) => <button key={t} className="ghost-btn" onClick={() => { setFirstPrompts(false); void send(t, conversationId) }}>{t}</button>)}
-                  </div>
-                )}
               </div>
             ) : (
               <div className="messages-inner" role="log" aria-label="Conversation">
@@ -196,8 +176,9 @@ export default function ChatView({ conversationId }: { conversationId?: string }
               <ArrowDown size={13} /> Jump to latest{unseen > 0 && <span className="jump-count">{unseen > 99 ? '99+' : unseen}</span>}
             </button>
           )}
-          {panelOn ? null : <><WorkersPanel conversationId={conversationId} />
-          <ProgressCard conversationId={conversationId} desk={desk} /></>}
+          {liveWorkers > 0 && (
+            <button type="button" className="workers-line" data-testid="workers-line" onClick={openWorkspace}>Workers {liveWorkers}</button>
+          )}
           <Composer conversationId={conversationId} footer={<ChatControls conversationId={conversationId} />} />
         </div>
         {showing && <ShowPanel conversationId={showKey} />}

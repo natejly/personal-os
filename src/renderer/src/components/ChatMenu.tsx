@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
 import type { RuntimeSelection, RuntimeSlot } from '@shared/types'
-import { SlidersHorizontal } from '../icons'
+import { MoreHorizontal } from '../icons'
 import { api } from '../lib/api'
 import { confirmDiff, pickedId, slotNoun } from '../lib/runtime'
 import PopMenu from './PopMenu'
+import { useStore } from '../store'
+import { useChatPermissionMode } from './PermissionMode'
+import { pillLabel } from '../lib/permissionMode'
 
 interface Asked { slot: string; value: RuntimeSelection; diff: string[] }
 
@@ -50,12 +53,21 @@ function ChatRuntime({ conversationId, projectId }: { conversationId: string; pr
   )
 }
 
-/** The chat's runtime menu: which provider fills each swappable seam (for now the agent loop) for this chat alone. Settings > Runtime
-    holds the same choice for a project or everywhere. */
-export default function RuntimeMenu({ conversationId, projectId }: { conversationId: string; projectId: string | null }): JSX.Element {
+/**
+ * The chat's options menu beside the model chip: the permission mode (opens Settings) and, once the chat exists, which provider
+ * fills each swappable seam (for now the agent loop) for this chat alone. Settings > Runtime holds the same choice for a project or everywhere.
+ */
+export default function ChatMenu({ conversationId, projectId }: { conversationId?: string; projectId?: string | null }): JSX.Element {
+  const mode = useChatPermissionMode(conversationId ?? null)
+  const openSettings = useStore((s) => s.openSettings)
   return (
-    <PopMenu className="ghost-btn" title="Runtime for this chat" aria-label="Runtime for this chat" label={<SlidersHorizontal size={13} aria-hidden />}>
-      {() => <ChatRuntime conversationId={conversationId} projectId={projectId} />}
+    <PopMenu className="ghost-btn chat-menu" title="Chat options" aria-label="Chat options" data-testid="chat-menu" label={<MoreHorizontal size={14} aria-hidden />}>
+      {(close) => (
+        <>
+          <button type="button" className="pop-menu-item" data-testid="chat-menu-permissions" onClick={() => { close(); openSettings('permissions') }}>Permissions: {pillLabel(mode)}</button>
+          {conversationId && <ChatRuntime conversationId={conversationId} projectId={projectId ?? null} />}
+        </>
+      )}
     </PopMenu>
   )
 }

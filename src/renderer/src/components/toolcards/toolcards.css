@@ -6,7 +6,18 @@
 .tc-card:focus-within { border-color: var(--border-strong); }
 .tc-card.awaiting:focus-within { border-color: var(--accent); }
 
-.tc-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.tc-head { padding: 0; }
+.tc-head.open { border-bottom: 1px solid var(--border); }
+.tc-toggle { width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 10px; min-width: 0; background: none; border: 0; color: inherit; font: inherit; text-align: left; border-radius: var(--r-lg); }
+button.tc-toggle { cursor: pointer; }
+button.tc-toggle:hover { background: var(--hover); }
+button.tc-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+div.tc-toggle { padding: 8px 12px; flex-wrap: wrap; }
+.tc-chev { flex-shrink: 0; color: var(--text-faint); transition: transform 0.15s; }
+.tc-chev.rot90 { transform: rotate(90deg); }
+.tc-toggle .tool-ms { margin-left: 0; flex-shrink: 0; }
+/* A finished or running call at rest is one quiet line, like the generic rows; a waiting or failed one keeps its box. */
+.tool-event.tc-card.collapsed:not(.awaiting):not(.error) { border-color: transparent; background: none; }
 .tc-icon { display: inline-flex; color: var(--accent); flex-shrink: 0; }
 .tc-title { font-size: 13px; font-weight: 600; }
 .tc-subject { color: var(--text-muted); min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -169,3 +180,9 @@
 .tc-trace-summary { margin-top: 6px; }
 .tc-trace-toggle { margin-top: 4px; padding: 0; border: 0; background: none; color: var(--text-muted); font-size: 11px; cursor: pointer; }
 .tc-trace-toggle:hover { color: var(--text); }
+
+/* pending write-file card: path, mode and size on one line, with Diff and Edit toggles */
+.tc-filebar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.tc-filepath { flex: 1 1 120px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-filebar .tc-more { position: relative; padding: 0 2px; }
+.tc-diff .tc-add { display: block; color: var(--ok); }

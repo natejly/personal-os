@@ -173,5 +173,6 @@ export async function launchSupervised({ settings = {} } = {}) {
 /** The agent inbox from the command palette: the title-bar icon only shows while the inbox has items. */
 export async function openInboxFromPalette(grain) {
   await menu(grain, 'Command Palette…')
+  await grain.page.getByPlaceholder('Go to, create, open…').fill('Agent inbox')
   await grain.page.getByRole('option', { name: /Agent inbox and jobs/ }).click()
 }

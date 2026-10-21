@@ -45,7 +45,7 @@ export function activate(ui: UiApi): void {
   })
   ui.settingsPanel({ id: 'recipes', label: 'Coding recipes', keys: 'recipe coding', Component: RecipesPanel })
   ui.command({
-    id: 'run-recipe', label: 'Run coding recipe...', hint: 'Coding',
+    id: 'run-recipe', label: 'Run coding recipe...',
     run: () => useStore.getState().openSettings('ext:coding:recipes')
   })
 }

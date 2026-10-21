@@ -185,12 +185,18 @@ test('command palette: opens, fuzzy filters, arrows + Enter run, every command e
   await menu(grain, 'Lists')
   await menu(grain, 'Command Palette…')
   await expect(pal.getByRole('option').first()).toBeVisible()
-  const settingsRows = await pal.getByRole('option').filter({ has: page.locator('small', { hasText: /^Settings$/ }) }).count()
-  expect(settingsRows).toBeGreaterThan(5)
+  await expect(pal.getByText('Settings', { exact: true })).toBeVisible() // the section heading
+  await expect(pal.getByText('Chats', { exact: true })).toBeVisible()
   await page.keyboard.press('Escape')
-  for (let i = 0; i < settingsRows; i++) {
+  // a section shows five rows at rest, more once a query narrows it
+  await menu(grain, 'Command Palette…')
+  const atRest = await pal.getByRole('option').count()
+  expect(atRest).toBeLessThanOrEqual(20)
+  await page.keyboard.press('Escape')
+  for (const label of ['General', 'Models', 'Extensions', 'Advanced']) {
     await menu(grain, 'Command Palette…')
-    await pal.getByRole('option').filter({ has: page.locator('small', { hasText: /^Settings$/ }) }).nth(i).click()
+    await pal.getByPlaceholder('Go to, create, open…').fill(label)
+    await pal.getByRole('option', { name: label, exact: true }).click()
     await expect(page.getByRole('dialog').filter({ has: page.getByRole('tab') }).first()).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(page.getByRole('tab').first()).toHaveCount(0)

@@ -48,6 +48,14 @@ class RefsTest(unittest.TestCase):
         self.assertNotIn("REFTEXT", v["procedure"])
         self.assertIn("REFTEXT body", v["references"]["references/note.md"])
 
+    def test_skill_view_accepts_id_alias(self) -> None:
+        row = skillmd.import_text(self.skills, self.lint, MD, references=REFS)["skill"]
+        self.skills.update(row["id"], {"status": "approved"})
+        args = {"id": row["id"]}
+        self.assertIsNone(self.box.precheck("skill_view", args))
+        out = asyncio.run(self.box.call("skill_view", args, {"project_id": None}))
+        self.assertEqual(out["skill_id"], row["id"])
+
     def test_scripts_dropped_and_no_new_tools(self) -> None:
         out = skillmd.import_text(self.skills, self.lint, MD, references=REFS)
         self.assertNotIn("scripts/run.py", out["skill"]["references"])

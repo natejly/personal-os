@@ -1,4 +1,4 @@
-/** Geometry for the faceless grain loaders (GrainWave, KernelSpinner). Pure, so the layout and the stagger can be tested. */
+/** Geometry for the faceless grain loaders (KernelSpinner). Pure, so the layout and the stagger can be tested. */
 import { GRAIN_FILL } from './sprout'
 
 /** Three shades of the logo grain, so a cluster reads as three grains rather than one drawn three times. */
@@ -20,9 +20,4 @@ export function kernelGrains(radius = 24): KernelGrain[] {
     const a = (i * 2 * Math.PI) / 3
     return { x: r1(50 + radius * Math.sin(a)), y: r1(KERNEL_CENTRE - radius * Math.cos(a)), tilt: TILTS[i], fill }
   })
-}
-
-/** Delays that offset each grain in a row by `step` ms, so the bob travels along it as a wave. */
-export function waveDelays(count: number, step: number): number[] {
-  return Array.from({ length: count }, (_, i) => i * step)
 }

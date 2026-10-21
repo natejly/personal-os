@@ -170,6 +170,9 @@ test('only calls that need the user, refused calls and actionable results stay o
   assert.equal(staysVisible(ev({ name: 'propose_plan', pending: true, needs_approval: true })), true)
   assert.equal(staysVisible(ev({ blocked: 'loop' })), true)
   assert.equal(staysVisible(ev({ name: 'doc_edit' })), true)
+  assert.equal(staysVisible(ev({ name: 'doc_create' })), true)
+  assert.equal(staysVisible(ev({ name: 'convert_document', pending: true })), false)
+  assert.equal(staysVisible(ev({ name: 'render_preview', error: 'x' })), true)
   assert.equal(staysVisible(ev({ name: 'ask_user' })), true) // the answered question stays as its one muted line
 })
 

@@ -300,10 +300,12 @@ export function isFoldable(t: ToolEvent, hasCard: (name: string) => boolean): bo
  * (approval, plan, question), a call that failed or a circuit breaker refused, and results the user acts on
  * (doc diffs, anything with an Undo button).
  */
+const FILE_CARD_TOOLS = new Set(['doc_create', 'convert_document', 'render_preview'])
 export function staysVisible(t: ToolEvent): boolean {
   return (!!t.pending && !!t.needs_approval) || !!t.error || !!t.blocked || !!t.breaker || t.name === 'doc_edit' || QUESTION_TOOLS.has(t.name)
     || !!t.show // its row is how a closed side panel is reopened
     || (t.name.startsWith('dashboard_') && !t.pending) // the dashboard card is drawn under its row
+    || (!t.pending && FILE_CARD_TOOLS.has(t.name) && !t.error) // the finished file card is the answer, not trace
     || !!t.undo?.snapshot_id || !!t.undo?.external_id
 }
 

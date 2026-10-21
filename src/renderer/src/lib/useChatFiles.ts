@@ -28,12 +28,13 @@ export const useProjectFileCount = (projectId: string): number => useCounts((s) 
  */
 export function useChatFileCountsSync(): void {
   const conversations = useStore((s) => s.conversations)
+  const docs = useStore((s) => s.docs) // a note made or moved changes a project's count without touching any chat
   useEffect(() => {
     const t = setTimeout(() => {
       chatFilesApi.counts().then((r) => useCounts.setState({ counts: r.counts, projects: r.projects ?? {} })).catch(() => undefined)
     }, 400)
     return () => clearTimeout(t)
-  }, [conversations])
+  }, [conversations, docs])
 }
 
 /** An upload opens in the chat's side panel when there is a chat, else in the standalone viewer. */

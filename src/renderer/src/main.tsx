@@ -15,7 +15,7 @@ import './styles.css'
 import './styles/motion.css'
 import './styles/press.css'
 import './styles/settings-rows.css'
-import './styles/settings-hooks.css'
+import './styles/settings-jobs.css'
 import './styles/motion-surfaces.css'
 import 'highlight.js/styles/github-dark-dimmed.css'
 

@@ -40,12 +40,11 @@ test('behavior and texting land on their new homes', () => {
 
 test('every index entry sits in a real section and the new groups are findable', () => {
   for (const e of SETTINGS_INDEX) assert.ok((SECTION_ORDER as readonly string[]).includes(e.tab), e.sec)
-  for (const [q, sec] of [['doom', 'loop'], ['sandbox', 'runtime'], ['auto compact', 'compaction'], ['what the model sees', 'inspector'], ['cron', 'jobs'], ['hook latency', 'hooks']] as const) assert.ok(searchSettings(q).some((e) => e.sec === sec), q)
+  for (const [q, sec] of [['doom', 'loop'], ['sandbox', 'runtime'], ['auto compact', 'compaction'], ['what the model sees', 'inspector'], ['cron', 'jobs']] as const) assert.ok(searchSettings(q).some((e) => e.sec === sec), q)
 })
 
-test('the jobs entry has its own anchor and opens the Hooks group; Runtime is listed only with an alternative provider', () => {
-  assert.equal(searchSettings('cron').find((e) => e.sec === 'jobs')?.open, 'hooks')
-  assert.ok(!searchSettings('cron').some((e) => e.sec === 'hooks'))
+test('the jobs entry has its own anchor and opens its own group; Runtime is listed only with an alternative provider', () => {
+  assert.equal(searchSettings('cron').find((e) => e.sec === 'jobs')?.open, 'jobs')
   assert.ok(searchSettings('sandbox').some((e) => e.sec === 'runtime'))
   assert.ok(!searchSettings('sandbox', [], new Set([RUNTIME_EXT])).some((e) => e.sec === 'runtime'))
 })

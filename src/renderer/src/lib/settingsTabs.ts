@@ -15,7 +15,7 @@ export const SECTION_ALIAS: Record<string, { tab: SettingsSectionId; group?: Set
   agent: { tab: 'assistant' },
   context: { tab: 'assistant', group: 'memories' },
   layout: { tab: 'general', group: 'sidebar' },
-  hooks: { tab: 'advanced', group: 'hooks' },
+  hooks: { tab: 'advanced' },
   usage: { tab: 'advanced', group: 'usage' }
 }
 
@@ -98,8 +98,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'permissions', sec: 'network', title: 'Network for commands', keys: 'shell hosts allow list sandbox internet domains' },
   { tab: 'permissions', sec: 'system', title: 'System access', keys: 'macos accessibility screen recording automation folders privacy permission' },
   { tab: 'extensions', sec: 'extensions', title: 'Extensions', keys: 'review proposed assistant drafted install enable disable permissions diff accept reject' },
-  { tab: 'advanced', sec: 'hooks', title: 'Hooks', keys: 'hook hooks event events latency calls extension on tool call before after automation' },
-  { tab: 'advanced', sec: 'jobs', open: 'hooks', title: 'Scheduled jobs', keys: 'jobs scheduled schedule cron background recurring automation run' },
+  { tab: 'advanced', sec: 'jobs', open: 'jobs', title: 'Scheduled jobs', keys: 'jobs scheduled schedule cron background recurring automation run' },
   { tab: 'integrations', sec: 'accounts', title: 'Mail and Calendar account', keys: 'google gmail calendar sign in oauth client outbox undo send' },
   { tab: 'integrations', sec: 'connectors', title: 'Connectors', keys: 'mcp library tools planner mail' },
   { tab: 'integrations', sec: 'web-search', title: 'Web search', keys: 'firecrawl brave tavily exa searxng github token reader api key' },

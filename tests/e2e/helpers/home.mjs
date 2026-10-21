@@ -25,7 +25,7 @@ export async function openSettings(page, tab) {
 }
 
 /** Where each former Advanced group now lives. Only Memory search and Data/Developer are still collapsed groups. */
-const GROUP_TAB = { Assistant: 'Models', Approvals: 'Permissions', 'Files and web': 'Permissions', 'Desks and workers': 'Assistant', 'Voice and shortcuts': 'General', Search: 'Assistant', Data: 'Advanced', Developer: 'Advanced', Usage: 'Advanced', 'Hooks and scheduled jobs': 'Advanced' }
+const GROUP_TAB = { Assistant: 'Models', Approvals: 'Permissions', 'Files and web': 'Permissions', 'Desks and workers': 'Assistant', 'Voice and shortcuts': 'General', Search: 'Assistant', Data: 'Advanced', Developer: 'Advanced', Usage: 'Advanced', 'Scheduled jobs': 'Advanced' }
 
 /** Open the Settings tab holding `group` (a former Advanced group name), expanding it when it is still collapsed. */
 export async function openAdvanced(page, group) {

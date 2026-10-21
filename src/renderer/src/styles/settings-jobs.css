@@ -1,0 +1,4 @@
+.jobs-lines { margin: 4px 0 8px; padding: 0; list-style: none; font-size: var(--fs-md); }
+.jobs-lines li { padding: 2px 0; }
+.jobs-lines .muted { color: var(--text-muted); }
+.jobs-note { margin: 8px 0 0; font-size: var(--fs-sm); color: var(--text-muted); }

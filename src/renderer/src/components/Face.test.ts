@@ -2,7 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import Face, { MOOD, type FaceProps } from './Face'
+import type { MascotId } from '../lib/appearance'
+import { FaceView, MOOD, type FaceProps } from './Face'
 
 test('MOOD: live statuses think, endings react', () => {
   for (const s of ['streaming', 'running', 'working', 'planning']) assert.equal(MOOD[s], 'thinking')
@@ -19,11 +20,30 @@ test('MOOD: unknown words have no entry, so the face stays idle', () => {
   assert.equal(MOOD.whatever, undefined)
 })
 
-const render = (props: Partial<FaceProps> = {}): string => renderToStaticMarkup(createElement(Face, { name: 'Grain', ...props }))
+const render = (mascot: MascotId, props: Partial<FaceProps> = {}): string => renderToStaticMarkup(createElement(FaceView, { name: 'Grain', mascot, ...props }))
 
-test('Face: draws the sprout, posed and sized by its props', () => {
-  const html = render({ status: 'streaming', size: 14 })
+test('Face: the Grain mascot draws the sprout', () => {
+  const html = render('grain', { status: 'streaming', size: 14 })
   assert.match(html, /class="sprout sprout-live sprout-small face"/)
   assert.match(html, /data-mood="thinking"/)
   assert.doesNotMatch(html, /face-dot|mo-root/)
+})
+
+test('Face: Blobs draws the library face with the same size and pose', () => {
+  const html = render('blobs', { status: 'streaming', size: 20 })
+  assert.match(html, /mo-root/)
+  assert.match(html, /mo-always/)
+  assert.match(html, /width="25"/)
+  assert.doesNotMatch(html, /sprout|face-dot/)
+  assert.doesNotMatch(render('blobs'), /mo-always/)
+})
+
+test('Face: off draws nothing for a decorative face and a mood-coloured dot for the rest', () => {
+  assert.equal(render('off', { decor: true, status: 'streaming' }), '')
+  const dot = render('off', { status: 'error', size: 16, title: 'Failed' })
+  assert.match(dot, /^<span class="face face-dot" style="width:20px;height:20px" data-mood="sad"/)
+  assert.match(dot, /aria-label="Failed"/)
+  assert.doesNotMatch(dot, /svg/)
+  assert.match(render('off', { status: 'running', size: 'fill' }), /data-mood="thinking" data-live="true"/)
+  assert.match(render('off'), /data-mood="idle"/)
 })

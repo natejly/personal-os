@@ -1828,6 +1828,8 @@ export interface Settings {
   uiFont?: 'system' | 'serif' | 'rounded' | 'mono' | 'avenir' | 'helvetica' | 'gill' | 'futura' | 'charter' | 'georgia' | 'iowan' | 'palatino' | 'menlo'
   /** URL (or local path) of the extensions catalog index; missing means the default catalog. */
   extensionCatalogUrl?: string
+  /** Which creature draws the faces; missing means the Grain mascot. */
+  mascot?: 'grain' | 'blobs' | 'off'
   /** Code and monospace typeface; missing means default. */
   codeFont?: 'default' | 'sfmono' | 'menlo' | 'monaco' | 'courier'
   /** Electron accelerator for the global Gather/Scatter shortcut. */

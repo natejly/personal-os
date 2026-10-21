@@ -35,7 +35,7 @@ export async function openAdvanced(page, group) {
   return dialog(page)
 }
 
-/** Open Settings > General and expand its "More appearance" disclosure (presets, text colour, background, fonts, zoom). */
+/** Open Settings > General and expand its "More appearance" disclosure (presets, text colour, background, mascot, fonts, zoom). */
 export async function openMoreAppearance(page) {
   const d = await openSettings(page, 'General')
   const more = d.locator('details.more-appearance')

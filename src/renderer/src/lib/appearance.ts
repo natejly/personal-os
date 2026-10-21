@@ -66,6 +66,13 @@ export const CODE_FONTS = [
   { id: 'courier', label: 'Courier New', stack: "'Courier New', Courier, monospace" }
 ] as const
 
+/** Which creature draws the agents' faces: the Grain mascot, the older blob faces, or none (a status dot where the face carries state). */
+export const MASCOTS = [
+  { id: 'grain', label: 'Grain mascot' },
+  { id: 'blobs', label: 'Blobs' },
+  { id: 'off', label: 'Off' }
+] as const
+
 export const THEME_IDS = ['dark', 'light', 'system'] as const
 
 export type AccentId = (typeof ACCENTS)[number]['id']
@@ -73,6 +80,7 @@ export type TextToneId = (typeof TEXT_TONES)[number]['id']
 export type SurfaceToneId = (typeof SURFACE_TONES)[number]['id']
 export type UiFontId = (typeof UI_FONTS)[number]['id']
 export type CodeFontId = (typeof CODE_FONTS)[number]['id']
+export type MascotId = (typeof MASCOTS)[number]['id']
 export type ThemeId = (typeof THEME_IDS)[number]
 
 export const DEFAULT_ACCENT: AccentId = 'sage'
@@ -86,6 +94,7 @@ export const textToneId = (v: unknown): TextToneId => pick(TEXT_TONES, v) as Tex
 export const surfaceToneId = (v: unknown): SurfaceToneId => pick(SURFACE_TONES, v) as SurfaceToneId
 export const uiFontId = (v: unknown): UiFontId => pick(UI_FONTS, v) as UiFontId
 export const codeFontId = (v: unknown): CodeFontId => pick(CODE_FONTS, v) as CodeFontId
+export const mascotId = (v: unknown): MascotId => pick(MASCOTS, v) as MascotId
 export const themeId = (v: unknown): ThemeId => THEME_IDS.find((t) => t === v) ?? 'dark'
 
 export type AppearanceSettings = {
@@ -96,6 +105,7 @@ export type AppearanceSettings = {
   uiFont?: unknown
   codeFont?: unknown
   accentCustom?: unknown
+  mascot?: unknown
 }
 
 /** Set every appearance attribute on <html>. A missing or unknown value falls back to the default. */
@@ -106,6 +116,7 @@ export function applyAppearance(s: AppearanceSettings, root: HTMLElement = docum
   root.dataset.surface = surfaceToneId(s.surfaceTone)
   root.dataset.font = uiFontId(s.uiFont)
   root.dataset.code = codeFontId(s.codeFont)
+  root.dataset.mascot = mascotId(s.mascot)
   if (s.accent === CUSTOM_ACCENT) root.style.setProperty('--accent-custom', hexColor(s.accentCustom))
   else root.style.removeProperty('--accent-custom')
 }

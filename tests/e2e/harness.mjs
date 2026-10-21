@@ -97,8 +97,21 @@ export async function seedProvider(backend, token, { llmUrl, llmKey, real = proc
   if (!put.ok) throw new Error(`PUT /settings after seeding the provider: ${put.status}`)
 }
 
-export async function startBackend({ llmUrl, llmKey, dataDir, token, extraEnv = {}, entry }) {
-  return waitHealthy(spawnBackend({ port: await freePort(), dataDir, token, llmUrl, llmKey, extraEnv, entry }))
+/**
+ * Start a backend on a fresh port and wait for it. The port is picked by binding 0 and releasing it, so under heavy
+ * parallel load another process can take it before the backend binds; that shows as an exit before healthy with
+ * "address already in use" in the log. Relaunch on a new port (up to `attempts` times) before giving up.
+ */
+export async function startBackend({ llmUrl, llmKey, dataDir, token, extraEnv = {}, entry, attempts = 3 }) {
+  for (let i = 1; ; i++) {
+    const backend = spawnBackend({ port: await freePort(), dataDir, token, llmUrl, llmKey, extraEnv, entry })
+    try {
+      return await waitHealthy(backend)
+    } catch (e) {
+      const raced = backend.child.exitCode !== null && /address already in use/i.test(backend.log())
+      if (!raced || i >= attempts) throw e
+    }
+  }
 }
 
 /**

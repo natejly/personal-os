@@ -24,3 +24,4 @@
 .cf-row:hover .cf-pin, .cf-pin:focus-visible, .cf-pin.on { opacity: 1; }
 .cf-pin.on { color: var(--accent); }
 
+.cf-upload { display: flex; justify-content: flex-end; padding: 2px 10px; }

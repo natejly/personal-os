@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronRight, File, FileDown, FileText, FolderOpen, Files, GitBranch, Paperclip, Pin } from '../icons'
-import { useIsStreaming } from '../store'
+import { ChevronRight, File, FileDown, FileText, FolderOpen, GitBranch, Paperclip, Pin } from '../icons'
+import { useIsStreaming, useStore } from '../store'
+import { FilesEmpty, FilesUpload } from './FilesUpload'
 import { fmtAgo } from '../lib/deskFiles'
 import { actionLabel, rowAction, type ChatFile, type ChatFileKind } from '../lib/chatFiles'
 import { chatFilesApi, openChatFile, revealChatFile } from '../lib/useChatFiles'
@@ -59,6 +60,7 @@ export function ChatFilesList({ conversationId, workspace }: { conversationId: s
   const [problem, setProblem] = useState<string | null>(null)
   const [wsOpen, setWsOpen] = useState(false)
   const streaming = useIsStreaming(conversationId)
+  const projectId = useStore((s) => s.conversations.find((c) => c.id === conversationId)?.project_id ?? null)
   useEffect(() => { setFiles(null) }, [conversationId])
   useEffect(() => {
     let live = true  // ChatView is not keyed by chat, so a late answer for the last chat must not land here
@@ -69,9 +71,10 @@ export function ChatFilesList({ conversationId, workspace }: { conversationId: s
   const sorted = useMemo(() => (files ? [...files].sort((a, b) => b.created_at - a.created_at) : null), [files])
   return (
     <div className="cf-list">
+      <div className="cf-upload"><FilesUpload projectId={projectId} primary={false} /></div>
       {problem && <p className="empty-hint" role="alert">{problem}</p>}
       {!problem && sorted === null && <p className="empty-hint">Loading…</p>}
-      {sorted?.length === 0 && !workspace && <div className="empty-state"><Files size={22} /><h2>No files</h2></div>}
+      {sorted?.length === 0 && !workspace && <FilesEmpty />}
       {sorted?.map((f) => <ChatFileRow key={f.id} file={f} jump={null} />)}
       {workspace && (
         <>

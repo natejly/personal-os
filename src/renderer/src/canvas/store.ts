@@ -399,7 +399,7 @@ export const useCanvas = create<CanvasState>((set, get) => {
     // These three work from anywhere: they navigate into the canvas, unless Canvases is turned off in Settings → Sidebar.
     if ((action === 'canvas:toggle' || action === 'canvas:new-space' || action.startsWith('canvas:space:')) && viewHidden(useStore.getState().settings, 'spaces')) {
       const app = useStore.getState()
-      return app.toast('Canvases are turned off', 'info', { label: 'Turn on', run: () => app.openSettings('sidebar') })
+      return app.toast('Canvases are turned off', 'info', { label: 'Turn on', run: () => app.openSettings('extensions') })
     }
     if (action === 'canvas:toggle') return void s.toggleCanvas()
     if (action === 'canvas:new-space') return void s.newSpace()

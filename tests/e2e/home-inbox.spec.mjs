@@ -16,9 +16,9 @@ test('Settings → Sidebar turns each sidebar row on and off on Save', async ({ 
   // One switch per sidebar row.
   const rows = dialog(page).locator('label.toggle-row').filter({ has: page.locator('input[type=checkbox]') })
   const sw = (n) => rows.getByRole('checkbox', { name: n, exact: true })
-  const views = ['Lists', 'Calendar', 'Mail', 'Library', 'Health']
+  const views = ['Library']
   const names = await rows.locator('b').allInnerTexts()
-  expect(names).toEqual(expect.arrayContaining([...views, 'Files', 'Canvases', 'Projects']))
+  expect(names).toEqual(expect.arrayContaining([...views, 'Files', 'Projects']))
   expect(names).not.toContain('Memory')
   // Mail and Health start out of the sidebar. Set a switch to a state, whatever it was.
   const set = async (n, on) => {
@@ -27,9 +27,8 @@ test('Settings → Sidebar turns each sidebar row on and off on Save', async ({ 
   }
   // Changes are a draft: Save applies them and closes, so each step reopens the tab.
   const apply = async (fn) => { await openSettings(page, 'General'); await fn(); await save(page) }
-  await apply(async () => { for (const n of views) await set(n, true) }) // Mail and Health only left the sidebar; turning them on first makes the off below a real view-off
   await apply(async () => { for (const n of views) await set(n, false) })
-  await expect.poll(async () => (await api('/settings')).hiddenViews.sort()).toEqual(['calendar', 'health', 'library', 'mail', 'todos'])
+  await expect.poll(async () => (await api('/settings')).hiddenViews.sort()).toEqual(['library'])
   for (const n of views) await expect.poll(() => shown(n), { message: `${n} hidden` }).toBe(false)
   await apply(async () => { for (const n of views) await set(n, true) })
   await expect.poll(async () => (await api('/settings')).hiddenViews).toEqual([])
@@ -38,7 +37,7 @@ test('Settings → Sidebar turns each sidebar row on and off on Save', async ({ 
   await expect(page.locator('.app-switcher button')).toHaveCount(1)
   await expect(page.locator('.app-switcher').getByRole('button', { name: 'Workspace panel' })).toHaveCount(1)
   // One at a time: hide it, then bring it back to the sidebar.
-  for (const n of ['Library', 'Mail']) {
+  for (const n of ['Library']) {
     await apply(() => set(n, false))
     await expect.poll(() => shown(n), { message: `${n} off` }).toBe(false)
     for (const o of views.filter((x) => x !== n)) expect(await shown(o), `${o} untouched`).toBe(true)

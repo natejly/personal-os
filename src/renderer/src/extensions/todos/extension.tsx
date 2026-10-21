@@ -9,7 +9,6 @@ export function activate(ui: UiApi): void {
   ui.command({
     id: 'todos:refresh',
     label: 'Refresh lists',
-    hint: 'Lists',
     run: () => {
       const { tasksSync, google, runTasksSync } = useStore.getState()
       if (tasksSync?.config.enabled && google?.connected) void runTasksSync()
@@ -22,7 +21,7 @@ export function activate(ui: UiApi): void {
     description: 'To-dos, synced with Google Tasks',
     icon: <ListChecks size={15} />,
     Component: TodosView,
-    nav: { order: 12, badge: (s) => s.dashboard?.todo_stats?.open || null },
+    nav: { order: 12 },
     widget: todosWidget
   })
 }

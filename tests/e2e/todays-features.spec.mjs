@@ -10,7 +10,7 @@ test('Settings opens on General and the tabs run in the shipped order', async ({
   await openSettings(page)
   await expect(dialog(page).getByRole('tab', { selected: true })).toHaveText(/^General/)
   const tabs = await dialog(page).getByRole('tab').allInnerTexts()
-  expect(tabs.map((t) => t.trim().split('\n')[0].replace(/(Dark|Light|System)$/, ''))).toEqual(['General', 'Models', 'Assistant', 'Permissions', 'Extensions', 'Integrations', 'Advanced'])
+  expect(tabs.map((t) => t.trim().split('\n')[0].replace(/(Dark|Light|System)$/, ''))).toEqual(['General', 'Models', 'Assistant', 'Permissions', 'Extensions', 'Advanced'])
   expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
 })
 

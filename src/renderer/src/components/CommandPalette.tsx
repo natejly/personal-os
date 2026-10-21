@@ -5,27 +5,43 @@ import { useModal } from '../lib/useModal'
 import { plainTitle } from '../lib/chatRows'
 import { SETTINGS_SECTIONS } from '../lib/settingsSections'
 import { useCanvas } from '../canvas/store'
-import { CORE, ownerOn, paletteCommands, registerCommand, settingsPanels } from '../extensions/host'
+import { CORE, ownerOn, paletteCommands, registerCommand, settingsPanels, type PaletteSection } from '../extensions/host'
 import { useSlot } from '../extensions/slot'
 
-type Entry = { key: string; label: string; hint: string; run: () => void }
+type Entry = { key: string; section: PaletteSection; label: string; /** Listed only once something is typed. */ typed?: boolean; run: () => void }
+type Row = { kind: 'heading'; key: string; label: string } | { kind: 'entry'; key: string; entry: Entry }
+
+const SECTIONS: PaletteSection[] = ['Chats', 'Files', 'Go to', 'Settings']
+const AT_REST = 5
+const TYPED = 8
+
+/** Entries grouped under their section headings: a few at rest, more while a query narrows them. */
+export function paletteRows(entries: Entry[], needle: string): Row[] {
+  const rows: Row[] = []
+  for (const section of SECTIONS) {
+    const own = entries.filter((e) => e.section === section && (needle ? e.label.toLowerCase().includes(needle) : !e.typed)).slice(0, needle ? TYPED : AT_REST)
+    if (!own.length) continue
+    rows.push({ kind: 'heading', key: `heading:${section}`, label: section }, ...own.map((entry): Row => ({ kind: 'entry', key: entry.key, entry })))
+  }
+  return rows
+}
 
 const VIEWS: { view: View; label: string }[] = [
   { view: 'chat', label: 'Chats' },
   { view: 'docs', label: 'Files' }
 ]
-const RECENT = 8
-registerCommand(CORE, { id: 'new-chat', label: 'New chat', hint: 'Create', run: () => useStore.getState().newChat(null) })
-registerCommand(CORE, { id: 'new-file', label: 'New file', hint: 'Create', run: () => void useStore.getState().createDoc({}) })
-registerCommand(CORE, { id: 'help', label: 'Help and keyboard shortcuts', hint: 'Help', run: () => useStore.getState().openHelp('shortcuts') })
-registerCommand(CORE, { id: 'help:guide', label: 'Using Grain', hint: 'Help', run: () => useStore.getState().openHelp('guide') })
+const RECENT = AT_REST
+registerCommand(CORE, { id: 'new-chat', label: 'New chat', run: () => useStore.getState().newChat(null) })
+registerCommand(CORE, { id: 'new-file', label: 'New file', run: () => void useStore.getState().createDoc({}) })
+registerCommand(CORE, { id: 'help', label: 'Help and keyboard shortcuts', run: () => useStore.getState().openHelp('shortcuts') })
+registerCommand(CORE, { id: 'help:guide', label: 'Using Grain', run: () => useStore.getState().openHelp('guide') })
 const recent = <T extends { updated_at: number }>(rows: T[]): T[] => [...rows].sort((a, b) => b.updated_at - a.updated_at).slice(0, RECENT)
 
 /** ⌘K: one input over every place and every "new" the app has. Typing filters, ↑/↓ pick, Enter goes. */
-export default function CommandPalette(): JSX.Element {
+export default function CommandPalette({ initialQuery = '' }: { initialQuery?: string }): JSX.Element {
   const close = (): void => useStore.setState({ paletteOpen: false })
   const m = useModal(close)
-  const [q, setQ] = useState('')
+  const [q, setQ] = useState(initialQuery)
   const [pick, setPick] = useState<string | null>(null) // by key, so entries arriving after a keypress do not move the highlight
   const list = useRef<HTMLUListElement>(null)
   const settings = useStore((s) => s.settings)
@@ -39,23 +55,24 @@ export default function CommandPalette(): JSX.Element {
   const s = useStore.getState()
 
   const entries: Entry[] = [
-    ...paletteCommands.filter((c) => ownerOn(settings, c.extension) && (!c.when || c.when(s)))
-      .map((c) => ({ key: `command:${c.id}`, label: c.label, hint: c.hint ?? 'Command', run: c.run })),
-    ...recent(conversations).map((c) => ({ key: `chat:${c.id}`, label: plainTitle(c.title) || 'Untitled chat', hint: 'Chat', run: () => void s.selectChat(c.id) })),
-    ...[...VIEWS, ...navRows].filter((v) => !viewHidden(settings, v.view)).map((v) => ({ key: `view:${v.view}`, label: v.label, hint: 'Go to', run: () => s.setView(v.view) })),
+    ...[...VIEWS, ...navRows].filter((v) => !viewHidden(settings, v.view)).map((v): Entry => ({ key: `view:${v.view}`, section: 'Go to', label: v.label, run: () => s.setView(v.view) })),
     // Places with no number key, and the ones a hidden sidebar row leaves reachable only from here.
-    { key: 'inbox', label: 'Agent inbox and jobs', hint: 'Go to', run: () => s.openInbox() },
-    ...projects.map((p) => ({ key: `project:${p.id}`, label: p.name, hint: 'Project', run: () => s.openProject(p.id) })),
-    ...(viewHidden(settings, 'spaces') ? [] : canvases).map((c) => ({ key: `space:${c.id}`, label: c.name, hint: 'Canvas', run: () => void useCanvas.getState().enterSpace(c.id) })),
-    ...recent(docs).map((d) => ({ key: `doc:${d.id}`, label: d.title || 'Untitled', hint: 'File', run: () => void s.openDoc(d.id) })),
-    ...SETTINGS_SECTIONS.map((t) => ({ key: `settings:${t.id}`, label: t.label, hint: 'Settings', run: () => s.openSettings(t.id) })),
-    ...settingsPanels.filter((p) => ownerOn(settings, p.extension)).map((p) => ({ key: `settings:${p.tab}`, label: p.label, hint: 'Settings', run: () => s.openSettings(p.tab) })),
+    { key: 'inbox', section: 'Go to', label: 'Agent inbox and jobs', run: () => s.openInbox() },
+    ...paletteCommands.filter((c) => ownerOn(settings, c.extension) && (!c.when || c.when(s)))
+      .map((c): Entry => ({ key: `command:${c.id}`, section: c.section ?? 'Go to', label: c.label, run: c.run })),
+    ...recent(conversations).map((c): Entry => ({ key: `chat:${c.id}`, section: 'Chats', label: plainTitle(c.title) || 'Untitled chat', run: () => void s.selectChat(c.id) })),
+    ...projects.map((p): Entry => ({ key: `project:${p.id}`, section: 'Go to', label: p.name, typed: true, run: () => s.openProject(p.id) })),
+    ...(viewHidden(settings, 'spaces') ? [] : canvases).map((c): Entry => ({ key: `space:${c.id}`, section: 'Go to', label: c.name, typed: true, run: () => void useCanvas.getState().enterSpace(c.id) })),
+    ...recent(docs).map((d): Entry => ({ key: `doc:${d.id}`, section: 'Files', label: d.title || 'Untitled', run: () => void s.openDoc(d.id) })),
+    ...SETTINGS_SECTIONS.map((t): Entry => ({ key: `settings:${t.id}`, section: 'Settings', label: t.label, run: () => s.openSettings(t.id) })),
+    ...settingsPanels.filter((p) => ownerOn(settings, p.extension)).map((p): Entry => ({ key: `settings:${p.tab}`, section: 'Settings', label: p.label, typed: true, run: () => s.openSettings(p.tab) })),
     // Advanced groups people look for by name.
     ...([['cowork', 'Desks and workers'], ['data', 'Data'], ['behavior', 'Assistant']] as const)
-      .map(([id, label]) => ({ key: `settings:advanced:${id}`, label, hint: 'Settings', run: () => s.openSettings(id) }))
+      .map(([id, label]): Entry => ({ key: `settings:advanced:${id}`, section: 'Settings', label, typed: true, run: () => s.openSettings(id) }))
   ]
   const needle = q.trim().toLowerCase()
-  const shown = needle ? entries.filter((e) => `${e.label} ${e.hint}`.toLowerCase().includes(needle)) : entries
+  const rows = paletteRows(entries, needle)
+  const shown = rows.flatMap((r) => (r.kind === 'entry' ? [r.entry] : []))
   const cur = Math.max(0, shown.findIndex((e) => e.key === pick))
 
   useEffect(() => { list.current?.querySelector('.active')?.scrollIntoView({ block: 'nearest' }) }, [cur])
@@ -91,20 +108,23 @@ export default function CommandPalette(): JSX.Element {
           aria-activedescendant={shown[cur] ? `palette-${cur}` : undefined}
         />
         <ul id="palette-list" className="palette-list" role="listbox" ref={list}>
-          {shown.map((e, i) => (
-            <li
-              key={e.key}
-              id={`palette-${i}`}
-              role="option"
-              aria-selected={i === cur}
-              className={i === cur ? 'active' : ''}
-              onMouseMove={() => i !== cur && setPick(e.key)}
-              onClick={() => go(e)}
-            >
-              <span>{e.label}</span>
-              <small>{e.hint}</small>
-            </li>
-          ))}
+          {rows.map((r) => {
+            if (r.kind === 'heading') return <li key={r.key} role="presentation" className="palette-heading">{r.label}</li>
+            const i = shown.indexOf(r.entry)
+            return (
+              <li
+                key={r.key}
+                id={`palette-${i}`}
+                role="option"
+                aria-selected={i === cur}
+                className={i === cur ? 'active' : ''}
+                onMouseMove={() => i !== cur && setPick(r.key)}
+                onClick={() => go(r.entry)}
+              >
+                <span>{r.entry.label}</span>
+              </li>
+            )
+          })}
           {!shown.length && <li className="palette-empty">Nothing matches</li>}
         </ul>
       </div>

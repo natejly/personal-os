@@ -27,7 +27,7 @@ async function sendChat(page, text) {
 test.describe('tasks sync', () => {
   test('Sync now pulls Google Tasks into Todos, and a local todo is pushed to Google', async ({ grain }) => {
     const { page } = grain
-    await openSettingsTab(page, 'Integrations')
+    await openSettingsTab(page, 'Extensions')
     await expect(page.getByText('Signed in as me@example.com')).toBeVisible()
     const toggle = page.getByLabel('Sync Todos with Google Tasks')
     await expect(toggle).toBeChecked() // on by default
@@ -45,13 +45,13 @@ test.describe('tasks sync', () => {
 
   test('turning the sync off sticks across a relaunch and hides nothing else', async ({ grain }) => {
     const { page } = grain
-    await openSettingsTab(page, 'Integrations')
+    await openSettingsTab(page, 'Extensions')
     await syncToggleOff(page)
     await expect(page.getByLabel('Google Tasks list to sync with')).toHaveCount(0)
     await expect.poll(async () => (await grain.api('/integrations/google/tasks-sync')).config.enabled).toBe(false)
     const p2 = await grain.relaunch()
     await p2.locator('.settings-btn').click()
-    await p2.locator('#settings-tab-integrations').click()
+    await p2.locator('#settings-tab-extensions').click()
     await expect(p2.getByLabel('Sync Todos with Google Tasks')).not.toBeChecked()
   })
 
@@ -132,7 +132,7 @@ testDisconnected.describe('Google not connected (default harness)', () => {
     await openApp(page, 'Lists')
     await expect(page.getByRole('button', { name: 'Sync with Google Tasks now' })).toHaveCount(0)
 
-    await openSettingsTab(page, 'Integrations')
+    await openSettingsTab(page, 'Extensions')
     await expect(page.getByRole('button', { name: /Sign in with Google|Set up Google sign-in/ })).toBeVisible()
     await expect(page.getByLabel('Sync Todos with Google Tasks')).toHaveCount(0)
     await page.keyboard.press('Escape')

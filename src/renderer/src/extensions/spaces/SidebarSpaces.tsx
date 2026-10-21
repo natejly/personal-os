@@ -166,7 +166,7 @@ export default function SidebarSpaces(): JSX.Element {
       </div>
       {open && (
         <div className="project-list space-list">
-          {loaded && order.length === 0 && <p className="empty-hint">No canvases yet.</p>}
+          {loaded && order.length === 0 && <p className="empty-hint">No canvases</p>}
           {!loaded && loadFailed && (
             <p className="empty-hint">
               Couldn't load canvases.{' '}

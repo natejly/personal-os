@@ -1,14 +1,14 @@
 /** The Settings sections, and where the ids older code still passes to openSettings now live. Pure: no store import. */
-export type SettingsSectionId = 'general' | 'models' | 'assistant' | 'permissions' | 'extensions' | 'integrations' | 'advanced'
+export type SettingsSectionId = 'general' | 'models' | 'assistant' | 'permissions' | 'extensions' | 'advanced'
 export type SettingsTab = SettingsSectionId | `ext:${string}`
 /** An anchor inside a section (`sec-<group>` in the pane). */
 export type SettingsGroup = string
 /** Older name for a group id. */
 export type AdvancedGroup = SettingsGroup
-export type LegacySettingsTab = 'appearance' | 'model' | 'agents' | 'memory' | 'system' | 'sidebar' | 'workspace' | 'provider' | 'cowork' | 'texting' | 'modules' | 'behavior' | 'data' | 'spending' | 'learning' | 'search' | 'map' | 'effective' | 'developer'
+export type LegacySettingsTab = 'appearance' | 'model' | 'agents' | 'memory' | 'system' | 'sidebar' | 'workspace' | 'provider' | 'cowork' | 'texting' | 'integrations' | 'modules' | 'behavior' | 'data' | 'spending' | 'learning' | 'search' | 'map' | 'effective' | 'developer'
 
 /** The sections in rail order. */
-export const SECTION_ORDER: readonly SettingsSectionId[] = ['general', 'models', 'assistant', 'permissions', 'extensions', 'integrations', 'advanced']
+export const SECTION_ORDER: readonly SettingsSectionId[] = ['general', 'models', 'assistant', 'permissions', 'extensions', 'advanced']
 
 /** Section ids that no longer exist, as the section (and the group to open) that absorbed them. One map for every caller: openSettings, the palette, a panel's `group`. */
 export const SECTION_ALIAS: Record<string, { tab: SettingsSectionId; group?: SettingsGroup }> = {
@@ -19,7 +19,8 @@ export const SECTION_ALIAS: Record<string, { tab: SettingsSectionId; group?: Set
   usage: { tab: 'advanced', group: 'usage' },
   jobs: { tab: 'advanced' },
   presets: { tab: 'permissions' },
-  profiles: { tab: 'general', group: 'sidebar' }
+  profiles: { tab: 'general', group: 'sidebar' },
+  integrations: { tab: 'extensions', group: 'accounts' }
 }
 
 const LEGACY: Record<LegacySettingsTab, { tab: SettingsTab; group?: SettingsGroup }> = {
@@ -37,7 +38,8 @@ const LEGACY: Record<LegacySettingsTab, { tab: SettingsTab; group?: SettingsGrou
   workspace: { tab: 'permissions' },
   sidebar: { tab: 'general', group: 'sidebar' },
   modules: { tab: 'general', group: 'sidebar' },
-  texting: { tab: 'integrations', group: 'texting' },
+  integrations: { tab: 'extensions', group: 'accounts' },
+  texting: { tab: 'extensions', group: 'texting' },
   data: { tab: 'advanced', group: 'data' },
   effective: { tab: 'advanced', group: 'effective' },
   developer: { tab: 'advanced', group: 'developer' },
@@ -100,11 +102,11 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'permissions', sec: 'network', title: 'Network for commands', keys: 'shell hosts allow list sandbox internet domains' },
   { tab: 'permissions', sec: 'system', title: 'System access', keys: 'macos accessibility screen recording automation folders privacy permission' },
   { tab: 'extensions', sec: 'extensions', title: 'Extensions', keys: 'review proposed assistant drafted install enable disable permissions diff accept reject' },
-  { tab: 'integrations', sec: 'accounts', title: 'Mail and Calendar account', keys: 'google gmail calendar sign in oauth client outbox undo send' },
-  { tab: 'integrations', sec: 'connectors', title: 'Connectors', keys: 'mcp library tools planner mail' },
-  { tab: 'integrations', sec: 'web-search', title: 'Web search', keys: 'firecrawl brave tavily exa searxng github token reader api key' },
-  { tab: 'integrations', sec: 'texting', title: 'Telegram bot', keys: 'texting text telegram bot pairing messages phone sms chat token botfather', ext: 'telegram' },
-  { tab: 'general', sec: 'sidebar', title: 'Sidebar rows', keys: 'hide show lists calendar mail health library files spaces projects modules views' },
+  { tab: 'extensions', sec: 'accounts', title: 'Mail and Calendar account', keys: 'google gmail calendar sign in oauth client outbox undo send' },
+  { tab: 'extensions', sec: 'connectors', title: 'Connectors', keys: 'mcp library tools planner mail' },
+  { tab: 'extensions', sec: 'web-search', title: 'Web search', keys: 'firecrawl brave tavily exa searxng github token reader api key' },
+  { tab: 'extensions', sec: 'texting', title: 'Telegram bot', keys: 'texting text telegram bot pairing messages phone sms chat token botfather', ext: 'telegram' },
+  { tab: 'general', sec: 'sidebar', title: 'Sidebar rows', keys: 'hide show library files projects' },
   { tab: 'advanced', sec: 'usage', title: 'Usage and cost', keys: 'tokens spend price billing calls' },
   { tab: 'advanced', sec: 'data', title: 'Data, backups and trash', keys: 'export import backup restore presets archive trash delete diagnostics support logs' },
   { tab: 'advanced', sec: 'effective', title: 'Effective configuration', keys: 'effective config dump sources where settings come from default user project chat differs json' },

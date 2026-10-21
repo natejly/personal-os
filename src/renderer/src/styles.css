@@ -1412,7 +1412,6 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .nav-item:hover { background: var(--hover); color: var(--text); }
 .nav-item.active { background: var(--active); color: var(--text); }
 /* --text-faint drops to 3.85:1 over the lighter .active row background. */
-.nav-item .count { margin-left: auto; font-size: var(--fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 /* One pressed look for every toggle button, whichever way the component marks it. */
 .icon-btn.on, .icon-btn.active, .icon-btn[aria-pressed='true'],
 .ghost-btn.on, .ghost-btn.active, .ghost-btn[aria-pressed='true'] { background: var(--active); color: var(--text); }
@@ -1549,7 +1548,7 @@ label:active > input:not(:disabled):checked + .switch::after { left: calc(16px -
 .section-h { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-faint); margin: 18px 4px 6px; }
 .section-h span { font-weight: 400; }
 .empty-hint.big { text-align: center; padding: 60px 0; font-size: 14px; }
-/* A page with nothing to show yet: icon, what it is, why it is empty, the one action that fixes it. */
+/* A page with nothing to show yet: icon, a title, the one action that fixes it. */
 .empty-state {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; padding: 40px 24px 80px; text-align: center; color: var(--text-faint);
@@ -1652,7 +1651,7 @@ button.tag:disabled { cursor: default; }
 .palette-list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; }
 .palette-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 10px; border-radius: var(--r-md); font-size: var(--fs-md); cursor: default; }
 .palette-list li > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.palette-list li small { color: var(--text-faint); font-size: var(--fs-xs); flex-shrink: 0; }
+.palette-list li.palette-heading { padding: 10px 10px 4px; color: var(--text-faint); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; }
 .palette-list li.active { background: color-mix(in srgb, var(--text) 8%, var(--bg-elev)); }
 .palette-list .palette-empty { color: var(--text-muted); }
 .doc-text { white-space: pre-wrap; font-size: var(--fs-md); padding: 20px; margin: 0; line-height: 1.5; font-family: var(--font); }
@@ -2808,12 +2807,12 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mail-review ul { margin: 0 0 10px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 .mail-review .doc-text { padding: 10px 12px; background: var(--bg-input); border-radius: var(--r-md); max-height: 220px; overflow: auto; margin-bottom: 10px; }
 
-/* Nav badge for assistant doc edits awaiting review (Docs), and memory tidy-up suggestions. */
-.settings-btn .count.pending, .settings-tabs .count.pending, .primary-btn .count.pending {
+/* Pending-count pills in the settings tabs and primary buttons. */
+.settings-tabs .count.pending, .primary-btn .count.pending {
   margin-left: auto; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; padding: 0 6px; border-radius: var(--r-pill);
 }
 .primary-btn .count.pending { margin-left: 4px; background: var(--on-accent); color: var(--accent-solid); font-weight: 600; }
-.nav-item .count.pending, .settings-btn .count.pending, .settings-tabs .count.pending {
+.settings-tabs .count.pending {
   background: var(--accent-solid);
   color: var(--on-accent);
   font-weight: 600;

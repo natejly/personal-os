@@ -4,7 +4,7 @@ import { SECTION_ALIAS, SECTION_ORDER, sectionOf, type SettingsSectionId, type S
 /** Sections that sit together in the rail; a divider is drawn between clusters. */
 export const RAIL_CLUSTERS: readonly (readonly SettingsSectionId[])[] = [
   ['general', 'models', 'assistant', 'permissions'],
-  ['extensions', 'integrations', 'advanced']
+  ['extensions', 'advanced']
 ]
 
 /** True when `id` opens a new cluster (a divider goes above it). */
@@ -36,7 +36,6 @@ export interface HintInput {
   themeLabel?: string | null
   modelLabel?: string | null
   modeLabel?: string | null
-  google?: { connected?: boolean; email?: string | null } | null
   autoCompact?: boolean | null
   extensionsOn?: number | null
 }
@@ -47,7 +46,6 @@ export function hintOf(id: SettingsSectionId, h: HintInput): string | null {
     case 'general': return h.themeLabel ?? null
     case 'models': return h.modelLabel || null
     case 'permissions': return h.modeLabel ?? null
-    case 'integrations': return h.google?.connected ? h.google.email || 'Google connected' : 'Google not connected'
     case 'assistant': return h.autoCompact == null ? null : h.autoCompact ? 'Auto-compact on' : 'Auto-compact off'
     case 'extensions': return h.extensionsOn == null ? null : `${h.extensionsOn} on`
     default: return null

@@ -71,7 +71,7 @@ export interface SidePanelTabProps { conversationId?: string; desk?: FullDesk | 
 /** The fixed slots and the item each takes (design doc section 6.1). */
 export interface SlotItems {
   /** A row of the sidebar's view list; `order` places it among the others. */
-  'sidebar.row': { view: View; label: string; description?: string; icon: JSX.Element; kind?: WidgetKind; badge?: ModuleNav['badge'] }
+  'sidebar.row': { view: View; label: string; description?: string; icon: JSX.Element; kind?: WidgetKind }
   /** A block of the sidebar between the view list and the project list. */
   'sidebar.section': { Component: FC }
   'composer.toolbar': { Component: FC<ComposerToolbarProps> }
@@ -96,7 +96,8 @@ export type SlotName = keyof SlotItems
 export type SlotItem<K extends SlotName> = SlotItems[K] & { id: string; order: number; when?: (s: State) => boolean }
 export type SlotEntry<K extends SlotName> = SlotItem<K> & { extension: string }
 
-export interface PaletteCommandDef { id: string; label: string; hint?: string; /** Listed only while this holds; always when omitted. */ when?: (s: State) => boolean; run: () => void }
+export type PaletteSection = 'Chats' | 'Files' | 'Go to' | 'Settings'
+export interface PaletteCommandDef { id: string; label: string; /** The palette heading the row sits under; 'Go to' when omitted. */ section?: PaletteSection; /** Listed only while this holds; always when omitted. */ when?: (s: State) => boolean; run: () => void }
 export interface KeybindingDef { id: string; /** What the shortcut overlay calls it; the id when omitted. */ label?: string; keys: string; when?: (s: State) => boolean; run: () => void }
 /** An item of the app menu, at the end of the top-level menu `group`. Its keys, if any, are a `keybinding` of their own. */
 export interface MenuItemDef { id: string; label: string; group: MenuGroup; run: () => void }
@@ -279,7 +280,7 @@ export function activateExtension(id: string, ext: ExtensionModule, permissions:
         key: id, label: def.label, description: def.description, icon: def.icon, widget: def.widget,
         view: { id: def.id, Component: def.Component, optional: true }
       })
-      const row = def.nav && registerSlot(id, 'sidebar.row', { id: def.id, order: def.nav.order, view: def.id, label: def.label, description: def.description, icon: def.icon, kind: def.widget?.kind, badge: def.nav.badge })
+      const row = def.nav && registerSlot(id, 'sidebar.row', { id: def.id, order: def.nav.order, view: def.id, label: def.label, description: def.description, icon: def.icon, kind: def.widget?.kind })
       return keep({ dispose: () => { view.dispose(); row?.dispose() } })
     },
     settingsPanel: (def) => keep(registerSettingsPanel(id, def)),

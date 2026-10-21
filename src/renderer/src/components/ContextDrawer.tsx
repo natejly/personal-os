@@ -432,7 +432,7 @@ function ContextUsedView({ ctx, only }: { ctx: ContextUsed; only?: string }): JS
       )}
       {g('files') && ctx.chunks.length > 0 && (
         <section>
-          <h5><FileText size={12} /> Uploads ({ctx.chunks.length} excerpt{ctx.chunks.length === 1 ? '' : 's'}) <button className="link" onClick={() => showFiles({ kind: 'uploads' })}>Files</button></h5>
+          <h5><FileText size={12} /> Files ({ctx.chunks.length}) <button className="link" onClick={() => showFiles({ kind: 'uploads' })}>Files</button></h5>
           <ul>{ctx.chunks.map((c, i) => <li key={c.chunk_id ?? c.url ?? `${c.n ?? i}`}><button className="link" title={c.source === 'web' ? c.url : 'Open the passage in its source'} onClick={() => openCite(c, setViewing)}>{c.n ? `[${c.n}] ` : ''}<b>{c.source === 'web' ? citeLabel(c) : c.name}</b>{c.idx != null ? ` · chunk ${c.idx + 1}` : ''}</button><div className="chunk-preview">{c.text}</div></li>)}</ul>
           {viewing && <ChunkViewer chunk={viewing} onClose={() => setViewing(null)} />}
         </section>

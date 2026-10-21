@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { dialog, openAdvanced, openSettings, save, seedJobRuns, seedUsage, sql } from './helpers/home.mjs'
+import { dialog, openAdvanced, openMoreAppearance, openSettings, save, seedJobRuns, seedUsage, sql } from './helpers/home.mjs'
 
 const benign = (e) => /ResizeObserver|favicon/i.test(e)
 const noErrors = (grain) => expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
@@ -9,7 +9,7 @@ const openInbox = async (page) => {
   await expect(page.locator('.agent-inbox')).toBeVisible()
 }
 
-test('Settings → Sidebar turns each sidebar row on and off on Save', async ({ grain }) => {
+test('Settings → Sidebar turns the Library row on and off on Save', async ({ grain }) => {
   const { page, api } = grain
   const shown = async (name) => (await page.locator('.sidebar .nav-item', { hasText: new RegExp(`^${name}`) }).count()) > 0
   await openSettings(page, 'General')
@@ -45,7 +45,7 @@ test('Settings → Sidebar turns each sidebar row on and off on Save', async ({ 
     await expect.poll(() => shown(n), { message: `${n} on` }).toBe(true)
   }
   // One switch for the recap on new chats (General tab).
-  await openSettings(page, 'General')
+  await openMoreAppearance(page)
   await expect(dialog(page).getByRole('checkbox', { name: 'Daily recap on new chats' })).not.toBeChecked() // off on a fresh install
   noErrors(grain)
 })

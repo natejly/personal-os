@@ -60,7 +60,7 @@ export default function AgentsPanel(): JSX.Element {
         {custom.map((d) => (
           <div key={d.id} className={`skill-row ${d.approved ? 'approved' : ''}`}>
             <div className="skill-head static">
-              <Face decor name={d.name} hue={d.hue ?? undefined} size={22} />
+              <Face name={d.name} hue={d.hue ?? undefined} size={22} />
               <button className="skill-name link" title="Open this agent's page" onClick={() => setHomeId(d.id)}>{d.name}</button>
               {(() => { const a = agentState(agentStatus[d.name]); return a.state === 'idle' ? null : <span className={`agent-status ${a.state}`}>{a.label}</span> })()}
               <span className="skill-desc muted">{d.label || d.description}</span>
@@ -82,7 +82,7 @@ export default function AgentsPanel(): JSX.Element {
         <h4>Built in</h4>
         {builtin.map((b) => (
           <div key={b.name} className="skill-row"><div className="skill-head static">
-            <Face decor name={b.name} hue={b.hue ?? undefined} size={22} />
+            <Face name={b.name} hue={b.hue ?? undefined} size={22} />
             <span className="skill-name">{b.name}</span><span className="skill-desc muted">{b.description}</span>
             <div className="skill-actions no-drag">
               <button className="ghost-btn sm" title="A new chat that speaks as this agent" onClick={() => chatWithAgent(b.name)}><MessageSquare size={13} /> Chat</button>
@@ -115,7 +115,7 @@ function AgentEditor({ initial, save, onDone }: { initial: AgentFields; save: (t
   return (
     <div className="skill-body agent-editor">
       <div className="agent-face-row">
-        <Face decor name={slug(f.name) || 'agent'} hue={f.hue ?? undefined} size={56} />
+        <Face name={slug(f.name) || 'agent'} hue={f.hue ?? undefined} size={56} />
         <label className="grow">Name<input value={f.name} placeholder="travel-planner" onChange={(e) => set({ name: e.target.value })} /></label>
         <label>Colour
           <span className="hue-pick">

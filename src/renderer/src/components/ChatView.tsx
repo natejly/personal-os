@@ -204,7 +204,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {/* From the click, and from user_message to the first assistant row (context assembly), nothing else shows work.
                     A brand-new chat has no id yet, so its slot stays empty rather than showing a face that would change once the row lands. */}
                 {(pending.some((p) => !p.queued) || draftPending || isStreamingHere) && streamingMessageId === null && duelLive === null && (
-                  <div className="msg assistant"><div className="avatar face-avatar">{(convo?.id ?? conversationId) && <Face decor {...face} name={face.name || conversationId!} status="streaming" send />}</div><div className="bubble"><Thinking chat={convo?.id ?? conversationId} /></div></div>
+                  <div className="msg assistant"><div className="avatar face-avatar">{(convo?.id ?? conversationId) && <Face {...face} name={face.name || conversationId!} status="streaming" send />}</div><div className="bubble"><Thinking chat={convo?.id ?? conversationId} /></div></div>
                 )}
                 {!conversationId && <DuelPanel conversationId={convo?.id} />}
                 {desk && <DeskInline desk={desk} events={msgs.flatMap((m) => m.tool_events ?? [])} />}

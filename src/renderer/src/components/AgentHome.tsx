@@ -51,7 +51,7 @@ export default function AgentHome({ def, onBack }: { def: AgentDef; onBack: () =
     <div className="library-panel agent-home">
       <div className="agent-home-head">
         <button className="ghost-btn sm" onClick={onBack}><ArrowLeft size={13} /> Agents</button>
-        <Face decor name={def.name} hue={def.hue ?? undefined} size={44} />
+        <Face name={def.name} hue={def.hue ?? undefined} size={44} />
         <div className="agent-home-title">
           <strong>{def.name}</strong>
           <span className="muted small">{def.label || def.description}</span>

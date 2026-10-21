@@ -149,7 +149,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "textTone": "neutral",  # text colour family: neutral, warm, cream, soft, cool
     "surfaceTone": "neutral",  # background tint: neutral, warm, cool, black
     "accentCustom": "#7c8cf0",  # the colour behind accent "custom"
-    "mascot": "grain",  # which creature draws the faces: grain, blobs, off (see lib/appearance.ts)
     "uiFont": "system",  # interface typeface: system, serif, rounded, mono and macOS faces (see lib/appearance.ts)
     "codeFont": "default",  # code typeface: default, sfmono, menlo, monaco, courier
     "gatherShortcut": "Control+Alt+Command+Space",

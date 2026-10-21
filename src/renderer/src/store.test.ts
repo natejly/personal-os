@@ -1639,14 +1639,3 @@ test('completing or deleting a todo works when the dashboard loaded without todo
   await useTodos.getState().deleteTodo('t1')
   assert.deepEqual(useTodos.getState().todos, [])
 })
-
-test('the mascot setting defaults to the Grain mascot and saves through the settings route', async (t) => {
-  assert.equal(useStore.getState().settings.mascot, 'grain')
-  const { calls } = stubFetch(t, (_m, _p, body) => json({ ...useStore.getState().settings, ...body }))
-  for (const mascot of ['blobs', 'off', 'grain'] as const) {
-    await useStore.getState().saveSettings({ mascot })
-    assert.equal(calls.at(-1)?.method, 'PUT')
-    assert.deepEqual(calls.at(-1)?.body, { mascot })
-    assert.equal(useStore.getState().settings.mascot, mascot)
-  }
-})

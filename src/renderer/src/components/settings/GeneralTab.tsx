@@ -2,7 +2,7 @@ import type { Settings, ShortcutState } from '@shared/types'
 import { useStore } from '../../store'
 import { DEFAULT_ZOOM, stepZoom } from '../../lib/zoom'
 import { homeModuleOn } from '../../moduleToggles'
-import { ACCENTS, CODE_FONTS, CUSTOM_ACCENT, MASCOTS, PRESETS, SURFACE_TONES, TEXT_TONES, UI_FONTS, accentId, activePreset, codeFontId, hexColor, isLightTheme, mascotId, surfaceToneId, textToneId, uiFontId } from '../../lib/appearance'
+import { ACCENTS, CODE_FONTS, CUSTOM_ACCENT, PRESETS, SURFACE_TONES, TEXT_TONES, UI_FONTS, accentId, activePreset, codeFontId, hexColor, isLightTheme, surfaceToneId, textToneId, uiFontId } from '../../lib/appearance'
 import { tip } from '../../lib/tip'
 import TypographyControls from '../../features/notes/TypographyMenu'
 import VoiceInputSettings from '../VoiceInputSettings'
@@ -99,14 +99,6 @@ export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { sho
         <div className="seg" role="radiogroup" aria-label="Background">
           {SURFACE_TONES.map((t) => (
             <button key={t.id} type="button" role="radio" aria-checked={surfaceToneId(draft.surfaceTone) === t.id} className={surfaceToneId(draft.surfaceTone) === t.id ? 'on' : ''} onClick={() => patch({ surfaceTone: t.id })}>{t.label}</button>
-          ))}
-        </div>
-      </div>
-      <div className="setting-row">
-        <span className="toggle-text"><b>Mascot</b></span>
-        <div className="seg" role="radiogroup" aria-label="Mascot">
-          {MASCOTS.map((m) => (
-            <button key={m.id} type="button" role="radio" aria-checked={mascotId(draft.mascot) === m.id} className={mascotId(draft.mascot) === m.id ? 'on' : ''} onClick={() => patch({ mascot: m.id })}>{m.label}</button>
           ))}
         </div>
       </div>

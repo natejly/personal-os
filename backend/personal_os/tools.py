@@ -2886,8 +2886,9 @@ def _register_skills(self: Toolbox) -> None:
               "procedure": {"type": "string", "description": "Numbered steps, at most 15, plain text"}},
              ["name", "description", "procedure"]), skill_draft, "skills", "writes"))
 
-    async def skill_revise(ctx: dict[str, Any], skill: str, name: str | None = None, description: str | None = None,
-                           procedure: str | None = None, summary: str = "") -> Any:
+    async def skill_revise(ctx: dict[str, Any], skill: str = "", name: str | None = None, description: str | None = None,
+                           procedure: str | None = None, summary: str = "", id: str = "") -> Any:
+        skill = skill or id  # the index and skill_list show the value as an id; accept it under that name too
         s = _find(ctx, skill)
         if not s:
             return _missing(ctx, skill)
@@ -2936,7 +2937,8 @@ def _register_skills(self: Toolbox) -> None:
               "summary": {"type": "string", "description": "Short note on what you changed, shown to the user"}},
              ["skill"]), skill_revise, "skills", "writes"))
 
-    async def skill_view(ctx: dict[str, Any], skill: str) -> Any:
+    async def skill_view(ctx: dict[str, Any], skill: str = "", id: str = "") -> Any:
+        skill = skill or id  # the index shows an id; models pass it as `id`
         # Approved rows only, in this chat's scope. A candidate or rejected row is model-written or unreviewed
         # text and must never come back through a door that looks like the approved one.
         pid = ctx.get("project_id")

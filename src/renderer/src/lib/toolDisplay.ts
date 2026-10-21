@@ -274,25 +274,20 @@ export function fmtMs(ms: number): string {
   return `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, '0')}s`
 }
 
-/** The first non-empty line of an error, short enough to sit under a collapsed row. */
-export function errorLine(error: string): string {
-  const first = (error.split('\n').map((l) => l.trim()).find(Boolean)) ?? ''
-  return clip(first, 80)
-}
-
 /** Tools whose card is a question: answered with a typed or picked answer, never Allow/Deny. */
 export const QUESTION_TOOLS = new Set(['desk_ask', 'ask_user'])
 
 const OWN_BODY = new Set(['propose_plan', ...QUESTION_TOOLS, 'doc_edit'])
 
 /**
- * Only a finished, plain row may fold into a group: no approval state, plan tag, verdict, undo, image or
- * inline body. An allow-list on purpose, so anything that needs the user's eye stays visible.
+ * Only a finished call with nothing for the user to act on may join a group: no approval wait, undo, side-panel
+ * link, image, dashboard or subagent card. An allow-list on purpose, so anything that needs the user's eye
+ * stays on its own line. A failed call may join; its group opens and shows it.
  */
-export function isFoldable(t: ToolEvent, hasCard: (name: string) => boolean): boolean {
-  return !hasCard(t.name) && !t.pending && !t.error && !t.needs_approval && !t.approval && !t.plan && !t.proposal
-    && !t.agent && !t.blocked && !t.breaker && !(t.images?.length) && !t.undo?.snapshot_id && !t.undo?.external_id
-    && readVerdict(t.result_preview) === null && !OWN_BODY.has(t.name) && !t.name.startsWith('agent_')
+export function isGroupable(t: ToolEvent): boolean {
+  return !t.pending && !t.needs_approval && !t.proposal && !t.blocked && !t.breaker && !(t.images?.length)
+    && !t.show && !t.undo?.snapshot_id && !t.undo?.external_id
+    && !OWN_BODY.has(t.name) && !t.name.startsWith('agent_') && !t.name.startsWith('dashboard_')
 }
 
 /**
@@ -308,8 +303,8 @@ export function staysVisible(t: ToolEvent): boolean {
 }
 
 export type ToolItem = { kind: 'single'; event: ToolEvent } | { kind: 'group'; key: string; events: ToolEvent[] }
-/** Maximal runs of at least `min` foldable events become one group keyed by the first id; order is kept. */
-export function partitionEvents(events: ToolEvent[], hasCard: (name: string) => boolean, min = 3): ToolItem[] {
+/** Maximal runs of at least `min` consecutive groupable calls of the same tool become one group keyed by the first id; order is kept. */
+export function partitionEvents(events: ToolEvent[], min = 2): ToolItem[] {
   const out: ToolItem[] = []
   let run: ToolEvent[] = []
   const flush = (): void => {
@@ -318,25 +313,37 @@ export function partitionEvents(events: ToolEvent[], hasCard: (name: string) => 
     run = []
   }
   for (const t of events) {
-    if (isFoldable(t, hasCard)) run.push(t)
-    else { flush(); out.push({ kind: 'single', event: t }) }
+    if (!isGroupable(t)) { flush(); out.push({ kind: 'single', event: t }) }
+    else {
+      if (run.length && run[0].name !== t.name) flush()
+      run.push(t)
+    }
   }
   flush()
   return out
 }
 
-/** `Ran 12 tools · Search the web ×8, Read web page ×4 · 41.0 s`, with no model call. */
-export function groupSummary(events: ToolEvent[]): string {
-  const counts = new Map<string, number>()
-  for (const t of events) {
-    const v = describeCall(t.name, t.arguments).verb
-    counts.set(v, (counts.get(v) ?? 0) + 1)
-  }
-  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1])
-  const shown = ranked.slice(0, 3).map(([v, n]) => `${v} ×${n}`)
-  if (ranked.length > 3) shown.push(`+${ranked.length - 3} more`)
-  const total = events.reduce((a, t) => a + (t.duration_ms || 0), 0)
-  return `Ran ${events.length} tools · ${shown.join(', ')} · ${fmtMs(total)}`
+/** What a run of one tool is called in a group line: the past-tense verb and the noun, singular then plural. */
+const GROUP_NOUNS: Record<string, [string, string, string]> = {
+  shell_run: ['Ran', 'command', 'commands'], shell_poll: ['Checked', 'command', 'commands'],
+  run_python: ['Ran', 'script', 'scripts'], python_install: ['Installed', 'package', 'packages'],
+  web_search: ['Ran', 'search', 'searches'], github_search: ['Ran', 'search', 'searches'], youtube_search: ['Ran', 'search', 'searches'],
+  search_documents: ['Ran', 'search', 'searches'], doc_search: ['Ran', 'search', 'searches'], search_memory: ['Ran', 'search', 'searches'],
+  graph_search: ['Ran', 'search', 'searches'], fs_glob: ['Ran', 'search', 'searches'], fs_grep: ['Ran', 'search', 'searches'], find_files: ['Ran', 'search', 'searches'],
+  fetch_url: ['Read', 'page', 'pages'], open_page: ['Opened', 'page', 'pages'], github_read: ['Read', 'file', 'files'], youtube_video: ['Read', 'video', 'videos'],
+  read_local_file: ['Read', 'file', 'files'], desk_read_file: ['Read', 'file', 'files'], read_document: ['Read', 'document', 'documents'], doc_read: ['Read', 'document', 'documents'],
+  desk_list_files: ['Listed', 'folder', 'folders'], list_documents: ['Listed', 'list', 'lists'],
+  write_local_file: ['Wrote', 'file', 'files'], desk_write_file: ['Wrote', 'file', 'files'], fs_edit: ['Edited', 'file', 'files'],
+  move_local_file: ['Moved', 'file', 'files'], fs_copy: ['Copied', 'file', 'files'], trash_local_file: ['Trashed', 'file', 'files'], desk_trash_file: ['Trashed', 'file', 'files'],
+  browser_click: ['Made', 'click', 'clicks'], browser_snapshot: ['Took', 'snapshot', 'snapshots'], browser_open: ['Opened', 'page', 'pages'],
+  calendar_events: ['Read', 'calendar', 'calendars'], save_memory: ['Saved', 'memory', 'memories'],
+}
+
+/** `Ran 4 commands`, `Read 3 files`, or `5 calls` for a tool without an entry above. */
+export function groupLabel(events: ToolEvent[]): string {
+  const n = events.length
+  const e = GROUP_NOUNS[events[0]?.name ?? '']
+  return e ? `${e[0]} ${n} ${n === 1 ? e[1] : e[2]}` : `${n} calls`
 }
 
 /** Paged viewer state for a stored tool result. */

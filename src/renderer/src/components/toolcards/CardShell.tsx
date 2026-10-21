@@ -1,7 +1,7 @@
-import { useRef, useState, type ReactNode } from 'react'
-import { Pencil } from '../../icons'
+import { useId, useRef, useState, type ReactNode } from 'react'
+import { ChevronRight, Pencil } from '../../icons'
 import type { ToolEvent } from '@shared/types'
-import { changedKeys, wasEdited } from '../../lib/toolDisplay'
+import { changedKeys, describeCall, fmtMs, wasEdited } from '../../lib/toolDisplay'
 import { RawDetails, ResultBlock, StatusChip, StatusDot } from './parts'
 import type { ToolCardProps } from './registry'
 import './toolcards.css'
@@ -31,6 +31,10 @@ export default function CardShell({ event, pending, decide, rules, icon, title, 
   tone?: 'warn'
 }): JSX.Element {
   const [busy, setBusy] = useState(false)
+  // One line until opened. A call waiting on the user is always open, and a failed one opens by itself.
+  const [manual, setManual] = useState<boolean | null>(null)
+  const bodyId = useId()
+  const open = pending || (manual ?? !!event.error)
   const root = useRef<HTMLDivElement>(null)
 
   const send = async (approve: boolean): Promise<void> => {
@@ -50,7 +54,7 @@ export default function CardShell({ event, pending, decide, rules, icon, title, 
   return (
     <div
       ref={root}
-      className={`tool-event tc-card ${event.pending ? 'pending' : ''} ${pending ? 'awaiting' : ''} ${event.error ? 'error' : ''} ${tone ?? ''}`}
+      className={`tool-event tc-card ${event.pending ? 'pending' : ''} ${pending ? 'awaiting' : ''} ${event.error ? 'error' : ''} ${open ? '' : 'collapsed'} ${tone ?? ''}`}
       role="group"
       aria-label={subject ? `${title} ${subject}` : title}
       onKeyDown={(e) => {
@@ -58,18 +62,30 @@ export default function CardShell({ event, pending, decide, rules, icon, title, 
       }}
     >
       <SettleWash awaiting={!!pending} denied={event.approval === 'deny'} />
-      <header className="tc-head">
-        <StatusDot event={event} />
-        <span className="tc-icon">{icon}</span>
-        <span className="tc-title">{title}</span>
-        {subject && <span className="tc-subject">{subject}</span>}
-        {edited && (
-          <span className="tag tc-edited" title={changed.length ? `You changed: ${changed.join(', ')}` : 'You edited the arguments'}>
-            <Pencil size={10} /> edited by you
-          </span>
-        )}
-        <StatusChip event={event} />
+      <header className={`tc-head ${open ? 'open' : ''}`}>
+        {(() => {
+          const line = (
+            <>
+              {!pending && <ChevronRight size={12} className={`tc-chev ${open ? 'rot90' : ''}`} />}
+              <StatusDot event={event} />
+              <span className="tc-icon">{icon}</span>
+              <span className="tc-title">{title}</span>
+              {(subject || !open) && <span className="tc-subject">{subject ?? describeCall(event.name, event.arguments).subject}</span>}
+              {edited && (
+                <span className="tag tc-edited" title={changed.length ? `You changed: ${changed.join(', ')}` : 'You edited the arguments'}>
+                  <Pencil size={10} /> edited by you
+                </span>
+              )}
+              <StatusChip event={event} />
+              {!event.pending && event.duration_ms > 0 && <span className="tool-ms">{fmtMs(event.duration_ms)}</span>}
+            </>
+          )
+          return pending
+            ? <div className="tc-toggle" data-testid="tool-row">{line}</div>
+            : <button type="button" className="tc-toggle" data-testid="tool-row" aria-expanded={open} aria-controls={bodyId} onClick={() => setManual(!open)}>{line}</button>
+        })()}
       </header>
+      {open && <div id={bodyId} className="tc-panel">
       <div className="tc-body">{children}</div>
       {!hideResult && <ResultBlock event={event} />}
       {pending ? (
@@ -83,6 +99,7 @@ export default function CardShell({ event, pending, decide, rules, icon, title, 
         </footer>
       ) : null}
       <RawDetails event={event as ToolEvent} />
+      </div>}
     </div>
   )
 }

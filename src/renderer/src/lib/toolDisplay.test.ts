@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { ToolEvent } from '@shared/types'
-import { appendPage, displayFullOutput, EMPTY_OUTPUT, errorLine, fmtMs, groupSummary, isFoldable, partitionEvents, staysVisible, argRows, cardStatus, changedKeys, describeCall, docEditStatus, formatValue, fullTitle, humanizeName, labelFor, recalledChats, resultView, wasEdited } from './toolDisplay'
+import { appendPage, displayFullOutput, EMPTY_OUTPUT, fmtMs, groupLabel, isGroupable, partitionEvents, staysVisible, argRows, cardStatus, changedKeys, describeCall, docEditStatus, formatValue, fullTitle, humanizeName, labelFor, recalledChats, resultView, wasEdited } from './toolDisplay'
 
 test('titles are plain language, with the subject beside the verb', () => {
   assert.equal(fullTitle('google_tasks_add', { title: 'Buy milk' }), 'Add Google Task Buy milk')
@@ -93,39 +93,35 @@ test('durations read humanely', () => {
   assert.equal(fmtMs(125000), '2m 05s')
 })
 
-test('errorLine is one short line', () => {
-  assert.equal(errorLine('\n  first line\nsecond'), 'first line')
-  assert.ok(errorLine('x'.repeat(300)).length <= 80)
-})
-
-test('only plain finished rows are foldable', () => {
-  assert.equal(isFoldable(ev('a'), noCard), true)
-  assert.equal(isFoldable(ev('a'), () => true), false)
+test('only finished calls with nothing to act on are groupable', () => {
+  assert.equal(isGroupable(ev('a')), true)
+  assert.equal(isGroupable(ev('a', { error: 'x' })), true)
   const flips: Record<string, unknown>[] = [
-    { pending: true }, { error: 'x' }, { needs_approval: true }, { approval: 'allow' }, { plan: { plan_id: 'p', idx: 0, title: '' } },
-    { proposal: 'pr' }, { agent: 'x' }, { blocked: 'web_search' }, { breaker: 'loop' }, { images: [{ name: 'a', data: 'd' }] },
-    { undo: { snapshot_id: 's' } }, { undo: { external_id: 'x' } }, { result_preview: '{"verification":{"status":"verified"}}' },
-    { name: 'doc_edit' }, { name: 'agent_spawn' }, { name: 'propose_plan' }, { name: 'desk_ask' }, { name: 'ask_user' }
+    { pending: true }, { needs_approval: true }, { proposal: 'pr' }, { blocked: 'web_search' }, { breaker: 'loop' },
+    { images: [{ name: 'a', data: 'd' }] }, { show: { kind: 'html' } }, { undo: { snapshot_id: 's' } }, { undo: { external_id: 'x' } },
+    { name: 'doc_edit' }, { name: 'agent_spawn' }, { name: 'propose_plan' }, { name: 'desk_ask' }, { name: 'ask_user' }, { name: 'dashboard_save' }
   ]
-  for (const f of flips) assert.equal(isFoldable(ev('a', f), noCard), false, JSON.stringify(f))
+  for (const f of flips) assert.equal(isGroupable(ev('a', f)), false, JSON.stringify(f))
 })
 
-test('partitionEvents groups runs of three or more and keeps order', () => {
-  assert.deepEqual(partitionEvents([ev('1'), ev('2')], noCard).map((i) => i.kind), ['single', 'single'])
-  const seven = [1, 2, 3, 4, 5, 6, 7].map((n) => ev(String(n), n === 4 ? { error: 'boom' } : {}))
-  const parts = partitionEvents(seven, noCard)
-  assert.deepEqual(parts.map((i) => i.kind), ['group', 'single', 'group'])
+test('partitionEvents groups consecutive runs of one tool, two or more, and keeps order', () => {
+  assert.deepEqual(partitionEvents([ev('1')]).map((i) => i.kind), ['single'])
+  assert.deepEqual(partitionEvents([ev('1'), ev('2')]).map((i) => i.kind), ['group'])
+  const mixed = [ev('1'), ev('2'), ev('3', { name: 'fetch_url' }), ev('4', { pending: true }), ev('5'), ev('6'), ev('7')]
+  const parts = partitionEvents(mixed)
+  assert.deepEqual(parts.map((i) => i.kind), ['group', 'single', 'single', 'group'])
   const g = parts[0]
-  assert.ok(g.kind === 'group' && g.key === '1' && g.events.length === 3)
-  const grow = partitionEvents([ev('1'), ev('2'), ev('3'), ev('4')], noCard)[0]
-  assert.ok(grow.kind === 'group' && grow.key === '1' && grow.events.length === 4)
+  assert.ok(g.kind === 'group' && g.key === '1' && g.events.length === 2)
+  const last = parts[3]
+  assert.ok(last.kind === 'group' && last.key === '5' && last.events.length === 3)
 })
 
-test('groupSummary counts verbs, caps at three and totals the time', () => {
-  const evs = [...Array(8).keys()].map((n) => ev(`s${n}`)).concat([...Array(4).keys()].map((n) => ev(`r${n}`, { name: 'fetch_url', arguments: { url: 'https://a.test' } })))
-  assert.equal(groupSummary(evs), 'Ran 12 tools · Search the web ×8, Read web page ×4 · 12.0 s')
-  const many = [ev('1'), ev('2', { name: 'fetch_url' }), ev('3', { name: 'run_python' }), ev('4', { name: 'current_time' })]
-  assert.match(groupSummary(many), /\+1 more/)
+test('groupLabel names the run by its tool and falls back to a call count', () => {
+  const run = (name: string, n: number) => [...Array(n).keys()].map((i) => ev(`x${i}`, { name }))
+  assert.equal(groupLabel(run('shell_run', 4)), 'Ran 4 commands')
+  assert.equal(groupLabel(run('web_search', 3)), 'Ran 3 searches')
+  assert.equal(groupLabel(run('read_local_file', 2)), 'Read 2 files')
+  assert.equal(groupLabel(run('some_new_tool', 5)), '5 calls')
 })
 
 test('full output pages append once and pretty-print only when complete', () => {

@@ -12,7 +12,7 @@ import ActionPlanCard from './ActionPlanCard'
 import RenderBoundary from './RenderBoundary'
 import ApprovalRules from './ApprovalRules'
 import { learnLabels, useItemLabel } from '../lib/itemLabel'
-import { describeCall, docEditStatus, errorLine, fmtMs, groupSummary, partitionEvents, QUESTION_TOOLS, recalledChats } from '../lib/toolDisplay'
+import { describeCall, docEditStatus, fmtMs, groupLabel, partitionEvents, QUESTION_TOOLS, recalledChats } from '../lib/toolDisplay'
 import { statusWord } from '../lib/statusWord'
 import { fmtCost } from '../lib/chatMeta'
 import { AskQuestion } from './DeskApprovalCard'
@@ -332,6 +332,8 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
   const events = useMemo(() => quietEvents(all), [all]) // hand-offs to workers are not cards: the app shows the workers
   useMemo(() => learnLabels(all), [all]) // ids seen in these results get their human names before any row below asks for one
   const [open, setOpen] = useState<Record<string, boolean>>({})
+  // A failed call opens by itself; a manual toggle wins.
+  const isOpen = (t: ToolEvent): boolean => open[t.id] ?? !!t.error
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
   const tools = useStore((s) => s.tools)
@@ -350,10 +352,10 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
   function genericRow(t: ToolEvent): JSX.Element {
     const d = describeCall(t.name, t.arguments)
     return (
-      <div className={`tool-event ${t.pending ? 'pending' : ''} ${t.pending && t.needs_approval ? 'awaiting' : ''} ${t.error ? 'error' : ''}`}>
+      <div className={`tool-event ${t.pending ? 'pending' : ''} ${t.pending && t.needs_approval ? 'awaiting' : ''} ${t.error ? 'error' : ''}`} data-testid="tool-row">
         <SettleWash awaiting={!!t.pending && !!t.needs_approval} denied={t.approval === 'deny'} />
-        <button className="tool-head" title={tools.find((x) => x.name === t.name)?.description || t.name} aria-expanded={!!open[t.id]} onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
-          <ChevronRight size={12} className={open[t.id] ? 'rot90' : ''} />
+        <button className="tool-head" title={tools.find((x) => x.name === t.name)?.description || t.name} aria-expanded={isOpen(t)} aria-controls={`tool-body-${t.id}`} onClick={() => setOpen((o) => ({ ...o, [t.id]: !isOpen(t) }))}>
+          <ChevronRight size={12} className={isOpen(t) ? 'rot90' : ''} />
           <StatusDot event={t} />
           <span className="tool-icon">{ICONS[t.name] ?? TOOL_DISPLAY[t.name]?.icon ?? <Wrench size={13} />}</span>
           <span className={`tool-name human ${t.pending && !t.needs_approval ? 'shimmer' : ''}`}>{d.verb}</span>
@@ -369,8 +371,7 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
           ) : t.approval && t.approval !== 'allow' && <span className="tag">{t.approval === 'deny' ? 'denied' : 'approved'}</span>}
           {t.pending ? (t.needs_approval ? <span className="tag ask">needs approval</span> : null) : t.error ? <AlertCircle size={12} aria-label="Failed" /> : <span className="tool-ms">{fmtMs(t.duration_ms)}{(t.wait_ms ?? 0) > 1000 && ` · waited ${fmtMs(t.wait_ms!)} for approval`}</span>}
         </button>
-        {t.error && !open[t.id] && <div className="tool-err">{errorLine(t.error)}</div>}
-        {t.images && t.images.length > 0 && (
+                {t.images && t.images.length > 0 && (
           <div className="tool-images">
             {t.images.map((im) => (
               <figure key={im.name}>
@@ -402,7 +403,7 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
           <GenericApproval event={t} conversationId={conversationId} decide={async (ok) => decideFor(t)(ok)}
             onWhy={inMainChat ? () => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() } : undefined} />
         )}
-        {open[t.id] && <GenericBody event={t} />}
+        {isOpen(t) && <div id={`tool-body-${t.id}`}><GenericBody event={t} /></div>}
       </div>
     )
   }
@@ -438,24 +439,26 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
     )
   }
 
-  // Foldable rows are finished and plain (see isFoldable), so a group never hides anything that needs the user.
-  const items = partitionEvents(events, (n) => hasCard({ name: n } as ToolEvent))
+  // Only finished calls with nothing for the user to act on group (see isGroupable), so a group never hides an approval.
+  const items = partitionEvents(events)
   return (
     <div className="tool-events">
       {items.map((it) => {
         if (it.kind === 'single') return renderEvent(it.event)
-        // Open while the reply streams, folded once it is done or loaded from history; a manual toggle wins.
-        const isOpen = groupOpen[it.key] ?? !!streaming
+        // Folded, unless a call in it failed; a manual toggle wins.
         const failed = it.events.filter((e) => e.error).length
+        const isOpen = groupOpen[it.key] ?? failed > 0
+        const total = it.events.reduce((a, e) => a + (e.duration_ms || 0), 0)
         return (
-          <div key={`g-${it.key}`} className="tool-event tool-group">
-            <button className="tool-head" aria-expanded={isOpen} onClick={() => setGroupOpen((g) => ({ ...g, [it.key]: !isOpen }))}>
+          <div key={`g-${it.key}`} className="tool-event tool-group" data-testid="tool-group">
+            <button className="tool-head" aria-expanded={isOpen} aria-controls={`tool-group-${it.key}`} onClick={() => setGroupOpen((g) => ({ ...g, [it.key]: !isOpen }))}>
               <ChevronRight size={12} className={isOpen ? 'rot90' : ''} />
               <span className={`status-dot ${failed ? 'failed' : 'done'}`} role="img" aria-label={failed ? 'Some calls failed' : 'Succeeded'} />
-              <span className="tool-icon"><ListChecks size={13} /></span>
-              <span className="tool-summary">{groupSummary(it.events)}{failed > 0 && <span className="group-failed"> · {failed} failed</span>}</span>
+              <span className="tool-icon">{ICONS[it.events[0].name] ?? TOOL_DISPLAY[it.events[0].name]?.icon ?? <Wrench size={13} />}</span>
+              <span className="tool-summary">{groupLabel(it.events)}{failed > 0 && <span className="group-failed"> · {failed} failed</span>}</span>
+              <span className="tool-ms">{fmtMs(total)}</span>
             </button>
-            {isOpen && <div className="tool-group-rows">{it.events.map(renderEvent)}</div>}
+            {isOpen && <div id={`tool-group-${it.key}`} className="tool-group-rows">{it.events.map(renderEvent)}</div>}
           </div>
         )
       })}

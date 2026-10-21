@@ -7,7 +7,7 @@ import { LongText } from './parts'
 import { registerToolCard, type ToolCardProps } from './registry'
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
-const MODES: Record<string, string> = { create: 'Create new (refuses to replace)', overwrite: 'Replace if it exists', append: 'Add to the end' }
+const MODES: Record<string, string> = { create: 'Create', overwrite: 'Replace', append: 'Append' }
 
 /** Write file: the path, how it is written, and a preview of the content, all editable until you approve. */
 function FileCard(props: ToolCardProps): JSX.Element {
@@ -17,6 +17,7 @@ function FileCard(props: ToolCardProps): JSX.Element {
   const [mode, setMode] = useState(str(a.mode) || 'create')
   const [content, setContent] = useState(str(a.content))
   const [editing, setEditing] = useState(false)
+  const [diff, setDiff] = useState(false)
 
   const edited = wasEdited(event)
   const changed = edited ? changedKeys(event.original_arguments, event.edited_arguments) : []
@@ -38,26 +39,37 @@ function FileCard(props: ToolCardProps): JSX.Element {
     >
       {pending ? (
         <div className="tc-form">
-          <label className="tc-field">
-            <span>Path</span>
-            <input className="mono" value={path} onChange={(e) => setPath(e.target.value)} aria-label="File path" spellCheck={false} />
-          </label>
-          <label className="tc-field narrow">
-            <span>Mode</span>
-            <select value={mode} onChange={(e) => setMode(e.target.value)} aria-label="Write mode">
-              {Object.entries(MODES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-          </label>
-          {mode === 'overwrite' && <div className="tc-hint warn">Replaces the file if it already exists.</div>}
-          <div className="tc-field">
-            <span>Content <em className="tc-muted">{formatBytes(bytes)}</em></span>
-            {editing ? (
-              <textarea className="mono" rows={10} value={content} onChange={(e) => setContent(e.target.value)} aria-label="File content" />
-            ) : (
-              <pre className="tc-preview">{content.split('\n').slice(0, 8).join('\n')}{content.split('\n').length > 8 ? '\n…' : ''}</pre>
-            )}
-            <button type="button" className="tc-more" onClick={() => setEditing((e) => !e)}>{editing ? 'Done editing' : 'Edit content'}</button>
+          <div className="tc-filebar">
+            <span className="mono tc-filepath" title={path} data-testid="write-path">{path || '(no path)'}</span>
+            <span className="tc-badge" data-testid="write-mode">{MODES[mode] ?? mode}</span>
+            <span className="tc-muted">{formatBytes(bytes)}</span>
+            <button type="button" className="tc-more" aria-expanded={diff} data-testid="write-diff-toggle" onClick={() => setDiff((d) => !d)}>Diff</button>
+            <button type="button" className="tc-more" aria-expanded={editing} data-testid="write-edit-toggle" onClick={() => setEditing((e) => !e)}>Edit</button>
           </div>
+          {mode === 'overwrite' && <div className="tc-hint warn">Replaces an existing file</div>}
+          {diff && (
+            <pre className="tc-preview tc-diff" aria-label="Changes">
+              {content.split('\n').map((l, i) => <span key={i} className="tc-add">{`+ ${l}\n`}</span>)}
+            </pre>
+          )}
+          {editing && (
+            <>
+              <label className="tc-field">
+                <span>Path</span>
+                <input className="mono" value={path} onChange={(e) => setPath(e.target.value)} aria-label="File path" spellCheck={false} />
+              </label>
+              <label className="tc-field narrow">
+                <span>Mode</span>
+                <select value={mode} onChange={(e) => setMode(e.target.value)} aria-label="Write mode">
+                  {Object.entries(MODES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </label>
+              <label className="tc-field">
+                <span>Content</span>
+                <textarea className="mono" rows={10} value={content} onChange={(e) => setContent(e.target.value)} aria-label="File content" />
+              </label>
+            </>
+          )}
         </div>
       ) : (
         <dl className="tc-args">

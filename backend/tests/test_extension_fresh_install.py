@@ -34,10 +34,9 @@ def test_every_manifest_default_is_off_except_the_google_service() -> None:
 def test_a_fresh_install_has_nothing_on_but_the_service() -> None:
     host = appmod.host
     assert all(not host.extensions[i].enabled() for i in USER_FACING)
-    assert not host.extensions["lean"].enabled() and not host.extensions["focus"].enabled()
     assert host.extensions["google"].enabled()
     assert set(USER_FACING) <= set(appmod.settings()["hiddenViews"])
-    assert "extDefaults" not in appmod.db.get_settings() or not appmod.db.get_settings()["extDefaults"]  # no profile was applied
+    assert "extDefaults" not in appmod.db.get_settings() or not appmod.db.get_settings()["extDefaults"]  # no extension default was applied
 
 
 def test_a_fresh_install_has_no_coding_tools_and_hides_the_sidebar_rows() -> None:

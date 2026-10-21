@@ -75,15 +75,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const markDeskSeen = useStore((s) => s.markDeskSeen)
   const deskPanel = useStore((s) => s.deskPanel)
   const setDeskPanel = useStore((s) => s.setDeskPanel)
-  const sidePanelClosed = useStore((s) => s.hiddenChrome.includes('sidepanel')) // a profile's layout keeps the Workspace column shut
   // The side panel: the full-window chat's Workspace column (it also hosts the step card and workers), or, in a canvas chat window, the same panel opened by the context request.
-  const panelOn = conversationId ? contextOpen : !sidePanelClosed && (deskPanel || contextOpen)
-  // Asking for a column the layout keeps shut says so and drops the request, so it does not open once the layout changes.
-  useEffect(() => {
-    if (!sidePanelClosed || conversationId || !(deskPanel || contextOpen)) return
-    useStore.setState({ deskPanel: false, contextOpen: false })
-    useStore.getState().toast('The side panel is off in this layout', 'info')
-  }, [sidePanelClosed, conversationId, deskPanel, contextOpen])
+  const panelOn = conversationId ? contextOpen : (deskPanel || contextOpen)
   useEffect(() => { if (deskId && !conversationId) void openDesk(deskId) }, [deskId, conversationId, openDesk])
   // Looking at the chat is the acknowledgement. Keyed on desk+count so a failed POST /seen is not retried every render.
   const deskUnseen = desk?.unseen ?? 0

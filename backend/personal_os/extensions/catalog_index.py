@@ -1,7 +1,7 @@
 """The extensions catalog: what is installed, what is available to enable or install, and the plain-language facts about each.
 
 `GET /extensions/catalog` returns `{installed, available, services, catalogUrl, catalogError?}` of cards. Available is every
-bundled extension or profile that is off, plus the entries of a remote index (setting `extensionCatalogUrl`: an https URL, a
+bundled extension that is off, plus the entries of a remote index (setting `extensionCatalogUrl`: an https URL, a
 file:// URL or a local path). Reading the catalog never loads or runs anything from an installed or listed extension.
 """
 from __future__ import annotations
@@ -84,8 +84,6 @@ def context_cost(manifest: Manifest, root: Path | None) -> int:
     """Stable context tokens the extension adds per turn: each tool's name, description and schema, plus a flat share for a
     declared volatile context contribution. An estimate from the manifest alone."""
     from ..context import estimate_tokens
-    if manifest.kind == "profile":
-        return 0
     total = 0
     for tool in manifest.contributes.get("tools", ()):
         text = f"{tool['name']} {tool.get('description', '')}"

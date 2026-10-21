@@ -43,7 +43,7 @@ PUT /runtime
 {"slot": "agent.loop", "scope": "chat", "scope_id": "<chat id>", "value": "core/plan-execute-verify"}
 ```
 
-`scope` is `global`, `project` or `chat` (the latter two need `scope_id`); `value: null` clears the choice at that scope. A profile can also select a loop with `defaults.runtime`. The narrowest choice wins: chat, then project, then profile, then global, then the built-in chat loop. `GET /runtime/resolve` says which provider is in effect and why. The loop is chosen once, as the turn starts. A reply that used a loop other than the default says so in its footer and context.
+`scope` is `global`, `project` or `chat` (the latter two need `scope_id`); `value: null` clears the choice at that scope. An extension can also select a loop with `defaults.runtime`. The narrowest choice wins: chat, then project, then the extension's default, then global, then the built-in chat loop. `GET /runtime/resolve` says which provider is in effect and why. The loop is chosen once, as the turn starts. A reply that used a loop other than the default says so in its footer and context.
 
 If the chosen loop's extension is turned off or removed, the chat loop takes over with a notice.
 

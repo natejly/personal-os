@@ -364,7 +364,7 @@ class CodingToolPostPayload(TypedDict):
 
 
 class RuntimeChangedPayload(TypedDict):
-    """A runtime slot selection was stored (at chat, project or global scope) or a profile applied one."""
+    """A runtime slot selection was stored (at chat, project or global scope) or an extension's default selected one."""
     slot: str
     scope: str
     scope_id: str | None
@@ -394,16 +394,6 @@ class SandboxRefusedPayload(TypedDict):
     run_id: str | None
 
 
-class PresetAppliedPayload(TypedDict):
-    """A permission preset was applied at a scope. Key names only, never values."""
-    preset_id: str
-    scope: str
-    scope_id: str
-    changed_keys: list[str]
-    loosened: list[str]
-    by: str
-
-
 class LoopStep(TypedDict):
     title: str
     done_when: str
@@ -425,7 +415,7 @@ class LoopVerifyPayload(TypedDict):
     gaps: list[str]
 
 
-HookId = Literal["app.start", "app.stop", "settings.changed", "chat.created", "chat.deleted", "project.created", "project.deleted", "ext.changed", "turn.accept", "turn.start", "context.contribute", "tools.offer", "model.select", "model.request", "model.response", "tool.permission", "tool.pre", "tool.post", "tool.result", "tool.taint", "tool.error", "reply.complete", "turn.settled", "run.after", "subagent.start", "subagent.stop", "memory.before_write", "memory.written", "memory.deleted", "compaction.before", "compaction.after", "approval.requested", "approval.resolved", "review.accepted", "worker.report", "job.fired", "job.done", "channel.inbound", "channel.outbound", "file.written", "notify", "coding.tool.pre", "coding.tool.post", "runtime.changed", "runtime.fallback", "sandbox.refused", "preset.applied", "loop.plan", "loop.verify"]
+HookId = Literal["app.start", "app.stop", "settings.changed", "chat.created", "chat.deleted", "project.created", "project.deleted", "ext.changed", "turn.accept", "turn.start", "context.contribute", "tools.offer", "model.select", "model.request", "model.response", "tool.permission", "tool.pre", "tool.post", "tool.result", "tool.taint", "tool.error", "reply.complete", "turn.settled", "run.after", "subagent.start", "subagent.stop", "memory.before_write", "memory.written", "memory.deleted", "compaction.before", "compaction.after", "approval.requested", "approval.resolved", "review.accepted", "worker.report", "job.fired", "job.done", "channel.inbound", "channel.outbound", "file.written", "notify", "coding.tool.pre", "coding.tool.post", "runtime.changed", "runtime.fallback", "sandbox.refused", "loop.plan", "loop.verify"]
 
 
 class On(Protocol):
@@ -522,8 +512,6 @@ class On(Protocol):
     def __call__(self, hook: Literal["runtime.fallback"], fn: Callable[[RuntimeFallbackPayload], Any | Awaitable[Any]] | Callable[[RuntimeFallbackPayload, HookCtx], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
     @overload
     def __call__(self, hook: Literal["sandbox.refused"], fn: Callable[[SandboxRefusedPayload], Any | Awaitable[Any]] | Callable[[SandboxRefusedPayload, HookCtx], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
-    @overload
-    def __call__(self, hook: Literal["preset.applied"], fn: Callable[[PresetAppliedPayload], Any | Awaitable[Any]] | Callable[[PresetAppliedPayload, HookCtx], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
     @overload
     def __call__(self, hook: Literal["loop.plan"], fn: Callable[[LoopPlanPayload], Any | Awaitable[Any]] | Callable[[LoopPlanPayload, HookCtx], Any | Awaitable[Any]], /, *, priority: int | None = ..., timeout_ms: int | None = ...) -> Disposable: ...
     @overload
@@ -624,8 +612,6 @@ class Fire(Protocol):
     def __call__(self, hook: Literal["runtime.fallback"], payload: RuntimeFallbackPayload, /) -> None: ...
     @overload
     def __call__(self, hook: Literal["sandbox.refused"], payload: SandboxRefusedPayload, /) -> None: ...
-    @overload
-    def __call__(self, hook: Literal["preset.applied"], payload: PresetAppliedPayload, /) -> None: ...
     @overload
     def __call__(self, hook: Literal["loop.plan"], payload: LoopPlanPayload, /) -> None: ...
     @overload

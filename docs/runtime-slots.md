@@ -4,9 +4,9 @@ Six seams of the app have a built-in provider and room for others: `model.client
 
 ## Choosing
 
-Settings > Runtime shows, for each slot, which provider is in effect, where that choice was made and why, and lets you choose for everything, for the focused project or for the focused chat. A chat's own choice wins over its project's, then a profile's, then the one set everywhere, then the built-in. A reply that used a provider other than the built-in says so in its footer, in its context and in its trace.
+Settings > Runtime shows, for each slot, which provider is in effect, where that choice was made and why, and lets you choose for everything, for the focused project or for the focused chat. A chat's own choice wins over its project's, then an enabled extension's default, then the one set everywhere, then the built-in. A reply that used a provider other than the built-in says so in its footer, in its context and in its trace.
 
-Choosing a provider that is looser than the one in effect (a remote model client over a local one, a sandbox that enforces less, a tool source that adds tools) asks first and lists the difference. A profile's `defaults.runtime` is held the same way.
+Choosing a provider that is looser than the one in effect (a remote model client over a local one, a sandbox that enforces less, a tool source that adds tools) asks first and lists the difference. An extension's `defaults.runtime` is held the same way.
 
 If a chosen provider is turned off or removed, the built-in takes over with a notice, but only when it is no less private (model client) or no less strong (sandbox). Otherwise the call is refused.
 

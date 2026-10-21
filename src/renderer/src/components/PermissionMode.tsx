@@ -1,8 +1,6 @@
 import { useEffect, useState, type KeyboardEvent } from 'react'
-import type { PermissionPreset, PresetDiff } from '@shared/types'
 import { ShieldAlert, ShieldCheck } from '../icons'
 import { api } from '../lib/api'
-import { diffRows } from '../lib/presets'
 import { useStore } from '../store'
 import PopMenu from './PopMenu'
 import { MODES, modeOf, needsConfirm, pillLabel, pillTitle, type PermissionMode } from '../lib/permissionMode'
@@ -60,52 +58,17 @@ export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; on
   )
 }
 
-/** The pill menu's presets, applied to one chat; a looser one asks first. */
-function ChatPresets({ conversationId, close, onApplied }: { conversationId: string; close: () => void; onApplied: () => void }): JSX.Element {
-  const [presets, setPresets] = useState<PermissionPreset[]>([])
-  const [held, setHeld] = useState<{ preset: PermissionPreset; diff: PresetDiff } | null>(null)
-  const toast = useStore((s) => s.toast)
-  useEffect(() => { api.presets.list().then(setPresets).catch(() => undefined) }, [])
-  const apply = (preset: PermissionPreset, confirm?: string): void => {
-    api.presets.apply(preset.id, 'chat', conversationId, confirm).then((r) => {
-      if ('held' in r) { setHeld({ preset, diff: r.held }); return }
-      toast(`${preset.name} applied to this chat`, 'info')
-      onApplied()
-      close()
-    }).catch((e: Error) => toast(e.message, 'error'))
-  }
-  if (held) {
-    return (
-      <div role="alert">
-        <p className="pop-menu-note"><b>{held.preset.name}</b> would allow more than this chat has now:</p>
-        <ul className="pop-menu-note">{diffRows(held.diff).filter((r) => r.loosens).map((r) => <li key={r.key}>{r.label}: {r.old} to {r.next}</li>)}</ul>
-        <button type="button" className="pop-menu-item" onClick={() => setHeld(null)}>Cancel</button>
-        <button type="button" className="pop-menu-item" onClick={() => apply(held.preset, held.diff.diff_hash)}>Apply anyway</button>
-      </div>
-    )
-  }
-  return (
-    <>
-      <p className="pop-menu-title">Preset for this chat</p>
-      {presets.map((p) => (
-        <button key={p.id} type="button" className="pop-menu-item" title={p.description || undefined} onClick={() => apply(p)}>{p.name}</button>
-      ))}
-    </>
-  )
-}
-
 export function PermissionModePill({ conversationId = null }: { conversationId?: string | null }): JSX.Element {
   const globalMode = useStore((s) => modeOf(s.settings))
   const [chatMode, setChatMode] = useState<PermissionMode | null>(null)
-  const [applied, setApplied] = useState(0)
-  // A preset applied to this chat can set its own mode, so the pill shows the chat's effective one.
+  // A chat can carry its own mode, so the pill shows the chat's effective one.
   useEffect(() => {
     setChatMode(null)
     if (!conversationId) return
     let live = true
     api.config.effective(null, conversationId).then((c) => { if (live) setChatMode(modeOf({ permissionMode: c.values.permissionMode?.value })) }).catch(() => undefined)
     return () => { live = false }
-  }, [conversationId, globalMode, applied])
+  }, [conversationId, globalMode])
   const mode = chatMode ?? globalMode
   const openSettings = useStore((s) => s.openSettings)
   const title = pillTitle(mode)
@@ -114,7 +77,6 @@ export function PermissionModePill({ conversationId = null }: { conversationId?:
       label={<><ShieldCheck size={13} aria-hidden /> {pillLabel(mode)}</>}>
       {(close) => (
         <>
-          {conversationId && <ChatPresets conversationId={conversationId} close={close} onApplied={() => setApplied((n) => n + 1)} />}
           <button type="button" className="pop-menu-item" onClick={() => { close(); openSettings('permissions') }}>Permission settings</button>
         </>
       )}

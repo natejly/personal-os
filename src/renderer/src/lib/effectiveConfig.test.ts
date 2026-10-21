@@ -6,8 +6,8 @@ import { effectiveRows, filterRows, sourceKind, sourceKinds, tabFor } from './ef
 const cfg: EffectiveConfig = {
   scope: { project_id: null, conversation_id: null },
   values: {
-    permissionMode: { value: 'manual', source: 'preset:builtin:manual', scope: 'global', shadowed: [{ source: 'default', value: 'auto' }] },
-    defaultEffort: { value: 'low', source: 'profile:focus', scope: 'global', shadowed: [{ source: 'previous', value: 'high' }] },
+    permissionMode: { value: 'manual', source: 'user', scope: 'global', shadowed: [{ source: 'default', value: 'auto' }] },
+    defaultEffort: { value: 'low', source: 'ext:focus', scope: 'global', shadowed: [{ source: 'previous', value: 'high' }] },
     accent: { value: 'sage', source: 'default', scope: 'global', shadowed: [] },
     toolDeferAbove: { value: 9, source: 'user', scope: 'global', shadowed: [], legacy: true }
   },
@@ -25,15 +25,15 @@ test('every setting and every tool is a row, with what it shadows', () => {
 })
 
 test('source kinds drop the id and list the default first', () => {
-  assert.equal(sourceKind('preset:builtin:manual'), 'preset')
-  assert.deepEqual(sourceKinds(effectiveRows(cfg)), ['default', 'preset', 'profile', 'project', 'user'])
+  assert.equal(sourceKind('ext:focus'), 'ext')
+  assert.deepEqual(sourceKinds(effectiveRows(cfg)), ['default', 'ext', 'project', 'user'])
 })
 
 test('rows filter by words, by source kind and to what differs from the default', () => {
   const rows = effectiveRows(cfg)
   assert.deepEqual(filterRows(rows, 'effort', 'all').map((r) => r.key), ['defaultEffort'])
-  assert.deepEqual(filterRows(rows, '', 'profile').map((r) => r.key), ['defaultEffort'])
-  assert.deepEqual(filterRows(rows, 'manual', 'preset').map((r) => r.key), ['permissionMode'])
+  assert.deepEqual(filterRows(rows, '', 'ext').map((r) => r.key), ['defaultEffort'])
+  assert.deepEqual(filterRows(rows, 'manual', 'user').map((r) => r.key), ['permissionMode'])
   assert.equal(filterRows(rows, '', 'changed').length, 4)
   assert.equal(filterRows(rows, 'ask gmail', 'default').length, 1)
   assert.equal(filterRows(rows, 'nothing here', 'all').length, 0)

@@ -134,7 +134,7 @@ async function surfaces(g) {
     await attempt('palette', async () => { await menuClick(g.app, 'Command Palette…'); await sleep(600); await shot(g, '12-palette'); await page.keyboard.press('Escape') })
   }
   if (want('views')) {
-    for (const [label, key] of [['Lists', '20-lists'], ['Calendar', '21-calendar'], ['Mail', '22-mail'], ['Health', '23-health'], ['Jobs', '25-jobs']])
+    for (const [label, key] of [['Lists', '20-lists'], ['Calendar', '21-calendar'], ['Mail', '22-mail'], ['Health', '23-health']])
       await attempt(label, async () => { await nav(page, label).click(); await sleep(1400); await shot(g, key) })
     await attempt('library tabs', async () => {
       await nav(page, 'Library').click(); await sleep(600)

@@ -164,11 +164,10 @@ export default function SettingsModal(): JSX.Element {
     base.current = fresh
     setDraft((d) => Object.fromEntries(Object.entries(fresh).map(([k, v]) => [k, JSON.stringify((d as unknown as Record<string, unknown>)[k]) === JSON.stringify(old[k]) ? v : (d as unknown as Record<string, unknown>)[k]])) as unknown as Settings)
   }
-  /** A profile was turned on or off (applied at once by its own routes): the same refresh, and off the view it may have hidden. */
-  const profileApplied = async (): Promise<void> => {
+  /** An extension was turned on or off from the dev panel (applied at once by its own routes): the same refresh, and off the view it may have hidden. */
+  const extensionsChanged = async (): Promise<void> => {
     await providersChanged()
-    void api.profiles.list().then(useStore.getState().applyProfiles).catch(() => undefined)  // the layout and theme tokens of whichever profiles are now on
-    void useStore.getState().refreshDashboard()  // a view the profile turned on has no data loaded yet
+    void useStore.getState().refreshDashboard()  // a view the extension turned on has no data loaded yet
     void useTodos.getState().refreshTodos()
     if (viewHidden(useStore.getState().settings, view)) setView('chat')
   }
@@ -262,13 +261,13 @@ export default function SettingsModal(): JSX.Element {
   useEffect(() => { paneRef.current?.scrollTo?.({ top: 0 }) }, [tab])
   const content = (): JSX.Element | null => {
     switch (tab) {
-      case 'general': return <><GeneralTab {...tabProps} shortcuts={shortcuts} /><SidebarTab {...tabProps} onProfileApplied={profileApplied} /></>
+      case 'general': return <><GeneralTab {...tabProps} shortcuts={shortcuts} /><SidebarTab {...tabProps} /></>
       case 'models': return <ModelTab {...tabProps} onProvidersChanged={providersChanged} />
       case 'assistant': return <><AgentsTab {...tabProps} /><h3 className="set-part">Memory and context</h3><ContextTab {...tabProps} {...gp} /></>
-      case 'permissions': return <><PermissionsTab {...tabProps} onPresetApplied={providersChanged} /><SystemTab /></>
+      case 'permissions': return <><PermissionsTab {...tabProps} /><SystemTab /></>
       case 'extensions': return null  // the Extensions panel registers into this section's group
       case 'integrations': return <IntegrationsTab {...tabProps} onSaveCreds={saveGoogleCreds} />
-      case 'advanced': return <AdvancedTab {...tabProps} {...gp} onExtensionsChanged={profileApplied} />
+      case 'advanced': return <AdvancedTab {...tabProps} {...gp} onExtensionsChanged={extensionsChanged} />
       default: return null
     }
   }

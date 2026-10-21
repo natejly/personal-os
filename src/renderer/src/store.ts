@@ -13,7 +13,6 @@ import { acceptToast } from './lib/proposalToast'
 import { installRejectionToasts } from './lib/rejections'
 import { busyText } from './lib/runStatus'
 import { api, backgroundStream, chatStream, getBase, getToken, setBase, type Scope } from './lib/api'
-import { applyProfileThemes, closedChrome } from './extensions/profiles'
 import { useTodos } from './extensions/todos/store'
 import { dispatchExtEvent, isAppEvent } from './extensions/events'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
@@ -27,7 +26,7 @@ import { chainTo, folderKey, groupShutKey, renameKeys } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
 import type { ShowItem, UploadResult } from '@shared/types'
-import type { Attention, ChromeRegion, Duel, DuelSide, Profile, WorkerInfo, RunInfo, ShipChecklist } from '@shared/types'
+import type { Attention, Duel, DuelSide, WorkerInfo, RunInfo, ShipChecklist } from '@shared/types'
 import { attention, chatAttention, wantsYou } from './lib/attention'
 import * as panes from './lib/panelPanes'
 import type { PanelState, Pane } from './lib/panelPanes'
@@ -42,11 +41,12 @@ import { isInternal, upsertWorker, withoutInternal } from './lib/workers'
 import { appendDelta, settleHeld } from './lib/noReply'
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-type BuiltinView = 'chat' | 'todos' | 'health' | 'claude-code' | 'calendar' | 'mail' | 'docs' | 'library' | 'jobs' | 'project' | 'canvas'
+type BuiltinView = 'chat' | 'todos' | 'health' | 'claude-code' | 'calendar' | 'mail' | 'docs' | 'library' | 'project' | 'canvas'
 /** `health` and `claude-code` are ids of built-in extensions' views: it predates `ext:` ids, and `hiddenViews` already stores it. */
 export type View = BuiltinView | `ext:${string}`
 /** Which tab a project page shows. */
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
+export type AutomationsKind = 'all' | 'jobs' | 'workflows' | 'commands'
 export type LibraryTab = 'skills' | 'agents' | 'automations' | 'connectors'
 export type FilesSection = 'notes' | 'uploads'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
@@ -253,8 +253,6 @@ export interface State {
   contextOpen: boolean
   /** The full-window chat's side panel (DeskPanel), apart from `contextOpen`, which opens it on Context. */
   deskPanel: boolean
-  /** Window chrome the enabled profiles close (their `layout`). */
-  hiddenChrome: ChromeRegion[]
   contextTab: ContextTab
   /** The side panel beside each chat (the `show` tool, or "Open in panel" on a fenced block), by conversation id. */
   shows: Record<string, PanelState>
@@ -370,8 +368,6 @@ export interface State {
   toggleSidebar: () => void
   toggleContext: () => void
   setDeskPanel: (open: boolean) => void
-  /** Take the profile list as the source of the enabled profiles' theme tokens and closed chrome. */
-  applyProfiles: (profiles: Profile[]) => void
   /** ⌘I: close the side panel if either flag has it open, else open it on its default (Context) tab. */
   toggleDeskPanel: () => void
   setContextTab: (t: ContextTab) => void
@@ -472,6 +468,8 @@ export interface State {
   setPlanSteps: (conversationId: string, steps: PlanStep[]) => Promise<void>
 
   libraryTab: LibraryTab
+  automationsKind: AutomationsKind
+  setAutomationsKind: (kind: AutomationsKind) => void
   setLibraryTab: (tab: LibraryTab) => void
   /** The agent whose home Library > Agents shows (null = the list). */
   openAgentId: string | null
@@ -1785,8 +1783,8 @@ export const useStore = create<State>((set, get) => {
     inboxOpen: false,
     jobsFocusId: null,
     openJobs: (jobId) => {
-      set({ jobsFocusId: jobId ?? null, inboxOpen: false, ...closeSettings() })
-      get().setView('jobs')
+      set({ jobsFocusId: jobId ?? null, inboxOpen: false, libraryTab: 'automations', automationsKind: 'jobs', ...closeSettings() })
+      get().setView('library')
     },
     openInbox: () => set({ inboxOpen: true, ...closeSettings() }),
     closeInbox: () => set({ inboxOpen: false }),
@@ -1826,9 +1824,10 @@ export const useStore = create<State>((set, get) => {
     shows: {},
     contextOpen: false,
     deskPanel: false,
-    hiddenChrome: [],
     contextTab: 'last',
     libraryTab: 'skills',
+    automationsKind: 'all',
+    setAutomationsKind: (automationsKind) => set({ automationsKind }),
     openAgentId: null,
     filesSection: 'notes',
     desks: [],
@@ -1917,7 +1916,6 @@ export const useStore = create<State>((set, get) => {
       installRejectionToasts((m, kind) => { if (get().backendState === 'ready') get().toast(m, kind) })
       set({ settings, view: 'chat', projects, conversations, ready: true, draftEffort: startEffort(settings) })
       void get().loadModels()
-      void api.profiles.list().then(get().applyProfiles).catch(() => undefined)
       void get().loadScope('all')
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
       void get().refreshAgentDefs().catch(() => undefined)
@@ -1964,6 +1962,8 @@ export const useStore = create<State>((set, get) => {
       if (listsWereOff !== viewHidden(get().settings, 'todos')) void useTodos.getState().refreshTodos()
     },
     setView: (view) => {
+      // The standalone Jobs view is gone; a stored or old caller's `jobs` lands on Library > Automations > Jobs.
+      if ((view as string) === 'jobs') return get().openJobs()
       // A view turned off in Settings → Sidebar stays off, whoever links to it: the toast says how to turn it back on.
       // Named as the sidebar shows it; nav.tsx holds the labels but importing it here would close a cycle.
       if (viewHidden(get().settings, view)) {
@@ -2002,10 +2002,6 @@ export const useStore = create<State>((set, get) => {
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
     toggleContext: () => set((s) => ({ contextOpen: !s.contextOpen })),
     setDeskPanel: (deskPanel) => set({ deskPanel }),
-    applyProfiles: (profiles) => {
-      applyProfileThemes(profiles)
-      set({ hiddenChrome: closedChrome(profiles) })
-    },
     toggleDeskPanel: () => set((s) => (s.deskPanel || s.contextOpen ? { deskPanel: false, contextOpen: false } : { deskPanel: true })),
     openShow: (conversationId, item) => set((s) => ({ shows: { ...s.shows, [conversationId]: panes.open(s.shows[conversationId], item, Date.now(), item.pane) } })),
     splitShow: (conversationId) => set((s) => (s.shows[conversationId] ? { shows: { ...s.shows, [conversationId]: panes.split(s.shows[conversationId]) } } : s)),

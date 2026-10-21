@@ -242,7 +242,6 @@ class ToolTests(unittest.TestCase):
     def test_extension_is_loaded_and_off_on_a_fresh_install(self) -> None:
         scope = host.extensions["health"]
         self.assertEqual(scope.manifest.enabled, False)
-        self.assertIs(builtin_manifest("lean").contributes["defaults"]["views"]["health"], False)
         self.assertEqual({t["name"]: (t["danger"], t["group"]) for t in scope.manifest.contributes["tools"]},
                          {n: (t.danger, t.group) for n, t in scope.tools.items()})
         self.assertTrue(scope.enabled())  # this test db never hid the view: an existing install keeps what it had

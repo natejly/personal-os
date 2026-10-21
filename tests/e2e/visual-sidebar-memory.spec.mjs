@@ -110,11 +110,11 @@ test('visual: sidebar, project memory, settings memory, jobs', async ({ grain })
     await page.waitForTimeout(400)
   })
 
-  // ---- e. jobs (absent in the current build)
+  // ---- e. jobs (Library > Automations > Jobs)
   await soft('jobs', async () => {
-    const item = page.locator('nav').getByText('Jobs', { exact: true }).first()
-    if (!(await item.count())) throw new Error('no Jobs nav item')
-    await item.click()
+    await page.locator('nav').getByText('Library', { exact: true }).first().click()
+    await page.getByRole('tab', { name: 'Automations', exact: true }).click()
+    await page.getByRole('tab', { name: 'Jobs', exact: true }).click()
     await page.waitForTimeout(1200)
     await shot('jobs')
     await soft('job detail', async () => {

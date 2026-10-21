@@ -14,11 +14,11 @@ test('Settings opens on General and the tabs run in the shipped order', async ({
   expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
 })
 
-test('a fresh data dir shows Files, Lists, Calendar, Library, Jobs, Canvases and Projects; Mail and Health are off', async ({ grain }) => {
+test('a fresh data dir shows Files, Lists, Calendar, Library, Canvases and Projects; Mail and Health are off', async ({ grain }) => {
   const { page, api } = grain
   expect((await api('/settings')).sidebarHidden).toEqual(['mail', 'health'])
   const sb = page.locator('.sidebar')
-  const rows = ['Files', 'Lists', 'Calendar', 'Library', 'Jobs']
+  const rows = ['Files', 'Lists', 'Calendar', 'Library']
   const labels = (await sb.locator('.nav-item:not(.nav-more)').allInnerTexts()).map((t) => t.split('\n')[0].trim())
   expect(labels.filter((l) => [...rows, 'Mail', 'Health'].includes(l))).toEqual(rows)
   await expect(sb.getByRole('button', { name: /Canvases/ })).toBeVisible()

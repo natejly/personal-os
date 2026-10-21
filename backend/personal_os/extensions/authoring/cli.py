@@ -69,7 +69,7 @@ def _print(findings: Sequence[Any]) -> int:
 
 def cmd_new(args: argparse.Namespace) -> int:
     try:
-        root = scaffold(args.id, Path(args.dir), args.profile, args.loop).resolve()  # the dev backend resolves a relative path against its own cwd
+        root = scaffold(args.id, Path(args.dir), args.loop).resolve()  # the dev backend resolves a relative path against its own cwd
     except (ValueError, OSError) as e:
         print(f"error: {e}")
         return 1
@@ -196,7 +196,6 @@ def parser() -> argparse.ArgumentParser:
     ext = groups.add_parser("ext", help="write extensions").add_subparsers(dest="cmd", required=True)
     p = ext.add_parser("new", help="scaffold an extension")
     p.add_argument("id")
-    p.add_argument("--profile", action="store_true", help="a profile: theme and defaults, no code")
     p.add_argument("--loop", action="store_true", help="an agent loop provider (slot agent.loop, permission runtime:loop)")
     p.add_argument("--dir", default=".", help="where to create the folder")
     _backend_args(p)

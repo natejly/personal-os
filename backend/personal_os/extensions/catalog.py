@@ -379,7 +379,7 @@ class CodingToolPostPayload(CodingToolPrePayload):
 
 
 class RuntimeChangedPayload(TypedDict):
-    """A runtime slot selection was stored (at chat, project or global scope) or a profile applied one."""
+    """A runtime slot selection was stored (at chat, project or global scope) or an extension's default selected one."""
     slot: str
     scope: str
     scope_id: str | None
@@ -407,16 +407,6 @@ class SandboxRefusedPayload(TypedDict):
     dimension: str
     enforcement: dict[str, Any]
     run_id: str | None
-
-
-class PresetAppliedPayload(TypedDict):
-    """A permission preset was applied at a scope. Key names only, never values."""
-    preset_id: str
-    scope: str
-    scope_id: str
-    changed_keys: list[str]
-    loosened: list[str]
-    by: str
 
 
 class LoopStep(TypedDict):
@@ -537,13 +527,11 @@ HOOKS: dict[str, HookSpec] = {s.id: s for s in (
     HookSpec("coding.tool.post", "emit", CodingToolPostPayload, "5.12", "a coding session finished a tool call, via `POST /coding-hooks/{session}/post`",
              "`emit`, 1 s hook timeout, never affects the session", "1.0", subscribers="grant", permission=("coding:read",)),
     HookSpec("runtime.changed", "emit", RuntimeChangedPayload, "5.13", "`PUT /runtime` after a selection is stored, at chat, project or "
-             "global scope; a profile apply", "`emit_sync`", "1.0", sync=True),
+             "global scope", "`emit_sync`", "1.0", sync=True),
     HookSpec("runtime.fallback", "emit", RuntimeFallbackPayload, "5.13", "`resolve()` when the selected provider is disabled, removed or failed "
              "and the default was used, or when the fallback was refused", "`emit_sync`; also raises the turn notice", "1.0", sync=True),
     HookSpec("sandbox.refused", "emit", SandboxRefusedPayload, "5.13", "`sandbox_wrap` when a confined request is refused (mode unsupported, "
              "partial enforcement, wrap or start failure)", "`emit_sync`", "1.0", sync=True),
-    HookSpec("preset.applied", "emit", PresetAppliedPayload, "5.14", "`POST /permissions/presets/{id}/apply`, after the write and the "
-             "`setting_sources` stamp", "`emit`", "1.0"),
     HookSpec("loop.plan", "emit", LoopPlanPayload, "5.15", "the plan-execute-verify loop, after the plan is parsed and validated, before the first "
              "step", "`emit`", "1.0", subscribers="grant", permission=("conversation:read",)),
     HookSpec("loop.verify", "emit", LoopVerifyPayload, "5.15", "the plan-execute-verify loop, after each verify call", "`emit`", "1.0",

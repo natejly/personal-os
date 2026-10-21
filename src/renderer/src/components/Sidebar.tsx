@@ -276,8 +276,7 @@ export default function Sidebar(): JSX.Element {
   const libCount = (v: View): number | null => {
     const ri = rows.findIndex((r) => r.view === v && r.badge)
     if (ri >= 0) return rowBadges[ri]
-    if (v === 'library') return skillCandidates || null
-    if (v === 'jobs') return jobsWanting || null
+    if (v === 'library') return skillCandidates + jobsWanting || null
     return null
   }
 

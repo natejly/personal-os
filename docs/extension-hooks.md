@@ -106,15 +106,9 @@ A hook is a named point where an extension may observe, add, transform or narrow
 
 | Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
 |---|---|---|---|---|---|
-| `runtime.changed` | `PUT /runtime` after a selection is stored, at chat, project or global scope; a profile apply | `{slot, scope, scope_id, old, new, by}`. A runtime slot selection was stored (at chat, project or global scope) or a profile applied one. | none | `emit_sync` | any enabled extension |
+| `runtime.changed` | `PUT /runtime` after a selection is stored, at chat, project or global scope | `{slot, scope, scope_id, old, new, by}`. A runtime slot selection was stored (at chat, project or global scope) or an extension's default selected one. | none | `emit_sync` | any enabled extension |
 | `runtime.fallback` | `resolve()` when the selected provider is disabled, removed or failed and the default was used, or when the fallback was refused | `{slot, wanted, used, why, refused, conversation_id, run_id}`. A selected runtime provider was disabled, removed or failed and the default was used, or the fallback was refused (used is null). | none | `emit_sync`; also raises the turn notice | any enabled extension |
 | `sandbox.refused` | `sandbox_wrap` when a confined request is refused (mode unsupported, partial enforcement, wrap or start failure) | `{tool, mode, backend, dimension, enforcement, run_id}`. A confined request was refused because the selected sandbox backend cannot enforce it; nothing was run. | none | `emit_sync` | any enabled extension |
-
-## Presets
-
-| Hook | Fires at | Payload | Returns | Order and failure | Who may subscribe |
-|---|---|---|---|---|---|
-| `preset.applied` | `POST /permissions/presets/{id}/apply`, after the write and the `setting_sources` stamp | `{preset_id, scope, scope_id, changed_keys, loosened, by}`. A permission preset was applied at a scope. Key names only, never values. | none | `emit` | any enabled extension |
 
 ## Agent loop
 

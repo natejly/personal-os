@@ -25,7 +25,7 @@ _SEMVER = re.compile(r"\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?")
 _ACTIVATION = re.compile(r"startup|(onView|onCommand):.+")  # the events the host raises: a view opens, a slash command is typed
 _TOP_KEYS = {"id", "name", "description", "version", "apiVersion", "kind", "enabled", "activation", "requires", "provides",
              "contributes", "hooks", "permissions", "settings", "data"}
-_CONTRIBUTES = {"tools", "routes", "views", "slots", "settings", "commands", "keybindings", "theme", "defaults", "layout", "runtime", "presets"}
+_CONTRIBUTES = {"tools", "routes", "views", "slots", "settings", "commands", "keybindings", "theme", "defaults", "runtime"}
 _RUNTIME_KEYS = {"slot", "id", "label", "meta"}
 _HOOK_KEYS = {"priority", "timeoutMs", "onFailure"}
 SETTING_TYPES = ("string", "number", "integer", "boolean", "secret")  # a secret is a string kept in the secret store
@@ -34,10 +34,7 @@ _SETTING_PYTHON = {"string": (str,), "number": (int, float), "integer": (int,), 
 _FIELD = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 _TOOL_NAME = re.compile(r"[a-z][a-z0-9_]*")
 _TABLE = re.compile(r"[a-z_][a-z0-9_]*")
-_PROFILE_CONTRIBUTES = {"theme", "defaults", "layout", "presets"}  # all a profile may contribute: it runs nothing
-_PROFILE_FORBIDDEN = ("requires", "provides", "hooks", "permissions", "settings", "data")
-_LAYOUT_REGIONS = ("titlebar", "statusbar", "sidepanel")  # the chrome a profile's layout can switch off
-_DEFAULTS = {"views", "model", "effort", "theme", "permissions", "permissionPreset", "runtime"}
+_DEFAULTS = {"views", "model", "effort", "theme", "permissions", "runtime"}
 PERMISSION_MODES = CHOICES["permissionMode"]
 _THEMES = ("dark", "light", "system")
 _TOKEN = re.compile(r"--[A-Za-z0-9_-]+")
@@ -90,15 +87,13 @@ class Manifest:
         if api > API_VERSION:
             raise ManifestError(f"targets apiVersion {api}, this host speaks {API_VERSION}")
         _check(isinstance(raw.get("description", ""), str), "description must be a string")
-        _check(raw.get("kind", "extension") in ("extension", "profile"), "kind must be 'extension' or 'profile'")
+        _check(raw.get("kind", "extension") == "extension", "kind must be 'extension'")
         _check(isinstance(raw.get("enabled", True), bool) or raw["enabled"] == "always", "enabled must be true, false or 'always'")
         activation = _strings(raw, "activation", ("startup",))
         _check(activation and all(_ACTIVATION.fullmatch(a) for a in activation), "activation takes startup, onView:<view id> or onCommand:<command name>")
         requires, provides = _object(raw, "requires", {"services", "extensions"}), _object(raw, "provides", {"services"})
         permissions = _strings(raw, "permissions", ())
         _check(all("." not in svc for svc in _strings(provides, "services", ())), "a service name has no dot: dotted names are runtime slots")
-        if raw.get("kind") == "profile":
-            _check_profile(raw)
         _check(all(p in _PERMISSIONS or p.startswith("service:") for p in permissions), "permissions has an unknown capability")
         return cls(
             id=raw["id"], name=raw["name"], version=raw["version"], api_version=api,
@@ -125,8 +120,6 @@ def load_manifest(path: Path) -> Manifest:
         raise ManifestError(f"cannot read {path.name}: {e}") from e
     manifest = Manifest.from_dict(raw)
     _check_static_text(path.parent, manifest)
-    if manifest.kind == "profile" and (extra := sorted(p.name for p in path.parent.iterdir() if p.name != path.name)):
-        raise ManifestError(f"a profile holds only {path.name}, found {', '.join(extra)}")
     return manifest
 
 
@@ -205,10 +198,8 @@ def _contributes(raw: dict[str, Any]) -> dict[str, Any]:
     _commands(c)
     _activation(raw, c)
     _theme(c)
-    _layout(raw, c)
     _defaults(c)
     _runtime(c, raw.get("permissions", ()))
-    _presets(c, str(raw.get("id")))
     return c
 
 
@@ -254,21 +245,6 @@ def _runtime(c: dict[str, Any], permissions: list[str]) -> None:
         seen.add((e["slot"], e["id"]))
 
 
-def _check_profile(raw: dict[str, Any]) -> None:
-    """A profile has no code: only theme, defaults and layout, which the host reads as data."""
-    _check(not (used := [k for k in _PROFILE_FORBIDDEN if raw.get(k)]), f"a profile cannot declare {', '.join(used)}")
-    _check(raw.get("activation", ["startup"]) == ["startup"], "a profile has no code to activate")
-    _check(set(_object(raw, "contributes")) <= _PROFILE_CONTRIBUTES, "a profile contributes only theme, defaults, layout and presets")
-
-
-def _layout(raw: dict[str, Any], c: dict[str, Any]) -> None:
-    """contributes.layout (profiles only): chrome regions the profile hides, each set to false."""
-    layout = c.get("layout", {})
-    _check(not layout or raw.get("kind") == "profile", "contributes.layout is for profiles")
-    _check(isinstance(layout, dict) and set(layout) <= set(_LAYOUT_REGIONS) and all(v is False for v in layout.values()),
-           f"contributes.layout maps {', '.join(_LAYOUT_REGIONS)} to false")
-
-
 def _theme(c: dict[str, Any]) -> None:
     theme = c.get("theme", {})
     _check(isinstance(theme, dict) and set(theme) <= {"light", "dark"}, "contributes.theme takes only 'light' and 'dark'")
@@ -278,24 +254,6 @@ def _theme(c: dict[str, Any]) -> None:
             _check(_TOKEN.fullmatch(name), f"contributes.theme.{scheme}: {name!r} is not a custom property name")
             _check(isinstance(value, str) and _TOKEN_VALUE.fullmatch(value) and _TOKEN_FUNCTIONS.issuperset(_CALL.findall(value.lower())),
                    f"contributes.theme.{scheme}.{name} must be a plain CSS value")
-
-
-def _presets(c: dict[str, Any], ext_id: str) -> None:
-    """contributes.presets: permission presets (presets.validate) with an id of their own, and defaults.permissionPreset naming one."""
-    from .. import presets
-    items = c.get("presets", [])
-    _check(isinstance(items, list) and all(isinstance(p, dict) and isinstance(p.get("id"), str) and presets.SLUG.fullmatch(p["id"]) for p in items),
-           "contributes.presets must be a list of presets, each with an id of [a-z][a-z0-9-]*")
-    _check(len({p["id"] for p in items}) == len(items), "contributes.presets ids must be unique")
-    for p in items:
-        try:
-            presets.validate({**p, "id": f"user:{p['id']}"})
-        except presets.PresetError as e:
-            raise ManifestError(f"contributes.presets.{p['id']}: {e}") from e
-    wanted = c.get("defaults", {}).get("permissionPreset")
-    if wanted is not None:
-        own = {f"profile:{ext_id}:{p['id']}" for p in items}
-        _check(isinstance(wanted, str) and (wanted in own or wanted in presets.BUILTINS), "defaults.permissionPreset must name a built-in preset or one of this manifest's presets")
 
 
 def _defaults(c: dict[str, Any]) -> None:
@@ -308,7 +266,6 @@ def _defaults(c: dict[str, Any]) -> None:
     _check(d.get("effort", "high") in EFFORTS, f"defaults.effort must be one of {', '.join(EFFORTS)}")
     _check(d.get("theme", "dark") in _THEMES, f"defaults.theme must be one of {', '.join(_THEMES)}")
     _check(d.get("permissions", "auto") in PERMISSION_MODES, f"defaults.permissions must be one of {', '.join(PERMISSION_MODES)}")
-    _check(not {"permissions", "permissionPreset"} <= set(d), "defaults.permissions and defaults.permissionPreset both set the permission mode: give one")
     runtime = d.get("runtime", {})
     _check(isinstance(runtime, dict) and set(runtime) <= set(SLOTS), "defaults.runtime must map a runtime slot to a provider")
     for slot, value in runtime.items():

@@ -1,13 +1,11 @@
 import { statusWord } from '../lib/statusWord'
 import { useEffect, useState } from 'react'
-import { ArrowRight, Scheduled, Play, Trash2 } from '../icons'
+import { ArrowRight, Play, Trash2 } from '../icons'
 import type { Job, JobRunRecord, JobSkipRecord } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { jobAttention } from '../lib/attention'
 import { AttentionDot } from './ChatPulse'
-import AppSwitcher from './AppSwitcher'
-import SidebarToggle from './SidebarToggle'
 import { NewTask, JobHistory, ReportBody, describeJobSchedule, fmtDate, fmtWhen } from './AgentInbox'
 
 const jobState = (j: Job): string => {
@@ -16,8 +14,8 @@ const jobState = (j: Job): string => {
   return j.next_due_at ? `Next ${fmtWhen(j.next_due_at)}` : j.kind === 'watch' ? 'Watching' : 'On'
 }
 
-/** Scheduled jobs: a grid of cards, and one job's detail (edit, controls, history, latest reports) in place of it. */
-export default function JobsView(): JSX.Element {
+/** Library > Automations > Jobs: a grid of cards, and one job's detail (edit, controls, history, latest reports) in place of it. */
+export default function JobsPanel(): JSX.Element {
   const jobs = useStore((s) => s.jobs)
   const focusId = useStore((s) => s.jobsFocusId)
   const openJobs = useStore((s) => s.openJobs)
@@ -26,36 +24,29 @@ export default function JobsView(): JSX.Element {
   const job = focusId ? jobs.find((j) => j.id === focusId) : undefined
 
   return (
-    <main className="page jobs-page">
-      <header className="page-header drag">
-        <SidebarToggle />
-        <h2><Scheduled size={16} /> Jobs</h2>
-        {!job && <button className="primary-btn sm no-drag" onClick={() => setCreating((v) => !v)}>New job</button>}
-        <AppSwitcher />
-      </header>
-      <div className="page-body jobs-body">
-        {job ? <JobDetail job={job} onBack={() => openJobs(null)} /> : (
-          <>
-            {creating && <div className="jobs-new"><NewTask onDone={() => setCreating(false)} /></div>}
-            {jobs.length === 0 && !creating && <p className="muted">No jobs</p>}
-            <div className="jobs-grid">
-              {jobs.map((j) => (
-                <button key={j.id} className={`job-card${j.enabled ? '' : ' off'}`} onClick={() => openJobs(j.id)}>
-                  <span className="job-card-head">
-                    <AttentionDot state={jobAttention(j)} detail={j.paused_reason ? 'switched off by the scheduler' : j.last_error ?? undefined} />
-                    <span className="job-card-name">{j.name}</span>
-                  </span>
-                  <span className="muted small">{describeJobSchedule(j)}</span>
-                  <span className="small">{jobState(j)}</span>
-                  <span className="muted small">{j.last_fired_at ? `Last run ${fmtWhen(j.last_fired_at)}` : 'Not run yet'}</span>
-                  {j.last_error && <span className="job-card-error small" title={j.last_error}>{j.last_error}</span>}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    </main>
+    <div className="jobs-body">
+      {job ? <JobDetail job={job} onBack={() => openJobs(null)} /> : (
+        <>
+          <div><button className="primary-btn sm" onClick={() => setCreating((v) => !v)}>New job</button></div>
+          {creating && <div className="jobs-new"><NewTask onDone={() => setCreating(false)} /></div>}
+          {jobs.length === 0 && !creating && <p className="muted">No jobs</p>}
+          <div className="jobs-grid">
+            {jobs.map((j) => (
+              <button key={j.id} className={`job-card${j.enabled ? '' : ' off'}`} onClick={() => openJobs(j.id)}>
+                <span className="job-card-head">
+                  <AttentionDot state={jobAttention(j)} detail={j.paused_reason ? 'switched off by the scheduler' : j.last_error ?? undefined} />
+                  <span className="job-card-name">{j.name}</span>
+                </span>
+                <span className="muted small">{describeJobSchedule(j)}</span>
+                <span className="small">{jobState(j)}</span>
+                <span className="muted small">{j.last_fired_at ? `Last run ${fmtWhen(j.last_fired_at)}` : 'Not run yet'}</span>
+                {j.last_error && <span className="job-card-error small" title={j.last_error}>{j.last_error}</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 

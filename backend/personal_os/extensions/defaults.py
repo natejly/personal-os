@@ -1,20 +1,19 @@
-"""contributes.defaults: set once when an extension or profile is enabled, undone when it is disabled (design doc section 6.1).
+"""contributes.defaults: set once when an extension is enabled, undone when it is disabled (design doc section 6.1).
 
 Each default is recorded as source `ext:<id>` in the private setting `extDefaults`, as {id: {key: {"was", "set"}}}.
 Revert puts `was` back only while the value is still `set`: whatever the user changed in the meantime stays.
 When two enabled extensions set the same value, the one still enabled keeps it: the other's `was` is handed over.
 Only an extension applied later inherits, and only if it found the value already in place: an earlier one whose value the user
 changed since lost its claim, so reverting the later one restores what the user had.
-A permission preset looser than the current one is never applied unless the caller says the user clicked for it, and revert never loosens it.
-A runtime slot default (`runtime:<slot>`) is only that record: the profile layer of a slot's selection is read from the records of the
-enabled extensions, and a provider looser than the one in effect is held like a looser permission preset.
-`defaults.permissionPreset` names a permission preset (presets.py): each key it sets is one change, held by the same rule.
-Every write is recorded in setting_sources as `profile:<id>` (a profile) or `ext:<id>`, with the value it replaced.
+A permission mode looser than the current one is never applied unless the caller says the user clicked for it, and revert never loosens it.
+A runtime slot default (`runtime:<slot>`) is only that record: the extension layer of a slot's selection is read from the records of the
+enabled extensions, and a provider looser than the one in effect is held like a looser permission mode.
+Every write is recorded in setting_sources as `ext:<id>`, with the value it replaced.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from .. import llm, permissions, runtime, setting_sources
 from ..runtime.slots import Scopes
@@ -27,21 +26,20 @@ KEY = "extDefaults"
 SETTING_OF = {"model": "defaultModel", "effort": "defaultEffort", "theme": "theme"}
 VIEW = "view:"
 RUNTIME = "runtime:"
-PERM = "perm:"  # a key of a permission preset
 DEFAULT_KEYS = ("hiddenViews", *SETTING_OF.values(), permissions.KEY)  # the settings a defaults write can change
 
 
 @dataclass(frozen=True)
 class Change:
-    key: str  # "view:<id>", "model", "effort", "theme", "permissions", "perm:<permission key>" or "runtime:<slot>"
+    key: str  # "view:<id>", "model", "effort", "theme", "permissions" or "runtime:<slot>"
     was: Any
     value: Any
     diff: tuple[str, ...] = ()  # a runtime provider: what it loosens compared with the one in effect
 
     @property
     def looser(self) -> bool:
-        key = "permissionMode" if self.key == "permissions" else self.key.removeprefix(PERM) if self.key.startswith(PERM) else None
-        return bool(self.diff) or (key is not None and bool(permissions.loosening({key: self.was}, {key: self.value})))
+        loosens = self.key == "permissions" and bool(permissions.loosening({"permissionMode": self.was}, {"permissionMode": self.value}))
+        return bool(self.diff) or loosens
 
     def to_dict(self) -> dict[str, Any]:
         return {"key": self.key, "was": self.was, "set": self.value, **({"diff": list(self.diff)} if self.diff else {})}
@@ -67,9 +65,8 @@ def _wanted(manifest: Manifest) -> list[tuple[str, Any]]:
 
 
 class Defaults:
-    def __init__(self, db: Database, preset_keys: Callable[[str], dict[str, Any]] | None = None) -> None:
+    def __init__(self, db: Database) -> None:
         self.db = db
-        self.preset_keys = preset_keys  # a preset id -> the permission keys it sets at global scope (Presets.keys)
 
     def applied(self, ext_id: str) -> bool:
         return ext_id in (self.db.get_settings().get(KEY) or {})
@@ -81,8 +78,6 @@ class Defaults:
     def _changes(self, manifest: Manifest) -> list[Change]:
         stored = self.db.get_settings()
         wanted = _wanted(manifest)
-        if (preset := manifest.contributes.get("defaults", {}).get("permissionPreset")) and self.preset_keys is not None:
-            wanted += [(PERM + key, value) for key, value in self.preset_keys(preset).items()]
         return [Change(key, self._read(stored, key), value, self._loosens(stored, key, value)) for key, value in wanted]
 
     @staticmethod
@@ -93,14 +88,14 @@ class Defaults:
         return tuple(runtime.active.loosening(slot, runtime.active.resolve(slot, runtime_scopes(stored)), value))
 
     def apply(self, manifest: Manifest, *, confirmed: bool = False) -> list[Change]:
-        """Apply the manifest's defaults once. Returns the changes held back: a looser permission preset without `confirmed`."""
+        """Apply the manifest's defaults once. Returns the changes held back: a looser permission mode or provider without `confirmed`."""
         records = self.db.get_settings().get(KEY) or {}
         if manifest.id in records:
             return []
-        changes = self._changes(manifest)  # includes a default that already holds, so reverting another profile leaves it be
+        changes = self._changes(manifest)  # includes a default that already holds, so reverting another extension leaves it be
         held = [c for c in changes if c.looser and not confirmed]
         done = [c for c in changes if c not in held]
-        source = f"{'profile' if manifest.kind == 'profile' else 'ext'}:{manifest.id}"
+        source = f"ext:{manifest.id}"
         self._write([(c.key, c.value) for c in done if c.was != c.value], source, {c.key: c.was for c in done})
         self.db.set_settings({KEY: {**records, manifest.id: {c.key: {"was": c.was, "set": c.value} for c in done}}})
         self._announce(manifest.id, [c for c in done if c.key.startswith(RUNTIME) and c.was != c.value])
@@ -132,8 +127,6 @@ class Defaults:
     def _read(self, stored: dict[str, Any], key: str) -> Any:
         if key.startswith(VIEW):
             return key.removeprefix(VIEW) not in (stored.get("hiddenViews") or ())
-        if key.startswith(PERM):
-            return permissions.get(permissions.load(stored), key.removeprefix(PERM))
         if key == "permissions":
             return permissions.get(permissions.load(stored), "permissionMode")
         if key.startswith(RUNTIME):
@@ -153,11 +146,10 @@ class Defaults:
                 patch["hiddenViews"] = hidden
             elif key.startswith(RUNTIME):
                 continue
-            elif key.startswith(PERM) or key == "permissions":
-                name = "permissionMode" if key == "permissions" else key.removeprefix(PERM)
-                perms[name] = value
+            elif key == "permissions":
+                perms["permissionMode"] = value
                 if key in was:
-                    prev[name] = was[key]
+                    prev["permissionMode"] = was[key]
             else:
                 patch[SETTING_OF[key]] = value
                 if key in was:

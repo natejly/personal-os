@@ -117,21 +117,7 @@ def test_new_refuses_a_bad_id_and_an_existing_folder(work: Path, ext: Path) -> N
     with pytest.raises(FileExistsError):
         scaffold("sample", work)
     with pytest.raises(ValueError, match="built-in"):
-        scaffold("lean", work)
-
-
-def test_new_profile_has_no_code_and_passes_check(work: Path) -> None:
-    root = scaffold("quiet", work, profile=True)
-    assert [p.name for p in root.iterdir()] == ["extension.json"]
-    assert json.loads((root / "extension.json").read_text("utf-8"))["kind"] == "profile"
-    assert check(root) == []
-
-
-def test_a_profile_may_not_carry_code_or_hooks(work: Path) -> None:
-    root = scaffold("quiet", work, profile=True)
-    (root / "extension.py").write_text("def activate(api): pass\n", "utf-8")
-    set_manifest(root, hooks={"app.start": {}}, contributes={"tools": [{"name": "t"}]})
-    assert errors(root) == ["manifest"]  # the loader refuses it, so there is nothing left to lint
+        scaffold("health", work)
 
 
 # ---- grain ext check ----
@@ -347,13 +333,6 @@ def test_pack_command_refuses_an_extension_with_errors(ext: Path, capsys: Any) -
     assert not (ext / "extension.lock.json").exists() and "id-collision" in capsys.readouterr().out
 
 
-def test_pack_command_refuses_a_profile_and_leaves_it_valid(work: Path, capsys: Any) -> None:
-    root = scaffold("quiet", work, profile=True)
-    assert cli.main(["ext", "pack", str(root)]) == 1
-    assert "no code to pin" in capsys.readouterr().out
-    assert not (root / "extension.lock.json").exists() and cli.main(["ext", "check", str(root)]) == 0
-
-
 # ---- the command line ----
 @pytest.fixture(autouse=True)
 def _no_dev_backend(monkeypatch: Any) -> None:
@@ -391,12 +370,6 @@ def test_cli_test_runs_the_extensions_own_tests_in_a_scratch_data_dir(ext: Path,
 def test_cli_test_on_a_missing_folder_fails(work: Path, capsys: Any) -> None:
     assert cli.main(["ext", "test", str(work / "nonexistent")]) == 1
     assert "cannot read" in capsys.readouterr().out
-
-
-def test_cli_test_on_a_profile_has_nothing_to_run(work: Path, capsys: Any) -> None:
-    root = scaffold("quiet", work, profile=True)
-    assert cli.main(["ext", "test", str(root)]) == 0
-    assert "nothing to run" in capsys.readouterr().out
 
 
 def test_dev_snapshot_notices_edits_but_not_build_output(ext: Path) -> None:
@@ -686,11 +659,9 @@ def test_new_loop_writes_a_provider_that_passes_check_and_the_fence(work: Path) 
     assert errors(root) == ["loop-fence"]
 
 
-def test_new_loop_command_and_a_profile_cannot_be_a_loop(work: Path, capsys: Any) -> None:
+def test_new_loop_command_writes_a_loop_extension(work: Path, capsys: Any) -> None:
     assert cli.main(["ext", "new", "viacli", "--loop", "--dir", str(work)]) == 0
     assert (work / "viacli" / "extension.py").is_file() and "created" in capsys.readouterr().out
-    with pytest.raises(ValueError, match="profile"):
-        scaffold("both", work, profile=True, loop=True)
 
 
 def test_the_generated_loop_test_passes_under_the_harness(work: Path) -> None:

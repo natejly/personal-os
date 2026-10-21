@@ -148,11 +148,8 @@ def test_manifest_runtime_entries_are_validated() -> None:
         Manifest.from_dict({**base, "provides": {"services": ["sandbox.backend"]}})
 
 
-def test_a_profile_cannot_contribute_a_runtime_provider() -> None:
-    with pytest.raises(ManifestError):
-        Manifest.from_dict({"id": "p", "name": "P", "version": "1.0.0", "apiVersion": 1, "kind": "profile",
-                            "contributes": {"runtime": [entry("model.router", "x")]}})
-    Manifest.from_dict({"id": "p", "name": "P", "version": "1.0.0", "apiVersion": 1, "kind": "profile",
+def test_a_manifest_may_default_a_runtime_provider() -> None:
+    Manifest.from_dict({"id": "p", "name": "P", "version": "1.0.0", "apiVersion": 1,
                         "contributes": {"defaults": {"runtime": {"model.router": "acme/x"}}}})
 
 

@@ -1613,3 +1613,13 @@ test('the mascot setting defaults to the Grain mascot and saves through the sett
     assert.equal(useStore.getState().settings.mascot, mascot)
   }
 })
+
+test('the retired jobs view id lands on Library > Automations > Jobs', () => {
+  useStore.setState({ view: 'chat', libraryTab: 'skills', automationsKind: 'all' })
+  useStore.getState().setView('jobs' as never)
+  const s = useStore.getState()
+  assert.equal(s.view, 'library')
+  assert.equal(s.libraryTab, 'automations')
+  assert.equal(s.automationsKind, 'jobs')
+  useStore.setState({ view: 'chat' })
+})

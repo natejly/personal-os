@@ -49,12 +49,6 @@ export interface ManifestContributesRuntimeItem {
   meta?: Record<string, unknown>
 }
 
-export interface ManifestContributesPresetsItem {
-  id: string
-  name: string
-  description?: string
-}
-
 export interface ManifestContributes {
   tools?: ManifestContributesToolsItem[]
   routes?: ManifestContributesRoutes
@@ -65,9 +59,7 @@ export interface ManifestContributes {
   keybindings?: Record<string, unknown>[]
   theme?: Record<string, unknown>
   defaults?: Record<string, unknown>
-  layout?: Record<string, unknown>
   runtime?: ManifestContributesRuntimeItem[]
-  presets?: ManifestContributesPresetsItem[]
 }
 
 export interface ManifestHooksValue {
@@ -98,7 +90,7 @@ export interface Manifest {
   description?: string
   version: string
   apiVersion: number
-  kind?: "extension" | "profile"
+  kind?: "extension"
   enabled?: true | false | "always"
   activation?: string[]
   requires?: ManifestRequires

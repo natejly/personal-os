@@ -109,7 +109,7 @@ def test_an_index_in_an_object_and_a_file_url_both_load(tmp_path: Path) -> None:
 def test_a_failing_index_is_reported_not_raised(tmp_path: Path) -> None:
     client.put("/settings", json={"extensionCatalogUrl": str(tmp_path / "missing.json")})
     r = client.get("/extensions/catalog")
-    assert r.status_code == 200 and "FileNotFoundError" in r.json()["catalogError"] and r.json()["available"]
+    assert r.status_code == 200 and "FileNotFoundError" in r.json()["catalogError"] and isinstance(r.json()["available"], list)
     (tmp_path / "bad.json").write_text("{not json", "utf-8")
     client.put("/settings", json={"extensionCatalogUrl": str(tmp_path / "bad.json")})
     assert client.get("/extensions/catalog").json()["catalogError"]

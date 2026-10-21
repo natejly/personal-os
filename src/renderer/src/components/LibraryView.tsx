@@ -1,24 +1,26 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Library, Plug, Sparkles, Terminal, Users, Workflow, Zap } from '../icons'
-import { useStore, type LibraryTab } from '../store'
+import { Library, Plug, Scheduled, Sparkles, Terminal, Users, Workflow, Zap } from '../icons'
+import { useStore, type AutomationsKind, type LibraryTab } from '../store'
 import SkillsPanel from './SkillsPanel'
 import McpSettings from './McpSettings'
 import WorkflowsPanel from './WorkflowsPanel'
 import { CommandsPanel } from './DefsPanels'
 import AgentsPanel from './AgentsPanel'
+import JobsPanel from './JobsPanel'
 import AppSwitcher from './AppSwitcher'
 import SidebarToggle from './SidebarToggle'
 
 const TABS: { key: LibraryTab; label: string; icon: JSX.Element; blurb: string }[] = [
   { key: 'skills', label: 'Skills', icon: <Sparkles size={14} />, blurb: 'Reusable instructions' },
   { key: 'agents', label: 'Agents', icon: <Users size={14} />, blurb: 'Roles with their own instructions and tools' },
-  { key: 'automations', label: 'Automations', icon: <Zap size={14} />, blurb: 'Workflows and commands' },
+  { key: 'automations', label: 'Automations', icon: <Zap size={14} />, blurb: 'Jobs, workflows and commands' },
   { key: 'connectors', label: 'Connectors', icon: <Plug size={14} />, blurb: 'MCP servers' }
 ]
 
-// Automations holds two kinds of saved thing; the filter narrows to one, All stacks them.
-const KINDS = [
+// Automations holds three kinds of saved thing; the filter narrows to one, All stacks them.
+const KINDS: { key: AutomationsKind; label: string; icon: JSX.Element; blurb: string; panel: JSX.Element }[] = [
+  { key: 'jobs', label: 'Jobs', icon: <Scheduled size={12} />, blurb: 'Scheduled jobs and their runs', panel: <JobsPanel /> },
   { key: 'workflows', label: 'Workflows', icon: <Workflow size={12} />, blurb: 'Multi-step plans', panel: <WorkflowsPanel /> },
   { key: 'commands', label: 'Commands', icon: <Terminal size={12} />, blurb: 'Saved prompts; $ARGUMENTS fills in what follows the name', panel: <CommandsPanel /> }
 ]
@@ -27,7 +29,8 @@ export default function LibraryView(): JSX.Element {
   const tab = useStore((s) => s.libraryTab)
   const candidates = useStore((s) => s.skills.filter((x) => x.status === 'candidate').length)
   const { setLibraryTab, refreshLibrary } = useStore(useShallow((s) => ({ setLibraryTab: s.setLibraryTab, refreshLibrary: s.refreshLibrary })))
-  const [kind, setKind] = useState('all')
+  const kind = useStore((s) => s.automationsKind)
+  const setKind = useStore((s) => s.setAutomationsKind)
 
   // Cheap enough to re-run on every entry, and it is the only thing that notices a connector that
   // fell over while the view was closed.
@@ -68,7 +71,7 @@ export default function LibraryView(): JSX.Element {
         {tab === 'automations' && (
           <div className="library-panel">
             <div className="seg" role="tablist" aria-label="Kind" style={{ alignSelf: 'flex-start' }}>
-              {[{ key: 'all', label: 'All', icon: null, blurb: 'Every kind' }, ...KINDS].map((k) => (
+              {[{ key: 'all' as AutomationsKind, label: 'All', icon: null, blurb: 'Every kind' }, ...KINDS].map((k) => (
                 <button key={k.key} role="tab" aria-selected={kind === k.key} className={kind === k.key ? 'on' : ''} title={k.blurb} onClick={() => setKind(k.key)}>{k.icon} {k.label}</button>
               ))}
             </div>

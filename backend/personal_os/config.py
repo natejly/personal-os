@@ -1,7 +1,7 @@
 """The settings the app runs on, and where every value came from (design doc 10.8.3).
 
 `assemble` builds the settings dict from a database (`app.settings()` is a call to it); `effective` lays the same settings
-out by key with the source of each value (default, profile:<id>, ext:<id>, preset:<id>, user, project, chat), the
+out by key with the source of each value (default, ext:<id>, user, project, chat), the
 modes of the tools, and which secrets are set. Neither imports the app, so `grain config dump` runs against a data folder
 with no server. Secrets are reported as "set" or "unset" and nothing else.
 """

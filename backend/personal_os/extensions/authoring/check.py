@@ -41,8 +41,6 @@ def check(root: Path, previous: Path | None = None) -> list[Finding]:
     others = list(_builtin_manifests(root))
     out = [Finding("warn", "api-version", warning)] if (warning := stale_api_warning(manifest)) else []
     out += [*_collisions(root, manifest, others), *_requires(manifest, others)]
-    if manifest.kind == "profile":
-        return out  # the manifest loader already refused any code, hooks or tools a profile carries
     out += _tools(root, manifest)
     out += _code(root, manifest)
     out += _data_tables(root, manifest)

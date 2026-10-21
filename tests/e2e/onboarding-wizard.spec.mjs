@@ -62,11 +62,12 @@ test('first run: wizard connects on the key step, finishes, and never returns af
     await api('/settings', { method: 'PUT', body: { defaultModel: 'custom/mock-chat-2' } })
     await page.getByRole('button', { name: /Start chatting/ }).click()
     await expect(w).toHaveCount(0)
-    // first prompts on the empty chat; clicking one sends it with the chosen model
-    await expect(page.getByRole('button', { name: /get to know me/ })).toBeVisible()
-    const prompt = page.getByRole('button', { name: /Put three things on my todo list/ })
-    await expect(prompt).toBeVisible()
-    await prompt.click()
+    // the home is the bare composer: no starter prompts; a message sends with the chosen model
+    const box = page.getByRole('textbox', { name: 'Message' })
+    await expect(box).toBeVisible()
+    await expect(page.locator('.empty-state').getByRole('button')).toHaveCount(0)
+    await box.fill('hello there')
+    await box.press('Enter')
     await expect.poll(() => llm.calls.length, { timeout: 20_000 }).toBeGreaterThan(0)
     expect(llm.calls.some((c) => c.model === 'mock-chat-2')).toBe(true)
 

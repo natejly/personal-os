@@ -55,12 +55,12 @@ export default function CommandPalette({ initialQuery = '' }: { initialQuery?: s
   const s = useStore.getState()
 
   const entries: Entry[] = [
-    ...paletteCommands.filter((c) => ownerOn(settings, c.extension) && (!c.when || c.when(s)))
-      .map((c): Entry => ({ key: `command:${c.id}`, section: c.section ?? 'Go to', label: c.label, run: c.run })),
-    ...recent(conversations).map((c): Entry => ({ key: `chat:${c.id}`, section: 'Chats', label: plainTitle(c.title) || 'Untitled chat', run: () => void s.selectChat(c.id) })),
     ...[...VIEWS, ...navRows].filter((v) => !viewHidden(settings, v.view)).map((v): Entry => ({ key: `view:${v.view}`, section: 'Go to', label: v.label, run: () => s.setView(v.view) })),
     // Places with no number key, and the ones a hidden sidebar row leaves reachable only from here.
     { key: 'inbox', section: 'Go to', label: 'Agent inbox and jobs', run: () => s.openInbox() },
+    ...paletteCommands.filter((c) => ownerOn(settings, c.extension) && (!c.when || c.when(s)))
+      .map((c): Entry => ({ key: `command:${c.id}`, section: c.section ?? 'Go to', label: c.label, run: c.run })),
+    ...recent(conversations).map((c): Entry => ({ key: `chat:${c.id}`, section: 'Chats', label: plainTitle(c.title) || 'Untitled chat', run: () => void s.selectChat(c.id) })),
     ...projects.map((p): Entry => ({ key: `project:${p.id}`, section: 'Go to', label: p.name, typed: true, run: () => s.openProject(p.id) })),
     ...(viewHidden(settings, 'spaces') ? [] : canvases).map((c): Entry => ({ key: `space:${c.id}`, section: 'Go to', label: c.name, typed: true, run: () => void useCanvas.getState().enterSpace(c.id) })),
     ...recent(docs).map((d): Entry => ({ key: `doc:${d.id}`, section: 'Files', label: d.title || 'Untitled', run: () => void s.openDoc(d.id) })),

@@ -185,8 +185,8 @@ test('command palette: opens, fuzzy filters, arrows + Enter run, every command e
   await menu(grain, 'Lists')
   await menu(grain, 'Command Palette…')
   await expect(pal.getByRole('option').first()).toBeVisible()
-  await expect(pal.getByText('Settings', { exact: true })).toBeVisible() // the section heading
-  await expect(pal.getByText('Chats', { exact: true })).toBeVisible()
+  await expect(pal.locator('.palette-heading', { hasText: 'Settings' })).toBeVisible()
+  await expect(pal.locator('.palette-heading', { hasText: 'Chats' })).toBeVisible()
   await page.keyboard.press('Escape')
   // a section shows five rows at rest, more once a query narrows it
   await menu(grain, 'Command Palette…')

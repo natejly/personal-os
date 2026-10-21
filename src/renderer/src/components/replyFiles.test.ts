@@ -30,7 +30,8 @@ const sendFiles = (result: unknown): ToolEvent => ({
   error: null, pending: false, images: [{ name: 'screen.png', mime: 'image/png', bytes: 3, data: 'data:image/png;base64,AAAA' }]
 } as unknown as ToolEvent)
 
-const card = (e: ToolEvent): string => renderToStaticMarkup(createElement(TOOL_CARDS[e.name], { event: e, pending: false, decide: async () => undefined }))
+// A decided card is one collapsed line; the body (what these tests read) renders while the call waits, which is always open.
+const card = (e: ToolEvent): string => renderToStaticMarkup(createElement(TOOL_CARDS[e.name], { event: e, pending: true, decide: async () => undefined }))
 
 test('the send_files card shows the phone badge only when it went to Telegram', () => {
   const att = [png]

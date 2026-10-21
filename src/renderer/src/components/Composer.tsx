@@ -4,6 +4,7 @@ import { SKILL_PRESETS, type SkillPreset } from '@shared/skillPresets'
 import { api } from '../lib/api'
 import CaretMenu from '../features/notes/CaretMenu'
 import { slashMenuKey } from '../features/notes/slash'
+import { SIMPLE_HIDDEN_COMMANDS, simpleOn } from '../lib/simpleMode'
 import { clientCommand, scheduleForm, skillSlug, slashItems, suggestSkills, type SlashItem } from '../lib/slashCommands'
 import { composerContext, EMPTY_CONTEXT, overlap, rankByContext, rankChats, type ComposerContext } from '../lib/composerRank'
 import ScheduleForm from './ScheduleForm'
@@ -54,6 +55,7 @@ export default function Composer({ conversationId, footer, compact = false, plac
   const streaming = useIsStreaming(conversationId)
   const stopping = useIsStopping(conversationId)
   const activeId = useStore((s) => conversationId ?? s.focusedConversationId)
+  const simple = useStore((s) => simpleOn(s.settings))
   const draftProjectId = useStore((s) => s.draftProjectId)
   // The draft is read by key, so switching chats or views shows each one's own text and a refused
   // send can be handed back to the chat it came from, not whichever is showing by then.
@@ -134,7 +136,7 @@ export default function Composer({ conversationId, footer, compact = false, plac
   }
   const ctx = slashClosedAt === text ? EMPTY_CONTEXT : menuCtx()
   const slash = slashClosedAt === text ? null
-    : slashItems(text, commands, skills, ctx, registered) ?? mentionItems(text, caret,
+    : slashItems(text, commands, skills, ctx, registered, simple ? SIMPLE_HIDDEN_COMMANDS : undefined) ?? mentionItems(text, caret,
       rankByContext(agentRows, (a) => overlap(a.description, ctx)), 8, rankChats(chatRows, ctx), dashRows)
   /** `/schedule` or `/loop` without a time: the inline form (ScheduleForm), seeded with the rest of the line. */
   const [sched, setSched] = useState<{ loop: boolean; task: string } | null>(null)
@@ -565,7 +567,7 @@ export default function Composer({ conversationId, footer, compact = false, plac
       </div>
       <div className="composer-footer">
         {footer}
-        <PermissionModePill conversationId={activeId} />
+        {!simple && <PermissionModePill conversationId={activeId} />}
       </div>
     </div>
   )

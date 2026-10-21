@@ -1751,6 +1751,8 @@ export interface Settings {
   uiFont?: 'system' | 'serif' | 'mono'
   /** URL (or local path) of the extensions catalog index; missing means the default catalog. */
   extensionCatalogUrl?: string
+  /** Hide models, permission detail, context, developer settings and chat internals. Presentation only; missing means off. */
+  simpleMode?: boolean
   /** Which creature draws the faces; missing means the Grain mascot. */
   mascot?: 'grain' | 'blobs' | 'off'
   /** Code and monospace typeface; missing means default. */

@@ -4,6 +4,7 @@ import TracesPane from './TracesPane'
 import { ChevronRight, ChevronDown, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, ShieldAlert, PenLine } from '../icons'
 import { ToolOverrides } from './ToolPermissions'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
+import { devToolsOn, simpleOn } from '../lib/simpleMode'
 import { api } from '../lib/api'
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import { citeLabel, openCite } from '../lib/remarkCites'
@@ -202,7 +203,7 @@ function Inspector({ ctx, b, tx, children }: { ctx: ContextUsed; b: UsageBreakdo
 /** What the last reply was sent. */
 function LastReply({ ctx, messageId, b, conversationId }: { ctx: ContextUsed | null; messageId?: string; b: UsageBreakdown | null; conversationId: string }): JSX.Element {
   const [loadReq, setLoadReq] = useState(false)
-  const devTools = useStore((s) => s.settings.devTools === true)
+  const devTools = useStore((s) => devToolsOn(s.settings))
   const tx = useMessageTexts(messageId)
   useEffect(() => { setLoadReq(false) }, [messageId])
   if (!ctx) return <section className="ctx-section"><h4>Last reply</h4><p className="muted ctx-empty">No replies yet</p></section>
@@ -442,7 +443,13 @@ function ContextUsedView({ ctx, only }: { ctx: ContextUsed; only?: string }): JS
 }
 
 /** The body of the side panel's Context tab: what the model is sent (with the text of each part), then what this chat may use. The shell scrolls it; `embedded` is accepted for callers and ignored. */
-export default function ContextDrawer({ conversationId }: { conversationId?: string; embedded?: boolean }): JSX.Element {
+export default function ContextDrawer(props: { conversationId?: string; embedded?: boolean }): JSX.Element | null {
+  // Simple mode hides the context meter and the settings behind it.
+  const simple = useStore((s) => simpleOn(s.settings))
+  return simple ? null : <ContextBody {...props} />
+}
+
+function ContextBody({ conversationId }: { conversationId?: string }): JSX.Element {
   const convo = useConversation(conversationId)
   const draftProjectId = useStore((s) => s.draftProjectId)
   const settings = useStore((s) => s.settings)

@@ -18,6 +18,12 @@ export const THEMES: { id: Settings['theme']; label: string }[] = [
 export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { shortcuts: Partial<Record<ShortcutKey, ShortcutState>> }): JSX.Element {
   return (
     <section>
+      <Sec id="simple">
+        <label className="toggle-row plain">
+          <span className="toggle-text"><b>Simple mode</b><small>Hide advanced settings and chat internals like thinking, tool calls and costs.</small></span>
+          <input type="checkbox" checked={draft.simpleMode === true} onChange={(e) => patch({ simpleMode: e.target.checked })} /><span className="switch" />
+        </label>
+      </Sec>
       <Sec id="look">
       <h4>Appearance</h4>
       <div className="setting-row">

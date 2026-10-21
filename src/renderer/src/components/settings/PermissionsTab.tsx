@@ -14,17 +14,25 @@ import { PermissionModeCards } from '../PermissionMode'
 import { AlwaysAsk, ToolGlobalToggles } from '../ToolPermissions'
 import RunSafetySettings, { SnapshotToggle } from '../RunSafetySettings'
 import { Sec, type TabProps } from './shared'
+import { useStore } from '../../store'
+import { simpleOn } from '../../lib/simpleMode'
 
 export default function PermissionsTab({ draft, patch }: TabProps): JSX.Element {
+  const simple = useStore((s) => simpleOn(s.settings))
   const mode = modeOf(draft)
   // The mode cards bring their own confirmation for Allow everything; these two switches share one inline confirmation.
   const [ask, setAsk] = useState<'connections' | 'edits' | null>(null)
+  const modeSec = (
+    <Sec id="mode">
+      <h4>Permission mode</h4>
+      <PermissionModeCards mode={mode} onPick={(permissionMode) => patch({ permissionMode })} />
+    </Sec>
+  )
+  // Simple mode keeps the mode picker and drops everything else in the tab.
+  if (simple) return <section className="permissions-tab">{modeSec}</section>
   return (
     <section className="permissions-tab">
-      <Sec id="mode">
-        <h4>Permission mode</h4>
-        <PermissionModeCards mode={mode} onPick={(permissionMode) => patch({ permissionMode })} />
-      </Sec>
+      {modeSec}
       {mode !== 'manual' && (
         <label className="setting-row"><span className="toggle-text"><b>Start confident plans after (seconds, 0 = off)</b></span>
           <NumberField name="planAutoApproveSeconds" value={draft.planAutoApproveSeconds ?? 30} fallback={0} onChange={(planAutoApproveSeconds) => patch({ planAutoApproveSeconds })} />

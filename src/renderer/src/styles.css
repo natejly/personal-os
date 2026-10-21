@@ -1696,7 +1696,9 @@ label:active > input:not(:disabled):checked + .switch::after { left: calc(16px -
 /* Calendar and Mail carry the most controls: below 760px of bar the secondary ones (range text, sync time, account) fold away so the title and primary actions never overlap. */
 @container (max-width: 760px) {
   .cal-page .page-header h2 { flex: 0 0 auto; }
-  .cal-page .cal-range, .cal-page .sync-status, .mail-page .sync-status, .mail-page .page-header h2 .muted { display: none; }
+  .cal-page .cal-range, .mail-page .page-header h2 .muted { display: none; }
+  .cal-page .sync-text, .mail-page .sync-text { display: none; }
+  .page-header .sync-status .sync-icon { display: block; }
   .mail-page .page-header h2 { flex: 0 0 auto; }
   .mail-page .page-header .search { width: 160px; }
 }
@@ -3547,4 +3549,5 @@ select:focus-visible {
 .traces-tool pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .sync-status { background: none; border: 0; padding: 4px 6px; border-radius: var(--r-sm); font-size: var(--fs-sm); color: var(--text-faint); cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sync-status .sync-icon { display: none; }
 .sync-status:hover:not(:disabled), .sync-status:focus-visible { color: var(--text); }

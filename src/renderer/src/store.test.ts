@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { learnedText, readDocMode, adoptServerDoc, flushDocOnUnload, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, setSettingsGuard, patchDocRow, PAGE_AGENT_DRAFT, type ChatSession } from './store'
+import { learnedText, readDocMode, adoptServerDoc, flushDocOnUnload, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, setSettingsGuard, patchDocRow, type ChatSession } from './store'
 import { insertIntoComposer } from './lib/composerInsert'
 import { getDraft } from './lib/drafts'
 import { ApiError } from './lib/apiError'
@@ -1180,11 +1180,9 @@ test('a timed-out chat POST with no run behind it says the message may not have 
   assert.match(useStore.getState().toasts[0].text, /may not have been sent/)
 })
 
-test("a slot chip inserts into the draft of the chat the card is in; the open ⌘I thread's is the panel's", () => {
-  useStore.setState({ focusedConversationId: 'other', pageAgentOpen: true, pageAgentId: 'c7' })
-  insertIntoComposer('Tue 3pm', { conversationId: 'c7' })
+test('a slot chip inserts into the draft of the chat the card is in', () => {
+  useStore.setState({ focusedConversationId: 'other' })
   insertIntoComposer('Wed 4pm', { conversationId: 'c8' })
-  assert.equal(getDraft('page')?.text, 'Tue 3pm')
   assert.equal(getDraft('c:c8')?.text, 'Wed 4pm')
   assert.equal(getDraft('c:other'), undefined)
 })
@@ -1210,41 +1208,6 @@ test('learnedText leaves out zero counts and says nothing when nothing changed',
   assert.equal(learnedText({ memories: [1], nodes: [], edges: [] }), 'Learned 1 memory')
   assert.equal(learnedText({ memories: [], nodes: [1, 2], edges: [1], removed: [1] }), 'Forgot 1, 2 entities, 1 relation')
   assert.equal(learnedText({ memories: [], nodes: [], edges: [] }), '')
-})
-
-test('opening a doc swaps the page agent thread to the chat bound to that doc', async () => {
-  const { api } = await import('./lib/api')
-  const docs = api.docs as unknown as Stubs
-  const orig = { ...docs }
-  docs.get = async (id: unknown) => docFull({ id })
-  docs.revisions = async () => []
-  const conv = (id: string, docId?: string) => ({ id, title: id, project_id: null, model: null, settings: docId ? { docId } : {}, created_at: 0, updated_at: 0 })
-  try {
-    const sessions = { a1: session({ conversation: conv('a1', 'dA') as never }), b1: session({ conversation: conv('b1', 'dB') as never }) } as never
-    useStore.setState({ activeDoc: null, docDraft: null, docTitleDraft: null, sessions, conversations: [conv('x'), conv('a1', 'dA'), conv('b1', 'dB')] as never, pageAgentId: 'x' })
-    await useStore.getState().openDoc('dA')
-    assert.equal(useStore.getState().pageAgentId, 'a1')
-    await useStore.getState().openDoc('dB')
-    assert.equal(useStore.getState().pageAgentId, 'b1')
-    await useStore.getState().openDoc('dC')
-    assert.equal(useStore.getState().pageAgentId, null, 'an unbound doc starts a fresh thread')
-  } finally {
-    Object.assign(docs, orig)
-  }
-})
-
-test('the side chat parks its model and effort until its thread exists, and a pin holds the thread', async (t) => {
-  useStore.setState({ sessions: {}, pageAgentChatSettings: {}, pageAgentModel: null, pageAgentPin: null, pageAgentId: 'a', view: 'chat' } as never)
-  const { calls } = stubFetch(t, () => json([]))
-  await useStore.getState().setChatConfig({ model: 'm1', effort: 'high' }, PAGE_AGENT_DRAFT)
-  assert.equal(calls.length, 0)
-  assert.equal(useStore.getState().pageAgentModel, 'm1')
-  assert.equal(useStore.getState().pageAgentChatSettings.effort, 'high')
-  useStore.getState().pinPageAgent()
-  useStore.setState({ pageAgentId: 'b' })
-  assert.equal(useStore.getState().pageAgentPin?.id, 'a')
-  useStore.getState().unpinPageAgent()
-  assert.equal(useStore.getState().pageAgentPin, null)
 })
 
 test('Memory lives in Settings: split by default, and every way in lands on its tab', () => {

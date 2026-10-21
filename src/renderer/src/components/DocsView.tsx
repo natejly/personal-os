@@ -14,8 +14,6 @@ import DiffView from './DiffView'
 import DocTree from './DocTree'
 import { scopeOf } from '../lib/docTree'
 import ResizeHandle from './ResizeHandle'
-import { oneLine } from '../lib/emailAsk'
-import { fenced, lines, usePageContext } from '../lib/pageContext'
 import { PANEL_TABS, parsePanelState, resolveWikiDoc, type PanelState, type PanelTab } from '../lib/docPanel'
 import Backlinks from '../features/notes/Backlinks'
 import DocOutline from '../features/notes/DocOutline'
@@ -34,7 +32,6 @@ import AppSwitcher from './AppSwitcher'
 import DocumentsView from './DocumentsView'
 import DashboardView from './DashboardView'
 import { isDashboardContent } from '../lib/dashboards'
-import ArtifactsView from './ArtifactsView'
 import ScopeSelect from './ScopeSelect'
 import SidebarToggle from './SidebarToggle'
 import { tip } from '../lib/tip'
@@ -77,7 +74,6 @@ function ViewMenu({ children, icon, title = 'View options', className = '' }: { 
 
 export default function DocsView(): JSX.Element {
   const docs = useStore((s) => s.docs)
-  const projects = useStore((s) => s.projects)
   const activeDoc = useStore((s) => s.activeDoc)
   const docDraft = useStore((s) => s.docDraft)
   const docTitleDraft = useStore((s) => s.docTitleDraft)
@@ -183,7 +179,6 @@ export default function DocsView(): JSX.Element {
   const pending = activeDoc?.pending ?? []
   const applied = useMemo(() => docRevisions.filter((r) => r.status !== 'pending'), [docRevisions])
   const scope = activeDoc ? scopeOf(activeDoc) : ''
-  const projectName = projects.find((p) => p.id === scope)?.name
   // A doc just made by New or Today's note opens in Edit and gets the caret, at its end, so typing can
   // start at once. The editor mounts on the next render, so the jump waits for it.
   useEffect(() => {
@@ -280,23 +275,6 @@ export default function DocsView(): JSX.Element {
     else void createDoc({ title: name, project_id: scope || null, folder: activeDoc?.folder ?? '' })
   }
 
-  // ⌘I over a doc answers about that doc: the text as it stands in the editor, unsaved edits and all.
-  usePageContext(() => (custom ? undefined : activeDoc
-    ? {
-        view: 'docs',
-        label: `File “${oneLine(activeDoc.title || 'Untitled', 80)}”`,
-        detail: `Open${dirty ? ', unsaved edits' : ''}. ${projectName ? `Project “${oneLine(projectName, 80)}”` : 'Personal'}${activeDoc.folder ? ` / ${oneLine(activeDoc.folder, 80)}` : ''}. Id \`${oneLine(activeDoc.id, 80)}\`. ${comments.openCount ? `${comments.openCount} open comment thread${comments.openCount === 1 ? '' : 's'} on this file: doc_comments reads them, doc_comment_reply answers in one. ` : ''}Revise with doc_edit. The user reviews the diff unless document edits are set to accept all.\n\n${fenced(body)}`,
-        refs: [{ kind: 'doc', id: activeDoc.id, name: activeDoc.title }],
-        hints: ['Summarise this file', 'Tighten the writing', 'Pull out the action items as todos']
-      }
-    : {
-        view: 'docs',
-        label: 'Files',
-        detail: `No file is open. Files are grouped by project — Personal plus one folder per project. The list shows:\n${lines(docs, (d) => `“${d.title || 'Untitled'}” (\`${d.id}\`)${d.project_id ? ` in project ${d.project_id}` : ' in Personal'}${d.folder ? `/${d.folder}` : ''}`)}`,
-        refs: docs.slice(0, 40).map((d) => ({ kind: 'doc', id: d.id, name: d.title })),
-        hints: ['What have I been writing about?', 'Start a file for this week’s plan']
-      }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, projectName, body, dirty, docs, comments.openCount, custom])
-
   return (
     <main className="page docs-page">
       <header className="page-header drag">
@@ -327,7 +305,6 @@ export default function DocsView(): JSX.Element {
         )}
 
         {section === 'uploads' ? <section className="docs-main"><DocumentsView embedded /></section>
-          : section === 'artifacts' ? <section className="docs-main"><ArtifactsView /></section>
           : custom && activeDoc ? <section className="docs-main"><custom.Component key={activeDoc.id} doc={activeDoc} /></section>
           : !activeDoc ? (
           <section className="empty-state">

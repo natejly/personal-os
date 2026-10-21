@@ -36,29 +36,13 @@ test('Lists, Calendar, Mail and Health are sidebar rows in order, each opens its
   })
 })
 
-test('the title-bar Quick chat button opens and closes the page agent panel', async ({ grain }) => {
+test('the title bar has no chat button outside a chat; a chat shows its Workspace panel button', async ({ grain }) => {
   const { page } = grain
-  const btn = page.getByRole('button', { name: 'Quick chat' })
-  // A chat gives that slot to its own Workspace panel button, so use a list view.
   await page.locator('.sidebar .nav-item', { hasText: /^\s*Lists/ }).first().click()
-  const panel = page.getByRole('complementary', { name: 'Page agent' })
-  // one Quick chat button per title bar; the inbox icon is absent while the inbox is empty
-  await expect(page.locator('.app-switcher button')).toHaveCount(1)
-  await expect(page.locator('.app-switcher').getByRole('button', { name: 'Quick chat' })).toHaveCount(1)
-  await expect(btn).toHaveAttribute('aria-pressed', 'false')
-  await expect(panel).toHaveCount(0)
-  await btn.click()
-  await expect(panel).toBeVisible()
-  await expect(page.locator('.app.page-agent-open')).toHaveCount(1)
-  await expect(btn).toHaveAttribute('aria-pressed', 'true')
-  await btn.click()
-  await expect(panel).toHaveCount(0)
-  await expect(page.locator('.app.page-agent-open')).toHaveCount(0)
-  await expect(btn).toHaveAttribute('aria-pressed', 'false')
-  // a chat's title bar shows its Workspace panel button in that slot instead
+  // the inbox icon is absent while the inbox is empty
+  await expect(page.locator('.app-switcher button')).toHaveCount(0)
   await page.locator('.sidebar .new-chat').click()
   await expect(page.locator('.app-switcher').getByRole('button', { name: 'Workspace panel' })).toBeVisible()
-  await expect(btn).toHaveCount(0)
   expect(grain.consoleErrors).toEqual([])
 })
 
@@ -228,7 +212,7 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   expect(acc['New Chat']).toMatch(/\+N$/)
   expect(acc['Settings…']).toMatch(/,$/)
   expect(acc['Toggle Sidebar']).toMatch(/\+B$/)
-  expect(acc['Context panel / Quick chat']).toMatch(/\+I$/)
+  expect(acc['Side Panel: Context and Terminal']).toMatch(/\+I$/)
   expect(acc['Toggle Side Panel']).toBeFalsy()
   expect(acc['Toggle Context Panel']).toBe('Control+Command+I')
   expect(acc['Toggle Canvases']).toMatch(/Shift\+C$/)
@@ -298,22 +282,11 @@ test('prev/next chat shortcuts step through the sidebar list', async ({ grain })
   await expect(active).toHaveCount(1)
 })
 
-test('page agent and context drawer shortcuts toggle the panels; context panel only lives in a chat', async ({ grain }) => {
+test('context drawer shortcuts toggle the panel; it only lives in a chat', async ({ grain }) => {
   const { page } = grain
-  const pa = page.getByRole('complementary', { name: 'Page agent' })
-  await menu(grain, 'Files')  // in a chat ⌘I opens the Context panel; the page agent is for every other view
-  await menu(grain, 'Context panel / Quick chat')
-  await expect(pa).toBeVisible()
-  await menu(grain, 'Context panel / Quick chat')
-  await expect(pa).toHaveCount(0)
-  await menu(grain, 'Context panel / Quick chat')
-  await expect(pa).toBeVisible()
-  await page.getByRole('button', { name: 'Close page agent' }).click()
-  await expect(pa).toHaveCount(0)
-  // rapid parity
-  for (let i = 0; i < 5; i++) await menu(grain, 'Context panel / Quick chat')
-  await expect(pa).toBeVisible()
-  await menu(grain, 'Context panel / Quick chat')
+  await menu(grain, 'Files')  // outside a chat there is no side panel: ⌘I does nothing
+  await menu(grain, 'Side Panel: Context and Terminal')
+  await expect(page.getByRole('complementary', { name: 'Workspace' })).toHaveCount(0)
   // context drawer in a chat
   await page.getByRole('button', { name: /New chat/ }).first().click()
   const panel = page.getByRole('complementary', { name: 'Workspace' })
@@ -348,8 +321,8 @@ test('nothing overflows horizontally at 820x520 on any view', async () => {
     }
     await page.getByRole('button', { name: /New chat/ }).first().click()
     await check('chat')
-    await menu(grain, 'Context panel / Quick chat')
-    await check('chat + page agent')
+    await menu(grain, 'Side Panel: Context and Terminal')
+    await check('chat + side panel')
     await menu(grain, 'Toggle Sidebar')
     await check('chat, sidebar hidden')
     await menu(grain, 'Toggle Canvases')

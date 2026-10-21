@@ -14,8 +14,8 @@ export interface HostEvents {
   /** The selection toolbar is about to show for `text`, highlighted in `source`. */
   'ui.selection': { text: string; source: SelectionSource }
 }
-/** Where a selection gets the toolbar: chat transcripts, the page agent panel, the note editor, the mail reader. */
-export type SelectionSource = 'chat' | 'page-agent' | 'note' | 'mail'
+/** Where a selection gets the toolbar: chat transcripts, the note editor, the mail reader. */
+export type SelectionSource = 'chat' | 'note' | 'mail'
 export type HostEvent = keyof HostEvents
 
 const viewOpened = new Set<(e: HostEvents['ui.view.opened']) => void>()

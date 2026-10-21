@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
-import { appendToDraft } from '../lib/drafts'
-import { COMPOSER_INSERT_EVENT } from '../lib/composerInsert'
+import { insertIntoComposer } from '../lib/composerInsert'
 import { askDraft, selectionMessage, SELECTION_VERBS, type SelectionVerb } from '../lib/selectionActions'
 import { CORE, ownerOn, registerSelectionAction, selectionActions } from '../extensions/host'
 import { emitSelection, type SelectionSource } from '../extensions/events'
 
-/** Where a selection gets the toolbar: chat transcripts, the page agent panel, the note editor, the mail reader. */
-const SURFACES: Record<SelectionSource, string> = { chat: '.messages', 'page-agent': '.page-agent-body', note: '.md-surface', mail: '.mail-body' }
+/** Where a selection gets the toolbar: chat transcripts, the note editor, the mail reader. */
+const SURFACES: Record<SelectionSource, string> = { chat: '.messages', note: '.md-surface', mail: '.mail-body' }
 
 const surfaceOf = (node: Element): SelectionSource | undefined =>
   (Object.keys(SURFACES) as SelectionSource[]).find((source) => node.closest(SURFACES[source]))
@@ -19,15 +18,16 @@ function selectedText(): string {
   return window.getSelection()?.toString().trim() ?? ''
 }
 
-/** Opens the page agent panel and hands it the quote: Ask… waits for a question, the rest send at once. */
+/** Drops the verb's message (or, for Ask…, the quote) into the current chat's composer; outside a chat it opens the chat view first. */
 export function runSelectionVerb(verb: SelectionVerb, quote: string): void {
   if (!quote) return
-  useStore.setState({ pageAgentOpen: true })
-  if (verb === 'ask') {
-    appendToDraft('page', askDraft(quote))
-    // The panel may only just have mounted: let it subscribe before it is told to take focus.
-    setTimeout(() => window.dispatchEvent(new CustomEvent(COMPOSER_INSERT_EVENT, { detail: { text: '', key: 'page' } })), 50)
-  } else void useStore.getState().sendToPageAgent(selectionMessage(verb, quote))
+  const s = useStore.getState()
+  const text = verb === 'ask' ? askDraft(quote) : selectionMessage(verb, quote)
+  const conversationId = s.focusedConversationId ?? undefined
+  if (s.view === 'chat' || s.view === 'canvas') return insertIntoComposer(text, { conversationId })
+  s.setView('chat')
+  // The composer mounts with the view: let it subscribe before it is told to take focus.
+  setTimeout(() => insertIntoComposer(text, { conversationId }), 50)
 }
 
 for (const v of SELECTION_VERBS) registerSelectionAction(CORE, { id: v.id, label: v.label, run: (text) => runSelectionVerb(v.id, text) })

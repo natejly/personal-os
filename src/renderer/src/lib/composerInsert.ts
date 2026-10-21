@@ -8,7 +8,6 @@
  */
 import { useStore } from '../store'
 import { appendToDraft, composerKey, restoreDraft } from './drafts'
-import { panelConversationFor } from './pagePanel'
 
 export const COMPOSER_INSERT_EVENT = 'grain:composer-insert'
 
@@ -17,9 +16,7 @@ export interface ComposerInsertDetail { text: string; key: string }
 export function insertIntoComposer(text: string, opts: { conversationId?: string; mode?: 'append' | 'restore' } = {}): void {
   if (!text) return
   const s = useStore.getState()
-  // The open ⌘I panel's thread drafts under the panel's own key, not the chat's.
-  const page = !!opts.conversationId && s.pageAgentOpen && opts.conversationId === panelConversationFor({ pageAgentId: s.pageAgentId, pin: s.pageAgentPin })
-  const key = composerKey({ conversationId: opts.conversationId, page, focusedId: s.focusedConversationId, draftProjectId: s.draftProjectId })
+  const key = composerKey({ conversationId: opts.conversationId, focusedId: s.focusedConversationId, draftProjectId: s.draftProjectId })
   if (opts.mode === 'restore') restoreDraft(key, text)
   else appendToDraft(key, text)
   if (typeof window === 'undefined') return

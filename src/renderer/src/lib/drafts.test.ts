@@ -56,8 +56,7 @@ const stored = (key: string): { t: string; at: number; taint?: string } | null =
   return raw ? JSON.parse(raw) : null
 }
 
-test('composerKey: the page agent, then the conversation, then the chat that has no row', () => {
-  assert.equal(composerKey({ page: true, conversationId: 'x', focusedId: 'y' }), 'page')
+test('composerKey: the conversation, then the chat that has no row', () => {
   assert.equal(composerKey({ conversationId: 'a', focusedId: 'b' }), 'c:a')
   assert.equal(composerKey({ focusedId: 'b' }), 'c:b')
   assert.equal(composerKey({ focusedId: null }), 'new:personal')

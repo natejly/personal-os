@@ -14,7 +14,6 @@ import WorkersPanel from './WorkersPanel'
 import ProgressCard from './ProgressCard'
 import ShowPanel from './ShowPanel'
 import ChatFilesButton from './ChatFilesPanel'
-import { fenced, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 import SidebarToggle from './SidebarToggle'
 import { useOnboarding } from './onboarding/onboardingStore'
@@ -102,8 +101,6 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const { shown, hidden } = sinceClear(all)
   const showEarlier = hidden > 0 && earlierFor === convo?.id
   const msgs = showEarlier ? all : shown
-  // Frozen while a reply streams: the page context is rebuilt once the reply settles, not on every token batch.
-  const lastLen = isStreamingHere ? -1 : msgs[msgs.length - 1]?.content.length ?? 0
 
   const last = msgs[msgs.length - 1]
   const watchId = latestBrowserMessage(msgs)
@@ -127,17 +124,6 @@ export default function ChatView({ conversationId }: { conversationId?: string }
     })
     return () => cancelAnimationFrame(raf)
   }, [chatJump, msgs, all, hidden, showEarlier, conversationId, convo?.id, release])
-
-  // Only the full-window chat is a "page"; a chat window on the canvas is one of many on screen.
-  usePageContext(() => (conversationId ? undefined : {
-    view: 'chat',
-    label: convo ? `Chat “${convo.title}”` : 'Chat',
-    detail: convo
-      ? `The user is reading this conversation (\`${convo.id}\`). Its last turns:\n\n${fenced(msgs.slice(-6).map((m) => `**${m.role}**: ${m.content}`).join('\n\n'), 3000)}`
-      : 'An empty chat, nothing sent yet.',
-    refs: convo ? [{ kind: 'conversation', id: convo.id, name: convo.title }] : [],
-    hints: convo ? ['Summarise this conversation', 'What did we decide?'] : []
-  }), [conversationId, convo?.id, convo?.title, msgs.length, lastLen])
 
   return (
     <main className="chat">
@@ -166,7 +152,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
         <div className="no-drag header-right">
           {conversationId && <ChatFilesButton conversationId={convo?.id} />}
         </div>
-        {/* The full-window chat gives the last title-bar slot to its own workspace panel. ⌘I toggles the same panel on Context here, and opens the quick chat in other views. */}
+        {/* The full-window chat gives the last title-bar slot to its own workspace panel. ⌘I toggles the same panel on Context here. */}
         <AppSwitcher last={conversationId || sidePanelClosed ? undefined : (
           <button className={`icon-btn${deskPanel || contextOpen ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={deskPanel || contextOpen}
             onClick={() => { if (contextOpen) toggleContext(); setDeskPanel(!(deskPanel || contextOpen)) }}><PanelRight size={15} /></button>

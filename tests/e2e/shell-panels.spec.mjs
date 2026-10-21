@@ -1,73 +1,17 @@
 import { test, expect } from './fixtures.mjs'
 import { menu, navItem } from './helpers/shell.mjs'
 
-const heading = (page, re) => expect(page.locator('main h2, .page h2').filter({ hasText: re }).first()).toBeVisible()
-const panel = (page) => page.getByRole('complementary', { name: 'Page agent' })
-const lastCallText = (llm) => JSON.stringify(llm.calls[llm.calls.length - 1] ?? {})
-
-async function askPageAgent(grain, text = '!!reply noted') {
-  const { page, llm } = grain
-  const before = llm.calls.length
-  if (!(await panel(page).count())) await menu(grain, 'Context panel / Quick chat')
-  await expect(panel(page)).toBeVisible()
-  const box = panel(page).getByRole('textbox').first()
-  await box.fill(text)
+test('side panel: width resizes with the handle, clamps with the keyboard and resets on double click', async ({ grain }) => {
+  const { page } = grain
+  await page.locator('.sidebar .new-chat').click()
+  const box = page.locator('main').getByRole('textbox', { name: 'Message' })
+  await box.fill('!!reply ready')
   await box.press('Enter')
-  await expect.poll(() => llm.calls.length, { timeout: 20_000 }).toBeGreaterThan(before)
-  await expect(panel(page).locator('.msg.assistant').last()).toContainText('noted')
-  // title / learn calls follow the reply, so look at every call since the question, not just the last
-  return JSON.stringify(llm.calls.slice(before))
-}
-
-test('page agent carries each view\'s content to the model', async ({ grain }) => {
-  const { page, api, llm } = grain
-  await api('/todos', { method: 'POST', body: { title: 'Zanzibar quarterly taxes' } })
-  await api('/docs', { method: 'POST', body: { title: 'Quokka notes', content: '# Quokka notes\n\nThe quokka is the happiest animal.' } })
-  await page.reload()
-  await page.waitForSelector('.sidebar')
-
-  // Todos
-  await navItem(page, 'Lists').click()
-  await heading(page, /Lists/)
-  await expect(page.getByText('Zanzibar quarterly taxes').first()).toBeVisible()
-  let body = await askPageAgent(grain)
-  expect(body).toContain('Zanzibar quarterly taxes')
-  await expect(panel(page).locator('.page-agent-ctx')).toContainText('Lists')
-  // The panel follows the view: switch to Calendar, context label changes
-  await navItem(page, 'Calendar').click()
-  await expect(panel(page).locator('.page-agent-ctx')).toContainText('Calendar')
-  // Files: open the doc, then ask
-  await page.locator('.sidebar .nav-item', { hasText: /^\s*Files/ }).click()
-  await heading(page, /Files/)
-  await page.getByText('Quokka notes').first().click()
-  await expect(page.getByText('happiest animal').first()).toBeVisible()
-  await expect(panel(page).locator('.page-agent-ctx')).toContainText(/Quokka|Files/)
-  body = await askPageAgent(grain, '!!reply noted about doc')
-  expect(body).toContain('happiest animal')
-  // Chat view: the chat's own text
-  await page.getByRole('button', { name: /New chat/ }).first().click()
-  const msg = page.locator('main').getByRole('textbox', { name: 'Message' })
-  await msg.fill('!!reply Walrus ledger entry')
-  await msg.press('Enter')
-  await expect(page.locator('main .msg.assistant').last()).toContainText('Walrus')
-  await expect(panel(page).locator('.page-agent-ctx')).toContainText(/Chat|chat|New/)
-  body = await askPageAgent(grain)
-  expect(body).toContain('Walrus ledger entry')
-  // The panel keeps its own thread across views, and "New thread" resets it
-  await panel(page).getByRole('button', { name: 'New thread' }).click()
-  await expect(panel(page).locator('.msg')).toHaveCount(0)
-  expect(llm.calls.length).toBeGreaterThan(4)
-  expect(grain.consoleErrors).toEqual([])
-})
-
-test('page agent: width resizes with the handle and persists; hints send on click; selection rides along', async ({ grain }) => {
-  const { page, api, llm } = grain
-  await api('/todos', { method: 'POST', body: { title: 'Hint probe todo' } })
-  await page.reload()
-  await page.waitForSelector('.sidebar')
-  await navItem(page, 'Lists').click()
-  await menu(grain, 'Context panel / Quick chat')
-  const w = () => panel(page).evaluate((e) => Math.round(e.getBoundingClientRect().width))
+  await expect(page.locator('.msg.assistant').last()).toContainText('ready', { timeout: 30_000 })
+  await menu(grain, 'Side Panel: Context and Terminal')
+  const drawer = page.locator('aside.desk-panel')
+  await expect(drawer).toBeVisible()
+  const w = () => drawer.evaluate((e) => Math.round(e.getBoundingClientRect().width))
   await expect.poll(w).toBe(380)
   const h = page.getByRole('separator', { name: 'Side panel width' })
   const b = await h.boundingBox()
@@ -77,22 +21,14 @@ test('page agent: width resizes with the handle and persists; hints send on clic
   await page.mouse.move(b.x - 120, b.y + 200, { steps: 6 })
   await page.mouse.up()
   await expect.poll(w).toBeGreaterThan(470)
-  await expect.poll(w).toBeLessThanOrEqual(520)
-  const saved = await w()
   await h.focus()
   for (let i = 0; i < 20; i++) await page.keyboard.press('Shift+ArrowLeft')
   // the stored width clamps at 720; the rendered panel may be narrower when the window cannot spare that much
   expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--side-panel-w').trim())).toBe('720px')
-  await expect.poll(w).toBeGreaterThan(500)
   for (let i = 0; i < 20; i++) await page.keyboard.press('Shift+ArrowRight')
   await expect.poll(w).toBe(300)
   await h.dblclick()
   await expect.poll(w).toBe(380)
-  // hint click sends it
-  const before = llm.calls.length
-  await panel(page).locator('.page-agent-hint').first().click()
-  await expect.poll(() => llm.calls.length).toBeGreaterThan(before)
-  void saved
   expect(grain.consoleErrors).toEqual([])
 })
 
@@ -248,21 +184,19 @@ test('pop-out: a space widget pops out to its own window and returns', async ({ 
   expect(grain.consoleErrors).toEqual([])
 })
 
-test('⌘I panel stays open when you switch its tabs or change view', async ({ grain }) => {
+test('⌘I panel stays open when you switch its tabs, and does nothing outside a chat', async ({ grain }) => {
   const { page } = grain
   // chat: ⌘I opens the side panel on Context; picking another tab must not close it
   const box = page.getByRole('textbox', { name: 'Message' })
   await box.fill('!!reply hello')
   await box.press('Enter')
   await expect(page.locator('.msg.assistant').last()).toContainText('hello')
-  await menu(grain, 'Context panel / Quick chat')
+  await menu(grain, 'Side Panel: Context and Terminal')
   await expect(page.getByRole('complementary', { name: 'Workspace' })).toBeVisible()
   await page.getByTestId('desk-tab-files').click()
   await expect(page.getByRole('complementary', { name: 'Workspace' })).toBeVisible()
-  // elsewhere: the quick-chat panel survives a view switch
+  // elsewhere there is no side panel to toggle
   await navItem(page, 'Lists').click()
-  await menu(grain, 'Context panel / Quick chat')
-  await expect(panel(page)).toBeVisible()
-  await navItem(page, 'Files').click()
-  await expect(panel(page)).toBeVisible()
+  await menu(grain, 'Side Panel: Context and Terminal')
+  await expect(page.getByRole('complementary', { name: 'Workspace' })).toHaveCount(0)
 })

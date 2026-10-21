@@ -57,7 +57,7 @@ the CSS highlight registry (`::highlight(doc-comment)`), which colours ranges wi
 wrapping the rendered DOM; a click on a mark opens its thread, and the quote on a card
 scrolls the page to its passage.
 
-The page agent sees the open-thread count in its context and has two tools:
+The assistant has two tools for threads:
 `doc_comments` (safe) reads a file's threads and `doc_comment_reply` (writes) answers in
 one as the assistant. It never resolves, edits or deletes a thread, and the assistant's
 replies cannot be edited through the route either.
@@ -75,7 +75,7 @@ one output line, so the two layers cannot drift no matter what is typed.
 
 Keys: `⇧⌘B` bold, `⇧⌘I` italic, `⌘K` link, `⌃⌘M` maths, `⇧⌘E` code, `Tab` /
 `⇧Tab` indent, `⌘S` save now. These avoid the menu's own chords (`⌘B` sidebar,
-`⌘I` page agent), which never reach the page. `Enter` continues
+`⌘I` side panel), which never reach the page. `Enter` continues
 the list you are in and a second `Enter` on an empty item ends it with a blank line.
 
 Editing autosaves 1.2 s after you stop typing. Consecutive saves by the same

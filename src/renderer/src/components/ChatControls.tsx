@@ -1,5 +1,5 @@
 import { DEFAULT_EFFORT } from '@shared/types'
-import { PAGE_AGENT_DRAFT, useStore, useConversation } from '../store'
+import { useStore, useConversation } from '../store'
 import DuelControls from './DuelControls'
 import ModelMenu from './ModelMenu'
 import RuntimeMenu from './RuntimeMenu'
@@ -16,15 +16,12 @@ export default function ChatControls({ conversationId }: { conversationId?: stri
   const draftModel = useStore((s) => s.draftModel)
   const draftEffort = useStore((s) => s.draftEffort)
   const draftFast = useStore((s) => s.draftFast)
-  const pageDraft = conversationId === PAGE_AGENT_DRAFT
-  const pageModel = useStore((s) => s.pageAgentModel)
-  const pageSettings = useStore((s) => s.pageAgentChatSettings)
   const setChatConfig = useStore((s) => s.setChatConfig)
-  // A canvas window always names its chat; only the page's draft reads the parked values.
+  // A canvas window always names its chat.
   const draft = !convo && !conversationId
-  const model = convo?.model ?? (draft ? draftModel : pageDraft ? pageModel : null) ?? defaultModel
-  const effort = convo?.settings?.effort ?? (draft ? draftEffort : pageDraft ? pageSettings.effort : null) ?? DEFAULT_EFFORT
-  const fast = convo?.settings?.fast ?? (draft ? draftFast : pageDraft ? pageSettings.fast : false)
+  const model = convo?.model ?? (draft ? draftModel : null) ?? defaultModel
+  const effort = convo?.settings?.effort ?? (draft ? draftEffort : null) ?? DEFAULT_EFFORT
+  const fast = convo?.settings?.fast ?? (draft ? draftFast : false)
   return (
     <>
       <ModelMenu
@@ -34,8 +31,8 @@ export default function ChatControls({ conversationId }: { conversationId?: stri
         placement="up"
         onChange={(c) => void setChatConfig(c, conversationId)}
       />
-      {convo && !pageDraft && <RuntimeMenu conversationId={convo.id} projectId={convo.project_id} />}
-      {/* Only the main chat draws a duel's columns; a quick chat, window or page agent never offers one. */}
+      {convo && <RuntimeMenu conversationId={convo.id} projectId={convo.project_id} />}
+      {/* Only the main chat draws a duel's columns; a window never offers one. */}
       {!conversationId && <DuelControls />}
     </>
   )

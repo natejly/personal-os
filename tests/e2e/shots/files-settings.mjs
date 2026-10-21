@@ -76,7 +76,6 @@ if (want('files')) await session(async (g) => {
     await page.locator('.doc-tree .doc-row', { hasText: 'Uploads' }).click()
     await sleep(1200)
   })
-  await snap(g, 'files-artifacts', async () => { await page.locator('.doc-tree .doc-row', { hasText: 'Artifacts' }).click(); await sleep(800) })
   await snap(g, 'files-trash', async () => {
     await page.locator('.doc-row', { hasText: 'Groceries' }).last().getByTitle('Delete').click()
     await sleep(500)

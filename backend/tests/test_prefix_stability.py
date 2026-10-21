@@ -1,7 +1,7 @@
 """Prefix stability: what must stay byte-identical between model calls so a provider's prefix cache can hit.
 
 Chat: messages[0] (the stable system prompt) and json.dumps(tools) do not change between turns, while memory
-recall, the page, and the date reach the request as a later system message. Session affinity follows the chat
+recall and the date reach the request as a later system message. Session affinity follows the chat
 (and, for workers, the kind and role). Workers of one role get the same prefix whatever their task says.
 
 Run: backend/.venv/bin/python backend/tests/test_prefix_stability.py   (or pytest -s for the report)
@@ -104,19 +104,18 @@ def test_chat_prefix_stable_across_turns(monkeypatch) -> None:  # type: ignore[n
     cid = appmod.convos.create(None, "Prefix", "test-model")["id"]
     for i in range(5):  # the workspace map buckets counts (0, 1, 2, 3, 5...): start mid-bucket so one more memory is no step
         appmod.memories.create(None, f"Seed fact {i}", pinned=False)
-    t1 = _turn(cid, content="hello there", page_context=appmod.PageContextIn(view="todos", label="Todos page ALPHA"))
+    t1 = _turn(cid, content="hello there")
     appmod.memories.create(None, "Zanzibar ferry leaves at dawn", pinned=False)
     monkeypatch.setattr(appmod, "datetime", _Clock)
-    t2 = _turn(cid, content="when does the zanzibar ferry leave", page_context=appmod.PageContextIn(view="mail", label="Mail page BETA"))
+    t2 = _turn(cid, content="when does the zanzibar ferry leave")
 
     s1, s2 = t1["messages"][0], t2["messages"][0]
     assert s1["role"] == "system" and s1["content"].encode() == s2["content"].encode(), "system prefix changed between turns"
     assert t1["tools"] == t2["tools"] and t1["ntools"] > 0, "tool list changed between turns"
-    assert "Zanzibar" not in s2["content"] and "2031" not in s2["content"] and "BETA" not in s2["content"]
+    assert "Zanzibar" not in s2["content"] and "2031" not in s2["content"]
     v1, v2 = _vol(t1), _vol(t2)
     assert "Zanzibar" in v2 and "Zanzibar" not in v1, "memory recall did not reach the volatile block"
     assert "2031-03-04" in v2 and "2031-03-04" not in v1, "the date did not reach the volatile block"
-    assert "BETA" in v2 and "ALPHA" in v1, "the page did not reach the volatile block"
     # layout: [stable] + history + [volatile] + newest user; history replay is byte-identical
     assert t1["messages"][-1]["content"] == "hello there" and t2["messages"][-1]["role"] == "user"
     assert t2["messages"][-2]["content"].startswith(VOLATILE_HEADER)

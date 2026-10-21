@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Plus, ListChecks, Bookmark, X, ChevronDown, KanbanSquare, List, SlidersHorizontal, Pencil, Trash2, Inbox, Layers } from '../../icons'
+import { Plus, ListChecks, Bookmark, X, ChevronDown, List, SlidersHorizontal, Pencil, Trash2, Inbox, Layers } from '../../icons'
 import type { TodoFilter, TodoRepeat } from '@shared/types'
 import { api } from '../../lib/api'
 import { useStore, type Scope } from '../../store'
@@ -9,7 +9,6 @@ import TodoItem, { justCompleted } from './TodoItem'
 import ScopeSelect from '../../components/ScopeSelect'
 import SmartTextarea from '../../components/SmartTextarea'
 import { localDay } from '../../components/CalendarWeek'
-import { lines, usePageContext } from '../../lib/pageContext'
 import AppSwitcher from '../../components/AppSwitcher'
 import PlannerPanel from '../../components/PlannerPanel'
 import TodoBoard, { type BoardGroup } from './TodoBoard'
@@ -151,22 +150,6 @@ export default function TodosView(): JSX.Element {
   const listLabel = list === null ? 'all lists' : list || DEFAULT_LIST
   const openCount = (name: string): number => todos.filter((t) => !t.done && (t.list_name ?? '') === name).length
 
-  const fmt = (t: typeof todos[number]): string =>
-    `${t.title} (\`${t.id}\`${t.due ? `, due ${t.due}` : ''}${t.priority !== 2 ? `, priority ${t.priority}` : ''}${t.list_name ? `, list ${t.list_name}` : ''})`
-  usePageContext(() => ({
-    view: 'todos',
-    label: 'Lists',
-    detail: [
-      list === null ? `Lists: ${[DEFAULT_LIST, ...lists].join(', ')}` : `Showing list: ${listLabel}`,
-      overdue.length ? `Overdue:\n${lines(overdue, fmt)}` : '',
-      today.length ? `Due today (${todayKey}):\n${lines(today, fmt)}` : '',
-      upcoming.length ? `Upcoming:\n${lines(upcoming, fmt)}` : '',
-      someday.length ? `No date:\n${lines(someday, fmt)}` : '',
-      open.length ? '' : 'Nothing open.'
-    ].filter(Boolean).join('\n\n'),
-    refs: open.slice(0, 40).map((t) => ({ kind: 'todo', id: t.id, name: t.title })),
-    hints: ['What should I do first?', 'Reschedule the overdue ones to tomorrow', 'Break the biggest one into steps']
-  }), [todos, todayKey, list, lists])
 
   // A subtask indents under its parent when the parent is in the same section.
   const depthOf = (t: typeof todos[number], items: typeof todos): number => {

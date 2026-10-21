@@ -131,11 +131,6 @@ async function surfaces(g) {
       await page.getByRole('button', { name: 'A/B' }).click()
       await g.api('/settings', { method: 'PUT', body: { devTools: false } }); await reloadHome(g)
     })
-    await attempt('quick chat', async () => {
-      await nav(page, 'Lists').click(); await sleep(600)
-      await page.getByRole('button', { name: 'Quick chat' }).click(); await page.getByRole('complementary', { name: 'Page agent' }).waitFor(); await sleep(600); await shot(g, '11-quick-chat')
-      await page.getByRole('complementary', { name: 'Page agent' }).getByRole('button', { name: /^Close/ }).click()
-    })
     await attempt('palette', async () => { await menuClick(g.app, 'Command Palette…'); await sleep(600); await shot(g, '12-palette'); await page.keyboard.press('Escape') })
   }
   if (want('views')) {

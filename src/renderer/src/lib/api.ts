@@ -2,7 +2,7 @@ import type {
   ArchivedInboxRun,
   BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, DriveBackupRun, DriveBackupStatus, Recap, Conversation, ConversationSettings, WorkerInfo, ContextUsed, ContextMeter, ContextPreview, MessageContext, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
-  Memory, MemoryProposal, Profile, ProfileHeld, RuntimeResolution, RuntimeSelection, RuntimeView, PermissionPreset, PresetBody, PresetDiff, PresetScope, EffectiveConfig, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
+  Memory, MemoryProposal, Profile, ProfileHeld, RuntimeResolution, RuntimeSelection, RuntimeView, PermissionPreset, PresetBody, PresetDiff, PresetScope, EffectiveConfig, MemorySource, ModelInfo, ModelPrice, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, ExtensionCommand, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasWindow, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskRichPreview,
@@ -658,7 +658,7 @@ export const api = {
     exportMd: (id: string) => req<{ filename: string; text: string }>(`/skills/${id}/export`)
   },
   /** Starts the reply as a background task and returns at once; watch it with `chatStream(convId, seq)`. Throws a 409 carrying a `RunConflict` when that conversation already has a live run. */
-  chat: (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string; attachments?: string[]; ab_model?: string }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }, CONTROL_TIMEOUT_MS),
+  chat: (convId: string, body: { content?: string; model?: string; replace_from?: string; attachments?: string[]; ab_model?: string }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }, CONTROL_TIMEOUT_MS),
   /** Developer mode: stream one side of the waiting duel again. */
   abRegenerate: (convId: string, messageId: string, side: 'a' | 'b') => req<{ ok: boolean }>(`/conversations/${convId}/ab/regenerate`, { method: 'POST', body: json({ message_id: messageId, side }) }, CONTROL_TIMEOUT_MS),
   /** Developer mode: settle the model duel a running reply waits on. */

@@ -1,7 +1,7 @@
 import { modelLabel } from '../lib/modelLabel'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import TracesPane from './TracesPane'
-import { ChevronRight, ChevronDown, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, ShieldAlert, MonitorDot, PenLine } from '../icons'
+import { ChevronRight, ChevronDown, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, ShieldAlert, PenLine } from '../icons'
 import { ToolOverrides } from './ToolPermissions'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
 import { api } from '../lib/api'
@@ -158,8 +158,7 @@ function Inspector({ ctx, b, tx, children }: { ctx: ContextUsed; b: UsageBreakdo
   const exact = Boolean(b?.exact)
   const slices = (b?.slices ?? []).filter((s) => (exact ? (s.items?.length ?? 0) > 0 : s.count > 0))
   const extra: { key: string; label: string }[] = exact ? [] : [
-    ...(ctx.system_prompt ? [{ key: 'system', label: 'System prompt' }] : []),
-    ...(ctx.page ? [{ key: 'page', label: 'Page' }] : [])
+    ...(ctx.system_prompt ? [{ key: 'system', label: 'System prompt' }] : [])
   ]
   const firstKey = exact ? slices[0]?.key : (extra[0]?.key ?? slices[0]?.key)
   const isOpen = (k: string): boolean => openRows[k] ?? k === firstKey
@@ -376,13 +375,6 @@ function ContextUsedView({ ctx, only }: { ctx: ContextUsed; only?: string }): JS
         {ctx.system_prompt && <button className="link" onClick={() => setShowPrompt((v) => !v)}>{showPrompt ? 'Hide' : 'System prompt'}</button>}
       </div>}
       {!only && showPrompt && <pre className="ctx-prompt">{ctx.system_prompt}</pre>}
-      {g('page') && ctx.page && (
-        <section>
-          <h5><MonitorDot size={12} /> Page — {ctx.page.label}</h5>
-          {ctx.page.selection && <div className="chunk-preview"><b>selection:</b> {ctx.page.selection}</div>}
-          <pre className="ctx-prompt">{ctx.page.detail}</pre>
-        </section>
-      )}
       {g('style') && ctx.style && (
         <section>
           <h5><PenLine size={12} /> Writing style {ctx.style.project_id ? '(project voice)' : '(your voice)'} <button className="link" onClick={() => openMemory('style')}>edit</button></h5>

@@ -149,7 +149,7 @@ function ErrorAction({ conversationId, kind }: { conversationId: string; kind: s
     else if (act.action === 'settings') st().openSettings('model')
     else if (act.action === 'models') {
       // The model menu lives under this chat's composer (not another window's); settings is the fallback when none is mounted.
-      const trigger = btn.current?.closest('.chat, .win, .page-agent, .quick-ask')?.querySelector<HTMLButtonElement>('.model-menu-trigger')
+      const trigger = btn.current?.closest('.chat, .win, .quick-ask')?.querySelector<HTMLButtonElement>('.model-menu-trigger')
       if (trigger) trigger.click()
       else st().openSettings('model')
     } else {

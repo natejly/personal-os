@@ -13,7 +13,7 @@ import { buildThreads, makeAnchor, type Anchor, type Span, type Thread } from '.
 
 const HL = 'doc-comment'
 const HL_ACTIVE = 'doc-comment-active'
-const POLL_MS = 15_000  // a reply the page agent posts shows up without a reload
+const POLL_MS = 15_000  // a reply the assistant posts shows up without a reload
 
 type HighlightCtor = new (...ranges: Range[]) => object
 const highlightApi = (): { H: HighlightCtor; reg: Map<string, object> } | null => {

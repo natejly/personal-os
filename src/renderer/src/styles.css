@@ -596,16 +596,6 @@ kbd {
 /* The status bar is the one shell child with a row of its own: the views keep the fixed first row, so it only takes the room it needs. */
 .statusbar { grid-column: 1 / -1; grid-row: 2; display: flex; align-items: center; gap: 12px; min-height: 24px; padding: 0 12px; border-top: 1px solid var(--border); background: var(--sidebar-bg); font-size: var(--fs-sm); color: var(--text-muted); }
 .titlebar-slot { display: flex; align-items: center; gap: 6px; }
-/* The page agent is a third column of the shell, not a drawer inside one view: ⌘I opens it over
-   Files, Calendar, Todos and the canvas alike. */
-.app.page-agent-open { grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--side-panel-w); }
-.app.page-agent-open.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr) var(--side-panel-w); }
-/* Same breakpoint as the workspace panel: too narrow for sidebar, view and panel side by side, so the panel floats over the view. */
-@media (max-width: 900px) {
-  .app.page-agent-open { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
-  .app.page-agent-open.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
-  .app.page-agent-open > .page-agent { position: absolute; inset: 0 0 0 auto; width: min(var(--side-panel-w), calc(100% - 16px)); z-index: 30; box-shadow: var(--shadow, 0 8px 24px rgb(0 0 0 / 0.18)); }
-}
 .app.loading { background: var(--bg); }
 
 /* ---------- Sidebar ---------- */
@@ -789,7 +779,6 @@ kbd {
 .header-right { display: flex; align-items: center; gap: 8px; }
 /* Pushes whatever follows it to the far end of any flex row. */
 .spacer { flex: 1; }
-/* The quick-chat button: the last thing in every title bar, set off from the view's own controls. */
 .inbox-btn { position: relative; }
 .inbox-btn-count {
   position: absolute; top: -3px; right: -4px; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box;
@@ -916,8 +905,6 @@ kbd {
 .model-menu-track.on { background: var(--accent-solid); }
 .model-menu-track.on span { transform: translateX(12px); }
 .model-menu-reset { margin-top: 4px; border-top: 1px solid var(--border); border-radius: 0 0 var(--r-sm) var(--r-sm); color: var(--text-muted); font-size: var(--fs-sm); justify-content: flex-start; }
-.page-agent .composer-wrap.compact { padding: 8px 12px 12px; max-width: none; }
-.page-agent .composer-wrap.compact .composer { border-radius: var(--r-xl); }
 
 .messages { flex: 1; overflow-y: auto; }
 .messages-inner { max-width: var(--chat-col); margin: 0 auto; padding: 14px 24px 8px; }
@@ -3280,26 +3267,6 @@ select:focus-visible {
 .skill-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .skill-desc { margin: 4px 0 0; }
 
-/* ---------- Page agent (⌘I) ---------- */
-.side-panel.page-agent { width: auto; }
-.page-agent-sent { flex: none; padding: 4px 12px; border-bottom: 1px solid var(--border); font-size: var(--fs-sm); color: var(--text-muted); }
-.page-agent-sent-btn { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-height: 28px; padding: 0; border: 0; background: none; color: var(--text-muted); font: inherit; text-align: left; cursor: pointer; }
-.page-agent-sent-btn:hover:not(:disabled) { color: var(--text); }
-.page-agent-sent-btn:disabled { cursor: default; }
-.page-agent-sent-btn:focus-visible, .page-agent-sent-text:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-.page-agent-sent-btn b { color: var(--text); font-weight: 600; }
-.page-agent-sent-text { margin: 4px 0 6px; padding: 8px 10px; max-height: 40vh; overflow: auto; white-space: pre-wrap; word-break: break-word; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg); color: var(--text); font-family: var(--mono); font-size: var(--fs-sm); }
-.page-agent-actions { display: flex; align-items: center; gap: 2px; }
-.page-agent-ctx { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: var(--fs-sm); }
-.page-agent-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.page-agent-ctx b { color: var(--text); font-weight: 600; }
-.page-agent-ctx em { font-style: normal; color: var(--text-faint); }
-.page-agent-body { flex: 1; overflow-y: auto; padding: 10px 12px; min-height: 0; }
-.page-agent-empty { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
-.page-agent-hint { text-align: left; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg); color: var(--text-muted); font-size: var(--fs-sm); }
-.page-agent-hint:hover { background: var(--active); color: var(--text); }
-/* The panel is 380px wide: an avatar column would spend a tenth of it to say what the header already does. */
-.page-agent .msg .avatar { display: none; }
 /* Permission rules: the approval card's rule block and the Settings editor. */
 /* Inset like .approval so the deny row lines up under the card it belongs to. */
 .approval-rules { margin: 0 10px 10px; display: flex; flex-direction: column; gap: 6px; }

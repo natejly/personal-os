@@ -32,11 +32,11 @@ First run, as a user:
 3. ⌘N for a chat. Model and effort pickers are under the composer.
 4. Drop or paste a file to attach it; it rides on the message as a chip and its text is inlined for the model up to a size cap.
 5. Set a **Working folder** on the chat if the assistant should touch files. With none set, file and shell tools work in `~/Grain` (`mac.py`).
-6. ⌘4 Files: ⌘⇧N new note, ⌘⇧D today's note, ⌘U upload. ⌘I (or the title-bar Quick chat button) opens the Page agent, a chat bound to the open note.
+6. ⌘4 Files: ⌘⇧N new note, ⌘⇧D today's note, ⌘U upload.
 7. Sidebar **+** next to Projects makes a project. Lists, Calendar and Mail are sidebar rows (⌘2, ⌘3, ⌘5).
 8. Canvases: ⌘⇧C, then Add widget or right-click the plane. Library for agents and automations.
 
-Shortcuts that matter (full list in reference.md): ⌘N new chat, ⌘K command palette, ⌘I quick chat, ⌘⇧C
+Shortcuts that matter (full list in reference.md): ⌘N new chat, ⌘K command palette, ⌘I side panel (in a chat), ⌘⇧C
 Spaces, ⌘1 to ⌘6 views (Chats, Lists, Calendar, Files, Mail, Memory), ⌘, settings,
 ⌘⇧F search chats.
 

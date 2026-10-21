@@ -2,14 +2,12 @@ import { useEffect, useRef } from 'react'
 import { X } from './icons'
 import { useStore } from './store'
 import { useTodos } from './extensions/todos/store'
-import { watchSelection } from './lib/pageContext'
 import Sidebar from './components/Sidebar'
 import GrainLogo from './components/GrainLogo'
 import ChatView from './components/ChatView'
 import DocsView from './components/DocsView'
 import ProjectView from './components/ProjectView'
 import PendingSends from './components/PendingSends'
-import PageAgentPanel from './components/PageAgentPanel'
 import SelectionToolbar from './components/SelectionToolbar'
 import StatusBar from './components/StatusBar'
 import LibraryView from './components/LibraryView'
@@ -223,7 +221,6 @@ export default function App(): JSX.Element {
   const accentCustom = useStore((s) => s.settings.accentCustom)
   const mascot = useStore((s) => s.settings.mascot)
   const inCanvas = useStore((s) => s.view === 'canvas')
-  const pageAgentOpen = useStore((s) => s.pageAgentOpen)
   const inboxOpen = useStore((s) => s.inboxOpen)
   const wizardOpen = useOnboarding((s) => s.open)
   useChatFileCountsSync()
@@ -236,8 +233,6 @@ export default function App(): JSX.Element {
   }, [theme, accent, textTone, surfaceTone, uiFont, codeFont, accentCustom, mascot])
   // A fresh install (no key, never onboarded) opens the first-run wizard once the backend is up.
   useEffect(() => { if (ready && !backendError) void useOnboarding.getState().check() }, [ready, backendError])
-  // What the user has highlighted rides along with the next ⌘I question, whatever view they are in.
-  useEffect(() => watchSelection(), [])
   // Extension keybindings, and the view-opened event their frontend halves listen for.
   useEffect(() => startExtensionRuntime(), [])
   // Spaces are listed in the sidebar, so the canvas store loads with the app, not on first entry.
@@ -275,7 +270,7 @@ export default function App(): JSX.Element {
   if (backendError) return <BackendFailed message={backendError} />
 
   return (
-    <div className={`app ${sidebarOpen ? '' : 'sidebar-collapsed'} ${pageAgentOpen ? 'page-agent-open' : ''}`}>
+    <div className={`app ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
       <Sidebar />
       {inCanvas ? (
         <Canvas />
@@ -303,7 +298,6 @@ export default function App(): JSX.Element {
         </RenderBoundary>
       )}
       <StatusBar />
-      {pageAgentOpen && <PageAgentPanel />}
       {settingsOpen && <SettingsModal />}
       {inboxOpen && <InboxModal />}
       {paletteOpen && <CommandPalette />}

@@ -98,7 +98,7 @@ test('deleting the open chat returns to an empty new-chat view', async ({ grain 
   await page.locator('.convo-list .convo-item.active').click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Delete' }).click()
   await expect(page.locator('.convo-list .convo-item')).toHaveCount(0)
-  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  await expect(page.locator('.empty-state')).toBeVisible()
   await expect(users(page)).toHaveCount(0)
   await sayAndWait(page, '!!reply still works', 'still works')
 })

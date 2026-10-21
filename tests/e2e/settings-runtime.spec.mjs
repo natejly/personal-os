@@ -83,7 +83,7 @@ test('the chat options menu picks the agent loop for this chat alone', async ({ 
   await newChat(page)
   await sayAndWait(page, '!!reply hello', 'hello')
   const chat = (await api('/conversations'))[0]
-  await page.getByRole('button', { name: 'Chat options' }).click()
+  await page.getByTestId('chat-menu').click()
   await page.getByLabel('Agent loop, this chat').selectOption('core/plan-execute-verify')
   await expect.poll(async () => (await api(`/conversations/${chat.id}`)).settings.runtime?.['agent.loop']).toBe('core/plan-execute-verify')
   await expect(page.getByLabel('Agent loop, this chat')).toHaveValue('core/plan-execute-verify')

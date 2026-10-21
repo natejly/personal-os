@@ -3464,6 +3464,7 @@ select:focus-visible {
 
 /* Jobs screen */
 .jobs-body { max-width: 1100px; }
+.jobs-actions { margin-bottom: var(--sp-3); }
 .jobs-new { margin-bottom: 16px; }
 .jobs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 .job-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 12px 14px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--r-lg); min-width: 0; }

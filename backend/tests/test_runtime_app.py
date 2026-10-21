@@ -304,7 +304,7 @@ def test_the_test_button_runs_the_contract_and_a_tool_can_be_accepted_back(ext: 
 
 
 # ---- a profile's default ----
-PROFILE = {"id": "calm", "name": "Calm", "version": "1.0.0", "apiVersion": 1, "kind": "profile"}
+PROFILE = {"id": "calm", "name": "Calm", "version": "1.0.0", "apiVersion": 1}
 
 
 def profile(**runtime: Any) -> Manifest:

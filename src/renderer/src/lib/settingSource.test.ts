@@ -8,8 +8,8 @@ test('a scope reads as a chip label', () => {
 
 test('a source reads as a phrase after "Set by"', () => {
   assert.deepEqual(
-    ['default', 'user', 'project', 'chat', 'profile:lean', 'preset:strict', 'ext:acme', 'other'].map(sourceText),
-    ['the built-in default', 'your settings', 'this project', 'this chat', 'the lean profile', 'the strict preset', 'the acme extension', 'other']
+    ['default', 'user', 'project', 'chat', 'ext:acme', 'other'].map(sourceText),
+    ['the built-in default', 'your settings', 'this project', 'this chat', 'the acme extension', 'other']
   )
 })
 

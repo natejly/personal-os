@@ -281,32 +281,19 @@ def find_commands(root: Path) -> list[str]:
 
 
 # ---- validation ----
-def _checkable(root: Path, tmp: Path) -> Path:
-    """The folder `grain ext check` reads. A profile carries only its manifest, so the check sees a copy of just that."""
-    try:
-        raw = json.loads((root / "extension.json").read_text("utf-8"))
-    except (OSError, ValueError):
-        return root
-    if isinstance(raw, dict) and raw.get("kind") == "profile":
-        tmp.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(root / "extension.json", tmp / "extension.json")
-        return tmp
-    return root
-
-
-def read_manifest(root: Path, tmp: Path) -> Manifest:
+def read_manifest(root: Path) -> Manifest:
     path = root / "extension.json"
     if not path.is_file():
         raise InstallError("it has no extension.json at its top level (use the subdir field when the extension is inside a larger repository)")
     try:
-        return load_manifest(_checkable(root, tmp) / "extension.json")
+        return load_manifest(path)
     except ManifestError as e:
         raise InstallError(f"extension.json is not valid: {e}") from e
 
 
-def findings_for(root: Path, tmp: Path) -> list[dict[str, str]]:
+def findings_for(root: Path) -> list[dict[str, str]]:
     level = {"error": "error", "warn": "warn", "note": "info"}
-    return [{"level": level.get(f.level, "info"), "message": f"[{f.code}] {f.message}"} for f in check(_checkable(root, tmp))]
+    return [{"level": level.get(f.level, "info"), "message": f"[{f.code}] {f.message}"} for f in check(root)]
 
 
 def tree_state(drafts: Drafts, ext_id: str) -> tuple[str, str | None]:
@@ -374,9 +361,9 @@ class Installer:
             if subdir and not (root.resolve().is_relative_to(tree.resolve()) and root.is_dir()):
                 raise InstallError("the subdir is not a folder inside the source")
             scan_tree(root)
-            manifest = read_manifest(root, work / "profile-check")
+            manifest = read_manifest(root)
             self._refuse_id(manifest.id, update_of)
-            findings = findings_for(root, work / "profile-check-2")
+            findings = findings_for(root)
             sha = tree_sha256(root)
             old = None
             if update_of:
@@ -460,7 +447,7 @@ class Installer:
         if tree_sha256(root) != meta["sha256"]:
             raise InstallError("the files changed after you reviewed them; fetch them again", 409)
         scan_tree(root)
-        manifest = read_manifest(root, self.quarantine / ".tmp-confirm")
+        manifest = read_manifest(root)
         shutil.rmtree(self.quarantine / ".tmp-confirm", ignore_errors=True)
         installed = self.drafts.installed / ext_id
         old: Manifest | None = None
@@ -473,11 +460,7 @@ class Installer:
         staging = self.drafts.installed / f".staging-{ext_id}"
         shutil.rmtree(staging, ignore_errors=True)
         try:
-            if manifest.kind == "profile":
-                staging.mkdir(parents=True)
-                shutil.copyfile(root / "extension.json", staging / "extension.json")  # a profile folder holds its manifest alone
-            else:
-                shutil.copytree(root, staging, symlinks=True)
+            shutil.copytree(root, staging, symlinks=True)
             try:
                 _disable(staging / "extension.json")
             except DraftError as e:

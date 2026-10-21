@@ -1632,24 +1632,7 @@ export interface TodayDashboard {
   errors: Record<string, string>
 }
 
-/** A profile extension: defaults and design tokens with no code. `theme` holds CSS custom properties per colour scheme. */
-export interface Profile {
-  id: string
-  name: string
-  description: string
-  enabled: boolean
-  theme: { light?: Record<string, string>; dark?: Record<string, string> }
-  /** Chrome the profile closes while it is on; each region is `false`. */
-  layout: Partial<Record<ChromeRegion, false>>
-}
-
-/** The parts of the window a profile's layout can close. */
-export type ChromeRegion = 'titlebar' | 'statusbar' | 'sidepanel'
-
-/** A default a profile would change but that needs the user's click first: a looser permission preset, or a runtime provider that loosens something (`diff`). */
-export interface ProfileHeld { key: string; was: unknown; set: unknown; diff?: string[] }
-
-/** One runtime slot's winner and why (design doc section 10.7.3). `source` is chat, project, profile:<id>, global or default. */
+/** One runtime slot's winner and why (design doc section 10.7.3). `source` is chat, project, profile:<id> (an extension default), global or default. */
 export interface RuntimeResolution {
   slot: string
   provider: string
@@ -1690,43 +1673,11 @@ export interface RuntimeView {
   withheld_tools: { slug: string; name: string; source: string }[]
 }
 
-/** A permission preset (backend presets.py). `readonly` is a built-in or a profile's. */
-export interface PermissionPreset {
-  id: string
-  name: string
-  description: string
-  source: 'builtin' | 'user' | 'import' | 'profile'
-  owner: string | null
-  readonly: boolean
-  body: PresetBody
-}
-export interface PresetBody {
-  schema?: string
-  name: string
-  description?: string
-  permissionMode?: 'auto' | 'manual' | 'allow_all'
-  permissionRules?: { allow: string[]; ask: string[]; deny: string[] }
-  alwaysAsk?: string[]
-  destructiveDefaults?: Record<string, string>
-  unattendedApprovals?: 'ask' | 'deny'
-  tools?: { groups?: Record<string, ToolMode>; danger?: Record<string, ToolMode>; tools?: Record<string, ToolMode> }
-  connectors?: Record<string, 'ask' | 'off'>
-  network?: Record<string, unknown>
-}
-export type PresetScope = 'global' | 'project' | 'chat'
-/** What applying a preset would change at a scope. `diff_hash` is what the confirming call quotes. */
-export interface PresetDiff {
-  changes: Record<string, { old: unknown; new: unknown; loosens: boolean }>
-  not_applied: string[]
-  pending: string[]
-  loosened: string[]
-  diff_hash: string
-}
 /** One setting in the effective configuration: its value, where it came from, and what it shadows. */
 export interface EffectiveValue {
   value: unknown
   source: string
-  scope: PresetScope
+  scope: 'global' | 'project' | 'chat'
   shadowed: { source: string; value: unknown }[]
   legacy?: boolean
 }

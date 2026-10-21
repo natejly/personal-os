@@ -1,10 +1,8 @@
-/** Design tokens: the stylesheet an extension's or a profile's tokens become, and that the profiles of the enabled ones are swapped as a set. */
+/** Design tokens: the stylesheet an extension's tokens become, and that the tokens of the enabled ones are swapped as a set. */
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { activateExtension } from './host'
-import { applyProfileThemes } from './profiles'
 import { themeCss } from './theme'
-import type { Profile } from '@shared/types'
 
 test('tokens for one scheme become a rule for that theme and for the OS setting when it matches', () => {
   assert.equal(
@@ -49,14 +47,3 @@ test('ui.theme registers tokens and its disposable takes them away', () => {
   })
 })
 
-const profile = (over: Partial<Profile>): Profile => ({ id: 'p', name: 'P', description: '', enabled: true, theme: {}, layout: {}, ...over })
-
-test('only enabled profiles apply their tokens, and a new list replaces the old one', () => {
-  withDocument((seen) => {
-    applyProfileThemes([profile({ theme: { dark: { '--bg': 'red' } } }), profile({ id: 'q', enabled: false, theme: { dark: { '--bg': 'blue' } } })])
-    assert.match(seen.at(-1) ?? '', /--bg:red/)
-    assert.doesNotMatch(seen.at(-1) ?? '', /--bg:blue/)
-    applyProfileThemes([])
-    assert.equal(seen.at(-1), '')
-  })
-})

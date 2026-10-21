@@ -94,7 +94,7 @@ def test_every_setting_the_permission_keys_and_the_tools_appear_with_a_source() 
     assert set(d["runtime"]) == set(appmod.host.runtime.resolve_all()) and d["scope"] == {"project_id": None, "conversation_id": None}
 
 
-def test_a_default_a_user_edit_a_preset_a_profile_an_extension_a_project_and_a_chat_each_show_their_source() -> None:
+def test_a_default_a_user_edit_an_extension_a_project_and_a_chat_each_show_their_source() -> None:
     assert dump()["values"]["permissionMode"]["source"] == "default"
     assert dump()["values"]["toolDeferAbove"]["source"] == "default"
     assert client.put("/settings", json={"toolDeferAbove": 9, "permissionMode": "manual"}).status_code == 200
@@ -102,19 +102,13 @@ def test_a_default_a_user_edit_a_preset_a_profile_an_extension_a_project_and_a_c
     assert v["toolDeferAbove"]["source"] == "user" and v["toolDeferAbove"]["value"] == 9 and not v["toolDeferAbove"].get("legacy")
     assert v["permissionMode"]["source"] == "user" and v["permissionMode"]["shadowed"] == [{"source": "default", "value": "auto"}]
 
-    assert client.post("/permissions/presets/builtin:auto/apply", json={}).status_code == 409  # auto from manual loosens
-    r = client.post("/permissions/presets/builtin:auto/apply", json={}).json()
-    client.post("/permissions/presets/builtin:auto/apply", json={"confirm": r["diff_hash"]})
-    v = dump()["values"]["permissionMode"]
-    assert v["source"] == "preset:builtin:auto" and v["value"] == "auto" and {"source": "previous", "value": "manual"} in v["shadowed"]
-
-    profile = Manifest.from_dict({"id": "calm", "name": "Calm", "version": "1.0.0", "apiVersion": 1, "kind": "profile",
-                                  "contributes": {"defaults": {"effort": "low", "permissions": "manual"}}})
-    Defaults(appmod.db).apply(profile)
+    calm = Manifest.from_dict({"id": "calm", "name": "Calm", "version": "1.0.0", "apiVersion": 1,
+                               "contributes": {"defaults": {"effort": "low", "permissions": "auto"}}})
+    Defaults(appmod.db).apply(calm, confirmed=True)
     v = dump()["values"]
-    assert v["defaultEffort"]["source"] == "profile:calm" and v["defaultEffort"]["value"] == "low"
+    assert v["defaultEffort"]["source"] == "ext:calm" and v["defaultEffort"]["value"] == "low"
     assert v["defaultEffort"]["shadowed"][-1] == {"source": "previous", "value": "high"}
-    assert v["permissionMode"]["source"] == "profile:calm"
+    assert v["permissionMode"]["source"] == "ext:calm" and {"source": "previous", "value": "manual"} in v["permissionMode"]["shadowed"]
 
     ext = Manifest.from_dict({"id": "tweaker", "name": "Tweaker", "version": "1.0.0", "apiVersion": 1, "contributes": {"defaults": {"theme": "light"}}})
     Defaults(appmod.db).apply(ext)
@@ -122,13 +116,6 @@ def test_a_default_a_user_edit_a_preset_a_profile_an_extension_a_project_and_a_c
 
     project = appmod.projects.create("P")["id"]
     chat = appmod.convos.create(project, "t", "m")["id"]
-    client.post("/permissions/presets", json={"name": "Chatty", "permissionMode": "allow_all", "tools": {"tools": {"fs_glob": "off"}}})
-    r = client.post("/permissions/presets/user:chatty/apply", json={"scope": "project", "scope_id": project}).json()
-    client.post("/permissions/presets/user:chatty/apply", json={"scope": "project", "scope_id": project, "confirm": r["diff_hash"]})
-    d = dump(project_id=project)
-    mode = d["values"]["permissionMode"]
-    assert mode["value"] == "allow_all" and mode["scope"] == "project" and mode["source"] == "preset:user:chatty"
-    assert {"source": "profile:calm", "value": "manual"} in mode["shadowed"] and d["tools"]["fs_glob"] == {"mode": "off", "source": "project"}
     appmod.projects.update(project, {"permissions": {"permissionMode": "allow_all"}})
     with appmod.db.tx() as c:
         c.execute("DELETE FROM setting_sources WHERE scope = 'project'")

@@ -51,12 +51,6 @@ class ManifestContributesRuntimeItem(TypedDict):
     meta: NotRequired[dict[str, Any]]
 
 
-class ManifestContributesPresetsItem(TypedDict):
-    id: str
-    name: str
-    description: NotRequired[str]
-
-
 class ManifestContributes(TypedDict):
     tools: NotRequired[list[ManifestContributesToolsItem]]
     routes: NotRequired[ManifestContributesRoutes]
@@ -67,9 +61,7 @@ class ManifestContributes(TypedDict):
     keybindings: NotRequired[list[dict[str, Any]]]
     theme: NotRequired[dict[str, Any]]
     defaults: NotRequired[dict[str, Any]]
-    layout: NotRequired[dict[str, Any]]
     runtime: NotRequired[list[ManifestContributesRuntimeItem]]
-    presets: NotRequired[list[ManifestContributesPresetsItem]]
 
 
 class ManifestHooksValue(TypedDict):
@@ -100,7 +92,7 @@ class Manifest(TypedDict):
     description: NotRequired[str]
     version: str
     apiVersion: int
-    kind: NotRequired[Literal['extension', 'profile']]
+    kind: NotRequired[Literal['extension']]
     enabled: NotRequired[Literal[True, False, 'always']]
     activation: NotRequired[list[str]]
     requires: NotRequired[ManifestRequires]

@@ -5,14 +5,12 @@ const SCOPES: Record<string, string> = { global: 'Global', project: 'Project', c
 /** The chip text for a scope; an unknown scope reads as itself. */
 export const scopeLabel = (scope: string): string => SCOPES[scope] ?? scope
 
-/** A source id as a phrase that follows "Set by", e.g. "your settings", "the lean profile". */
+/** A source id as a phrase that follows "Set by", e.g. "your settings", "the acme extension". */
 export function sourceText(source: string): string {
   if (source === 'default') return 'the built-in default'
   if (source === 'user') return 'your settings'
   if (source === 'project') return 'this project'
   if (source === 'chat') return 'this chat'
-  if (source.startsWith('profile:')) return `the ${source.slice('profile:'.length)} profile`
-  if (source.startsWith('preset:')) return `the ${source.slice('preset:'.length)} preset`
   if (source.startsWith('ext:')) return `the ${source.slice('ext:'.length)} extension`
   return source
 }

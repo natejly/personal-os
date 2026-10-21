@@ -25,7 +25,7 @@ export function effectiveRows(cfg: EffectiveConfig): EffectiveRow[] {
   return [...values, ...tools]
 }
 
-/** `preset:builtin:auto` and `profile:lean` are filtered as `preset` and `profile`. */
+/** `ext:acme` is filtered as `ext`. */
 export const sourceKind = (source: string): string => source.split(':')[0]
 
 /** The source kinds present, for the filter chips, `default` first. */

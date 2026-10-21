@@ -84,7 +84,6 @@ class ExtensionContext:
     widget_kinds: Callable[[], tuple[str, ...]] = lambda: ()  # the canvas widget kinds the loaded extensions declare
     owe_wake: Callable[[str, str, dict[str, Any]], None] = lambda *_: None  # (conversation id, text, wake record): the chat is owed a hidden turn
     record_job_run: Callable[[str, dict[str, Any], str, str | None], None] = lambda *_: None  # (run id, fire record, status, error): a job run that is not a chat turn, for the history, inbox and notifications
-    preset_keys: Callable[[str], dict[str, Any]] | None = None  # a permission preset id -> the permission keys it sets (Presets.keys), for defaults.permissionPreset
     chat_settings: Callable[[str | None], dict[str, Any]] | None = None  # (conversation id) -> the settings with that chat's and its project's permission overrides; the global ones for None
 
     def __post_init__(self) -> None:
@@ -265,7 +264,7 @@ class ExtensionScope:
     @property
     def defaults(self) -> Defaults:
         assert self._ctx is not None
-        return Defaults(self._ctx.db, self._ctx.preset_keys)
+        return Defaults(self._ctx.db)
 
     @property
     def services(self) -> Services:
@@ -275,8 +274,6 @@ class ExtensionScope:
     def enabled(self) -> bool:
         if self.module:
             return self.module.enabled()
-        if self.manifest.kind == "profile":
-            return self.defaults.applied(self.manifest.id)
         if self.manifest.enabled == "always" and not self.dev:  # only a built-in decides it cannot be turned off
             return True
         if self._ctx is None:
@@ -285,9 +282,8 @@ class ExtensionScope:
 
     @property
     def toggleable(self) -> bool:
-        """Does `enabled` follow this extension's id in `hiddenViews`? Not for a module (its view decides), a profile (it is applied
-        or not) or a built-in that is always on."""
-        return self.module is None and self._ctx is not None and self.manifest.kind == "extension" and (self.manifest.enabled != "always" or self.dev)
+        """Does `enabled` follow this extension's id in `hiddenViews`? Not for a module (its view decides) or a built-in that is always on."""
+        return self.module is None and self._ctx is not None and (self.manifest.enabled != "always" or self.dev)
 
     def migration_steps(self) -> list[tuple[int, str, migrations.Step]]:
         folder = self.manifest.data.get("migrations")
@@ -599,8 +595,6 @@ class ExtensionHost:
         manifest = builtin_manifest(ext_id)
         self._seed_enabled(manifest, ctx)
         scope = self._add(manifest, root=BUILTIN_ROOT / ext_id, ctx=ctx)
-        if scope.manifest.kind == "profile":
-            return scope  # a profile is data: nothing to import or activate
         self._load_code(scope, lambda: importlib.import_module(f"{__package__}.{ext_id}.extension"))
         return scope
 
@@ -648,8 +642,6 @@ class ExtensionHost:
         if missing := [s for s in manifest.requires_services if s not in provided]:
             raise ValueError(f"requires service {', '.join(missing)}, which nothing provides")
         scope = self._add(manifest, root=root, ctx=ctx, dev=True)
-        if manifest.kind == "profile":
-            return scope  # a profile is data: nothing to import or activate
         try:
             self._load_code(scope, lambda: _import_extension(root, scope))
         except BaseException:
@@ -843,7 +835,7 @@ class ExtensionHost:
 
     def refresh_enabled(self) -> None:
         """Fire ext.changed for each extension whose enabled state differs from the last one reported. An extension's
-        contributes.defaults are applied when it turns on and reverted when it turns off (a profile does this itself).
+        contributes.defaults are applied when it turns on and reverted when it turns off.
         Those writes can flip an extension already visited, so it goes round again until nothing changes."""
         with self._refresh_lock:
             for _ in self.extensions:
@@ -855,7 +847,7 @@ class ExtensionHost:
         for ext_id, scope in self.extensions.items():
             if (now := scope.enabled()) != self._enabled[ext_id]:
                 changed, self._enabled[ext_id] = True, now
-                if scope._ctx and scope.manifest.kind == "extension":
+                if scope._ctx:
                     db = scope._ctx.db
                     before = db.get_settings()
                     if now:

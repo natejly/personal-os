@@ -17,7 +17,9 @@ export const SECTION_ALIAS: Record<string, { tab: SettingsSectionId; group?: Set
   layout: { tab: 'general', group: 'sidebar' },
   hooks: { tab: 'advanced' },
   usage: { tab: 'advanced', group: 'usage' },
-  jobs: { tab: 'advanced' }
+  jobs: { tab: 'advanced' },
+  presets: { tab: 'permissions' },
+  profiles: { tab: 'general', group: 'sidebar' }
 }
 
 const LEGACY: Record<LegacySettingsTab, { tab: SettingsTab; group?: SettingsGroup }> = {
@@ -91,7 +93,6 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'assistant', sec: 'inspector', title: 'Context inspector', keys: 'context inspector what the model sees tokens blocks prompt breakdown size' },
   { tab: 'assistant', sec: 'memories', title: 'Memories', keys: 'memories memory saved facts remember list edit forget' },
   { tab: 'permissions', sec: 'mode', title: 'Permission mode', keys: 'auto manual allow everything approvals ask risky reviewer' },
-  { tab: 'permissions', sec: 'presets', title: 'Permission presets', keys: 'preset presets bundle apply duplicate export import read only manual auto allow everything project chat scope diff' },
   { tab: 'permissions', sec: 'safety', title: 'Run safety', keys: 'snapshot undo checkpoint safety' },
   { tab: 'permissions', sec: 'tools', title: 'Per-tool access', keys: 'tools on off ask hide disable' },
   { tab: 'permissions', sec: 'always-ask', title: 'Always ask first', keys: 'confirm cards rules deny allow grants approvals revoke' },
@@ -103,11 +104,10 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: 'integrations', sec: 'connectors', title: 'Connectors', keys: 'mcp library tools planner mail' },
   { tab: 'integrations', sec: 'web-search', title: 'Web search', keys: 'firecrawl brave tavily exa searxng github token reader api key' },
   { tab: 'integrations', sec: 'texting', title: 'Telegram bot', keys: 'texting text telegram bot pairing messages phone sms chat token botfather', ext: 'telegram' },
-  { tab: 'general', sec: 'profiles', title: 'Profiles', keys: 'lean focus defaults preset bundle theme effort quiet' },
   { tab: 'general', sec: 'sidebar', title: 'Sidebar rows', keys: 'hide show lists calendar mail health library files spaces projects modules views' },
   { tab: 'advanced', sec: 'usage', title: 'Usage and cost', keys: 'tokens spend price billing calls' },
   { tab: 'advanced', sec: 'data', title: 'Data, backups and trash', keys: 'export import backup restore presets archive trash delete diagnostics support logs' },
-  { tab: 'advanced', sec: 'effective', title: 'Effective configuration', keys: 'effective config dump sources where settings come from default profile preset user project chat differs json' },
+  { tab: 'advanced', sec: 'effective', title: 'Effective configuration', keys: 'effective config dump sources where settings come from default user project chat differs json' },
   { tab: 'advanced', sec: 'developer', title: 'Developer tools', keys: 'traces otel telemetry export context preview system prompt debug extensions hooks reload latency' }
 ]
 

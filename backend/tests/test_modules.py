@@ -39,7 +39,7 @@ def _route_set() -> set[tuple[str, str]]:
 class HostTests(unittest.TestCase):
     def test_modules_and_built_in_extensions_load_and_the_app_starts_through_the_lifespan(self) -> None:
         from personal_os import app as appmod
-        self.assertEqual(list(appmod.host.extensions), ["google", "todos", "calendar", "mail", *(m.key for m in modules), "health", "spaces", "latex", "lean", "focus", "coding", "claude-code", "memory-tree", "telegram"])
+        self.assertEqual(list(appmod.host.extensions), ["google", "todos", "calendar", "mail", *(m.key for m in modules), "health", "spaces", "latex", "coding", "claude-code", "memory-tree", "telegram"])
         self.assertIs(appmod.google, appmod._ext_ctx.services["google"]())
         self.assertEqual(app.router.on_startup + app.router.on_shutdown, [])  # no @app.on_event handlers remain
         with TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN}) as c:  # runs the lifespan
@@ -242,8 +242,6 @@ class ModulesStampTests(unittest.TestCase):
         self._reset(appmod)
         appmod._seed_hidden_modules()
         self.assertEqual(appmod.db.get_settings()["hiddenViews"], [])
-        self.assertFalse(host.extensions["lean"].enabled())
-        self.assertFalse(host.extensions["focus"].enabled())
 
     def test_install_with_chats_keeps_every_view(self) -> None:
         from personal_os import app as appmod

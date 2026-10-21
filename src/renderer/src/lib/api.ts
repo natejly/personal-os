@@ -2,7 +2,7 @@ import type {
   ArchivedInboxRun,
   BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, DriveBackupRun, DriveBackupStatus, Recap, Conversation, ConversationSettings, WorkerInfo, ContextUsed, ContextMeter, ContextPreview, MessageContext, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
-  Memory, MemoryProposal, Profile, ProfileHeld, RuntimeResolution, RuntimeSelection, RuntimeView, PermissionPreset, PresetBody, PresetDiff, PresetScope, EffectiveConfig, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
+  Memory, MemoryProposal, RuntimeResolution, RuntimeSelection, RuntimeView, EffectiveConfig, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, ExtensionCommand, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasWindow, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskRichPreview,
@@ -180,33 +180,9 @@ export const api = {
     get: () => req<Settings>('/settings'),
     set: (patch: Partial<Settings>) => req<Settings>('/settings', { method: 'PUT', body: json(patch) })
   },
-  /** Permission presets. `apply` answers `{held: diff}` instead of applying when the preset loosens anything; call again with `confirm` set to its `diff_hash`. */
-  presets: {
-    list: () => req<PermissionPreset[]>('/permissions/presets'),
-    create: (body: PresetBody) => req<PermissionPreset>('/permissions/presets', { method: 'POST', body: json(body) }),
-    update: (id: string, body: PresetBody) => req<PermissionPreset>(`/permissions/presets/${encodeURIComponent(id)}`, { method: 'PUT', body: json(body) }),
-    remove: (id: string) => req<void>(`/permissions/presets/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    duplicate: (id: string) => req<PermissionPreset>(`/permissions/presets/${encodeURIComponent(id)}/duplicate`, { method: 'POST' }),
-    export: (id: string) => req<PresetBody>(`/permissions/presets/${encodeURIComponent(id)}/export`),
-    import: (body: unknown) => req<PermissionPreset>('/permissions/presets/import', { method: 'POST', body: json(body) }),
-    apply: async (id: string, scope: PresetScope, scopeId: string, confirm?: string): Promise<{ applied: PresetDiff } | { held: PresetDiff }> => {
-      try {
-        return { applied: await req<PresetDiff>(`/permissions/presets/${encodeURIComponent(id)}/apply`, { method: 'POST', body: json({ scope, scope_id: scopeId, confirm }) }) }
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 409) return { held: e.body as PresetDiff }
-        throw e
-      }
-    }
-  },
   config: {
     effective: (projectId?: string | null, conversationId?: string | null) =>
       req<EffectiveConfig>(`/config/effective?${new URLSearchParams({ ...(projectId ? { project_id: projectId } : {}), ...(conversationId ? { conversation_id: conversationId } : {}) })}`)
-  },
-  /** Profile extensions. `enable` applies nothing and returns what it held back unless `confirm` is true. */
-  profiles: {
-    list: () => req<Profile[]>('/profiles'),
-    enable: (id: string, confirm = false) => req<{ held: ProfileHeld[] }>(`/profiles/${id}/enable`, { method: 'POST', body: json({ confirm }) }),
-    disable: (id: string) => req<void>(`/profiles/${id}/disable`, { method: 'POST' })
   },
   /** Runtime slots (Settings > Runtime): the providers a chat can run on and the user's selection per scope. */
   runtime: {

@@ -43,7 +43,6 @@ from .dispatch import dispatch_tool
 from .context import Block, Ledger, MemoryBlocks, PrefixWatch, build_context, cite_slim, compose, context_taints, estimate_tokens, layout_messages, ledger_history, ledger_tools, prefix_hash, retrieval_query
 from .drive_backup import DriveBackup
 from .config import PRIVATE_SETTINGS
-from .presets import Presets
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .kinds import is_internal
 from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_index, has_readable_text, safe_upload_name
@@ -107,7 +106,7 @@ from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .style import WritingStyle
 from .extensions.channels import ChatService
 from .extensions.coding.extension import Coding
-from .extensions import catalog_routes, devapi, profiles as profile_routes, review as review_routes
+from .extensions import catalog_routes, devapi, review as review_routes
 from .runtime import routes as runtime_routes
 from .runtime.sources import SERVER as SOURCE_SERVER, ToolSources, is_source_tool
 from .runtime.harness import ContextBuilder, EventSink, LoopHooks, LoopRun, LoopViolation, ModelCalls, ModelStream, Tools, TurnLimits
@@ -115,10 +114,9 @@ from .runtime.loop_api import LOOP_EVENTS, AgentLoop, AttachmentRef, LoopEvent, 
 from .runtime.tool_step import Round, ToolStep, TurnState
 from .extensions.authoring import skill as author_extension
 from .extensions.drafts import Drafts
-from .extensions.defaults import Defaults
 from .extensions.hooks import Deny, hook_ctx
 from .extensions.notes import BODY_CHARS, ExtNotes, InboxItem
-from .extensions.host import ExtensionContext, ExtensionHost, builtin_manifest
+from .extensions.host import ExtensionContext, ExtensionHost
 from .modules import Module, ModuleContext, build_modules
 from .tools import Toolbox, UrlBlocked, guarded_request, page_title, summarize_result, times_body
 from .webread import WebCache
@@ -382,7 +380,6 @@ _MODULES_DEFAULT = 6
 # Stamp 4 shows these once: agent work waits for review there (desks, skill and workflow approvals), and a hidden row
 # meant the user could not find work the assistant had already handed back.
 _SHOWN_AT_4 = ("library", "cowork")
-_PROFILES = ("lean", "focus")  # the bundled profiles; a fresh install starts with nothing enabled; a manifest's enabled is only the default for installs that predate it
 
 
 def _seed_hidden_modules() -> None:
@@ -396,16 +393,8 @@ def _seed_hidden_modules() -> None:
     )
     if current < 4:
         hidden = [v for v in hidden if v not in _SHOWN_AT_4]
-    first_boot = False
-    if current == 0 and "hiddenViews" not in stored:
-        with db.tx() as c:  # a first boot starts with nothing enabled; an install that already has chats keeps every view it had
-            first_boot = not c.execute("SELECT 1 FROM conversations LIMIT 1").fetchone()
     widgets = dict(stored["homeWidgets"]) if isinstance(stored.get("homeWidgets"), dict) else {}
     db.set_settings({"hiddenViews": hidden, "homeWidgets": widgets, "modulesDefault": _MODULES_DEFAULT})
-    if first_boot:
-        for profile in map(builtin_manifest, _PROFILES):
-            if profile.enabled is True:
-                Defaults(db).apply(profile)
 
 
 _seed_hidden_modules()
@@ -473,16 +462,6 @@ host.mount(app, host.load_builtin("health", _ext_ctx))
 host.mount(app, host.load_builtin("spaces", _ext_ctx))
 host.mount(app, host.load_builtin("latex", _ext_ctx))
 canvases = _ext_ctx.services["canvases"]()
-for _p in _PROFILES:
-    host.load_builtin(_p, _ext_ctx)
-
-
-def _profile_changed(before: dict[str, Any]) -> None:
-    """A profile toggle writes through contributes.defaults: these are the settings it can touch."""
-    _settings_changed(before, ["hiddenViews", "defaultModel", "defaultEffort", "theme", permissions.KEY], set())
-
-
-app.include_router(profile_routes.router(host, _profile_changed))
 host.migrate(db)
 # Soft delete: the DELETE routes below move things here, and /trash restores or erases them (trash.py).
 trash = Trash(db, todos, docs, host.bus, host.trash_kinds)
@@ -796,7 +775,7 @@ def _mcp_tooling(project_id: str | None, conversation_id: str | None) -> tuple[d
     modes: dict[str, str] = {}
     schemas: list[dict[str, Any]] = []
     sources = tool_sources.tools(runtime_selections.scopes(conversation_id, project_id)) if host.runtime.has_alternatives("tools.source") else []
-    for tool in sources:  # an extension's source: ask, or off when a preset or the user switched it off
+    for tool in sources:  # an extension's source: ask, or off when the user switched it off
         if mcp_store.effective_mode(tool.slug, project_id, conversation_id)["mode"] == "off":
             continue
         modes[tool.slug] = "ask"
@@ -1096,14 +1075,7 @@ def _store_permissions(fn: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[s
 toolbox.permission_store = _store_permissions
 
 
-def _shipped_presets() -> list[tuple[str, str, dict[str, Any]]]:
-    """The permission presets the loaded profiles and extensions ship (contributes.presets): (owner id, owner name, preset)."""
-    return [(m.id, m.name, doc) for scope in host.extensions.values() if (m := scope.manifest) for doc in m.contributes.get("presets", ())]
-
-
-presets = Presets(db, toolbox, mcp_store, projects, convos, _shipped_presets, _rule_tool_known, host.bus, tool_sources.known_slugs)
-_ext_ctx.preset_keys = presets.keys
-app.include_router(permissions_routes.router(presets, lambda project_id, conversation_id: config.effective(
+app.include_router(permissions_routes.router(projects, convos, lambda project_id, conversation_id: config.effective(
     db, toolbox, config.declared_settings(s.manifest for s in host.extensions.values()), project_id=project_id, conversation_id=conversation_id,
     runtime={slot: r.to_dict() for slot, r in host.runtime.resolve_all(runtime_selections.scopes(conversation_id, project_id)).items()})))
 HOST_LIST_SETTINGS = set(permissions.HOST_LISTS)
@@ -1664,7 +1636,7 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
         raise HTTPException(422, "settings.tools is a map of tool name to mode")
     if "tools" in settings_patch:
         settings_patch["tools"] = _check_permissions({"tools": settings_patch["tools"]})["tools"]  # external and schedules tools top out at ask
-    settings_patch.pop("permissions", None)  # set by the preset routes only: a PATCH must not loosen a chat unasked
+    settings_patch.pop("permissions", None)   # a PATCH must not loosen a chat unasked
     settings_patch.pop("deskId", None)  # bound and unbound by the cowork routes only, never by a settings PATCH
     settings_patch.pop("runtime", None)  # chosen only through PUT /runtime, which checks the provider and confirms any loosening
     settings_patch.pop("workingFolder", None)  # retired: the file tools reach the whole Mac, so a chat needs no folder bound to it

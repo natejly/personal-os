@@ -191,19 +191,6 @@ def test_a_misplaced_tool_leaves_none_of_the_extensions_tools_behind(ext: Path) 
     assert "sample_note" not in appmod.toolbox.tool_owner
 
 
-def test_a_profile_folder_loads_and_is_not_toggled_here(tmp_path: Path) -> None:
-    root = scaffold("myprof", tmp_path, profile=True)
-    try:
-        got = load(root)
-        assert got.status_code == 200 and got.json()["toggleable"] is False
-        assert "myprof" in {p["id"] for p in client.get("/profiles").json()}
-        assert client.post("/dev/extensions/myprof/disable").status_code == 400
-        assert "myprof" not in appmod.settings()["hiddenViews"]
-    finally:
-        import asyncio
-        asyncio.run(appmod.host.unload("myprof"))
-
-
 def test_an_always_on_built_in_is_not_toggled_here() -> None:
     assert next(e for e in listing()["extensions"] if e["id"] == "google")["toggleable"] is False
     before = appmod.settings()["hiddenViews"]
@@ -262,17 +249,6 @@ def test_a_broken_edit_does_not_turn_an_enabled_extension_off(ext: Path) -> None
     assert client.post("/dev/extensions/sample/reload").status_code == 400
     edit(ext, "extension.py", lambda t: t.replace("\n    raise RuntimeError('half done')\n", "\n"))
     assert load(ext).json()["enabled"] is True  # `grain ext dev` falls back to a load once the reload is refused
-
-
-def test_a_profile_folder_can_be_turned_on_and_off(tmp_path: Path) -> None:
-    root = scaffold("myprof", tmp_path, profile=True)
-    try:
-        load(root)
-        assert client.post("/profiles/myprof/enable", json={"confirm": True}).status_code == 200
-        assert client.post("/profiles/myprof/disable").status_code == 200
-    finally:
-        import asyncio
-        asyncio.run(appmod.host.unload("myprof"))
 
 
 def test_a_failing_start_leaves_nothing_registered_and_a_fixed_folder_loads(ext: Path) -> None:

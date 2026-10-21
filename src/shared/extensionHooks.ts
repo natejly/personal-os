@@ -353,7 +353,7 @@ export interface CodingToolPostPayload {
   duration_ms?: number
 }
 
-/** A runtime slot selection was stored (at chat, project or global scope) or a profile applied one. */
+/** A runtime slot selection was stored (at chat, project or global scope) or an extension's default selected one. */
 export interface RuntimeChangedPayload {
   slot: string
   scope: string
@@ -384,16 +384,6 @@ export interface SandboxRefusedPayload {
   run_id: string | null
 }
 
-/** A permission preset was applied at a scope. Key names only, never values. */
-export interface PresetAppliedPayload {
-  preset_id: string
-  scope: string
-  scope_id: string
-  changed_keys: string[]
-  loosened: string[]
-  by: string
-}
-
 export interface LoopStep {
   title: string
   done_when: string
@@ -415,7 +405,7 @@ export interface LoopVerifyPayload {
   gaps: string[]
 }
 
-export type HookId = 'app.start' | 'app.stop' | 'settings.changed' | 'chat.created' | 'chat.deleted' | 'project.created' | 'project.deleted' | 'ext.changed' | 'turn.accept' | 'turn.start' | 'context.contribute' | 'tools.offer' | 'model.select' | 'model.request' | 'model.response' | 'tool.permission' | 'tool.pre' | 'tool.post' | 'tool.result' | 'tool.taint' | 'tool.error' | 'reply.complete' | 'turn.settled' | 'run.after' | 'subagent.start' | 'subagent.stop' | 'memory.before_write' | 'memory.written' | 'memory.deleted' | 'compaction.before' | 'compaction.after' | 'approval.requested' | 'approval.resolved' | 'review.accepted' | 'worker.report' | 'job.fired' | 'job.done' | 'channel.inbound' | 'channel.outbound' | 'file.written' | 'notify' | 'coding.tool.pre' | 'coding.tool.post' | 'runtime.changed' | 'runtime.fallback' | 'sandbox.refused' | 'preset.applied' | 'loop.plan' | 'loop.verify'
+export type HookId = 'app.start' | 'app.stop' | 'settings.changed' | 'chat.created' | 'chat.deleted' | 'project.created' | 'project.deleted' | 'ext.changed' | 'turn.accept' | 'turn.start' | 'context.contribute' | 'tools.offer' | 'model.select' | 'model.request' | 'model.response' | 'tool.permission' | 'tool.pre' | 'tool.post' | 'tool.result' | 'tool.taint' | 'tool.error' | 'reply.complete' | 'turn.settled' | 'run.after' | 'subagent.start' | 'subagent.stop' | 'memory.before_write' | 'memory.written' | 'memory.deleted' | 'compaction.before' | 'compaction.after' | 'approval.requested' | 'approval.resolved' | 'review.accepted' | 'worker.report' | 'job.fired' | 'job.done' | 'channel.inbound' | 'channel.outbound' | 'file.written' | 'notify' | 'coding.tool.pre' | 'coding.tool.post' | 'runtime.changed' | 'runtime.fallback' | 'sandbox.refused' | 'loop.plan' | 'loop.verify'
 
 /** The payload each hook's handlers receive. */
 export interface HookPayloads {
@@ -465,7 +455,6 @@ export interface HookPayloads {
   'runtime.changed': RuntimeChangedPayload
   'runtime.fallback': RuntimeFallbackPayload
   'sandbox.refused': SandboxRefusedPayload
-  'preset.applied': PresetAppliedPayload
   'loop.plan': LoopPlanPayload
   'loop.verify': LoopVerifyPayload
 }
@@ -518,7 +507,6 @@ export interface HookKinds {
   'runtime.changed': 'emit'
   'runtime.fallback': 'emit'
   'sandbox.refused': 'emit'
-  'preset.applied': 'emit'
   'loop.plan': 'emit'
   'loop.verify': 'emit'
 }

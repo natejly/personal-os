@@ -731,10 +731,8 @@ def _provider_refs(c: sqlite3.Connection) -> None:
 
 
 def _permission_presets(c: sqlite3.Connection) -> None:
-    """Named permission presets, where each setting's value came from (setting_sources), and a project's own permission
-    overrides (projects.permissions). A chat keeps its overrides in conversations.settings."""
-    c.execute("CREATE TABLE IF NOT EXISTS permission_presets(id TEXT PRIMARY KEY, name TEXT NOT NULL, body TEXT NOT NULL, "
-              "source TEXT NOT NULL DEFAULT 'user', created_at REAL NOT NULL, updated_at REAL NOT NULL)")
+    """Where each setting's value came from (setting_sources), and a project's own permission overrides (projects.permissions).
+    A chat keeps its overrides in conversations.settings."""
     c.execute("CREATE TABLE IF NOT EXISTS setting_sources(key TEXT NOT NULL, scope TEXT NOT NULL, scope_id TEXT NOT NULL DEFAULT '', "
               "source TEXT NOT NULL, prev TEXT, set_at REAL NOT NULL, PRIMARY KEY (key, scope, scope_id))")
     if (cols := _cols(c, "projects")) and "permissions" not in cols:
@@ -746,6 +744,21 @@ def _ext_notes(c: sqlite3.Connection) -> None:
     from .extensions.notes import SCHEMA
     for stmt in filter(str.strip, SCHEMA.split(";")):
         c.execute(stmt)
+
+
+def _drop_permission_presets(c: sqlite3.Connection) -> None:
+    """Permission presets and the bundled Lean and Focus profiles are gone: drop the preset table, the preset and profile
+    source stamps and the defaults those two profiles recorded. What they already wrote to the settings stays as it is."""
+    c.execute("DROP TABLE IF EXISTS permission_presets")
+    c.execute("DELETE FROM setting_sources WHERE source LIKE 'preset:%' OR source LIKE 'profile:%'")  # the value stays; it now reads as the user's
+    row = c.execute("SELECT value FROM settings WHERE key = 'extDefaults'").fetchone()
+    try:
+        records = json.loads(row[0]) if row else None
+    except ValueError:
+        return
+    if isinstance(records, dict) and {"lean", "focus"} & set(records):
+        c.execute("UPDATE settings SET value = ? WHERE key = 'extDefaults'",
+                  (json.dumps({k: v for k, v in records.items() if k not in ("lean", "focus")}),))
 
 
 MIGRATIONS: list[tuple[int, str, Step]] = [
@@ -796,6 +809,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (45, "provider_refs", _provider_refs),
     (46, "permission_presets", _permission_presets),
     (47, "ext_notes", _ext_notes),
+    (48, "drop_permission_presets", _drop_permission_presets),
 ]
 
 

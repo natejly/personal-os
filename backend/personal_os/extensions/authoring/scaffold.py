@@ -1,4 +1,4 @@
-"""`grain ext new`: the files of a working extension (or a profile) to start from."""
+"""`grain ext new`: the files of a working extension to start from."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -42,17 +42,6 @@ LOOP_MANIFEST = Template('''{
     ]
   },
   "permissions": ["runtime:loop"]
-}
-''')
-
-PROFILE = Template('''{
-  "id": "$id",
-  "name": "$title",
-  "description": "Theme tokens and defaults; a profile runs no code.",
-  "version": "0.1.0",
-  "apiVersion": 1,
-  "kind": "profile",
-  "contributes": { "theme": {}, "defaults": {} }
 }
 ''')
 
@@ -205,7 +194,7 @@ def test_the_tool_saves_a_note() -> None:
 ''')
 
 
-def scaffold(ext_id: str, parent: Path, profile: bool = False, loop: bool = False) -> Path:
+def scaffold(ext_id: str, parent: Path, loop: bool = False) -> Path:
     """Write `<parent>/<ext_id>/` and return it. Refuses an id that is not a valid new id or is a built-in's, or a folder that exists."""
     if not ID.fullmatch(ext_id):
         raise ValueError("an extension id starts with a letter and holds lowercase letters, digits and hyphens")
@@ -215,9 +204,7 @@ def scaffold(ext_id: str, parent: Path, profile: bool = False, loop: bool = Fals
     if root.exists():
         raise FileExistsError(f"{root} already exists")
     values = {"id": ext_id, "ident": ext_id.replace("-", "_"), "title": ext_id.replace("-", " ").title()}
-    if profile and loop:
-        raise ValueError("a profile runs no code, so it cannot provide a loop")
-    files = {"extension.json": PROFILE.substitute(values)} if profile else {
+    files = {
         "extension.json": LOOP_MANIFEST.substitute(values),
         "extension.py": LOOP_BACKEND.substitute(values),
         "tests/test_extension.py": LOOP_TEST.substitute(values),

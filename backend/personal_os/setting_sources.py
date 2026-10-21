@@ -1,7 +1,7 @@
 """Where each setting's value came from (design doc 10.8.3): one row per (key, scope, scope id) in `setting_sources`.
 
-The source is `user`, `preset:<id>`, `profile:<id>` or `ext:<id>`; a project or chat value without a row is that scope's
-own. `prev` holds the value before a profile or extension default overwrote it. A stored value with no row was written
+The source is `user` or `ext:<id>`; a project or chat value without a row is that scope's
+own. `prev` holds the value before an extension default overwrote it. Rows stamped `preset:` or `profile:` by earlier versions still read. A stored value with no row was written
 before this table existed and is reported as the user's.
 """
 from __future__ import annotations

@@ -1,6 +1,5 @@
 import ConfirmDanger from './ConfirmDanger'
 import NumberField from './NumberField'
-import PresetsSection from './PresetsSection'
 import Switch from './Switch'
 import Disclosure from './Disclosure'
 import GrantsPanel from '../GrantsPanel'
@@ -16,7 +15,7 @@ import { AlwaysAsk, ToolGlobalToggles } from '../ToolPermissions'
 import RunSafetySettings, { SnapshotToggle } from '../RunSafetySettings'
 import { Sec, type TabProps } from './shared'
 
-export default function PermissionsTab({ draft, patch, onPresetApplied }: TabProps & { onPresetApplied: () => Promise<void> }): JSX.Element {
+export default function PermissionsTab({ draft, patch }: TabProps): JSX.Element {
   const mode = modeOf(draft)
   // The mode cards bring their own confirmation for Allow everything; these two switches share one inline confirmation.
   const [ask, setAsk] = useState<'connections' | 'edits' | null>(null)
@@ -67,11 +66,6 @@ export default function PermissionsTab({ draft, patch, onPresetApplied }: TabPro
         <h4>Network for commands</h4>
         <SnapshotToggle draft={draft} patch={patch} />
         <ShellNetwork draft={draft} patch={patch} />
-      </Sec>
-      <Sec id="presets">
-        <Disclosure id="permission-presets" title="Presets" secs={["presets"]} keepMounted>
-          <PresetsSection onApplied={onPresetApplied} />
-        </Disclosure>
       </Sec>
       <Sec id="tools"><Disclosure id="per-tool-access" title="Per-tool access" secs={["tools", "always-ask"]} keepMounted>
         <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />

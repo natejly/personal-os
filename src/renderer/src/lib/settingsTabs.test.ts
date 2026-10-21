@@ -21,7 +21,7 @@ test('old tab ids map to the new sections', () => {
   assert.deepEqual(resolveTab('spending'), { tab: 'advanced', group: 'usage' })
   assert.deepEqual(resolveTab('nope'), { tab: 'models' })
   for (const [old, to] of Object.entries(SECTION_ALIAS)) assert.deepEqual(resolveTab(old), to)
-  assert.deepEqual(Object.keys(SECTION_ALIAS).sort(), ['agent', 'context', 'hooks', 'jobs', 'layout', 'usage'])
+  assert.deepEqual(Object.keys(SECTION_ALIAS).sort(), ['agent', 'context', 'hooks', 'jobs', 'layout', 'presets', 'profiles', 'usage'])
   for (const id of SECTION_ORDER) assert.deepEqual(resolveTab(id), { tab: id })
 })
 

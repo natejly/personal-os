@@ -3,14 +3,13 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { FullDesk, Message, Profile } from '@shared/types'
+import type { FullDesk, Message } from '@shared/types'
 import { useStore } from '../store'
 import {
   activateExtension, docEditorFor, fenceRenderer, keybindings, paletteCommands, registerSlot, selectionActions, slotItems, WIDGETS, widgetOn, type UiApi
 } from './host'
 import { Slot } from './slot'
 import { extStore } from './events'
-import { closedChrome } from './profiles'
 import { addWidgetEntries } from '../canvas/AddWidgetMenu'
 import type { WidgetDef } from '../canvas/registry'
 import { kindIcon, kindLabel } from '../canvas/WindowHost'
@@ -327,14 +326,13 @@ test('raw CSS and DOM access needs the ui:unsupported-css permission', () => {
   }
 })
 
-test('title bar and status bar items render in their slots, and a profile can close either', async () => {
+test('title bar and status bar items render in their slots', async () => {
   const { default: StatusBar } = await import('../components/StatusBar')
   const { default: TitleBarSlot } = await import('../components/TitleBarSlot')
   const item = (label: string) => (): JSX.Element => createElement('i', null, label)
   const html = (el: JSX.Element): string => renderToStaticMarkup(el)
   const bars = (): string[] => [html(createElement(StatusBar)), html(createElement(TitleBarSlot, { side: 'left' })), html(createElement(TitleBarSlot, { side: 'right' }))]
-  const chrome = (hiddenChrome: Profile['layout']): void => { Object.assign(useStore.getInitialState(), { settings: { hiddenViews: [] }, hiddenChrome: closedChrome([{ id: 'p', name: 'P', description: '', enabled: true, theme: {}, layout: hiddenChrome }]) }) }  // server rendering reads the initial state
-  chrome({})
+  Object.assign(useStore.getInitialState(), { settings: { hiddenViews: [] } })  // server rendering reads the initial state
   assert.deepEqual(bars(), ['', '', ''])  // nothing listed, nothing drawn
   const gone = withExtension('bardemo', (ui) => {
     ui.slot('statusbar.item', { id: 'bardemo:s', order: 1, Component: item('status') })
@@ -343,24 +341,7 @@ test('title bar and status bar items render in their slots, and a profile can cl
   })
   assert.deepEqual(bars().map((h) => h.replace(/<[^>]*>/g, '')), ['status', 'left', 'right'])
   assert.match(bars()[0], /^<footer class="statusbar">/)
-  chrome({ statusbar: false })
-  assert.deepEqual(bars().map((h) => h.replace(/<[^>]*>/g, '')), ['', 'left', 'right'])
-  chrome({ titlebar: false })
-  assert.deepEqual(bars().map((h) => h.replace(/<[^>]*>/g, '')), ['status', '', ''])
   gone()
-  chrome({})
-})
-
-test('applyProfiles records the closed chrome in the store', () => {
-  useStore.getState().applyProfiles([{ id: 'p', name: 'P', description: '', enabled: true, theme: {}, layout: { sidepanel: false } }])
-  assert.deepEqual(useStore.getState().hiddenChrome, ['sidepanel'])
-  useStore.getState().applyProfiles([])
-  assert.deepEqual(useStore.getState().hiddenChrome, [])
-})
-
-test('closedChrome lists the regions of enabled profiles only', () => {
-  const p = (enabled: boolean, layout: Profile['layout']): Profile => ({ id: 'p', name: 'P', description: '', enabled, theme: {}, layout })
-  assert.deepEqual(closedChrome([p(true, { sidepanel: false, titlebar: false }), p(true, { sidepanel: false }), p(false, { statusbar: false })]), ['sidepanel', 'titlebar'])
 })
 
 test('ui.call goes to the extension routes with the token, ui.notify and settings follow the extension being on', async () => {

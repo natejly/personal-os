@@ -3309,17 +3309,10 @@ select:focus-visible {
 /* The deny note is plain English, not a rule: the UI font and a normal field. */
 .approval-rules form input { width: 100%; min-width: 0; padding: 6px 10px; font-size: var(--fs-md); background: var(--bg-input); border: 1px solid var(--control-border); border-radius: var(--r-md); }
 .approval-rules form { flex: 1; }
-.preset-list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--r-lg); }
-.preset-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; flex-wrap: wrap; }
-.preset-list li + li { border-top: 1px solid var(--border); }
-.preset-scope, .preset-buttons, .preset-actions, .eff-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.preset-scope .ghost-btn.on, .eff-chips .ghost-btn.on { background: var(--hover); }
-.preset-held { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--danger); border-radius: var(--r-lg); }
-.preset-diff, .eff-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); margin: 6px 0; }
-.preset-diff th, .preset-diff td, .eff-table th, .eff-table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
-.preset-diff tr.loosens td { color: var(--danger); }
-.preset-editor { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-lg); display: flex; flex-direction: column; gap: 10px; }
-.preset-part { display: flex; flex-direction: column; gap: 8px; }
+.eff-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.eff-chips .ghost-btn.on { background: var(--hover); }
+.eff-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); margin: 6px 0; }
+.eff-table th, .eff-table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
 .eff-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
 .eff-bar input[type=search] { flex: 1 1 180px; min-width: 0; }
 .eff-table code { font-size: var(--fs-xs); }

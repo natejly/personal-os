@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react'
-import { File, FileDown, FileText, FolderOpen, Files, GitBranch, Paperclip, Pin } from '../icons'
-import { Popover } from '../canvas/Popover'
+import { useEffect, useMemo, useState } from 'react'
+import { ChevronRight, File, FileDown, FileText, FolderOpen, Files, GitBranch, Paperclip, Pin } from '../icons'
 import { useIsStreaming } from '../store'
 import { fmtAgo } from '../lib/deskFiles'
-import { actionLabel, groupByKind, rowAction, type ChatFile, type ChatFileKind } from '../lib/chatFiles'
+import { actionLabel, rowAction, type ChatFile, type ChatFileKind } from '../lib/chatFiles'
 import { chatFilesApi, openChatFile, revealChatFile } from '../lib/useChatFiles'
 import './chatFiles.css'
 
@@ -51,16 +50,14 @@ export function ChatFileRow({ file, jump, showChat, onDone, onOpen, onPin }: { f
   )
 }
 
-const ORDER: ChatFileKind[] = ['output', 'local', 'upload', 'note', 'coding']
-const LABEL: Partial<Record<ChatFileKind, string>> = { output: 'Artifacts', local: 'Changed files' }
-
 /**
- * This chat's files, Artifacts first. Refreshes when a reply starts or ends. `pane` is the Files tab of the side panel,
- * `above` the same list over a desk's workspace tree (nothing at all when empty), `pop` the bare list inside the popover.
+ * This chat's files as one flat list, newest first. On a desk the workspace tree sits behind a collapsed
+ * "Workspace" row at the bottom of the same list. Refreshes when a reply starts or ends.
  */
-export function ChatFilesList({ conversationId, layout = 'pane', onDone }: { conversationId: string; layout?: 'pane' | 'above' | 'pop'; onDone?: () => void }): JSX.Element | null {
+export function ChatFilesList({ conversationId, workspace }: { conversationId: string; workspace?: JSX.Element | null }): JSX.Element {
   const [files, setFiles] = useState<ChatFile[] | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
+  const [wsOpen, setWsOpen] = useState(false)
   const streaming = useIsStreaming(conversationId)
   useEffect(() => { setFiles(null) }, [conversationId])
   useEffect(() => {
@@ -69,30 +66,21 @@ export function ChatFilesList({ conversationId, layout = 'pane', onDone }: { con
     chatFilesApi.forChat(conversationId).then((r) => { if (live) setFiles(r.files) }).catch((e: Error) => { if (live) setProblem(e.message) })
     return () => { live = false }
   }, [conversationId, streaming])
-  if (layout === 'above' && !problem && !files?.length) return null
+  const sorted = useMemo(() => (files ? [...files].sort((a, b) => b.created_at - a.created_at) : null), [files])
   return (
-    <div className={`${layout === 'pop' ? '' : 'desk-pane scroll '}cf-list${layout === 'above' ? ' cf-above' : ''}`}>
+    <div className="cf-list">
       {problem && <p className="empty-hint" role="alert">{problem}</p>}
-      {!problem && files === null && <p className="empty-hint">Loading…</p>}
-      {files?.length === 0 && <p className="empty-hint">No files</p>}
-      {files && groupByKind(files).sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind)).map((g) => (
-        <section key={g.kind}>
-          <h4>{LABEL[g.kind] ?? g.label}</h4>
-          {g.files.map((f) => <ChatFileRow key={f.id} file={f} jump={null} onDone={onDone} />)}
-        </section>
-      ))}
+      {!problem && sorted === null && <p className="empty-hint">Loading…</p>}
+      {sorted?.length === 0 && !workspace && <div className="empty-state"><Files size={22} /><h2>No files</h2></div>}
+      {sorted?.map((f) => <ChatFileRow key={f.id} file={f} jump={null} />)}
+      {workspace && (
+        <>
+          <button type="button" className="cf-ws-toggle" aria-expanded={wsOpen} onClick={() => setWsOpen((o) => !o)}>
+            <ChevronRight size={11} className={wsOpen ? 'rot90' : undefined} />Workspace
+          </button>
+          {wsOpen && <div className="cf-ws-body">{workspace}</div>}
+        </>
+      )}
     </div>
-  )
-}
-
-/** A canvas chat window has no side panel, so its Documents button opens the list in a popover. */
-export default function ChatFilesButton({ conversationId }: { conversationId?: string }): JSX.Element {
-  const [at, setAt] = useState<{ x: number; y: number } | null>(null)
-  return (
-    <>
-      <button className={`icon-btn no-drag${at ? ' on' : ''}`} title="Documents in this chat" aria-label="Documents in this chat" aria-haspopup="dialog" aria-expanded={!!at} disabled={!conversationId}
-        onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAt({ x: r.right - 320, y: r.bottom + 4 }) }}><Files size={15} /></button>
-      {at && conversationId && <Popover at={at} onClose={() => setAt(null)} className="cf-pop"><ChatFilesList conversationId={conversationId} layout="pop" onDone={() => setAt(null)} /></Popover>}
-    </>
   )
 }

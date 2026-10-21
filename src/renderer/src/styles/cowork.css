@@ -290,7 +290,7 @@
 
 /* The active tab fills the rest of the panel and is its one scroll area. Panes inside it grow to their content instead of scrolling on their own. */
 .side-panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; font-size: var(--fs-md); }
-.side-panel-body > .desk-pane.scroll:not(.cf-above) { flex: none; overflow: visible; background: none; border: 0; padding: 12px 16px; }
+.side-panel-body > .desk-pane.scroll { flex: none; overflow: visible; background: none; border: 0; padding: 12px 16px; }
 /* Context tab: header, stacked bar, inspector. Everything flows in the shell's one scroll area; nothing here has a fixed height. */
 .ctx-body { font-size: var(--fs-md); }
 .ctx-head { display: flex; flex-direction: column; gap: 8px; }
@@ -340,12 +340,13 @@
 .desk-panel .desk-files { min-height: 280px; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(120px, 40%) minmax(0, 1fr); }
 .desk-panel .desk-tree { border-right: 0; border-bottom: 1px solid var(--border); }
 
-/* The plain-chat Files tab reuses the chat file rows: section headings and the empty line as in the old popover. */
-.cf-list h4 { margin: 0; padding: 6px 8px 2px; font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
+/* The Files tab is one list in the panel's single scroll area; the desk workspace tree hides behind one row at its end. */
+.cf-list { padding: 12px 16px; }
 .cf-list .empty-hint { margin: 0; padding: 6px 8px; font-size: var(--fs-sm); }
-/* A desk chat's Files tab: the chat's own files over the workspace tree, a short scrolling block under a quiet divider. */
-.cf-above { flex: none; max-height: 40%; padding-bottom: 4px; }
-.desk-panel .cf-ws { margin: 0; padding: 6px 16px 2px; font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); border-top: 1px solid var(--border); }
+.cf-ws-toggle { display: flex; align-items: center; gap: 6px; width: 100%; margin-top: 8px; padding: 6px 8px; border-top: 1px solid var(--border); font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); text-align: left; }
+.cf-ws-toggle:hover { color: var(--text); }
+.cf-ws-toggle .rot90 { transform: rotate(90deg); }
+.cf-ws-body { display: flex; flex-direction: column; height: 420px; }
 
 /* Terminal tab: one row per session; actions show on hover. The xterm lives in the floating .term-window. */
 .term-list { padding: 0 6px 6px; display: flex; flex-direction: column; gap: 1px; }

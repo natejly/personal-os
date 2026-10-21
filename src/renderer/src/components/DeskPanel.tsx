@@ -17,9 +17,7 @@ import { useSlot } from '../extensions/slot'
 // The tabs other than Terminal are `sidepanel.tab` slot items. Terminal owns the panel's attach state, so it stays in the coding extension, last.
 
 const ContextTab = ({ conversationId }: SidePanelTabProps): JSX.Element => <ContextDrawer conversationId={conversationId} />
-const FilesTab = ({ conversationId, desk }: SidePanelTabProps): JSX.Element => (desk
-  ? <><ChatFilesList conversationId={conversationId ?? ''} layout="above" /><h4 className="cf-ws">Workspace</h4><DeskFiles desk={desk} /></>
-  : <ChatFilesList conversationId={conversationId ?? ''} />)
+const FilesTab = ({ conversationId, desk }: SidePanelTabProps): JSX.Element => <ChatFilesList conversationId={conversationId ?? ''} workspace={desk ? <DeskFiles desk={desk} /> : null} />
 const ChangesTab = ({ conversationId, desk }: SidePanelTabProps): JSX.Element => <div className="desk-pane scroll"><DeskChanges desk={desk ?? undefined} conversationId={conversationId ?? ''} /></div>
 const ReviewTab = ({ desk }: SidePanelTabProps): JSX.Element | null => (desk ? <div className="desk-pane scroll"><DeskReview desk={desk} /></div> : null)
 

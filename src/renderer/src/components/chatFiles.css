@@ -1,7 +1,4 @@
-/* Chat files: the header popover, the sidebar's Documents list and the paperclip count on a chat row. Tokens only. */
-.cf-pop { width: 320px; }
-.cf-pop h4 { margin: 0; padding: 6px 8px 2px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
-.cf-pop .empty-hint { margin: 0; padding: 6px 8px; font-size: 12px; }
+/* Chat files: the sidebar's Documents list and the paperclip count on a chat row. Tokens only. */
 
 .cf-row { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border-radius: 6px; color: var(--text); }
 .cf-row:hover { background: var(--hover); }

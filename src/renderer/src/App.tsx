@@ -23,6 +23,7 @@ import UploadPreview from './components/UploadPreview'
 import SubagentPanel from './components/SubagentPanel'
 import { moduleForView } from './shell/registry'
 import { startExtensionRuntime } from './extensions/runtime'
+import './lib/viewCommands'
 import Canvas from './canvas/Canvas'
 import { useCanvas } from './canvas/store'
 import { BackendBanner } from './components/BackendStatus'
@@ -213,8 +214,6 @@ export default function App(): JSX.Element {
   const ModView = moduleForView(view)?.view?.Component
   const theme = useStore((s) => s.settings.theme)
   const accent = useStore((s) => s.settings.accent)
-  const textTone = useStore((s) => s.settings.textTone)
-  const surfaceTone = useStore((s) => s.settings.surfaceTone)
   const uiFont = useStore((s) => s.settings.uiFont)
   const codeFont = useStore((s) => s.settings.codeFont)
   const accentCustom = useStore((s) => s.settings.accentCustom)
@@ -228,8 +227,8 @@ export default function App(): JSX.Element {
     void init()
   }, [init])
   useEffect(() => {
-    applyAppearance({ theme, accent, textTone, surfaceTone, uiFont, codeFont, accentCustom, mascot })
-  }, [theme, accent, textTone, surfaceTone, uiFont, codeFont, accentCustom, mascot])
+    applyAppearance({ theme, accent, uiFont, codeFont, accentCustom, mascot })
+  }, [theme, accent, uiFont, codeFont, accentCustom, mascot])
   // A fresh install (no key, never onboarded) opens the first-run wizard once the backend is up.
   useEffect(() => { if (ready && !backendError) void useOnboarding.getState().check() }, [ready, backendError])
   // Extension keybindings, and the view-opened event their frontend halves listen for.

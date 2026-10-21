@@ -1,4 +1,4 @@
-// Coverage for the 2026-10-12 merges: model duels, shipped sidebar rows, General first, appearance presets.
+// Coverage for the 2026-10-12 merges: model duels, shipped sidebar rows, General first, appearance rows.
 import { test, expect } from './fixtures.mjs'
 import { dialog, openMoreAppearance, openSettings } from './helpers/home.mjs'
 import { newChat, say, assistants, users, anyStop, msgBox } from './helpers/chat.mjs'
@@ -23,23 +23,6 @@ test('a fresh data dir shows Files, Lists, Calendar, Library, Canvases and Proje
   expect(labels.filter((l) => [...rows, 'Mail', 'Health'].includes(l))).toEqual(rows)
   await expect(sb.getByRole('button', { name: /Canvases/ })).toBeVisible()
   await expect(sb.getByRole('button', { name: /Projects/ })).toBeVisible()
-})
-
-test('an appearance preset sets theme, accent and fonts together, and Save keeps it', async ({ grain }) => {
-  const { page, api } = grain
-  const d = await openMoreAppearance(page)
-  const presets = d.getByRole('radiogroup', { name: 'Appearance presets' })
-  await expect(presets.getByRole('radio')).toHaveCount(2)
-  await presets.getByRole('radio', { name: /Default/ }).click()
-  const attrs = () => page.evaluate(() => ({ ...document.documentElement.dataset }))
-  await expect.poll(attrs).toMatchObject({ theme: 'dark', accent: 'sage', font: 'system', code: 'default' })
-  await d.getByRole('radiogroup', { name: 'Appearance presets' }).getByRole('radio', { name: /Paper/ }).click()
-  await expect.poll(attrs).toMatchObject({ theme: 'light', accent: 'clay', font: 'serif' })
-  await d.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(dialog(page)).toHaveCount(0)
-  await expect.poll(async () => (await api('/settings')).accent).toBe('clay')
-  expect((await api('/settings')).uiFont).toBe('serif')
-  expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
 })
 
 test('A/B duel: both columns stream, picking B keeps only B as the reply and the vote is counted', async ({ grain }) => {

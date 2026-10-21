@@ -146,12 +146,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "learnStyle": True,
     "theme": "dark",
     "accent": "sage",
-    "textTone": "neutral",  # text colour family: neutral, warm, cream, soft, cool
-    "surfaceTone": "neutral",  # background tint: neutral, warm, cool, black
     "accentCustom": "#7c8cf0",  # the colour behind accent "custom"
     "mascot": "grain",  # which creature draws the faces: grain, blobs, off (see lib/appearance.ts)
-    "uiFont": "system",  # interface typeface: system, serif, rounded, mono and macOS faces (see lib/appearance.ts)
-    "codeFont": "default",  # code typeface: default, sfmono, menlo, monaco, courier
+    "uiFont": "system",  # interface typeface: system, serif, mono (see lib/appearance.ts)
+    "codeFont": "default",  # code typeface: default, menlo
     "gatherShortcut": "Control+Alt+Command+Space",
     # Global quick capture: a small window that appends a timestamped bullet to today's daily note.
     "quickCaptureShortcut": "CommandOrControl+Shift+Space",

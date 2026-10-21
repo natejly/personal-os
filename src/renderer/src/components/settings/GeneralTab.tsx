@@ -1,8 +1,7 @@
 import type { Settings, ShortcutState } from '@shared/types'
 import { useStore } from '../../store'
-import { DEFAULT_ZOOM, stepZoom } from '../../lib/zoom'
 import { homeModuleOn } from '../../moduleToggles'
-import { ACCENTS, CODE_FONTS, CUSTOM_ACCENT, MASCOTS, PRESETS, SURFACE_TONES, TEXT_TONES, UI_FONTS, accentId, activePreset, codeFontId, hexColor, isLightTheme, mascotId, surfaceToneId, textToneId, uiFontId } from '../../lib/appearance'
+import { ACCENTS, CODE_FONTS, CUSTOM_ACCENT, MASCOTS, UI_FONTS, accentId, codeFontId, hexColor, mascotId, uiFontId } from '../../lib/appearance'
 import { tip } from '../../lib/tip'
 import TypographyControls from '../../features/notes/TypographyMenu'
 import VoiceInputSettings from '../VoiceInputSettings'
@@ -17,7 +16,6 @@ export const THEMES: { id: Settings['theme']; label: string }[] = [
 ]
 
 export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { shortcuts: Partial<Record<ShortcutKey, ShortcutState>> }): JSX.Element {
-  const zoom = draft.uiZoom ?? DEFAULT_ZOOM
   return (
     <section>
       <Sec id="look">
@@ -59,49 +57,6 @@ export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { sho
       </div>
       <details className="settings-disclosure more-appearance" data-opens="look">
         <summary>More appearance</summary>
-      <div className="preset-row" role="radiogroup" aria-label="Appearance presets">
-        {PRESETS.map((p) => {
-          const on = activePreset(draft) === p.id
-          return (
-            <button key={p.id} type="button" role="radio" aria-checked={on} className={`preset-card${on ? ' on' : ''}`}
-              onClick={() => patch({ theme: p.theme, accent: p.accent, uiFont: p.uiFont, codeFont: p.codeFont })}>
-              <span className="preset-prev" style={{ background: p.bg, color: p.fg, fontFamily: UI_FONTS.find((f) => f.id === p.uiFont)?.stack }}>
-                Aa<i style={{ background: p.dot }} />
-              </span>
-              <b>{p.label}</b>
-            </button>
-          )
-        })}
-      </div>
-      <div className="setting-row">
-        <span className="toggle-text"><b>Text colour</b><small>{TEXT_TONES.find((t) => t.id === textToneId(draft.textTone))?.label}</small></span>
-        <div className="accent-picks" role="radiogroup" aria-label="Text color">
-          {TEXT_TONES.map((t) => {
-            const on = textToneId(draft.textTone) === t.id
-            return (
-              <button
-                key={t.id}
-                type="button"
-                role="radio"
-                aria-checked={on}
-                aria-label={t.label}
-                title={t.label}
-                className={`accent-swatch${on ? ' on' : ''}`}
-                style={{ background: isLightTheme(draft.theme) ? t.light : t.dark }}
-                onClick={() => patch({ textTone: t.id })}
-              />
-            )
-          })}
-        </div>
-      </div>
-      <div className="setting-row">
-        <span className="toggle-text"><b>Background</b></span>
-        <div className="seg" role="radiogroup" aria-label="Background">
-          {SURFACE_TONES.map((t) => (
-            <button key={t.id} type="button" role="radio" aria-checked={surfaceToneId(draft.surfaceTone) === t.id} className={surfaceToneId(draft.surfaceTone) === t.id ? 'on' : ''} onClick={() => patch({ surfaceTone: t.id })}>{t.label}</button>
-          ))}
-        </div>
-      </div>
       <div className="setting-row">
         <span className="toggle-text"><b>Mascot</b></span>
         <div className="seg" role="radiogroup" aria-label="Mascot">
@@ -126,19 +81,11 @@ export default function GeneralTab({ draft, patch, shortcuts }: TabProps & { sho
           ))}
         </div>
       </div>
-      <div className="setting-row">
-        <span className="toggle-text"><b>Zoom</b></span>
-        <div className="seg" role="group" aria-label="Zoom">
-          <button type="button" aria-label="Zoom out" title={tip('Zoom out', 'zoom-out')} onClick={() => patch({ uiZoom: stepZoom(zoom, -1) })}>−</button>
-          <button type="button" disabled>{zoom}%</button>
-          <button type="button" aria-label="Zoom in" title={tip('Zoom in', 'zoom-in')} onClick={() => patch({ uiZoom: stepZoom(zoom, 1) })}>+</button>
-          <button type="button" title={tip('Actual size', 'zoom-reset')} onClick={() => patch({ uiZoom: DEFAULT_ZOOM })}>Reset</button>
-        </div>
-      </div>
-      </details>
       <Switch title="Daily recap on new chats" checked={homeModuleOn(draft, 'recap')} onChange={(on) => patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), recap: on } })} />
       <TypographyControls rows value={draft.docTypography ?? {}} onChange={(t) => patch({ docTypography: { ...(draft.docTypography ?? {}), ...t } })}
-          onReset={draft.docTypography && Object.keys(draft.docTypography).length ? () => patch({ docTypography: {} }) : undefined} /></Sec>
+          onReset={draft.docTypography && Object.keys(draft.docTypography).length ? () => patch({ docTypography: {} }) : undefined} />
+      </details>
+      </Sec>
       <Sec id="notifications">
         <h4>Notifications</h4>
         <Switch title="Notify me when a chat finishes" checked={draft.chatNotify !== false} onChange={(chatNotify) => patch({ chatNotify })} />

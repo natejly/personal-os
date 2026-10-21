@@ -1747,18 +1747,14 @@ export interface Settings {
   accent?: 'sage' | 'lilac' | 'sky' | 'rose' | 'mint' | 'fog' | 'amber' | 'peach' | 'clay' | 'indigo' | 'teal' | 'coral' | 'gold' | 'plum' | 'slate' | 'forest' | 'crimson' | 'custom'
   /** The #rrggbb behind accent 'custom'. */
   accentCustom?: string
-  /** Text colour family; missing means neutral. */
-  textTone?: 'neutral' | 'warm' | 'cream' | 'soft' | 'cool'
-  /** Background tint; missing means neutral. */
-  surfaceTone?: 'neutral' | 'warm' | 'cool' | 'black'
-  /** Interface typeface; missing means system. */
-  uiFont?: 'system' | 'serif' | 'rounded' | 'mono' | 'avenir' | 'helvetica' | 'gill' | 'futura' | 'charter' | 'georgia' | 'iowan' | 'palatino' | 'menlo'
+  /** Interface typeface; missing or an id from an older version means system. */
+  uiFont?: 'system' | 'serif' | 'mono'
   /** URL (or local path) of the extensions catalog index; missing means the default catalog. */
   extensionCatalogUrl?: string
   /** Which creature draws the faces; missing means the Grain mascot. */
   mascot?: 'grain' | 'blobs' | 'off'
   /** Code and monospace typeface; missing means default. */
-  codeFont?: 'default' | 'sfmono' | 'menlo' | 'monaco' | 'courier'
+  codeFont?: 'default' | 'menlo'
   /** Electron accelerator for the global Gather/Scatter shortcut. */
   gatherShortcut: string
   /** Electron accelerator for the global quick-capture window (appends to today's daily note). */

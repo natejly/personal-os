@@ -198,7 +198,7 @@ export default function SettingsModal(): JSX.Element {
   // Preview the appearance options on the page while the modal is open; discard restores saved values.
   useEffect(() => {
     applyAppearance(draft)
-  }, [draft.theme, draft.accent, draft.textTone, draft.surfaceTone, draft.uiFont, draft.codeFont, draft.accentCustom])
+  }, [draft.theme, draft.accent, draft.uiFont, draft.codeFont, draft.accentCustom])
   useEffect(() => () => applyAppearance(useStore.getState().settings), [])
 
   /** A rejected accelerator keeps the modal open: it is the only place the reason is readable. */

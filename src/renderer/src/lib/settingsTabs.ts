@@ -72,7 +72,7 @@ export interface SettingsEntry { tab: SettingsTab; sec: string; title: string; k
 /** Stands in for the `ext` of the Runtime block: it renders nothing until some slot has a non-core provider, so a search hit needs that to be off the `off` set. */
 export const RUNTIME_EXT = 'core:runtime'
 export const SETTINGS_INDEX: readonly SettingsEntry[] = [
-  { tab: 'general', sec: 'look', title: 'Theme, accent, fonts and zoom', keys: 'preset presets dark light colour color custom accent font typeface code monospace size scale recap' },
+  { tab: 'general', sec: 'look', title: 'Theme, accent and fonts', keys: 'dark light system colour color custom accent mascot font typeface code monospace recap' },
   { tab: 'general', sec: 'notifications', title: 'Notifications', keys: 'notify alerts unread dot jobs finish' },
   { tab: 'general', sec: 'shortcuts', title: 'Shortcuts and voice', keys: 'keyboard hotkey dictation microphone speech quick note quick ask gather widgets' },
   { tab: 'models', sec: 'provider', title: 'Providers', keys: 'provider add key api key verify replace remove address base url openai anthropic fireworks openrouter ollama litellm custom setup' },

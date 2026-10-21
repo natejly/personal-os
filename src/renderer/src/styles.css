@@ -381,163 +381,12 @@
   }
 }
 
-/* Text colour: --text, --text-muted and --text-faint retinted in one hue family. Neutral is the base above.
-   Every tone keeps --text-faint at 4.5:1 or better on --bg and --bg-elev under every background tone
-   (styles.contrast.test.ts walks the whole grid). Light-theme tones are inks, so they come after the dark ones
-   and win on specificity; the system-light mirror must match them exactly. */
-:root[data-text='warm'] {
-  --text: #efe6d8;
-  --text-muted: #aa9f90;
-  --text-faint: #9a8f80;
-}
-:root[data-text='cream'] {
-  --text: #ecdfc8;
-  --text-muted: #ab9e86;
-  --text-faint: #9b8e77;
-}
-:root[data-text='soft'] {
-  --text: #d4d1ca;
-  --text-muted: #9d9a93;
-  --text-faint: #8f8c85;
-}
-:root[data-text='cool'] {
-  --text: #e3e8ee;
-  --text-muted: #9aa2ad;
-  --text-faint: #8b939e;
-}
-
-:root[data-theme='light'][data-text='warm'] {
-  --text: #2b2118;
-  --text-muted: #665848;
-  --text-faint: #6d5f4e;
-}
-:root[data-theme='light'][data-text='cream'] {
-  --text: #3a2c1c;
-  --text-muted: #695740;
-  --text-faint: #705e46;
-}
-:root[data-theme='light'][data-text='soft'] {
-  --text: #3b3a37;
-  --text-muted: #63615c;
-  --text-faint: #6b6963;
-}
-:root[data-theme='light'][data-text='cool'] {
-  --text: #1e2833;
-  --text-muted: #566170;
-  --text-faint: #5f6b7b;
-}
-@media (prefers-color-scheme: light) {
-  :root[data-theme='system'][data-text='warm'] {
-    --text: #2b2118;
-    --text-muted: #665848;
-    --text-faint: #6d5f4e;
-  }
-  :root[data-theme='system'][data-text='cream'] {
-    --text: #3a2c1c;
-    --text-muted: #695740;
-    --text-faint: #705e46;
-  }
-  :root[data-theme='system'][data-text='soft'] {
-    --text: #3b3a37;
-    --text-muted: #63615c;
-    --text-faint: #6b6963;
-  }
-  :root[data-theme='system'][data-text='cool'] {
-    --text: #1e2833;
-    --text-muted: #566170;
-    --text-faint: #5f6b7b;
-  }
-}
-
-/* Background tone: --bg, --bg-elev, --bg-input, --sidebar-bg and --user-bubble tinted together. Black is a
-   dark-theme look (true black behind the elevated surfaces); the light rules put neutral back. */
-:root[data-surface='warm'] {
-  --bg: #1d1916;
-  --bg-elev: #27221e;
-  --bg-input: #2e2924;
-  --sidebar-bg: rgba(34, 29, 25, 0.6);
-  --user-bubble: #352e27;
-}
-:root[data-surface='cool'] {
-  --bg: #171a1e;
-  --bg-elev: #1f2328;
-  --bg-input: #262b31;
-  --sidebar-bg: rgba(25, 29, 34, 0.6);
-  --user-bubble: #292f36;
-}
-:root[data-surface='black'] {
-  --bg: #000000;
-  --bg-elev: #0d0d0d;
-  --bg-input: #171717;
-  --sidebar-bg: rgba(0, 0, 0, 0.6);
-  --user-bubble: #1e1e1e;
-}
-
-:root[data-theme='light'][data-surface='warm'] {
-  --bg: #f9f4ec;
-  --bg-elev: #fffaf2;
-  --bg-input: #fffaf2;
-  --sidebar-bg: rgba(237, 229, 215, 0.6);
-  --user-bubble: #f0e8da;
-}
-:root[data-theme='light'][data-surface='cool'] {
-  --bg: #f4f6f9;
-  --bg-elev: #ffffff;
-  --bg-input: #ffffff;
-  --sidebar-bg: rgba(229, 234, 240, 0.6);
-  --user-bubble: #e1e6ed;
-}
-:root[data-theme='light'][data-surface='black'] {
-  --bg: #f7f6f3;
-  --bg-elev: #ffffff;
-  --bg-input: #ffffff;
-  --sidebar-bg: rgba(240, 238, 233, 0.6);
-  --user-bubble: #ebe8e2;
-}
-@media (prefers-color-scheme: light) {
-  :root[data-theme='system'][data-surface='warm'] {
-    --bg: #f9f4ec;
-    --bg-elev: #fffaf2;
-    --bg-input: #fffaf2;
-    --sidebar-bg: rgba(237, 229, 215, 0.6);
-    --user-bubble: #f0e8da;
-  }
-  :root[data-theme='system'][data-surface='cool'] {
-    --bg: #f4f6f9;
-    --bg-elev: #ffffff;
-    --bg-input: #ffffff;
-    --sidebar-bg: rgba(229, 234, 240, 0.6);
-    --user-bubble: #e1e6ed;
-  }
-  :root[data-theme='system'][data-surface='black'] {
-    --bg: #f7f6f3;
-    --bg-elev: #ffffff;
-    --bg-input: #ffffff;
-    --sidebar-bg: rgba(240, 238, 233, 0.6);
-    --user-bubble: #ebe8e2;
-  }
-}
-
 /* Interface font: swaps the --font token. Code and editors keep --mono. */
 :root[data-font='serif'] { --font: ui-serif, 'New York', 'Iowan Old Style', Charter, Georgia, 'Times New Roman', serif; }
-:root[data-font='rounded'] { --font: ui-rounded, 'SF Pro Rounded', 'Nunito', 'Varela Round', -apple-system, system-ui, sans-serif; }
 :root[data-font='mono'] { --font: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
 
-:root[data-font='avenir'] { --font: 'Avenir Next', Avenir, -apple-system, system-ui, sans-serif; }
-:root[data-font='helvetica'] { --font: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
-:root[data-font='gill'] { --font: 'Gill Sans', 'Gill Sans MT', Calibri, -apple-system, sans-serif; }
-:root[data-font='futura'] { --font: Futura, 'Trebuchet MS', -apple-system, sans-serif; }
-:root[data-font='charter'] { --font: Charter, 'Bitstream Charter', Georgia, serif; }
-:root[data-font='georgia'] { --font: Georgia, 'Times New Roman', serif; }
-:root[data-font='iowan'] { --font: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif; }
-:root[data-font='palatino'] { --font: Palatino, 'Palatino Linotype', 'Book Antiqua', Georgia, serif; }
-:root[data-font='menlo'] { --font: Menlo, Monaco, 'SF Mono', monospace; }
-
 /* Code font: swaps the --mono token (code blocks, editors, tags). Default keeps the stack in :root. */
-:root[data-code='sfmono'] { --mono: 'SF Mono', ui-monospace, Menlo, monospace; }
 :root[data-code='menlo'] { --mono: Menlo, Monaco, monospace; }
-:root[data-code='monaco'] { --mono: Monaco, Menlo, monospace; }
-:root[data-code='courier'] { --mono: 'Courier New', Courier, monospace; }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -737,7 +586,9 @@ kbd {
 .attn-needs_you { background: var(--st-needs-you); }
 .attn-blocked { background: var(--st-failed); }
 .empty-hint { color: var(--text-faint); font-size: var(--fs-md); padding: 6px 8px; }
-.sidebar-bottom { border-top: 1px solid var(--border); padding: 3px 0; flex-shrink: 0; }
+.sidebar-bottom { border-top: 1px solid var(--border); padding: 3px 0; flex-shrink: 0; display: flex; align-items: center; }
+.sidebar-bottom .settings-btn { flex: 1; min-width: 0; }
+.sidebar-bottom .theme-btn { flex-shrink: 0; margin-right: 10px; }
 
 /* ---------- Chat ---------- */
 .chat {
@@ -3504,18 +3355,6 @@ select:focus-visible {
 .duel-table th, .duel-table td { text-align: right; padding: 3px 6px; border-bottom: 1px solid var(--border); }
 .duel-table th:first-child, .duel-table td:first-child { text-align: left; }
 
-/* Appearance presets */
-.preset-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: 8px; margin: 4px 0 14px; }
-.preset-card {
-  display: flex; flex-direction: column; gap: 6px; padding: 8px; text-align: left;
-  border: 1.5px solid var(--border-strong); border-radius: var(--r-lg); background: var(--bg-elev);
-}
-.preset-card:hover { border-color: var(--control-border); }
-.preset-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.preset-card:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.preset-prev { display: flex; align-items: center; justify-content: space-between; height: 38px; padding: 0 9px; border-radius: var(--r-sm); border: 1px solid rgba(128, 128, 128, 0.3); font-size: var(--fs-lg); line-height: 1; }
-.preset-prev i { width: 12px; height: 12px; border-radius: 50%; }
-.preset-card b { font-size: var(--fs-sm); font-weight: 600; }
 .font-picks { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 2px; }
 .font-picks button { padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); font-size: var(--fs-md); }
 .font-picks button.on { border-color: var(--accent); background: var(--zone-fill); }

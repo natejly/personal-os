@@ -16,6 +16,7 @@
     "bundle:backend": "scripts/bundle-backend.sh",
     "package": "scripts/bundle-backend.sh && electron-vite build && electron-builder --mac --config electron-builder.config.cjs",
     "package:x64": "scripts/bundle-backend.sh x64 && electron-vite build && electron-builder --mac --x64 --config electron-builder.config.cjs",
+    "package:linux": "scripts/bundle-backend.sh && electron-vite build && electron-builder --linux --config electron-builder.config.cjs",
     "install-app": "scripts/install-app.sh",
     "rebuild:native": "electron-rebuild -f -w node-pty",
     "postinstall": "npm run rebuild:native"

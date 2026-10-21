@@ -8,9 +8,10 @@
 const { resolveSigning, LOCAL_IDENTITY } = require('./scripts/mac-signing.cjs')
 const { version } = require('./package.json')
 
-const signingMode = resolveSigning()
+const isMac = process.platform === 'darwin'
+const signingMode = isMac ? resolveSigning() : 'adhoc'
 const signing = signingMode !== 'adhoc'
-if (signingMode === 'local') console.log(`  • signing with local identity "${LOCAL_IDENTITY}"`)
+if (isMac && signingMode === 'local') console.log(`  • signing with local identity "${LOCAL_IDENTITY}"`)
 const notarize = Boolean(
   process.env.APPLE_ID && process.env.APPLE_TEAM_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD
 )
@@ -23,9 +24,14 @@ module.exports = {
   asarUnpack: ['node_modules/node-pty/**'],
   // The python-build-standalone + backend bundle made by scripts/bundle-backend.sh.
   extraResources: [{ from: 'build/backend-bundle', to: 'backend' }],
-  afterSign: 'scripts/adhoc-sign.cjs',
+  ...(isMac ? { afterSign: 'scripts/adhoc-sign.cjs' } : {}),
   // electron-updater on a plain version (1.0.0) only looks at GitHub's latest release, which skips prereleases.
   publish: [{ provider: 'github', owner: 'natejly', repo: 'personal-os', releaseType: /-/.test(version) ? 'prerelease' : 'release' }],
+  linux: {
+    category: 'Utility',
+    target: ['AppImage', 'dir'], // electron-updater applies updates to an AppImage; no fpm-based targets
+    artifactName: '${productName}-${version}-${arch}.${ext}'
+  },
   mac: {
     category: 'public.app-category.productivity',
     target: ['dmg', 'zip'], // electron-updater applies updates from the zip

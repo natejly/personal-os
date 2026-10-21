@@ -33,6 +33,25 @@ In a packaged app `src/main/backend.ts` runs
 To bump Python, change `PBS_TAG`, `PBS_PY` and the two checksums in `bundle-backend.sh`
 (checksums come from the release's `SHA256SUMS`).
 
+## Linux
+
+```
+npm run package:linux    # x86_64 only
+```
+
+Same three steps as the Mac build, on a Linux host: `bundle-backend.sh` picks the
+`x86_64-unknown-linux-gnu` CPython (own pinned sha256) and installs the `whistle` and `charts` extras
+(the `mac` extra is macOS-only). `uv` is required on the build machine
+(`curl -LsSf https://astral.sh/uv/install.sh | sh`, installs to `~/.local/bin`). Then
+`electron-builder --linux` emits, in `dist/`:
+
+- `Grain-<ver>-x86_64.AppImage` (~300 MB) and `latest-linux.yml`
+- `linux-unpacked/grain`, the same tree unpacked (~880 MB); run it directly to test
+
+Nothing on Linux is signed or notarized, and the signing hooks only run on macOS. Only the AppImage
+auto-updates. Logs are in `~/.config/Grain/logs`; `GRAIN_USER_DATA=<dir>` runs a build against a fresh
+data directory.
+
 ## Signing
 
 `scripts/mac-signing.cjs` picks the identity, in this order:

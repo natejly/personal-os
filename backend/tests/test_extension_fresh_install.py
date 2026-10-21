@@ -22,7 +22,7 @@ from personal_os import app as appmod  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.extensions.host import SEEDED_FILE, BUILTIN_ROOT, ExtensionContext, ExtensionHost, builtin_manifest  # noqa: E402
 
-USER_FACING = ("coding", "telegram", "spaces", "todos", "calendar", "mail", "health")
+USER_FACING = ("coding", "claude-code", "telegram", "spaces", "todos", "calendar", "mail", "health")
 
 
 def test_every_manifest_default_is_off_except_the_google_service() -> None:
@@ -106,3 +106,20 @@ def test_a_user_who_turned_one_on_keeps_it_across_starts() -> None:
     again = ExtensionHost()
     again.load_builtin("health", ctx)
     assert again.extensions["health"].enabled()
+
+
+def test_a_fresh_database_hides_claude_code_and_coding_and_a_stored_list_is_kept() -> None:
+    fresh = _db(chats=False)
+    host, ctx = ExtensionHost(), _ctx(fresh)
+    for i in ("coding", "claude-code"):
+        host.load_builtin(i, ctx)
+    assert {"coding", "claude-code"} <= set(fresh.get_settings()["hiddenViews"])
+    assert not host.extensions["coding"].enabled() and not host.extensions["claude-code"].enabled()
+    stored = _db(chats=False)
+    stored.set_settings({"hiddenViews": ["health"]})
+    (stored.data_dir / SEEDED_FILE).write_text(json.dumps(["coding", "claude-code"]))  # an install that has seen both: its list wins
+    again, ctx2 = ExtensionHost(), _ctx(stored)
+    for i in ("coding", "claude-code"):
+        again.load_builtin(i, ctx2)
+    assert stored.get_settings()["hiddenViews"] == ["health"]
+    assert again.extensions["coding"].enabled() and again.extensions["claude-code"].enabled()

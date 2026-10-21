@@ -105,7 +105,7 @@ export async function startBackend({ llmUrl, llmKey, dataDir, token, extraEnv = 
  * launchApp(): { app, page, api, backend, llm, dataDir, close }.
  *  - api(path, {method, body}) calls the backend with the bearer token and returns parsed JSON (throws on >= 400).
  *  - llm.calls is every chat-completions request body the mock saw (undefined with E2E_LLM=real).
- *  - settings are seeded over {autonomousByDefault:false, permissionMode:'manual', hiddenViews:[]} (a fresh install starts with Lists, Calendar, Mail, Health and Canvases off) so the classic chat stays testable, and retrievalMode:'bm25' (the mock has no embedding model, so the keyword-only notice would cover the page);
+ *  - settings are seeded over {autonomousByDefault:false, permissionMode:'manual', hiddenViews:[]} (a fresh install starts with every extension off: Lists, Calendar, Mail, Health, Canvases, Claude Code and Coding among them; this empty list keeps the views the specs use) so the classic chat stays testable, and retrievalMode:'bm25' (the mock has no embedding model, so the keyword-only notice would cover the page);
  *    pass autonomousByDefault:true / permissionMode:'auto' to test the shipped defaults.
  *  - page is the main window; waits until the shell (sidebar) has rendered.
  */

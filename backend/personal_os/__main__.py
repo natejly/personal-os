@@ -1,7 +1,7 @@
 import argparse
 import os
 
-import uvicorn
+from .serve import serve, uvicorn_kwargs
 
 
 def load_dotenv() -> None:
@@ -59,9 +59,7 @@ def main() -> None:
     register_secret(os.environ.get("PERSONAL_OS_AUTH_TOKEN"))
     register_secret(os.environ.get("FIRECRAWL_API_KEY"))
     setup_logging()
-    # log_config=None: uvicorn's own dictConfig would give its loggers private handlers and cut them off from the
-    # redacting file handler on the root logger.
-    uvicorn.run("personal_os.app:app", host=args.host, port=args.port, reload=args.reload, log_level="info", log_config=None)
+    serve(**uvicorn_kwargs(args.host, args.port, args.reload))
 
 
 if __name__ == "__main__":

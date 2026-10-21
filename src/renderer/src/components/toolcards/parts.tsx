@@ -152,8 +152,12 @@ const STATUS: Record<CardStatus, { label: string; icon: JSX.Element }> = {
 
 export function StatusChip({ event }: { event: ToolEvent }): JSX.Element {
   const s = cardStatus(event)
-  const label = s === 'running' && event.approval && event.approval !== 'deny' ? 'Approved · running' : STATUS[s].label
-  return <span className={`tc-status ${s}`} role="status">{STATUS[s].icon}<span className={s === 'running' ? 'shimmer' : undefined}>{label}</span></span>
+  const approved = !!event.approval && event.approval !== 'deny'
+  const label = s === 'running' && approved ? 'Approved · running'
+    : s === 'done' && approved ? 'Approved'
+    : s === 'done' && !event.approval && event.review?.verdict === 'allow' ? 'Auto-approved'
+    : STATUS[s].label
+  return <span className={`tc-status ${s}`} role="status" data-testid="approval-status">{STATUS[s].icon}<span className={s === 'running' ? 'shimmer' : undefined}>{label}</span></span>
 }
 
 const DOT_LABEL: Record<CardStatus, string> = {

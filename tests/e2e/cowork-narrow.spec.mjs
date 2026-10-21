@@ -51,9 +51,9 @@ test('820x520: a waiting plan, the review panel and a tool-mode card keep their 
   await openChat(page, 'Narrow ask desk')
   const allow = page.locator('.messages').getByRole('button', { name: /^(Approve|Allow once|Allow)$/ }).first()
   await expect(allow).toBeVisible()
-  // a tool-mode card offers the standing grants, and they have to be reachable too
-  const grants = page.locator('.messages').getByRole('button', { name: /in this chat|in every chat/ })
-  await expect(grants).toHaveCount(2)
+  // a tool-mode card offers the Always allow menu, and it has to be reachable too
+  const grants = page.locator('.messages').getByRole('button', { name: 'Always allow' })
+  await expect(grants).toHaveCount(1)
   expect(await inWindow(page, allow)).toBe(true)
   expect(await inWindow(page, grants.last())).toBe(true)
   expect(await noHScroll(page)).toBe(true)

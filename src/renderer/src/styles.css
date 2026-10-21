@@ -2342,15 +2342,15 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .approval-text { font-size: var(--fs-md); line-height: 1.5; margin-bottom: 6px; }
 /* Row one of every approval: the primary action first, then the plain refusal. Nothing else. */
 .approval-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-/* Row two, deliberately quieter: the standing grants and the denial with a note, as text links.
-   A grant outlives this one call, so it must never look like the default answer. */
-.approval-more { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; font-size: var(--fs-sm); line-height: 1.3; color: var(--text-faint); }
-.approval-more .link { min-height: 24px; color: var(--text-muted); }
-.approval-more .link:hover:not(:disabled) { color: var(--text); }
-.approval-more .link:disabled { opacity: 0.5; cursor: default; }
-.approval-more .link code { font-family: var(--mono); font-size: var(--fs-xs); }
-/* Set apart from the grants when there are any; on a forced card it is the only link and stays left. */
-.approval-more-label ~ .approval-deny-note { margin-left: auto; }
+/* "Always allow" is a menu, never a one-click: a grant outlives this one call, so it asks which scope. */
+.approval-rules .pop-menu-item code { font-family: var(--mono); font-size: var(--fs-xs); }
+.approval-rules .pop-menu-panel { width: max-content; max-width: 280px; }
+.approval-deny-note { font-size: var(--fs-sm); color: var(--text-muted); }
+.approval-warning { color: var(--text-faint); }
+/* In a dedicated card the menu sits in the footer row beside Approve and Deny; the rule editor and note form take a line. */
+.tc-foot > .approval-rules, .approval-actions > .approval-rules, .tc-foot .approval-rules > div.approval-actions, .approval-actions > .approval-rules > div.approval-actions { display: contents; }
+.tc-foot .approval-warning { order: -1; flex-basis: 100%; }
+.tc-foot .approval-rule-list, .tc-foot .approval-rules > form { flex-basis: 100%; }
 /* The same line inside a dedicated card, whose sections carry their own 12px side padding. */
 .tc-card > .approval-rules, .mc > .approval-rules { margin: 0; padding: 0 12px 8px; }
 /* A mail result card has no buttons of its own to sit under, so the line gets its own strip. */

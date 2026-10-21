@@ -26,7 +26,7 @@ test('a card forced by a credential-store read, not by taint, does not say the c
     await say(page, `!!tool read_local_file {"path":"${join(dir, '.env')}"}`)
     const card = page.locator('.tc-approval').first()
     await expect(card).toBeVisible({ timeout: 60_000 })
-    await expect(card).toContainText('Always asks')
+    await expect(card).not.toContainText('Always asks')
     await expect(card).not.toContainText('untrusted')
     const [c] = await api('/conversations?include_desks=true')
     expect((await api(`/conversations/${c.id}`)).settings.tainted).toBeFalsy()

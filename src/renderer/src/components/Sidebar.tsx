@@ -21,6 +21,7 @@ import { useChatSelection } from '../lib/chatSelection'
 import { rowButton } from '../lib/rowButton'
 import { projectGroupOpen, toggleProjectGroup } from '../lib/projectGroups'
 import { tip } from '../lib/tip'
+import { attentionTarget } from '../lib/attentionTarget'
 import { formatAccelerator, shortcut } from '@shared/shortcuts'
 
 /** Project groups the user folded shut. Stored as exceptions, so a new project starts open. */
@@ -95,8 +96,6 @@ export default function Sidebar(): JSX.Element {
   const docsPending = useStore((s) => s.docsPending)
   const skillCandidates = useStore((s) => s.skills.filter((x) => x.status === 'candidate').length)
   const memoryProposals = useStore((s) => s.memoryProposals)
-  /** Chats working autonomously with something unseen that needs you: the one badge worth interrupting for. */
-  const needsYou = useStore((s) => new Set(s.deskInbox.map((e) => e.desk_id)).size)
   const inCanvas = useStore((s) => s.view === 'canvas')
   // One selector per action. Sidebar is mounted in every view, the canvas included, so a bare
   // useStore() here is what made App's whole subtree commit once per streamed token.
@@ -269,15 +268,14 @@ export default function Sidebar(): JSX.Element {
     searchRef.current?.select()
   }, [searchTick])
 
-  // Module badges are pure functions of the store; useShallow compares the array element-wise, so a
-  // fresh array with the same counts does not re-render.
   const rows = useSlot('sidebar.row')
-  const rowBadges = useStore(useShallow((s) => rows.map((r) => r.badge?.(s) ?? null)))
-  const libCount = (v: View): number | null => {
-    const ri = rows.findIndex((r) => r.view === v && r.badge)
-    if (ri >= 0) return rowBadges[ri]
-    if (v === 'library') return skillCandidates + jobsWanting || null
-    return null
+  const target = attentionTarget({ chats: wantsAny || jobsWanting > 0 ? 1 : 0, library: skillCandidates + jobsWanting, memory: memoryProposals, docs: docsPending })
+  const toggleNeeds = (): void => { setChatsOpen(true); setNeedsOnly((on) => { writeNeeds(!on); return !on }) }
+  const openAttention = (): void => {
+    if (target === 'chats') toggleNeeds()
+    else if (target === 'library') setView('library')
+    else if (target === 'memory') useStore.getState().openSettings('memory')
+    else if (target === 'docs') setView('docs')
   }
 
   /** The nav title, plus the Go-to shortcut where the view has one. */
@@ -292,10 +290,6 @@ export default function Sidebar(): JSX.Element {
       onClick={() => (n.view ? setView(n.view) : void useCanvas.getState().openWindow(n.kind as WidgetKind))}
       {...(n.kind ? dragProps({ kind: 'nav', id: n.kind, label: n.label }) : {})}>
       {n.icon}<span>{n.label}</span>
-      {n.view === 'docs' && docsPending > 0 && (
-        <span className="count pending" title={`${docsPending} assistant edit${docsPending === 1 ? '' : 's'} awaiting review`}>{docsPending}</span>
-      )}
-      {n.view != null && libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}
     </button>
   )
 
@@ -372,13 +366,11 @@ export default function Sidebar(): JSX.Element {
       <div className="section-row">
         <button className="section-toggle" aria-label="Chats" aria-expanded={chatsOpen} onClick={() => setChatsOpen((o) => !o)}>
           <span className="project-twist"><MessageSquare size={13} className="twist-folder" /><ChevronRight size={13} className={`twist-chevron${chatsOpen ? ' rot90' : ''}`} /></span> Chats
-          {/* Counted off the desk inbox: chats working autonomously that have something unseen for you. */}
-          {needsYou > 0 && <span className="count pending" title={`${needsYou} chat${needsYou === 1 ? '' : 's'} working autonomously need${needsYou === 1 ? 's' : ''} you`}>{needsYou}</span>}
         </button>
         <span style={{ flex: 1 }} />
-        {(wantsAny || jobsWanting > 0 || needsOnly) && <button className={`icon-btn sm${needsOnly ? ' on' : ''}`} aria-label="Show only what needs you" aria-pressed={needsOnly}
-          title={needsOnly ? 'Showing only what needs you or is blocked' : 'Show only what needs you'}
-          onClick={() => { setChatsOpen(true); setNeedsOnly((on) => { writeNeeds(!on); return !on }) }}>
+        {(target || needsOnly) && <button className={`icon-btn sm${needsOnly ? ' on' : ''}`} aria-label="Needs you" aria-pressed={needsOnly}
+          title="Needs you"
+          onClick={needsOnly ? toggleNeeds : openAttention}>
           <Bell size={13} />
         </button>}
         <button
@@ -490,9 +482,7 @@ export default function Sidebar(): JSX.Element {
       </div>
 
       <div className="sidebar-bottom">
-        <button className="settings-btn" title={tip('Settings', 'settings')} onClick={() => setSettingsOpen(true)}><Settings size={16} /><span>Settings</span>
-          {memoryProposals > 0 && <span className="count pending" title={`${memoryProposals} memory tidy-up suggestion${memoryProposals === 1 ? '' : 's'} to review, under Knowledge base`}>{memoryProposals}</span>}
-          <kbd>⌘,</kbd></button>
+        <button className="settings-btn" title={tip('Settings', 'settings')} onClick={() => setSettingsOpen(true)}><Settings size={16} /><span>Settings</span>          <kbd>⌘,</kbd></button>
       </div>
     </aside>
   )

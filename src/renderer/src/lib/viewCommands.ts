@@ -1,4 +1,7 @@
 import { useEffect, useRef } from 'react'
+import { CORE, registerCommand } from '../extensions/host'
+import { useStore } from '../store'
+import { FILES_KINDS } from './chatFiles'
 
 /**
  * A palette command aimed at a view that may not be mounted yet. The request is held until the view
@@ -31,3 +34,16 @@ export function useViewCommand(name: string, fn: () => void, ready = true): void
     return (): void => window.removeEventListener(EVENT, on)
   }, [name, ready])
 }
+
+// ---- Files commands in the palette ----
+// Registered here, at import, so the palette lists them before the Files view has ever mounted.
+const files = (): ReturnType<typeof useStore.getState> => useStore.getState()
+registerCommand(CORE, { id: 'files:upload', label: 'Upload file', hint: 'Files', run: () => { files().showFiles({ kind: 'uploads' }); requestViewCommand('files:upload') } })
+registerCommand(CORE, { id: 'files:today', label: "Today's note", hint: 'Files', run: () => { files().showFiles({ kind: 'notes' }); void files().openDailyNote() } })
+registerCommand(CORE, { id: 'files:trash', label: 'Trash', hint: 'Files', run: () => files().showFiles({ kind: 'trash' }) })
+registerCommand(CORE, {
+  id: 'files:this-chat', label: 'Files in this chat', hint: 'Files',
+  when: (s) => s.view === 'chat' && !!s.focusedConversationId,
+  run: () => useStore.setState((st) => ({ contextOpen: false, deskPanel: true, deskTabRequest: { tab: 'files', n: (st.deskTabRequest?.n ?? 0) + 1, at: Date.now() } }))
+})
+for (const k of FILES_KINDS) registerCommand(CORE, { id: `files:kind:${k.id}`, label: `Files: ${k.label}`, hint: 'Files', run: () => files().showFiles({ kind: k.id }) })

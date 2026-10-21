@@ -69,7 +69,7 @@ test('a slot renders its items in order, and skips one whose extension is off or
 })
 
 test('palette commands: the shell registers its own, an extension adds more, ids are unique', () => {
-  assert.deepEqual(paletteCommands.map((c) => c.id).filter((id) => !/^(todos|calendar|mail):/.test(id)), ['run-recipe', 'new-chat', 'new-file', 'help', 'help:guide'])  // the first is the coding extension's; the view extensions add their own refresh commands
+  assert.deepEqual(paletteCommands.map((c) => c.id).filter((id) => !/^(todos|calendar|mail|files):/.test(id)), ['run-recipe', 'new-chat', 'new-file', 'help', 'help:guide'])  // the first is the coding extension's; the view extensions add their own refresh commands and Files registers its own (lib/viewCommands.ts)
   const gone = withExtension('cmddemo', (ui) => {
     ui.command({ id: 'cmddemo:go', label: 'Go', run: () => undefined })
     assert.throws(() => ui.command({ id: 'cmddemo:go', label: 'Again', run: () => undefined }), /already registered/)

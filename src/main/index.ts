@@ -252,9 +252,8 @@ function buildMenu(): void {
         item('view-docs'),
         item('view-mail'),
         item('view-memory'),
-        // No digit for these: the graph is a mode of Memory (⌘6) and Uploads is a Files section (⌘4, ⌘U).
+        // No digit for this: the graph is a mode of Memory (⌘6).
         { label: 'Knowledge Graph…', click: () => sendMenu('view:graph') },
-        { label: 'Uploads', click: () => sendMenu('view:documents') },
         { label: 'Library', click: () => sendMenu('view:library') },
         { type: 'separator' },
         // Inside the Markdown editor ⌘K is still the link chord: the renderer hands it back.

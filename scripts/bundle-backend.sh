@@ -4,22 +4,37 @@
 # needed on the machine that runs Grain.app. Output: build/backend-bundle/ (gitignored), which
 # electron-builder copies to Contents/Resources/backend.
 #
-#   scripts/bundle-backend.sh [arm64|x64]      (default: this machine's arch)
+#   scripts/bundle-backend.sh [arm64|x64]      (default: this machine's arch; Linux builds x86_64 only)
 set -euo pipefail
 
 PBS_TAG="20260929"
 PBS_PY="3.12.14"
 SHA_ARM64="de6b8f94fa765639b423ea353ab340669704c7186f96ee3cab389dcfde770c3c"
 SHA_X64="f51ec8a7fa0ede129a5e2e942a2a453ba4830adaca2289da4449390e42443292"
+SHA_LINUX_X64="06c90b93f419b63371c18f20fed0558a1a901f6518c3c24f755077e048447e7f"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ARCH="${1:-$(uname -m)}"
-case "$ARCH" in
-  arm64|aarch64) TRIPLE="aarch64-apple-darwin"; SHA="$SHA_ARM64" ;;
-  x64|x86_64)    TRIPLE="x86_64-apple-darwin";  SHA="$SHA_X64" ;;
-  *) echo "unknown arch: $ARCH (use arm64 or x64)" >&2; exit 2 ;;
+HOST="$(uname -s)"
+case "$HOST" in
+  Darwin)
+    EXTRAS=(--extra mac --extra whistle --extra charts)
+    case "$ARCH" in
+      arm64|aarch64) TRIPLE="aarch64-apple-darwin"; SHA="$SHA_ARM64" ;;
+      x64|x86_64)    TRIPLE="x86_64-apple-darwin";  SHA="$SHA_X64" ;;
+      *) echo "unknown arch: $ARCH (use arm64 or x64)" >&2; exit 2 ;;
+    esac ;;
+  Linux)
+    EXTRAS=(--extra whistle --extra charts)   # the mac extra is macOS-only
+    case "$ARCH" in
+      x64|x86_64) TRIPLE="x86_64-unknown-linux-gnu"; SHA="$SHA_LINUX_X64" ;;
+      *) echo "unsupported Linux arch: $ARCH (only x64 / x86_64)" >&2; exit 2 ;;
+    esac ;;
+  *) echo "unsupported host: $HOST" >&2; exit 2 ;;
 esac
-command -v uv >/dev/null || { echo "uv is required to build the bundle (brew install uv)" >&2; exit 1; }
+export PATH="$HOME/.local/bin:$PATH"
+command -v uv >/dev/null || { echo "uv is required to build the bundle (macOS: brew install uv; Linux: curl -LsSf https://astral.sh/uv/install.sh | sh)" >&2; exit 1; }
+if command -v shasum >/dev/null; then SHA256=(shasum -a 256); else SHA256=(sha256sum); fi
 
 NAME="cpython-${PBS_PY}+${PBS_TAG}-${TRIPLE}-install_only.tar.gz"
 URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_TAG}/${NAME//+/%2B}"
@@ -32,17 +47,17 @@ if [ ! -f "$CACHE/$NAME" ]; then
   curl -fL --retry 3 -o "$CACHE/$NAME.part" "$URL"
   mv "$CACHE/$NAME.part" "$CACHE/$NAME"
 fi
-echo "$SHA  $CACHE/$NAME" | shasum -a 256 -c - || { rm -f "$CACHE/$NAME"; echo "checksum mismatch" >&2; exit 1; }
+echo "$SHA  $CACHE/$NAME" | "${SHA256[@]}" -c - || { rm -f "$CACHE/$NAME"; echo "checksum mismatch" >&2; exit 1; }
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
 tar -xzf "$CACHE/$NAME" -C "$OUT"   # -> $OUT/python
 PY="$OUT/python/bin/python3"
 
-# Non-editable install of the backend plus the macOS (mac), whistle and charts extras. The backend never imports
+# Non-editable install of the backend plus the whistle and charts extras (and the macOS mac extra on a Mac). The backend never imports
 # LiteLLM; it only talks to a proxy over HTTP, so nothing LiteLLM-shaped is bundled. Dependency versions come
 # from backend/uv.lock (the ones the tests ran against); --locked fails if pyproject changed without a relock.
-uv export --project "$ROOT/backend" --locked --no-dev --extra mac --extra whistle --extra charts --no-emit-project \
+uv export --project "$ROOT/backend" --locked --no-dev "${EXTRAS[@]}" --no-emit-project \
   -q -o "$CACHE/requirements.txt"
 uv pip install --python "$PY" -r "$CACHE/requirements.txt"
 uv pip install --python "$PY" --no-deps --reinstall-package grain-backend "$ROOT/backend"
@@ -59,7 +74,7 @@ SP="$OUT/python/lib/python3.12"
 find "$OUT" -name '__pycache__' -type d -prune -exec rm -rf {} +
 find "$SP/site-packages" -type d \( -name tests -o -name test -o -name testing \) -prune -exec rm -rf {} + 2>/dev/null || true
 rm -rf "$SP/test" "$SP/idlelib" "$SP/tkinter" "$SP/turtledemo" "$SP/lib2to3" \
-       "$OUT/python/include" "$OUT/python/share" "$SP/config-3.12-darwin"
+       "$OUT/python/include" "$OUT/python/share" "$SP"/config-3.12-*
 rm -rf "$SP/site-packages/pip" "$SP"/site-packages/pip-*
 # matplotlib ships sample data and test images; the backend only renders charts.
 rm -rf "$SP/site-packages/matplotlib/mpl-data/sample_data" "$SP/site-packages/matplotlib/mpl-data/images"

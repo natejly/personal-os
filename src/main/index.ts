@@ -43,7 +43,7 @@ for (const legacy of userDataOverride ? [] : ['personal-os', 'Personal OS']) {
   }
 }
 
-// Rotating logs for this process and the backend's raw output: ~/Library/Logs/Grain when packaged,
+// Rotating logs for this process and the backend's raw output: app.getPath('logs') when packaged (~/Library/Logs/Grain on macOS, ~/.config/Grain/logs on Linux),
 // <userData>/logs in dev. The backend writes its own backend.log into the same folder (PERSONAL_OS_LOG_DIR).
 initLogs(app.isPackaged ? app.getPath('logs') : join(app.getPath('userData'), 'logs'))
 hookConsole()

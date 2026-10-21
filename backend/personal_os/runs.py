@@ -633,6 +633,41 @@ class _Sub:
         self.overflow = False
 
 
+# Server shutdown. uvicorn waits for every open response to finish before it runs the app's lifespan shutdown, and a
+# stream that follows live events never finishes on its own. The server calls begin_shutdown() on the exit signal; every
+# attached subscriber then ends its stream, so the connections close instead of holding the process open.
+_closing = False
+_attached: dict[_Sub, asyncio.AbstractEventLoop] = {}
+
+
+def closing() -> bool:
+    return _closing
+
+
+def begin_shutdown() -> None:
+    """End every attached event stream. Safe from a signal handler or any thread; later subscribers end at once."""
+    global _closing
+    _closing = True
+    for sub, loop in list(_attached.items()):
+        try:
+            loop.call_soon_threadsafe(_end_sub, sub)
+        except RuntimeError:  # the loop is already closed: nothing is waiting on it
+            pass
+
+
+def reset_shutdown() -> None:
+    global _closing
+    _closing = False
+    _attached.clear()
+
+
+def _end_sub(sub: _Sub) -> None:
+    try:
+        sub.q.put_nowait(None)
+    except asyncio.QueueFull:  # a full queue wakes its reader anyway, and every stream checks `_closing` before each wait
+        sub.overflow = True
+
+
 class Run:
     def __init__(self, conversation_id: str, store: RunStore | None = None, kind: str = "chat",
                  input: dict[str, Any] | None = None, desk_id: str | None = None, turn: int = 0) -> None:
@@ -792,6 +827,7 @@ class Run:
         """Replay past `since` (from the table for whatever the ring no longer holds), then follow live until the run ends."""
         sub = _Sub()
         self._subs.add(sub)
+        _attached[sub] = asyncio.get_running_loop()
         getter: asyncio.Task[RunEvent | None] | None = None
         try:
             last = since
@@ -806,7 +842,7 @@ class Run:
                     yield sse(event, data, seq)
                     last = seq
             while self.live or not sub.q.empty():
-                if sub.overflow and sub.q.empty():
+                if _closing or (sub.overflow and sub.q.empty()):
                     return
                 if getter is None:
                     getter = asyncio.ensure_future(sub.q.get())
@@ -823,6 +859,7 @@ class Run:
                     last = seq
         finally:
             self._subs.discard(sub)
+            _attached.pop(sub, None)
             if getter is not None:
                 getter.cancel()
 
@@ -869,6 +906,7 @@ class Topic:
             since = 0
         sub = _Sub()
         self._subs.add(sub)
+        _attached[sub] = asyncio.get_running_loop()
         getter: asyncio.Task[RunEvent | None] | None = None
         try:
             last = since
@@ -877,7 +915,7 @@ class Topic:
                     yield sse(event, data, seq)
                     last = seq
             while True:
-                if sub.overflow and sub.q.empty():
+                if _closing or (sub.overflow and sub.q.empty()):
                     return  # the client fell behind the queue; it reconnects and replays from `last`
                 if getter is None:
                     getter = asyncio.ensure_future(sub.q.get())
@@ -894,6 +932,7 @@ class Topic:
                     last = seq
         finally:
             self._subs.discard(sub)
+            _attached.pop(sub, None)
             if getter is not None:
                 getter.cancel()
 

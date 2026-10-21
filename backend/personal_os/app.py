@@ -7408,6 +7408,19 @@ async def _blobs_startup() -> None:
     asyncio.get_running_loop().run_in_executor(None, run)
 
 
+SHUTDOWN_STEP_S = 10  # one stuck await in the stop hook must not keep the process from exiting
+
+
+async def _bounded(name: str, aw: Awaitable[Any], seconds: float = SHUTDOWN_STEP_S) -> None:
+    """Run one shutdown step under a time limit; a step that fails or overruns is logged and skipped."""
+    try:
+        await asyncio.wait_for(aw, seconds)
+    except asyncio.TimeoutError:
+        log.warning("shutdown step %r did not finish within %ss; continuing", name, seconds)
+    except Exception:  # noqa: BLE001 - the steps after this one still have to run
+        log.warning("shutdown step %r failed", name, exc_info=True)
+
+
 @host.on_stop
 async def _shutdown() -> None:
     workers_mgr.closing = True  # an ending worker must not start a wake turn into a dying backend
@@ -7418,14 +7431,14 @@ async def _shutdown() -> None:
     # Sessions whose owner (a reply or subagent) is still running stop with it; ones whose owner already finished were
     # left working on purpose and outlive the app.
     owners = bus.live_ids() | {c.id for c in subagent_mgr.running()}
-    await coding.shutdown(owners)
-    await host.channels.stop()  # before the runs are cancelled: a dying backend must not send "interrupted" replies
-    await toolbox.shell.shutdown()  # first: host shell jobs (SIGTERM then SIGKILL per group) before anything slow can stall exit
-    await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there
-    await title_jobs.stop()
-    await followup_jobs.stop()
-    await learner.stop()  # after the runs, so nothing is still queueing work at it
-    await llm.aclose()  # the shared provider connection pool
+    await _bounded("coding", coding.shutdown(owners), 15)
+    await _bounded("channels", host.channels.stop())  # before the runs are cancelled: a dying backend must not send "interrupted" replies
+    await _bounded("shell", toolbox.shell.shutdown())  # first: host shell jobs (SIGTERM then SIGKILL per group) before anything slow can stall exit
+    await _bounded("runs", bus.shutdown())  # before the rmtree: a live run's sandboxed run_python writes in there
+    await _bounded("title jobs", title_jobs.stop())
+    await _bounded("followup jobs", followup_jobs.stop())
+    await _bounded("learner", learner.stop())  # after the runs, so nothing is still queueing work at it
+    await _bounded("llm", llm.aclose())  # the shared provider connection pool
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)
 
 

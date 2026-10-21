@@ -69,32 +69,11 @@ export function projectFilter(files: ChatFile[], q: string): ChatFile[] {
 
 export interface ChatFilesPage { files: ChatFile[]; next_cursor: string | null }
 
-const KIND_ORDER: ChatFileKind[] = ['upload', 'note', 'output', 'local', 'coding']
 const KIND_LABEL: Record<ChatFileKind, string> = { upload: 'Uploads', note: 'Notes', output: 'Chat', local: 'Local', coding: 'Coding' }
 const ACTION_LABEL: Record<ChatFileAction, string> = { attached: 'Attached', created: 'Created', edited: 'Edited', saved: 'Saved', uploaded: 'Uploaded' }
 
 export const kindLabel = (k: ChatFileKind): string => KIND_LABEL[k] ?? k
 export const actionLabel = (a: ChatFileAction): string => ACTION_LABEL[a] ?? a
-
-/** The groups Uploads, Notes, Chat, Local, Coding, in that order; a kind with no files is left out. */
-export function groupByKind(files: ChatFile[]): { kind: ChatFileKind; label: string; files: ChatFile[] }[] {
-  return KIND_ORDER.map((kind) => ({ kind, label: KIND_LABEL[kind], files: files.filter((f) => f.kind === kind) })).filter((g) => g.files.length > 0)
-}
-
-export interface ChatGroup { conversationId: string; title: string; /** The chat is in the trash: no live link. */ deleted: boolean; files: ChatFile[] }
-
-/** One group per chat, the chat with the newest file first; files keep the order they came in. Files no chat touched share one group with the id ''. */
-export function groupByChat(files: ChatFile[]): ChatGroup[] {
-  const by = new Map<string, ChatGroup>()
-  for (const f of files) {
-    const id = f.conversation_id ?? ''
-    const g = by.get(id)
-    if (g) g.files.push(f)
-    else by.set(id, { conversationId: id, title: id ? f.conversation_title || 'Untitled chat' : 'Not from a chat', deleted: !!f.chat_deleted, files: [f] })
-  }
-  const newest = (g: ChatGroup): number => Math.max(...g.files.map((f) => f.created_at))
-  return [...by.values()].sort((a, b) => newest(b) - newest(a))
-}
 
 /** The sidebar badge: nothing for zero, the number up to 99, then "99+". */
 export const formatCount = (n: number): string => (n <= 0 ? '' : n > 99 ? '99+' : String(n))

@@ -50,7 +50,7 @@ from .runs import CoreRefused
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .trace import Tracer, now_ms
 from .stuck import POLL_HINT_AFTER, POLL_TOOLS, STUCK_NUDGE, WAITING_TOOLS, StuckDetector, result_digest
-from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, DISCARDED, ToolSpec, _obj, allows_slug, call_key, denied, summarize_result, tool_error
+from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, DISCARDED, ToolSpec, _obj, allows_slug, call_key, counts_toward_block, denied, summarize_result, tool_error
 from .working import escape_tags, fence_untrusted
 
 log = logging.getLogger(__name__)
@@ -1307,8 +1307,11 @@ class Subagents:
                     ch.ctx["fs_outside_ok"] = False
                     ch.touch(in_tool=False)
         err = result.get("error") if isinstance(result, dict) else None
-        ch.tool_errors[name] = ch.tool_errors.get(name, 0) + 1 if err else 0  # consecutive, as in a chat
-        if ch.tool_errors[name] >= limits.loop_setting(self.settings(), "loopToolErrorLimit"):
+        if not err:  # consecutive argument errors and crashes only, as in a chat: a not-found or empty answer neither counts nor resets
+            ch.tool_errors[name] = 0
+        elif spec is None or counts_toward_block(result):
+            ch.tool_errors[name] = ch.tool_errors.get(name, 0) + 1
+        if ch.tool_errors.get(name, 0) >= limits.loop_setting(self.settings(), "loopToolErrorLimit"):
             ch.blocked.add(name)
         if isinstance(result, dict):
             result.pop("images", None)

@@ -4,7 +4,8 @@ import SourcesList from './SourcesList'
 import { citeInfo, openCite, splitSources } from '../lib/remarkCites'
 import { AlertCircle, User, FileText, Activity, ChevronRight, Play, Pencil, GitBranch, Trash2 } from '../icons'
 import type { Attachment, Message, RunChanges, ToolEvent } from '@shared/types'
-import { useStore, useMessageSubagents, useSubagents, useWorkers, useBusy } from '../store'
+import { useStore, useMessageSubagents, useSubagents, useWorkers, useBusy, useSimple } from '../store'
+import { SIMPLE_ERROR, devToolsOn } from '../lib/simpleMode'
 import { api } from '../lib/api'
 import { fetchBlobUrl } from '../features/notes/api'
 import ToolEvents, { agentIds } from './ToolEvents'
@@ -22,7 +23,7 @@ import { displayText } from '../extensions/events'
 import { parseQuotedMessage } from '../lib/selectionActions'
 import { modelLabel } from '../lib/modelLabel'
 import { outcomeLabel } from '../lib/outcomeLabel'
-import { staysVisible, traceLines } from '../lib/toolDisplay'
+import { simpleVisible, staysVisible, traceLines } from '../lib/toolDisplay'
 import { quietEvents } from '../lib/orchestration'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
@@ -260,7 +261,7 @@ export function Thinking({ chat }: { chat?: string }): JSX.Element {
 /** The "N steps · ms · tok" chip, shown only with Settings → Behavior → Developer tools on. Its own component so the
  *  subscription stays out of MessageView. */
 function TraceChip({ message, showContextChips }: MessageSlotProps): JSX.Element | null {
-  const devTools = useStore((s) => s.settings.devTools === true)
+  const devTools = useStore((s) => devToolsOn(s.settings))
   if (!showContextChips || !devTools || !message.trace?.length) return null
   const trace = traceSummary(message.trace)
   return (
@@ -272,16 +273,18 @@ function TraceChip({ message, showContextChips }: MessageSlotProps): JSX.Element
 
 /** Which runtime slots a provider other than the built-in served this reply, with the reasons on hover. Nothing for a reply that used only the defaults. */
 function RuntimeChip({ message }: MessageSlotProps): JSX.Element | null {
+  const simple = useSimple()
   const used = message.context_used?.runtime
-  if (!used?.length) return null
+  if (simple || !used?.length) return null
   return <span className="model-tag" title={runtimeReasons(used)}>{runtimeChip(used)}</span>
 }
 
 /** The model name plus, on a finished reply with a trace, its total tokens and generation speed, as one muted line.
  *  It reads no store state, so it stays out of MessageView's render path. */
 function ModelTag({ message, streaming }: { message: Message; streaming: boolean }): JSX.Element | null {
+  const simple = useSimple()
   const m = message.role === 'assistant' && !streaming ? replyMetrics(message.trace) : null
-  if (!message.model && !m) return null
+  if (simple || (!message.model && !m)) return null
   const speed = m?.tokPerSec != null ? ` · ${m.tokPerSec.toFixed(1)} tok/s` : ''
   const usage = m ? `${compactCount(m.tokens)} tok${speed}` : ''
   const label = message.model ? modelLabel(message.model) : ''
@@ -322,17 +325,20 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   }, [chunks, citedKey])
   const [citing, setCiting] = useState<ChunkRef | null>(null)
   const onCite = useCallback((n: number) => { const c = chunks?.find((x) => x.n === n); if (c) openCite(c, setCiting) }, [chunks])
+  // Simple mode shows only the calls the user acts on, and no thinking or activity line (the live status line stays).
+  const simple = useSimple()
+  const reasoning = simple ? null : message.reasoning
   // An interrupted row carries both an `Interrupted:` error and the outcome; the error line says it once.
   const note = !streaming && message.role === 'assistant' && !message.error ? outcomeLabel(message.outcome) : null
-  const bare = !streaming && message.role === 'assistant' && message.outcome === 'stopped' && !content && !message.tool_events?.length && !message.reasoning
+  const bare = !streaming && message.role === 'assistant' && message.outcome === 'stopped' && !content && !message.tool_events?.length && !reasoning
   // Calls that need the user (or that the user acts on) stay in place; the rest fold into the activity line.
   // Hand-offs to workers are not cards: the app shows the workers themselves.
-  const events = useMemo(() => quietEvents(message.tool_events), [message.tool_events])
+  const events = useMemo(() => quietEvents(message.tool_events).filter((t) => !simple || simpleVisible(t)), [message.tool_events, simple])
   const [shown, folded] = useMemo(() => [(events ?? []).filter(staysVisible), (events ?? []).filter((t) => !staysVisible(t))], [events])
   const trail = useMemo(() => trailFromEvents(events), [events])
   const summarized = !isUser && message.trace?.some((sp) => sp.kind === 'compact' && sp.meta?.kind === 'history')
   // A reply that only handed work on has nothing to draw (the backend removes it once the turn ends); nor does one that is only the sentinel.
-  if (!isUser && !streaming && !content && !message.reasoning && !message.error && !message.attachments?.length && !events.length && (message.tool_events?.length || sentinel)) return null
+  if (!isUser && !streaming && !content && !reasoning && !message.error && !message.attachments?.length && !events.length && (message.tool_events?.length || sentinel)) return null
   return (
     <div className={`msg ${message.role}`} data-message-id={message.id} aria-busy={streaming || undefined}>
       {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a face, and each thread its own. */}
@@ -348,7 +354,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
         ) : (
           <div className="msg-body">
             <BodyBoundary resetKey={message.id}>
-              {(message.reasoning || folded.length > 0) && !(busy && !content) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!content} />}
+              {(reasoning || folded.length > 0) && !(busy && !content) && <ReplyActivity reasoning={reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!content} />}
               {trail && <ResearchTrail trail={trail} />}
               {!isUser && <SubagentThread messageId={message.id} conversationId={message.conversation_id} events={events ?? []} />}
               {shown.length > 0 && <ToolEvents events={shown} conversationId={message.conversation_id} streaming={streaming} browserSession={browserSession} />}
@@ -360,7 +366,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
                     <MarkdownPreview source={shownText} streaming={streaming} cites={cites} onCite={onCite} />
                   </ShowCtx.Provider>
                 </div>
-              ) : streaming && !message.reasoning && !folded.length && !shown.some((t) => t.pending) && !busy ? (
+              ) : streaming && !reasoning && !folded.length && !shown.some((t) => t.pending) && !busy ? (
                 <Thinking chat={message.conversation_id} />
               ) : null}
               {/* The one named live line, below whatever has streamed: it replaces the trace's live step and the bare Thinking. */}
@@ -371,8 +377,8 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
             {citing && <ChunkViewer chunk={citing} onClose={() => setCiting(null)} />}
           </div>
         )}
-        {message.error && <div className="msg-error"><AlertCircle size={14} /><span>{message.error}</span></div>}
-        {summarized && showContextChips && (
+        {message.error && <div className="msg-error"><AlertCircle size={14} /><span>{simple ? SIMPLE_ERROR : message.error}</span></div>}
+        {summarized && showContextChips && !simple && (
           <button className="compact-note" title="Open the context panel, where the summary lives" onClick={() => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() }}>
             Earlier messages summarized
           </button>

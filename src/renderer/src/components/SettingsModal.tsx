@@ -6,7 +6,8 @@ import { useStore, setSettingsGuard } from '../store'
 import { useTodos } from '../extensions/todos/store'
 import { modeOf, MODES } from '../lib/permissionMode'
 import { RUNTIME_EXT, resolveTab, searchSettings, type SettingsSectionId, type SettingsTab } from '../lib/settingsTabs'
-import { SETTINGS_SECTIONS } from '../lib/settingsSections'
+import { SETTINGS_SECTIONS as ALL_SECTIONS } from '../lib/settingsSections'
+import { simpleHides, simpleOn } from '../lib/simpleMode'
 import { hintOf, locate, panelsFor, startsCluster } from '../lib/settingsShell'
 import { api } from '../lib/api'
 import { useModal } from '../lib/useModal'
@@ -44,6 +45,8 @@ type Tab = SettingsSectionId
 export default function SettingsModal(): JSX.Element {
   const tabsPill = useSlidingPill<HTMLElement>()
   const settings = useStore((s) => s.settings)
+  const simple = simpleOn(settings)
+  const SETTINGS_SECTIONS = ALL_SECTIONS.filter((s) => !(simple && simpleHides(s.id)))
   const view = useStore((s) => s.view)
   const { saveSettings, setSettingsOpen, setView, toast } = useStore(useShallow((s) => ({ saveSettings: s.saveSettings, setSettingsOpen: s.setSettingsOpen, setView: s.setView, toast: s.toast })))
   // Panels that extensions contribute, shown inside their section while their extension is on.
@@ -59,7 +62,8 @@ export default function SettingsModal(): JSX.Element {
   const place = (id: string): { section: Tab; anchor?: string } => {
     const r = resolveTab(id)
     const at = locate(r.tab, panels)
-    return { section: at.section, anchor: at.anchor ?? r.group }
+    // A section simple mode hides opens General instead.
+    return simple && simpleHides(at.section) ? { section: 'general' } : { section: at.section, anchor: at.anchor ?? r.group }
   }
   const [tab, setTabState] = useState<Tab>(() => place(storeTab).section)
   // The store keeps the shown section, so openSettings from a toast or a link switches the open modal too.
@@ -83,9 +87,10 @@ export default function SettingsModal(): JSX.Element {
     ...(extList ?? []).filter((e) => !e.enabled).map((e) => e.id), ...(hiddenViews ?? []),
     ...(runtimeSlotsShown(runtimeView).length ? [] : [RUNTIME_EXT])
   ])
-  const hits = searchSettings(q, panels.map((p) => ({ tab: p.tab, sec: p.id, title: p.label, keys: p.keys ?? '' })), offExtensions)
   /** A search hit as the section it lives in (a registered panel's hit lands in its group) and the anchor inside it. */
   const hitAt = (h: { tab: SettingsTab; sec: string }): { section: Tab; sec: string } => ({ section: locate(h.tab, panels).section, sec: h.sec })
+  const hits = searchSettings(q, panels.map((p) => ({ tab: p.tab, sec: p.id, title: p.label, keys: p.keys ?? '' })), offExtensions)
+    .filter((h) => !(simple && simpleHides(hitAt(h).section, h.sec)))
   /** Go to a search hit: its section, any collapsed group around it opened, then scrolled to once it has rendered. */
   const goTo = (h: { tab: SettingsTab; sec: string; open?: string }): void => {
     const at = hitAt(h)
@@ -118,6 +123,8 @@ export default function SettingsModal(): JSX.Element {
     if (at.anchor) setJump(at.anchor)
     if (storeGroup) { setOpenGroups((g) => new Set(g).add(storeGroup)); if (!at.anchor) setJump(storeGroup) }
   }, [storeTab, storeGroup])
+  // Simple mode turned on while a hidden section is open: fall back to General.
+  useEffect(() => { if (simple && simpleHides(tab)) setTab('general') }, [simple, tab])
   const mode = modeOf(settings)
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({})
   const paneRef = useRef<HTMLDivElement>(null)
@@ -261,7 +268,7 @@ export default function SettingsModal(): JSX.Element {
     switch (tab) {
       case 'general': return <><GeneralTab {...tabProps} shortcuts={shortcuts} /><SidebarTab {...tabProps} /></>
       case 'models': return <ModelTab {...tabProps} onProvidersChanged={providersChanged} />
-      case 'assistant': return <><AgentsTab {...tabProps} /><h3 className="set-part">Memory and context</h3><ContextTab {...tabProps} {...gp} /></>
+      case 'assistant': return <>{!simple && <><AgentsTab {...tabProps} /><h3 className="set-part">Memory and context</h3></>}<ContextTab {...tabProps} {...gp} /></>
       case 'permissions': return <><PermissionsTab {...tabProps} /><SystemTab /></>
       case 'extensions': return null  // the Extensions panel registers into this section's group
       case 'advanced': return <AdvancedTab {...tabProps} {...gp} onExtensionsChanged={extensionsChanged} />

@@ -69,6 +69,7 @@ export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
 /** Settings sections, one per rail entry in SettingsModal. Older ids still work in openSettings (lib/settingsTabs). */
 import { resolveTab, type AdvancedGroup, type LegacySettingsTab, type SettingsTab } from './lib/settingsTabs'
+import { devToolsOn, simpleOn } from './lib/simpleMode'
 export type { SettingsTab }
 export type { Scope, SessionStatus }
 
@@ -1648,7 +1649,7 @@ export const useStore = create<State>((set, get) => {
    */
   /** The model to duel for a message typed in the main chat view, where the columns and pick buttons are drawn. */
   const abFor = (st: ReturnType<typeof get>, convId: string): string | undefined =>
-    st.settings.devTools === true && st.abOn && st.abModel && st.view === 'chat' && st.focusedConversationId === convId ? st.abModel : undefined
+    devToolsOn(st.settings) && st.abOn && st.abModel && st.view === 'chat' && st.focusedConversationId === convId ? st.abModel : undefined
 
   const runStream = async (convId: string, body: { content?: string; model?: string; replace_from?: string; attachments?: string[]; ab_model?: string }, pendingKey?: number): Promise<boolean> => {
     let run: ChatRunStarted
@@ -1763,7 +1764,7 @@ export const useStore = create<State>((set, get) => {
     ready: false,
     backendError: null,
     backendState: 'ready',
-    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', autoRoute: false, systemPrompt: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', mascot: 'grain', gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true },
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', autoRoute: false, systemPrompt: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', mascot: 'grain', simpleMode: false, gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true },
     models: [],
     modelsError: null,
     tools: [],
@@ -3646,6 +3647,8 @@ export const useMessageSubagents = (convId: string | undefined, messageId: strin
 /** Whether the streaming reply has a named busy line (see `busyText`); a boolean so only a change re-renders. False when not streaming. */
 export const useBusy = (message: Pick<Message, 'conversation_id' | 'status' | 'tool_events' | 'content'>, streaming: boolean): boolean =>
   useStore((s) => streaming && busyText(message, { nowMs: 0, subs: pick(s, message.conversation_id)?.subagents, workers: s.workers[message.conversation_id] }) !== null)
+/** Simple mode is on. A hook of its own: MessageView may not call useStore directly. */
+export const useSimple = (): boolean => useStore((s) => simpleOn(s.settings))
 /** A Library agent's face colour; the primitive under every face that wears an agent. */
 export const useAgentHue = (agent?: string): number | undefined => useStore((s) => agentHue(s.agentDefs, agent))
 /**

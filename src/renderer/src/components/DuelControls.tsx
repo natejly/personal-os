@@ -1,10 +1,11 @@
 import { DEFAULT_EFFORT } from '@shared/types'
 import { useStore } from '../store'
+import { devToolsOn } from '../lib/simpleMode'
 import ModelMenu from './ModelMenu'
 
 /** Developer mode: also send the next messages to a second model and compare the replies. Hidden unless Developer tools is on. */
 export default function DuelControls(): JSX.Element | null {
-  const devTools = useStore((s) => s.settings.devTools === true)
+  const devTools = useStore((s) => devToolsOn(s.settings))
   const on = useStore((s) => s.abOn)
   const model = useStore((s) => s.abModel)
   const defaultModel = useStore((s) => s.settings.defaultModel)

@@ -304,6 +304,16 @@ export function staysVisible(t: ToolEvent): boolean {
     || !!t.undo?.snapshot_id || !!t.undo?.external_id
 }
 
+/**
+ * Simple mode's allow-list: staysVisible without the failures and breaker refusals (machinery; the reply says what
+ * went wrong), plus editable proposals. What is left is what the user answers or acts on: approval and
+ * permission cards, questions, plans awaiting approval, editable sends and calendar proposals, doc diffs, the
+ * Show panel, dashboards, finished files and anything with an Undo. Every other call folds away entirely.
+ */
+export function simpleVisible(t: ToolEvent): boolean {
+  return staysVisible({ ...t, error: null, blocked: undefined, breaker: undefined }) || !!t.proposal
+}
+
 export type ToolItem = { kind: 'single'; event: ToolEvent } | { kind: 'group'; key: string; events: ToolEvent[] }
 /** Maximal runs of at least `min` consecutive groupable calls of the same tool become one group keyed by the first id; order is kept. */
 export function partitionEvents(events: ToolEvent[], min = 2): ToolItem[] {

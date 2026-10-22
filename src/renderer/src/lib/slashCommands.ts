@@ -42,7 +42,7 @@ const skillRow = (s: Skill): SlashItem =>
  * commands are ranked together (a saved command named like a built-in or an extension's command is shadowed, as the backend shadows it).
  * With nothing typed after the slash, rows that fit the chat (composerRank) come first.
  */
-export function slashItems(text: string, commands: Command[], skills: Skill[], ctx?: ComposerContext, registered: ExtensionCommand[] = []): SlashItem[] | null {
+export function slashItems(text: string, commands: Command[], skills: Skill[], ctx?: ComposerContext, registered: ExtensionCommand[] = [], hidden: ReadonlySet<string> = new Set()): SlashItem[] | null {
   const fit = <T>(rows: T[], q: string, words: (r: T) => string, bonus: (r: T) => number = () => 0): T[] =>
     !q && ctx ? rankByContext(rows, (r) => overlap(words(r), ctx) + bonus(r)) : rows
   const approved = skills.filter((s) => s.status === 'approved')
@@ -63,7 +63,7 @@ export function slashItems(text: string, commands: Command[], skills: Skill[], c
   const hit = detectSlash(text, text.length)
   if (!hit || hit.start !== 0) return null
   const items = [
-    ...BUILTIN.map((b) => ({ label: b.name, keywords: b.hint.split(/\s+/), words: b.hint, bonus: b.name === 'research' && ctx?.question ? 2 : 0,
+    ...BUILTIN.filter((b) => !hidden.has(b.name)).map((b) => ({ label: b.name, keywords: b.hint.split(/\s+/), words: b.hint, bonus: b.name === 'research' && ctx?.question ? 2 : 0,
       item: { key: `builtin:${b.name}`, label: `/${b.name}${b.args ? ` ${b.args}` : ''}`, hint: b.hint, insert: `/${b.name} `,
         ...(b.name === 'schedule' || b.name === 'loop' ? { act: 'form' as const } : {}) } })),
     ...registered.map((r) => ({ label: r.name, keywords: r.hint.split(/\s+/).filter(Boolean), words: `${r.name} ${r.hint}`, bonus: 0,

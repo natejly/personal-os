@@ -1,5 +1,6 @@
 import { DEFAULT_EFFORT } from '@shared/types'
 import { useStore, useConversation } from '../store'
+import { simpleOn } from '../lib/simpleMode'
 import DuelControls from './DuelControls'
 import ModelMenu from './ModelMenu'
 import ChatMenu from './ChatMenu'
@@ -12,6 +13,7 @@ import ChatMenu from './ChatMenu'
  */
 export default function ChatControls({ conversationId }: { conversationId?: string }): JSX.Element {
   const convo = useConversation(conversationId)
+  const simple = useStore((s) => simpleOn(s.settings))
   const defaultModel = useStore((s) => s.settings.defaultModel)
   const draftModel = useStore((s) => s.draftModel)
   const draftEffort = useStore((s) => s.draftEffort)
@@ -24,13 +26,15 @@ export default function ChatControls({ conversationId }: { conversationId?: stri
   const fast = convo?.settings?.fast ?? (draft ? draftFast : false)
   return (
     <>
-      <ModelMenu
-        model={model}
-        effort={effort}
-        fast={!!fast}
-        placement="up"
-        onChange={(c) => void setChatConfig(c, conversationId)}
-      />
+      {!simple && (
+        <ModelMenu
+          model={model}
+          effort={effort}
+          fast={!!fast}
+          placement="up"
+          onChange={(c) => void setChatConfig(c, conversationId)}
+        />
+      )}
       <ChatMenu conversationId={convo?.id ?? conversationId} projectId={convo?.project_id} />
       {/* Only the main chat draws a duel's columns; a window never offers one. */}
       {!conversationId && <DuelControls />}

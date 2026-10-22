@@ -4,6 +4,7 @@ import { api } from '../lib/api'
 import type { Span, SpanKind } from '@shared/types'
 import { modelLabel } from '../lib/modelLabel'
 import { useStore } from '../store'
+import { devToolsOn } from '../lib/simpleMode'
 
 /** Waterfall view of one assistant reply's execution trace. */
 
@@ -80,7 +81,7 @@ async function downloadOtlp(messageId: string): Promise<void> {
 }
 
 export default function TraceView({ spans, live, model, messageId, reasoning }: { spans: Span[]; live: boolean; model: string | null; messageId?: string; reasoning?: string | null }): JSX.Element {
-  const devTools = useStore((s) => s.settings.devTools === true)  // the OTLP export stays a developer tool
+  const devTools = useStore((s) => devToolsOn(s.settings))  // the OTLP export stays a developer tool
   const [now, setNow] = useState(Date.now())
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const running = live || spans.some((s) => s.end === null)

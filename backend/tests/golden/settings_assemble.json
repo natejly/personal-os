@@ -215,6 +215,7 @@
  "sidebarHidden": [
   "health"
  ],
+ "simpleMode": false,
  "snapshotsEnabled": true,
  "stuckSensitivity": "standard",
  "subagentMaxConcurrent": 0,

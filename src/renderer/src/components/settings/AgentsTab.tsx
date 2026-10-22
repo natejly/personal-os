@@ -14,7 +14,7 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
 }
 
 export default function AgentsTab({ draft, patch }: TabProps): JSX.Element {
-  const delegationAfterRounds = draft.delegationAfterRounds ?? 4
+  const delegationAfterRounds = draft.delegationAfterRounds ?? 6
   const workerMaxConcurrent = draft.workerMaxConcurrent ?? 4
   const codingSessionMaxConcurrent = draft.codingSessionMaxConcurrent ?? 3
   const codingAgent = draft.codingAgent ?? 'any'

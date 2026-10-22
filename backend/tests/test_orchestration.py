@@ -408,8 +408,9 @@ def test_errored_rounds_do_not_count_toward_delegation() -> None:
     stream(cid, "go")
     front = seat("front")
     assert len(front) == 5
-    assert all("search_memory" in s["tools"] for s in front[:4]), "still unrestricted through the mixed round"
-    assert "search_memory" not in front[4]["tools"], "narrowed only after two rounds with a successful call"
+    assert all("search_memory" in s["tools"] for s in front), "the list never narrows"
+    assert any(m["role"] == "system" and "budget for doing tool work" in m["content"] for m in front[4]["messages"]), "tripped only after two rounds with a successful call"
+    assert not any(m["role"] == "system" and "budget for doing tool work" in m["content"] for m in front[3]["messages"])
 
 
 def test_forced_delegation_rule() -> None:
@@ -418,15 +419,20 @@ def test_forced_delegation_rule() -> None:
     assert not W.delegation_forced(on, 1, offered) and W.delegation_forced(on, 2, offered) and W.delegation_forced(on, 9, offered)
     assert not W.delegation_forced({**on, "delegationForce": False}, 9, offered)
     assert not W.delegation_forced(on, 9, ["search_memory"]), "no delegate offered, nothing to route to"
-    assert W.delegation_forced({}, limits.DELEGATION_AFTER_ROUNDS, offered), "defaults: on, after 4 rounds"
-    assert W.delegation_forced({"delegationAfterRounds": "junk"}, 4, offered) and not W.delegation_forced({"delegationAfterRounds": "junk"}, 3, offered)
+    assert W.delegation_forced({}, limits.DELEGATION_AFTER_ROUNDS, offered), "defaults: on, after 6 rounds"
+    assert not W.delegation_forced({}, 5, offered, 5_000), "fast reads past 4 rounds do not trip it"
+    assert W.delegation_forced({}, 1, offered, limits.DELEGATION_AFTER_SECONDS * 1000), "slow tool time trips it"
+    assert not W.delegation_forced({}, 1, offered, limits.DELEGATION_AFTER_SECONDS * 1000 - 1)
+    junk = limits.DELEGATION_AFTER_ROUNDS
+    assert W.delegation_forced({"delegationAfterRounds": "junk"}, junk, offered) and not W.delegation_forced({"delegationAfterRounds": "junk"}, junk - 1, offered)
     assert W.delegation_forced({"delegationAfterRounds": -3}, 1, offered), "never below one round"
     assert not W.counts_as_work(["delegate", "todo_write", "check_worker", "propose_plan", "ask_user"])
     assert W.counts_as_work(["todo_write", "search_memory"])
-    schemas = [{"function": {"name": n}} for n in ("delegate", "search_memory", "todo_write", "gmail_search", "resume_worker")]
-    assert [s["function"]["name"] for s in W.restrict_schemas(schemas)] == ["delegate", "todo_write", "resume_worker"]
+    assert not W.counts_as_work(["tool_search", "mcp_tool_search", "save_memory"])
     err = W.forced_refusal("gmail_search")
     assert "gmail_search" in err["error"] and "delegate" in json.dumps(err)
+    assert all(n in json.dumps(err) and n in W.FORCE_DELEGATE_NUDGE for n in W.DELEGATE_ALLOW), "refusal and nudge name the one allowed list"
+    assert W.lane_refusal("tool_search", True, True) is None and W.lane_refusal("tool_search", True, False) is None
 
 
 def test_wake_decision_and_message() -> None:
@@ -465,7 +471,7 @@ def search(i: int) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize("after", [2, 3])
-def test_past_the_threshold_only_hand_off_tools_are_offered(after: int) -> None:
+def test_past_the_threshold_other_tools_are_refused_but_the_tool_list_is_unchanged(after: int) -> None:
     appmod.db.set_settings({"delegationAfterRounds": after})
     cid = new_conv()
     WORKER["Big job"] = [{"text": "big result"}]
@@ -477,16 +483,13 @@ def test_past_the_threshold_only_hand_off_tools_are_offered(after: int) -> None:
     front = seat("front")
     assert len(front) == after + 2
     for i, s in enumerate(front):
-        names = set(s["tools"])
-        if i < after:
-            assert {"search_memory", "delegate"} <= names, f"round {i + 1} is unrestricted"
-        else:
-            assert names and names <= W.FORCED_ALLOW and "delegate" in names and "search_memory" not in names, f"round {i + 1} is narrowed: {names}"
-    assert any(m["role"] == "system" and "only delegate" in m["content"] for m in front[after]["messages"]), "the model is told why"
+        assert {"search_memory", "delegate"} <= set(s["tools"]), f"round {i + 1}: the tools array never changes (prompt cache)"
+    assert all(s["tools"] == front[0]["tools"] for s in front)
+    assert any(m["role"] == "system" and "budget for doing tool work" in m["content"] for m in front[after]["messages"]), "the model is told why"
     results = {d["id"].rsplit(":", 1)[-1]: d for e, d in events if e == "tool_result"}
     assert not any(d["error"] for i, d in results.items() if i.startswith("c") and int(i[1:]) <= after), "work before the threshold ran"
     assert results["c90"]["error"] and results["c91"]["error"], "a non-hand-off call after it gets the forced refusal"
-    assert "delegate" in json.dumps(results["c90"]), "and the refusal points at delegate"
+    assert "delegate" in json.dumps(results["c90"]) and "tool_search" in json.dumps(results["c90"]), "and the refusal points at delegate and names what is allowed"
     assert not results["d1"]["error"], "delegate itself still works"
     done = final_done(events)
     assert done["error"] is None and done["partial"] is None and done["outcome"] is None, "nothing was stopped"
@@ -502,7 +505,7 @@ def test_with_delegation_force_off_nothing_is_restricted() -> None:
     front = seat("front")
     assert len(front) == 6 and all("search_memory" in s["tools"] and "delegate" in s["tools"] for s in front)
     assert not any(d["error"] for e, d in events if e == "tool_result") and len([1 for e, _ in events if e == "tool_result"]) == 5
-    assert not any("only delegate" in str(m.get("content")) for s in front for m in s["messages"] if m["role"] == "system")
+    assert not any("budget for doing tool work" in str(m.get("content")) for s in front for m in s["messages"] if m["role"] == "system")
     assert final_done(events)["error"] is None
 
 
@@ -1079,7 +1082,7 @@ def test_the_new_default_model_does_not_skip_onboarding() -> None:
 
 def test_orchestration_settings_defaults_and_ranges() -> None:
     d = llm.DEFAULT_SETTINGS
-    assert d["delegationForce"] is True and d["delegationAfterRounds"] == 4 and d["workerMaxConcurrent"] == 8 and d["telegramPushWorkerResults"] is False
+    assert d["delegationForce"] is True and d["delegationAfterRounds"] == 6 and d["workerMaxConcurrent"] == 8 and d["telegramPushWorkerResults"] is False
     assert limits.WORKER_MEMORY_FLOOR == 0.15 and limits.RANGES["delegationAfterRounds"] == (1, 20) and limits.RANGES["workerMaxConcurrent"] == (1, 16)
     assert client.put("/settings", json={"workerMaxConcurrent": 99}).status_code == 422, "out-of-range values are refused"
     assert client.put("/settings", json={"delegationAfterRounds": 0}).status_code == 422

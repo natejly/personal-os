@@ -40,9 +40,9 @@ def test_no_prompt_tells_the_model_to_narrate_routine_steps() -> None:
     for text in (W.FRONT_AGENT_HINT, W.FORCE_DELEGATE_NUDGE, json.dumps(W.forced_refusal("x"))):
         assert "what you started" not in text and "On it" not in text
     # Still quiet about routine steps: NO_REPLY when there is nothing for the user, and no narrating rounds or tools.
-    assert "NO_REPLY" in W.FRONT_AGENT_HINT and "do not narrate planning, rounds or tools" in W.FRONT_AGENT_HINT
-    # But it does name a worker it hands work to, so a reply is never bare tool calls with no visible output.
-    assert "name what is running" in W.FRONT_AGENT_HINT
+    assert "NO_REPLY" in W.FRONT_AGENT_HINT and "narrate planning, rounds or tools" in W.FRONT_AGENT_HINT
+    # But it says in one line what runs when it hands work to a worker, so a reply is never bare tool calls with no visible output.
+    assert "what is running and that you will report back" in W.FRONT_AGENT_HINT
     assert not hasattr(W, "ACK_LINE") and not hasattr(W, "ACK_NUDGE")
 
 
@@ -52,7 +52,7 @@ def test_the_delegate_result_does_not_ask_for_narration() -> None:
     FRONT[:] = quiet("Quiet job")
     run_quietly(cid, "go")
     note = next(m["content"] for s in T.seat("front") for m in s["messages"] if m["role"] == "tool" and "worker_id" in str(m["content"]))
-    assert "what you started" not in note and "Say nothing" in note
+    assert "what you started" not in note and "report back" in note and "Say nothing" not in note
 
 
 def test_dispatch_only() -> None:

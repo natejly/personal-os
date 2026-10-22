@@ -79,6 +79,7 @@ class TurnState:
     tool_errors: dict[str, int] = field(default_factory=dict)
     warm_tasks: list[asyncio.Task] = field(default_factory=list)  # read-only calls started ahead of their turn in the round; cancelled at the end
     delegation_forced: bool = False  # set once the reply's own tool use has to turn into delegating
+    work_ms: int = 0  # tool time (not approval waits) of this reply's own work calls, for limits.DELEGATION_AFTER_SECONDS
     last_sig: str | None = None
     repeats: int = 0
     partial: str | None = None  # how the reply was cut short ("loop" once a breaker has stopped tool use)
@@ -836,6 +837,8 @@ class ToolStep:
             dashboard = result.pop("dashboard", None) if isinstance(result, dict) else None  # dashboard_open: the UI renders it inline
             preview = summarize_result(result)
             err = result.get("error") if isinstance(result, dict) else None
+            if c["name"] not in workers_mod.FORCED_ALLOW:
+                st.work_ms += ms
             if not err:
                 rnd.ok_calls.append(c["name"])
             # consecutive argument errors and crashes only: a not-found or empty answer neither counts nor resets

@@ -32,7 +32,7 @@ Settings that shape the loop but are not specific to it:
 | `parallelReads` | 0 (automatic) | 1 to 8 | Read-only calls of one round that run together. |
 | `llmRetries` | 3 | 0 to 10 | Retries before a reply's first token. |
 | `llmIdleSeconds` | 300 | 10 to 3600 | A model stream silent this long is abandoned with an error. |
-| `delegationAfterRounds` | 4 | 1 to 20 | Rounds a chat reply works itself before the rest is routed to a worker (routing, not a cap). |
+| `delegationAfterRounds` | 6 | 1 to 20 | Rounds a chat reply works itself (or 45 s of tool time, whichever first) before other tools return an error telling it to hand the rest to a worker (routing, not a cap). |
 
 ## Choosing a loop
 

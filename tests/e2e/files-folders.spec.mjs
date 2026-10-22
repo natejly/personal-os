@@ -5,6 +5,9 @@ test.beforeEach(({ grain }) => patient(grain))
 
 
 const folderRow = (page, name) => page.locator('.doc-folder-row', { has: page.locator('.doc-folder-name', { hasText: new RegExp('^' + name + '$') }) })
+// A folder or group row toggles from anywhere on it; aria-expanded says which way it is.
+const groupRow = (page, name) => page.locator('.doc-group-row', { has: page.locator('.doc-group-name', { hasText: new RegExp('^' + name + '$') }) })
+const toggle = (row) => row.locator('.doc-folder-name, .doc-group-name').click()
 const newFolderAtRoot = async (page, name) => {
   await treeMenu(page)
   await page.getByRole('menuitem', { name: 'New folder…' }).click()
@@ -13,7 +16,7 @@ const newFolderAtRoot = async (page, name) => {
 }
 const newSub = async (page, parent, name) => {
   await folderRow(page, parent).getByRole('button', { name: `Actions for ${parent}` }).click()
-  await page.getByRole('button', { name: 'New subfolder…' }).click()
+  await page.getByRole('button', { name: 'New subfolder…', exact: true }).click()
   await page.getByPlaceholder('Folder name').fill(name)
   await page.keyboard.press('Enter')
 }
@@ -118,7 +121,7 @@ test('delete folder with contents: files move up one level, nothing is orphaned'
   const b = await mkDoc(g, { title: 'in inner', folder: 'Outer/Inner' })
   await openFiles(page)
   await folderRow(page, 'Outer').getByRole('button', { name: 'Actions for Outer' }).click()
-  await page.getByRole('button', { name: 'Delete folder' }).click()
+  await page.getByRole('button', { name: 'Delete folder', exact: true }).click()
   await expect(folderRow(page, 'Outer')).toHaveCount(0)
   await expect.poll(async () => (await g.api(`/docs/${a.id}`)).folder).toBe('')
   await expect.poll(async () => (await g.api(`/docs/${b.id}`)).folder).toBe('Inner')
@@ -137,11 +140,11 @@ test('delete folder: cancelling the confirm keeps it; delete with open doc insid
   await page.locator('.doc-row', { hasText: 'open one' }).last().click()
   await editDoc(page)
   await folderRow(page, 'Keep').getByRole('button', { name: 'Actions for Keep' }).click()
-  await page.getByRole('button', { name: 'Delete folder' }).click()
+  await page.getByRole('button', { name: 'Delete folder', exact: true }).click()
   await expect(folderRow(page, 'Keep')).toBeVisible()
   accept = true
   await folderRow(page, 'Keep').getByRole('button', { name: 'Actions for Keep' }).click()
-  await page.getByRole('button', { name: 'Delete folder' }).click()
+  await page.getByRole('button', { name: 'Delete folder', exact: true }).click()
   await expect(folderRow(page, 'Keep')).toHaveCount(0)
   await expect(body(page)).toHaveValue('abc')
   expect((await g.api(`/docs/${d.id}`)).folder).toBe('')
@@ -156,19 +159,22 @@ test('collapse state of folders and groups persists across relaunch', async ({ g
   // folders start shut; opening one shows its children, the group row hides everything
   await expect(folderRow(page, 'Fold')).toBeVisible()
   await expect(folderRow(page, 'Sub')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Expand Fold', exact: true }).click()
+  await expect(folderRow(page, 'Fold')).toHaveAttribute('aria-expanded', 'false')
+  await toggle(folderRow(page, 'Fold'))
   await expect(folderRow(page, 'Sub')).toBeVisible()
-  await page.getByRole('button', { name: 'Expand Sub', exact: true }).click()
+  await toggle(folderRow(page, 'Sub'))
   await expect(page.locator('.doc-row', { hasText: 'child of sub' })).toHaveCount(2) // Recent shortcut + its place in the tree
-  await page.getByRole('button', { name: 'Collapse Personal' }).click()
+  await expect(groupRow(page, 'Personal')).toHaveAttribute('aria-expanded', 'true')
+  await toggle(groupRow(page, 'Personal'))
   await expect(folderRow(page, 'Fold')).toHaveCount(0)
   page = await relaunch(g)
   await openFiles(page)
   await expect(folderRow(page, 'Fold')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Expand Personal' }).click()
+  await expect(groupRow(page, 'Personal')).toHaveAttribute('aria-expanded', 'false')
+  await toggle(groupRow(page, 'Personal'))
   await expect(folderRow(page, 'Fold')).toBeVisible()
   await expect(folderRow(page, 'Sub')).toBeVisible()
-  await page.getByRole('button', { name: 'Collapse Fold', exact: true }).click()
+  await toggle(folderRow(page, 'Fold'))
   await expect(folderRow(page, 'Sub')).toHaveCount(0)
   expect(errorsOf(g)).toEqual([])
 })
@@ -182,7 +188,7 @@ test('300 docs in one folder: renders, filters and searches quickly', async ({ g
   }
   await openFiles(page)
   // Folders start shut and Recent holds only a handful of rows, so open the folder before looking for its last doc.
-  await page.getByRole('button', { name: 'Expand Big' }).click()
+  await toggle(folderRow(page, 'Big'))
   const t0 = Date.now()
   await expect(page.locator('.doc-row', { hasText: 'Bulk 299' }).last()).toBeVisible()
   const rendered = Date.now() - t0

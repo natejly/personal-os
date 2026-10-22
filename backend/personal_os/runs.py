@@ -47,6 +47,7 @@ RETAIN_S = 300.0
 JOB_RUNS_KEEP = 20
 # How long a finished run keeps its event tape. The agent_runs row, approvals and executed_calls stay.
 EVENTS_RETAIN_S = 14 * 86400
+CHECKPOINT_MAX_CHARS = 4_000_000  # a chat run's checkpoint is dropped, not stored, past this size
 # How long appended events wait for the writer thread, so a burst of deltas lands as one commit.
 FLUSH_S = 0.1
 _INSERT_EVENT = "INSERT INTO run_events(run_id, seq, type, data, ts) VALUES(?,?,?,?,?)"
@@ -234,6 +235,8 @@ class RunStore:
         cols = {k: (_dumps(v) if k == "budget" and v is not None else v) for k, v in fields.items() if k in allowed}
         if not cols:
             return
+        if cols.get("status") == "done":
+            self.clear_checkpoint(run_id)
         sets = ", ".join(f"{k}=?" for k in cols)
         try:
             self._exec(f"UPDATE agent_runs SET {sets}, updated_at=? WHERE run_id=?", (*cols.values(), time.time(), run_id))
@@ -259,6 +262,33 @@ class RunStore:
 
     def set_resumed_from(self, run_id: str, prior: str) -> None:
         self.update(run_id, resumed_from=prior)
+
+    def set_checkpoint(self, run_id: str, messages: list[dict[str, Any]]) -> None:
+        """Replace the run's checkpoint with the model messages it has built so far. Never raises; one row per run, so
+        storage stays bounded. Past CHECKPOINT_MAX_CHARS the old row is dropped rather than left stale."""
+        try:
+            blob = _dumps(messages)
+            if len(blob) > CHECKPOINT_MAX_CHARS:
+                return self.clear_checkpoint(run_id)
+            self._exec("INSERT INTO run_checkpoints(run_id, messages, updated_at) VALUES(?,?,?) "
+                       "ON CONFLICT(run_id) DO UPDATE SET messages=excluded.messages, updated_at=excluded.updated_at",
+                       (run_id, blob, time.time()))
+        except (TypeError, ValueError, sqlite3.Error):
+            log.warning("could not checkpoint run %s", run_id, exc_info=True)
+
+    def checkpoint(self, run_id: str) -> list[dict[str, Any]] | None:
+        r = self._one("SELECT messages FROM run_checkpoints WHERE run_id=?", (run_id,))
+        try:
+            msgs = json.loads(r["messages"]) if r else None
+        except ValueError:
+            return None
+        return msgs if isinstance(msgs, list) else None
+
+    def clear_checkpoint(self, run_id: str) -> None:
+        try:
+            self._exec("DELETE FROM run_checkpoints WHERE run_id=?", (run_id,))
+        except sqlite3.Error:
+            log.warning("could not drop the checkpoint of run %s", run_id, exc_info=True)
 
     def resumed_by(self, run_id: str) -> str | None:
         """The run that continued this one, if any (a run is resumed at most once)."""

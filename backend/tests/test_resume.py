@@ -357,6 +357,127 @@ def test_prior_call_unit() -> None:
     asyncio.run(go2())
 
 
+def _chat(steps: list[list[Any]]) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    """Run one chat turn whose model streams follow `steps` (an Exception in a step is raised there); returns the conversation id,
+    the run row and the reply row. Backoff is shrunk so the retries do not slow the suite."""
+    prev, base = llm.stream_chat, llm.RETRY_BASE_S
+
+    async def stream(*a: Any, **k: Any) -> Any:
+        SEEN.append([dict(m) for m in a[2]])
+        for ev in (steps.pop(0) if steps else [{"type": "delta", "text": "extra"}, {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None}]):
+            if isinstance(ev, Exception):
+                raise ev
+            yield ev
+    llm.stream_chat, llm.RETRY_BASE_S = stream, 0.01
+    try:
+        cid = client.post("/conversations", json={}).json()["id"]
+        client.post(f"/conversations/{cid}/chat", json={"content": "hi"})
+        for _ in range(400):
+            time.sleep(0.05)
+            r = store.latest(cid)
+            if r and r["status"] in ("done", "error", "interrupted"):
+                break
+        return cid, r, appmod.convos.get(cid)["messages"][-1]
+    finally:
+        llm.stream_chat, llm.RETRY_BASE_S = prev, base
+
+
+END = {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None}
+
+
+def test_midstream_failure_retries_the_round() -> None:
+    SEEN.clear()
+    cid, run, msg = _chat([[{"type": "delta", "text": "par"}, llm.LLMError("reset", kind="transport")],
+                           [{"type": "delta", "text": "whole"}, END]])
+    check(len(SEEN) == 2, f"the round was asked twice, got {len(SEEN)}")
+    check(msg["content"] == "whole" and not msg["error"], f"the partial text is gone from the reply, got {msg['content']!r} {msg['error']!r}")
+    check(all("par" not in str(m.get("content")) for m in SEEN[1] if m["role"] == "assistant"), "the partial text is not sent to the model")
+    tape = [(e, d) for _, e, d in store.events(run["run_id"])]
+    check(("text_replace", {"id": msg["id"], "text": ""}) in tape, "the screen is told to reset the text")
+    check(run["status"] == "done", "the run finished")
+
+
+def test_midstream_failure_is_retried_at_most_twice() -> None:
+    SEEN.clear()
+    boom = lambda: [{"type": "delta", "text": "x"}, llm.LLMError("reset", kind="transport")]  # noqa: E731
+    cid, run, msg = _chat([boom(), boom(), boom(), [{"type": "delta", "text": "never"}, END]])
+    check(len(SEEN) == 3 and msg["error"], f"first try + 2 retries, then the error stands: {len(SEEN)} {msg['error']!r}")
+
+
+def test_midstream_failure_after_tool_calls_is_not_retried() -> None:
+    SEEN.clear()
+    calls = [{"id": "k1", "name": "list_documents", "arguments": "{}"}]
+    cid, run, msg = _chat([[{"type": "delta", "text": "a"}, {"type": "end", "finish_reason": "tool_calls", "tool_calls": calls, "usage": None},
+                            llm.LLMError("reset", kind="transport")]])
+    check(len(SEEN) == 1 and msg["error"], f"no retry once the round has its tool calls: {len(SEEN)} {msg['error']!r}")
+
+
+def test_non_transient_failure_is_not_retried() -> None:
+    for kind in ("auth", "content_filter", "bad_request", "quota"):
+        SEEN.clear()
+        cid, run, msg = _chat([[{"type": "delta", "text": "a"}, llm.LLMError("no", kind=kind)], [{"type": "delta", "text": "b"}, END]])
+        check(len(SEEN) == 1 and msg["error"], f"{kind} is not retried: {len(SEEN)}")
+
+
+def test_chat_run_checkpoints_each_round_and_drops_it_when_done() -> None:
+    seen: list[Any] = []
+    calls = [{"id": "k1", "name": "list_documents", "arguments": "{}"}]
+    prev = llm.stream_chat
+    cids: list[str] = []
+
+    async def stream(*a: Any, **k: Any) -> Any:
+        r = store.latest(cids[0]) if cids else None
+        seen.append(store.checkpoint(r["run_id"]) if r else None)
+        if len(seen) > 1:
+            yield {"type": "delta", "text": "ok"}
+        yield {"type": "end", "finish_reason": "tool_calls" if len(seen) == 1 else "stop", "tool_calls": calls if len(seen) == 1 else [], "usage": None}
+    llm.stream_chat = stream
+    try:
+        cid = client.post("/conversations", json={}).json()["id"]
+        cids.append(cid)
+        client.post(f"/conversations/{cid}/chat", json={"content": "hi"})
+        for _ in range(400):
+            time.sleep(0.05)
+            r = store.latest(cid)
+            if r and r["status"] == "done":
+                break
+    finally:
+        llm.stream_chat = prev
+    second = seen[-1] or []
+    check([m["role"] for m in second] == ["assistant", "tool"], f"round 2 starts from round 1's calls and full results, got {second}")
+    check(store.checkpoint(r["run_id"]) is None, "a finished run keeps no checkpoint")
+
+
+def test_resume_continues_from_the_checkpoint() -> None:
+    cid, rid = dead_run()
+    big = "R" * 5000
+    store.set_checkpoint(rid, [{"role": "assistant", "content": "", "tool_calls": [{"id": "k1", "type": "function", "function": {"name": "list_documents", "arguments": "{}"}}]},
+                               {"role": "tool", "tool_call_id": "k1", "content": big}])
+    check(store.checkpoint(rid)[1]["content"] == big, "the checkpoint round-trips")
+    store.set_checkpoint(rid, store.checkpoint(rid))
+    with appmod.db.tx() as c:
+        check(c.execute("SELECT COUNT(*) FROM run_checkpoints WHERE run_id=?", (rid,)).fetchone()[0] == 1, "one row per run")
+    SEEN.clear()
+    ROUNDS[:] = [{"text": "continuing", "calls": []}]
+    check(resume_it(rid).status_code == 200, "resume ok")
+    wait(cid)
+    tool = [m for m in SEEN[0] if m["role"] == "tool"]
+    check(tool and tool[0]["content"] == big, "the model sees the tool result in full, not a 300-char preview")
+    note = [m["content"] for m in SEEN[0] if m["role"] == "system" and "Resuming" in (m.get("content") or "")][0]
+    check("unknown_outcome" in note and "3 docs" not in note, "the note asks to verify unknown_outcome calls and skips the previews")
+    check(store.checkpoint(rid) is None, "a resumed run's checkpoint is dropped")
+
+
+def test_checkpoint_table_is_added_to_an_existing_database() -> None:
+    from personal_os.db import Database
+    d = tempfile.mkdtemp(prefix="ckdb-")
+    Database(d)
+    with Database(d).tx() as c:
+        c.execute("DROP TABLE run_checkpoints")
+    with Database(d).tx() as c:
+        check(c.execute("SELECT name FROM sqlite_master WHERE name='run_checkpoints'").fetchone(), "reopening an older database creates the table")
+
+
 if __name__ == "__main__":
     failed = 0
     prev = (llm.stream_chat, appmod.toolbox.call)

@@ -913,6 +913,8 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
       return mapMsg(ev.data.id, (m) => ({ ...m, status: ev.data.kind ? { kind: ev.data.kind, attempt: ev.data.attempt, max: ev.data.max, until: ev.data.until, reason: ev.data.reason, model: ev.data.model, why: ev.data.why, text: ev.data.text } : null }))
     case 'delta':
       return mapMsg(ev.data.id, (m) => ({ ...m, ...appendDelta(m, ev.data.text), status: null }))  // a NO_REPLY in the making never shows
+    case 'text_replace':
+      return mapMsg(ev.data.id, (m) => ({ ...m, content: ev.data.text, held: undefined }))
     case 'thinking_summary':
       return mapMsg(ev.data.id, (m) => ({ ...m, reasoning: m.reasoning ? `${m.reasoning}\n${ev.data.text}` : ev.data.text, status: null }))
     case 'tool_call':

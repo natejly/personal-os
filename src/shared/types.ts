@@ -2062,6 +2062,8 @@ export type ChatEvent =
   | { event: 'restored_message'; data: { message: Message; reason: string | null } }
   | { event: 'title'; data: { id: string; title: string } }
   | { event: 'delta'; data: { id: string; text: string } }
+  /** A round's stream broke and is being asked again: the reply's text so far, replacing what was shown. */
+  | { event: 'text_replace'; data: { id: string; text: string } }
   /** One short model-written status line about the reply's thinking; the raw chain-of-thought is never sent. */
   | { event: 'thinking_summary'; data: { id: string; text: string } }
   | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; started_at?: number; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; review?: ToolEvent['review']; plan?: PlanStepRef | null; agent?: string; mcp?: McpToolOrigin | null } }

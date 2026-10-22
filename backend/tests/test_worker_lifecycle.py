@@ -96,7 +96,7 @@ def test_a_worker_owns_its_jobs_and_says_who_stopped_it(monkeypatch: pytest.Monk
         info = mgr.info(row)
         assert info["status"] == "stopped" and info["exit_reason"] == "stopped" and info["error"] == "Stopped by the user."
         assert info["parent_run_id"] == row["parent_run_id"] and "model" in info and "effort" in info
-        assert row["input"].get("wake_delivered") == 1, "a worker the user stopped does not wake the front agent"
+        assert not mgr.wakes.open(conv, "worker"), "a worker the user stopped does not wake the front agent"
     asyncio.run(go())
 
 

@@ -59,8 +59,8 @@ CREATE INDEX IF NOT EXISTS idx_chat_links_to ON chat_links(to_conv, status);
 CREATE INDEX IF NOT EXISTS idx_chat_links_from ON chat_links(from_conv, status);
 """
 # Created by migration 31 (migrations._chat_links), which runs statement by statement inside its transaction.
-# status: pending (the message waits for its turn in to_conv) -> running (that turn is live) -> replied (the reply waits for
-# its turn in from_conv) -> returning (that turn is live) -> done; a message_chat call that got the reply itself ends it at done.
+# status: pending (the message waits for, or is in, its turn in to_conv) -> replied (the reply waits for its turn in from_conv)
+# -> done; a message_chat call that got the reply itself ends it at done. Each owed turn is a row of the wake queue (wakes.py).
 
 
 def slug(title: str) -> str:
@@ -102,11 +102,11 @@ def mention_note(text: str, chats: list[dict[str, Any]], self_id: str, dashboard
 
 
 class ChatLinks:
-    """The chat_links table and the message_chat calls waiting on a reply. `deliver(conv_id)` is app.py's: it starts the
-    next owed turn in that chat when nothing is answering there."""
+    """The chat_links table and the message_chat calls waiting on a reply. Each turn it owes a chat is queued in `wakes`, and
+    `deliver(conv_id)` is app.py's: it starts the next owed turn in that chat when nothing is answering there."""
 
-    def __init__(self, db: Any, convos: Any, deliver: Callable[[str], None] | None = None) -> None:
-        self.db, self.convos = db, convos
+    def __init__(self, db: Any, convos: Any, wakes: Any, deliver: Callable[[str], None] | None = None) -> None:
+        self.db, self.convos, self.wakes = db, convos, wakes
         self.deliver = deliver or (lambda cid: None)
         self.waiters: dict[str, asyncio.Future[str]] = {}  # link id -> a message_chat call waiting for its reply
         self.waiting_on: dict[str, str] = {}  # sender chat -> the chat it is waiting on (a wait the other way would deadlock)
@@ -159,17 +159,12 @@ class ChatLinks:
                "digest": digest(text), "status": "pending", "reply": None, "created_at": t, "updated_at": t}
         with self.db.tx() as c:
             c.execute(f"INSERT INTO chat_links({','.join(row)}) VALUES({','.join('?' * len(row))})", tuple(row.values()))
-        self.deliver(to_id)
+        self._owe(to_id, "chat_in", row["id"])
         return row
 
-    def next_for(self, conv_id: str) -> tuple[str, dict[str, Any]] | None:
-        """The oldest turn owed to this chat: a message to it (chat_in) or a reply to a message it sent (chat_reply)."""
-        with self.db.tx() as c:
-            r = c.execute("SELECT * FROM chat_links WHERE (to_conv=? AND status='pending') OR (from_conv=? AND status='replied') "
-                          "ORDER BY updated_at LIMIT 1", (conv_id, conv_id)).fetchone()
-        if r is None:
-            return None
-        return ("chat_in" if r["to_conv"] == conv_id and r["status"] == "pending" else "chat_reply"), dict(r)
+    def _owe(self, conv_id: str, kind: str, link_id: str) -> None:
+        self.wakes.add(conv_id, "chat", {"link": link_id, "kind": kind}, f"chat:{link_id}:{kind}")
+        self.deliver(conv_id)
 
     def turn(self, kind: str, link: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
         """The fenced text and the chat_link record of the turn owed, or None when the other chat is gone (the link ends)."""
@@ -182,12 +177,6 @@ class ChatLinks:
         text = link["text"] if kind == "chat_in" else link["reply"] or ""
         return fence(kind, other, title, link["id"], text), {"id": link["id"], "kind": kind, "depth": int(link["depth"]),
                                                              "from_chat": other, "title": title}
-
-    def started(self, kind: str, link_id: str) -> None:
-        self._set(link_id, status="running" if kind == "chat_in" else "returning")
-
-    def unstarted(self, kind: str, link_id: str) -> None:
-        self._set(link_id, status="pending" if kind == "chat_in" else "replied")
 
     def ended(self, chat_link: dict[str, Any], text: str, error: str | None = None, silent: bool = False,
               stopped: bool = False) -> None:
@@ -207,16 +196,7 @@ class ChatLinks:
             self._set(link["id"], status="done", reply=reply)
             return
         self._set(link["id"], status="replied", reply=reply)
-        self.deliver(link["from_conv"])
-
-    def recover(self) -> list[str]:
-        """At startup: a turn that died with the last process is owed again. -> the chats to deliver to."""
-        with self.db.tx() as c:
-            c.execute("UPDATE chat_links SET status='pending' WHERE status='running'")
-            c.execute("UPDATE chat_links SET status='replied' WHERE status='returning'")
-            rows = c.execute("SELECT to_conv AS cid FROM chat_links WHERE status='pending' "
-                             "UNION SELECT from_conv FROM chat_links WHERE status='replied'").fetchall()
-        return [r["cid"] for r in rows]
+        self._owe(link["from_conv"], "chat_reply", link["id"])
 
     async def wait(self, link: dict[str, Any], timeout: float) -> str | None:
         """The reply, or None after `timeout` seconds (it then arrives as a chat_reply turn)."""

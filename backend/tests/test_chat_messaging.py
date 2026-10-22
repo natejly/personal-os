@@ -230,7 +230,7 @@ def test_tell_chat_strips_the_marker_and_skips_empty() -> None:
 
 def test_a_message_to_a_busy_chat_waits_for_its_reply_to_end() -> None:
     a, b = chat("Sender busy"), chat("Busy")
-    appmod._chat_waiting.discard(b)
+    appmod._wake_waiting.discard(b)
     gate = asyncio.Event()
 
     async def slow(*args: Any, **kw: Any) -> Any:
@@ -242,7 +242,7 @@ def test_a_message_to_a_busy_chat_waits_for_its_reply_to_end() -> None:
     wait(lambda: appmod.bus.answering(b), "the user's reply to start")
     out = call("message_chat", ctx_of(a), chat_id=b, text="when free")
     time.sleep(0.2)
-    assert link_status(out["message_id"]) == "pending" and b in appmod._chat_waiting
+    assert link_status(out["message_id"]) == "pending" and b in appmod._wake_waiting
     llm.stream_chat = _fake  # type: ignore[assignment]
     appmod._loop.call_soon_threadsafe(gate.set)  # type: ignore[union-attr]
     wait(lambda: link_status(out["message_id"]) == "done", "the queued message to run and its reply to return")
@@ -339,20 +339,6 @@ def test_the_chat_route_refuses_a_client_sent_chat_link() -> None:
     b = chat("Route")
     r = client.post(f"/conversations/{b}/chat", json={"content": "hi", "chat_link": {"id": "x", "kind": "chat_in", "depth": 0}})
     assert r.status_code == 400
-
-
-def test_recover_reowes_turns_that_died_with_the_process() -> None:
-    a, b = chat("Rec A"), chat("Rec B")
-    appmod._chat_waiting.clear()
-    with appmod.db.tx() as c:
-        for i, (st, frm, to) in enumerate((("running", a, b), ("returning", a, b), ("done", a, b))):
-            c.execute("INSERT INTO chat_links(id,from_conv,to_conv,depth,text,digest,status,reply,created_at,updated_at) "
-                      "VALUES(?,?,?,?,?,?,?,?,?,?)", (f"cl_rec{i}", frm, to, 1, "t", "d", st, "r", time.time(), time.time()))
-    owed = set(appmod.chat_links.recover())
-    assert owed == {a, b}
-    assert [link_status(f"cl_rec{i}") for i in range(3)] == ["pending", "replied", "done"]
-    with appmod.db.tx() as c:
-        c.execute("DELETE FROM chat_links WHERE id LIKE 'cl_rec%'")
 
 
 def test_an_autonomous_chat_is_woken_through_its_desk() -> None:

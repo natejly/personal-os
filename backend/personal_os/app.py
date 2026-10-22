@@ -36,6 +36,7 @@ from . import auth_breaker, blobs, system_access
 from .bounds import clamp_limit
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
 from . import branch_summary, compaction, side_question, followups, otel_export, replay_trace, router, thinking_summary, titles
+from .wakes import WakeQueue
 from . import chatlink, config, duel, fsx, guards, labels, permissions_routes, request_log, runtime, setting_sources, toolcore
 from .fsx import sensitive_reason
 from . import context_map
@@ -238,17 +239,14 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credenti
 # Each run is also a row (agent_runs) with its event tape (run_events); the bus is the hot path over it.
 run_store = RunStore(db, host.bus)
 bus = RunBus(run_store, host.bus)
+wake_q = WakeQueue(db)  # hidden turns owed to chats (wakes.py); drained by _drain_wakes
 def _run_changed(run: Run) -> None:
     events.publish("run_state", run.info())  # `events` is bound below; read at call time
     for channel in host.channels:
         channel.on_run_change(run)  # it never raises
-    if run.conversation_id in _wake_waiting and not run.answering:
-        _schedule_wake(run.conversation_id)  # a worker finished while this reply was being written: its report goes in now
-    if run.conversation_id in _owed_waiting and not run.answering:
-        _schedule_owed_wake(run.conversation_id)  # an extension's wake arrived while this reply was being written
-    if _chat_waiting and not run.answering:  # any run ending may free the chat (or the desk slot) a cross-chat turn waits on
-        for cid in list(_chat_waiting):
-            _schedule_chat_delivery(cid)
+    if _wake_waiting and not run.answering:  # any run ending may free the chat (or the desk slot) a wake waits on
+        for cid in list(_wake_waiting):
+            _schedule_wake(cid)
 
 
 bus.on_change = _run_changed
@@ -727,7 +725,7 @@ subagent_mgr.connectors = SimpleNamespace(
 # Workers (workers.py): detached background subagents the chat's delegate tool starts. The callback is late-bound:
 # the wake machinery is defined further down.
 workers_mgr = workers_mod.Workers(subagent_mgr, run_store, publish=events.publish, answering=bus.answering,
-                                  on_end=lambda cid: _wake_conversation(cid))
+                                  on_end=lambda cid: _drain_wakes(cid))
 toolbox.workers = workers_mgr
 # Workflows (workflows.py) and commands (commands.py): saved definitions, approved by hash before a run starts.
 workflow_store = Workflows(db, lambda: set(toolbox.specs), lambda n: subagent_mgr.role_for(n) is not None)
@@ -3697,11 +3695,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             "taint": {"tainted": tool_ctx["tainted"], "sources": tool_ctx["taint_sources"]}, "outcome": outcome}))
     await _end_jobs()  # after the done: _run_chat has marked the run replied, so a steer already gets its 409
     if is_wake:
-        workers_mgr.mark_delivered(body.wake.get("ids") or [])  # reached its end (even with an error): the sweep at startup does not repeat it
         if text and not error and not silent and not stop.is_set():
             _push_wake_reply(text, tool_ctx.get("reply_attachments"), conv_id)
     if body.chat_link:
         chat_links.ended(body.chat_link, text, error, silent=silent, stopped=stop.is_set())
+    wake_q.done(((body.wake or body.chat_link) or {}).get("queue") or [])  # reached its end (even with an error): startup does not repeat it
     if tool_ctx.get("learned"):
         yield "learned", {**tool_ctx["learned"], "conversation_id": conv_id, "message_id": am["id"], "user_message_id": user_msg_id}
 
@@ -4170,20 +4168,21 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     return {"run_id": run.run_id, "seq": run.seq}
 
 
-# ---------------- workers (workers.py): wake on completion, routes ----------------
-# Conversations with a finished worker's report waiting for the reply being written to end, and the workers whose
-# report is inside a wake turn that has not finished yet (so a second trigger cannot start a duplicate).
+# ---------------- wake turns: one queue (wakes.py), one drainer ----------------
+# Everything that owes a chat a hidden turn is a wake_queue row: a worker's report (queued when it starts), a scheduled
+# task's result, an extension's news (owe_wake), another chat's message or reply (chatlink.py). The rows of a chat that
+# could not be delivered yet (a reply was being written, or its desk is busy) wait here for _run_changed to try again.
 _wake_waiting: set[str] = set()
-_wake_inflight: set[str] = set()
+_WAKE_FOLD = {"worker": "reports", "job": "reports", "ext": "ext"}  # kinds that fold into one turn; a chat message is a turn of its own
 
 
 def _schedule_wake(conv_id: str) -> None:
     try:
         asyncio.get_running_loop()
-        asyncio.ensure_future(_wake_conversation(conv_id))
+        asyncio.ensure_future(_drain_wakes(conv_id))
     except RuntimeError:  # called from the threadpool
         if _loop is not None and not _loop.is_closed():
-            _loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_wake_conversation(conv_id)))
+            _loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_drain_wakes(conv_id)))
 
 
 def _wake_reports(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -4205,77 +4204,6 @@ async def _noted_reports(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-async def _wake_conversation(conv_id: str) -> None:
-    """Hand the reports of this conversation's finished workers to its front agent: a hidden user message (kind 'wake') and
-    a reply run started here, so it works with no window open. While a reply is being written the wake waits (_run_changed
-    retries when it ends); several reports waiting fold into one turn. Whether it was delivered is on each worker's row."""
-    pending = [r for r in workers_mgr.pending_wakes(conv_id) if r["run_id"] not in _wake_inflight]
-    booked = _job_wakes.get(conv_id, [])
-    row = convos.get(conv_id, with_messages=False)
-    verdict = workers_mod.wake_decision(bool(bus.answering(conv_id)), len(pending) + len(booked), row is not None)
-    if verdict == "wait":
-        _wake_waiting.add(conv_id)
-        return
-    _wake_waiting.discard(conv_id)
-    if verdict == "skip":
-        if row is None:  # the chat is gone: nobody to tell
-            workers_mgr.mark_delivered(r["run_id"] for r in pending)
-            _job_wakes.pop(conv_id, None)
-        return
-    claimed = [r["run_id"] for r in pending]
-    _wake_inflight.update(claimed)  # held across the handlers' awaits: a second worker ending meanwhile must not rebuild this wake
-    booked = _job_wakes.pop(conv_id, [])  # taken for the same reason; put back when no turn starts
-
-    def unclaim() -> None:
-        _wake_inflight.difference_update(claimed)
-        if booked:
-            _job_wakes[conv_id] = booked + _job_wakes.get(conv_id, [])
-
-    try:
-        text, wake = workers_mod.build_wake(await _noted_reports(_wake_reports(pending)) + booked)
-    except BaseException:
-        unclaim()
-        raise
-    if bus.answering(conv_id):  # a reply started while the handlers awaited: this wake runs when it ends
-        unclaim()
-        _wake_waiting.add(conv_id)
-        return
-    if desk_id := row["settings"].get("deskId"):
-        # A desk-bound chat is woken through its desk, so the turn runs under the desk runtime, supervisor and settle.
-        started = _launch_desk(desk_id, text, MESSAGE_FROM, wake=wake)
-        if started is None:  # a run is still live on the conversation (its learn tail), or the desk is in no status that takes a message
-            _wake_waiting.add(conv_id)
-        if isinstance(started, Run):
-            started.task.add_done_callback(lambda _t: _wake_inflight.difference_update(claimed))
-        else:
-            unclaim()
-        return
-    body = ChatIn(content=text, wake=wake)
-    run = bus.start(conv_id, lambda r: _run_chat(r, body), input=body.model_dump())
-    run.task.add_done_callback(lambda _t: _wake_inflight.difference_update(claimed))
-
-
-# Wake turns an extension owes a chat (a coding session that settled), and the chats whose wake waits for a reply to end.
-_owed_wakes: dict[str, list[tuple[str, dict[str, Any]]]] = {}
-_owed_waiting: set[str] = set()
-
-
-def _schedule_owed_wake(conv_id: str) -> None:
-    try:
-        asyncio.get_running_loop()
-        asyncio.ensure_future(_wake_owed(conv_id))
-    except RuntimeError:  # called from the threadpool (a watcher refreshes off the loop)
-        if _loop is not None and not _loop.is_closed():
-            _loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_wake_owed(conv_id)))
-
-
-def owe_wake(conversation_id: str, text: str, wake: dict[str, Any]) -> None:
-    """An extension owes this chat a hidden wake turn: the same kind a finished worker's report gets (NO_REPLY when there is
-    nothing new to say). Several owed at once fold into one turn."""
-    _owed_wakes.setdefault(conversation_id, []).append((text, wake))
-    _schedule_owed_wake(conversation_id)
-
-
 def _merge_wakes(owed: list[tuple[str, dict[str, Any]]]) -> tuple[str, dict[str, Any]]:
     wakes = [w for _, w in owed]
     return "\n\n".join(t for t, _ in owed), {
@@ -4284,75 +4212,89 @@ def _merge_wakes(owed: list[tuple[str, dict[str, Any]]]) -> tuple[str, dict[str,
         "attachments": list({a["id"]: a for w in wakes for a in w["attachments"]}.values())}
 
 
-async def _wake_owed(conv_id: str) -> None:
-    if not _owed_wakes.get(conv_id):
+async def _wake_turn(group: list[dict[str, Any]]) -> tuple[str, dict[str, Any]] | None:
+    """The text and ChatIn fields of the turn this group of queue rows is: a wake record (workers, scheduled tasks and
+    extensions: several fold into one turn, oldest first), or a chat_link record. None when the chat link is gone."""
+    ids = [r["id"] for r in group]
+    if group[0]["kind"] == "chat":
+        p = group[0]["payload"]
+        link = chat_links.get(p["link"])
+        got = chat_links.turn(p["kind"], link) if link else None
+        return None if got is None else (got[0], {"kind": p["kind"], "chat_link": {**got[1], "queue": ids}})
+    if group[0]["kind"] == "ext":
+        text, wake = _merge_wakes([(r["payload"]["text"], r["payload"]["wake"]) for r in group])
+    else:
+        rows = [run_store.get(r["payload"]["run_id"]) for r in group if r["kind"] == "worker"]
+        booked = [r["payload"] for r in group if r["kind"] == "job"]
+        text, wake = workers_mod.build_wake(await _noted_reports(_wake_reports([r for r in rows if r])) + booked)
+    return text, {"wake": {**wake, "queue": ids}}
+
+
+async def _drain_wakes(conv_id: str) -> None:
+    """Start the next hidden turn this chat is owed: a hidden user message (kind 'wake', 'chat_in' or 'chat_reply') and a
+    reply run started here, so it works with no window open. While a reply is being written the turn waits (_run_changed
+    retries when it ends). The rows are claimed from here until the turn ends, so a second trigger starts no duplicate;
+    they are delivered when it has (_run_chat), and startup claims nothing, so a turn lost with the process is owed again."""
+    rows = [r for r in wake_q.pending(conv_id)
+            if r["kind"] != "worker" or (run_store.get(r["payload"]["run_id"]) or {}).get("ended_at")]  # a worker's row waits for its end
+    if not rows:
+        _wake_waiting.discard(conv_id)
         return
     conv = convos.get(conv_id, with_messages=False)
-    if conv is None:  # the chat is gone: nobody to tell
-        _owed_wakes.pop(conv_id, None)
+    if conv is None:  # the chat is gone: nobody to tell (a reply to it ends its link)
+        for r in rows:
+            if r["kind"] == "chat":
+                chat_links.ended({"id": r["payload"]["link"], "kind": "chat_reply"}, "")
+        wake_q.done(r["id"] for r in rows)
+        _wake_waiting.discard(conv_id)
         return
-    if bus.answering(conv_id):
-        _owed_waiting.add(conv_id)  # _run_changed retries when the reply ends
+    fold = _WAKE_FOLD.get(rows[0]["kind"])
+    group = [r for r in rows if _WAKE_FOLD.get(r["kind"]) == fold] if fold else rows[:1]
+    ids = [r["id"] for r in group]
+    desk_id = conv["settings"].get("deskId")
+
+    def busy() -> bool:  # a queued desk turn would lose the link and its fence, so a chat message never queues there
+        return bool(bus.answering(conv_id)) or (group[0]["kind"] == "chat" and bool(desk_id) and bool(bus.live(conv_id) or _over_live_cap()))
+
+    if busy():
+        _wake_waiting.add(conv_id)
         return
-    _owed_waiting.discard(conv_id)
-    owed = _owed_wakes.pop(conv_id)
-    text, wake = _merge_wakes(owed)
-    if desk_id := conv["settings"].get("deskId"):
-        if not isinstance(_launch_desk(desk_id, text, MESSAGE_FROM, wake=wake), Run):
-            _owed_wakes.setdefault(conv_id, [])[:0] = owed
-            _owed_waiting.add(conv_id)
-        return
-    body = ChatIn(content=text, wake=wake)
-    bus.start(conv_id, lambda r: _run_chat(r, body), input=body.model_dump())
-
-
-# ---------------- chats messaging each other (chatlink.py) ----------------
-_chat_waiting: set[str] = set()  # chats owed a cross-chat turn that could not start yet (a reply was being written there)
-
-
-def _schedule_chat_delivery(conv_id: str) -> None:
+    _wake_waiting.discard(conv_id)
+    wake_q.claim(ids)  # held across the handlers' awaits: a second trigger meanwhile must not rebuild this turn
     try:
-        asyncio.get_running_loop().call_soon(_deliver_chat, conv_id)
-    except RuntimeError:  # called from the threadpool
-        if _loop is not None and not _loop.is_closed():
-            _loop.call_soon_threadsafe(_deliver_chat, conv_id)
-
-
-def _deliver_chat(conv_id: str) -> None:
-    """Start the oldest cross-chat turn owed to this chat (a message to it, or the reply to one it sent) as a hidden-kind
-    user row and a reply run under the chat's own settings, as a worker's wake does. Synchronous, so nothing can start a
-    second run between the check and the start."""
-    nxt = chat_links.next_for(conv_id)
-    if nxt is None:
-        _chat_waiting.discard(conv_id)
+        turn = await _wake_turn(group)
+    except BaseException:
+        wake_q.release(ids)
+        raise
+    if turn is None:  # its chat link ended (the other chat is gone): the next owed turn
+        wake_q.done(ids)
+        return _schedule_wake(conv_id)
+    text, fields = turn
+    if busy():  # a reply started while the handlers awaited: this wake runs when it ends
+        wake_q.release(ids)
+        _wake_waiting.add(conv_id)
         return
-    row = convos.get(conv_id, with_messages=False)
-    if row is None:  # the chat is gone: a message to it is dropped, a reply to it has nobody to tell
-        chat_links.ended({"id": nxt[1]["id"], "kind": "chat_reply"}, "")
-        _chat_waiting.discard(conv_id)
-        return _schedule_chat_delivery(conv_id)
-    desk_id = row["settings"].get("deskId")
-    if bus.answering(conv_id) or (desk_id and (bus.live(conv_id) or _over_live_cap())):
-        _chat_waiting.add(conv_id)  # _run_changed retries; a queued desk turn would lose the link and its fence, so it never queues
-        return
-    _chat_waiting.discard(conv_id)
-    kind, link = nxt
-    got = chat_links.turn(kind, link)
-    if got is None:
-        return _schedule_chat_delivery(conv_id)
-    text, cl = got
-    chat_links.started(kind, link["id"])
     if desk_id:
-        started = _launch_desk(desk_id, text, MESSAGE_FROM, kind=kind, chat_link=cl)
-        if not isinstance(started, Run):
-            chat_links.unstarted(kind, link["id"])
-            _chat_waiting.add(conv_id)
-        return
-    body = ChatIn(content=text, kind=kind, chat_link=cl)
-    bus.start(conv_id, lambda r: _run_chat(r, body), input=body.model_dump())
+        # A desk-bound chat is woken through its desk, so the turn runs under the desk runtime, supervisor and settle.
+        run = _launch_desk(desk_id, text, MESSAGE_FROM, **fields)
+    else:
+        body = ChatIn(content=text, **fields)
+        run = bus.start(conv_id, lambda r: _run_chat(r, body), input=body.model_dump())
+    if isinstance(run, Run):
+        run.task.add_done_callback(lambda _t: wake_q.release(ids))
+    else:  # a run is still live on the conversation (its learn tail), or the desk is in no status that takes a message
+        wake_q.release(ids)
+        _wake_waiting.add(conv_id)
 
 
-chat_links = chatlink.ChatLinks(db, convos, deliver=_schedule_chat_delivery)
+def owe_wake(conversation_id: str, text: str, wake: dict[str, Any]) -> None:
+    """An extension owes this chat a hidden wake turn: the same kind a finished worker's report gets (NO_REPLY when there is
+    nothing new to say). Several owed at once fold into one turn."""
+    wake_q.add(conversation_id, "ext", {"text": text, "wake": wake})
+    _schedule_wake(conversation_id)
+
+
+chat_links = chatlink.ChatLinks(db, convos, wake_q, deliver=_schedule_wake)
 toolbox.chat_links = chat_links
 
 
@@ -5380,20 +5322,17 @@ async def _recover_runs() -> None:
 @host.on_start
 async def _workers_startup() -> None:
     """After run recovery: workers that were queued or running when the last process died are interrupted (resumable), their
-    cards denied, every ended worker whose report never reached its chat gets its wake, and shell jobs those workers left
+    cards denied, every wake still queued (wakes.py) is delivered again, and shell jobs those workers left
     running are killed (nothing can poll them again)."""
     try:
-        for cid in workers_mgr.recover():
+        wake_q.startup()
+        workers_mgr.recover()
+        for cid in wake_q.convs():
             _schedule_wake(cid)
         if n := await workers_mgr.reap_orphan_jobs():
             log.info("killed %d shell job(s) left running by workers of the previous backend", n)
     except Exception:  # noqa: BLE001 - recovery must never stop the backend from starting
         log.warning("worker recovery failed", exc_info=True)
-    try:
-        for cid in chat_links.recover():
-            _schedule_chat_delivery(cid)
-    except Exception:  # noqa: BLE001
-        log.warning("chat link recovery failed", exc_info=True)
 
 
 # ---------------- scheduled jobs, proposals, agent inbox ----------------
@@ -5510,9 +5449,6 @@ async def _job_fired(job: dict[str, Any], fire: dict[str, Any]) -> None:
                                       "trigger": fire.get("trigger") or ("manual" if fire.get("manual") else "clock")})
 
 
-_job_wakes: dict[str, list[dict[str, Any]]] = {}  # origin chat -> finished task reports waiting to be handed over (ponytail: lost on restart)
-
-
 def _job_ended(run_id: str, job_id: str) -> None:
     """A finished run that answered NO_REPLY is flagged unchanged, so the inbox and notifications skip it. A run of a task
     booked from a chat (schedule_task) hands its result to that chat as a hidden wake turn, where the assistant decides
@@ -5533,8 +5469,8 @@ def _job_ended(run_id: str, job_id: str) -> None:
         if not origin or not convos.get(origin):
             return
         tainted = bool((convos.get(row["conversation_id"], with_messages=False) or {}).get("settings", {}).get("tainted"))
-        _job_wakes.setdefault(origin, []).append({"id": run_id, "label": "Scheduled task", "title": job.get("name") or "",
-                                                   "goal": job.get("prompt") or "", "status": "done", "text": text, "tainted": tainted})
+        wake_q.add(origin, "job", {"id": run_id, "label": "Scheduled task", "title": job.get("name") or "",
+                                   "goal": job.get("prompt") or "", "status": "done", "text": text, "tainted": tainted}, f"job:{run_id}")
         _schedule_wake(origin)
     except Exception:  # noqa: BLE001 - delivery must never break the scheduler
         log.warning("could not hand job run %s to its chat", run_id, exc_info=True)

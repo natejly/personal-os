@@ -354,14 +354,12 @@ class RunStore:
         except sqlite3.Error:
             log.warning("could not update the input of run %s", run_id, exc_info=True)
 
-    def workers(self, conversation_id: str | None = None, undelivered: bool = False) -> list[dict[str, Any]]:
-        """Worker runs (kind='worker'), newest first: one conversation's, or every ended worker whose wake is still owed."""
+    def workers(self, conversation_id: str | None = None) -> list[dict[str, Any]]:
+        """Worker runs (kind='worker'), newest first: one conversation's, or all."""
         where, params = ["kind='worker'"], []
         if conversation_id:
             where.append("json_extract(input,'$.conversation_id')=?")
             params.append(conversation_id)
-        if undelivered:
-            where.append("ended_at IS NOT NULL AND COALESCE(json_extract(input,'$.wake_delivered'),1)=0")
         return [self._run_row(r) for r in self._all(f"SELECT * FROM agent_runs WHERE {' AND '.join(where)} ORDER BY started_at DESC, rowid DESC", params)]  # type: ignore[misc]
 
     def events(self, run_id: str, since: int = 0, until: int | None = None) -> list[RunEvent]:

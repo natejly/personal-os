@@ -33,6 +33,7 @@ from . import limits, osplat, redact
 from .osplat.darwin import parse_vm_stat  # noqa: F401  (kept for callers and tests)
 from .subagents import GROUP, MAX_TASK_CHARS, Child, Subagents, _now_line, _one_line, worker_effort
 from .tools import ToolSpec, _obj, tool_error
+from .wakes import WakeQueue
 from .working import escape_tags
 
 log = logging.getLogger(__name__)
@@ -248,13 +249,6 @@ def build_wake(reports: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
     return WAKE_HEADER + "\n\n" + "\n\n".join(blocks), wake
 
 
-def wake_decision(answering: bool, pending: int, conversation_exists: bool) -> str:
-    """'skip' (nothing owed, or the chat is gone), 'wait' (a reply is being written: its end retries) or 'go'."""
-    if not pending or not conversation_exists:
-        return "skip"
-    return "wait" if answering else "go"
-
-
 # ---- machine state -------------------------------------------------------------------------------
 
 def free_memory_fraction() -> float | None:
@@ -310,6 +304,7 @@ class Workers:
         self.sub, self.store, self.publish, self.memory = sub, store, publish, memory
         self.answering = answering or (lambda cid: None)  # conversation id -> the live reply (a Run) or None
         self.on_end = on_end                              # (conversation id) -> awaitable: wake its front agent
+        self.wakes = WakeQueue(store.db) if store is not None else None  # each worker's report is a row here until its wake turn ends
         self.queue: deque[Child] = deque()
         self.stopped: dict[str, str] = {}                 # worker id -> who stopped it ('tool' | 'ui')
         sub.on_stall = self._stalled
@@ -362,9 +357,11 @@ class Workers:
             args["resume_id"] = resume
         got = self.sub._start(ctx, args, kind="worker", defer=True, prompt=WORKER_PROMPT,
                               meta={"title": _one_line(a.get("title") or a.get("goal"), 80), "goal": _one_line(a.get("goal"), 400),
-                                    "allow_subworkers": allow, "wake_delivered": 0, **(meta or {})})
+                                    "allow_subworkers": allow, **(meta or {})})
         if isinstance(got, dict):
             return got
+        if self.wakes is not None and got.conversation_id:  # its report is owed to the chat until the wake turn that carries it has ended
+            self.wakes.add(got.conversation_id, "worker", {"run_id": got.id}, f"worker:{got.id}")
         self.queue.append(got)
         self.watch(got)
         self.pump()
@@ -417,8 +414,9 @@ class Workers:
         if self.store is not None:
             self.store.mark_input(ch.id, exit_reason=ch.exit_reason, tainted=bool(ch.ctx.get("tainted")),
                                   taint_sources=list(ch.ctx.get("taint_sources") or []), attachments=list(ch.ctx.get("reply_attachments") or []),
-                                  report=strip_no_reply(self.report_text({"run_id": ch.id}))[:4000],  # the list reads this, never the transcript
-                                  **({"wake_delivered": 1} if by in QUIET_STOPS else {}))
+                                  report=strip_no_reply(self.report_text({"run_id": ch.id}))[:4000])  # the list reads this, never the transcript
+            if by in QUIET_STOPS:
+                self.wakes.done_key(f"worker:{ch.id}")
         self._emit(ch.conversation_id, self.info_of(ch))
         self.pump()
         if self.on_end is not None and not self.closing and by not in QUIET_STOPS and ch.conversation_id:
@@ -518,13 +516,10 @@ class Workers:
                 calls[str(data["id"])]["error"] = bool(data.get("error"))
         return list(calls.values())[-n:] if n else list(calls.values())
 
-    def pending_wakes(self, conversation_id: str) -> list[dict[str, Any]]:
-        """Ended workers of a conversation whose report has not been handed to its front agent, oldest first."""
-        return list(reversed(self.store.workers(conversation_id, undelivered=True)))
-
-    def mark_delivered(self, ids: Iterable[str]) -> None:
-        for i in ids:
-            self.store.mark_input(i, wake_delivered=1)
+    def pending_wakes(self, conversation_id: str | None = None) -> list[dict[str, Any]]:
+        """Ended workers (of a conversation, else all) whose report has not been handed to their front agent, oldest first."""
+        rows = (self.store.get(q["payload"]["run_id"]) for q in self.wakes.open(conversation_id, "worker"))
+        return [r for r in rows if r and r.get("ended_at")]
 
     # ---- acting --------------------------------------------------------------------------------------
     def _mine(self, worker_id: str, conversation_id: str | None) -> dict[str, Any] | None:
@@ -556,7 +551,7 @@ class Workers:
             self.stopped[ch.id] = by
             ch.error = ch.error or why or self.STOPPED_BY.get(by) or "Stopped."
             if by in QUIET_STOPS:
-                self.store.mark_input(ch.id, wake_delivered=1)
+                self.wakes.done_key(f"worker:{ch.id}")
             if ch.state == "queued":
                 try:
                     self.queue.remove(ch)
@@ -591,7 +586,7 @@ class Workers:
                                   "title": inp.get("title"), "goal": inp.get("goal"), "allow_subworkers": inp.get("allow_subworkers")},
                          resume=row["run_id"], meta={"resume_of": row["run_id"], "origin": inp.get("origin") or row["run_id"]})
         if "worker_id" in out:
-            self.store.mark_input(row["run_id"], wake_delivered=1)  # the new run reports for it
+            self.wakes.done_key(f"worker:{row['run_id']}")  # the new run reports for it
         return out
 
     # ---- events ----------------------------------------------------------------------------------------
@@ -634,7 +629,7 @@ class Workers:
             self.store.update(r["run_id"], status="interrupted", ended_at=time.time(),
                               error="Interrupted: the backend stopped while this worker was queued.")
         convs: list[str] = []
-        for r in self.store.workers(undelivered=True):
+        for r in self.pending_wakes():
             for i in [r["run_id"], *(c["run_id"] for c in self.store._all("SELECT run_id FROM agent_runs WHERE parent_run_id=?", (r["run_id"],)))]:
                 for a in self.store.approvals("pending", run_id=i):  # its sub-workers' cards too: nothing waits on them now
                     self.store.decide(a["call_id"], "deny", by="restart", note="the backend restarted")

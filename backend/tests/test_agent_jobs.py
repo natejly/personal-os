@@ -1198,7 +1198,7 @@ def test_a_finished_task_wakes_the_chat_that_booked_it() -> None:
     wake = next(m for m in msgs if m.get("kind") == "wake")
     assert "Scheduled task" in wake["content"] and "Acme replied: invoice approved." in wake["content"]
     assert msgs[-1]["role"] == "assistant" and msgs[-1]["content"] == "Good news: Acme approved the invoice."
-    assert not appmod._job_wakes.get(cid)  # noqa: SLF001
+    assert not appmod.wake_q.open(cid, "job")
     jobs.delete(job["id"])
 
 

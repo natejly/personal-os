@@ -115,7 +115,7 @@ async def _end_all() -> None:
     mgr.queue.clear()
     if mgr._recheck is not None:
         mgr._recheck.cancel()
-    mgr.on_end = lambda cid: appmod._wake_conversation(cid)
+    mgr.on_end = lambda cid: appmod._drain_wakes(cid)
 
 
 # ---------------- helpers ----------------

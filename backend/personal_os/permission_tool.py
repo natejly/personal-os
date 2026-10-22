@@ -84,7 +84,7 @@ def preview(tb: Any, args: dict[str, Any]) -> list[str] | None:
 
 
 def register(tb: Any) -> None:
-    async def permissions_update(ctx: dict[str, Any], kind: str, value: str = "", target: str = "", remove: bool = False) -> Any:
+    async def permissions_update(ctx: dict[str, Any], kind: str, value: str, target: str = "", remove: bool = False) -> Any:
         store: Callable[..., Any] | None = getattr(tb, "permission_store", None)
         if store is None or ctx.get("proposal_only"):
             return tool_error("Permission settings cannot be changed from here.")

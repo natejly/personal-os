@@ -439,7 +439,7 @@ def register(tb: Any) -> None:
     spec.available_fn = _any_converter
     R("convert_document", spec)
 
-    async def render_preview(ctx: dict[str, Any], path: str, pages: str | None = None, dpi: int | None = None) -> Any:
+    async def render_preview(ctx: dict[str, Any], path: str, pages: str | None = None, dpi: int = DEFAULT_DPI) -> Any:
         src, err = _resolve(tb, ctx, path)
         if err:
             return err

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import difflib
 import fnmatch
 import hashlib
 import inspect
@@ -305,6 +306,18 @@ def tool_error(message: str, *, field: str | None = None, expected: str | None =
     return e
 
 
+_EXCEPTION_ERROR = re.compile(r"^[\w.]+: (\w+(Error|Exception)\b|HTTP \d)")
+
+
+def counts_toward_block(result: Any) -> bool:
+    """Whether a tool error is the model's argument mistake or a crash, which repeating will not fix. A not-found or
+    empty outcome (a wrong id, no match) is a valid answer that the next call can differ from, so it does not count
+    toward disabling the tool for the reply."""
+    if not isinstance(result, dict) or not result.get("error"):
+        return False
+    return bool(result.get("expected")) or bool(_EXCEPTION_ERROR.match(str(result["error"])))
+
+
 def resolve_ref(rows: list[dict[str, Any]], key: Any, id_key: str, name_key: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Resolve what a model passed where an id or a name is wanted: an id (with a `doc_` prefix tolerated), then a name
     (case-insensitive, a folder path or file extension ignored), then a unique substring. Returns (row, candidates):
@@ -376,6 +389,68 @@ def coerce_args(spec: "ToolSpec", args: dict[str, Any]) -> dict[str, Any] | None
         else:
             return tool_error(redact.scrub_command_output(f"{spec.name}: {key} must be a {t}, not {v[:40]!r}."),
                               field=key, expected=t, example=(spec.examples or [None])[0])
+    return None
+
+
+_JSON_TYPES = {"string": str, "boolean": bool, "array": list, "object": dict}
+
+
+def _type_ok(v: Any, t: Any) -> bool:
+    if t == "integer":
+        return (isinstance(v, int) and not isinstance(v, bool)) or (isinstance(v, float) and v.is_integer())
+    if t == "number":
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+    if t == "string":
+        return isinstance(v, (str, int, float)) and not isinstance(v, bool)  # a number for a text field is read as its text
+    return t not in _JSON_TYPES or isinstance(v, _JSON_TYPES[t])
+
+
+def _param_list(props: dict[str, Any], required: set[str]) -> str:
+    return ", ".join(f"{k}{'*' if k in required else ''} ({p.get('type', 'any') if isinstance(p, dict) else 'any'})" for k, p in props.items())
+
+
+def validate_args(spec: "ToolSpec", args: dict[str, Any]) -> dict[str, Any] | None:
+    """Check `args` against the tool's JSON schema: unknown names, missing required ones, wrong types and enum members.
+    Coerces what is harmless (a whole float for an integer, a differently cased enum word). A name the function takes
+    that the schema does not list is a documented alias (skill_view's `id`) and passes; with one given, the function
+    checks what is required. Returns a tool_error that names the field and lists the right parameters, else None."""
+    props = spec.parameters.get("properties") or {}
+    required = set(spec.parameters.get("required") or [])
+    try:
+        params = inspect.signature(spec.fn).parameters
+    except (TypeError, ValueError):
+        return None
+    var_kw = any(p.kind is p.VAR_KEYWORD for p in params.values())
+    aliases = {k for k in args if k not in props and k in params}
+
+    def fail(msg: str, field: str, expected: str | None = None) -> dict[str, Any]:
+        return tool_error(redact.scrub_command_output(f"{spec.name}: {msg}"), field=field,
+                          expected=expected or "parameters: " + (_param_list(props, required) or "none"),
+                          example=(spec.examples or [None])[0], alternative=ALTERNATIVE.get(spec.name))
+
+    if not var_kw:
+        for k in args:
+            if k not in props and k not in params:
+                near = difflib.get_close_matches(k, list(props), n=1)
+                return fail(f"unknown parameter {k[:40]!r}" + (f"; did you mean {near[0]!r}?" if near else "."), k)
+    for k in required:
+        if k not in args and not aliases:
+            return fail(f"{k} is required.", k)
+    for k, v in args.items():
+        p = props.get(k)
+        if not isinstance(p, dict):
+            continue
+        t = p.get("type")
+        if not _type_ok(v, t) or (t == "array" and (it := (p.get("items") or {}).get("type")) and not all(_type_ok(x, it) for x in v)):
+            return fail(f"{k} must be {'a list of ' + str(p['items']['type']) + 's' if t == 'array' and (p.get('items') or {}).get('type') else 'a ' + str(t)}.", k)
+        if t == "integer" and isinstance(v, float):
+            args[k] = int(v)
+        if enum := p.get("enum"):
+            if v not in enum:
+                low = next((e for e in enum if isinstance(e, str) and isinstance(v, str) and e.lower() == v.strip().lower()), None)
+                if low is None:
+                    return fail(f"{k} must be one of {', '.join(map(str, enum))}, not {str(v)[:40]!r}.", k)
+                args[k] = low
     return None
 
 
@@ -1132,12 +1207,14 @@ class Toolbox:
 
     def precheck(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> dict[str, Any] | None:
         """The error `call` would return for arguments the tool's signature cannot take, found before anything is
-        approved or run. Coerces scalar types (coerce_args), then binds, so None means the call may go on. Not a spec
+        approved or run. Coerces scalar types (coerce_args), checks the schema (validate_args), then binds, so None means the call may go on. Not a spec
         (a connector tool) is None as well. With `ctx`, a refusal by an extension's precheck too."""
         spec = self.specs.get(name)
         if not spec:
             return None
         if (bad := coerce_args(spec, args)) is not None:
+            return bad
+        if (bad := validate_args(spec, args)) is not None:
             return bad
         if ctx is not None and (refused := self.prechecks.refusal(name, args, ctx)):
             return tool_error(refused)
@@ -1827,7 +1904,7 @@ class Toolbox:
                       {"kind": "mermaid", "content": "graph TD\n  A[Order] --> B{Paid?}\n  B -->|yes| C[Ship]", "title": "Order flow"},
                       {"kind": "html", "content": "<h1>Dashboard</h1><p>...</p>", "title": "Mock-up"}]))
 
-        async def propose_plan(ctx: dict[str, Any], steps: Any = None, title: str = "") -> Any:
+        async def propose_plan(ctx: dict[str, Any], steps: Any, title: str = "", confidence: Any = None, assumptions: Any = None) -> Any:
             """Unreachable from a chat: the plan *is* its approval card, so app.py records the plan at the approval
             gate and answers the call from the user's decision. Only a direct toolbox.call lands here."""
             return tool_error("propose_plan is answered by the approval gate, which is not running for this call.",

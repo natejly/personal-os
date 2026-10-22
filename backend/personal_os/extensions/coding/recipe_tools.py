@@ -54,7 +54,14 @@ def tools(coding: Coding) -> list[ToolSpec]:
         return {"id": found["id"], "name": found["name"], "version": v["version"], "approved": v["approved_at"] is not None,
                 "created_by": v["created_by"], "recipe": v["body"], "versions": coding.recipes.versions(found["id"])}
 
-    async def coding_recipe_save(ctx: dict[str, Any], **fields: Any) -> Any:
+    async def coding_recipe_save(ctx: dict[str, Any], name: str, prompt: str, repo_path: str, verify: dict[str, Any],
+                                 description: str | None = None, inputs: list[dict[str, Any]] | None = None, worktree: str | None = None,
+                                 worktree_path: str | None = None, branch_prefix: str | None = None, driver: str | None = None,
+                                 model: str | None = None, permission_mode: str | None = None, allowed_tools: list[str] | None = None,
+                                 denied_tools: list[str] | None = None, max_steps: int | None = None, timeout_s: int | None = None,
+                                 max_retries: int | None = None) -> Any:
+        given = {**locals()}
+        fields = {k: given[k] for k in FIELDS if given.get(k) is not None}
         try:
             out = await asyncio.to_thread(coding.recipes.save, fields, "agent")
         except RecipeError as e:

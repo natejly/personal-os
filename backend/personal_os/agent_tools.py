@@ -27,7 +27,7 @@ def register(tb: Any) -> None:
     def _defs() -> Any:
         return getattr(getattr(tb, "subagents", None), "defs", None)
 
-    async def agent_create(ctx: dict[str, Any], name: str = "", description: str = "", brief: str = "", **_dropped: Any) -> Any:
+    async def agent_create(ctx: dict[str, Any], name: str, brief: str, description: str = "") -> Any:
         defs = _defs()
         if defs is None:
             return tool_error("Agents are not available.")
@@ -83,7 +83,7 @@ def register(tb: Any) -> None:
         with cl.db.tx() as c:
             return c.execute("SELECT 1 FROM approvals WHERE status='pending' AND conversation_id=?", (cid,)).fetchone() is not None
 
-    async def agent_message(ctx: dict[str, Any], agent: str = "", message: str = "", timeout_seconds: int = WAIT_DEFAULT) -> Any:
+    async def agent_message(ctx: dict[str, Any], agent: str, message: str, timeout_seconds: int = WAIT_DEFAULT) -> Any:
         defs, cl = _defs(), getattr(tb, "chat_links", None)
         me, body = str(ctx.get("conversation_id") or ""), str(message or "").strip()
         if defs is None or cl is None:

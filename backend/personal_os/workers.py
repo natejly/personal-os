@@ -669,7 +669,7 @@ def register(tb: Any) -> None:
     def _w() -> Workers | None:
         return getattr(tb, "workers", None)
 
-    async def delegate(ctx: dict[str, Any], goal: str = "", context: str = "", constraints: str = "", done_criteria: str = "",
+    async def delegate(ctx: dict[str, Any], goal: str, context: str = "", constraints: str = "", done_criteria: str = "",
                        report_format: str = "", title: str = "", allow_subworkers: bool = False, agent: str = "") -> Any:
         w = _w()
         if w is None:
@@ -704,7 +704,7 @@ def register(tb: Any) -> None:
                    "context": "The user flies United or Delta and wants to arrive before 6pm.", "done_criteria": "A table of three options with price, times and airline",
                    "report_format": "Short table, then one recommendation line", "title": "Flight options"}]))
 
-    async def message_worker(ctx: dict[str, Any], worker_id: str = "", text: str = "") -> Any:
+    async def message_worker(ctx: dict[str, Any], worker_id: str, text: str) -> Any:
         w = _w()
         if w is None:
             return tool_error("Workers are not available.")
@@ -732,7 +732,7 @@ def register(tb: Any) -> None:
         out = []
         for r in rows[:20]:
             item = w.info(r)
-            item = {k: item[k] for k in ("id", "title", "status", "now", "queue_position", "resumable")}
+            item = {("worker_id" if k == "id" else k): item[k] for k in ("id", "title", "status", "now", "queue_position", "resumable")}  # the name the other worker tools take
             item["recent_actions"] = w.recent_actions(r["run_id"])
             if (r.get("input") or {}).get("tainted"):
                 ctx["tainted"] = True  # what a tainted worker did is untrusted too
@@ -744,7 +744,7 @@ def register(tb: Any) -> None:
         "check_worker", "Status of one worker (all of this conversation's if no id): state, current activity, last actions. Only to answer the user about progress; do not poll.",
         _obj({"worker_id": {"type": "string"}}, []), check_worker, GROUP, "safe", examples=[{}, {"worker_id": "sa_abc"}]))
 
-    async def stop_worker(ctx: dict[str, Any], worker_id: str = "") -> Any:
+    async def stop_worker(ctx: dict[str, Any], worker_id: str) -> Any:
         w = _w()
         return await w.stop(ctx.get("conversation_id"), worker_id, by="tool") if w else tool_error("Workers are not available.")
 
@@ -752,7 +752,7 @@ def register(tb: Any) -> None:
         "stop_worker", "Stop a worker and anything it started; partial work stays and it can be resumed. No report follows.",
         _obj({"worker_id": {"type": "string"}}, ["worker_id"]), stop_worker, GROUP, "safe", examples=[{"worker_id": "sa_abc"}]))
 
-    async def resume_worker(ctx: dict[str, Any], worker_id: str = "", text: str = "") -> Any:
+    async def resume_worker(ctx: dict[str, Any], worker_id: str, text: str = "") -> Any:
         w = _w()
         if w is None:
             return tool_error("Workers are not available.")

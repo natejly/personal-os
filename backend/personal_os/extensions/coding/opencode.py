@@ -355,7 +355,7 @@ def tool(coding: Any) -> ToolSpec:
                     "on as a background job you follow with shell_poll(job_id, wait_s=...); background=true starts it that way.",
                     _obj({"prompt": {"type": "string", "description": "The task, with the files or folder it concerns"},
                           "cwd": {"type": "string", "description": "The folder to work in, usually a repo; relative to the default folder"},
-                          "timeout_s": {"type": "integer", "default": 300}, "background": {"type": "boolean", "default": False},
+                          "timeout_s": {"type": "integer"}, "background": {"type": "boolean", "default": False},
                           "continue_session": {"type": "boolean", "default": False},
                           "in_place": {"type": "boolean", "default": False,
                                        "description": "Edit a repo's checkout directly instead of a fresh worktree"},

@@ -904,7 +904,7 @@ def register(tb: Any) -> None:
                     "A blocked command returns sandbox_blocked with the OS error and the rule that caused it; report that wall to "
                     "the user instead of retrying blindly.",
                     _obj({"command": {"type": "string"}, "cwd": {"type": "string", "description": "Any folder on this Mac; relative to the default folder"},
-                          "timeout_s": {"type": "integer", "default": 120}, "background": {"type": "boolean", "default": False},
+                          "timeout_s": {"type": "integer"}, "background": {"type": "boolean", "default": False},
                           "notify_on_complete": {"type": "boolean", "default": True},
                           "unsandboxed": {"type": "boolean", "default": False},
                           "on_timeout": {"type": "string", "enum": ["background", "kill"], "default": "background"}}, ["command"]),

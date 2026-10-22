@@ -260,7 +260,7 @@ def register(tb: Any) -> None:
         "may call it by, and last activity. Use it to find the chat to read or message.",
         _obj({"limit": {"type": "integer", "default": 30}}, []), list_chats, GROUP, "safe", examples=[{}]))
 
-    async def read_chat(ctx: dict[str, Any], chat_id: str = "", last: int = 20) -> Any:
+    async def read_chat(ctx: dict[str, Any], chat_id: str, last: int = 20) -> Any:
         cl = _cl()
         if cl is None:
             return tool_error("Chats are not available.")
@@ -280,7 +280,7 @@ def register(tb: Any) -> None:
         _obj({"chat_id": {"type": "string"}, "last": {"type": "integer", "default": 20}}, ["chat_id"]), read_chat, GROUP, "safe",
         examples=[{"chat_id": "c_abc", "last": 10}], taints=True))
 
-    async def message_chat(ctx: dict[str, Any], chat_id: str = "", text: str = "", wait_for_reply: bool = False,
+    async def message_chat(ctx: dict[str, Any], chat_id: str, text: str, wait_for_reply: bool = False,
                            timeout_seconds: int = WAIT_DEFAULT) -> Any:
         cl = _cl()
         if cl is None:

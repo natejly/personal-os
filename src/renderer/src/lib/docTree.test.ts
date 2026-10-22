@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Doc, DocFolder } from '@shared/types'
 import {
-  buildGroups, canDropDoc, canDropFolder, chainTo, flattenGroups, folderKey, groupShutKey, isInside, renameKeys,
+  buildGroups, canDropDoc, canDropFolder, chainTo, crumbsOf,flattenGroups, folderKey, groupShutKey, isInside, renameKeys,
   joinPath, nameOf, parentOf, recentDocs, scopeOf, splitPinned, starredDocs, type Group
 } from './docTree'
 
@@ -73,6 +73,15 @@ test('expand keys separate the two kinds of row, and a path is scoped to its pro
 test('chainTo names every folder to open on the way down', () => {
   assert.deepEqual(chainTo('Work/Research/2026'), ['Work', 'Work/Research', 'Work/Research/2026'])
   assert.deepEqual(chainTo(''), [])
+})
+
+test('crumbs lead from the scope down through every folder, each stepping to its own path', () => {
+  assert.deepEqual(crumbsOf('p1', 'Acme', 'Work/Research'), [
+    { label: 'Acme', scope: 'p1', path: '' },
+    { label: 'Work', scope: 'p1', path: 'Work' },
+    { label: 'Research', scope: 'p1', path: 'Work/Research' }
+  ])
+  assert.deepEqual(crumbsOf('', 'Personal', ''), [{ label: 'Personal', scope: '', path: '' }])
 })
 
 test("a doc's scope is its project, and Personal is the empty one", () => {

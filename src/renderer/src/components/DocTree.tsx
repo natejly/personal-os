@@ -61,6 +61,27 @@ function markWords(text: string, query: string): React.ReactNode {
   return text.split(re).map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part))
 }
 
+/** Bring a folder (or a group, path '') row into view once the tree has re-rendered open. */
+export function revealNode(scope: string, path: string): void {
+  requestAnimationFrame(() => {
+    const rows = document.querySelectorAll<HTMLElement>('[data-node]')
+    for (const r of rows) if (r.dataset.node === folderKey(scope, path)) { r.scrollIntoView({ block: 'nearest' }); return }
+  })
+}
+
+/** Arrow keys walk the visible rows; Right opens and Left closes a folder or group, Enter/Space come from rowButton. */
+const ROWS = '.doc-tree .doc-row, .doc-tree .doc-folder-row:not(.drafting), .doc-tree .doc-group-row'
+function treeKeys(e: React.KeyboardEvent<HTMLElement>): void {
+  const row = e.target as HTMLElement
+  if (!row.matches(ROWS)) return
+  const open = row.getAttribute('aria-expanded')
+  if ((e.key === 'ArrowRight' && open === 'false') || (e.key === 'ArrowLeft' && open === 'true')) { e.preventDefault(); row.click(); return }
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+  e.preventDefault()
+  const all = [...e.currentTarget.querySelectorAll<HTMLElement>(ROWS)]
+  all[all.indexOf(row) + (e.key === 'ArrowDown' ? 1 : -1)]?.focus()
+}
+
 export default function DocTree({ hits, docs, activeId, query, onQuery }: Props): JSX.Element {
   const folders = useStore((s) => s.docFolders)
   const projects = useStore((s) => s.projects)
@@ -134,6 +155,12 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
   useEffect(() => {
     if (activeScope !== null) expandTo(activeScope, activeFolder ?? '')
   }, [activeScope, activeFolder, expandTo])
+
+  // Opened from elsewhere (chat, search): once its ancestors have unfolded, bring its row into view.
+  useEffect(() => {
+    if (!activeId) return
+    requestAnimationFrame(() => document.querySelector('.doc-tree .doc-row.active')?.scrollIntoView({ block: 'nearest' }))
+  }, [activeId])
 
   const expanded = useMemo(() => new Set(expandedList), [expandedList])
   const { pinned, rest } = useMemo(() => splitPinned(docs), [docs])
@@ -252,8 +279,9 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
   const docRow = (d: Doc, depth: number, showScope = false): JSX.Element => (
     <div
       key={d.id}
-      className={`doc-row ${d.id === activeId ? 'active' : ''}`}
-      style={{ paddingLeft: 8 + depth * 14 }}
+      className={`doc-row ${d.id === activeId ? 'active' : ''} ${showScope && d.folder ? 'has-meta' : ''}`}
+      style={{ paddingLeft: 6 + depth * 14 }}
+      title={d.title || 'Untitled'}
       {...rowButton(() => void openDoc(d.id))}
       draggable
       onDragStart={(e) => {
@@ -265,6 +293,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
       }}
       onDragEnd={endDrag}
     >
+      <span className="doc-row-twist" />
       {isDashboardDoc(d) ? <LayoutDashboard size={13} className="doc-row-icon" /> : <FileText size={13} className="doc-row-icon" />}
       <span className="doc-row-main">
         <span className="doc-row-title">
@@ -277,18 +306,23 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
         </span>
         {showScope && d.folder && <span className="doc-row-meta">{d.folder}</span>}
       </span>
-      <button className={`icon-btn ghost xs ${d.pinned ? 'starred' : ''}`} title={d.pinned ? 'Unpin' : 'Pin'}
-        onClick={(e) => { e.stopPropagation(); void setDocPin(d.id, !d.pinned) }}>
-        <Pin size={12} fill={d.pinned ? 'currentColor' : 'none'} />
-      </button>
-      <button className={`icon-btn ghost xs ${d.starred ? 'starred' : ''}`} title={d.starred ? 'Unstar' : 'Star'}
-        onClick={(e) => { e.stopPropagation(); void setDocStar(d.id, !d.starred) }}>
-        <Star size={12} fill={d.starred ? 'currentColor' : 'none'} />
-      </button>
-      <button className="icon-btn ghost xs danger" title="Delete"
-        onClick={(e) => { e.stopPropagation(); void deleteDoc(d.id) }}>
-        <Trash2 size={12} />
-      </button>
+      {(d.pinned || d.starred) && (
+        <span className="doc-row-flag">{d.pinned && <Pin size={10} fill="currentColor" />}{d.starred && <Star size={10} fill="currentColor" />}</span>
+      )}
+      <span className="row-actions">
+        <button className={`icon-btn ghost xs ${d.pinned ? 'starred' : ''}`} title={d.pinned ? 'Unpin' : 'Pin'}
+          onClick={(e) => { e.stopPropagation(); void setDocPin(d.id, !d.pinned) }}>
+          <Pin size={12} fill={d.pinned ? 'currentColor' : 'none'} />
+        </button>
+        <button className={`icon-btn ghost xs ${d.starred ? 'starred' : ''}`} title={d.starred ? 'Unstar' : 'Star'}
+          onClick={(e) => { e.stopPropagation(); void setDocStar(d.id, !d.starred) }}>
+          <Star size={12} fill={d.starred ? 'currentColor' : 'none'} />
+        </button>
+        <button className="icon-btn ghost xs danger" title="Delete"
+          onClick={(e) => { e.stopPropagation(); void deleteDoc(d.id) }}>
+          <Trash2 size={12} />
+        </button>
+      </span>
     </div>
   )
 
@@ -302,30 +336,34 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
       <div
         key={menuKey}
         className={`doc-group-row ${over === key ? 'drop-into' : ''} ${menu === menuKey ? 'menu-open' : ''}`}
+        data-node={key}
+        aria-expanded={open}
+        {...rowButton(() => toggleFolder(shut))}
         onDragOver={dragOver(g.scope, '')}
         onDragLeave={() => { if (over === key) setOver(null) }}
         onDrop={dropOn(g.scope, '')}
       >
-        <button className="doc-folder-toggle" onClick={() => toggleFolder(shut)} aria-expanded={open}
-          aria-label={`${open ? 'Collapse' : 'Expand'} ${g.name}`}>
+        <span className="doc-folder-toggle">
           <ChevronRight size={11} className={open ? 'rot90' : undefined} />
           {g.scope
             ? <span className="project-dot" style={g.color ? { background: g.color } : undefined} />
             : <User size={12} />}
-        </button>
-        <button className="doc-group-name" onClick={() => toggleFolder(shut)} title={g.orphan ? 'This project no longer exists; its files are personal now' : g.name}>
+        </span>
+        <span className="doc-group-name" title={g.orphan ? 'This project no longer exists; its files are personal now' : g.name}>
           {g.name}
-        </button>
-        <button className="icon-btn ghost xs" title={`New file in ${g.name}`} aria-label={`New file in ${g.name}`}
-          onClick={(e) => { e.stopPropagation(); void createDoc({ project_id: g.scope || null }) }}>
-          <Plus size={13} />
-        </button>
-        <button className="icon-btn ghost xs" title="Actions" aria-label={`Actions for ${g.name}`}
-          onClick={(e) => { e.stopPropagation(); setMenu(menu === menuKey ? null : menuKey) }}>
-          <MoreHorizontal size={13} />
-        </button>
+        </span>
+        <span className="row-actions">
+          <button className="icon-btn ghost xs" title={`New file in ${g.name}`} aria-label={`New file in ${g.name}`}
+            onClick={(e) => { e.stopPropagation(); void createDoc({ project_id: g.scope || null }) }}>
+            <Plus size={13} />
+          </button>
+          <button className="icon-btn ghost xs" title="Actions" aria-label={`Actions for ${g.name}`}
+            onClick={(e) => { e.stopPropagation(); setMenu(menu === menuKey ? null : menuKey) }}>
+            <MoreHorizontal size={13} />
+          </button>
+        </span>
         {menu === menuKey && (
-          <div className="doc-folder-menu" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="doc-folder-menu" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
             <button onClick={() => { setMenu(null); void createDoc({ project_id: g.scope || null }) }}>New file here</button>
             <button onClick={() => newFolder(g.scope, '')}>New folder…</button>
             {newItems.map((i) => <button key={i.id} onClick={() => { setMenu(null); i.run(g.scope) }}>{i.label}</button>)}
@@ -343,6 +381,9 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
         key={`f:${key}`}
         className={`doc-folder-row ${over === key ? 'drop-into' : ''} ${menu === key ? 'menu-open' : ''}`}
         style={{ paddingLeft: 6 + depth * 14 }}
+        data-node={key}
+        aria-expanded={open}
+        {...rowButton(() => toggleFolder(key))}
         onDragOver={dragOver(f.scope, f.path)}
         onDragLeave={() => { if (over === key) setOver(null) }}
         onDrop={dropOn(f.scope, f.path)}
@@ -355,11 +396,10 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
         }}
         onDragEnd={endDrag}
       >
-        <button className="doc-folder-toggle" onClick={() => toggleFolder(key)} aria-expanded={open}
-          aria-label={`${open ? 'Collapse' : 'Expand'} ${f.name}`}>
+        <span className="doc-folder-toggle">
           <ChevronRight size={11} className={open ? 'rot90' : undefined} />
           {open ? <FolderOpen size={13} /> : <Folder size={13} />}
-        </button>
+        </span>
         {renaming?.path === f.path && renaming.scope === f.scope ? (
           <input
             className="doc-folder-rename"
@@ -367,20 +407,23 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
             defaultValue={renaming.name}
             ref={nameInput}
             onBlur={(e) => commitRename(e.currentTarget.value)}
+            onClick={(e) => e.stopPropagation()}
             onKeyDown={nameKeys}
           />
         ) : (
-          <button className="doc-folder-name" onClick={() => toggleFolder(key)}
+          <span className="doc-folder-name" title={f.name}
             onDoubleClick={() => setRenaming({ scope: f.scope, path: f.path, name: f.name })}>
             {f.name}
-          </button>
+          </span>
         )}
-        <button className="icon-btn ghost xs" title="Folder actions" aria-label={`Actions for ${f.name}`}
-          onClick={(e) => { e.stopPropagation(); setMenu(menu === key ? null : key) }}>
-          <MoreHorizontal size={13} />
-        </button>
+        <span className="row-actions">
+          <button className="icon-btn ghost xs" title="Folder actions" aria-label={`Actions for ${f.name}`}
+            onClick={(e) => { e.stopPropagation(); setMenu(menu === key ? null : key) }}>
+            <MoreHorizontal size={13} />
+          </button>
+        </span>
         {menu === key && (
-          <div className="doc-folder-menu" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="doc-folder-menu" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
             <button onClick={() => { setMenu(null); void createDoc({ project_id: f.scope || null, folder: f.path }) }}>New file here</button>
             <button onClick={() => newFolder(f.scope, f.path)}>New subfolder…</button>
             <button onClick={() => { setMenu(null); setRenaming({ scope: f.scope, path: f.path, name: f.name }) }}>Rename</button>
@@ -397,12 +440,9 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
     const open = !topShut.includes(key)
     return (
       <div key={`top:${key}`}>
-        <div className="doc-group-row">
-          <button className="doc-folder-toggle" onClick={() => toggleTop(key)} aria-expanded={open}
-            aria-label={`${open ? 'Collapse' : 'Expand'} ${title}`}>
-            <ChevronRight size={11} className={open ? 'rot90' : undefined} />
-          </button>
-          <button className="doc-group-name" onClick={() => toggleTop(key)}>{title}</button>
+        <div className="doc-group-row" aria-expanded={open} {...rowButton(() => toggleTop(key))}>
+          <span className="doc-folder-toggle"><ChevronRight size={11} className={open ? 'rot90' : undefined} /></span>
+          <span className="doc-group-name">{title}</span>
         </div>
         {open && list.map((d) => docRow(d, 1, true))}
       </div>
@@ -428,7 +468,8 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
   }
 
   return (
-    <div className="doc-tree" onMouseDown={() => menu && setMenu(null)}>
+    <div className="doc-tree" onMouseDown={() => menu && setMenu(null)} onKeyDown={treeKeys}>
+      <div className="doc-tree-top">
       <div className="doc-tree-head">
         <label className="search mini"><Search size={12} /><input placeholder="Search files" value={query} onChange={(e) => onQuery(e.target.value)} /></label>
         <FilesUpload projectId={project} />
@@ -438,6 +479,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
         {FILES_KINDS.map((k) => (
           <button key={k.id} type="button" className={kind === k.id ? 'on' : ''} aria-pressed={kind === k.id} onClick={() => showFiles({ kind: k.id, projectId: project })}>{k.label}</button>
         ))}
+      </div>
       </div>
       {project && (
         <div className="doc-tag-chips">
@@ -457,8 +499,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
       {/* A search is a flat answer, not a shape: matches come back wherever they are filed. */}
       {showNotes && (searching
         ? (hits ? (hits.length === 0 ? <p className="empty-hint">No matches.</p> : hits.map((h) => (
-          <div key={h.doc_id} className={`doc-row ${h.doc_id === activeId ? 'active' : ''}`} role="button" tabIndex={0}
-            onClick={() => void openDoc(h.doc_id)}>
+          <div key={h.doc_id} className={`doc-row has-meta ${h.doc_id === activeId ? 'active' : ''}`} {...rowButton(() => void openDoc(h.doc_id))}>
             <FileText size={13} className="doc-row-icon" />
             <span className="doc-row-main">
               <span className="doc-row-title">{h.title || 'Untitled'}</span>

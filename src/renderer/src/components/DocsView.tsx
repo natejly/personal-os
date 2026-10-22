@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   FileText, Files, PanelRight, X, Columns2, Eye, Pencil, MessageSquarePlus, Type,
@@ -11,8 +11,8 @@ import MarkdownEditor from './MarkdownEditor'
 import DocFind from './DocFind'
 import MarkdownPreview from './MarkdownPreview'
 import DiffView from './DiffView'
-import DocTree from './DocTree'
-import { scopeOf } from '../lib/docTree'
+import DocTree, { revealNode } from './DocTree'
+import { crumbsOf, scopeOf } from '../lib/docTree'
 import ResizeHandle from './ResizeHandle'
 import { PANEL_TABS, parsePanelState, resolveWikiDoc, type PanelState, type PanelTab } from '../lib/docPanel'
 import Backlinks from '../features/notes/Backlinks'
@@ -91,6 +91,8 @@ export default function DocsView(): JSX.Element {
   // An extension's editor (LaTeX) takes the pane over for the docs it matches, along with the page context and the side panel.
   const custom = activeDoc ? docEditorFor(settings, activeDoc) : undefined
 
+  const projects = useStore((s) => s.projects)
+  const expandTo = useStore((s) => s.expandTo)
   const [query, setQuery] = useState('')
   // One tabbed panel in the right-hand column (Outline, Comments, Links, History).
   const [panel, setPanelState] = useState<PanelState>(readPanel)
@@ -303,7 +305,7 @@ export default function DocsView(): JSX.Element {
             <aside className="docs-side">
               <DocTree hits={hits} docs={treeDocs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery} />
             </aside>
-            <ResizeHandle id="docs-tree-w" defaultSize={240} min={170} max={480} grows="right" onCollapse={() => setTreeOpen(false)} label="File tree width" className="docs-tree-edge" />
+            <ResizeHandle id="docs-tree-w" defaultSize={260} min={200} max={480} grows="right" onCollapse={() => setTreeOpen(false)} label="File tree width" className="docs-tree-edge" />
           </>
         )}
         {kind !== 'trash' && activeDoc && panelOpen && !showDash && !custom && (
@@ -320,6 +322,14 @@ export default function DocsView(): JSX.Element {
           </section>
         ) : (
           <section className="docs-main">
+            <nav className="doc-crumbs" aria-label="Location">
+              {crumbsOf(scope, scope ? (projects.find((p) => p.id === scope)?.name ?? 'Former project') : 'Personal', activeDoc.folder).map((c, i) => (
+                <Fragment key={c.path}>
+                  {i > 0 && <span className="sep">›</span>}
+                  <button type="button" title={c.label} onClick={() => { setTreeOpen(true); expandTo(c.scope, c.path); revealNode(c.scope, c.path) }}>{c.label}</button>
+                </Fragment>
+              ))}
+            </nav>
             <div className="doc-toolbar">
               <input
                 className="doc-title-input"

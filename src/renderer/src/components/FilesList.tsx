@@ -74,7 +74,7 @@ export default function FilesList({ kind, query, project }: { kind: string; quer
         </div>
       ))}
       {chat.map((f) => (
-        <div key={f.id} className="doc-row" data-testid="artifact-row" {...rowButton(() => setOpen(f))}>
+        <div key={f.id} className="doc-row has-meta" data-testid="artifact-row" {...rowButton(() => setOpen(f))}>
           <Package size={13} className="doc-row-icon" />
           <span className="doc-row-main">
             <span className="doc-row-title"><span className="doc-row-name" title={f.name}>{f.name}</span></span>

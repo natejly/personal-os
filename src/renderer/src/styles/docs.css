@@ -32,11 +32,34 @@
 .docs-side {
   border-right: 1px solid var(--border);
   overflow-y: auto;
+  scrollbar-gutter: stable;
   padding: 8px;
   min-height: 0;
 }
 .doc-tree { display: flex; flex-direction: column; min-height: 100%; }
+/* Search and the kind switch stay put while the rows scroll beneath them. */
+.doc-tree-top { position: sticky; top: -8px; z-index: 2; margin: -8px -8px 4px; padding: 8px 8px 2px; background: var(--bg); }
 .doc-tree-head { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+/* Every tree row is one height and one indent step, with its actions laid over the right edge on hover. */
+.doc-group-row, .doc-folder-row, .doc-row { height: 28px; box-sizing: border-box; flex: none; }
+.doc-row.has-meta { height: auto; min-height: 28px; }
+.row-actions {
+  position: absolute; right: 2px; top: 50%; transform: translateY(-50%);
+  display: none; align-items: center; gap: 1px; padding-left: 10px; border-radius: var(--r-md);
+  background: linear-gradient(90deg, transparent, var(--hover) 10px);
+}
+.doc-group-row:hover .row-actions, .doc-folder-row:hover .row-actions, .doc-row:hover .row-actions,
+.doc-row:focus-within .row-actions, .doc-group-row:focus-within .row-actions, .doc-folder-row:focus-within .row-actions,
+.menu-open > .row-actions { display: flex; }
+.doc-row.active .row-actions { background: linear-gradient(90deg, transparent, var(--active) 10px); }
+.doc-row-twist { width: 8px; flex: none; }
+.doc-row-flag { display: inline-flex; gap: 2px; flex: none; color: var(--warn); }
+.doc-group-row, .doc-folder-row { cursor: pointer; }
+.doc-group-row:focus-visible, .doc-folder-row:focus-visible, .doc-row:focus-visible { outline: 1.5px solid var(--accent); outline-offset: -1.5px; }
+.doc-crumbs { display: flex; align-items: center; gap: 2px; padding: 4px 10px 0; min-height: 24px; font-size: var(--fs-xs); color: var(--text-faint); overflow: hidden; white-space: nowrap; }
+.doc-crumbs button { color: inherit; font: inherit; padding: 1px 4px; border-radius: var(--r-sm); max-width: 16ch; overflow: hidden; text-overflow: ellipsis; }
+.doc-crumbs button:hover { background: var(--hover); color: var(--text); }
+.doc-crumbs .sep { flex: none; opacity: 0.6; }
 .doc-tree-head > .search.mini { flex: 1; min-width: 0; }
 /* The tail is the rest of the column. There is no root to drop onto any more: every doc belongs to
    Personal or to a project, so the group rows are the only roots and they are always on screen. */
@@ -58,8 +81,6 @@
   letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .doc-group-row .project-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); flex: none; }
-.doc-group-row .icon-btn.xs { opacity: 0; flex: none; }
-.doc-group-row:hover .icon-btn.xs, .doc-group-row.menu-open .icon-btn.xs { opacity: 1; }
 /* While a folder is being named it does not exist yet, so nothing about it is draggable or clickable. */
 .doc-folder-row.drafting { cursor: default; background: var(--hover); }
 
@@ -68,7 +89,6 @@
   display: flex; align-items: center; gap: 4px;
   padding: 4px 6px; border-radius: var(--r-md);
   color: var(--text-muted); font-size: var(--fs-md);
-  cursor: grab;
 }
 .doc-folder-row:hover { background: var(--hover); color: var(--text); }
 .doc-folder-row.drop-into { background: var(--active); box-shadow: inset 0 0 0 1.5px var(--accent); }
@@ -83,8 +103,6 @@
   background: var(--bg-input); border: 1px solid var(--control-border); border-radius: var(--r-sm);
   padding: 2px 6px; color: var(--text); outline: 0;
 }
-.doc-folder-row .icon-btn.xs { opacity: 0; flex: none; }
-.doc-folder-row:hover .icon-btn.xs, .doc-folder-row.menu-open .icon-btn.xs { opacity: 1; }
 .doc-folder-menu {
   position: absolute; top: 100%; right: 4px; z-index: 5;
   display: flex; flex-direction: column; min-width: 150px; padding: 4px;
@@ -100,6 +118,7 @@
 
 .doc-row {
   display: flex; align-items: center; gap: 6px;
+  position: relative;
   padding: 5px 6px; border-radius: var(--r-md); cursor: pointer;
   color: var(--text-muted);
 }
@@ -121,12 +140,10 @@
 .doc-row-date { flex: none; font-size: var(--fs-xs); color: var(--text-faint); }
 .doc-row-chat { padding: 0; font-size: inherit; color: inherit; background: none; border: 0; cursor: pointer; text-decoration: underline; text-decoration-color: transparent; }
 .doc-row-chat:hover { text-decoration-color: currentColor; }
-.files-kinds { margin: 0 8px 6px; }
+.files-kinds { margin: 0 0 6px; }
 .files-kinds button { flex: 1; }
 .doc-hit-snippet { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; }
 .doc-hit-snippet mark { background: color-mix(in srgb, var(--warn) 35%, transparent); color: inherit; border-radius: 2px; }
-.doc-row .icon-btn.xs { opacity: 0; flex: none; }
-.doc-row:hover .icon-btn.xs, .doc-row:focus-within .icon-btn.xs, .doc-row .icon-btn.xs.starred { opacity: 1; }
 .doc-row .icon-btn.starred { color: var(--warn); }
 
 /* An assistant edit waiting on this doc. */
@@ -419,7 +436,8 @@
   .doc-panes.split .docs-render { border-left: 0; border-top: 1px solid var(--border); }
 }
 
-.doc-tag-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 6px; }
+.doc-tag-chips { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 4px; padding: 0 8px 6px; }
+.doc-tag-chips > * { flex: none; }
 .doc-tag-chip { font-size: var(--fs-xs); padding: 1px 7px; border-radius: var(--r-lg); border: 1px solid var(--border); background: none; color: var(--text-muted); cursor: pointer; }
 .doc-tag-chip:hover { color: var(--text); }
 .doc-tag-chip.on { color: var(--accent); border-color: var(--accent); }

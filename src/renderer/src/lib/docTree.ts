@@ -96,6 +96,12 @@ export const chainTo = (path: string): string[] => {
   return segs.map((_, i) => segs.slice(0, i + 1).join('/'))
 }
 
+/** Where a doc sits as clickable steps: its scope, then each folder down to it (`path` is that step's own folder). */
+export const crumbsOf = (scope: Scope, scopeName: string, folder: string): { label: string; scope: Scope; path: string }[] => [
+  { label: scopeName, scope, path: '' },
+  ...chainTo(folder).map((path) => ({ label: nameOf(path), scope, path }))
+]
+
 const byName = (a: { name: string }, b: { name: string }): number => a.name.localeCompare(b.name, undefined, { numeric: true })
 
 /** A doc's scope is its project, with no second source of truth to disagree with. */

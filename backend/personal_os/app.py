@@ -94,7 +94,7 @@ from . import sandbox
 from . import shell as shell_tool
 from . import ship as ship_mod
 from . import workers as workers_mod
-from .subagents import UNATTENDED_KINDS, USER_NOTE, AgentDefs, Subagents
+from .subagents import UNATTENDED_KINDS, USER_NOTE, AgentDefs, Subagents, _public_message
 from .commands import Commands
 from .commands import expand as expand_command
 from .commands import expand_history as expand_commands
@@ -1843,6 +1843,7 @@ def _map_status_block(used: dict[str, Any], conv_settings: dict[str, Any], cfg: 
     return text
 
 
+STREAM_RETRIES = 2  # re-issues of a round whose stream broke after text arrived and before any tool call ran, per reply
 EMPTY_NUDGE = ("Your last turn ended without any text and without a tool call. Answer the user now in plain text, "
                "or say in one line what you did and what is still missing.")
 LOOP_STOP = ("{name} has been called with identical arguments {n} times in a row, so this reply is stopping tool use. "
@@ -2812,12 +2813,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             _run_note("note:regen", "Regenerate note", resume.build_regen_note(regen_done))
         if not internal and "@" in user_text and (mnote := chatlink.mention_note(user_text, chat_links.chats(), conv_id, saved_dashboards.list())):
             _run_note("note:mention", "Mentioned chats note", mnote)
+        resume_tail: list[dict[str, Any]] = []  # the dead run's own model messages, in full, when it left a checkpoint
         if body.resume_of:
             old = run_store.get(body.resume_of) or {}
             old_events = run_store.events(body.resume_of)
+            resume_tail = run_store.checkpoint(body.resume_of) or []
             _run_note("note:resume", "Resume note", resume.build_resume_note(
                 old, old_events, run_store.executed(body.resume_of), run_store.approvals(None, run_id=body.resume_of),
-                reason=resume.reason_tag(old, _run_message(old)),
+                reason=resume.reason_tag(old, _run_message(old)), checkpointed=bool(resume_tail),
                 plan_steps=[s for p in plans.for_run(body.resume_of) if p["status"] == "approved" for s in p["steps"] if s["status"] == "approved"]))
             # Taint is only ever added to: a resume cannot launder what the dead run read.
             for src in resume.taint_from_tape(old_events):
@@ -2841,6 +2844,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         used["tokens_estimate"] = led.system_tokens()  # the run notes joined the tail
         used["blocks"], used["totals"] = led.finish(), led.totals(win)
         base_len = len(messages)  # what follows is this run's own steers, tool turns and notes
+        messages.extend(resume_tail)
         if in_side:  # the duel reads this side's tool turns once it is picked (Side.transcript)
             duel.SIDE.get().live = (messages, lambda: base_len, lambda: plan_msg)
         yield "assistant_message", {**am, "context_used": cite_slim(used)}
@@ -2855,7 +2859,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         _round = 0
         # A provider restarts its call numbering every round (and every turn): ids stay unique against the replayed
         # history too, since one request must not carry two calls with the same id.
-        seen_call_ids: set[str] = {tc["id"] for m in history for tc in (m.get("tool_calls") or []) if tc.get("id")}
+        seen_call_ids: set[str] = {tc["id"] for m in [*history, *resume_tail] for tc in (m.get("tool_calls") or []) if tc.get("id")}
         quiet_retries = 0  # silent retries of an incomplete or empty round: at most one per reply
         cut_recoveries = 0  # rounds whose tool calls were cut off at the output limit
         seen_ids = set(cinfo.get("row_ids") or [])  # rows the context was built from; a steer in it is not sent twice
@@ -2887,6 +2891,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 messages.append(plan_msg)
 
         overflow_retried = False
+        stream_retries = 0
         run_started = am["created_at"]
 
         async def _recover_overflow(e: llm.ContextOverflowError) -> dict[str, Any] | None:
@@ -2925,14 +2930,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             with contextlib.suppress(Exception):
                 request_log.record(db.data_dir, am["id"], _round, model, messages, st.tool_schemas, tool_choice, led.texts)
 
-        async def _stream_round(**options: Any) -> AsyncIterator[dict[str, Any]]:
+        async def _stream_round(*, retry_mid: bool = False, **options: Any) -> AsyncIterator[dict[str, Any]]:
             """The round's model stream. A provider overflow before anything streamed is recovered once per reply:
             the stream is re-issued over the compacted context and a synthetic `overflow_recovered` event says so.
             Anything else (a second overflow, one after text arrived) propagates to the reply's error handling.
-            `options` go to llm.stream_chat (an alternative loop's tool-free call sets tool_choice)."""
-            nonlocal overflow_retried
+            `retry_mid` (the default loop only) also re-issues a stream that broke after text arrived and before any
+            tool call ran, up to STREAM_RETRIES times, saying so with a `stream_retry` event. `options` go to llm.stream_chat (an alternative loop's tool-free call sets tool_choice)."""
+            nonlocal overflow_retried, stream_retries
             while True:
-                streamed = False
+                streamed = called = False
+                broke: llm.LLMError | None = None
                 _capture(options.get("tool_choice", "auto"))
                 stream = llm.stream_chat(cfg, model, messages, st.tool_schemas or None,
                                          effort=turn_effort,
@@ -2941,6 +2948,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 try:
                     async for ev in stream:
                         streamed = streamed or ev["type"] in ("reasoning", "delta")
+                        called = called or bool(ev.get("tool_calls"))
                         yield ev
                     return
                 except llm.ContextOverflowError as e:
@@ -2952,8 +2960,24 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         return  # Stop arrived while the summarizer ran: the round ends with nothing, as stopped
                     if recovered is None:
                         raise
+                except llm.LLMError as e:
+                    # The stream broke after text arrived. No tool call has run (they only run once the round ends), so
+                    # the round can be asked again; a failure that waiting does not fix is the reply's error as before.
+                    if not (retry_mid and streamed and not called and stream_retries < STREAM_RETRIES and (e.kind in llm.RETRYABLE_KINDS or e.kind == "timeout")
+                            and not stop.is_set() and not steers):
+                        raise
+                    stream_retries += 1
+                    broke = e
                 finally:
                     await stream.aclose()
+                if broke is not None:
+                    delay = llm.retry_delay(stream_retries)
+                    log.warning("stream broke mid-reply (%s); re-issuing the round, retry %d/%d in %.1fs", broke, stream_retries, STREAM_RETRIES, delay)
+                    yield {"type": "stream_retry", "attempt": stream_retries, "max": STREAM_RETRIES, "delay_s": delay,
+                           "reason": "connection" if broke.kind == "transport" else "provider_error"}
+                    if not await llm._backoff(delay, stop):
+                        return
+                    continue
                 yield {"type": "overflow_recovered", **recovered}
 
         ab_model = (body.ab_model or "").strip() if (cfg.get("devTools") is True and run is not None and body.content is not None
@@ -3114,7 +3138,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                        "tool_calls": [{"id": f"held_{i}", "name": h["name"], "arguments": json.dumps(h["arguments"], ensure_ascii=False)}
                                       for i, h in enumerate(held)]}
                 return
-            async for ev in _stream_round():
+            async for ev in _stream_round(retry_mid=True):
                 yield ev
 
         async def _end_jobs() -> None:
@@ -3458,6 +3482,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             for _note in toolbox.shell.drain_notes(conv_id):  # a background shell job finished since the last round
                 messages.append({"role": "system", "content": _note})
             _reinject_plan()  # last message in the context, after the previous round's tool results
+            if run is not None and run.kind == "chat" and not desk_id:  # a resume rebuilds from this, not from a prose note
+                run_store.set_checkpoint(run.run_id, [_public_message(m) for m in messages[base_len:] if m is not plan_msg])
+                if body.resume_of and _round == 1:  # a run is resumed at most once: the old checkpoint has been used
+                    run_store.clear_checkpoint(body.resume_of)
             llm.usage_context.set({**_ucx, "round": _round})
             lspan = _start_llm_span()
             round_span = lspan  # the tool calls below nest under it
@@ -3500,6 +3528,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     lspan = _start_llm_span()
                     round_span = lspan
                     yield "span", {"message_id": am["id"], "span": lspan}
+                elif ev["type"] == "stream_retry":
+                    # This round's partial text leaves the reply; the screen is told what text is left.
+                    first_token = None
+                    del buf[round_start:]
+                    yield "text_replace", {"id": am["id"], "text": "".join(buf)}
+                    yield "status", _retry_status(am["id"], ev)
                 elif ev["type"] == "reasoning":
                     if first_token is None:
                         first_token = now_ms()

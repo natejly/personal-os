@@ -92,17 +92,27 @@ def _args(args: Any, n: int = 300) -> str:
     return json.dumps(short, ensure_ascii=False, sort_keys=True, default=str)
 
 
+CHECKPOINT_PART = ("Its own tool calls and their full results follow this note, exactly as the model had them. "
+                   "The run was interrupted: any call whose journal result says unknown_outcome may or may not have "
+                   "taken effect, so verify it before repeating it.")
+
+
 def build_resume_note(run: dict[str, Any], events: list[tuple[int, str, Any]], executed: list[dict[str, Any]],
                       approvals: list[dict[str, Any]], max_text: int = 1500, max_preview: int = 300,
-                      reason: str | None = None, plan_steps: list[dict[str, Any]] | None = None) -> str:
+                      reason: str | None = None, plan_steps: list[dict[str, Any]] | None = None,
+                      checkpointed: bool = False) -> str:
+    """`checkpointed`: the run's own messages are replayed in full after the note, so the note skips the shortened
+    text and finished-call previews and only adds what the messages cannot say."""
     mid = run.get("message_id")
     text = "".join((d.get("text") or "") for _, e, d in events
                    if e == "delta" and isinstance(d, dict) and d.get("id") == mid).strip()
-    parts: list[str] = []
+    parts: list[str] = [CHECKPOINT_PART] if checkpointed else []
+    if checkpointed:
+        text = ""
     if text:
         tail = text if len(text) <= max_text else "…" + text[-max_text:]
         parts.append("Text it had written so far:\n" + tail)
-    done = [d for _, e, d in events if e == "tool_result" and isinstance(d, dict) and not d.get("pending")]
+    done = [] if checkpointed else [d for _, e, d in events if e == "tool_result" and isinstance(d, dict) and not d.get("pending")]
     if done:
         lines = []
         for d in done:

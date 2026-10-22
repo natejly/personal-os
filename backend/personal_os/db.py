@@ -169,6 +169,13 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   updated_at REAL NOT NULL,
   ended_at REAL
 );
+-- The newest model message list of a chat run (what it had sent, tool results in full), so a resume continues from it
+-- rather than from a prose summary. One row per run; dropped when the run completes or is resumed.
+CREATE TABLE IF NOT EXISTS run_checkpoints (
+  run_id TEXT PRIMARY KEY REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+  messages TEXT NOT NULL,
+  updated_at REAL NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_runs_conv ON agent_runs(conversation_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON agent_runs(status, started_at DESC);
 -- A worker's chat and a job's id live in `input`: the Workers panel poll and every job fire look runs up by them.

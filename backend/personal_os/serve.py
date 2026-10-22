@@ -1,6 +1,7 @@
 """How the backend is served: uvicorn's settings, and a server that tells open event streams to end on the exit signal."""
 from __future__ import annotations
 
+import socket
 import sys
 import types
 from typing import Any
@@ -10,7 +11,7 @@ from uvicorn.supervisors import ChangeReload
 
 STARTUP_FAILURE = 3  # uvicorn's own exit code for a server that never came up
 
-from . import runs
+from . import fdhygiene, runs
 
 # Seconds an open connection gets after the exit signal before uvicorn cancels it. The event streams end on their own
 # as soon as the signal arrives; this bounds anything else still holding a response open (a slow upload, a stuck client).
@@ -25,6 +26,13 @@ def uvicorn_kwargs(host: str, port: int, reload: bool) -> dict[str, Any]:
 
 
 class Server(uvicorn.Server):
+    async def startup(self, sockets: list[socket.socket] | None = None) -> None:
+        # The worker has its sockets now; a reload parent made them inheritable only to hand them over. No child
+        # this process starts later may keep the port bound after the backend exits.
+        fdhygiene.seal_sockets(sockets)
+        fdhygiene.seal()
+        await super().startup(sockets=sockets)
+
     def handle_exit(self, sig: int, frame: types.FrameType | None) -> None:
         # Before uvicorn starts waiting for connections: a follow-forever stream would otherwise be what it waits on.
         runs.begin_shutdown()

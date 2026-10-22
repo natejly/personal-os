@@ -45,7 +45,7 @@ from mcp import ClientSession, Implementation, StdioServerParameters, stdio_clie
 from mcp.client.sse import sse_client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
-from . import mac, mcp_catalog, mcp_drift, mcp_path, redact
+from . import fdhygiene, mac, mcp_catalog, mcp_drift, mcp_path, redact
 from .vision import MAX_FILE_BYTES
 from .mcp_oauth import McpNeedsAuth, OAuthFlows, SignIn, headers_of
 from .mcp_servers import DEFAULT_DANGER, McpServers
@@ -201,6 +201,8 @@ async def _open(config: _Config, err: "_Stderr", oauth: OAuthFlows | None, sign_
             raise McpMissingCommand(mcp_path.missing_message(config.command))
         no_bytecode(command, env)
         params = StdioServerParameters(command=command, args=config.args, env=env, cwd=config.cwd or None)
+        fdhygiene.seal()  # an event loop that ignores close_fds would pass every inheritable descriptor to the server
+        _track_spawns()
         async with stdio_client(params, errlog=err.file) as streams:
             yield streams
         return
@@ -217,6 +219,51 @@ async def _open(config: _Config, err: "_Stderr", oauth: OAuthFlows | None, sign_
     async with create_mcp_http_client(headers=config.headers or None, auth=auth) as http:
         async with streamable_http_client(config.url, http_client=http) as streams:
             yield streams
+
+
+_SPAWNED: list[Any] = []   # server processes started by the SDK's stdio transport, for the shutdown backstop
+_TRACKING = False
+
+
+def _track_spawns() -> None:
+    """Remember each stdio server process, so stop() can end any the transport's own teardown missed."""
+    global _TRACKING
+    if _TRACKING:
+        return
+    import mcp.client.stdio as transport
+    make = getattr(transport, "_create_platform_compatible_process", None)
+    if make is None:
+        return
+
+    async def tracked(*args: Any, **kwargs: Any) -> Any:
+        process = await make(*args, **kwargs)
+        _SPAWNED[:] = [p for p in _SPAWNED if p.returncode is None]
+        _SPAWNED.append(process)
+        return process
+
+    transport._create_platform_compatible_process = tracked
+    _TRACKING = True
+
+
+def reap_spawned(grace: float = 2.0) -> int:
+    """Signal the process group of every server still running (each is its own session leader): SIGTERM now,
+    SIGKILL after `grace`. Returns how many were signalled."""
+    import signal
+    live = [p for p in _SPAWNED if p.returncode is None]
+    _SPAWNED.clear()
+    for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 0.0)):
+        deadline = time.monotonic() + wait
+        for p in live:
+            try:
+                os.killpg(p.pid, sig) if hasattr(os, "killpg") else p.terminate()
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        while wait and time.monotonic() < deadline and any(p.returncode is None for p in live):
+            time.sleep(0.05)
+        live = [p for p in live if p.returncode is None]
+        if not live:
+            break
+    return len(live)
 
 
 class _Stderr:
@@ -824,6 +871,7 @@ class McpClient:
         # Together, not in turn: the app gives the backend a few seconds at quit, and each stop can take several.
         sups = [self._supervisors.pop(sid) for sid in list(self._supervisors)]
         await asyncio.gather(*(s.stop() for s in sups), return_exceptions=True)
+        await asyncio.to_thread(reap_spawned)  # a server that outlived its transport's teardown must not outlive the app
         if self.oauth:
             await self.oauth.stop()
 

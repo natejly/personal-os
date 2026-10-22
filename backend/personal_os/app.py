@@ -1481,13 +1481,6 @@ async def _mcp_startup() -> None:
         log.warning("MCP startup failed", exc_info=True)
 
 
-@host.on_stop
-async def _mcp_shutdown() -> None:
-    # Before anything else tears down: this is what guarantees no child server outlives the app.
-    with contextlib.suppress(Exception):
-        await mcp.stop()
-
-
 @app.get("/projects")
 def list_projects() -> list[dict[str, Any]]:
     return [{**s, "stats": projects.stats(s["id"])} for s in projects.list()]
@@ -7430,6 +7423,7 @@ async def _shutdown() -> None:
     await asyncio.gather(*(asyncio.wait_for(c.finished.wait(), 5) for c in live), return_exceptions=True)
     # Sessions whose owner (a reply or subagent) is still running stop with it; ones whose owner already finished were
     # left working on purpose and outlive the app.
+    await _bounded("mcp", mcp.stop(), 15)  # closes each connector's stdin, then ends its process group: no child server outlives the app
     owners = bus.live_ids() | {c.id for c in subagent_mgr.running()}
     await _bounded("coding", coding.shutdown(owners), 15)
     await _bounded("channels", host.channels.stop())  # before the runs are cancelled: a dying backend must not send "interrupted" replies

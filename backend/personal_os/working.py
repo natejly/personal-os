@@ -124,6 +124,13 @@ def plan_block(steps: list[dict[str, Any]], desk: bool = False) -> str:
     return f"{PLAN_HEADER}\n\n{render_plan(steps)}\n\n{done}/{len(steps)} steps done. {DESK_PLAN_FOOTER if desk else PLAN_FOOTER}"
 
 
+def _head_tail(rid: str, blob: str) -> str:
+    """First and last chars of the stored blob with a marker naming the gap; offsets are into that same blob (read_tool_result)."""
+    gap = len(blob) - SPILL_HEAD_CHARS - SPILL_TAIL_CHARS
+    return (f"{blob[:SPILL_HEAD_CHARS]}\n[... {gap} chars omitted: read_tool_result(\"{rid}\", offset={SPILL_HEAD_CHARS}) "
+            f"for the rest; the tail resumes at offset {len(blob) - SPILL_TAIL_CHARS} ...]\n{blob[-SPILL_TAIL_CHARS:]}")
+
+
 class Plans:
     """One plan per conversation. Written by `todo_write`, edited by the user, re-injected every round."""
 
@@ -176,13 +183,15 @@ class Plans:
 # each round pays the provider's time to first token again.
 INLINE_CHARS = 12000
 PREVIEW_CHARS = 2000
+SPILL_HEAD_CHARS = 4000  # a spilled result keeps its first and last chars inline: errors and summaries sit at the end
+SPILL_TAIL_CHARS = 2000
 MAX_STORED_CHARS = 2_000_000
 READ_CHARS = 12000
 SEARCH_WINDOW = 600   # chars per search hit
 SEARCH_TOTAL = 3800   # serialized size of all hits, under INLINE_CHARS
 MAX_READ_CHARS = INLINE_CHARS  # a page never outgrows what an inline result may be
 
-HANDLE_NOTE = ("Large result: it is stored outside this conversation's context, not truncated. `preview` is its head. "
+HANDLE_NOTE = ("Large result: it is stored outside this conversation's context, not truncated. `preview` is its head (and, past a marker line, its tail). "
                "Call read_tool_result(result_id, offset, limit) to page through the rest; `shape` says what is in there.")
 
 
@@ -271,7 +280,8 @@ class ToolResults:
         row = self.store(conversation_id, message_id, tool, blob, shape)
         return redact.scrub_command_output(_dumps({
             "result_id": row["id"], "tool": tool, "total_chars": row["total_chars"], "shape": shape,
-            "preview": summarize_result(result, PREVIEW_CHARS), "note": HANDLE_NOTE,
+            "preview": _head_tail(row["id"], blob[:MAX_STORED_CHARS]) if len(blob) > SPILL_HEAD_CHARS + SPILL_TAIL_CHARS
+                       else summarize_result(result, PREVIEW_CHARS), "note": HANDLE_NOTE,
         })), row["id"]
 
     def for_model(self, conversation_id: str, message_id: str | None, tool: str, result: Any, untrusted: bool = False,

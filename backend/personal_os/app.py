@@ -2300,8 +2300,28 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     rq = str((body.wake or {}).get("title") or "background work") if is_wake else retrieval_query(prior, user_text)
     win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))  # every context block is a share of it
     # One query embedding for all three, then the three lookups side by side: they all sit before the first token.
-    qvec = await _query_vec(rq, cfg, conv["settings"])
-    hits, retrieved, memory_blocks = await _gather_context(rq, qvec, conv["project_id"], conv_id, dict(conv["settings"]), win)
+    use_tools = conv["settings"].get("useTools", True)
+    _tool_maps = (permissions.get(cfg, "tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools"),
+                  persona.tool_modes if persona is not None else None)
+    modes = toolbox.effective(*_tool_maps) if use_tools else {}
+    explicit_modes = toolbox.explicit(*_tool_maps) if use_tools else {}  # what the user set on purpose (auto mode trusts those)
+    if persona is not None:
+        modes = {n: v for n, v in modes.items() if n in persona.tools}
+    chat_core = toolcore.CURRENT.get("chat") or tools.CORE_ORDER  # read once: a daily refresh never changes this reply's tools
+    # The reranked tool pick needs only the user's words and the tools that could be held back, so it runs beside retrieval.
+    # It is checked against the real held-back set when the tool schemas are built.
+    pre_task: asyncio.Task[list[str]] | None = None
+    if use_tools and user_text and not internal and not body.resume_of and mcp_search.should_defer(len(modes), int(cfg.get("toolDeferAbove", 40) or 0)):
+        pre_docs = mcp_search.build_docs([{"slug": n, "description": sp.description, "parameters": sp.parameters, "server": sp.group}
+                                          for n in sorted(modes) if (sp := toolbox.specs.get(n)) and not tools.is_core(sp, chat_core)])
+        pre_task = asyncio.create_task(mcp_search.preselect_ranked(pre_docs, user_text, cfg))
+    try:
+        qvec = await _query_vec(rq, cfg, conv["settings"])
+        hits, retrieved, memory_blocks = await _gather_context(rq, qvec, conv["project_id"], conv_id, dict(conv["settings"]), win)
+    except BaseException:
+        if pre_task:
+            pre_task.cancel()
+        raise
     system, used = build_context(
         memories=memories, graph=graph, documents=documents, doc_hits=hits["docs"],
         memory_hits=hits["memory"], graph_hits=hits["graph"], memory=memory_blocks,
@@ -2426,13 +2446,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             tool_ctx["chat_link"] = dict(body.chat_link)
         if is_wake and body.wake.get("attachments"):  # files the workers sent: they ride on this reply
             tool_ctx["reply_attachments"] = list(body.wake["attachments"])
-        use_tools = conv["settings"].get("useTools", True)
-        _tool_maps = (permissions.get(cfg, "tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools"),
-                      persona.tool_modes if persona is not None else None)
-        modes = toolbox.effective(*_tool_maps) if use_tools else {}
-        explicit_modes = toolbox.explicit(*_tool_maps) if use_tools else {}  # what the user set on purpose (auto mode trusts those)
-        if persona is not None:
-            modes = {n: v for n, v in modes.items() if n in persona.tools}
         # MCP slugs all carry a reserved prefix no built-in may use, so the two mode maps cannot collide.
         mcp_modes, mcp_schemas = _mcp_tooling(conv["project_id"], conv_id) if use_tools else ({}, [])
         # A job's allowlist (job_tools) writes 'off' for tools outside it into the chat's tool map; MCP modes come from
@@ -2447,7 +2460,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # Past MCP_DEFER_ABOVE ready tools the model gets mcp_tool_search instead of every schema. Only loaded
         # slugs are in `modes`, so a call to an unloaded one is off -> denied, never run.
         mcp_defer = mcp_search.should_defer(len(mcp_schemas), limits.MCP_DEFER_ABOVE)
-        chat_core = toolcore.CURRENT.get("chat") or tools.CORE_ORDER  # read once: a daily refresh never changes this reply's tools
         loaded = _tool_loaded.get(conv_id)
         if loaded is None:
             loaded = _tool_loaded[conv_id] = {str(e["name"]) for r in convos.history_rows(conv_id)
@@ -2715,9 +2727,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         tool_step = ToolStep(st, front=_front, load_groups=_load_groups, log_mode=_log_mode, review_call=_review_call, schemas=_schemas)
 
         st.tool_schemas = _schemas()
-        if tool_ctx["deferred"] and tool_ctx["user_text"] and not body.resume_of:
+        if pre_task is not None:
             # What the message plainly asks for is loaded before round 1, so it costs no tool_search round.
-            if picks := await mcp_search.preselect_ranked(mcp_search.build_docs(tool_ctx["tool_catalog"]()), tool_ctx["user_text"], cfg):
+            if not tool_ctx["deferred"]:
+                pre_task.cancel()
+            elif picks := [n for n in await pre_task if n in tool_ctx["deferred"]]:
                 loaded.update(picks)
                 st.tool_schemas = _schemas()
 
@@ -3411,6 +3425,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 raise LoopViolation(f"the agent loop {loop.id!r} ran a tool outside the tool step, so the reply was stopped")
 
     except asyncio.CancelledError:
+        if pre_task:
+            pre_task.cancel()
         if am:
             _active.pop(am["id"], None)
             convos.finish_message(am["id"], "", "Cancelled", used, [], tracer.spans, None)
@@ -3418,6 +3434,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         raise
     except Exception as e:  # noqa: BLE001
         log.exception("chat setup failed for %s", conv_id)
+        if pre_task:
+            pre_task.cancel()
         if am:
             _active.pop(am["id"], None)
             convos.finish_message(am["id"], "", str(e), used, [], tracer.spans, None, error_kind=getattr(e, "kind", None))

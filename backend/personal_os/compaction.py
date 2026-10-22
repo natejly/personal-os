@@ -486,6 +486,9 @@ def memory_nudge(n_cleared: int, already_nudged: bool, tool_schemas: list[dict[s
     return MEMORY_NUDGE
 
 
+MICRO_LOW_WATER = 0.6  # a microcompact clears down to this share of its threshold
+
+
 def microcompact(messages: list[dict[str, Any]], keep: int, window_tokens: int, at_fraction: float,
                  at_tokens: int | None = None, fixed_tokens: int = 0) -> tuple[int, int]:
     """Replace old tool-result content in place with a stub once the context passes at_fraction of the window.
@@ -493,12 +496,16 @@ def microcompact(messages: list[dict[str, Any]], keep: int, window_tokens: int, 
 
     Skips the tool messages after the last assistant tool-call turn (the round the model has not seen yet),
     the newest `keep` results before that, small results, and anything already cleared. Returns (cleared, tokens_saved).
+    Clears oldest first in one batch, down to MICRO_LOW_WATER of the threshold, so the request is not rewritten (and the
+    provider's cached prefix lost) every round: past that it is left alone until the threshold is crossed again.
     """
     threshold = at_fraction * window_tokens
     if at_tokens:
         threshold = min(threshold, at_tokens)
-    if estimate_messages(messages) + fixed_tokens <= threshold:
+    total = estimate_messages(messages) + fixed_tokens
+    if total <= threshold:
         return 0, 0
+    low = MICRO_LOW_WATER * threshold
     last_call = max((i for i, m in enumerate(messages) if m.get("role") == "assistant" and m.get("tool_calls")), default=-1)
     names = {tc.get("id", ""): (tc.get("function") or {}).get("name", "")
              for m in messages if m.get("role") == "assistant" for tc in (m.get("tool_calls") or [])}
@@ -510,9 +517,13 @@ def microcompact(messages: list[dict[str, Any]], keep: int, window_tokens: int, 
         if stub is None:
             continue
         new = json.dumps(stub)
-        saved += max(0, (len(messages[i]["content"]) - len(new)) // 4)
+        gain = max(0, (len(messages[i]["content"]) - len(new)) // 4)
+        saved += gain
+        total -= gain
         messages[i]["content"] = new
         cleared += 1
+        if total <= low:  # stop at the low-water mark: the prefix then stays put until the threshold is crossed again
+            break
     return cleared, saved
 
 

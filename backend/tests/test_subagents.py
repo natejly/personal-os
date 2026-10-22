@@ -1459,6 +1459,73 @@ def test_worker_defers_tools_and_a_restricted_role_gains_none() -> None:
     check(offered <= set(sa.READ_TOOLS) | {"tool_search"}, f"researcher only ever sees read tools: {sorted(offered - set(sa.READ_TOOLS))}")
 
 
+def _fetch_stub(name: str = "fetch_url") -> tuple[Any, Any, list[dict[str, Any]]]:
+    """The tool's function swapped for one with its real, strict signature (url only; current_time takes nothing)."""
+    spec = appmod.toolbox.specs[name]
+    real, hits = spec.fn, []
+
+    async def fake_url(ctx: dict[str, Any], url: str) -> Any:
+        hits.append(url)
+        return {"url": url, "text": "page"}
+
+    async def fake_time(ctx: dict[str, Any]) -> Any:
+        hits.append("now")
+        return {"now": "noon"}
+
+    fake = fake_url if name == "fetch_url" else fake_time
+
+    spec.fn = fake
+    return spec, real, hits
+
+
+def _child_results(task: str) -> list[str]:
+    last = [s for s in SEEN if s["child"] and s["task"] == task][-1]
+    return [m["content"] for m in last["messages"] if m["role"] == "tool"]
+
+
+def test_child_bad_arguments_open_no_card_and_repeated_errors_block_the_tool() -> None:
+    reset(loopToolErrorLimit=2)
+    spec, real, hits = _fetch_stub()
+    try:
+        SCRIPTS["bad"] = [{"text": "", "calls": [call(f"b{i}", "fetch_url", {"url": f"https://example.com/{i}", "bogus": i})]}
+                          for i in range(3)] + [{"text": "gave up"}]
+        fr = FakeRun()
+        modes = appmod.toolbox.effective({}, None, None)
+        modes["fetch_url"] = "ask"
+        ctx = mkctx(new_conv(), modes=modes, run=fr, message_id=None)
+        out = run(asyncio.wait_for(appmod.toolbox.call("agent_spawn", {"task": "bad"}, ctx), 10))
+    finally:
+        spec.fn = real
+    results = _child_results("bad")
+    check(not hits and not appmod._approvals and not [1 for e, d in fr.events if e == "tool_call" and d.get("needs_approval")],
+          "a call the tool cannot take opens no approval card and never runs")
+    check(len(results) == 3 and "bogus" in results[0], "the child is told which argument was wrong")
+    check("disabled for the rest of this run" in results[2], "the tool is blocked after loopToolErrorLimit consecutive errors")
+    check(out["state"] == "completed", "the child carried on")
+
+
+def test_child_doom_limit_follows_the_setting() -> None:
+    hits_by_limit = {}
+    for limit in (2, 6):
+        reset(loopDoomLimit=limit)
+        spec, real, hits = _fetch_stub("current_time")
+        try:
+            SCRIPTS["twice"] = [{"text": "", "calls": [call(f"d{i}", "current_time", {})]} for i in range(2)] + [{"text": "done"}]
+            modes = appmod.toolbox.effective({}, None, None)
+            modes["current_time"] = "on"
+            ctx = mkctx(new_conv(), modes=modes, proposal_only=True)
+            run(asyncio.wait_for(appmod.toolbox.call("agent_spawn", {"task": "twice"}, ctx), 10))
+        finally:
+            spec.fn = real
+        hits_by_limit[limit] = len(hits)
+    check(hits_by_limit == {2: 1, 6: 2}, f"a repeat becomes a card at loopDoomLimit, not a fixed count: {hits_by_limit}")
+
+
+def test_agent_tools_taint() -> None:
+    check(all(appmod.toolbox.specs[n].taints for n in ("agent_spawn", "agent_wait", "agent_stop")),
+          "each returns a child's report, which is untrusted text")
+
+
 def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

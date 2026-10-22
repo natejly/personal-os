@@ -533,6 +533,8 @@ class Child:
     denials: permrules.DenialStreak = field(default_factory=permrules.DenialStreak)
     last_sig: str | None = None
     repeats: int = 0
+    tool_errors: dict[str, int] = field(default_factory=dict)  # consecutive errors per tool; a success resets it
+    blocked: set[str] = field(default_factory=set)            # tools disabled for the rest of this run after loopToolErrorLimit errors
     stuck_hits: int = 0
     stuck_stop: str = ""            # set when a breaker ends tool use: what to tell the model
     seen: dict[str, tuple[str, int, str]] = field(default_factory=dict)  # call_key -> (result digest, round, result_id) of the last read-only answer
@@ -1187,12 +1189,16 @@ class Subagents:
             result = tool_error(str(c["_name_problem"])[:500], alternative="call one of the tools listed in this request, by its exact name")
         elif spec is None or raw_mode == "off":
             result = denied(name, "not available to this subagent")
+        elif name in ch.blocked:
+            result = denied(name, f"failing {limits.loop_setting(self.settings(), 'loopToolErrorLimit')} times in a row and disabled for the rest of this run")
         elif "_raw" in args:
             cut = bool(c.get("_cut"))
             result = tool_error(
                 f"{name}: the arguments were cut off at the model's output limit and the call was not run." if cut
                 else f"{name}: the arguments were not valid JSON.",
                 alternative="send a smaller call or split the content (for a big file, write the first part, then add the rest in several calls with mode='append')" if cut else ALTERNATIVE.get(name))
+        elif (result := self.toolbox.precheck(name, args, ch.ctx)) is not None:
+            pass  # arguments the tool cannot take (or an extension's precheck): no card opens for a call that cannot run, as in a chat
         else:
             pmode = ch.ctx.get("permission_mode") or autoreview.mode_of(ch.ctx.get("settings") or self.settings())
             tainted = self.toolbox.tainted_for(name, args, ch.ctx)
@@ -1224,7 +1230,7 @@ class Subagents:
             pcwd = pcwd if name == "shell_run" else (desk[0] if desk else os.path.expanduser("~"))
             perm = permrules.resolve(name, args, mode, forced, rules=self.settings().get("permissionRules"),
                                      roots=self._perm_roots(ch), conv=ch.conversation_id, cwd=pcwd,
-                                     doom=ch.detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
+                                     doom=ch.detector.repeat_count(name, args) >= limits.loop_setting(self.settings(), "loopDoomLimit") - 1)
             mode, forced = perm.mode, perm.forced
             bad = perm.refusal or self._confine(ch, name, args) or self.toolbox.prechecks.refusal(name, args, ch.ctx)
             floor = self.toolbox.floor_action(name, args, ch.ctx)
@@ -1301,6 +1307,9 @@ class Subagents:
                     ch.ctx["fs_outside_ok"] = False
                     ch.touch(in_tool=False)
         err = result.get("error") if isinstance(result, dict) else None
+        ch.tool_errors[name] = ch.tool_errors.get(name, 0) + 1 if err else 0  # consecutive, as in a chat
+        if ch.tool_errors[name] >= limits.loop_setting(self.settings(), "loopToolErrorLimit"):
+            ch.blocked.add(name)
         if isinstance(result, dict):
             result.pop("images", None)
             if hint := ch.denials.note():
@@ -1908,6 +1917,7 @@ def register(tb: Any) -> None:
               "resume_id": {"type": "string", "description": "A finished subagent's id, to continue it"},
               "root": {"type": "string", "description": "worker only: confine writes to this folder inside a granted one"}},
              ["task"]),
+        # All three taint: a foreground spawn, agent_wait and agent_stop each hand back a child's report, which is untrusted text.
         agent_spawn, GROUP, "executes", taints=True,
         examples=[{"task": "Find what the uploaded contract says about termination notice and quote the clauses", "role": "researcher"},
                   {"task": "Write the comparison table into outputs/compare.md", "role": "worker", "background": True}]))

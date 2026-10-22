@@ -1,6 +1,7 @@
 {
  "accent": "sage",
  "accentCustom": "#7c8cf0",
+ "activitySummaries": true,
  "allowAllConnections": false,
  "alwaysAsk": [
   "gmail_send"

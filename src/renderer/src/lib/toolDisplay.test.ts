@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { ToolEvent } from '@shared/types'
-import { appendPage, displayFullOutput, EMPTY_OUTPUT, fmtMs, groupLabel, isGroupable, partitionEvents, staysVisible, argRows, cardStatus, changedKeys, describeCall, docEditStatus, formatValue, fullTitle, humanizeName, labelFor, recalledChats, resultView, wasEdited } from './toolDisplay'
+import { activityLabel, appendPage, displayFullOutput, EMPTY_OUTPUT, fmtMs, groupLabel, isGroupable, partitionEvents, staysVisible, argRows, cardStatus, changedKeys, describeCall, docEditStatus, formatValue, fullTitle, humanizeName, labelFor, recalledChats, resultView, wasEdited } from './toolDisplay'
 
 test('titles are plain language, with the subject beside the verb', () => {
   assert.equal(fullTitle('google_tasks_add', { title: 'Buy milk' }), 'Add Google Task Buy milk')
@@ -178,4 +178,13 @@ test('a doc_edit result reads as waiting for you or written, and says nothing wh
   assert.equal(docEditStatus(JSON.stringify({ unchanged: true })), null)
   assert.equal(docEditStatus('{"status":"pending_re'), null, 'a cut preview carries no label')
   assert.equal(docEditStatus(null), null)
+})
+
+test('activityLabel: present-tense label from the tool, with its subject', () => {
+  assert.equal(activityLabel('web_search', { query: 'rent' }), 'Searching the web: rent')
+  assert.equal(activityLabel('calendar_events', {}), 'Listing calendar events')
+  assert.equal(activityLabel('run_python', {}), 'Running Python')
+  assert.equal(activityLabel('read_local_file', {}), 'Reading file')
+  assert.equal(activityLabel('doc_create', {}), 'Creating file')
+  assert.equal(activityLabel('some_new_tool', {}), 'Running some new tool')
 })

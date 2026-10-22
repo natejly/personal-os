@@ -925,6 +925,8 @@ export interface Message {
   created_at: number
   /** Live only, never persisted: what a streaming reply is waiting on (a provider retry, a history summary). Set and cleared by `status` events. */
   status?: MessageStatus | null
+  /** Live only, never persisted: the model-written line for the tool in flight (`activity` events). Cleared by the next call, text or the end. */
+  activity?: string | null
   /** How the reply ended when it did not end normally; null = complete, or failed with error. */
   outcome?: MessageOutcome | null
   error_kind?: ErrorKind | null
@@ -1738,6 +1740,8 @@ export interface Settings {
   autoTitle: boolean
   /** Suggest up to 3 next questions as chips under the latest reply (uses the extraction model). */
   followUps: boolean
+  /** A cheap model writes a live "what it is doing" line while a tool runs; missing means on. */
+  activitySummaries?: boolean
   /** Bank long messages and saved docs as writing samples, and keep the voice profile current. */
   learnStyle: boolean
   /** Default type for Files; a doc with its own `typography` ignores it. */
@@ -2066,6 +2070,8 @@ export type ChatEvent =
   | { event: 'text_replace'; data: { id: string; text: string } }
   /** One short model-written status line about the reply's thinking; the raw chain-of-thought is never sent. */
   | { event: 'thinking_summary'; data: { id: string; text: string } }
+  /** Transient, live only (not replayed): a short model-written line about what the running tool call is doing. */
+  | { event: 'activity'; data: { message_id: string; text: string } }
   | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; started_at?: number; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; review?: ToolEvent['review']; plan?: PlanStepRef | null; agent?: string; mcp?: McpToolOrigin | null } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   /** The card was answered (by this window, another one, or a steer): settles a replayed card so it is not asked twice. */

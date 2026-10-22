@@ -81,6 +81,10 @@ export default function ModelTab({ draft, patch, onProvidersChanged }: TabProps 
           value={draft.followUps !== false} defaultValue={true} onReset={() => patch({ followUps: true })}>
           <Toggle label="Suggest next questions" checked={draft.followUps !== false} onChange={(followUps) => patch({ followUps })} />
         </SettingRow>
+        <SettingRow settingKey="activitySummaries" title="Live activity line"
+          value={draft.activitySummaries !== false} defaultValue={true} onReset={() => patch({ activitySummaries: true })}>
+          <Toggle label="Live activity line" checked={draft.activitySummaries !== false} onChange={(activitySummaries) => patch({ activitySummaries })} />
+        </SettingRow>
         <SettingRow settingKey="selectionToolbar" title="Selection toolbar"
           value={draft.selectionToolbar !== false} defaultValue={true} onReset={() => patch({ selectionToolbar: true })}>
           <Toggle label="Selection toolbar" checked={draft.selectionToolbar !== false} onChange={(selectionToolbar) => patch({ selectionToolbar })} />

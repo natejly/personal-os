@@ -133,6 +133,22 @@ export function fullTitle(name: string, args: Record<string, unknown> | null | u
   return d.subject ? `${d.verb} ${d.subject}` : d.verb
 }
 
+const DOUBLE = new Set(['run', 'get', 'set', 'put', 'stop', 'log', 'plan', 'drop', 'skip', 'scan'])
+/** "Search" -> "Searching", "Run" -> "Running", "Create" -> "Creating". Only the leading word changes. */
+function gerund(verb: string): string {
+  const [w, ...rest] = verb.split(' ')
+  const lo = w.toLowerCase()
+  const ing = DOUBLE.has(lo) ? `${w}${lo.slice(-1)}ing` : /[^e]e$/.test(w) ? `${w.slice(0, -1)}ing` : /ing$/.test(lo) ? w : `${w}ing`
+  return [ing, ...rest].join(' ')
+}
+
+/** The present-tense label for a call that has just started, from the same verb and subject its card shows: "Searching the web". */
+export function activityLabel(name: string, args: Record<string, unknown> | null | undefined): string {
+  const d = describeCall(name, args)
+  const head = VERBS[name] ?? TOOL_DISPLAY[name]?.verb ? gerund(d.verb) : `Running ${d.verb.toLowerCase()}`
+  return d.subject ? `${head}: ${d.subject}` : head
+}
+
 /** A readable label for an argument key: `reply_to_message_id` -> `Reply to message`. */
 export function labelFor(key: string): string {
   const k = key.replace(/_id$/, '').replace(/[_-]+/g, ' ').trim()

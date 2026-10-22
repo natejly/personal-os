@@ -76,13 +76,13 @@ test('busyText: subagent waits, then a plain tool call, then running subagents',
   const subs = { a: sub('running'), b: sub('running'), c: sub('done') }
   assert.equal(busyText({ tool_events: [call('agent_wait')] }, { nowMs: 0, subs }), 'Waiting on 2 subagents')
   assert.equal(busyText({ tool_events: [call('agent_wait')] }, { nowMs: 0, subs: { a: sub('running') } }), 'Waiting on 1 subagent')
-  assert.equal(busyText({ tool_events: [call('run_python')] }, { nowMs: 0, subs }), 'Run Python…')
+  assert.equal(busyText({ tool_events: [call('run_python')] }, { nowMs: 0, subs }), 'Running Python…')
   assert.equal(busyText({ tool_events: [] }, { nowMs: 0, subs }), 'Running 2 subagents')
 })
 
 test('busyText: a running tool shows even once the answer has started', () => {
   const m = { content: 'Here is what I found so far', tool_events: [call('run_python', { started_at: 1000 })] }
-  assert.equal(busyText(m, { nowMs: 1000 }), 'Run Python…')
+  assert.equal(busyText(m, { nowMs: 1000 }), 'Running Python…')
   assert.equal(nowText({ ...m, reasoning: null }), null)
 })
 
@@ -108,6 +108,12 @@ test('elapsedSuffix is silent for 5s, then counts; the tool line carries it', ()
   assert.equal(elapsedSuffix(5_000), ' 5s')
   assert.equal(elapsedSuffix(72_400), ' 72s')
   const m = { tool_events: [call('run_python', { started_at: 1_000 })] }
-  assert.equal(busyText(m, { nowMs: 3_000 }), 'Run Python…')
-  assert.equal(busyText(m, { nowMs: 13_000 }), 'Run Python… 12s')
+  assert.equal(busyText(m, { nowMs: 3_000 }), 'Running Python…')
+  assert.equal(busyText(m, { nowMs: 13_000 }), 'Running Python… 12s')
+})
+
+test('busyText: the model-written activity line replaces the label for the running call, and only then', () => {
+  const m = { tool_events: [call('web_search', { arguments: { query: 'rent' } })], activity: 'Comparing three rental listings…' }
+  assert.equal(busyText(m, { nowMs: 0 }), 'Comparing three rental listings…')
+  assert.equal(busyText({ tool_events: [], activity: 'Stale…' }, { nowMs: 0 }), null)
 })

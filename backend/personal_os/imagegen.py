@@ -69,7 +69,7 @@ def register(tb: Any) -> None:
     """Register generate_image on a Toolbox (group `media`)."""
     from .tools import ToolSpec, _obj, tool_error
 
-    async def generate_image(ctx: dict[str, Any], prompt: str = "", size: str = "1024x1024", n: int = 1, style: str = "") -> Any:
+    async def generate_image(ctx: dict[str, Any], prompt: str, size: str = "1024x1024", n: int = 1, style: str = "") -> Any:
         s = ctx.get("settings") or tb.settings()
         prompt = (prompt or "").strip()
         if not prompt:

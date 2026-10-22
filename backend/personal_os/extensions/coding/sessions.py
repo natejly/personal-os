@@ -1240,6 +1240,9 @@ def specs(coding: Any) -> list[ToolSpec]:
         return out
 
     sid = {"id": {"type": "string"}}
+    SID_EXAMPLE = "a1b2c3d4e5f60718"
+    EXAMPLES = {"coding_session_list": [], "coding_session_wait": [{"ids": [SID_EXAMPLE], "timeout_s": 120}],
+                "coding_session_send": [{"id": SID_EXAMPLE, "message": "Also add a test for the empty case."}]}
     for name, desc, params, fn, danger in (
         ("coding_session_list", "List coding sessions (newest first) with their status, plus `harnesses`: each supported coding agent with "
          "installed and default flags. needs_you means the session waits for an answer (a question or a permission prompt).", _obj({}, []), coding_session_list, "safe"),
@@ -1270,7 +1273,7 @@ def specs(coding: Any) -> list[ToolSpec]:
          "since the session started; full=true adds the whole working-tree patch (cut at 60 KB).",
          _obj({**sid, "full": {"type": "boolean", "default": False}}, ["id"]), coding_session_diff, "safe"),
     ):
-        s = ToolSpec(name, desc, params, fn, "shell", danger, examples=[{"id": "a1b2c3d4e5f60718"}] if name not in ("coding_session_list", "coding_session_wait") else [])
+        s = ToolSpec(name, desc, params, fn, "shell", danger, examples=EXAMPLES.get(name, [{"id": SID_EXAMPLE}]))
         s.available_fn = available
         if name == "coding_session_send":
             s.default = "ask"

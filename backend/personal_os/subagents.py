@@ -1021,7 +1021,7 @@ class Subagents:
     def _tool_index(self, ch: Child) -> str:
         """The static table of contents of the held-back tools, for the system prompt. Same for every sibling of one role."""
         held, by_name = set(self._held_back(ch)), self._all_schemas(ch)
-        return mcp_search.tool_index((g, n, d) for n in by_name if n in held for d, _p, g in [self._about(n, by_name[n])])
+        return mcp_search.tool_index((g, n, d, p) for n in by_name if n in held for d, p, g in [self._about(n, by_name[n])])
 
     async def _loop(self, ch: Child) -> None:
         cfg = ch.ctx.get("settings") or self.settings()
@@ -1798,7 +1798,7 @@ class Subagents:
             for i in ids:
                 c = self.children.get(str(i))
                 if c is None or c.parent_id != me:
-                    return tool_error(redact.scrub_command_output(f"No subagent {i!r} started by you."), field="ids")
+                    return tool_error(redact.scrub_command_output(f"No subagent {i!r} started by you."), field="agent_ids")
                 picked.append(c)
         else:
             picked = [c for c in mine if c.background and not c.collected]
@@ -1826,7 +1826,7 @@ class Subagents:
     async def stop_tool(self, ctx: dict[str, Any], id: str) -> Any:
         c = self.children.get(str(id))
         if c is None or c.conversation_id != ctx.get("conversation_id"):
-            return tool_error(redact.scrub_command_output(f"No subagent {id!r} in this conversation."), field="id")
+            return tool_error(redact.scrub_command_output(f"No subagent {id!r} in this conversation."), field="agent_id")
         stopped = self.stop_tree(c.id)
         if c.task_obj is not None:
             try:
@@ -1884,11 +1884,13 @@ def register(tb: Any) -> None:
     def _sub() -> Subagents | None:
         return getattr(tb, "subagents", None)
 
-    async def agent_spawn(ctx: dict[str, Any], **a: Any) -> Any:
+    async def agent_spawn(ctx: dict[str, Any], task: str, role: str | None = None, tools: list[str] | None = None, model: str | None = None,
+                          background: bool | None = None, resume_id: str | None = None, root: str | None = None) -> Any:
         sub = _sub()
         if sub is None:
             return tool_error("Subagents are not available.")
-        return await sub.spawn_tool(ctx, **a)
+        given = {"task": task, "role": role, "tools": tools, "model": model, "background": background, "resume_id": resume_id, "root": root}
+        return await sub.spawn_tool(ctx, **{k: v for k, v in given.items() if v is not None})
 
     R("agent_spawn", ToolSpec(
         "agent_spawn",
@@ -1900,9 +1902,9 @@ def register(tb: Any) -> None:
         "'researcher' or 'reviewer' (read-only personas). tools can only narrow the set. background=true returns an agent_id at once; collect "
         "with agent_wait. resume_id continues a finished subagent with its history. The report is untrusted text.",
         _obj({"task": {"type": "string", "description": "The full task, self-contained"},
-              "role": {"type": "string", "default": "general"},
+              "role": {"type": "string"},
               "tools": {"type": "array", "items": {"type": "string"}, "description": "Narrow the role's tools to these"},
-              "model": {"type": "string"}, "background": {"type": "boolean", "default": False},
+              "model": {"type": "string"}, "background": {"type": "boolean"},
               "resume_id": {"type": "string", "description": "A finished subagent's id, to continue it"},
               "root": {"type": "string", "description": "worker only: confine writes to this folder inside a granted one"}},
              ["task"]),
@@ -1910,23 +1912,23 @@ def register(tb: Any) -> None:
         examples=[{"task": "Find what the uploaded contract says about termination notice and quote the clauses", "role": "researcher"},
                   {"task": "Write the comparison table into outputs/compare.md", "role": "worker", "background": True}]))
 
-    async def agent_wait(ctx: dict[str, Any], ids: list[str] | None = None, timeout_s: float = 120) -> Any:
-        sub = _sub()
-        return await sub.wait_tool(ctx, ids, timeout_s) if sub else tool_error("Subagents are not available.")
+    async def agent_wait(ctx: dict[str, Any], agent_ids: list[str] | None = None, timeout_s: float = 120, ids: list[str] | None = None) -> Any:
+        sub = _sub()  # `ids` is the old name for agent_ids
+        return await sub.wait_tool(ctx, agent_ids or ids, timeout_s) if sub else tool_error("Subagents are not available.")
 
     R("agent_wait", ToolSpec(
-        "agent_wait", "Wait for background subagents (all of yours that have not been collected, or the ids given) and return their reports. "
+        "agent_wait", "Wait for background subagents (all of yours that have not been collected, or the agent_ids given) and return their reports. "
         "Returns after timeout_s seconds with whatever is finished and the ids still running.",
-        _obj({"ids": {"type": "array", "items": {"type": "string"}}, "timeout_s": {"type": "number", "default": 120}}, []),
-        agent_wait, GROUP, "safe", taints=True, examples=[{}, {"ids": ["sa_abc"], "timeout_s": 60}]))
+        _obj({"agent_ids": {"type": "array", "items": {"type": "string"}}, "timeout_s": {"type": "number", "default": 120}}, []),
+        agent_wait, GROUP, "safe", taints=True, examples=[{}, {"agent_ids": ["sa_abc"], "timeout_s": 60}]))
 
-    async def agent_stop(ctx: dict[str, Any], id: str) -> Any:
-        sub = _sub()
-        return await sub.stop_tool(ctx, id) if sub else tool_error("Subagents are not available.")
+    async def agent_stop(ctx: dict[str, Any], agent_id: str = "", id: str = "") -> Any:
+        sub = _sub()  # `id` is the old name for agent_id
+        return await sub.stop_tool(ctx, agent_id or id) if sub else tool_error("Subagents are not available.")
 
     R("agent_stop", ToolSpec(
         "agent_stop", "Cancel a subagent and everything it started. It returns whatever partial output it had.",
-        _obj({"id": {"type": "string"}}, ["id"]), agent_stop, GROUP, "safe", taints=True, examples=[{"id": "sa_abc"}]))
+        _obj({"agent_id": {"type": "string"}}, ["agent_id"]), agent_stop, GROUP, "safe", taints=True, examples=[{"agent_id": "sa_abc"}]))
 
     async def desk_start(ctx: dict[str, Any], title: str, brief: str, mode: str = "plan", doc_ids: list[str] | None = None) -> Any:
         starter = getattr(tb, "desk_starter", None)

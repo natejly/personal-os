@@ -188,7 +188,7 @@ def tool(coding: Any) -> ToolSpec:
     from ...tools import ToolSpec, _obj, tool_error
 
     async def coding_run_structured(ctx: dict[str, Any], prompt: str, schema: dict[str, Any], cwd: str | None = None,
-                                    tools: list[str] | None = None, max_steps: int | None = None, timeout_s: int | None = None,
+                                    tools: list[str] | None = None, max_steps: int = STEPS[2], timeout_s: int = TIMEOUT_S[2],
                                     max_budget_usd: float | None = None, model: str | None = None) -> Any:
         if ctx.get("proposal_only"):
             return tool_error("coding_run_structured starts a coding agent on this Mac and this is an unattended background run, "

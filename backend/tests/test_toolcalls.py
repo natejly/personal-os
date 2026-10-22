@@ -92,12 +92,12 @@ def test_precheck_reports_what_call_would() -> None:
     try:
         assert tb.precheck("t_pre", {"text": "x"}) is None
         bad = tb.precheck("t_pre", {})
-        assert bad and "bad arguments" in bad["error"] and bad["expected"] == "required: text" and bad["example"] == {"text": "hi"}
+        assert bad and "text is required" in bad["error"] and bad["field"] == "text" and bad["expected"] == "parameters: text* (string)" and bad["example"] == {"text": "hi"}
         assert tb.precheck("t_pre", {"text": "x", "extra": 1})
         assert tb.precheck("no_such_tool", {}) is None  # a connector tool is not a spec
         out = asyncio.run(tb.call("t_pre", {}, {}))
         # the same shape from the backstop: only the TypeError's own wording differs
-        assert out["error"].startswith("t_pre: bad arguments") and out["expected"] == bad["expected"] and out["example"] == bad["example"]
+        assert out["error"].startswith("t_pre: bad arguments") and out["expected"] == "required: text" and out["example"] == bad["example"]
     finally:
         tb.specs.pop("t_pre", None)
 
@@ -258,7 +258,7 @@ def test_signature_mismatch_is_refused_before_a_card() -> None:
     cid, rid = run_chat({"t_ask": "ask"})
     assert store.approvals(status=None, run_id=rid) == []
     tr = [d for e, d in tape(rid) if e == "tool_result"][0]
-    assert tr["invalid"] == "schema" and "bad arguments" in tr["error"]
+    assert tr["invalid"] == "schema" and "unknown parameter" in tr["error"]
     assert RAN == []
 
 

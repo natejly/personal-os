@@ -162,13 +162,23 @@ def gist(description: str, words: int = 6) -> str:
     return " ".join(out).rstrip(",")
 
 
-def tool_index(rows: Iterable[tuple[str, str, str]]) -> str:
+def signature(name: str, parameters: Mapping[str, Any] | None, cap: int = 6) -> str:
+    """`name(a*, b)`: a tool's parameter names, the required ones starred, so a deferred tool is called with the right ones."""
+    props = list((parameters or {}).get("properties") or {})
+    req = set((parameters or {}).get("required") or [])
+    props.sort(key=lambda k: k not in req)  # required first, so the cap never hides one
+    shown = [k + "*" if k in req else k for k in props[:cap]] + (["\u2026"] if len(props) > cap else [])
+    return f"{name}({', '.join(shown)})" if shown else name
+
+
+def tool_index(rows: Iterable[tuple[Any, ...]]) -> str:
     """The static table of contents of the built-in tools held back past toolDeferAbove: one line per group,
-    `group: name - gist, ...`. `rows` is (group, name, description) for every tool that could be deferred, not the
-    ones deferred right now, so the text does not change as tools load and the cached prompt prefix holds."""
+    `group: name(params*) - gist, ...`. `rows` is (group, name, description[, parameters]) for every tool that could be
+    deferred, not the ones deferred right now, so the text does not change as tools load and the cached prompt prefix holds."""
     groups: dict[str, list[str]] = {}
-    for g, n, d in sorted(rows):
-        groups.setdefault(g, []).append(f"{n} \u2014 {gist(d)}" if gist(d) else n)
+    for g, n, d, *p in sorted(rows, key=lambda r: r[:3]):
+        label = signature(n, p[0]) if p else n
+        groups.setdefault(g, []).append(f"{label} \u2014 {gist(d)}" if gist(d) else label)
     if not groups:
         return ""
     return ("More tools, loaded when you first call one:\n" + "\n".join(f"{g}: {', '.join(items)}" for g, items in groups.items())

@@ -2758,7 +2758,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             tools_hint = "\n".join(p for p in (tools_hint, mcp_search.mcp_index(_by_server)) if p)
         if tool_ctx["deferrable"]:
             tools_hint = "\n".join(p for p in (tools_hint, mcp_search.tool_index(
-                (toolbox.specs[_n].group, _n, toolbox.specs[_n].description) for _n in tool_ctx["deferrable"])) if p)
+                (toolbox.specs[_n].group, _n, toolbox.specs[_n].description, toolbox.specs[_n].parameters) for _n in tool_ctx["deferrable"])) if p)
         used["tools_deferred"] = len(tool_ctx["deferred"])  # the Context drawer's "N tools loaded on demand"
         if mcp_modes and cfg.get("mcpServerNotes", True):
             # What each connected server said about its own tools at initialize, for servers with a tool offered this

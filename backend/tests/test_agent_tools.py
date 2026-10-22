@@ -114,7 +114,10 @@ def test_unknown_unapproved_or_chatless_calls_are_errors() -> None:
 # ---- security --------------------------------------------------------------------------------------
 
 def test_agent_create_drops_permission_fields_and_refuses_duplicates() -> None:
-    out = make("plain-agent", tool_modes={"shell_run": "on"}, tools=["shell_run"], skills=["x"], workspace="/")
+    for field, value in (("tool_modes", {"shell_run": "on"}), ("tools", ["shell_run"]), ("skills", ["x"]), ("workspace", "/")):
+        err = appmod.toolbox.precheck("agent_create", {"name": "plain-agent", "brief": "b", field: value})
+        assert err and err["field"] == field  # refused before the call, so nothing is created
+    out = make("plain-agent")
     row = appmod.agent_defs.get(out["id"])
     assert row["tool_modes"] == {} and row["tools"] == [] and row["skills"] == [] and not row["workspace"]
     assert "error" in call("agent_create", ctx_of(chat()), name="plain-agent", description="", brief="again")

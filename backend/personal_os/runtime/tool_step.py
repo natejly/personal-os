@@ -819,8 +819,8 @@ class ToolStep:
                 # The journal row stays `started`, so a later identical call reports unknown_outcome rather than repeating it.
                 result = tools.tool_error("Stopped by the user before it finished; whether it took effect is unknown."
                                           if danger in core.IDEMPOTENT_DANGER else "Stopped by the user.")
-            if first_use and isinstance(result, dict) and result.get("error") and not was_blocked:
-                # The model never saw this schema: a failed first call gets it (the tool is loaded from the next round on).
+            if first_use and isinstance(result, dict) and not was_blocked:
+                # The model never saw this schema: the first call of a deferred tool gets it (the tool is loaded from the next round on).
                 fn_ = (st.tool_ctx["mcp_schemas"].get(c["name"]) or {}).get("function") or (spec.schema()["function"] if spec else {})
                 result["schema"] = {"description": str(fn_.get("description") or "")[:400], "parameters": fn_.get("parameters")}
             hint = st.denials.note()
@@ -838,10 +838,14 @@ class ToolStep:
             err = result.get("error") if isinstance(result, dict) else None
             if not err:
                 rnd.ok_calls.append(c["name"])
-            st.tool_errors[c["name"]] = st.tool_errors.get(c["name"], 0) + 1 if err else 0  # reset on success = consecutive
+            # consecutive argument errors and crashes only: a not-found or empty answer neither counts nor resets
+            if not err:
+                st.tool_errors[c["name"]] = 0
+            elif spec is None or tools.counts_toward_block(result):  # a connector tool's error text is not ours to classify
+                st.tool_errors[c["name"]] = st.tool_errors.get(c["name"], 0) + 1
             if ran and not err and st.run is not None:
                 st.run.tool_ok += 1  # a desk turn's progress, beside steps_consumed (_chain_kind)
-            if st.tool_errors[c["name"]] >= limits.loop_setting(st.cfg, "loopToolErrorLimit"):
+            if st.tool_errors.get(c["name"], 0) >= limits.loop_setting(st.cfg, "loopToolErrorLimit"):
                 st.blocked.add(c["name"])
             # An MCP result is third-party text by definition, so it taints like a web fetch does.
             # A connector's error text is as untrusted as its output, so it taints either way.

@@ -13,7 +13,7 @@ from .tools import ToolSpec, _obj, tool_error
 
 
 def register(tb: Any) -> None:
-    async def ext_propose(ctx: dict[str, Any], id: str = "") -> Any:
+    async def ext_propose(ctx: dict[str, Any], id: str) -> Any:
         drafts = tb.ext_drafts
         if drafts is None:
             return tool_error("Extensions are not available.")

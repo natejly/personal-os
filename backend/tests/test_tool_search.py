@@ -111,7 +111,7 @@ def test_search_loads_and_persists_per_conversation() -> None:
     assert "graph_search" not in OFFERED[0] and "graph_search" in OFFERED[1]
     am = next(e for e in ev if e["event"] == "assistant_message")
     sent = json.dumps(appmod.request_log.read(appmod.db.data_dir, am["id"])[0]["messages"], ensure_ascii=False)  # the event keeps no prompt
-    assert am["context_used"]["tools_deferred"] > 0 and "graph_search \u2014 " in sent
+    assert am["context_used"]["tools_deferred"] > 0 and "graph_search(query*) \u2014 " in sent
     reply(cid, [])
     assert "graph_search" in OFFERED[0]  # the next reply in the same conversation keeps it
     reply(new_conv(), [])
@@ -145,7 +145,7 @@ def test_index_is_static_and_lists_every_deferrable_tool() -> None:
     ev = reply(cid, [])
     sys2 = system_of(ev)
     assert sys1 == sys2 and "More tools, loaded when you first call one:" in sys1
-    assert "graph_search \u2014 " in sys1 and "Call any tool listed above directly by name" in sys1
+    assert "graph_search(query*) \u2014 " in sys1 and "Call any tool listed above directly by name" in sys1
     assert "Also available via tool_search" not in sys1
 
 
@@ -188,7 +188,7 @@ def test_skill_view_loads_named_groups() -> None:
     prev = appmod.toolbox.specs["skill_view"].fn
     appmod.toolbox.specs["skill_view"].fn = _skill_view
     try:
-        reply(new_conv(), [[call("skill_view", {"name": "x"})]])
+        reply(new_conv(), [[call("skill_view", {"skill": "x"})]])
     finally:
         appmod.toolbox.specs["skill_view"].fn = prev
     assert "graph_traverse" not in OFFERED[0] and {"graph_traverse", "graph_search", "graph_add"} <= set(OFFERED[1])

@@ -47,7 +47,8 @@ async def summarise(cfg: dict[str, Any], model: str, chunk: str) -> str:
 class ThinkingSummary:
     """Feed raw reasoning with `add`; `take` returns the lines finished since the last call. One call in flight at most."""
 
-    def __init__(self, cfg: dict[str, Any], model: str, summarise_fn: Any = summarise):
+    def __init__(self, cfg: dict[str, Any], model: str, summarise_fn: Any = summarise, on_text: Any = None):
+        self._on_text = on_text
         self._cfg, self._model, self._fn = cfg, model, summarise_fn
         self.lines: list[str] = []
         self._pending = ""
@@ -56,6 +57,8 @@ class ThinkingSummary:
         self._ready: list[str] = []
 
     def add(self, text: str) -> None:
+        if self._on_text:
+            self._on_text(text)
         self._pending += text
         if self._task and self._task.done():
             self._harvest()

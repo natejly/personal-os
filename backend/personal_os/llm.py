@@ -148,6 +148,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "accent": "sage",
     "accentCustom": "#7c8cf0",  # the colour behind accent "custom"
     "simpleMode": False,  # hide models, permission detail, context, developer settings and chat internals (see lib/simpleMode.ts)
+    "activitySummaries": True,  # a cheap model writes a live "what it is doing" line while a tool runs (see activity_line.py)
     "mascot": "grain",  # which creature draws the faces: grain, blobs, off (see lib/appearance.ts)
     "uiFont": "system",  # interface typeface: system, serif, mono (see lib/appearance.ts)
     "codeFont": "default",  # code typeface: default, menlo

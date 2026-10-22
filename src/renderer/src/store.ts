@@ -912,11 +912,13 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
     case 'status':
       return mapMsg(ev.data.id, (m) => ({ ...m, status: ev.data.kind ? { kind: ev.data.kind, attempt: ev.data.attempt, max: ev.data.max, until: ev.data.until, reason: ev.data.reason, model: ev.data.model, why: ev.data.why, text: ev.data.text } : null }))
     case 'delta':
-      return mapMsg(ev.data.id, (m) => ({ ...m, ...appendDelta(m, ev.data.text), status: null }))  // a NO_REPLY in the making never shows
+      return mapMsg(ev.data.id, (m) => ({ ...m, ...appendDelta(m, ev.data.text), status: null, activity: null }))  // a NO_REPLY in the making never shows
     case 'thinking_summary':
       return mapMsg(ev.data.id, (m) => ({ ...m, reasoning: m.reasoning ? `${m.reasoning}\n${ev.data.text}` : ev.data.text, status: null }))
+    case 'activity':
+      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.pending) ? { ...m, activity: ev.data.text } : m))
     case 'tool_call':
-      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, status: null, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, started_at: ev.data.started_at ?? Date.now(), needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, review: ev.data.review ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent, ...(ev.data.mcp ? { mcp: ev.data.mcp } : {}) }] }))
+      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, status: null, activity: null, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, started_at: ev.data.started_at ?? Date.now(), needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, review: ev.data.review ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent, ...(ev.data.mcp ? { mcp: ev.data.mcp } : {}) }] }))
     case 'tool_result':
       return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === ev.data.id ? { ...t, ...ev.data, pending: false } : t)) }))
     case 'tool_decision':
@@ -931,7 +933,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
       return withTaint(s, [ev.data.source])
     case 'done': {
       s = s.duel ? { ...s, duel: null } : s
-      const done = !ev.data.id ? s : mapMsg(ev.data.id, (m) => ({ ...m, ...settleHeld(m), status: null, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace, reasoning: ev.data.reasoning ?? m.reasoning, attachments: ev.data.attachments ?? m.attachments, outcome: ev.data.outcome ?? (ev.data.stopped ? 'stopped' : (ev.data.partial as Message['outcome']) ?? null), error_kind: ev.data.error_kind ?? null }))
+      const done = !ev.data.id ? s : mapMsg(ev.data.id, (m) => ({ ...m, ...settleHeld(m), status: null, activity: null, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace, reasoning: ev.data.reasoning ?? m.reasoning, attachments: ev.data.attachments ?? m.attachments, outcome: ev.data.outcome ?? (ev.data.stopped ? 'stopped' : (ev.data.partial as Message['outcome']) ?? null), error_kind: ev.data.error_kind ?? null }))
       // The reply is whole and persisted here. The stream stays open for the auto-learn tail, so the
       // subscription is left alone and only `answering` drops.
       // `unread` counts the final done, not the first token: a chat that is mid-reply off-screen has nothing to read yet.
@@ -1764,7 +1766,7 @@ export const useStore = create<State>((set, get) => {
     ready: false,
     backendError: null,
     backendState: 'ready',
-    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', autoRoute: false, systemPrompt: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', mascot: 'grain', simpleMode: false, gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true },
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', autoRoute: false, systemPrompt: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', mascot: 'grain', simpleMode: false, activitySummaries: true, gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true },
     models: [],
     modelsError: null,
     tools: [],

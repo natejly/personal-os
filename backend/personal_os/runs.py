@@ -702,6 +702,7 @@ class Run:
         # Set when the reply's `done` goes out. The task lives on past that — auto-learn is the last
         # thing it does — so `live` alone cannot tell a working run from one that is only tidying up.
         self.replied = False
+        self.activity: Any = None  # activity_line.ActivityLine while a live "what it is doing" line is on
         self.silent = False  # a reply the loop removed (NO_REPLY): nothing to show or forward
         self.seq = 0
         self.status = "running"
@@ -778,12 +779,22 @@ class Run:
             except Exception:  # noqa: BLE001 - a listener must never break the run
                 log.debug("run change listener failed for %s", self.run_id, exc_info=True)
 
+    def emit_transient(self, event: str, data: Any) -> None:
+        """Live subscribers only: no seq, no ring, no table, so a reconnect or replay never sees it."""
+        for sub in self._subs:
+            try:
+                sub.q.put_nowait((self.seq, event, data))
+            except asyncio.QueueFull:
+                pass
+
     def publish(self, event: str, data: Any) -> None:
         self.seq += 1
         self.last_active = time.monotonic()
         if event == "tool_call" and isinstance(data, dict):
             # Wall-clock start, so a window that attaches or replays mid-call times it from when it began.
             data.setdefault("started_at", int(time.time() * 1000))
+            if self.activity is not None:
+                self.activity.note_tool(str(data.get("message_id") or ""), str(data.get("name") or ""), data.get("arguments"))
         if event == "assistant_message":
             self.message_seq = self.seq
         item = (self.seq, event, data)
@@ -812,6 +823,8 @@ class Run:
             self._changed()
 
     def end(self, status: str | None = None) -> None:
+        if self.activity is not None:
+            self.activity.stop()
         self.ended_at = time.time()
         self.status = status or ("error" if self.error else "done")
         if self.store is not None:

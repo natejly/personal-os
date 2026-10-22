@@ -1,6 +1,6 @@
 import type { Message, MessageStatus, SubagentInfo, ToolEvent, WorkerInfo } from '@shared/types'
 import { modelLabel } from './modelLabel'
-import { fullTitle, staysVisible } from './toolDisplay'
+import { activityLabel, fullTitle, staysVisible } from './toolDisplay'
 import { workerIsLive } from './workers'
 
 const CAUSE: Record<NonNullable<MessageStatus['reason']>, string> = {
@@ -87,7 +87,7 @@ export type BusyContext = { nowMs: number; subs?: Record<string, SubagentInfo>; 
 /** The busy line while a card waits on the user. */
 export const APPROVAL_WAIT = 'Waiting for your approval'
 
-export function busyText(m: (Pick<Message, 'status' | 'tool_events'> & Partial<Pick<Message, 'content'>>) | null | undefined, ctx: BusyContext): string | null {
+export function busyText(m: (Pick<Message, 'status' | 'tool_events'> & Partial<Pick<Message, 'content' | 'activity'>>) | null | undefined, ctx: BusyContext): string | null {
   if (!m) return null
   if (m.status) return statusText(m.status, ctx.nowMs)
   const workers = ctx.workers ?? []
@@ -101,7 +101,8 @@ export function busyText(m: (Pick<Message, 'status' | 'tool_events'> & Partial<P
   if (call) {
     // A card on screen already says it is running; the same words twice would read as two things happening.
     if (CARD_RUNNING.test(call.name) && staysVisible(call)) return null
-    return `${fullTitle(call.name, call.arguments)}…${call.started_at ? elapsedSuffix(ctx.nowMs - call.started_at) : ''}`
+    // The model-written line, when one has arrived for this call, outranks the deterministic label.
+    return `${m.activity ? m.activity.replace(/…$/, '') : activityLabel(call.name, call.arguments)}…${call.started_at ? elapsedSuffix(ctx.nowMs - call.started_at) : ''}`
   }
   if (n) return `Running ${n} subagent${n === 1 ? '' : 's'}`
   // Workers are only waited on in silence: while text is streaming the line would be noise.

@@ -66,14 +66,14 @@ TIER_DEFAULTS: dict[str, dict[str, str]] = {
 #   medium - quality matters but the user does not watch it: Auto's fast path (still a visible reply), the auto-review
 #            of tool calls, compaction and recaps (a bad summary poisons later turns), memory consolidation.
 #   low    - high-volume and checkable: memory and graph extraction, auto-learn, style learning, titles, follow-ups,
-#            the thinking summariser.
+#            the thinking summariser, the live activity line.
 # `settings()` in app.py resolves the legacy keys from these: a blank extractionModel is the low tier, a blank fastModel
 # the medium tier (an explicit saved value still wins). Medium sites call tier_model(cfg, "medium") directly.
 TASK_TIERS: dict[str, str] = {
     "chat": "default", "planning": "high", "draft_skill": "high", "draft_agent": "high",
     "auto_route_fast": "medium", "auto_review": "medium", "compaction": "medium", "recap": "medium", "consolidation": "medium",
     "extraction": "low", "auto_learn": "low", "style": "low", "title": "low", "followups": "low", "thinking_summary": "low",
-    "branch_summary": "low", "assist": "low", "side_question": "low",
+    "branch_summary": "low", "assist": "low", "side_question": "low", "activity_line": "low",
 }
 for _p in PROVIDERS:  # shipped to the Settings pickers as the blank-state placeholder
     _p["tiers"] = TIER_DEFAULTS.get(_p["id"], {})

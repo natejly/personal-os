@@ -35,7 +35,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from . import auth_breaker, blobs, system_access
 from .bounds import clamp_limit
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, osplat, redact, stt, tools, verify
-from . import branch_summary, compaction, side_question, followups, otel_export, replay_trace, router, thinking_summary, titles
+from . import activity_line, branch_summary, compaction, side_question, followups, otel_export, replay_trace, router, thinking_summary, titles
 from . import chatlink, config, duel, fsx, guards, labels, permissions_routes, request_log, runtime, setting_sources, toolcore
 from .fsx import sensitive_reason
 from . import context_map
@@ -2381,7 +2381,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # never goes back to the model: history() reads content only.
         rbuf: list[str] = []
         # The client never sees the raw thinking: a low-tier model turns it into short status lines.
-        tsum = thinking_summary.ThinkingSummary(cfg, model)
+        activity = activity_line.ActivityLine(run, cfg, model) if run is not None and cfg.get("activitySummaries", True) else None
+        if activity is not None:
+            run.activity = activity
+        tsum = thinking_summary.ThinkingSummary(cfg, model, on_text=activity.add_reasoning if activity else None)
         error: str | None = None
         tool_events: list[dict[str, Any]] = []
         # Uploaded-file excerpts are text the user did not

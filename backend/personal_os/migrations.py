@@ -748,21 +748,25 @@ def _ext_notes(c: sqlite3.Connection) -> None:
 
 def _wake_queue(c: sqlite3.Connection) -> None:
     """The wake queue (wakes.py). Turns still owed are queued: a worker whose report was (flag wake_delivered 0 on its run row), a
-    chat message or reply that had not been answered (chat_links statuses pending/running and replied/returning)."""
+    chat message or reply that had not been answered (chat_links statuses pending/running and replied/returning). A bare
+    database has neither table."""
     from .wakes import SCHEMA
     for stmt in filter(str.strip, SCHEMA.split(";")):
         c.execute(stmt)
-    c.execute("INSERT OR IGNORE INTO wake_queue(conversation_id, kind, payload, dedupe_key, created_at) "
-              "SELECT json_extract(input,'$.conversation_id'), 'worker', json_object('run_id', run_id), 'worker:' || run_id, started_at "
-              "FROM agent_runs WHERE kind='worker' AND json_extract(input,'$.conversation_id') IS NOT NULL "
-              "AND COALESCE(json_extract(input,'$.wake_delivered'),1)=0 ORDER BY started_at")
-    c.execute("UPDATE chat_links SET status='pending' WHERE status='running'")
-    c.execute("UPDATE chat_links SET status='replied' WHERE status='returning'")
-    c.execute("INSERT OR IGNORE INTO wake_queue(conversation_id, kind, payload, dedupe_key, created_at) "
-              "SELECT IIF(status='pending', to_conv, from_conv), 'chat', "
-              "json_object('link', id, 'kind', IIF(status='pending', 'chat_in', 'chat_reply')), "
-              "'chat:' || id || ':' || IIF(status='pending', 'chat_in', 'chat_reply'), updated_at "
-              "FROM chat_links WHERE status IN ('pending', 'replied') ORDER BY updated_at")
+    have = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE name IN ('agent_runs', 'chat_links')")}
+    if "agent_runs" in have:
+        c.execute("INSERT OR IGNORE INTO wake_queue(conversation_id, kind, payload, dedupe_key, created_at) "
+                  "SELECT json_extract(input,'$.conversation_id'), 'worker', json_object('run_id', run_id), 'worker:' || run_id, started_at "
+                  "FROM agent_runs WHERE kind='worker' AND json_extract(input,'$.conversation_id') IS NOT NULL "
+                  "AND COALESCE(json_extract(input,'$.wake_delivered'),1)=0 ORDER BY started_at")
+    if "chat_links" in have:
+        c.execute("UPDATE chat_links SET status='pending' WHERE status='running'")
+        c.execute("UPDATE chat_links SET status='replied' WHERE status='returning'")
+        c.execute("INSERT OR IGNORE INTO wake_queue(conversation_id, kind, payload, dedupe_key, created_at) "
+                  "SELECT IIF(status='pending', to_conv, from_conv), 'chat', "
+                  "json_object('link', id, 'kind', IIF(status='pending', 'chat_in', 'chat_reply')), "
+                  "'chat:' || id || ':' || IIF(status='pending', 'chat_in', 'chat_reply'), updated_at "
+                  "FROM chat_links WHERE status IN ('pending', 'replied') ORDER BY updated_at")
 
 
 def _drop_permission_presets(c: sqlite3.Connection) -> None:

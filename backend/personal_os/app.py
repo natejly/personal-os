@@ -2640,10 +2640,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         offered_ext_tools: set[str] = set()  # kept offered for the rest of this turn if their extension is turned off meanwhile
 
         def _schemas(withheld: bool = False) -> list[dict[str, Any]]:
-            out = _schemas_all(withheld)
-            return workers_mod.restrict_schemas(out) if st.delegation_forced and not withheld else out
-
-        def _schemas_all(withheld: bool = False) -> list[dict[str, Any]]:
             """The offered tools, less what a tools.offer handler hides (the order is core's, so the cached prefix holds)."""
             out = _offered(withheld)
             if not host.bus.active("tools.offer"):
@@ -3232,9 +3228,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 st.partial = None
             st.repeats, st.last_sig, st.stuck_hits, st.stop_text = 0, None, 0, None
             work_rounds = 0
-            if st.delegation_forced:
-                st.delegation_forced = False
-                st.tool_schemas = _schemas()
+            st.delegation_forced, st.work_ms = False, 0
             st.blocked.clear()
             st.tool_errors.clear()
             if st.detector is not None:
@@ -3602,11 +3596,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if _front_active():
                 if workers_mod.counts_as_work(ok_calls):
                     work_rounds += 1
-                if not st.delegation_forced and workers_mod.delegation_forced(cfg, work_rounds, (s_["function"]["name"] for s_ in st.tool_schemas)):
-                    # Past the threshold: from the next round only the hand-off tools are offered. A routing rule; nothing stops.
+                if not st.delegation_forced and workers_mod.delegation_forced(cfg, work_rounds, (s_["function"]["name"] for s_ in st.tool_schemas), st.work_ms):
+                    # Past the budget: the tools stay as they are (a changed list busts the prompt cache); dispatch refuses the
+                    # others (workers.lane_refusal). A routing rule; nothing stops.
                     st.delegation_forced = True
-                    st.tool_schemas = _schemas()
-                    messages.append({"role": "system", "content": workers_mod.FORCE_DELEGATE_NUDGE.format(n=work_rounds)})
+                    messages.append({"role": "system", "content": workers_mod.FORCE_DELEGATE_NUDGE})
             max_rounds = limits.loop_setting(cfg, "loopMaxRounds")
             if max_rounds and _round >= max_rounds and st.partial is None:  # loopMaxRounds: the closing answer, as after a breaker
                 st.partial = "loop"

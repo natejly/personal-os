@@ -78,7 +78,8 @@ CODING_SESSION_MAX_CONCURRENT = 3  # live coding sessions at once, their own poo
 LOGIN_SHELL_TIMEOUT_SECONDS = 5    # resolving the user's login-shell PATH for a new claude daemon
 # Workers (workers.py): detached background agents the chat's front agent hands work to. These route and queue work;
 # none of them ends a worker's run.
-DELEGATION_AFTER_ROUNDS = 4        # rounds of tool calls a chat reply makes itself before the rest must go to a worker (routing, not a cap)
+DELEGATION_AFTER_ROUNDS = 6        # rounds of tool calls a chat reply makes itself before the rest must go to a worker (routing, not a cap)
+DELEGATION_AFTER_SECONDS = 45      # ...or this much cumulative tool time in one reply, whichever comes first; later calls to other tools return an error
 WORKER_MAX_CONCURRENT = 8          # workers running at once; the rest wait in a queue and start in order
 WORKER_MEMORY_FLOOR = 0.15         # a queued worker is not started while free system memory is below this share
 WORKER_RECHECK_SECONDS = 5.0       # how often a non-empty queue looks again for a free slot or recovered memory

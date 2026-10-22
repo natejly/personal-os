@@ -1127,7 +1127,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      }
     ],
     "tool_choice": "auto",
@@ -1163,10 +1163,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -1205,12 +1208,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -1245,7 +1251,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -1326,10 +1332,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -1368,12 +1377,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -1408,7 +1420,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      }
     ],
     "tool_choice": "auto",
@@ -1444,10 +1456,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -1486,12 +1501,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -1526,7 +1544,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -1594,10 +1612,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -1636,12 +1657,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -1676,7 +1700,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      }
     ],
     "tool_choice": "auto",
@@ -1712,10 +1736,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -1754,12 +1781,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -1795,7 +1825,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      }
     ],
     "tool_choice": "auto",
@@ -1831,10 +1861,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -1873,12 +1906,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -1913,7 +1949,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -1968,10 +2004,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -2010,12 +2049,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -2050,163 +2092,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
-     },
-     {
-      "content": null,
-      "role": "assistant",
-      "tool_calls": [
-       {
-        "function": {
-         "arguments": "{}",
-         "name": "g_read"
-        },
-        "id": "r0",
-        "type": "function"
-       }
-      ]
-     },
-     {
-      "content": "{\"ok\": true, \"read\": 1}",
-      "role": "tool",
-      "tool_call_id": "r0"
-     },
-     {
-      "content": null,
-      "role": "assistant",
-      "tool_calls": [
-       {
-        "function": {
-         "arguments": "{}",
-         "name": "g_read"
-        },
-        "id": "r1",
-        "type": "function"
-       }
-      ]
-     },
-     {
-      "content": "{\"ok\": true, \"read\": 1}",
-      "role": "tool",
-      "tool_call_id": "r1"
-     }
-    ],
-    "tool_choice": "auto",
-    "tools": [
-     "search_documents",
-     "read_document",
-     "list_documents",
-     "search_memory",
-     "save_memory",
-     "graph_search",
-     "graph_traverse",
-     "graph_add",
-     "web_search",
-     "fetch_url",
-     "run_python",
-     "setup_request",
-     "current_time",
-     "show",
-     "propose_plan",
-     "ask_user",
-     "todo_write",
-     "context_map",
-     "read_tool_result",
-     "search_tool_results",
-     "doc_list",
-     "doc_search",
-     "doc_read",
-     "doc_create",
-     "doc_edit",
-     "doc_delete",
-     "doc_comments",
-     "doc_comment_reply",
-     "dashboard_save",
-     "dashboard_open",
-     "dashboard_pin",
-     "read_local_file",
-     "write_local_file",
-     "move_local_file",
-     "trash_local_file",
-     "fs_glob",
-     "fs_grep",
-     "fs_edit",
-     "fs_copy",
-     "fs_mkdir",
-     "youtube_video",
-     "youtube_search",
-     "github_search",
-     "github_read",
-     "read_feed",
-     "schedule_task",
-     "scheduled_tasks",
-     "cancel_scheduled_task",
-     "writing_style",
-     "save_writing_sample",
-     "skill_list",
-     "skill_draft",
-     "skill_revise",
-     "skill_view",
-     "skill_from_run",
-     "desk_start",
-     "delegate",
-     "message_worker",
-     "check_worker",
-     "stop_worker",
-     "resume_worker",
-     "list_chats",
-     "read_chat",
-     "message_chat",
-     "permissions_update",
-     "agent_create",
-     "agents_list",
-     "agent_message",
-     "ext_propose",
-     "deep_research",
-     "shell_run",
-     "shell_poll",
-     "shell_kill",
-     "workflow_list",
-     "workflow_run",
-     "workflow_resume",
-     "command_list",
-     "command_run",
-     "generate_image",
-     "send_files",
-     "convert_document",
-     "render_preview",
-     "doc_guide",
-     "python_install",
-     "ship_checklist",
-     "ship_status",
-     "coding_session_start",
-     "coding_session_list",
-     "coding_session_status",
-     "coding_session_wait",
-     "coding_session_summary",
-     "coding_session_send",
-     "coding_session_stop",
-     "coding_session_diff",
-     "coding_recipe_list",
-     "coding_recipe_show",
-     "coding_recipe_save",
-     "coding_recipe_run",
-     "coding_recipe_status",
-     "coding_run_structured",
-     "g_read",
-     "g_write",
-     "g_hang"
-    ]
-   },
-   {
-    "messages": [
-     {
-      "context": [
-       "system",
-       "system",
-       "user"
-      ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -2245,25 +2131,6 @@
       "content": "{\"ok\": true, \"read\": 1}",
       "role": "tool",
       "tool_call_id": "r1"
-     },
-     {
-      "content": null,
-      "role": "assistant",
-      "tool_calls": [
-       {
-        "function": {
-         "arguments": "{}",
-         "name": "g_read"
-        },
-        "id": "r2",
-        "type": "function"
-       }
-      ]
-     },
-     {
-      "content": "{\"ok\": true, \"read\": 1}",
-      "role": "tool",
-      "tool_call_id": "r2"
      }
     ],
     "tool_choice": "auto",
@@ -2299,10 +2166,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -2341,12 +2211,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -2381,7 +2254,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -2439,42 +2312,119 @@
       "content": "{\"ok\": true, \"read\": 1}",
       "role": "tool",
       "tool_call_id": "r2"
-     },
-     {
-      "content": null,
-      "role": "assistant",
-      "tool_calls": [
-       {
-        "function": {
-         "arguments": "{}",
-         "name": "g_read"
-        },
-        "id": "r3",
-        "type": "function"
-       }
-      ]
-     },
-     {
-      "content": "{\"ok\": true, \"read\": 1}\n\n[stuck_notice] You appear to be stuck: g_read returned the same result 4 times in a row. Change approach: use a different tool or arguments, or answer with what you have and say what is missing.",
-      "role": "tool",
-      "tool_call_id": "r3"
-     },
-     {
-      "content": "This reply has already used 4 rounds of tool calls itself. From here only delegate, message_worker, check_worker, stop_worker, resume_worker and todo_write are offered. Hand the remaining work to a worker with a self-contained brief. Do not announce it and do not explain this rule; if there is nothing else for the user, answer with exactly NO_REPLY.",
-      "role": "system"
      }
     ],
     "tool_choice": "auto",
     "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
      "propose_plan",
      "ask_user",
      "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "find_files",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
      "delegate",
      "message_worker",
      "check_worker",
      "stop_worker",
      "resume_worker",
-     "deep_research"
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "opencode_run",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "view_image",
+     "generate_image",
+     "screenshot",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
     ]
    },
    {
@@ -2485,7 +2435,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -2562,10 +2512,206 @@
       "content": "{\"ok\": true, \"read\": 1}\n\n[stuck_notice] You appear to be stuck: g_read returned the same result 4 times in a row. Change approach: use a different tool or arguments, or answer with what you have and say what is missing.",
       "role": "tool",
       "tool_call_id": "r3"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "find_files",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "opencode_run",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "view_image",
+     "generate_image",
+     "screenshot",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "250ffebe31c3"
      },
      {
-      "content": "This reply has already used 4 rounds of tool calls itself. From here only delegate, message_worker, check_worker, stop_worker, resume_worker and todo_write are offered. Hand the remaining work to a worker with a self-contained brief. Do not announce it and do not explain this rule; if there is nothing else for the user, answer with exactly NO_REPLY.",
-      "role": "system"
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r0",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r1",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r1"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r2",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r2"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r3",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}\n\n[stuck_notice] You appear to be stuck: g_read returned the same result 4 times in a row. Change approach: use a different tool or arguments, or answer with what you have and say what is missing.",
+      "role": "tool",
+      "tool_call_id": "r3"
      },
      {
       "content": null,
@@ -2589,19 +2735,119 @@
     ],
     "tool_choice": "none",
     "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
      "propose_plan",
      "ask_user",
      "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "find_files",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
      "delegate",
      "message_worker",
      "check_worker",
      "stop_worker",
      "resume_worker",
-     "deep_research"
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "opencode_run",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "view_image",
+     "generate_image",
+     "screenshot",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
     ]
    }
   ],
-  "prefix_sha1": "6b369d34ee8e4b189d5ca0222504c46c91fe9642"
+  "prefix_sha1": "fcbd0a3fd10132b6ae466dab68ed5b3c55f20b80"
  },
  "round_card_allowed": {
   "events": [
@@ -3270,7 +3516,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      }
     ],
     "tool_choice": "auto",
@@ -3306,10 +3552,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -3348,12 +3597,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -3388,7 +3640,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -3469,10 +3721,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -3511,12 +3766,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -3544,7 +3802,7 @@
     ]
    }
   ],
-  "prefix_sha1": "6b369d34ee8e4b189d5ca0222504c46c91fe9642"
+  "prefix_sha1": "fcbd0a3fd10132b6ae466dab68ed5b3c55f20b80"
  },
  "round_card_denied": {
   "events": [
@@ -4144,7 +4402,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      }
     ],
     "tool_choice": "auto",
@@ -4180,10 +4438,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -4222,12 +4483,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -4262,7 +4526,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -4343,10 +4607,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -4385,12 +4652,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -4425,7 +4695,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      }
     ],
     "tool_choice": "auto",
@@ -4461,10 +4731,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -4503,12 +4776,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -4543,7 +4819,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -4611,10 +4887,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -4653,12 +4932,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -4686,7 +4968,7 @@
     ]
    }
   ],
-  "prefix_sha1": "6b369d34ee8e4b189d5ca0222504c46c91fe9642"
+  "prefix_sha1": "fcbd0a3fd10132b6ae466dab68ed5b3c55f20b80"
  },
  "stopped_in_a_tool": {
   "events": [
@@ -5153,7 +5435,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      }
     ],
     "tool_choice": "auto",
@@ -5189,10 +5471,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -5231,12 +5516,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -5271,7 +5559,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -5352,10 +5640,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -5394,12 +5685,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -5434,7 +5728,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      }
     ],
     "tool_choice": "auto",
@@ -5470,10 +5764,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -5512,12 +5809,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -5552,7 +5852,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -5620,10 +5920,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -5662,12 +5965,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -5702,7 +6008,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      }
     ],
     "tool_choice": "auto",
@@ -5738,10 +6044,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -5780,12 +6089,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -5814,7 +6126,7 @@
     ]
    }
   ],
-  "prefix_sha1": "6b369d34ee8e4b189d5ca0222504c46c91fe9642"
+  "prefix_sha1": "fcbd0a3fd10132b6ae466dab68ed5b3c55f20b80"
  },
  "unknown_tool": {
   "events": [
@@ -5988,7 +6300,7 @@
      "arguments": {},
      "blocked": null,
      "breaker": null,
-     "error": "Unknown tool no_such_tool. Did you mean: search_tool_results, shell_poll, doc_search, cancel_scheduled_task, writing_style, search_memory, schedule_task, doc_list",
+     "error": "Unknown tool no_such_tool. Did you mean: search_tool_results, shell_poll, doc_search, cancel_scheduled_task, run_shortcut, writing_style, search_memory, schedule_task",
      "forced": false,
      "id": "<id>:a",
      "images": null,
@@ -5997,7 +6309,7 @@
      "name": "no_such_tool",
      "plan": null,
      "proposal": null,
-     "result_preview": "{\"error\": \"Unknown tool no_such_tool. Did you mean: search_tool_results, shell_poll, doc_search, cancel_scheduled_task, writing_style, search_memory, schedule_task, doc_list\", \"try_instead\": \"call one of the tools listed in this request, by its exact name\"}",
+     "result_preview": "{\"error\": \"Unknown tool no_such_tool. Did you mean: search_tool_results, shell_poll, doc_search, cancel_scheduled_task, run_shortcut, writing_style, search_memory, schedule_task\", \"try_instead\": \"call one of the tools listed in this request, by its exact name\"}",
      "tainted": false,
      "undo": null
     },
@@ -6457,7 +6769,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      }
     ],
     "tool_choice": "auto",
@@ -6493,10 +6805,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -6535,12 +6850,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -6575,7 +6893,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -6656,10 +6974,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -6698,12 +7019,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -6738,7 +7062,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      }
     ],
     "tool_choice": "auto",
@@ -6774,10 +7098,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -6816,12 +7143,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -6856,7 +7186,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -6924,10 +7254,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -6966,12 +7299,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -7006,7 +7342,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      }
     ],
     "tool_choice": "auto",
@@ -7042,10 +7378,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -7084,12 +7423,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -7125,7 +7467,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      }
     ],
     "tool_choice": "auto",
@@ -7161,10 +7503,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -7203,12 +7548,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -7243,7 +7591,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -7298,10 +7646,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -7340,12 +7691,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -7380,163 +7734,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
-     },
-     {
-      "content": null,
-      "role": "assistant",
-      "tool_calls": [
-       {
-        "function": {
-         "arguments": "{}",
-         "name": "g_read"
-        },
-        "id": "r0",
-        "type": "function"
-       }
-      ]
-     },
-     {
-      "content": "{\"ok\": true, \"read\": 1}",
-      "role": "tool",
-      "tool_call_id": "r0"
-     },
-     {
-      "content": null,
-      "role": "assistant",
-      "tool_calls": [
-       {
-        "function": {
-         "arguments": "{}",
-         "name": "g_read"
-        },
-        "id": "r1",
-        "type": "function"
-       }
-      ]
-     },
-     {
-      "content": "{\"ok\": true, \"read\": 1}",
-      "role": "tool",
-      "tool_call_id": "r1"
-     }
-    ],
-    "tool_choice": "auto",
-    "tools": [
-     "search_documents",
-     "read_document",
-     "list_documents",
-     "search_memory",
-     "save_memory",
-     "graph_search",
-     "graph_traverse",
-     "graph_add",
-     "web_search",
-     "fetch_url",
-     "run_python",
-     "setup_request",
-     "current_time",
-     "show",
-     "propose_plan",
-     "ask_user",
-     "todo_write",
-     "context_map",
-     "read_tool_result",
-     "search_tool_results",
-     "doc_list",
-     "doc_search",
-     "doc_read",
-     "doc_create",
-     "doc_edit",
-     "doc_delete",
-     "doc_comments",
-     "doc_comment_reply",
-     "dashboard_save",
-     "dashboard_open",
-     "dashboard_pin",
-     "read_local_file",
-     "write_local_file",
-     "move_local_file",
-     "trash_local_file",
-     "fs_glob",
-     "fs_grep",
-     "fs_edit",
-     "fs_copy",
-     "fs_mkdir",
-     "youtube_video",
-     "youtube_search",
-     "github_search",
-     "github_read",
-     "read_feed",
-     "schedule_task",
-     "scheduled_tasks",
-     "cancel_scheduled_task",
-     "writing_style",
-     "save_writing_sample",
-     "skill_list",
-     "skill_draft",
-     "skill_revise",
-     "skill_view",
-     "skill_from_run",
-     "desk_start",
-     "delegate",
-     "message_worker",
-     "check_worker",
-     "stop_worker",
-     "resume_worker",
-     "list_chats",
-     "read_chat",
-     "message_chat",
-     "permissions_update",
-     "agent_create",
-     "agents_list",
-     "agent_message",
-     "ext_propose",
-     "deep_research",
-     "shell_run",
-     "shell_poll",
-     "shell_kill",
-     "workflow_list",
-     "workflow_run",
-     "workflow_resume",
-     "command_list",
-     "command_run",
-     "generate_image",
-     "send_files",
-     "convert_document",
-     "render_preview",
-     "doc_guide",
-     "python_install",
-     "ship_checklist",
-     "ship_status",
-     "coding_session_start",
-     "coding_session_list",
-     "coding_session_status",
-     "coding_session_wait",
-     "coding_session_summary",
-     "coding_session_send",
-     "coding_session_stop",
-     "coding_session_diff",
-     "coding_recipe_list",
-     "coding_recipe_show",
-     "coding_recipe_save",
-     "coding_recipe_run",
-     "coding_recipe_status",
-     "coding_run_structured",
-     "g_read",
-     "g_write",
-     "g_hang"
-    ]
-   },
-   {
-    "messages": [
-     {
-      "context": [
-       "system",
-       "system",
-       "user"
-      ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -7575,25 +7773,6 @@
       "content": "{\"ok\": true, \"read\": 1}",
       "role": "tool",
       "tool_call_id": "r1"
-     },
-     {
-      "content": null,
-      "role": "assistant",
-      "tool_calls": [
-       {
-        "function": {
-         "arguments": "{}",
-         "name": "g_read"
-        },
-        "id": "r2",
-        "type": "function"
-       }
-      ]
-     },
-     {
-      "content": "{\"ok\": true, \"read\": 1}",
-      "role": "tool",
-      "tool_call_id": "r2"
      }
     ],
     "tool_choice": "auto",
@@ -7629,10 +7808,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -7671,12 +7853,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -7711,7 +7896,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -7769,42 +7954,119 @@
       "content": "{\"ok\": true, \"read\": 1}",
       "role": "tool",
       "tool_call_id": "r2"
-     },
-     {
-      "content": null,
-      "role": "assistant",
-      "tool_calls": [
-       {
-        "function": {
-         "arguments": "{}",
-         "name": "g_read"
-        },
-        "id": "r3",
-        "type": "function"
-       }
-      ]
-     },
-     {
-      "content": "{\"ok\": true, \"read\": 1}\n\n[stuck_notice] You appear to be stuck: g_read returned the same result 4 times in a row. Change approach: use a different tool or arguments, or answer with what you have and say what is missing.",
-      "role": "tool",
-      "tool_call_id": "r3"
-     },
-     {
-      "content": "This reply has already used 4 rounds of tool calls itself. From here only delegate, message_worker, check_worker, stop_worker, resume_worker and todo_write are offered. Hand the remaining work to a worker with a self-contained brief. Do not announce it and do not explain this rule; if there is nothing else for the user, answer with exactly NO_REPLY.",
-      "role": "system"
      }
     ],
     "tool_choice": "auto",
     "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
      "propose_plan",
      "ask_user",
      "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "find_files",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
      "delegate",
      "message_worker",
      "check_worker",
      "stop_worker",
      "resume_worker",
-     "deep_research"
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "opencode_run",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "view_image",
+     "generate_image",
+     "screenshot",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
     ]
    },
    {
@@ -7815,7 +8077,7 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -7892,10 +8154,206 @@
       "content": "{\"ok\": true, \"read\": 1}\n\n[stuck_notice] You appear to be stuck: g_read returned the same result 4 times in a row. Change approach: use a different tool or arguments, or answer with what you have and say what is missing.",
       "role": "tool",
       "tool_call_id": "r3"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "find_files",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "opencode_run",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "view_image",
+     "generate_image",
+     "screenshot",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "250ffebe31c3"
      },
      {
-      "content": "This reply has already used 4 rounds of tool calls itself. From here only delegate, message_worker, check_worker, stop_worker, resume_worker and todo_write are offered. Hand the remaining work to a worker with a self-contained brief. Do not announce it and do not explain this rule; if there is nothing else for the user, answer with exactly NO_REPLY.",
-      "role": "system"
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r0",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r0"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r1",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r1"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r2",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}",
+      "role": "tool",
+      "tool_call_id": "r2"
+     },
+     {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+       {
+        "function": {
+         "arguments": "{}",
+         "name": "g_read"
+        },
+        "id": "r3",
+        "type": "function"
+       }
+      ]
+     },
+     {
+      "content": "{\"ok\": true, \"read\": 1}\n\n[stuck_notice] You appear to be stuck: g_read returned the same result 4 times in a row. Change approach: use a different tool or arguments, or answer with what you have and say what is missing.",
+      "role": "tool",
+      "tool_call_id": "r3"
      },
      {
       "content": null,
@@ -7919,30 +8377,6 @@
     ],
     "tool_choice": "none",
     "tools": [
-     "propose_plan",
-     "ask_user",
-     "todo_write",
-     "delegate",
-     "message_worker",
-     "check_worker",
-     "stop_worker",
-     "resume_worker",
-     "deep_research"
-    ]
-   },
-   {
-    "messages": [
-     {
-      "context": [
-       "system",
-       "system",
-       "user"
-      ],
-      "digest": "bbf24342d975"
-     }
-    ],
-    "tool_choice": "auto",
-    "tools": [
      "search_documents",
      "read_document",
      "list_documents",
@@ -7974,10 +8408,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -8016,12 +8453,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -8056,7 +8496,131 @@
        "system",
        "user"
       ],
-      "digest": "bbf24342d975"
+      "digest": "250ffebe31c3"
+     }
+    ],
+    "tool_choice": "auto",
+    "tools": [
+     "search_documents",
+     "read_document",
+     "list_documents",
+     "search_memory",
+     "save_memory",
+     "graph_search",
+     "graph_traverse",
+     "graph_add",
+     "web_search",
+     "fetch_url",
+     "run_python",
+     "setup_request",
+     "current_time",
+     "show",
+     "propose_plan",
+     "ask_user",
+     "todo_write",
+     "context_map",
+     "read_tool_result",
+     "search_tool_results",
+     "doc_list",
+     "doc_search",
+     "doc_read",
+     "doc_create",
+     "doc_edit",
+     "doc_delete",
+     "doc_comments",
+     "doc_comment_reply",
+     "dashboard_save",
+     "dashboard_open",
+     "dashboard_pin",
+     "find_files",
+     "read_local_file",
+     "write_local_file",
+     "move_local_file",
+     "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
+     "fs_glob",
+     "fs_grep",
+     "fs_edit",
+     "fs_copy",
+     "fs_mkdir",
+     "youtube_video",
+     "youtube_search",
+     "github_search",
+     "github_read",
+     "read_feed",
+     "schedule_task",
+     "scheduled_tasks",
+     "cancel_scheduled_task",
+     "writing_style",
+     "save_writing_sample",
+     "skill_list",
+     "skill_draft",
+     "skill_revise",
+     "skill_view",
+     "skill_from_run",
+     "desk_start",
+     "delegate",
+     "message_worker",
+     "check_worker",
+     "stop_worker",
+     "resume_worker",
+     "list_chats",
+     "read_chat",
+     "message_chat",
+     "permissions_update",
+     "agent_create",
+     "agents_list",
+     "agent_message",
+     "ext_propose",
+     "deep_research",
+     "shell_run",
+     "shell_poll",
+     "shell_kill",
+     "opencode_run",
+     "workflow_list",
+     "workflow_run",
+     "workflow_resume",
+     "command_list",
+     "command_run",
+     "view_image",
+     "generate_image",
+     "screenshot",
+     "send_files",
+     "convert_document",
+     "render_preview",
+     "doc_guide",
+     "python_install",
+     "ship_checklist",
+     "ship_status",
+     "coding_session_start",
+     "coding_session_list",
+     "coding_session_status",
+     "coding_session_wait",
+     "coding_session_summary",
+     "coding_session_send",
+     "coding_session_stop",
+     "coding_session_diff",
+     "coding_recipe_list",
+     "coding_recipe_show",
+     "coding_recipe_save",
+     "coding_recipe_run",
+     "coding_recipe_status",
+     "coding_run_structured",
+     "g_read",
+     "g_write",
+     "g_hang"
+    ]
+   },
+   {
+    "messages": [
+     {
+      "context": [
+       "system",
+       "system",
+       "user"
+      ],
+      "digest": "250ffebe31c3"
      },
      {
       "content": null,
@@ -8073,7 +8637,7 @@
       ]
      },
      {
-      "content": "{\"error\": \"Unknown tool no_such_tool. Did you mean: search_tool_results, shell_poll, doc_search, cancel_scheduled_task, writing_style, search_memory, schedule_task, doc_list\", \"try_instead\": \"call one of the tools listed in this request, by its exact name\"}",
+      "content": "{\"error\": \"Unknown tool no_such_tool. Did you mean: search_tool_results, shell_poll, doc_search, cancel_scheduled_task, run_shortcut, writing_style, search_memory, schedule_task\", \"try_instead\": \"call one of the tools listed in this request, by its exact name\"}",
       "role": "tool",
       "tool_call_id": "a"
      }
@@ -8111,10 +8675,13 @@
      "dashboard_save",
      "dashboard_open",
      "dashboard_pin",
+     "find_files",
      "read_local_file",
      "write_local_file",
      "move_local_file",
      "trash_local_file",
+     "list_shortcuts",
+     "run_shortcut",
      "fs_glob",
      "fs_grep",
      "fs_edit",
@@ -8153,12 +8720,15 @@
      "shell_run",
      "shell_poll",
      "shell_kill",
+     "opencode_run",
      "workflow_list",
      "workflow_run",
      "workflow_resume",
      "command_list",
      "command_run",
+     "view_image",
      "generate_image",
+     "screenshot",
      "send_files",
      "convert_document",
      "render_preview",
@@ -8186,6 +8756,6 @@
     ]
    }
   ],
-  "prefix_sha1": "6b369d34ee8e4b189d5ca0222504c46c91fe9642"
+  "prefix_sha1": "fcbd0a3fd10132b6ae466dab68ed5b3c55f20b80"
  }
 }

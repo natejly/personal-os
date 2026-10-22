@@ -41,9 +41,9 @@ QUIET_STOPS = ("tool", "ui")  # stops that never wake the front agent (see Worke
 FRONT_TOOLS = ("delegate", "message_worker", "check_worker", "stop_worker", "resume_worker")
 SPAWN_TOOLS = ("agent_spawn", "agent_wait", "agent_stop")
 # What a reply may still do once it has used its inline budget (delegation_forced): the hand-off tools, the task list, finding
-# a tool, saving a memory, and the tools that hand a decision to the user (a plan card, a question; a desk asks and finishes
+# a tool, saving or looking up a memory, and the tools that hand a decision to the user (a plan card, a question; a desk asks and finishes
 # with its own). Not the reply doing the work itself. The one list: FORCE_DELEGATE_NUDGE names it, dispatch enforces it.
-DELEGATE_ALLOW = (*FRONT_TOOLS, "todo_write", "tool_search", "mcp_tool_search", "save_memory", "propose_plan", "ask_user",
+DELEGATE_ALLOW = (*FRONT_TOOLS, "todo_write", "tool_search", "mcp_tool_search", "save_memory", "search_memory", "propose_plan", "ask_user",
                   "desk_ask", "desk_done", "deep_research")
 FORCED_ALLOW = frozenset(DELEGATE_ALLOW)
 ENDED = ("done", "error", "interrupted", "stopped")

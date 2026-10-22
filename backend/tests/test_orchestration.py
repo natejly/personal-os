@@ -384,17 +384,17 @@ def test_is_silent_only_for_the_marker_or_nothing() -> None:
 # ---------------- pure helpers ----------------
 def test_tool_arrangement_by_lane() -> None:
     modes = {"delegate": "on", "message_worker": "on", "check_worker": "on", "stop_worker": "on", "resume_worker": "on",
-             "agent_spawn": "ask", "agent_wait": "on", "agent_stop": "on", "search_memory": "on"}
+             "agent_spawn": "ask", "agent_wait": "on", "agent_stop": "on", "search_documents": "on"}
     front = W.arrange_tools(modes, True)
-    assert set(front) == {"delegate", "message_worker", "check_worker", "stop_worker", "resume_worker", "search_memory"}
-    assert set(W.arrange_tools(modes, False)) == {"agent_spawn", "agent_wait", "agent_stop", "search_memory"}, "a desk or scheduled run never gets the hand-off tools"
+    assert set(front) == {"delegate", "message_worker", "check_worker", "stop_worker", "resume_worker", "search_documents"}
+    assert set(W.arrange_tools(modes, False)) == {"agent_spawn", "agent_wait", "agent_stop", "search_documents"}, "a desk or scheduled run never gets the hand-off tools"
     off = {**modes, "delegate": "off"}
     assert {"agent_spawn", "agent_wait", "agent_stop"} <= set(W.arrange_tools(off, True)), "a chat that cannot delegate keeps fanning out"
     assert "delegate" in modes, "the input is not mutated"
     assert W.lane_refusal("agent_spawn", True, False)["error"] and W.lane_refusal("delegate", False, False)["error"]
-    assert W.lane_refusal("delegate", True, False) is None and W.lane_refusal("search_memory", True, False) is None
-    assert W.lane_refusal("search_memory", True, True)["error"], "forced: anything but the hand-off set is refused"
-    assert W.lane_refusal("todo_write", True, True) is None and W.lane_refusal("ask_user", True, True) is None
+    assert W.lane_refusal("delegate", True, False) is None and W.lane_refusal("search_documents", True, False) is None
+    assert W.lane_refusal("search_documents", True, True)["error"], "forced: anything but the hand-off set is refused"
+    assert W.lane_refusal("todo_write", True, True) is None and W.lane_refusal("ask_user", True, True) is None and W.lane_refusal("search_memory", True, True) is None, "a memory lookup stays allowed"
 
 
 def test_errored_rounds_do_not_count_toward_delegation() -> None:
@@ -408,17 +408,17 @@ def test_errored_rounds_do_not_count_toward_delegation() -> None:
     stream(cid, "go")
     front = seat("front")
     assert len(front) == 5
-    assert all("search_memory" in s["tools"] for s in front), "the list never narrows"
+    assert all("search_documents" in s["tools"] for s in front), "the list never narrows"
     assert any(m["role"] == "system" and "budget for doing tool work" in m["content"] for m in front[4]["messages"]), "tripped only after two rounds with a successful call"
     assert not any(m["role"] == "system" and "budget for doing tool work" in m["content"] for m in front[3]["messages"])
 
 
 def test_forced_delegation_rule() -> None:
-    offered = ["delegate", "search_memory"]
+    offered = ["delegate", "search_documents"]
     on = {"delegationForce": True, "delegationAfterRounds": 2}
     assert not W.delegation_forced(on, 1, offered) and W.delegation_forced(on, 2, offered) and W.delegation_forced(on, 9, offered)
     assert not W.delegation_forced({**on, "delegationForce": False}, 9, offered)
-    assert not W.delegation_forced(on, 9, ["search_memory"]), "no delegate offered, nothing to route to"
+    assert not W.delegation_forced(on, 9, ["search_documents"]), "no delegate offered, nothing to route to"
     assert W.delegation_forced({}, limits.DELEGATION_AFTER_ROUNDS, offered), "defaults: on, after 6 rounds"
     assert not W.delegation_forced({}, 5, offered, 5_000), "fast reads past 4 rounds do not trip it"
     assert W.delegation_forced({}, 1, offered, limits.DELEGATION_AFTER_SECONDS * 1000), "slow tool time trips it"
@@ -427,8 +427,8 @@ def test_forced_delegation_rule() -> None:
     assert W.delegation_forced({"delegationAfterRounds": "junk"}, junk, offered) and not W.delegation_forced({"delegationAfterRounds": "junk"}, junk - 1, offered)
     assert W.delegation_forced({"delegationAfterRounds": -3}, 1, offered), "never below one round"
     assert not W.counts_as_work(["delegate", "todo_write", "check_worker", "propose_plan", "ask_user"])
-    assert W.counts_as_work(["todo_write", "search_memory"])
-    assert not W.counts_as_work(["tool_search", "mcp_tool_search", "save_memory"])
+    assert W.counts_as_work(["todo_write", "gmail_search"])
+    assert not W.counts_as_work(["tool_search", "mcp_tool_search", "save_memory", "search_memory"]), "a memory lookup is not work"
     err = W.forced_refusal("gmail_search")
     assert "gmail_search" in err["error"] and "delegate" in json.dumps(err)
     assert all(n in json.dumps(err) and n in W.FORCE_DELEGATE_NUDGE for n in W.DELEGATE_ALLOW), "refusal and nudge name the one allowed list"
@@ -467,7 +467,7 @@ def test_vm_stat_and_brief() -> None:
 
 # ---------------- 3. forced delegation ----------------
 def search(i: int) -> dict[str, Any]:
-    return call(f"c{i}", "search_memory", {"query": f"distinct {i}"})
+    return call(f"c{i}", "search_documents", {"query": f"distinct {i}"})
 
 
 @pytest.mark.parametrize("after", [2, 3])
@@ -483,7 +483,7 @@ def test_past_the_threshold_other_tools_are_refused_but_the_tool_list_is_unchang
     front = seat("front")
     assert len(front) == after + 2
     for i, s in enumerate(front):
-        assert {"search_memory", "delegate"} <= set(s["tools"]), f"round {i + 1}: the tools array never changes (prompt cache)"
+        assert {"search_documents", "delegate"} <= set(s["tools"]), f"round {i + 1}: the tools array never changes (prompt cache)"
     assert all(s["tools"] == front[0]["tools"] for s in front)
     assert any(m["role"] == "system" and "budget for doing tool work" in m["content"] for m in front[after]["messages"]), "the model is told why"
     results = {d["id"].rsplit(":", 1)[-1]: d for e, d in events if e == "tool_result"}
@@ -503,7 +503,7 @@ def test_with_delegation_force_off_nothing_is_restricted() -> None:
     FRONT[:] = [{"text": "Looking.", "calls": [search(i)]} for i in range(1, 6)] + [{"text": "All done."}]
     events = stream(cid, "go")
     front = seat("front")
-    assert len(front) == 6 and all("search_memory" in s["tools"] and "delegate" in s["tools"] for s in front)
+    assert len(front) == 6 and all("search_documents" in s["tools"] and "delegate" in s["tools"] for s in front)
     assert not any(d["error"] for e, d in events if e == "tool_result") and len([1 for e, _ in events if e == "tool_result"]) == 5
     assert not any("budget for doing tool work" in str(m.get("content")) for s in front for m in s["messages"] if m["role"] == "system")
     assert final_done(events)["error"] is None
@@ -515,7 +515,7 @@ def test_the_threshold_resets_on_a_new_turn() -> None:
     stream(cid, "one")
     FRONT[:] = [{"text": "b", "calls": [search(3)]}, {"text": "second reply"}]
     stream(cid, "two")
-    assert "search_memory" in seat("front")[-1]["tools"], "work rounds are counted per reply"
+    assert "search_documents" in seat("front")[-1]["tools"], "work rounds are counted per reply"
 
 
 # ---------------- 4. the queue ----------------
@@ -1126,7 +1126,7 @@ def test_wake_rows_stay_out_of_search_and_export() -> None:
 
 def capture_ctx(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     seen: list[dict[str, Any]] = []
-    spec = appmod.toolbox.specs["search_memory"]
+    spec = appmod.toolbox.specs["search_documents"]
     real = spec.fn
 
     async def spy(ctx: dict[str, Any], **kw: Any) -> Any:

@@ -221,7 +221,7 @@ def test_an_ask_desk_answers_hands_off_and_is_woken_through_the_desk() -> None:
 # ---------------- c. forced delegation ----------------
 def test_forced_delegation_refuses_other_tools_on_an_ask_desk_after_the_threshold() -> None:
     appmod.db.set_settings({"delegationAfterRounds": 1})
-    search = lambda i: call(f"c{i}", "search_memory", {"query": f"distinct {i}"})  # noqa: E731
+    search = lambda i: call(f"c{i}", "search_documents", {"query": f"distinct {i}"})  # noqa: E731
     FRONT[:] = [{"text": "Looking.", "calls": [search(1)]},
                 {"text": "", "calls": [search(2), call("d1", "delegate", {"goal": "Big job"})]},
                 {"text": "Handed off."}]
@@ -229,7 +229,7 @@ def test_forced_delegation_refuses_other_tools_on_an_ask_desk_after_the_threshol
     settle(cid)
     front = seat("front")
     assert len(front) == 3
-    assert {"search_memory", "delegate"} <= set(front[0]["tools"])
+    assert {"search_documents", "delegate"} <= set(front[0]["tools"])
     assert front[1]["tools"] == front[0]["tools"], "the tool list is not narrowed"
     assert "deep_research" in W.FORCED_ALLOW
     assert {"desk_done", "desk_ask"} & set(front[1]["tools"]), "a desk can still finish or ask"

@@ -57,7 +57,7 @@ def test_the_delegate_result_does_not_ask_for_narration() -> None:
 
 def test_dispatch_only() -> None:
     assert W.dispatch_only(["delegate"]) and W.dispatch_only(["todo_write", "message_worker"]) and W.dispatch_only(["todo_write"])
-    assert not W.dispatch_only([]) and not W.dispatch_only(["delegate", "search_memory"])
+    assert not W.dispatch_only([]) and not W.dispatch_only(["delegate", "search_documents"])
 
 
 @pytest.mark.parametrize("text", ["", "   ", "NO_REPLY", "`no_reply`."])
@@ -87,7 +87,7 @@ def test_real_tool_calls_without_words_are_not_deleted() -> None:
     events = run_quietly(cid, "look")
     assert not any(e == "removed_message" for e, _ in events)
     done = final_done(events)
-    assert done["id"] and done["error"] is None and [e["name"] for e in done["tool_events"]] == ["search_memory"]
+    assert done["id"] and done["error"] is None and [e["name"] for e in done["tool_events"]] == ["search_documents"]
     # mixed with a hand-off: the visible tool card keeps the row
     FRONT[:] = [{"text": "", "calls": [search(2), call("d2", "delegate", {"goal": "x"})]}, {"text": ""}]
     assert final_done(run_quietly(cid, "again"))["id"]
@@ -127,7 +127,7 @@ def test_real_tool_calls_with_no_reply_keep_the_row_but_not_the_marker() -> None
     events = run_quietly(cid, "look")
     assert not any(e == "removed_message" for e, _ in events)
     done = final_done(events)
-    assert done["id"] and done["error"] is None and [e["name"] for e in done["tool_events"]] == ["search_memory"]
+    assert done["id"] and done["error"] is None and [e["name"] for e in done["tool_events"]] == ["search_documents"]
     last = messages(cid)[-1]
     assert last["role"] == "assistant" and last["content"] == "", "the sentinel itself is never stored"
 

@@ -26,7 +26,7 @@ import { compactNow } from '../lib/compact'
 import { startAutonomy } from '../lib/autonomyDefault'
 import { appendToDraft, clearRedirect, composerKey, dropDraft, getDraft, moveDraft, restoreDraft, setDraftFiles, useDraft, useDraftFiles } from '../lib/drafts'
 import { promptList, recallKey, step, type Recall } from '../lib/promptHistory'
-import { enqueue, enterAction, removeQueued, requeueFront, sendNext, updateQueue, type QueuedItem } from '../lib/followQueue'
+import { enqueue, enterAction, isFreshRun, removeQueued, requeueFront, sendNext, updateQueue, type QueuedItem } from '../lib/followQueue'
 import QueueTray from './QueueTray'
 import KernelSpinner from './KernelSpinner'
 import { followupsFor } from '../lib/followups'
@@ -408,7 +408,9 @@ export default function Composer({ conversationId, footer, compact = false, plac
     setLaunch((n) => n + 1)
     // A built-in the UI handles ("/compact", "/skills") runs now, never queued: it is not a message for the reply.
     // A chat working autonomously sends straight to its desk, which steers the live turn or wakes the next.
-    const action = queueId && !deskBound && !clientCommand(text) && !scheduleForm(text) ? enterAction({ busy: streaming && !stopping, mod, cardPending, desk }) : 'send'
+    const live = queueId ? useStore.getState().sessions[queueId] : undefined
+    const fresh = isFreshRun(live?.streaming?.startedAt, Date.now(), live?.conversation.messages?.find((m) => m.id === live.streaming?.messageId))
+    const action = queueId && !deskBound && !clientCommand(text) && !scheduleForm(text) ? enterAction({ busy: streaming && !stopping, mod, cardPending, desk, fresh }) : 'send'
     if (action === 'queue' && queueId) {
       updateQueue(queueId, (q) => enqueue(q, text, crypto.randomUUID(), files))
       clearRedirect(key)

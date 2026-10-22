@@ -63,15 +63,26 @@ export const pauseQueue = (q: FollowQueue): FollowQueue => (q.items.length ? { .
 /** A queued send that was refused goes back in front, and the queue waits for the user. */
 export const requeueFront = (q: FollowQueue, item: QueuedItem): FollowQueue => ({ items: [item, ...q.items.filter((i) => i.id !== item.id)], paused: true })
 
+/** A second message this soon after a reply began, before it has said or done anything, joins that turn. */
+export const MERGE_WINDOW_MS = 1500
+
+/** The run began under MERGE_WINDOW_MS ago and has produced no text, reasoning or tool call yet. */
+export function isFreshRun(startedAt: number | undefined, now: number, msg?: { content?: string | null; reasoning?: string | null; tool_events?: unknown[] | null }): boolean {
+  return startedAt !== undefined && now - startedAt < MERGE_WINDOW_MS && !msg?.content && !msg?.reasoning && !msg?.tool_events?.length
+}
+
 export type EnterAction = 'send' | 'queue' | 'steer' | 'confirm-steer'
 
 /**
  * What Enter does in a chat composer. Idle: send. While a reply runs: Enter queues and ⌘Enter steers.
  * A steer while an approval or plan card is open declines that card (the typed text is the reason the
- * assistant gets), so ⌘Enter asks first there. A desk's run never declines a card on a steer.
+ * assistant gets), so ⌘Enter asks first there. A desk's run never declines a card on a steer. `fresh`: see isFreshRun.
  */
-export function enterAction(args: { busy: boolean; mod: boolean; cardPending: boolean; desk?: boolean }): EnterAction {
+export function enterAction(args: { busy: boolean; mod: boolean; cardPending: boolean; desk?: boolean; fresh?: boolean }): EnterAction {
   if (!args.busy) return 'send'
+  // Enter right after sending, before the reply has begun and with no card open, is a steer: the backend folds it into
+  // the same run before its first model output, so both messages are answered as one turn.
+  if (!args.mod && args.fresh && !args.cardPending) return 'steer'
   if (!args.mod) return 'queue'
   return args.cardPending && !args.desk ? 'confirm-steer' : 'steer'
 }

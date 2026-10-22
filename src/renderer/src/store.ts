@@ -90,6 +90,8 @@ export interface Streaming {
   seq: number
   /** Stop was pressed and the run has not yet reported its end. */
   stopping: boolean
+  /** epoch ms this window began watching the run (lib/followQueue isFreshRun). */
+  startedAt?: number
 }
 
 /** A message sent but not yet confirmed by the run's `user_message` event; shown dimmed in the transcript. */
@@ -1455,7 +1457,7 @@ export const useStore = create<State>((set, get) => {
       return {
         ...s,
         conversation,
-        streaming: { messageId: from.messageId, runId: run.run_id, abort, answering: true, seq: run.seq, stopping: false },
+        streaming: { messageId: from.messageId, runId: run.run_id, abort, answering: true, seq: run.seq, stopping: false, startedAt: Date.now() },
         status: settleApprovals('working', approvals),
         finishedAt: null,
         pendingApprovals: approvals,

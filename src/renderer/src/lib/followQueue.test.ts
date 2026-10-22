@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { EMPTY_QUEUE, enqueue, enterAction, nextOnDone, parseQueue, removeQueued, requeueFront, serializeQueue } from './followQueue'
+import { EMPTY_QUEUE, enqueue, enterAction, isFreshRun, nextOnDone, parseQueue, removeQueued, requeueFront, serializeQueue } from './followQueue'
 
 const two = enqueue(enqueue(EMPTY_QUEUE, 'first', 'a'), 'second', 'b')
 
@@ -57,4 +57,21 @@ test('Enter queues while busy, even with a card open; mod+Enter steers, asking f
   assert.equal(enterAction({ busy: true, mod: true, cardPending: true }), 'confirm-steer')
   // A desk's run never declines a card on a steer, so there is nothing to confirm.
   assert.equal(enterAction({ busy: true, mod: true, cardPending: true, desk: true }), 'steer')
+})
+
+test('Enter on a fresh run steers (merges) instead of queueing, unless a card is open', () => {
+  assert.equal(enterAction({ busy: true, mod: false, cardPending: false, fresh: true }), 'steer')
+  assert.equal(enterAction({ busy: true, mod: false, cardPending: true, fresh: true }), 'queue')
+  assert.equal(enterAction({ busy: true, mod: false, cardPending: false, fresh: false }), 'queue')
+  assert.equal(enterAction({ busy: false, mod: false, cardPending: false, fresh: true }), 'send')
+})
+
+test('a run is fresh only inside the window and before any output', () => {
+  assert.equal(isFreshRun(1000, 2000, { content: '' }), true)
+  assert.equal(isFreshRun(1000, 2000), true)
+  assert.equal(isFreshRun(1000, 2500), false)
+  assert.equal(isFreshRun(1000, 1500, { content: 'hi' }), false)
+  assert.equal(isFreshRun(1000, 1500, { reasoning: 'x' }), false)
+  assert.equal(isFreshRun(1000, 1500, { tool_events: [{}] }), false)
+  assert.equal(isFreshRun(undefined, 1500), false)
 })

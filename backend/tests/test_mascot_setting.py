@@ -1,4 +1,4 @@
-"""The `mascot` setting (which creature draws the faces): defaults to the Grain mascot and round-trips through /settings.
+"""The `mascot` setting (what draws the faces): defaults to blobs and round-trips through /settings.
 
 Run: cd backend && .venv/bin/python -m pytest -q tests/test_mascot_setting.py
 """
@@ -21,8 +21,8 @@ from personal_os.app import AUTH_TOKEN, app  # noqa: E402
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 
 
-def test_mascot_defaults_to_grain_and_round_trips() -> None:
-    assert client.get("/settings").json()["mascot"] == "grain"
-    for choice in ("blobs", "off", "grain"):
+def test_mascot_defaults_to_blobs_and_round_trips() -> None:
+    assert client.get("/settings").json()["mascot"] == "blobs"
+    for choice in ("blobs", "off"):
         assert client.put("/settings", json={"mascot": choice}).json()["mascot"] == choice
         assert client.get("/settings").json()["mascot"] == choice

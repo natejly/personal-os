@@ -2,7 +2,7 @@ import { GRAIN_RX, GRAIN_RY, KERNEL_CENTRE, kernelGrains } from '../lib/kernel'
 import { GRAIN_STROKE } from '../lib/sprout'
 import '../styles/sprout.css'
 
-/** Below this pixel size the outline and highlight go, as on the mascot, so the three grains stay legible. */
+/** Below this pixel size the outline and highlight go, so the three grains stay legible. */
 const SMALL_PX = 20
 const GRAINS = kernelGrains()
 

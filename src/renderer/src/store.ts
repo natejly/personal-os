@@ -1764,7 +1764,7 @@ export const useStore = create<State>((set, get) => {
     ready: false,
     backendError: null,
     backendState: 'ready',
-    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', autoRoute: false, systemPrompt: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', mascot: 'grain', simpleMode: false, gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true },
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', autoRoute: false, systemPrompt: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', mascot: 'blobs', simpleMode: false, gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true },
     models: [],
     modelsError: null,
     tools: [],

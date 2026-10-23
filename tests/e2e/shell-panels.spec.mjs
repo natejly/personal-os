@@ -112,8 +112,8 @@ test('sidebar chat pulse shows a reply streaming in another chat, then settles',
   await page.locator('.sidebar .convo-item', { hasText: 'Other chat B' }).click()
   const rowA = page.locator('.sidebar .convo-item', { hasText: 'Slow chat A' })
   // working: the row's face animates (blinks) instead of a dot
-  await expect(rowA.locator('.face.sprout-live')).toBeVisible()
-  await expect(rowA.locator('.face.sprout-live')).toHaveCount(0, { timeout: 20_000 })
+  await expect(rowA.locator('.face.mo-always')).toBeVisible()
+  await expect(rowA.locator('.face.mo-always')).toHaveCount(0, { timeout: 20_000 })
   // finished while out of sight: unread dot until opened
   await expect(rowA.locator('.pulse.unread')).toHaveCount(1)
   await rowA.click()

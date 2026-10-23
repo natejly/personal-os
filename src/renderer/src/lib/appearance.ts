@@ -37,9 +37,8 @@ export const CODE_FONTS = [
   { id: 'menlo', label: 'Menlo', stack: 'Menlo, Monaco, monospace' }
 ] as const
 
-/** Which creature draws the agents' faces: the Grain mascot, the older blob faces, or none (a status dot where the face carries state). */
+/** What draws the agents' faces: blobs, or none (a status dot where the face carries state). The first entry is the default, so a stored legacy or unknown id resolves to blobs. */
 export const MASCOTS = [
-  { id: 'grain', label: 'Grain mascot' },
   { id: 'blobs', label: 'Blobs' },
   { id: 'off', label: 'Off' }
 ] as const

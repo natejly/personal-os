@@ -22,19 +22,12 @@ test('MOOD: unknown words have no entry, so the face stays idle', () => {
 
 const render = (mascot: MascotId, props: Partial<FaceProps> = {}): string => renderToStaticMarkup(createElement(FaceView, { name: 'Grain', mascot, ...props }))
 
-test('Face: the Grain mascot draws the sprout', () => {
-  const html = render('grain', { status: 'streaming', size: 14 })
-  assert.match(html, /class="sprout sprout-live sprout-small face"/)
-  assert.match(html, /data-mood="thinking"/)
-  assert.doesNotMatch(html, /face-dot|mo-root/)
-})
-
 test('Face: Blobs draws the library face with the same size and pose', () => {
   const html = render('blobs', { status: 'streaming', size: 20 })
   assert.match(html, /mo-root/)
   assert.match(html, /mo-always/)
   assert.match(html, /width="25"/)
-  assert.doesNotMatch(html, /sprout|face-dot/)
+  assert.doesNotMatch(html, /face-dot/)
   assert.doesNotMatch(render('blobs'), /mo-always/)
 })
 

@@ -1753,8 +1753,8 @@ export interface Settings {
   extensionCatalogUrl?: string
   /** Hide models, permission detail, context, developer settings and chat internals. Presentation only; missing means off. */
   simpleMode?: boolean
-  /** Which creature draws the faces; missing means the Grain mascot. */
-  mascot?: 'grain' | 'blobs' | 'off'
+  /** What draws the faces; missing means blobs. */
+  mascot?: 'blobs' | 'off'
   /** Code and monospace typeface; missing means default. */
   codeFont?: 'default' | 'menlo'
   /** Electron accelerator for the global Gather/Scatter shortcut. */

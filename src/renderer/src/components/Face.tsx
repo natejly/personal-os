@@ -4,10 +4,11 @@ import { happy, idle, sad, scared, sleepy, surprised, thinking, unsure, type Exp
 import 'blobatar/motion.css'
 import { useStore } from '../store'
 import { mascotId, type MascotId } from '../lib/appearance'
-import Sprout, { type SproutMood } from './Sprout'
+
+export type FaceMood = 'idle' | 'thinking' | 'unsure' | 'surprised' | 'scared' | 'sad' | 'sleepy' | 'happy'
 
 /** Status words used across replies, desks, subagents and job runs, read as a pose. Unknown words stay idle. */
-export const MOOD: Record<string, SproutMood> = {
+export const MOOD: Record<string, FaceMood> = {
   streaming: 'thinking', running: 'thinking', working: 'thinking', planning: 'thinking',
   awaiting_plan: 'unsure', blocked: 'unsure',
   needs_approval: 'surprised', 'needs-approval': 'surprised', awaiting_approval: 'surprised',
@@ -18,8 +19,8 @@ export const MOOD: Record<string, SproutMood> = {
   waiting_approval: 'surprised'
 }
 
-/** The same poses for the Blobs mascot. */
-const BLOB_EXPRESSION: Record<SproutMood, Expression> = { idle, thinking, unsure, surprised, scared, sad, sleepy, happy }
+/** Each pose as a blob expression. */
+const BLOB_EXPRESSION: Record<FaceMood, Expression> = { idle, thinking, unsure, surprised, scared, sad, sleepy, happy }
 
 const LIVE = new Set(['streaming', 'running', 'working', 'planning'])
 /** How a live run ended decides the one-shot reaction: a droop for these, a hop for a clean finish, nothing for the rest (approval, paused, stopped). */
@@ -55,10 +56,7 @@ export function FaceView({ name, status, size = 26, title, hue, tone, send, calm
     if (decor) return null
     return <span className="face face-dot" style={{ width: px, height: px }} data-mood={mood} data-live={live || undefined} role={title ? 'img' : undefined} aria-label={title} title={title} />
   }
-  if (mascot === 'blobs') {
-    return <Blobatar className={className} name={name} size={px} title={title} hue={hue} tone={tone} expression={BLOB_EXPRESSION[mood]} animate={live ? 'always' : 'hover'} />
-  }
-  return <Sprout className={className} name={name} size={px} title={title} hue={hue} tone={tone} mood={mood} live={live} />
+  return <Blobatar className={className} name={name} size={px} title={title} hue={hue} tone={tone} expression={BLOB_EXPRESSION[mood]} animate={live ? 'always' : 'hover'} />
 }
 
 /**

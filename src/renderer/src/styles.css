@@ -796,22 +796,12 @@ kbd {
 .face.mo-root:not(.mo-always):not(:hover),
 .face.mo-root:not(.mo-always):not(:hover) * { animation-play-state: paused; }
 .face.mo-root.mo-expr:not(.mo-always):not(:hover) .mo-eye { animation-play-state: running; }
-/* Face reactions (Face.tsx useReaction, Composer typing flag). One-shot CSS animations on the Grain mascot's .sp-fx group around
-   the body and sprout (the looping motion lives on the groups inside it) or the Blobs' .mo-bob groups, and on the svg; the eyes move
-   by transition only, so they never fight the blink or gaze. Reduced motion keeps the eye position, drops the travel. */
-.face .sp-eyes { transition: translate var(--dur-spring) var(--spring-gentle); }
-.chat-main[data-typing] .face .sp-eyes { translate: 0 2px; }
-.face.fx-down .sp-eyes { translate: 0 3px; }
+/* Face reactions (Face.tsx useReaction, Composer typing flag). One-shot CSS animations on the blobs' .mo-bob groups and on the svg;
+   the eyes move by transition only, so they never fight the blink or gaze. Reduced motion keeps the eye position, drops the travel. */
 .face .mo-eyes { transition: fill var(--mo-morph) var(--mo-morph-ease), transform var(--dur-spring) var(--spring-gentle); }
 .chat-main[data-typing] .face .mo-eyes { transform: translateY(3px); }
 .face.fx-down .mo-eyes { transform: translateY(5px); }
 @media (prefers-reduced-motion: no-preference) {
-  .face[class*='fx-squish'] .sp-fx,
-  .face[class*='fx-droop'] .sp-fx { transform-origin: 50% 70%; animation-duration: var(--dur-spring); animation-timing-function: var(--ease-out); }
-  .face.fx-squish-0 .sp-fx { animation-name: face-squish-a; }
-  .face.fx-squish-1 .sp-fx { animation-name: face-squish-b; }
-  .face.fx-droop-0 .sp-fx { animation-name: face-sag-a; animation-duration: calc(var(--dur-spring) + var(--dur-snap)); }
-  .face.fx-droop-1 .sp-fx { animation-name: face-sag-b; animation-duration: calc(var(--dur-spring) + var(--dur-snap)); }
   .face[class*='fx-squish'] .mo-bob > g:not(.mo-eyes),
   .face[class*='fx-droop'] .mo-bob > g:not(.mo-eyes) { transform-box: fill-box; transform-origin: 50% 70%; animation-duration: var(--dur-spring); animation-timing-function: var(--ease-out); }
   .face.fx-squish-0 .mo-bob > g:not(.mo-eyes) { animation-name: face-squish-a; }

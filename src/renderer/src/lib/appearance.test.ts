@@ -2,11 +2,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { MASCOTS, applyAppearance, codeFontId, flippedTheme, isLightTheme, mascotId, nextTheme, uiFontId } from './appearance'
 
-test('mascotId: the three modes pass through, anything else is the Grain mascot', () => {
-  assert.deepEqual(MASCOTS.map((m) => m.id), ['grain', 'blobs', 'off'])
-  assert.deepEqual(MASCOTS.map((m) => m.label), ['Grain mascot', 'Blobs', 'Off'])
+test('mascotId: blobs and off pass through, anything else (including the retired grain and sprout) is blobs', () => {
+  assert.deepEqual(MASCOTS.map((m) => m.id), ['blobs', 'off'])
+  assert.deepEqual(MASCOTS.map((m) => m.label), ['Blobs', 'Off'])
   for (const m of MASCOTS) assert.equal(mascotId(m.id), m.id)
-  for (const v of [undefined, null, '', 'sprout', 7]) assert.equal(mascotId(v), 'grain')
+  for (const v of [undefined, null, '', 'grain', 'sprout', 7]) assert.equal(mascotId(v), 'blobs')
 })
 
 test('applyAppearance writes the mascot onto the root', () => {
@@ -14,7 +14,9 @@ test('applyAppearance writes the mascot onto the root', () => {
   applyAppearance({ mascot: 'off' }, root)
   assert.equal(root.dataset.mascot, 'off')
   applyAppearance({}, root)
-  assert.equal(root.dataset.mascot, 'grain')
+  assert.equal(root.dataset.mascot, 'blobs')
+  applyAppearance({ mascot: 'grain' }, root)
+  assert.equal(root.dataset.mascot, 'blobs')
 })
 
 test('applyAppearance ignores the removed tone keys and maps a removed font id to the default', () => {
